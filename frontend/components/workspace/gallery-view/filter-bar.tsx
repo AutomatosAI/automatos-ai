@@ -25,6 +25,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { ViewToggle, type ViewMode } from '@/components/shared/view-toggle'
 import {
   DEFAULT_FILTERS,
   type DateRange,
@@ -74,6 +75,8 @@ export interface FilterBarProps {
   filters: FilterState
   onFiltersChange: (filters: FilterState) => void
   total: number
+  viewMode: ViewMode
+  onViewModeChange: (mode: ViewMode) => void
 }
 
 function hasActiveFilters(filters: FilterState): boolean {
@@ -86,7 +89,7 @@ function hasActiveFilters(filters: FilterState): boolean {
   )
 }
 
-export function FilterBar({ filters, onFiltersChange, total }: FilterBarProps) {
+export function FilterBar({ filters, onFiltersChange, total, viewMode, onViewModeChange }: FilterBarProps) {
   // Local search state so typing feels instant; debounce pushes to parent.
   const [searchInput, setSearchInput] = useState(filters.search)
   const debouncedSearch = useDebounce(searchInput, 300)
@@ -216,9 +219,12 @@ export function FilterBar({ filters, onFiltersChange, total }: FilterBarProps) {
         </Button>
       )}
 
-      {/* Total count (right-aligned) */}
-      <div className="ml-auto text-sm text-muted-foreground tabular-nums">
-        {total.toLocaleString()} {total === 1 ? 'output' : 'outputs'}
+      {/* Total count + view toggle (right-aligned) */}
+      <div className="ml-auto flex items-center gap-3">
+        <span className="text-sm text-muted-foreground tabular-nums">
+          {total.toLocaleString()} {total === 1 ? 'output' : 'outputs'}
+        </span>
+        <ViewToggle value={viewMode} onChange={onViewModeChange} />
       </div>
     </div>
   )

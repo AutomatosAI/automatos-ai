@@ -546,6 +546,71 @@ class DeliverableService:
             return {"success": False, "error": f"delete failed: {exc}"}
 
     # ------------------------------------------------------------------
+    # retention — prune old heartbeat reports
+    # ------------------------------------------------------------------
+
+    def apply_retention(
+        self,
+        *,
+        source_type: str = "heartbeat",
+        keep_per_agent: int = 50,
+    ) -> Dict[str, Any]:
+        """Soft-delete old deliverables beyond *keep_per_agent* most recent per agent.
+
+        Only targets rows matching *source_type* (default: heartbeat) so that
+        user-initiated outputs (chat, mission, task) are never auto-pruned.
+
+        Uses a window function to rank rows per agent by created_at DESC, then
+        soft-deletes everything outside the top N.
+        """
+        try:
+            result = self.db.execute(
+                text("""
+                    WITH ranked AS (
+                        SELECT id,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY COALESCE(agent_id, 0)
+                                   ORDER BY created_at DESC
+                               ) AS rn
+                        FROM deliverables
+                        WHERE workspace_id = :workspace_id
+                          AND source_type  = :source_type
+                          AND deleted_at   IS NULL
+                    )
+                    UPDATE deliverables
+                       SET deleted_at  = NOW(),
+                           updated_at = NOW()
+                    WHERE id IN (SELECT id FROM ranked WHERE rn > :keep)
+                    RETURNING id
+                """),
+                {
+                    "workspace_id": str(self.workspace_id),
+                    "source_type": source_type,
+                    "keep": keep_per_agent,
+                },
+            )
+            pruned_ids = [str(r.id) for r in result.fetchall()]
+            self.db.commit()
+
+            logger.info(
+                "[DeliverableService] Retention pruned %d %s deliverables (kept %d per agent)",
+                len(pruned_ids), source_type, keep_per_agent,
+            )
+            return {
+                "success": True,
+                "pruned": len(pruned_ids),
+                "source_type": source_type,
+                "keep_per_agent": keep_per_agent,
+            }
+        except Exception as exc:
+            self.db.rollback()
+            logger.error(
+                "[DeliverableService] apply_retention() failed: %s",
+                exc, exc_info=True,
+            )
+            return {"success": False, "error": f"retention failed: {exc}"}
+
+    # ------------------------------------------------------------------
     # helpers
     # ------------------------------------------------------------------
 

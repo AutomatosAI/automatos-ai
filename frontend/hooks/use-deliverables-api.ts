@@ -175,9 +175,11 @@ export function useDeliverables(filters: FilterState = DEFAULT_FILTERS) {
   const { workspaceId } = useWorkspace()
 
   // React Query v4: pageParam defaults to undefined; seed with 0 via destructuring.
+  // keepPreviousData must be false so stale cards don't linger when filters change.
   return useInfiniteQuery<DeliverableListResponse>({
     queryKey: deliverableQueryKeys.list(workspaceId, filters),
     enabled: !!workspaceId,
+    keepPreviousData: false,
     queryFn: ({ pageParam = 0 }) => {
       const qs = buildListQuery(filters, pageParam as number)
       return apiClient.request<DeliverableListResponse>(

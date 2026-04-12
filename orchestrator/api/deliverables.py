@@ -24,7 +24,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
@@ -76,6 +76,19 @@ async def deliverable_stats(
     """Aggregate deliverable stats for the workspace."""
     svc = DeliverableService(db, ctx.workspace_id)
     return svc.get_stats()
+
+
+# ── Retention ───────────────────────────────────────────────────────
+@router.post("/retention")
+async def apply_retention(
+    source_type: str = Body("heartbeat", embed=True),
+    keep_per_agent: int = Body(50, embed=True),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Prune old deliverables — keeps the N most recent per agent for a given source_type."""
+    svc = DeliverableService(db, ctx.workspace_id)
+    return svc.apply_retention(source_type=source_type, keep_per_agent=keep_per_agent)
 
 
 # ── Get One ──────────────────────────────────────────────────────────

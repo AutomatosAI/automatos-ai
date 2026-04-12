@@ -2,8 +2,9 @@
  * GalleryView (PRD-129: Workspace Outputs Hub)
  * ==============================================
  *
- * Consumer-facing container for agent deliverables. Renders a FilterBar,
- * a responsive card grid (using DeliverableCard), and a slide-over preview
+ * Consumer-facing container for agent deliverables. Renders a FilterBar
+ * (with grid/list toggle), a responsive card grid OR list rows (using
+ * DeliverableCard / DeliverableRow), and a slide-over preview
  * (DeliverablePreview). Pagination uses the useDeliverables infinite query
  * with a Load More button at the bottom.
  */
@@ -20,8 +21,10 @@ import {
   type Deliverable,
   type FilterState,
 } from '@/hooks/use-deliverables-api'
+import { useViewMode } from '@/hooks/use-view-mode'
 
 import { DeliverableCard } from './deliverable-card'
+import { DeliverableRow } from './deliverable-row'
 import { DeliverablePreview } from './deliverable-preview'
 import { FilterBar } from './filter-bar'
 
@@ -34,6 +37,7 @@ export function GalleryView({ className }: GalleryViewProps) {
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
+  const [viewMode, setViewMode] = useViewMode('gallery')
 
   const {
     data,
@@ -53,7 +57,7 @@ export function GalleryView({ className }: GalleryViewProps) {
 
   const total = data?.pages?.[0]?.total ?? 0
 
-  const handleCardClick = useCallback((deliverable: Deliverable) => {
+  const handleItemClick = useCallback((deliverable: Deliverable) => {
     setSelectedId(deliverable.id)
     setPreviewOpen(true)
   }, [])
@@ -72,6 +76,8 @@ export function GalleryView({ className }: GalleryViewProps) {
         filters={filters}
         onFiltersChange={setFilters}
         total={total}
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
       />
 
       {/* Content */}
@@ -98,15 +104,27 @@ export function GalleryView({ className }: GalleryViewProps) {
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-              {deliverables.map((deliverable) => (
-                <DeliverableCard
-                  key={deliverable.id}
-                  deliverable={deliverable}
-                  onClick={handleCardClick}
-                />
-              ))}
-            </div>
+            {viewMode === 'grid' ? (
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+                {deliverables.map((deliverable) => (
+                  <DeliverableCard
+                    key={deliverable.id}
+                    deliverable={deliverable}
+                    onClick={handleItemClick}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {deliverables.map((deliverable) => (
+                  <DeliverableRow
+                    key={deliverable.id}
+                    deliverable={deliverable}
+                    onClick={handleItemClick}
+                  />
+                ))}
+              </div>
+            )}
 
             {hasNextPage && (
               <div className="mt-6 flex justify-center">
@@ -118,7 +136,7 @@ export function GalleryView({ className }: GalleryViewProps) {
                   {isFetchingNextPage ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Loading…
+                      Loading...
                     </>
                   ) : (
                     'Load more'
