@@ -173,10 +173,11 @@ class Agent(Base):
     __tablename__ = 'agents'
     __table_args__ = (
         UniqueConstraint('workspace_id', 'slug', name='uq_agent_workspace_slug'),
+        {'extend_existing': True},
     )
 
     id = Column(Integer, primary_key=True)
-    public_id = Column(UUID(as_uuid=True), default=uuid4, unique=True, nullable=False, index=True)
+    public_id = Column(UUID(as_uuid=True), default=uuid4, unique=True, nullable=True, index=True)
     name = Column(String(255), nullable=False)
     description = Column(Text)
     agent_type = Column(String(100), nullable=False)  # 'custom', 'system', 'specialized'
