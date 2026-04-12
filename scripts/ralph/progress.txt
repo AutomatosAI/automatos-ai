@@ -1,124 +1,88 @@
-# PRD-122: Tool Routing Promotion, Permission Enforcement & First-Class Schemas — Progress Log
+# PRD-129: Workspace Outputs Hub — Progress Log
 
-## 2026-03-31 — US-001: admin_only field + 6 infra tools gated
-- Added `admin_only: bool = False` to ActionDefinition dataclass (after workspace_scoped)
-- Marked 6 tools as admin_only=True:
-  - actions_monitoring.py: platform_query_loki_logs, platform_query_prometheus, platform_get_alerts, platform_get_logs, platform_list_services
-  - actions_workspace.py: platform_get_system_health (registered here, not actions_monitoring.py as PRD assumed)
-- to_openai_schema() unaffected (admin_only is metadata only)
-- Syntax validation passed
+2026-04-10 — Rebuilt IMPLEMENTATION_PLAN.md for PRD-129 (was stale PRD-122).
+2026-04-10 — US-001 complete: created alembic/versions/prd129_deliverables.py
+  - Standalone migration (down_revision=None) following prd127/prd76 pattern
+  - deliverables table: UUID PK, workspace FK, source/artifact/storage/preview cols
+  - `extra` JSONB (not `metadata` — avoids SQLAlchemy Base.metadata conflict)
+  - file_size_bytes BIGINT
+  - Soft delete via deleted_at
+  - 5 indices + UNIQUE partial index uq_deliverables_workspace_path WHERE deleted_at IS NULL
+  - Import-tested OK; DB not running locally so `alembic upgrade` deferred to deploy.
+2026-04-10 — US-002 complete: services/deliverable_service.py + tests/services/test_deliverable_service.py
+  - DeliverableService class with register/list_deliverables/get_deliverable/get_stats/soft_delete
+  - Module-level EXTENSION_TO_ARTIFACT (~45 extensions across 9 categories), _slugify, _infer_artifact_type, _humanize_basename
+  - register() is idempotent via ON CONFLICT (workspace_id, file_path) WHERE deleted_at IS NULL
+    - DO UPDATE uses COALESCE to preserve old values when caller omits them
+    - `extra` JSONB merged via `||` operator (preserves prior keys)
+    - Returns {success, deliverable_id, created, artifact_type, title} — `created` tells insert vs update
+    - NEVER calls WorkspaceClient (confirmed by test_register_does_not_call_workspace_client)
+  - list_deliverables() supports artifact_type/source_type/agent_id/date_from/date_to/search filters
+    - LEFT JOINs agents for fallback agent_name
+    - Clamps limit to [1, 100], excludes deleted_at IS NOT NULL
+  - get_deliverable(include_content=True): reads file via WorkspaceClient for text; for images returns content_url
+  - get_stats(): total, by_type (count), by_agent (list of {agent_id, agent_name, count})
+  - All SQL uses sqlalchemy.text() with bound params. All exceptions logged with exc_info=True.
+  - 26 unit tests, all passing (0.75s).
+2026-04-10 — US-003 complete: api/deliverables.py + tests/api/test_deliverables_api.py
+  - Routes: GET / (list + filters), GET /stats, GET /{id}?include_content=, DELETE /{id}
+  - /stats declared BEFORE /{deliverable_id} to avoid FastAPI capturing 'stats' as an id
+  - All endpoints use Depends(get_request_context_hybrid); svc scoped to ctx.workspace_id
+  - Registered in main.py inside try/except ImportError (mirrors reports router)
+  - 12 integration tests pass in 0.48s — covers list default, filter forwarding, limit>100 → 422,
+    stats, stats vs id path shadowing, get (found, 404, include_content), delete (success, 404),
+    and workspace isolation: X-Workspace-ID header is ignored, svc always gets ctx.workspace_id
+  - Test uses FastAPI dependency_overrides + patch('api.deliverables.DeliverableService')
+    with sys.modules stubs for jwt/clerk/core.database/core.auth — no DB or env needed.
+2026-04-10 — US-004 complete: auto-register deliverables on workspace_write_file + report_service
+  - Added AGENT_REGISTERABLE_ARTIFACT_TYPES (report/image/document/slide/spreadsheet/code) to deliverable_service.py
+  - exec_workspace.py: new _auto_register_deliverable() helper + _derive_source() that extracts
+    source_type/source_id from caller_context (heartbeat_id → 'heartbeat', mission_id → 'mission',
+    task_id → 'task', playbook_id → 'playbook', trigger_id → 'trigger', else 'chat').
+  - execute_workspace_action() now accepts agent_id + caller_context, calls auto-register on
+    successful workspace_write_file. Skips non-registerable extensions (archive/audio/video).
+    ALL failures caught via try/except with exc_info=True — never break the write.
+  - File size extracted from worker response (size/bytes_written/file_size_bytes/bytes keys).
+  - Agent name resolved via cheap DB lookup (SessionLocal + Agent.query).
+  - unified_executor.py: plumbed agent_id + caller_context into both workspace action paths
+    (platform_execute dispatcher branch + direct workspace_* branch).
+  - report_service.create_report(): mirrors reports into deliverables after DB insert with
+    artifact_type='report', source_type='heartbeat' (or 'task' if no heartbeat_result_id and
+    report_type != 'standup'), source_id from heartbeat_result_id or report_id.
+  - 11 unit tests in tests/modules/tools/execution/test_exec_workspace_deliverable.py — all pass.
+    Tests use sys.modules stubs for core.workspace_client, core.database.database, core.models.core,
+    and services.deliverable_service to avoid pulling pgvector + DB config into test import.
+    Covered: _derive_source precedence, successful register, skip non-registerable (.zip),
+    register failure does not break write, read_file does not register, default source=chat.
 
-## 2026-03-31 — US-002: Thread caller_context through executor chain
-- Added `caller_context: Optional[Dict[str, Any]] = None` to `execute_tool()` in unified_executor.py
-- Passed caller_context through both platform_execute dispatcher path and direct platform_* routing
-- Updated delegate `_execute_platform_action()` to accept and forward caller_context
-- Updated `exec_platform.execute_platform_action()` to accept and pass caller_context to PlatformActionExecutor
-- Updated `PlatformActionExecutor.execute()` to accept `caller_context: Dict[str, Any] | None = None`
-- All parameters have defaults (None) — existing callers unaffected
-- Syntax validation passed for all 3 files
-- NOTE: unified_executor.py is at `modules/tools/execution/` not `modules/tools/` as PRD assumed
+2026-04-10 — US-005 complete: scripts/backfill_prd129_deliverables.py
+  - Iterates agent_reports via SQL (LEFT JOIN agents for name fallback)
+  - Calls DeliverableService.register() per row (artifact_type='report')
+  - source_type='heartbeat' if heartbeat_result_id set or report_type='standup', else 'task'
+  - Flags: --dry-run, --workspace-id <uuid>, --verbose
+  - Idempotent via US-001 unique partial index
+  - Summary printed: Processed/Inserted/Updated/Skipped/Errors; exit 1 on errors
+  - Local --help verified; full dry-run needs DB (runs on deploy)
+  - Import fix: `from config import config` (NOT core.config)
 
-## 2026-03-31 — US-003: Admin gate + destructive safety check in platform_executor.py
-- Added admin_only gate BEFORE requires_confirmation check:
-  - Looks up action_def from registry, checks admin_only flag
-  - If admin_only: caller must have workspace_role in (owner, admin) OR system_role == admin
-  - If caller_context is None (no identity), admin_only actions are denied (fail-closed)
-  - Returns {success: False, permission_denied: True, error: ...}
-  - Logs denial at WARNING with action name, workspace_id, and sanitized caller_context (no user_id)
-- Added destructive safety check AFTER rate limit block:
-  - If permission_level == "destructive" and requires_confirmation is False, reject with internal error
-  - Logs at ERROR level (misconfigured action)
-- Syntax validation passed
-
-## 2026-03-31 — US-004: Filter admin_only tools from non-admin callers
-- Added `is_admin: bool = False` param to `get_tools_for_agent()` in tool_router.py
-- Added `exclude_admin: bool = False` param to `to_dispatcher_schema()` in action_registry.py
-- Added `exclude_admin: bool = False` param to `build_prompt_summary()` in action_registry.py
-- build_prompt_summary skips admin_only actions when exclude_admin=True
-- get_tools_for_agent passes `exclude_admin=not is_admin` to dispatcher schema
-- All params default to False — existing callers unaffected
-- Validated: admin actions correctly filtered from summary, dispatcher schema accepts param, is_admin in function signature
-
-## 2026-03-31 — US-005: Fix search_chat_history multi-tenancy bug
-- Replaced `WHERE c.user_id = (SELECT id FROM users LIMIT 1)` with workspace-scoped JOIN
-- Chats table has no workspace_id column — joined through workspace_members: `JOIN workspace_members wm ON wm.user_id = c.user_id WHERE wm.workspace_id = :workspace_id AND wm.is_active = true`
-- Also fixed INTERVAL bug: `INTERVAL ':days days'` doesn't parameterize (days is inside string literal) — replaced with `make_interval(days => :days)`
-- workspace_id parameter was already available in the handler function signature
-- Syntax validation passed
-
-## 2026-03-31 — US-006: Add promoted field + schema generation methods
-- Added `promoted: bool = False` to ActionDefinition dataclass (after admin_only)
-- Added `get_promoted()` method to ActionRegistry — returns list of promoted ActionDefinitions
-- Added `to_first_class_schemas(exclude_admin=False)` method — returns OpenAI function schemas for promoted actions
-  - When exclude_admin=True, admin_only promoted actions are excluded (non-admin callers don't see them)
-- All new fields/params have defaults — existing callers unaffected
-- Validated with isolated import: promoted field works, get_promoted filters correctly, to_first_class_schemas respects exclude_admin
-
-## 2026-03-31 — US-007: Exclude promoted actions from prompt summary + dispatcher
-- Added `exclude_promoted: bool = True` param to `build_prompt_summary()` in action_registry.py
-  - When True (default), actions with promoted=True are skipped from the markdown catalog
-  - Filter applied alongside existing exclude_admin filter
-- Added `exclude_promoted: bool = True` param to `to_dispatcher_schema()` in action_registry.py
-  - Parameter accepted for forward compatibility — actual enum filtering will be added in US-012
-  - Default True ensures promoted actions will be excluded from dispatcher enum by default
-- All params have defaults — existing callers unaffected
-- Syntax validation passed (py_compile OK)
-
-## 2026-03-31 — US-008: Mark ~13 high-value actions as promoted=True
-- Added promoted=True to 13 actions across 5 files:
-  - actions_agents.py (4): platform_list_agents, platform_get_agent, platform_create_agent, platform_update_agent
-  - actions_marketplace.py (5): platform_browse_marketplace_agents, platform_browse_marketplace_skills, platform_browse_marketplace_plugins, platform_install_skill, platform_install_plugin
-  - actions_workspace.py (2): platform_store_memory, platform_get_system_health (also admin_only=True)
-  - actions_analytics.py (1): platform_get_activity_feed
-  - actions_search.py (1): platform_search_memory
-- Note: platform_store_memory and platform_get_system_health are in actions_workspace.py, not actions_search.py/actions_monitoring.py as PRD assumed
-- Validated: 97 total actions, 13 promoted, 6 admin-only. platform_get_system_health is both promoted + admin_only
-- Syntax validation passed (py_compile OK for all 5 files)
-
-## 2026-03-31 — US-009: Append promoted schemas in tool_router + consolidate field tools
-- Replaced hardcoded _FIELD_TOOL_SCHEMAS block (60 lines) in tool_router.py with `action_registry.to_first_class_schemas(exclude_admin=not is_admin)`
-  - All promoted actions now get first-class schemas dynamically from ActionRegistry
-  - Admin-only promoted actions excluded for non-admin callers
-  - Log line: "Added {n} promoted action schemas"
-- Marked platform_field_query and platform_field_inject as promoted=True in actions_field.py
-  - platform_field_stability left as non-promoted (not a high-value direct-call tool)
-- Field tool schemas now come from ActionDefinition.to_openai_schema() instead of hardcoded dicts
-  - Schema structure matches: same type/function/name/description/parameters pattern
-  - Descriptions are richer in ActionDefinition (more context for LLM) — improvement, not regression
-- Total promoted count: 15 (13 from US-008 + 2 field tools)
-- Syntax validation passed (py_compile OK for actions_field.py + tool_router.py)
-
-## 2026-03-31 — US-010: Update SmartToolRouter with promoted tool categories
-- Added ALWAYS_INCLUDE set with 6 critical promoted tools that bypass intent filtering:
-  - platform_list_agents, platform_get_agent, platform_search_memory, platform_store_memory, platform_field_query, platform_field_inject
-- Added 5 new TOOL_CATEGORIES for promoted tools:
-  - platform_management (list/get/create/update agents)
-  - marketplace (browse agents/skills/plugins, install skill/plugin)
-  - monitoring (system health, activity feed)
-  - memory (search/store memory)
-  - fields (field query/inject)
-- Updated INTENT_TO_TOOLS mappings:
-  - DATA_QUERY: added "fields"
-  - SEARCH: added "memory"
-  - EXTERNAL_ACTION: added "platform_management"
-  - CREATION: added "platform_management"
-  - MULTI_STEP: added all 5 promoted categories
-  - MEMORY_RECALL: now includes "memory" (was empty)
-- Applied ALWAYS_INCLUDE in _filter_tools_by_categories alongside CORE_TOOLS
-- Syntax validation passed (py_compile OK)
-
-## 2026-03-31 — US-011: Update PlatformActionsSection to exclude promoted actions
-- Updated PlatformActionsSection._build() to pass exclude_promoted=True to registry.build_prompt_summary()
-- Parameter was already the default (True from US-007), but now explicit per acceptance criteria
-- Promoted actions no longer appear in the markdown catalog injected into the system prompt
-- Non-promoted actions still appear as before
-- Syntax validation passed (py_compile OK)
-
-## 2026-03-31 — US-012: Add enum to dispatcher schema for remaining actions
-- Added enum of valid action names to the `action` parameter in `to_dispatcher_schema()`
-- Enum is built dynamically from registered actions, respecting both exclude_promoted and exclude_admin filters
-- Sorted alphabetically for consistent output
-- When no actions match (empty registry), enum key is omitted entirely
-- Token impact: ~78 non-promoted action names x ~10 tokens = ~780 tokens — acceptable
-- Syntax validation passed (py_compile OK)
-- Tested: 5 scenarios (exclude both, exclude promoted only, exclude nothing, sorted order, empty registry)
+2026-04-10 US-006 — Create useDeliverables React Query hooks
+- New: frontend/hooks/use-deliverables-api.ts
+- Types: Deliverable, FilterState, DEFAULT_FILTERS, DeliverableListResponse, DeliverableDetailResponse, DeliverableStats
+- Hooks: useDeliverables (useInfiniteQuery), useDeliverable, useDeliverableStats, useDeleteDeliverable
+- PAGE_SIZE=24; offset-based pagination via getNextPageParam
+- date_range ('today'|'week'|'month'|'all') translated to ISO date_from client-side
+- Query keys scoped by workspaceId via existing useWorkspace() hook
+- Delete mutation invalidates all ['deliverables', workspaceId] queries
+- React Query v4 API (pageParam default via destructuring, no initialPageParam)
+2026-04-10 21:20 US-007: DeliverableCard component created
+2026-04-10 — US-008 complete: frontend/components/workspace/gallery-view/filter-bar.tsx
+  - Debounced search (local useDebounce hook, 300ms) — no shared hook in repo
+  - Type/Source/Date Selects using shadcn Select (with 'all' sentinel — Radix rejects empty string values)
+  - Clear button only when hasActiveFilters; right-aligned total with pluralization
+  - Lucide icons only (Search, Calendar, FileType, Zap, X) — no emojis
+  - Effect deps [debouncedSearch, filters.search, onFiltersChange] — no stale closure, no-op guarded
+  - External-reset sync via second effect on filters.search
+  - Typecheck not runnable locally (no node_modules in frontend/); imports verified against ui/* and use-deliverables-api
+US-009 DeliverablePreview slide-over built (2026-04-10)
+2026-04-10 21:26 US-010 GalleryView container (infinite scroll + preview slide-over)
+2026-04-10 US-011 WorkspaceViewToggle + workspace page wiring (gallery default, preserves explorer deep-links)

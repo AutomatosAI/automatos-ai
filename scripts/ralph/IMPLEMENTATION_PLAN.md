@@ -1,72 +1,73 @@
-# PRD-122: Tool Routing Promotion & Permission Enforcement — Implementation Plan
+# PRD-129: Workspace Outputs Hub — Implementation Plan
 
 ## Overview
 
-Two problems, one fix:
-1. **Auto can't reliably call platform tools** — they're behind `platform_execute` dispatcher indirection. Promote ~13 high-value actions to first-class OpenAI tool schemas.
-2. **`permission_level` is declared but never enforced** — 6 infrastructure tools expose system internals to every user. Enforce admin gating before promoting.
+Transform the VS Code-style Workspace tab into a consumer-friendly **Gallery** of agent deliverables: reports, images, documents, code, slides. New `deliverables` table + `DeliverableService` + `/api/deliverables` endpoints + Gallery/Explorer/Activity view toggle. Auto-register deliverables when agents write files or submit reports.
 
 ## Architecture
 
 ```
-get_tools_for_agent() [tool_router.py:129]
-  ├── ToolRegistry.get_all() → core tool schemas
-  ├── ActionRegistry.to_dispatcher_schema() → platform_execute (non-promoted only)
-  ├── ActionRegistry.to_first_class_schemas() → promoted schemas [NEW]
-  └── ComposioActionCache enrichment → composio_execute params
-
-Execution: unified_executor.py routes platform_* → PlatformActionExecutor (no changes needed)
+agents write files (exec_workspace) ──┐
+report_service.create_report() ───────┼──► DeliverableService.register() ──► deliverables table
+backfill script (agent_reports) ──────┘                                              │
+                                                                                      ▼
+                                                                /api/deliverables (list/get/stats/delete)
+                                                                                      │
+                                                                                      ▼
+                                                                  frontend GalleryView (cards + preview)
 ```
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `orchestrator/modules/tools/discovery/action_registry.py` | ActionDefinition dataclass (line 27) + ActionRegistry class (line 53) |
-| `orchestrator/modules/tools/discovery/platform_executor.py` | execute() at line 273, permission checks at 286-334 |
-| `orchestrator/modules/tools/tool_router.py` | get_tools_for_agent() at line 129, dispatcher at 242 |
-| `orchestrator/modules/tools/discovery/actions_monitoring.py` | 6 infrastructure tool registrations |
-| `orchestrator/modules/tools/discovery/handlers_search.py` | search_chat_history handler, broken WHERE at line 33 |
-| `orchestrator/consumers/chatbot/smart_tool_router.py` | TOOL_CATEGORIES at 65, INTENT_TO_TOOLS at 77 |
-| `orchestrator/modules/context/sections/platform_actions.py` | PlatformActionsSection._build() at ~50 |
-| `orchestrator/modules/tools/discovery/actions_agents.py` | Agent action registrations |
-| `orchestrator/modules/tools/discovery/actions_marketplace.py` | Marketplace action registrations |
-| `orchestrator/modules/tools/discovery/actions_search.py` | Memory + search action registrations |
-| `orchestrator/modules/tools/unified_executor.py` | execute_tool() routing at ~310 |
+| `orchestrator/alembic/versions/prd129_deliverables.py` | Migration: deliverables table + indices |
+| `orchestrator/services/deliverable_service.py` | DeliverableService with register/list/get/stats/soft_delete |
+| `orchestrator/api/deliverables.py` | REST endpoints for list/get/stats/delete |
+| `orchestrator/modules/tools/execution/exec_workspace.py` | Auto-register on workspace_write_file |
+| `orchestrator/services/report_service.py` | Wire create_report → DeliverableService |
+| `orchestrator/scripts/backfill_prd129_deliverables.py` | Backfill existing agent_reports |
+| `orchestrator/main.py` | Register deliverables router |
+| `frontend/hooks/use-deliverables-api.ts` | React Query hooks |
+| `frontend/components/workspace/gallery-view/*` | Gallery UI (card, filter-bar, preview, index) |
+| `frontend/components/workspace/workspace-view-toggle.tsx` | Gallery/Explorer/Activity toggle |
+| `frontend/app/workspace/page.tsx` | Wire toggle + default to Gallery |
 
 ## Tasks
 
-### Phase 0: Permission Enforcement (P0)
+### Phase 0: Backend Foundation
 
-- [x] **US-001**: Add `admin_only: bool = False` to ActionDefinition + mark 6 infra tools (5 in actions_monitoring.py, 1 in actions_workspace.py)
-- [x] **US-002**: Thread caller_context (user_id, system_role, workspace_role) through unified_executor → platform_executor
-- [x] **US-003**: Add admin gate (before requires_confirmation) + destructive safety check (after rate limit) in platform_executor.py
-- [x] **US-004**: Add is_admin param to get_tools_for_agent() + exclude_admin to to_dispatcher_schema/build_prompt_summary
-- [x] **US-005**: Fix search_chat_history WHERE clause to scope by workspace_id
+- [x] **US-001**: Create deliverables table migration (alembic) — `prd129_deliverables.py`, standalone (down_revision=None), BIGINT size, unique partial index for idempotent register, import-test OK. DB not running locally — actual `alembic upgrade` will run on deploy.
+- [x] **US-002**: Implement DeliverableService (register/list/get/stats/soft_delete + 26 unit tests, all passing). Uses `ON CONFLICT (workspace_id, file_path) WHERE deleted_at IS NULL` for idempotent register. Extra JSONB merged via `||` on conflict. Images skip file read (returns content_url). Never calls WorkspaceClient during register.
+- [x] **US-003**: Add /api/deliverables endpoints + integration tests — `api/deliverables.py` (list/stats/get/delete), registered in `main.py`, 12 integration tests in `tests/api/test_deliverables_api.py` all passing. Stats route declared before `/{id}` to avoid path shadowing. Workspace isolation covered by asserting service is always constructed with `ctx.workspace_id`, ignoring `X-Workspace-ID` header.
+- [x] **US-004**: Auto-register on workspace_write_file + report_service.create_report — `exec_workspace.py` now calls `_auto_register_deliverable()` after a successful write, plumbed `agent_id`/`caller_context` through `unified_executor.py`. `report_service.create_report()` mirrors into deliverables after DB insert. Skips non-registerable types (archive/audio/video). Failures are caught+logged and never break the write. 11 unit tests in `tests/modules/tools/execution/test_exec_workspace_deliverable.py` (all pass). Tests use sys.modules stubs for core.* / services.* to avoid pulling pgvector + DB config.
+- [x] **US-005**: Backfill script for existing agent_reports — `orchestrator/scripts/backfill_prd129_deliverables.py`. Iterates `agent_reports` (LEFT JOIN agents for name), calls `DeliverableService.register(artifact_type='report')` per row. `source_type` = 'heartbeat' if `heartbeat_result_id` set or `report_type='standup'`, else 'task'. Idempotent via the US-001 unique partial index (ON CONFLICT updates in place). Flags: `--dry-run`, `--workspace-id <uuid>`, `--verbose`. Prints summary `Processed/Inserted/Updated/Skipped/Errors`. Exit code 1 if any errors. `--help` verified locally; full dry-run needs DB (runs on deploy). Config import is `from config import config` (matches repo convention, NOT `core.config`).
 
-### Phase 1: Promote High-Value Actions (P1)
+### Phase 1: Frontend
 
-- [x] **US-006**: Add `promoted: bool = False` to ActionDefinition + get_promoted() + to_first_class_schemas() methods
-- [x] **US-007**: Update build_prompt_summary(exclude_promoted=True) + to_dispatcher_schema(exclude_promoted=True)
-- [x] **US-008**: Mark ~13 actions as promoted=True in actions_agents, actions_marketplace, actions_monitoring, actions_search
-- [x] **US-009**: Append promoted schemas in tool_router.py + remove hardcoded _FIELD_TOOL_SCHEMAS + promote field tools
-- [x] **US-010**: Update SmartToolRouter with ALWAYS_INCLUDE set + promoted tool categories
-- [x] **US-011**: Update PlatformActionsSection._build() to pass exclude_promoted=True
-
-### Phase 2: Dispatcher Enum (P2)
-
-- [x] **US-012**: Add enum of non-promoted action names to to_dispatcher_schema()
+- [x] **US-006**: Create useDeliverables React Query hooks (infinite query) — `frontend/hooks/use-deliverables-api.ts`. Exports `Deliverable`, `FilterState`, `DEFAULT_FILTERS`, `useDeliverables` (useInfiniteQuery, PAGE_SIZE=24, offset-based `getNextPageParam`), `useDeliverable(id, includeContent)`, `useDeliverableStats()`, `useDeleteDeliverable()` mutation (invalidates `['deliverables', workspaceId]`). `date_range` translated to ISO `date_from` client-side ('today'/'week'/'month'). Workspace ID pulled from existing `useWorkspace()` hook — no separate `useWorkspaceId` exists in this repo; query keys still scoped by workspaceId so switching clears cache. React Query v4 API: no `initialPageParam` (v5-only) — `pageParam = 0` default via destructuring.
+- [x] **US-007**: Build DeliverableCard component — `frontend/components/workspace/gallery-view/deliverable-card.tsx`. Memoized; ARTIFACT_ICONS/ARTIFACT_COLORS/SOURCE_ICONS maps (Lucide only, no emojis); image preview via `<img loading="lazy" object-cover>` when artifact_type='image' + preview_url, otherwise centered Lucide icon in colored chip; source badge (small icon in rounded pill) pinned top-right on preview; title line-clamp-2, agent · time-ago, file size below; `formatFileSize` returns '0 B' for 0 bytes (and '' for null/undefined to avoid empty line); uses `formatDistanceToNow` from date-fns; cursor-pointer + hover:border-primary/50 + hover:shadow-md; role="button" + keyboard Enter/Space support. Typecheck clean.
+- [x] **US-008**: Build FilterBar component — `frontend/components/workspace/gallery-view/filter-bar.tsx`. Debounced search (local 300ms `useDebounce` hook, no shared one exists in repo), Type/Source/Date Select dropdowns using shadcn `Select`, Clear button shown only when `hasActiveFilters(filters)` is true, right-aligned total count with pluralization (`output`/`outputs`). Dropdowns use `'all'` sentinel value (Radix Select rejects empty-string values) and translate to `null` on change. Local `searchInput` state keeps typing responsive; `useEffect([debouncedSearch, filters.search, onFiltersChange])` pushes up only when different (no stale closure, no loop). External resets re-sync via a second effect on `filters.search`. Icons: Search/Calendar/FileType/Zap/X from lucide — no emojis. Typecheck not runnable locally (no node_modules) — imports verified manually against `@/components/ui/{button,input,select}` and `@/hooks/use-deliverables-api`.
+- [x] **US-009**: Build DeliverablePreview slide-over — `frontend/components/workspace/gallery-view/deliverable-preview.tsx`. Uses shadcn `Sheet` (side=right, max-w-3xl, scrollable). Fetches via `useDeliverable(id, true)` with `enabled` gated on `open` so switching cards doesn't thrash. Header: title (line-clamp via leading-tight), agent · time-ago · artifact_type, Download button (asChild `<a>` with native `download` attr, points at `content_url || preview_url`), Open in Canvas button (router.push `/workspace?view=explorer&path=<encoded>`). Body dispatcher `PreviewBody`: image → `<img>` via `content_url`; code → Prism via `getLanguageFromPath()` (reuses same extensions as `code-block.tsx` — no `react-syntax-highlighter` dep because repo already standardises on Prism); report/markdown (artifact_type='report' OR file_type md/markdown) → `react-markdown` in `prose prose-sm dark:prose-invert`; other text → `<pre>` whitespace-pre-wrap; unsupported or `content_error` → `UnavailableContent` card with Download fallback. Summary (if present) shown in bordered card below content. Escape close handled by Radix + explicit `keydown` listener as belt-and-braces. `getLanguageFromPath` is exported for future reuse; recognises bare `Dockerfile`. Icons: Download/ExternalLink/FileWarning/Loader2 — no emojis. Typecheck not runnable (no node_modules) — imports verified against `@/components/ui/{sheet,button}`, `@/hooks/use-deliverables-api`, and Prism grammars already used by `components/chatbot/code-block.tsx`.
+- [x] **US-010**: Build GalleryView container with infinite scroll — `frontend/components/workspace/gallery-view/index.tsx`. Client component; local `filters` state seeded from `DEFAULT_FILTERS`; `useDeliverables(filters)` infinite query; pages flattened via `useMemo(() => data.pages.flatMap(p => p.deliverables))` (immutable, stable ref). Responsive grid `grid-cols-2 sm:3 md:4 lg:5 xl:6 gap-4`. States: Loader2 spinner (loading), destructive text (error — includes error.message if Error instance), empty state with FolderOpen icon + "No outputs yet" + helper copy (Lucide only, no emojis). Load More button (shadcn `Button variant=outline`) shown when `hasNextPage`, disabled + inline Loader2 during `isFetchingNextPage`. Click opens `DeliverablePreview` slide-over; close keeps `selectedId` for 200ms so the sheet can animate out before unmounting content. `workspaceId` prop accepted but unused — real scoping happens inside `useDeliverables` via `useWorkspace()`. Typecheck not runnable locally (no node_modules) — imports verified against `@/components/ui/button`, `@/hooks/use-deliverables-api`, and the three sibling gallery-view components.
+- [x] **US-011**: Build WorkspaceViewToggle and wire into /workspace page — `frontend/components/workspace/workspace-view-toggle.tsx` (shadcn `ToggleGroup type="single" variant="outline"`, three items Outputs/Explorer/Activity with LayoutGrid/FolderTree/Activity Lucide icons, ignores empty-string re-click from Radix so view never becomes undefined). `frontend/app/workspace/page.tsx` rewritten: `useSearchParams()` reads `?view=` and `?path=` on mount; `resolveInitialView()` forces `explorer` when `path` is present (keeps Code Canvas deep-links working), otherwise honours `view=gallery|explorer|activity` and defaults to `gallery`. `useEffect([viewParam, pathParam])` re-syncs on URL changes so the preview's "Open in Canvas" link switches views cleanly. Header row gets the toggle pinned right (`ml-auto`); body switches between `GalleryView` (wrapped in `overflow-y-auto p-4` + `max-w-[1600px]` centering), existing `WorkspaceExplorer` (untouched — same props), and an Activity placeholder (`Activity` icon + copy, no emojis). No Suspense wrapper — matches existing `useSearchParams` usage in `app/activity/execution/page.tsx`. Typecheck not runnable locally (no node_modules); imports verified manually.
 
 ## Constraints
 
-- **No execution layer changes** — unified_executor.py already routes `platform_*` directly (line 392). Only adding caller_context passthrough.
-- **No migration needed** — workspace_members.role column already exists with owner|admin|editor|viewer|member values.
-- **Backward compatible** — all new parameters default to None/False. Existing callers unaffected.
-- **Field tool consolidation** — must verify to_openai_schema() output matches old hardcoded _FIELD_TOOL_SCHEMAS exactly.
+- Column is `extra` not `metadata` (SQLAlchemy Base.metadata conflict)
+- `file_size_bytes` is BIGINT (support >2GB)
+- Soft delete via `deleted_at`
+- UNIQUE `(workspace_id, file_path) WHERE deleted_at IS NULL` for idempotent re-registration
+- `register()` does NOT hit WorkspaceClient during registration — size passed in from caller
+- Registration failure MUST NOT break file write (try/except + log)
+- All SQL uses `sqlalchemy.text()` with bound params
+- Frontend uses Lucide icons only (no emojis)
+- Default view is `gallery` (consumer-friendly)
 
 ## Quality Bar
 
-- Every change is additive (new fields with defaults, new optional parameters)
-- Admin gate is fail-closed (no caller_context = denied)
-- Promoted actions are excluded from dispatcher (no dual paths)
-- Log all permission denials at WARNING level
+- All new SQL parameterized (no string interpolation of user input)
+- All method envelopes have `success` key
+- Exceptions logged with `exc_info=True`
+- Typecheck + tests pass for each story
+- Backward compatible: existing Explorer behaviour preserved exactly

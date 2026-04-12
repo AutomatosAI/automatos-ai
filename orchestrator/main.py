@@ -1021,6 +1021,13 @@ try:
 except ImportError as e:
     logger.warning("Could not load reports router: %s", e)
 
+# PRD-129: Workspace Outputs Hub — deliverables gallery
+try:
+    from api.deliverables import router as deliverables_router
+    app.include_router(deliverables_router)
+except ImportError as e:
+    logger.warning("Could not load deliverables router: %s", e)
+
 # PRD-72: Board Tasks
 try:
     from api.board_tasks import router as board_tasks_router
