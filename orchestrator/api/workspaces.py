@@ -310,14 +310,15 @@ async def get_orchestrator_settings(
     result["heartbeat"] = {**_ORCHESTRATOR_DEFAULTS["heartbeat"], **orchestrator.get("heartbeat", {})}
     result["harness"] = {**_ORCHESTRATOR_DEFAULTS["harness"], **orchestrator.get("harness", {})}
 
-    # Pull LLM config from the Auto agent (single source of truth)
+    # Pull LLM + persona from the Auto agent (single source of truth)
     try:
         auto_agent = _get_or_seed_auto_agent(db, ctx.workspace_id)
-        if auto_agent and auto_agent.model_config:
-            mc = auto_agent.model_config
+        if auto_agent:
+            # LLM config
+            mc = auto_agent.model_config or {}
             result["llm"] = {
-                "provider": mc.get("provider", "openrouter"),
-                "model_id": mc.get("model_id", "openai/gpt-4o"),
+                "provider": mc.get("provider", config.LLM_PROVIDER or "openrouter"),
+                "model_id": mc.get("model_id", config.LLM_MODEL or "openai/gpt-4o"),
                 "temperature": mc.get("temperature", 0.7),
                 "max_tokens": mc.get("max_tokens", 4000),
                 "top_p": mc.get("top_p", 1.0),
@@ -325,6 +326,29 @@ async def get_orchestrator_settings(
                 "presence_penalty": mc.get("presence_penalty", 0.0),
                 "fallback_model_id": mc.get("fallback_model_id"),
             }
+            # Persona / Soul — Auto agent is the source of truth
+            if auto_agent.custom_persona_prompt:
+                # Detect which preset matches, or it's custom
+                matched_preset = None
+                for mode, text in _PERSONALITY_PRESETS.items():
+                    if auto_agent.custom_persona_prompt.strip() == text.strip():
+                        matched_preset = mode
+                        break
+                if matched_preset:
+                    result["personality_mode"] = matched_preset
+                    result["custom_soul"] = ""
+                else:
+                    result["personality_mode"] = "custom"
+                    result["custom_soul"] = auto_agent.custom_persona_prompt
+
+            # Configuration (thinking, proactive, communication style)
+            agent_cfg = auto_agent.configuration or {}
+            if agent_cfg.get("communication_style"):
+                result["communication_style"] = agent_cfg["communication_style"]
+            if agent_cfg.get("proactive_level"):
+                result["proactive_level"] = agent_cfg["proactive_level"]
+            if agent_cfg.get("thinking_level"):
+                result["thinking_level"] = agent_cfg["thinking_level"]
         else:
             result["llm"] = {
                 "provider": config.LLM_PROVIDER or "openrouter",
@@ -337,7 +361,7 @@ async def get_orchestrator_settings(
                 "fallback_model_id": None,
             }
     except Exception:
-        logger.exception("Failed to read Auto agent LLM config for workspace %s", ctx.workspace_id)
+        logger.exception("Failed to read Auto agent config for workspace %s", ctx.workspace_id)
         result["llm"] = None
 
     return result
