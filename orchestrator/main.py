@@ -295,6 +295,22 @@ async def _boot_phase_1_core():
 
 async def _schema_migration():
     """Phase 1 continued: DDL migrations that must complete before seeds."""
+    # Run Alembic migrations to head (idempotent — skips already-applied)
+    try:
+        from alembic.config import Config as AlembicConfig
+        from alembic import command as alembic_command
+        import os
+
+        alembic_ini = os.path.join(os.path.dirname(__file__), "alembic.ini")
+        if os.path.exists(alembic_ini):
+            alembic_cfg = AlembicConfig(alembic_ini)
+            alembic_command.upgrade(alembic_cfg, "head")
+            logger.info("Alembic migrations applied to head")
+        else:
+            logger.warning("alembic.ini not found at %s — skipping migrations", alembic_ini)
+    except Exception as mig_err:
+        logger.error("Alembic migration failed: %s", mig_err, exc_info=True)
+
     # PRD-64: Ensure semantic routing columns exist on agents table
     try:
         from sqlalchemy import text as _t64
