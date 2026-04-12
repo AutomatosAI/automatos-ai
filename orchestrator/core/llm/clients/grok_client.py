@@ -43,7 +43,7 @@ class GrokProvider(BaseLLMProvider):
             self.client = OpenAI(
                 api_key=api_key,
                 base_url=self.API_BASE_URL,
-                timeout=180.0,
+                timeout=float(self.config.timeout) if self.config.timeout else 180.0,
             )
             logger.info(f"Initialized Grok client with model: {self.config.model}")
     
@@ -64,8 +64,16 @@ class GrokProvider(BaseLLMProvider):
                     "model": self.config.model,
                     "messages": messages,
                     "temperature": self.config.temperature,
-                    "max_tokens": self.config.max_tokens
+                    "max_tokens": self.config.max_tokens,
                 }
+                if self.config.top_p is not None:
+                    kwargs["top_p"] = self.config.top_p
+                if self.config.frequency_penalty is not None:
+                    kwargs["frequency_penalty"] = self.config.frequency_penalty
+                if self.config.presence_penalty is not None:
+                    kwargs["presence_penalty"] = self.config.presence_penalty
+                if self.config.stop is not None:
+                    kwargs["stop"] = self.config.stop
                 if tools:
                     kwargs["tools"] = self._sanitize_tools(tools)
                     kwargs["tool_choice"] = "auto"
@@ -120,12 +128,21 @@ class GrokProvider(BaseLLMProvider):
             )
         
         try:
-            response = self.client.chat.completions.create(
-                model=self.config.model,
-                messages=messages,
-                temperature=self.config.temperature,
-                max_tokens=self.config.max_tokens
-            )
+            sync_kwargs = {
+                "model": self.config.model,
+                "messages": messages,
+                "temperature": self.config.temperature,
+                "max_tokens": self.config.max_tokens,
+            }
+            if self.config.top_p is not None:
+                sync_kwargs["top_p"] = self.config.top_p
+            if self.config.frequency_penalty is not None:
+                sync_kwargs["frequency_penalty"] = self.config.frequency_penalty
+            if self.config.presence_penalty is not None:
+                sync_kwargs["presence_penalty"] = self.config.presence_penalty
+            if self.config.stop is not None:
+                sync_kwargs["stop"] = self.config.stop
+            response = self.client.chat.completions.create(**sync_kwargs)
             
             usage = {}
             if hasattr(response, 'usage') and response.usage:

@@ -324,6 +324,8 @@ async def get_orchestrator_settings(
                 "top_p": mc.get("top_p", 1.0),
                 "frequency_penalty": mc.get("frequency_penalty", 0.0),
                 "presence_penalty": mc.get("presence_penalty", 0.0),
+                "stop": mc.get("stop"),
+                "timeout": mc.get("timeout"),
                 "fallback_model_id": mc.get("fallback_model_id"),
             }
             # Persona / Soul — read from Auto agent configuration
@@ -483,7 +485,8 @@ async def save_orchestrator_settings(
         if llm and isinstance(llm, dict):
             new_mc = dict(auto_agent.model_config or {})
             for key in ("provider", "model_id", "temperature", "max_tokens",
-                        "top_p", "frequency_penalty", "presence_penalty", "fallback_model_id"):
+                        "top_p", "frequency_penalty", "presence_penalty",
+                        "stop", "timeout", "fallback_model_id"):
                 if key in llm:
                     new_mc[key] = llm[key]
             auto_agent.model_config = new_mc
@@ -544,6 +547,8 @@ async def save_orchestrator_settings(
                 "top_p": mc.get("top_p", 1.0),
                 "frequency_penalty": mc.get("frequency_penalty", 0.0),
                 "presence_penalty": mc.get("presence_penalty", 0.0),
+                "stop": mc.get("stop"),
+                "timeout": mc.get("timeout"),
                 "fallback_model_id": mc.get("fallback_model_id"),
             }
     except Exception:

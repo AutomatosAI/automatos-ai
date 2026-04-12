@@ -46,7 +46,7 @@ class OpenRouterProvider(BaseLLMProvider):
                     "HTTP-Referer": config.OPENROUTER_SITE_URL,
                     "X-Title": "Automatos AI",
                 },
-                timeout=180.0,  # 3 min hard timeout — prevents indefinite hangs
+                timeout=float(self.config.timeout) if self.config.timeout else 180.0,
             )
             logger.info(f"Initialized OpenRouter client with model: {self.config.model}")
 
@@ -69,6 +69,14 @@ class OpenRouterProvider(BaseLLMProvider):
                     "temperature": self.config.temperature,
                     "max_tokens": self.config.max_tokens,
                 }
+                if self.config.top_p is not None:
+                    kwargs["top_p"] = self.config.top_p
+                if self.config.frequency_penalty is not None:
+                    kwargs["frequency_penalty"] = self.config.frequency_penalty
+                if self.config.presence_penalty is not None:
+                    kwargs["presence_penalty"] = self.config.presence_penalty
+                if self.config.stop is not None:
+                    kwargs["stop"] = self.config.stop
                 if tools:
                     kwargs["tools"] = self._sanitize_tools(tools)
 
@@ -204,12 +212,21 @@ class OpenRouterProvider(BaseLLMProvider):
             )
 
         try:
-            response = self.client.chat.completions.create(
-                model=self.config.model,
-                messages=messages,
-                temperature=self.config.temperature,
-                max_tokens=self.config.max_tokens,
-            )
+            sync_kwargs = {
+                "model": self.config.model,
+                "messages": messages,
+                "temperature": self.config.temperature,
+                "max_tokens": self.config.max_tokens,
+            }
+            if self.config.top_p is not None:
+                sync_kwargs["top_p"] = self.config.top_p
+            if self.config.frequency_penalty is not None:
+                sync_kwargs["frequency_penalty"] = self.config.frequency_penalty
+            if self.config.presence_penalty is not None:
+                sync_kwargs["presence_penalty"] = self.config.presence_penalty
+            if self.config.stop is not None:
+                sync_kwargs["stop"] = self.config.stop
+            response = self.client.chat.completions.create(**sync_kwargs)
 
             return LLMResponse(
                 content=response.choices[0].message.content,
