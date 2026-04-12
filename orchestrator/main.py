@@ -368,30 +368,19 @@ async def _schema_migration():
                     "tags": '["auto", "system", "orchestrator"]',
                 })
 
-            # Fix Auto agents: reset personality_mode to "friendly" and restore
-            # the correct preset persona text. Early deploys had a bug where the
-            # GET returned personality_mode="custom" (text comparison failed),
-            # then user saves persisted that broken state.
+            # Backfill personality_mode for Auto agents that don't have one yet.
+            # Only touches agents with NO personality_mode — never overwrites custom.
             conn.execute(_t2("""
                 UPDATE agents
                 SET configuration = CAST(
                     COALESCE(CAST(configuration AS JSONB), CAST('{}' AS JSONB))
                     || CAST('{"personality_mode": "friendly"}' AS JSONB)
-                AS JSON),
-                custom_persona_prompt = :friendly_persona
+                AS JSON)
                 WHERE is_system_agent = true
                   AND slug LIKE 'auto-%'
                   AND (configuration IS NULL
-                       OR CAST(configuration AS JSONB) ->> 'personality_mode' IS NULL
-                       OR CAST(configuration AS JSONB) ->> 'personality_mode' = 'custom')
-            """), {"friendly_persona": (
-                "**My personality:**\n"
-                "- I'm warm and approachable - think of me as a knowledgeable friend\n"
-                "- I remember you and our past conversations\n"
-                "- I prefer action over explanation - if you ask me to do something, I'll do it\n"
-                "- I'm honest about what I can and can't do\n"
-                "- I get excited when we solve problems together!"
-            )})
+                       OR CAST(configuration AS JSONB) ->> 'personality_mode' IS NULL)
+            """))
 
             conn.commit()
             if workspace_ids:
