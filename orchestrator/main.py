@@ -39,7 +39,6 @@ from api.workflow_templates import router as workflow_templates_router
 from api.workflow_recipes import router as workflow_recipes_router, webhook_router as recipe_webhook_router
 from api.webhooks import router as general_webhooks_router
 from api.marketplace import router as marketplace_router
-from api.shopify import router as shopify_router
 from api.documents import router as documents_router
 from api.cache import router as cache_router
 from api.system import router as system_router
@@ -1041,7 +1040,6 @@ app.include_router(workflow_recipes_router)  # US-009: Renamed from templates
 app.include_router(recipe_webhook_router)  # Recipe webhook triggers (no auth)
 app.include_router(general_webhooks_router)  # General workspace webhooks (no auth)
 app.include_router(marketplace_router)  # Community Marketplace
-app.include_router(shopify_router)  # Shopify App Store provisioning & webhook forwarding
 app.include_router(document_generation_router)  # PRD-63: Must be BEFORE documents_router (has /templates, /generated specific routes that would otherwise be caught by documents_router's /{document_id} catch-all → 422)
 app.include_router(documents_router)
 app.include_router(cache_router)  # Cache management and monitoring
