@@ -1289,10 +1289,21 @@ def seed_system_settings(db: Session):
         # ========================================
         {
             "category": SettingCategory.COORDINATION.value,
-            "key": "planner_model",
+            "key": "provider",
+            "default_value": "openrouter",
+            "value_type": "string",
+            "description": "LLM provider for coordination services (planner, verifier)",
+            "is_required": True,
+            "validation_rules": {
+                "options": ["openrouter", "openai", "anthropic", "google", "deepseek"]
+            }
+        },
+        {
+            "category": SettingCategory.COORDINATION.value,
+            "key": "model",
             "default_value": "openai/gpt-4o-mini",
             "value_type": "string",
-            "description": "LLM model for mission planning/decomposition (via OpenRouter)",
+            "description": "LLM model for mission planning/decomposition",
             "is_required": True,
         },
         {
@@ -1388,10 +1399,21 @@ def seed_system_settings(db: Session):
         # ========================================
         {
             "category": SettingCategory.KNOWLEDGE_GRAPH.value,
-            "key": "extraction_model",
+            "key": "provider",
+            "default_value": "openrouter",
+            "value_type": "string",
+            "description": "LLM provider for knowledge graph extraction",
+            "is_required": True,
+            "validation_rules": {
+                "options": ["openrouter", "openai", "anthropic", "google"]
+            }
+        },
+        {
+            "category": SettingCategory.KNOWLEDGE_GRAPH.value,
+            "key": "model",
             "default_value": "google/gemini-2.0-flash",
             "value_type": "string",
-            "description": "LLM model for knowledge graph entity/relation extraction (via OpenRouter)",
+            "description": "LLM model for knowledge graph entity/relation extraction",
             "is_required": True,
         },
         {

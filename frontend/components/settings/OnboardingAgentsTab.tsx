@@ -42,7 +42,7 @@ const MODEL_TIERS: Record<string, { label: string; color: string }> = {
 }
 
 // Keys we show in the Planner card (from coordination category)
-const PLANNER_KEYS = ['planner_model', 'planner_max_tokens', 'planner_temperature'] as const
+const PLANNER_KEYS = ['provider', 'model', 'planner_max_tokens', 'planner_temperature'] as const
 
 export function OnboardingAgentsTab() {
   const [agents, setAgents] = useState<OnboardingAgent[]>([])
@@ -234,12 +234,20 @@ export function OnboardingAgentsTab() {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="space-y-2">
+                <Label>Provider</Label>
+                <Input
+                  value={plannerValues.provider ?? ''}
+                  onChange={(e) => handlePlannerChange('provider', e.target.value)}
+                  placeholder="openrouter"
+                />
+              </div>
               <div className="space-y-2">
                 <Label>Model</Label>
                 <Input
-                  value={plannerValues.planner_model ?? ''}
-                  onChange={(e) => handlePlannerChange('planner_model', e.target.value)}
+                  value={plannerValues.model ?? ''}
+                  onChange={(e) => handlePlannerChange('model', e.target.value)}
                   placeholder="openai/gpt-4o-mini"
                 />
               </div>

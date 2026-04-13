@@ -178,7 +178,7 @@ class Config:
         """Get planner model from system_settings → env var fallback only."""
         try:
             from core.llm.manager import get_system_setting
-            return get_system_setting("coordination", "planner_model", os.getenv("PLANNER_MODEL"))
+            return get_system_setting("coordination", "model", os.getenv("PLANNER_MODEL"))
         except Exception:
             return os.getenv("PLANNER_MODEL")
 
@@ -197,7 +197,7 @@ class Config:
         """Get graphify/knowledge-graph extraction model from system_settings."""
         try:
             from core.llm.manager import get_system_setting
-            return get_system_setting("knowledge_graph", "extraction_model", os.getenv("GRAPHIFY_MODEL"))
+            return get_system_setting("knowledge_graph", "model", os.getenv("GRAPHIFY_MODEL"))
         except Exception:
             return os.getenv("GRAPHIFY_MODEL")
 
