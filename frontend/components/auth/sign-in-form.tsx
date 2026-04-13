@@ -37,7 +37,7 @@ export function SignInForm() {
         })
     }
 
-    // Handle Email/Password sign in — two-step Clerk flow
+    // Handle Email/Password sign in
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
         if (!isLoaded) return
@@ -46,39 +46,34 @@ export function SignInForm() {
         setError(null)
 
         try {
-            // Step 1: Create sign-in with identifier
-            const si = await signIn.create({ identifier: email })
-
-            // Step 2: Attempt password as first factor
-            const result = await si.attemptFirstFactor({
-                strategy: 'password',
+            const result = await signIn.create({
+                identifier: email,
                 password,
+            })
+
+            console.log('Sign-in result:', {
+                status: result.status,
+                firstFactors: result.supportedFirstFactors?.map((f: any) => f.strategy),
+                secondFactors: result.supportedSecondFactors?.map((f: any) => f.strategy),
             })
 
             if (result.status === 'complete') {
                 await setActive({ session: result.createdSessionId })
                 router.push('/')
+            } else if (result.status === 'needs_first_factor') {
+                // Password was accepted but Clerk wants another first factor (e.g. email code)
+                const strategies = result.supportedFirstFactors?.map((f: any) => f.strategy) || []
+                setError(`Clerk needs first factor: [${strategies.join(', ')}]. Open browser console for details.`)
             } else if (result.status === 'needs_second_factor') {
-                // Check what second factor strategies Clerk supports
-                const factors = result.supportedSecondFactors || []
-                const strategies = factors.map((f: any) => f.strategy)
-                console.log('Second factor strategies:', strategies)
-
-                if (strategies.includes('phone_code')) {
-                    await signIn.prepareSecondFactor({ strategy: 'phone_code' })
-                    setSecondFactorStrategy('phone_code')
-                } else if (strategies.includes('totp')) {
-                    setSecondFactorStrategy('totp')
-                }
-                // totp doesn't need prepare — user has authenticator app
-                setPendingSecondFactor(true)
+                const strategies = result.supportedSecondFactors?.map((f: any) => f.strategy) || []
+                setError(`Clerk needs second factor: [${strategies.join(', ')}]. Open browser console for details.`)
             } else {
-                console.error('Sign-in status:', result.status)
-                setError(`Sign-in returned status: ${result.status}. Please try Google/GitHub or contact support.`)
+                setError(`Unexpected status: ${result.status}`)
             }
         } catch (err: any) {
             const msg = err.errors?.[0]?.longMessage || err.errors?.[0]?.message
-            console.error('Sign-in error:', msg, err.errors)
+            const code = err.errors?.[0]?.code
+            console.error('Sign-in error:', { code, msg, errors: err.errors })
             setError(msg || 'Failed to sign in. Please try again.')
         } finally {
             setIsLoading(false)
