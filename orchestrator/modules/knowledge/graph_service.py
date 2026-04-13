@@ -629,7 +629,7 @@ class GraphifyService:
                     extraction = await extract_from_document(
                         doc_text=source["text"],
                         doc_path=source["path"],
-                        workspace_id=int(workspace_id) if workspace_id.isdigit() else 0,
+                        workspace_id=str(workspace_id),
                         team_access=source.get("team_access"),
                     )
                     extractions.append(extraction)
@@ -708,14 +708,20 @@ class GraphifyService:
         await self._write_json(ws, _COMMUNITIES_JSON_PATH, community_data)
 
         # graph.html — use graphify's to_html (writes to temp file, then upload)
-        with tempfile.TemporaryDirectory() as tmpdir:
-            html_path = os.path.join(tmpdir, "graph.html")
-            await loop.run_in_executor(
-                None, partial(to_html, graph, communities, html_path)
-            )
-            with open(html_path, "r", encoding="utf-8") as f:
-                html_content = f.read()
-        await ws.write_file(_GRAPH_HTML_PATH, html_content)
+        # Guard: to_html divides by max_degree — if graph has nodes but no
+        # edges (all degrees 0), patch the graph with self-loops temporarily
+        # so the visualiser doesn't crash with ZeroDivisionError.
+        if graph.number_of_nodes() > 0 and graph.number_of_edges() == 0:
+            logger.warning("_export_graph: graph has nodes but no edges — skipping HTML export")
+        else:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                html_path = os.path.join(tmpdir, "graph.html")
+                await loop.run_in_executor(
+                    None, partial(to_html, graph, communities, html_path)
+                )
+                with open(html_path, "r", encoding="utf-8") as f:
+                    html_content = f.read()
+            await ws.write_file(_GRAPH_HTML_PATH, html_content)
 
     @staticmethod
     def _format_communities(

@@ -14,6 +14,7 @@ import logging
 import re
 from typing import Any
 
+from config import Config
 from core.llm import create_llm_manager
 
 logger = logging.getLogger(__name__)
@@ -254,7 +255,7 @@ def _normalise_extraction(
 async def extract_from_document(
     doc_text: str,
     doc_path: str,
-    workspace_id: int,
+    workspace_id: str,
     team_access: list[str] | None = None,
 ) -> dict[str, list]:
     """Extract knowledge graph from a business document via LLM.
@@ -262,7 +263,7 @@ async def extract_from_document(
     Args:
         doc_text: Full text of the document.
         doc_path: Path/identifier for provenance tracking.
-        workspace_id: Workspace that owns the document (for future scoping).
+        workspace_id: Workspace UUID that owns the document (for future scoping).
         team_access: Teams that can access this document (PRD-124).
             Empty list or None means visible to all agents.
 
@@ -276,7 +277,7 @@ async def extract_from_document(
     prompt = _DOCUMENT_EXTRACTION_PROMPT.format(doc_path=doc_path, doc_text=doc_text)
 
     try:
-        llm = create_llm_manager(service_name="orchestrator")
+        llm = create_llm_manager(service_name="orchestrator", model=Config().GRAPHIFY_MODEL)
         # Graph extraction produces large JSON — default 2000 tokens truncates
         llm.config.max_tokens = 8000
         response = await llm.generate_response([
@@ -321,7 +322,7 @@ async def extract_from_report(
     )
 
     try:
-        llm = create_llm_manager(service_name="orchestrator")
+        llm = create_llm_manager(service_name="orchestrator", model=Config().GRAPHIFY_MODEL)
         llm.config.max_tokens = 8000
         response = await llm.generate_response([
             {"role": "system", "content": "You are a knowledge-graph extraction engine. Output valid JSON only."},
