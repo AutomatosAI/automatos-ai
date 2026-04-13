@@ -114,6 +114,113 @@ async def _dispatch_mission_event(
 
 
 # ---------------------------------------------------------------------------
+# Ephemeral onboarding agents
+# ---------------------------------------------------------------------------
+
+
+def _clone_onboarding_agents(
+    db: Session,
+    run: OrchestrationRun,
+) -> List[int]:
+    """Clone global onboarding agent templates into workspace-scoped ephemeral
+    instances for this mission run.
+
+    Each clone:
+    - Has workspace_id set → native RAG/file access
+    - agent_type = "ephemeral" → hidden from roster, cleaned up after mission
+    - cloned_from_id → points to the global template
+    - Slug = "{template_slug}-{run_id[:8]}" → unique per run
+
+    Returns the list of new agent IDs (stored in run.config["ephemeral_agent_ids"]).
+    """
+    from uuid import uuid4
+
+    templates = (
+        db.query(Agent)
+        .filter(
+            Agent.is_system_agent.is_(True),
+            Agent.required_role == "onboarding",
+            Agent.status == "active",
+        )
+        .all()
+    )
+    if not templates:
+        logger.warning("No onboarding agent templates found — cannot clone")
+        return []
+
+    run_short = str(run.id)[:8]
+    ephemeral_ids: List[int] = []
+
+    for tmpl in templates:
+        clone = Agent(
+            public_id=uuid4(),
+            name=tmpl.name,  # Same name so AgentMatcher role matching works
+            description=f"[Ephemeral] {tmpl.description or ''}",
+            agent_type="ephemeral",
+            status="active",
+            workspace_id=run.workspace_id,
+            is_system_agent=False,
+            required_role=None,
+            owner_type="workspace",
+            slug=f"{tmpl.slug}-{run_short}",
+            cloned_from_id=tmpl.id,
+            use_custom_persona=tmpl.use_custom_persona,
+            custom_persona_prompt=tmpl.custom_persona_prompt,
+            model_config=dict(tmpl.model_config) if tmpl.model_config else None,
+            configuration=dict(tmpl.configuration) if tmpl.configuration else None,
+            tags=(tmpl.tags or []) + ["ephemeral", f"run:{run.id}"],
+            team=tmpl.team,
+            job_title=tmpl.job_title,
+        )
+        db.add(clone)
+
+    db.flush()  # Get IDs assigned
+
+    # Collect the IDs after flush
+    for tmpl in templates:
+        slug = f"{tmpl.slug}-{run_short}"
+        row = db.query(Agent.id).filter(Agent.slug == slug).first()
+        if row:
+            ephemeral_ids.append(row[0])
+
+    # Store in run config so we don't re-clone on next tick
+    config = dict(run.config or {})
+    config["ephemeral_agent_ids"] = ephemeral_ids
+    run.config = config
+    db.commit()
+
+    logger.info(
+        "Cloned %d ephemeral onboarding agents for run %s (ids=%s)",
+        len(ephemeral_ids),
+        run.id,
+        ephemeral_ids,
+    )
+    return ephemeral_ids
+
+
+def _cleanup_ephemeral_agents(db: Session, run: OrchestrationRun) -> int:
+    """Delete ephemeral agents created for a completed/failed mission run."""
+    config = run.config or {}
+    ephemeral_ids = config.get("ephemeral_agent_ids", [])
+    if not ephemeral_ids:
+        return 0
+
+    count = (
+        db.query(Agent)
+        .filter(Agent.id.in_(ephemeral_ids), Agent.agent_type == "ephemeral")
+        .delete(synchronize_session="fetch")
+    )
+    db.commit()
+
+    logger.info(
+        "Cleaned up %d ephemeral agents for run %s",
+        count,
+        run.id,
+    )
+    return count
+
+
+# ---------------------------------------------------------------------------
 # CoordinatorService
 # ---------------------------------------------------------------------------
 
@@ -599,20 +706,21 @@ class CoordinatorService:
             .all()
         )
 
-        # Mission Zero: include global onboarding agents so dispatcher
-        # can match VOYAGER/BLUEPRINT/SCRIBE/FORGE to tasks.
+        # Mission Zero: spin up ephemeral workspace-scoped clones of the
+        # global onboarding agents so they can access this workspace's RAG/docs.
+        # Clones are created once (first tick) and stored in run.config.
         run_config = run.config or {}
         if run_config.get("source") == "mission_zero":
-            onboarding_agents: List[Agent] = (
-                db.query(Agent)
-                .filter(
-                    Agent.is_system_agent.is_(True),
-                    Agent.required_role == "onboarding",
-                    Agent.status == "active",
+            ephemeral_ids = run_config.get("ephemeral_agent_ids")
+            if not ephemeral_ids:
+                ephemeral_ids = _clone_onboarding_agents(db, run)
+            if ephemeral_ids:
+                ephemeral_agents = (
+                    db.query(Agent)
+                    .filter(Agent.id.in_(ephemeral_ids), Agent.status == "active")
+                    .all()
                 )
-                .all()
-            )
-            agents.extend(onboarding_agents)
+                agents.extend(ephemeral_agents)
 
         # --- Dispatch phase (parallel via dispatch_ready) ---
         dispatch_results = MissionDispatcher.dispatch_ready(db, run, agents)
@@ -651,8 +759,11 @@ class CoordinatorService:
         # --- Reconcile phase ---
         await MissionReconciler.reconcile(db, run)
 
-        # --- Check if run advanced to verifying → build summary ---
+        # --- Cleanup ephemeral agents when run reaches terminal state ---
         db.refresh(run)
+        if RunState(run.state) in TERMINAL_RUN_STATES:
+            _cleanup_ephemeral_agents(db, run)
+
         if RunState(run.state) == RunState.VERIFYING:
             await self._build_and_advance_to_awaiting_human(db, run)
 
@@ -940,14 +1051,6 @@ class CoordinatorService:
         if not agent_runtime:
             agent_runtime = await factory.activate_agent(agent_id, workspace_dir="/tmp/automatos_workspace")
 
-        # Mission Zero: onboarding agents are global (workspace_id=None) but
-        # need to operate within the mission's workspace for RAG/file access.
-        # SAFETY: always set from the run, then reset after execution to prevent
-        # cross-tenant bleed if the runtime is cached and reused by another workspace.
-        _original_workspace_id = agent_runtime.workspace_id if agent_runtime else None
-        if agent_runtime and run.workspace_id:
-            agent_runtime.workspace_id = run.workspace_id
-
         # Mission tasks need longer outputs than the 2000-token default
         if agent_runtime and hasattr(agent_runtime, "llm_manager"):
             original_max_tokens = agent_runtime.llm_manager.config.max_tokens
@@ -985,10 +1088,6 @@ class CoordinatorService:
                 exc_info=True,
             )
             result = {"status": "error", "error": str(exc)}
-
-        # Restore original workspace_id to prevent cross-tenant cache bleed
-        if agent_runtime:
-            agent_runtime.workspace_id = _original_workspace_id
 
         # Record completion/failure
         MissionDispatcher.record_task_completion(db, task, result)
