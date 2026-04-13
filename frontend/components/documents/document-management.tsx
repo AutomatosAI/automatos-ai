@@ -377,45 +377,54 @@ export function DocumentManagement() {
   // Calculate stats from real API data
   const stats = useMemo(() => {
     const totalDocs = typedDocuments.length
-    const processedDocs = typedDocuments.filter(d => (d.status || '').toLowerCase() === 'completed').length
+    const pendingDocs = typedDocuments.filter(d => {
+      const s = (d.status || '').toLowerCase()
+      return s === 'pending' || s === 'processing' || s === 'uploading'
+    }).length
+    const failedDocs = typedDocuments.filter(d => (d.status || '').toLowerCase() === 'failed').length
     const totalSizeBytes = typedDocuments.reduce((sum, d) => sum + (d.file_size || 0), 0)
     const sizeInMB = totalSizeBytes / (1024 * 1024)
     const sizeDisplay = sizeInMB < 1024 ? `${sizeInMB.toFixed(1)} MB` : `${(sizeInMB / 1024).toFixed(1)} GB`
-    
+
+    // Find last sync time from most recently updated document
+    const lastSyncDoc = [...typedDocuments]
+      .filter(d => d.updated_at || d.created_at)
+      .sort((a, b) => new Date(b.updated_at || b.created_at || 0).getTime() - new Date(a.updated_at || a.created_at || 0).getTime())[0]
+    const lastSyncDate = lastSyncDoc ? new Date(lastSyncDoc.updated_at || lastSyncDoc.created_at || 0) : null
+    const lastSyncDisplay = lastSyncDate
+      ? `${Math.floor((Date.now() - lastSyncDate.getTime()) / 3600000)}h ago`
+      : 'Never'
+
     return [
       {
-        label: 'Total Documents',
+        label: 'Documents',
         value: totalDocs.toString(),
-        change: `+${Math.max(0, totalDocs - 2)} this month`,
+        change: `${totalDocs} total`,
         icon: FileText,
         iconColor: 'text-[hsl(var(--info))]',
         globalIconKey: 'global_document',
-
       },
       {
-        label: 'Processed',
-        value: processedDocs.toString(),
-        change: totalDocs > 0 ? `${((processedDocs / totalDocs) * 100).toFixed(1)}% success rate` : '0% success rate',
+        label: 'Processing Status',
+        value: pendingDocs > 0 ? `${pendingDocs} pending` : 'All done',
+        change: failedDocs > 0 ? `${failedDocs} failed` : 'No errors',
         icon: Database,
-        iconColor: 'text-[hsl(var(--success))]',
-
+        iconColor: pendingDocs > 0 ? 'text-[hsl(var(--warning))]' : 'text-[hsl(var(--success))]',
       },
       {
         label: 'Storage Used',
         value: sizeDisplay,
-        change: `+${Math.max(0, sizeInMB - 0.5).toFixed(1)} MB this week`,
+        change: `Across ${totalDocs} files`,
         icon: FolderOpen,
         iconColor: 'text-primary',
         globalIconKey: 'global_storage',
-
       },
       {
-        label: 'Vector Chunks',
-        value: typedDocuments.reduce((sum, d)=> sum + (d.chunk_count || 0), 0).toString(),
-        change: '',
-        icon: Database,
+        label: 'Last Sync',
+        value: lastSyncDisplay,
+        change: lastSyncDate ? lastSyncDate.toLocaleDateString() : 'No documents',
+        icon: History,
         iconColor: 'text-[hsl(var(--agent))]',
-
       }
     ]
   }, [typedDocuments])

@@ -154,9 +154,9 @@ export function AnalyticsDocuments({ days }: Props) {
 
       {/* Document Table */}
       <Card className="glass-card overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
           <table className="w-full">
-            <thead>
+            <thead className="sticky top-0 bg-card z-10">
               <tr className="border-b border-border/50">
                 <th className="text-left p-4"><SortHeader field="name">Name</SortHeader></th>
                 <th className="text-left p-4 hidden md:table-cell"><span className="text-xs font-medium text-muted-foreground">Type</span></th>

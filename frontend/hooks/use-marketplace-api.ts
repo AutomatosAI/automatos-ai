@@ -160,6 +160,29 @@ export function useInstallMarketplaceItem() {
 }
 
 /**
+ * Hook to toggle featured status on a marketplace item (admin only)
+ */
+export function useToggleFeatured() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (itemId: number) => {
+      return await apiClient.toggleMarketplaceFeatured(itemId)
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: marketplaceQueryKeys.items() })
+      queryClient.invalidateQueries({ queryKey: marketplaceQueryKeys.featured })
+      toast.success(data.is_featured ? 'Item featured' : 'Item unfeatured')
+    },
+    onError: (error: any) => {
+      toast.error('Failed to toggle featured', {
+        description: error?.message || 'An error occurred.'
+      })
+    }
+  })
+}
+
+/**
  * Hook to check for marketplace updates
  */
 export function useMarketplaceUpdates() {

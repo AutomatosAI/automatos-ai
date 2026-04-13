@@ -184,9 +184,9 @@ export function AnalyticsWorkflows({ days }: Props) {
 
       {/* Missions & Workflows Table */}
       <Card className="glass-card overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
           <table className="w-full table-fixed">
-            <thead>
+            <thead className="sticky top-0 bg-card z-10">
               <tr className="border-b border-border/50">
                 <th className="text-left p-4 w-[40%]"><SortHeader field="name">Name</SortHeader></th>
                 <th className="text-left p-4 w-[8%]"><SortHeader field="totalRuns">Runs</SortHeader></th>
@@ -306,22 +306,22 @@ export function AnalyticsWorkflows({ days }: Props) {
       <div className="pt-2">
         <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
           <ChefHat className="w-5 h-5 text-primary" />
-          Recipes
+          Playbooks
         </h3>
 
         <StatsBar stats={[
-          { label: 'Total Recipes', value: data?.recipeSummary?.totalRecipes || 0, icon: ChefHat, iconColor: 'text-primary', globalIconKey: 'global_recipe' },
+          { label: 'Total Playbooks', value: data?.recipeSummary?.totalRecipes || 0, icon: ChefHat, iconColor: 'text-primary', globalIconKey: 'global_recipe' },
           { label: 'Executions', value: data?.recipeSummary?.totalExecutions || 0, icon: Activity, iconColor: 'text-[hsl(var(--info))]', globalIconKey: 'global_activity' },
           { label: 'Avg Quality', value: `${((data?.recipeSummary?.avgQualityScore || 0) * 100).toFixed(0)}%`, icon: CheckCircle, iconColor: 'text-[hsl(var(--success))]', globalIconKey: 'global_performance' },
           { label: 'Avg Success Rate', value: `${(data?.recipeSummary?.avgSuccessRate || 0).toFixed(0)}%`, icon: Zap, iconColor: 'text-[hsl(var(--agent))]', globalIconKey: 'global_performance' },
         ]} loading={isLoading} />
       </div>
 
-      {/* Recipe Table */}
+      {/* Playbooks Table */}
       <Card className="glass-card overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
           <table className="w-full">
-            <thead>
+            <thead className="sticky top-0 bg-card z-10">
               <tr className="border-b border-border/50">
                 <th className="text-left p-4"><RecipeSortHeader field="name">Name</RecipeSortHeader></th>
                 <th className="text-left p-4"><span className="text-xs font-medium text-muted-foreground">Steps</span></th>
@@ -337,7 +337,7 @@ export function AnalyticsWorkflows({ days }: Props) {
                 <tr>
                   <td colSpan={7} className="p-12 text-center text-muted-foreground">
                     <ChefHat className="w-10 h-10 mx-auto mb-3 opacity-50" />
-                    <p>No recipes found</p>
+                    <p>No playbooks found</p>
                   </td>
                 </tr>
               ) : (

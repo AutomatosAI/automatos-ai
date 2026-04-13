@@ -148,7 +148,7 @@ export function useAgentAnalytics(days: number = 30) {
             name: agent.name,
             status: agent.status,
             agentType: agent.agent_type,
-            successRate: agent.performance_metrics?.success_rate || 0,
+            successRate: (agent.performance_metrics?.success_rate || 0) * 100,
             avgRunTime: agent.performance_metrics?.avg_execution_time || 0,
             tokensUsed: agent.model_usage_stats?.total_tokens || 0,
             cost: agent.model_usage_stats?.total_cost || 0,
@@ -164,13 +164,21 @@ export function useAgentAnalytics(days: number = 30) {
             lastMemoryAt: mem?.last_memory_at || null,
           }
         }),
-        summary: {
-          totalAgents: agentList.length,
-          activeAgents: agentList.filter((a: any) => a.status === 'active').length,
-          avgSuccessRate: (stats as any)?.average_performance || 0,
-          totalTokens: agentList.reduce((sum: number, a: any) => sum + (a.model_usage_stats?.total_tokens || 0), 0),
-          totalCost: agentList.reduce((sum: number, a: any) => sum + (a.model_usage_stats?.total_cost || 0), 0),
-        },
+        summary: (() => {
+          // Calculate avg success rate from per-agent data (not workflow executions)
+          const agentsWithRate = agentList.filter((a: any) => (a.performance_metrics?.success_rate || 0) > 0)
+          const avgRate = agentsWithRate.length > 0
+            ? (agentsWithRate.reduce((sum: number, a: any) => sum + (a.performance_metrics?.success_rate || 0), 0) / agentsWithRate.length) * 100
+            : (stats as any)?.average_performance || 0
+
+          return {
+            totalAgents: agentList.length,
+            activeAgents: agentList.filter((a: any) => a.status === 'active').length,
+            avgSuccessRate: avgRate,
+            totalTokens: agentList.reduce((sum: number, a: any) => sum + (a.model_usage_stats?.total_tokens || 0), 0),
+            totalCost: agentList.reduce((sum: number, a: any) => sum + (a.model_usage_stats?.total_cost || 0), 0),
+          }
+        })(),
         ranking: [],
       }
     },
@@ -328,7 +336,7 @@ export function useDocumentAnalyticsUnified(days: number = 30) {
         summary: {
           totalDocuments: docList.length,
           totalStorageMb: docList.reduce((sum: number, d: any) => sum + (d.file_size || d.size || 0), 0) / (1024 * 1024),
-          totalRagQueries: usage?.total_events || 0,
+          totalRagQueries: (usage?.event_counts?.rag_query || 0) + (usage?.event_counts?.document_searched || 0),
           avgConfidence: 0,
         },
         usage: usage || null,

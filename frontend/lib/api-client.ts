@@ -1182,6 +1182,12 @@ class ApiClient {
     return this.request('/api/marketplace/updates')
   }
 
+  async toggleMarketplaceFeatured(itemId: number) {
+    return this.request(`/api/marketplace/items/${itemId}/toggle-featured`, {
+      method: 'POST'
+    })
+  }
+
   // ===== WORKFLOW ENDPOINTS =====
   async getWorkflows() {
     return this.request('/api/workflows')

@@ -11,6 +11,8 @@ interface MarketplaceGridProps {
   category?: string
   search?: string
   onItemClick: (itemId: number) => void
+  isAdmin?: boolean
+  onToggleFeatured?: (id: number) => void
 }
 
 export function MarketplaceGrid({
@@ -18,7 +20,9 @@ export function MarketplaceGrid({
   type,
   category,
   search,
-  onItemClick
+  onItemClick,
+  isAdmin,
+  onToggleFeatured,
 }: MarketplaceGridProps) {
   const [gridItems, setGridItems] = useState<MarketplaceItem[]>(items || [])
   const [loading, setLoading] = useState(!items)
@@ -75,6 +79,8 @@ export function MarketplaceGrid({
           key={item.id}
           item={item}
           onClick={() => onItemClick(item.id)}
+          isAdmin={isAdmin}
+          onToggleFeatured={onToggleFeatured}
         />
       ))}
     </div>

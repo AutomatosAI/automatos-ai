@@ -20,6 +20,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
+import { StatsBar, type StatItem } from '@/components/shared/stats-bar'
 import { Progress } from '@/components/ui/progress'
 import {
   ResponsiveContainer,
@@ -47,6 +48,7 @@ import {
   useCostProjections,
   useDailyCostByModel,
 } from '@/hooks/use-unified-analytics'
+import { useWorkspaceModels } from '@/hooks/use-model-api'
 
 interface Props {
   days: number
@@ -148,6 +150,35 @@ export function AnalyticsCosts({ days }: Props) {
   const [projectionPeriod, setProjectionPeriod] = useState('30d')
   const { data: comparisonData, isLoading: comparisonLoading } = useModelComparison(selectedModelIds, comparisonPeriod)
   const { data: projections, isLoading: projectionsLoading } = useCostProjections(projectionPeriod)
+  const { data: workspaceModels = [] } = useWorkspaceModels()
+
+  // Build a merged list of all models for the comparison dropdown:
+  // workspace models (all installed) + usage models (have cost data).
+  // Workspace models appear even when they have zero usage.
+  const allAvailableModels = useMemo(() => {
+    const seen = new Set<string>()
+    const result: Array<{ model: string; displayName: string; requests: number; totalCost: number }> = []
+
+    // Usage-based models first (they have stats to show)
+    for (const m of data?.byModel || []) {
+      const key = m.model.toLowerCase()
+      if (!seen.has(key)) {
+        seen.add(key)
+        result.push({ model: m.model, displayName: shortenModelName(m.model), requests: m.requests, totalCost: m.totalCost })
+      }
+    }
+
+    // Workspace-installed models that have no usage yet
+    for (const wm of workspaceModels) {
+      const key = wm.model_id.toLowerCase()
+      if (!seen.has(key)) {
+        seen.add(key)
+        result.push({ model: wm.model_id, displayName: wm.display_name || shortenModelName(wm.model_id), requests: 0, totalCost: 0 })
+      }
+    }
+
+    return result
+  }, [data?.byModel, workspaceModels])
 
   // Compute max cost share for proportional bars in model table
   const maxModelCost = useMemo(() => {
@@ -158,17 +189,12 @@ export function AnalyticsCosts({ days }: Props) {
   if (isLoading) {
     return (
       <div className="space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <Card key={i} className="glass-card">
-              <CardContent className="p-5">
-                <Skeleton className="h-4 w-20 mb-3" />
-                <Skeleton className="h-8 w-24 mb-2" />
-                <Skeleton className="h-3 w-16" />
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+        <StatsBar stats={[
+          { label: 'Total Cost', value: '...', icon: DollarSign, iconColor: 'text-[hsl(var(--success))]' },
+          { label: 'Total Tokens', value: '...', icon: Zap, iconColor: 'text-[hsl(var(--info))]' },
+          { label: 'Cost per Request', value: '...', icon: Activity, iconColor: 'text-[hsl(var(--agent))]' },
+          { label: 'Top Spender', value: '...', icon: AlertTriangle, iconColor: 'text-primary' },
+        ]} loading={true} />
         <Skeleton className="h-80 w-full rounded-2xl" />
       </div>
     )
@@ -177,70 +203,39 @@ export function AnalyticsCosts({ days }: Props) {
   return (
     <div className="space-y-6">
       {/* ─── Hero Stats ─── */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
-        {[
-          {
-            label: 'Total Cost',
-            value: formatCost(data?.summary?.totalCost || 0),
-            sub: 'This period',
-            icon: DollarSign,
-            iconBg: 'bg-emerald-500/10',
-            iconColor: 'text-emerald-400',
-            accent: 'border-l-emerald-500',
-          },
-          {
-            label: 'Total Tokens',
-            value: formatNumber(data?.summary?.totalTokens || 0),
-            sub: 'Input + Output',
-            icon: Zap,
-            iconBg: 'bg-blue-500/10',
-            iconColor: 'text-blue-400',
-            accent: 'border-l-blue-500',
-          },
-          {
-            label: 'Cost per Request',
-            value: formatCost(data?.summary?.costPerTask || 0),
-            sub: `${formatNumber(data?.summary?.totalRequests || 0)} requests`,
-            icon: Activity,
-            iconBg: 'bg-purple-500/10',
-            iconColor: 'text-purple-400',
-            accent: 'border-l-purple-500',
-          },
-          {
-            label: 'Top Spender',
-            value: data?.summary?.mostExpensiveAgent?.name || 'None',
-            sub: data?.summary?.mostExpensiveAgent
-              ? `${formatCost(data.summary.mostExpensiveAgent.cost)} on ${shortenModelName(data.summary.mostExpensiveAgent.model)}`
-              : 'No data',
-            icon: AlertTriangle,
-            iconBg: 'bg-orange-500/10',
-            iconColor: 'text-orange-400',
-            accent: 'border-l-orange-500',
-          },
-        ].map((stat, index) => (
-          <motion.div
-            key={stat.label}
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: index * 0.08 }}
-          >
-            <Card className={`glass-card border-l-2 ${stat.accent} hover:border-l-4 transition-all duration-300`}>
-              <CardContent className="p-5">
-                <div className="flex items-start justify-between">
-                  <div className="space-y-1">
-                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{stat.label}</p>
-                    <p className="text-2xl font-bold leading-none">{stat.value}</p>
-                    <p className="text-xs text-muted-foreground mt-1">{stat.sub}</p>
-                  </div>
-                  <div className={`w-10 h-10 rounded-xl ${stat.iconBg} flex items-center justify-center`}>
-                    <stat.icon className={`w-5 h-5 ${stat.iconColor}`} />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </motion.div>
-        ))}
-      </div>
+      <StatsBar stats={[
+        {
+          label: 'Total Cost',
+          value: formatCost(data?.summary?.totalCost || 0),
+          change: 'This period',
+          icon: DollarSign,
+          iconColor: 'text-[hsl(var(--success))]',
+          globalIconKey: 'global_cost',
+        },
+        {
+          label: 'Total Tokens',
+          value: formatNumber(data?.summary?.totalTokens || 0),
+          change: 'Input + Output',
+          icon: Zap,
+          iconColor: 'text-[hsl(var(--info))]',
+        },
+        {
+          label: 'Cost per Request',
+          value: formatCost(data?.summary?.costPerTask || 0),
+          change: `${formatNumber(data?.summary?.totalRequests || 0)} requests`,
+          icon: Activity,
+          iconColor: 'text-[hsl(var(--agent))]',
+        },
+        {
+          label: 'Top Spender',
+          value: data?.summary?.mostExpensiveAgent?.name || 'None',
+          change: data?.summary?.mostExpensiveAgent
+            ? `${formatCost(data.summary.mostExpensiveAgent.cost)} on ${shortenModelName(data.summary.mostExpensiveAgent.model)}`
+            : 'No data',
+          icon: AlertTriangle,
+          iconColor: 'text-primary',
+        },
+      ] satisfies StatItem[]} />
 
       {/* ─── Multi-Line Cost by Model Chart ─── */}
       <motion.div
@@ -511,9 +506,9 @@ export function AnalyticsCosts({ days }: Props) {
               Token Usage by Model
             </CardTitle>
           </CardHeader>
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
             <table className="w-full">
-              <thead>
+              <thead className="sticky top-0 bg-card z-10">
                 <tr className="border-b border-border/50">
                   <th className="text-left p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Model</th>
                   <th className="text-right p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Requests</th>
@@ -590,9 +585,9 @@ export function AnalyticsCosts({ days }: Props) {
                 Cost by Agent
               </CardTitle>
             </CardHeader>
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
               <table className="w-full">
-                <thead>
+                <thead className="sticky top-0 bg-card z-10">
                   <tr className="border-b border-border/50">
                     <th className="text-left p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Agent</th>
                     <th className="text-left p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Model</th>
@@ -671,8 +666,8 @@ export function AnalyticsCosts({ days }: Props) {
                     </button>
                     {modelDropdownOpen && (
                       <div className="absolute z-50 mt-1 w-72 max-h-56 overflow-y-auto rounded-xl border border-border bg-card shadow-xl">
-                        {data?.byModel
-                          ?.filter(m => !selectedModelIds.includes(m.model))
+                        {allAvailableModels
+                          .filter(m => !selectedModelIds.includes(m.model))
                           .map(m => (
                             <button
                               key={m.model}
@@ -682,11 +677,13 @@ export function AnalyticsCosts({ days }: Props) {
                                 setModelDropdownOpen(false)
                               }}
                             >
-                              <span>{shortenModelName(m.model)}</span>
-                              <span className="text-muted-foreground">{m.requests} req &middot; {formatCost(m.totalCost)}</span>
+                              <span>{m.displayName}</span>
+                              <span className="text-muted-foreground">
+                                {m.requests > 0 ? `${m.requests} req · ${formatCost(m.totalCost)}` : 'No usage yet'}
+                              </span>
                             </button>
                           ))}
-                        {(!data?.byModel || data.byModel.filter(m => !selectedModelIds.includes(m.model)).length === 0) && (
+                        {allAvailableModels.filter(m => !selectedModelIds.includes(m.model)).length === 0 && (
                           <p className="px-4 py-3 text-xs text-muted-foreground">No more models available</p>
                         )}
                       </div>
@@ -711,9 +708,9 @@ export function AnalyticsCosts({ days }: Props) {
             ) : comparisonData && comparisonData.length > 0 ? (
               <>
                 {/* Comparison Table */}
-                <div className="overflow-x-auto">
+                <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
                   <table className="w-full">
-                    <thead>
+                    <thead className="sticky top-0 bg-card z-10">
                       <tr className="border-b border-border/50">
                         <th className="text-left p-3 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Metric</th>
                         {comparisonData.map((model, idx) => (

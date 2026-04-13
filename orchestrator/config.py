@@ -173,7 +173,7 @@ class Config:
     LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.7"))
     LLM_MAX_TOKENS: int = int(os.getenv("LLM_MAX_TOKENS", "2000"))
     PLANNER_MODEL: str = os.getenv("PLANNER_MODEL", "z-ai/glm-5.1")
-    GRAPHIFY_MODEL: str = os.getenv("GRAPHIFY_MODEL", "z-ai/glm-5.1")
+    GRAPHIFY_MODEL: str = os.getenv("GRAPHIFY_MODEL", "google/gemini-2.0-flash")
     
     # =============================================================================
     # ENVIRONMENT
@@ -345,7 +345,7 @@ class Config:
     # Replanning limits (PRD-82B US-005)
     COORDINATOR_MAX_REPLANS: int = int(os.getenv("COORDINATOR_MAX_REPLANS", "2"))
     # Max tokens for mission task LLM calls (agents default to 2000, missions need more)
-    COORDINATOR_TASK_MAX_TOKENS: int = int(os.getenv("COORDINATOR_TASK_MAX_TOKENS", "16384"))
+    COORDINATOR_TASK_MAX_TOKENS: int = int(os.getenv("COORDINATOR_TASK_MAX_TOKENS", "8000"))
     # Maximum seconds a single task execution can take before being timed out
     COORDINATOR_TASK_EXECUTION_TIMEOUT: int = int(os.getenv("COORDINATOR_TASK_EXECUTION_TIMEOUT", "240"))
     # Cross-task consistency verification (PRD-82B US-006)

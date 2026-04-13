@@ -7,7 +7,6 @@ import { motion } from 'framer-motion'
 import {
   Users,
   Activity,
-  Brain,
   Settings,
   ChevronLeft,
   Bot,
@@ -17,7 +16,6 @@ import {
   Database,
   Store,
   BarChart3,
-  LayoutDashboard,
   HardDrive,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -77,7 +75,7 @@ const navigationItems = [
     icon: Store,
     iconColor: 'text-primary',
     navIconKey: 'nav_marketplace',
-    description: 'Discover agents, recipes & tools'
+    description: 'Discover agents, playbooks & tools'
   },
   {
     name: 'Knowledge Bases',
@@ -95,23 +93,6 @@ const navigationItems = [
     navIconKey: 'nav_team',
     description: 'Manage workspace members',
     requiredRole: 'admin' as const,
-  },
-  {
-    name: 'Context Engineering',
-    href: '/context',
-    icon: Brain,
-    iconColor: 'text-[hsl(var(--chart-4))]',
-    navIconKey: 'nav_context',
-    description: 'RAG system and field theory',
-    requiredRole: 'admin' as const,
-  },
-  {
-    name: 'Dashboard',
-    href: '/dashboard',
-    icon: LayoutDashboard,
-    iconColor: 'text-emerald-400',
-    navIconKey: 'nav_dashboard',
-    description: 'System metrics & health',
   },
   {
     name: 'Analytics',

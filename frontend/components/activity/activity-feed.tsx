@@ -52,7 +52,7 @@ function KitchenSkeleton() {
 const TYPE_CHIPS = [
   { value: 'chat', label: 'Chats', icon: MessageCircle },
   { value: 'routine', label: 'Routines', icon: RefreshCw },
-  { value: 'recipe', label: 'Recipes', icon: ChefHat },
+  { value: 'recipe', label: 'Playbooks', icon: ChefHat },
   { value: 'mission', label: 'Missions', icon: Rocket, comingSoon: true },
 ] as const
 
@@ -246,7 +246,7 @@ export function ActivityFeed({ period = '1d', openExecution, deepLinkRecipeId }:
   // ─── Execution Detail Drill-Down ──────────────────
 
   if (selectedItem) {
-    // Recipes → full ExecutionKitchen (cooking theater with streaming logs, self-learning)
+    // Playbooks → full ExecutionKitchen (cooking theater with streaming logs, self-learning)
     if (selectedItem.type === 'recipe') {
       // Extract execution ID: source_url has ?openExecution=X or id is recipe-X
       const execId =

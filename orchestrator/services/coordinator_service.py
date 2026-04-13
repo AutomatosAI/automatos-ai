@@ -741,20 +741,48 @@ class CoordinatorService:
                 if task:
                     tasks_to_execute.append((task, result.agent_id))
 
-            # Execute tasks — each _execute_task performs DB reads/writes
-            # on the shared session so we must run them sequentially.
-            # TODO: When agent I/O dominates latency, refactor to separate
-            # DB prep (serial) from agent calls (parallel via asyncio.gather).
+            # --- Phase 1: DB prep (serial on shared session) ---
+            # Transition tasks to RUNNING, load upstream deps, build prompts,
+            # activate agents. All DB I/O must complete before parallel phase.
+            prepared = []
             for task, agent_id in tasks_to_execute:
                 try:
-                    await self._execute_task(db, run, task, agent_id)
+                    prep = await self._prepare_task(db, run, task, agent_id)
+                    if prep is not None:
+                        prepared.append(prep)
                 except Exception as exc:
                     logger.error(
-                        "Task %s execution failed: %s",
+                        "Task %s preparation failed: %s",
                         task.id,
                         exc,
                         exc_info=True,
                     )
+
+            # Flush all DB changes before entering the parallel phase
+            db.flush()
+
+            # --- Phase 2: Agent I/O (parallel via asyncio.gather) ---
+            if prepared:
+                agent_coros = [
+                    self._run_agent_io(p["factory"], p["agent_id"], p["prompt"],
+                                       p["task"], p["attachment_ids"])
+                    for p in prepared
+                ]
+                results = await asyncio.gather(*agent_coros, return_exceptions=True)
+
+                # --- Phase 3: Record completions (serial on shared session) ---
+                for prep, result in zip(prepared, results):
+                    task = prep["task"]
+                    agent_id = prep["agent_id"]
+                    if isinstance(result, Exception):
+                        logger.error(
+                            "Task %s agent I/O failed: %s",
+                            task.id,
+                            result,
+                            exc_info=result,
+                        )
+                        result = {"status": "error", "error": str(result)}
+                    await self._record_task_result(db, run, task, agent_id, result)
 
         # --- Reconcile phase ---
         await MissionReconciler.reconcile(db, run)
@@ -901,17 +929,18 @@ class CoordinatorService:
 
         return criteria
 
-    async def _execute_task(
+    async def _prepare_task(
         self,
         db: Session,
         run: OrchestrationRun,
         task: OrchestrationTask,
         agent_id: int,
-    ) -> None:
-        """
-        Execute a dispatched task via AgentFactory.execute_with_prompt().
+    ) -> Optional[Dict[str, Any]]:
+        """DB prep phase for a task — runs serially on the shared session.
 
-        Transitions: ASSIGNED → RUNNING → COMPLETED/FAILED.
+        Transitions ASSIGNED → RUNNING, loads upstream context, builds prompt,
+        activates agent. Returns a dict with everything needed for the parallel
+        agent I/O phase, or None if the task couldn't be prepared.
         """
         from modules.agents.factory.agent_factory import AgentFactory
 
@@ -924,7 +953,7 @@ class CoordinatorService:
                 "Could not transition task %s to running", task.id,
                 exc_info=True,
             )
-            return
+            return None
 
         # Inject upstream task outputs into input_context so the agent
         # can see what previous tasks produced (dependency chain context)
@@ -941,13 +970,11 @@ class CoordinatorService:
                 .order_by(OrchestrationTask.sequence_number)
                 .all()
             )
-            import re as _re
             _MAX_UPSTREAM_CHARS = 8000  # per task — prevent context blow-up
 
             def _sanitize_upstream(raw: str) -> str:
                 """Strip base64 images and truncate for downstream context."""
-                # Replace base64 image data with a reference marker
-                cleaned = _re.sub(
+                cleaned = re.sub(
                     r"data:image/[^;]+;base64,[A-Za-z0-9+/=]+",
                     "[image — see generated-images API]",
                     raw,
@@ -981,18 +1008,15 @@ class CoordinatorService:
             }
 
         # PRD-127: Get attachment_ids for this task
-        # Tasks can have their own attachment_ids, or inherit from mission
         task_attachment_ids: List[str] = []
         if hasattr(task, "attachment_ids") and task.attachment_ids:
             task_attachment_ids = task.attachment_ids
         else:
-            # Inherit from mission run
             task_attachment_ids = (run.config or {}).get("attachment_ids", [])
 
         # Build the prompt — synthesis tasks use a specialised prompt
         is_synthesis = task.task_type == TaskType.SYNTHESIS.value
 
-        # Check if this is a revision retry (has previous output + feedback)
         ctx = task.input_context or {}
         previous_output = ctx.get("previous_output")
         verification_feedback = ctx.get("verification_feedback")
@@ -1002,8 +1026,6 @@ class CoordinatorService:
             synthesis_upstream = self._collect_upstream_outputs(db, task)
 
             if is_revision:
-                # REVISION MODE: Don't rebuild the full synthesis prompt.
-                # Give the LLM its own output + targeted feedback instead.
                 failures = verification_feedback.get("failures", [])
                 reasoning = verification_feedback.get("reasoning", "Unknown")
                 attempt = verification_feedback.get("attempt", "?")
@@ -1030,7 +1052,6 @@ class CoordinatorService:
             else:
                 prompt = self._build_synthesis_prompt(task, synthesis_upstream)
 
-            # Auto-set verification criteria if not already defined
             if not task.verification_criteria:
                 task.verification_criteria = (
                     self._auto_synthesis_verification_criteria(task, synthesis_upstream)
@@ -1043,29 +1064,47 @@ class CoordinatorService:
         else:
             prompt = MissionDispatcher.build_task_prompt(task)
 
-        # Execute via AgentFactory
+        # Activate agent and bump max_tokens
         factory = AgentFactory(db_session=db)
 
-        # Ensure agent is activated so we can bump max_tokens for mission tasks
         agent_runtime = factory.active_agents.get(agent_id)
         if not agent_runtime:
             agent_runtime = await factory.activate_agent(agent_id, workspace_dir="/tmp/automatos_workspace")
 
-        # Mission tasks need longer outputs than the 2000-token default
         if agent_runtime and hasattr(agent_runtime, "llm_manager"):
             original_max_tokens = agent_runtime.llm_manager.config.max_tokens
             agent_runtime.llm_manager.config.max_tokens = max(
                 original_max_tokens, Config.COORDINATOR_TASK_MAX_TOKENS
             )
 
+        return {
+            "task": task,
+            "agent_id": agent_id,
+            "prompt": prompt,
+            "factory": factory,
+            "attachment_ids": task_attachment_ids,
+        }
+
+    async def _run_agent_io(
+        self,
+        factory: Any,
+        agent_id: int,
+        prompt: str,
+        task: Any,
+        attachment_ids: List[str],
+    ) -> Dict[str, Any]:
+        """Execute agent I/O — safe to run concurrently via asyncio.gather().
+
+        No DB access here — only the LLM + tool loop.
+        """
         try:
             result = await asyncio.wait_for(
                 factory.execute_with_prompt(
                     agent=agent_id,
                     prompt=prompt,
-                    max_retries=0,  # Coordinator manages retries, not AgentFactory
+                    max_retries=0,
                     max_tool_iterations=10,
-                    attachment_ids=task_attachment_ids,  # PRD-127
+                    attachment_ids=attachment_ids,
                 ),
                 timeout=Config.COORDINATOR_TASK_EXECUTION_TIMEOUT,
             )
@@ -1088,8 +1127,17 @@ class CoordinatorService:
                 exc_info=True,
             )
             result = {"status": "error", "error": str(exc)}
+        return result
 
-        # Record completion/failure
+    async def _record_task_result(
+        self,
+        db: Session,
+        run: OrchestrationRun,
+        task: OrchestrationTask,
+        agent_id: int,
+        result: Dict[str, Any],
+    ) -> None:
+        """Record task completion/failure — runs serially on shared session."""
         MissionDispatcher.record_task_completion(db, task, result)
 
         # PRD-128: dispatch mission_step_complete (default pref is 'silent'
@@ -1113,7 +1161,7 @@ class CoordinatorService:
 
         # PRD-108: Inject completed task output into shared field
         if result.get("status") == "success":
-            db.refresh(task)  # Ensure task.output is populated
+            db.refresh(task)
             await self._inject_task_output_into_field(run, task, agent_id)
 
         # Update run-level token tracking (PRD-82A Section 9)
@@ -1121,7 +1169,6 @@ class CoordinatorService:
         if task_tokens:
             run.tokens_used = (run.tokens_used or 0) + task_tokens
 
-            # Budget warning check
             if (
                 run.token_budget_estimate
                 and run.tokens_used > run.token_budget_estimate * 1.5

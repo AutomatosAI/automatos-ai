@@ -94,7 +94,7 @@ export default function WebhooksSettingsTab() {
             href="/activity"
             className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
           >
-            Go to Recipes
+            Go to Playbooks
             <ArrowRight className="w-3.5 h-3.5" />
           </a>
         </CardContent>
