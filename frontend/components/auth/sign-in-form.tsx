@@ -21,6 +21,8 @@ export function SignInForm() {
     const [showPassword, setShowPassword] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const [isLoading, setIsLoading] = useState(false)
+    const [pendingSecondFactor, setPendingSecondFactor] = useState(false)
+    const [totpCode, setTotpCode] = useState('')
     const router = useRouter()
 
     // Handle OAuth sign in
@@ -56,7 +58,7 @@ export function SignInForm() {
                 // via its built-in flows. For now, surface a helpful message.
                 setError('Please verify your email address first. Check your inbox for a verification link.')
             } else if (result.status === 'needs_second_factor') {
-                setError('Two-factor authentication required. This is not yet supported — please contact support.')
+                setPendingSecondFactor(true)
             } else {
                 console.error('Unexpected sign-in status:', result.status, result)
                 setError('Sign-in could not be completed. Please try again or use Google/GitHub.')
@@ -65,6 +67,34 @@ export function SignInForm() {
             const msg = err.errors?.[0]?.longMessage || err.errors?.[0]?.message
             console.error('Sign-in error:', msg, err.errors)
             setError(msg || 'Failed to sign in. Please try again.')
+        } finally {
+            setIsLoading(false)
+        }
+    }
+
+    // Handle 2FA verification
+    const handleSecondFactor = async (e: React.FormEvent) => {
+        e.preventDefault()
+        if (!isLoaded) return
+
+        setIsLoading(true)
+        setError(null)
+
+        try {
+            const result = await signIn.attemptSecondFactor({
+                strategy: 'totp',
+                code: totpCode,
+            })
+
+            if (result.status === 'complete') {
+                await setActive({ session: result.createdSessionId })
+                router.push('/')
+            } else {
+                setError('Verification failed. Please try again.')
+            }
+        } catch (err: any) {
+            const msg = err.errors?.[0]?.longMessage || err.errors?.[0]?.message
+            setError(msg || 'Invalid verification code. Please try again.')
         } finally {
             setIsLoading(false)
         }
@@ -185,75 +215,118 @@ export function SignInForm() {
                         </div>
                     </div>
 
-                    <form onSubmit={handleSubmit} className="space-y-4">
-                        <div className="space-y-2">
-                            <Label htmlFor="email" className="text-slate-300">Email</Label>
-                            <div className="relative group">
-                                <Mail className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
-                                <Input
-                                    id="email"
-                                    type="email"
-                                    placeholder="name@example.com"
-                                    value={email}
-                                    onChange={(e) => setEmail(e.target.value)}
-                                    className="pl-9 bg-secondary/20 border-border/40 focus:border-primary/50 focus:bg-secondary/30 transition-all"
-                                    required
-                                />
+                    {pendingSecondFactor ? (
+                        <form onSubmit={handleSecondFactor} className="space-y-4">
+                            <p className="text-sm text-slate-400">
+                                Enter the verification code from your authenticator app.
+                            </p>
+                            <div className="space-y-2">
+                                <Label htmlFor="totp" className="text-slate-300">Verification Code</Label>
+                                <div className="relative group">
+                                    <Lock className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
+                                    <Input
+                                        id="totp"
+                                        type="text"
+                                        inputMode="numeric"
+                                        autoComplete="one-time-code"
+                                        placeholder="000000"
+                                        value={totpCode}
+                                        onChange={(e) => setTotpCode(e.target.value)}
+                                        className="pl-9 bg-secondary/20 border-border/40 focus:border-primary/50 focus:bg-secondary/30 transition-all text-center text-lg tracking-widest"
+                                        required
+                                    />
+                                </div>
                             </div>
-                        </div>
-                        <div className="space-y-2">
-                            <div className="flex items-center justify-between">
-                                <Label htmlFor="password" className="text-slate-300">Password</Label>
-                                <button
-                                    type="button"
-                                    onClick={handleForgotPassword}
-                                    className="text-xs text-primary hover:text-primary/90 hover:underline"
-                                >
-                                    Forgot password?
-                                </button>
+                            <Button
+                                type="submit"
+                                className="w-full gradient-accent font-medium shadow-lg shadow-orange-500/20 hover:shadow-orange-500/40 transition-all duration-300"
+                                disabled={isLoading}
+                            >
+                                {isLoading ? (
+                                    <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Verifying...</>
+                                ) : (
+                                    <>Verify<ArrowRight className="ml-2 h-4 w-4" /></>
+                                )}
+                            </Button>
+                            <button
+                                type="button"
+                                onClick={() => { setPendingSecondFactor(false); setTotpCode(''); setError(null) }}
+                                className="w-full text-sm text-muted-foreground hover:text-white transition-colors"
+                            >
+                                Back to sign in
+                            </button>
+                        </form>
+                    ) : (
+                        <form onSubmit={handleSubmit} className="space-y-4">
+                            <div className="space-y-2">
+                                <Label htmlFor="email" className="text-slate-300">Email</Label>
+                                <div className="relative group">
+                                    <Mail className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
+                                    <Input
+                                        id="email"
+                                        type="email"
+                                        placeholder="name@example.com"
+                                        value={email}
+                                        onChange={(e) => setEmail(e.target.value)}
+                                        className="pl-9 bg-secondary/20 border-border/40 focus:border-primary/50 focus:bg-secondary/30 transition-all"
+                                        required
+                                    />
+                                </div>
                             </div>
-                            <div className="relative group">
-                                <Lock className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
-                                <Input
-                                    id="password"
-                                    type={showPassword ? 'text' : 'password'}
-                                    value={password}
-                                    onChange={(e) => setPassword(e.target.value)}
-                                    className="pl-9 pr-9 bg-secondary/20 border-border/40 focus:border-primary/50 focus:bg-secondary/30 transition-all"
-                                    required
-                                />
-                                <button
-                                    type="button"
-                                    onClick={() => setShowPassword(!showPassword)}
-                                    className="absolute right-3 top-2.5 text-muted-foreground hover:text-white transition-colors"
-                                >
-                                    {showPassword ? (
-                                        <EyeOff className="h-4 w-4" />
-                                    ) : (
-                                        <Eye className="h-4 w-4" />
-                                    )}
-                                </button>
+                            <div className="space-y-2">
+                                <div className="flex items-center justify-between">
+                                    <Label htmlFor="password" className="text-slate-300">Password</Label>
+                                    <button
+                                        type="button"
+                                        onClick={handleForgotPassword}
+                                        className="text-xs text-primary hover:text-primary/90 hover:underline"
+                                    >
+                                        Forgot password?
+                                    </button>
+                                </div>
+                                <div className="relative group">
+                                    <Lock className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
+                                    <Input
+                                        id="password"
+                                        type={showPassword ? 'text' : 'password'}
+                                        value={password}
+                                        onChange={(e) => setPassword(e.target.value)}
+                                        className="pl-9 pr-9 bg-secondary/20 border-border/40 focus:border-primary/50 focus:bg-secondary/30 transition-all"
+                                        required
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowPassword(!showPassword)}
+                                        className="absolute right-3 top-2.5 text-muted-foreground hover:text-white transition-colors"
+                                    >
+                                        {showPassword ? (
+                                            <EyeOff className="h-4 w-4" />
+                                        ) : (
+                                            <Eye className="h-4 w-4" />
+                                        )}
+                                    </button>
+                                </div>
                             </div>
-                        </div>
 
-                        <Button
-                            type="submit"
-                            className="w-full gradient-accent font-medium shadow-lg shadow-orange-500/20 hover:shadow-orange-500/40 transition-all duration-300"
-                            disabled={isLoading}
-                        >
-                            {isLoading ? (
-                                <>
-                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                    Signing in...
-                                </>
-                            ) : (
-                                <>
-                                    Sign In
-                                    <ArrowRight className="ml-2 h-4 w-4" />
-                                </>
-                            )}
-                        </Button>
-                    </form>
+                            <Button
+                                type="submit"
+                                className="w-full gradient-accent font-medium shadow-lg shadow-orange-500/20 hover:shadow-orange-500/40 transition-all duration-300"
+                                disabled={isLoading}
+                            >
+                                {isLoading ? (
+                                    <>
+                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                        Signing in...
+                                    </>
+                                ) : (
+                                    <>
+                                        Sign In
+                                        <ArrowRight className="ml-2 h-4 w-4" />
+                                    </>
+                                )}
+                            </Button>
+                        </form>
+                    )}
                 </CardContent>
                 <CardFooter className="flex justify-center border-t border-border/30 pt-6">
                     <p className="text-sm text-muted-foreground">
