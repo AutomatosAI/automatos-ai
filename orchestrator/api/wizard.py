@@ -480,6 +480,7 @@ async def generate_plan(
     mission_config = {
         "source": "mission_zero",
         "auto_approve": True,
+        "skip_verification": True,  # Onboarding tasks don't need LLM judge — saves ~50% cost
         "profile_id": str(profile.id),
         "domain": profile.domain,
         "archetype": profile.archetype,
