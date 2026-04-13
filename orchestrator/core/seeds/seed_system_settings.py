@@ -1283,6 +1283,182 @@ def seed_system_settings(db: Session):
                 "max": 500
             }
         },
+
+        # ========================================
+        # COORDINATION SETTINGS (Mission planner, verifier, reconciler)
+        # ========================================
+        {
+            "category": SettingCategory.COORDINATION.value,
+            "key": "planner_model",
+            "default_value": "z-ai/glm-5.1",
+            "value_type": "string",
+            "description": "LLM model for mission planning/decomposition (via OpenRouter)",
+            "is_required": True,
+        },
+        {
+            "category": SettingCategory.COORDINATION.value,
+            "key": "planner_max_tokens",
+            "default_value": "4000",
+            "value_type": "number",
+            "description": "Max tokens for planner LLM output",
+            "is_required": False,
+            "validation_rules": {"min": 500, "max": 32000}
+        },
+        {
+            "category": SettingCategory.COORDINATION.value,
+            "key": "planner_temperature",
+            "default_value": "0.4",
+            "value_type": "number",
+            "description": "Temperature for planner (low = more deterministic plans)",
+            "is_required": False,
+            "validation_rules": {"min": 0.0, "max": 1.0, "step": 0.1}
+        },
+        {
+            "category": SettingCategory.COORDINATION.value,
+            "key": "task_max_tokens",
+            "default_value": "4000",
+            "value_type": "number",
+            "description": "Max tokens for mission task agent execution (overrides agent default during missions)",
+            "is_required": False,
+            "validation_rules": {"min": 500, "max": 16000}
+        },
+        {
+            "category": SettingCategory.COORDINATION.value,
+            "key": "verifier_model_mapping",
+            "default_value": "anthropic=openai/gpt-4o-mini,openai=anthropic/claude-haiku-4-5,google=openai/gpt-4o-mini,deepseek=openai/gpt-4o-mini,meta=openai/gpt-4o-mini",
+            "value_type": "string",
+            "description": "Cross-model verifier mapping (family=model pairs, comma-separated)",
+            "is_required": False,
+        },
+        {
+            "category": SettingCategory.COORDINATION.value,
+            "key": "verifier_fallback_model",
+            "default_value": "openai/gpt-4o-mini",
+            "value_type": "string",
+            "description": "Fallback model for verification when no mapping matches",
+            "is_required": True,
+        },
+        {
+            "category": SettingCategory.COORDINATION.value,
+            "key": "verifier_max_tokens",
+            "default_value": "2000",
+            "value_type": "number",
+            "description": "Max tokens for verification LLM output",
+            "is_required": False,
+            "validation_rules": {"min": 200, "max": 8000}
+        },
+        {
+            "category": SettingCategory.COORDINATION.value,
+            "key": "verification_pass_threshold",
+            "default_value": "0.7",
+            "value_type": "number",
+            "description": "Score threshold for PASS verdict (above = pass)",
+            "is_required": False,
+            "validation_rules": {"min": 0.0, "max": 1.0, "step": 0.05}
+        },
+        {
+            "category": SettingCategory.COORDINATION.value,
+            "key": "verification_catastrophic_threshold",
+            "default_value": "0.15",
+            "value_type": "number",
+            "description": "Score below this flags for human review (NOT auto-retry, just alert)",
+            "is_required": False,
+            "validation_rules": {"min": 0.0, "max": 0.5, "step": 0.05}
+        },
+        {
+            "category": SettingCategory.COORDINATION.value,
+            "key": "max_plan_retries",
+            "default_value": "3",
+            "value_type": "number",
+            "description": "Max retries for plan validation failures",
+            "is_required": False,
+            "validation_rules": {"min": 1, "max": 5}
+        },
+        {
+            "category": SettingCategory.COORDINATION.value,
+            "key": "consistency_check_enabled",
+            "default_value": "true",
+            "value_type": "boolean",
+            "description": "Enable cross-task consistency check (adds 1 extra LLM call per mission)",
+            "is_required": False,
+        },
+
+        # ========================================
+        # KNOWLEDGE GRAPH SETTINGS (Graph extraction LLM)
+        # ========================================
+        {
+            "category": SettingCategory.KNOWLEDGE_GRAPH.value,
+            "key": "extraction_model",
+            "default_value": "google/gemini-2.0-flash",
+            "value_type": "string",
+            "description": "LLM model for knowledge graph entity/relation extraction (via OpenRouter)",
+            "is_required": True,
+        },
+        {
+            "category": SettingCategory.KNOWLEDGE_GRAPH.value,
+            "key": "extraction_max_tokens",
+            "default_value": "4000",
+            "value_type": "number",
+            "description": "Max tokens for graph extraction LLM output",
+            "is_required": False,
+            "validation_rules": {"min": 500, "max": 8000}
+        },
+        {
+            "category": SettingCategory.KNOWLEDGE_GRAPH.value,
+            "key": "extraction_temperature",
+            "default_value": "0.1",
+            "value_type": "number",
+            "description": "Temperature for extraction (low = more consistent entities)",
+            "is_required": False,
+            "validation_rules": {"min": 0.0, "max": 1.0, "step": 0.1}
+        },
+        {
+            "category": SettingCategory.KNOWLEDGE_GRAPH.value,
+            "key": "max_concurrent_extractions",
+            "default_value": "5",
+            "value_type": "number",
+            "description": "Max concurrent document extractions",
+            "is_required": False,
+            "validation_rules": {"min": 1, "max": 20}
+        },
+
+        # ========================================
+        # LLM COST AUDIT SETTINGS (Budget alerts, tracking)
+        # ========================================
+        {
+            "category": SettingCategory.LLM_COST_AUDIT.value,
+            "key": "enabled",
+            "default_value": "true",
+            "value_type": "boolean",
+            "description": "Enable LLM cost tracking and audit logging",
+            "is_required": False,
+        },
+        {
+            "category": SettingCategory.LLM_COST_AUDIT.value,
+            "key": "mission_budget_alert_usd",
+            "default_value": "2.00",
+            "value_type": "number",
+            "description": "Alert threshold per mission (USD). Logs WARNING when exceeded.",
+            "is_required": False,
+            "validation_rules": {"min": 0.10, "max": 100.00, "step": 0.50}
+        },
+        {
+            "category": SettingCategory.LLM_COST_AUDIT.value,
+            "key": "daily_budget_alert_usd",
+            "default_value": "20.00",
+            "value_type": "number",
+            "description": "Alert threshold per day (USD). Logs CRITICAL when exceeded.",
+            "is_required": False,
+            "validation_rules": {"min": 1.00, "max": 500.00, "step": 1.00}
+        },
+        {
+            "category": SettingCategory.LLM_COST_AUDIT.value,
+            "key": "log_every_call",
+            "default_value": "true",
+            "value_type": "boolean",
+            "description": "Log model, tokens, and estimated cost for every LLM call",
+            "is_required": False,
+        },
     ]
     
     created_count = 0

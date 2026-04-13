@@ -333,7 +333,7 @@ class MissionPlanner:
         Raises:
             PlanValidationError: if all retry attempts fail structural validation.
         """
-        llm = create_llm_manager(service_name="orchestrator", model=Config().PLANNER_MODEL)
+        llm = create_llm_manager(service_name="planner", model=Config().PLANNER_MODEL)
         agent_roster = _render_agent_roster(agents)
         last_errors: List[str] = []
 
@@ -523,7 +523,7 @@ class MissionPlanner:
             )
 
         # --- LLM decomposition fallback ---
-        llm = create_llm_manager(service_name="orchestrator", model=Config().PLANNER_MODEL)
+        llm = create_llm_manager(service_name="planner", model=Config().PLANNER_MODEL)
         agent_roster = _render_agent_roster(agents)
         last_errors: List[str] = []
 

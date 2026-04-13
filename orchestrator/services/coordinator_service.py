@@ -114,6 +114,76 @@ async def _dispatch_mission_event(
 
 
 # ---------------------------------------------------------------------------
+# Mission cost audit
+# ---------------------------------------------------------------------------
+
+_cost_logger = logging.getLogger("llm.cost_audit")
+
+
+def _log_mission_cost_summary(db: Session, run) -> float:
+    """Query llm_usage for this mission run and log a cost summary.
+
+    Returns estimated total cost in USD (0.0 if no data).
+    """
+    try:
+        from sqlalchemy import func as sa_func
+        from core.models.core import LLMUsage
+
+        rows = (
+            db.query(
+                LLMUsage.model_id,
+                sa_func.count().label("calls"),
+                sa_func.sum(LLMUsage.input_tokens).label("input_tokens"),
+                sa_func.sum(LLMUsage.output_tokens).label("output_tokens"),
+                sa_func.sum(LLMUsage.total_cost).label("total_cost"),
+            )
+            .filter(LLMUsage.execution_id == str(run.id))
+            .group_by(LLMUsage.model_id)
+            .all()
+        )
+
+        total_cost = 0.0
+        total_tokens = 0
+        lines = []
+        for row in rows:
+            cost = float(row.total_cost or 0)
+            tokens = int(row.input_tokens or 0) + int(row.output_tokens or 0)
+            total_cost += cost
+            total_tokens += tokens
+            lines.append(
+                f"  {row.model_id}: {row.calls} calls, "
+                f"{row.input_tokens}in/{row.output_tokens}out tokens, "
+                f"${cost:.4f}"
+            )
+
+        summary = "\n".join(lines) if lines else "  (no usage data recorded)"
+        _cost_logger.info(
+            "MISSION_COST_SUMMARY run_id=%s total_cost_usd=%.4f "
+            "total_tokens=%d\n%s",
+            run.id, total_cost, total_tokens, summary,
+        )
+
+        # Budget alert
+        try:
+            from core.llm.manager import get_system_setting
+            budget = float(get_system_setting("llm_cost_audit", "mission_budget_alert_usd", "2.00"))
+        except Exception:
+            budget = 2.00
+
+        if total_cost > budget:
+            _cost_logger.warning(
+                "MISSION_BUDGET_EXCEEDED run_id=%s cost=%.4f budget=%.2f — "
+                "review model selection in Settings > Coordination",
+                run.id, total_cost, budget,
+            )
+
+        return total_cost
+    except Exception:
+        logger.debug("Mission cost summary failed", exc_info=True)
+        return 0.0
+
+
+# ---------------------------------------------------------------------------
 # Ephemeral onboarding agents
 # ---------------------------------------------------------------------------
 
@@ -1074,7 +1144,7 @@ class CoordinatorService:
         if agent_runtime and hasattr(agent_runtime, "llm_manager"):
             original_max_tokens = agent_runtime.llm_manager.config.max_tokens
             agent_runtime.llm_manager.config.max_tokens = max(
-                original_max_tokens, Config.COORDINATOR_TASK_MAX_TOKENS
+                original_max_tokens, Config().COORDINATOR_TASK_MAX_TOKENS
             )
 
         return {
@@ -2518,6 +2588,9 @@ class CoordinatorService:
             )
 
             # PRD-128: dispatch mission_complete on terminal transition
+            # --- Mission cost summary (audit log) ---
+            mission_cost = _log_mission_cost_summary(db, run)
+
             await _dispatch_mission_event(
                 db=db,
                 run=run,
@@ -2526,6 +2599,7 @@ class CoordinatorService:
                 message=(
                     f"{summary['tasks_completed']} tasks verified in "
                     f"{summary['total_duration_seconds']}s"
+                    f" | est. cost ${mission_cost:.2f}"
                 ),
                 status="ok",
             )
@@ -2558,7 +2632,7 @@ class CoordinatorService:
 
         Returns ConsistencyResult or None if disabled/skipped.
         """
-        if not Config.COORDINATOR_CONSISTENCY_CHECK:
+        if not Config().COORDINATOR_CONSISTENCY_CHECK:
             logger.info(
                 "Consistency check disabled for run %s (COORDINATOR_CONSISTENCY_CHECK=false)",
                 run.id,

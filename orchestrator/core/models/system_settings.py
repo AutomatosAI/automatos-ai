@@ -32,6 +32,9 @@ class SettingCategory(str, Enum):
     BACKUPS = "backups"
     MONITORING = "monitoring"
     COMPLEXITY_ASSESSOR = "complexity_assessor"  # PRD-68: routing LLM
+    COORDINATION = "coordination"  # Mission planner, verifier, reconciler
+    KNOWLEDGE_GRAPH = "knowledge_graph"  # Graph extraction LLM
+    LLM_COST_AUDIT = "llm_cost_audit"  # Cost tracking, budget alerts
 
 
 class SystemSetting(Base):

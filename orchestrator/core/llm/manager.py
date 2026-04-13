@@ -38,6 +38,12 @@ SERVICE_CATEGORY_MAP = {
     "nl2sql": "nl2sql",
     "heartbeat": "orchestrator_llm",
     "complexity_assessor": "orchestrator_llm",  # PRD-68: uses orchestrator LLM settings
+    # Coordination services — read from 'coordination' system_settings category
+    "planner": "coordination",
+    "verifier": "coordination",
+    "consistency_verifier": "coordination",
+    # Knowledge graph extraction
+    "graph_extraction": "knowledge_graph",
 }
 
 
@@ -641,18 +647,32 @@ class LLMManager:
             raise
 
     def _track_usage(self, response: Any, start: float, status: str = "success") -> None:
-        """Track LLM usage via UsageTracker if workspace_id is set."""
+        """Track LLM usage via UsageTracker and cost audit logger."""
+        latency_ms = int((time.monotonic() - start) * 1000)
+
+        usage = getattr(response, "usage", None) or {}
+        input_tokens = usage.get("input_tokens", 0) or usage.get("prompt_tokens", 0)
+        output_tokens = usage.get("output_tokens", 0) or usage.get("completion_tokens", 0)
+        total_tokens = input_tokens + output_tokens
+
+        # ------------------------------------------------------------------
+        # Cost audit logging — always log regardless of workspace
+        # ------------------------------------------------------------------
+        self._log_cost_audit(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            latency_ms=latency_ms,
+            status=status,
+        )
+
+        # ------------------------------------------------------------------
+        # Workspace-scoped usage tracking
+        # ------------------------------------------------------------------
         ws = self._tracking_ctx.get("workspace_id")
         if not ws:
             return
         try:
             from .usage_tracker import UsageTracker
-
-            latency_ms = int((time.monotonic() - start) * 1000)
-
-            usage = getattr(response, "usage", None) or {}
-            input_tokens = usage.get("input_tokens", 0) or usage.get("prompt_tokens", 0)
-            output_tokens = usage.get("output_tokens", 0) or usage.get("completion_tokens", 0)
 
             UsageTracker.track(
                 workspace_id=ws,
@@ -669,6 +689,76 @@ class LLMManager:
             )
         except Exception as e:
             logger.debug(f"Usage tracking failed: {e}")
+
+    # ------------------------------------------------------------------
+    # Cost Audit Logger
+    # ------------------------------------------------------------------
+    # Dedicated logger so cost lines can be grepped / forwarded to alerts.
+    _cost_logger = logging.getLogger("llm.cost_audit")
+
+    # Approximate $/1K-token rates for common models (input, output).
+    # Used ONLY for logging estimates — not billing.  Keep sorted.
+    _MODEL_COST_MAP: Dict[str, tuple] = {
+        "claude-3-opus":       (0.015, 0.075),
+        "claude-3.5-sonnet":   (0.003, 0.015),
+        "claude-sonnet-4":     (0.003, 0.015),
+        "claude-3-haiku":      (0.00025, 0.00125),
+        "claude-haiku-4":      (0.0008, 0.004),
+        "gpt-4o":              (0.0025, 0.010),
+        "gpt-4o-mini":         (0.00015, 0.0006),
+        "gpt-4.1":             (0.002, 0.008),
+        "gpt-4.1-mini":       (0.0004, 0.0016),
+        "gpt-4.1-nano":       (0.0001, 0.0004),
+        "gemini-2.0-flash":    (0.0001, 0.0004),
+        "glm-5.1":             (0.0005, 0.001),
+        "deepseek-chat":       (0.00014, 0.00028),
+    }
+
+    def _estimate_cost(self, input_tokens: int, output_tokens: int) -> float:
+        """Rough USD cost estimate for logging. Not for billing."""
+        model = (self.config.model or "").lower()
+        for key, (inp_rate, out_rate) in self._MODEL_COST_MAP.items():
+            if key in model:
+                return (input_tokens / 1000 * inp_rate) + (output_tokens / 1000 * out_rate)
+        # Unknown model — use a conservative middle estimate
+        return (input_tokens + output_tokens) / 1000 * 0.003
+
+    def _log_cost_audit(
+        self,
+        input_tokens: int,
+        output_tokens: int,
+        latency_ms: int,
+        status: str,
+    ) -> None:
+        """Emit a structured cost audit log line for every LLM call."""
+        try:
+            cost_usd = self._estimate_cost(input_tokens, output_tokens)
+            model = self.config.model or "unknown"
+            provider = self.config.provider.value if self.config.provider else "unknown"
+            agent_id = self._tracking_ctx.get("agent_id")
+            execution_id = self._tracking_ctx.get("execution_id")
+
+            self._cost_logger.info(
+                "LLM_CALL service=%s provider=%s model=%s "
+                "input_tokens=%d output_tokens=%d total_tokens=%d "
+                "est_cost_usd=%.4f latency_ms=%d status=%s "
+                "agent_id=%s execution_id=%s",
+                self.service_name, provider, model,
+                input_tokens, output_tokens, input_tokens + output_tokens,
+                cost_usd, latency_ms, status,
+                agent_id, execution_id,
+            )
+
+            # Budget alert: warn if single call is expensive
+            if cost_usd > 0.50:
+                self._cost_logger.warning(
+                    "COST_ALERT single_call_cost=%.4f USD exceeds $0.50 threshold — "
+                    "service=%s model=%s tokens=%d",
+                    cost_usd, self.service_name, model,
+                    input_tokens + output_tokens,
+                )
+        except Exception:
+            pass  # Never let audit logging break the LLM call
     
     def get_provider_info(self) -> Dict[str, Any]:
         """Get information about the current provider configuration"""

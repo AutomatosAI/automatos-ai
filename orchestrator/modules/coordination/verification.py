@@ -86,7 +86,7 @@ class ConsistencyResult:
 
 def _parse_verifier_model_mapping() -> Dict[str, str]:
     """Parse the COORDINATOR_VERIFIER_MODEL_MAPPING config string into a dict."""
-    raw = Config.COORDINATOR_VERIFIER_MODEL_MAPPING
+    raw = Config().COORDINATOR_VERIFIER_MODEL_MAPPING
     mapping: Dict[str, str] = {}
     if not raw:
         return mapping
@@ -105,7 +105,7 @@ def _select_verifier_model(executor_model: Optional[str]) -> str:
     Detection: look for family keywords in the executor model string.
     Falls back to COORDINATOR_VERIFIER_FALLBACK_MODEL.
     """
-    fallback = Config.COORDINATOR_VERIFIER_FALLBACK_MODEL
+    fallback = Config().COORDINATOR_VERIFIER_FALLBACK_MODEL
     if not executor_model:
         return fallback
 
