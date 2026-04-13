@@ -1,7 +1,7 @@
 'use client'
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Settings, Key, Webhook, KeyRound, Radio, Brain, Puzzle, Volume2, Bell, Rocket } from 'lucide-react'
+import { Settings, Key, Webhook, KeyRound, Radio, Brain, Puzzle, Volume2, Bell } from 'lucide-react'
 import { CredentialsTab } from './CredentialsTab'
 import SystemSettingsTab from './SystemSettingsTab'
 import SystemLLMSettingsTab from './SystemLLMSettingsTab'
@@ -11,7 +11,6 @@ import { ChannelsSettingsTab } from './ChannelsSettingsTab'
 import { ApiKeyManager } from './ApiKeyManager'
 import { VoiceProfilesSettingsTab } from './VoiceProfilesSettingsTab'
 import { NotificationsSettingsTab } from './NotificationsSettingsTab'
-import { OnboardingAgentsTab } from './OnboardingAgentsTab'
 import { useSystemRole } from '@/contexts/role-context'
 
 export function SettingsPanel() {
@@ -66,10 +65,6 @@ export function SettingsPanel() {
             <Puzzle className="w-4 h-4 mr-1 shrink-0" />
             Widget SDK
           </TabsTrigger>
-          <TabsTrigger value="onboarding-agents">
-            <Rocket className="w-4 h-4 mr-1 shrink-0" />
-            Onboarding
-          </TabsTrigger>
         </TabsList>
 
         {/* System Settings Tab — Admin only */}
@@ -119,10 +114,6 @@ export function SettingsPanel() {
           <ApiKeyManager />
         </TabsContent>
 
-        {/* Mission Zero: Onboarding Agents */}
-        <TabsContent value="onboarding-agents">
-          <OnboardingAgentsTab />
-        </TabsContent>
       </Tabs>
     </div>
   )

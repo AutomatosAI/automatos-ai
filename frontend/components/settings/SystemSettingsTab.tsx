@@ -12,7 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Loader2, Settings, Save, RotateCcw, AlertCircle, Shield, FileText, Palette } from 'lucide-react'
+import { Loader2, Settings, Save, RotateCcw, AlertCircle, Shield, FileText, Palette, Rocket } from 'lucide-react'
 import { toast } from 'sonner'
 
 import {
@@ -33,6 +33,7 @@ import BackendAPIKeysSettingsTab from './BackendAPIKeysSettingsTab'
 import { CredentialAuditTab } from './CredentialAuditTab'
 import { SystemPromptsTab } from './SystemPromptsTab'
 import { SystemIconsSettingsTab } from './SystemIconsSettingsTab'
+import { OnboardingAgentsTab } from './OnboardingAgentsTab'
 
 interface SystemSettingsTabProps {
   className?: string
@@ -206,6 +207,10 @@ export default function SystemSettingsTab({ className }: SystemSettingsTabProps)
             <Palette className="w-3.5 h-3.5 mr-1 shrink-0" />
             Icons
           </TabsTrigger>
+          <TabsTrigger value="onboarding_agents">
+            <Rocket className="w-3.5 h-3.5 mr-1 shrink-0" />
+            Mission Team
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="general">
@@ -263,6 +268,10 @@ export default function SystemSettingsTab({ className }: SystemSettingsTabProps)
 
         <TabsContent value="system_icons">
           <SystemIconsSettingsTab />
+        </TabsContent>
+
+        <TabsContent value="onboarding_agents">
+          <OnboardingAgentsTab />
         </TabsContent>
 
       </Tabs>
