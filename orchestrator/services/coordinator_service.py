@@ -942,7 +942,10 @@ class CoordinatorService:
 
         # Mission Zero: onboarding agents are global (workspace_id=None) but
         # need to operate within the mission's workspace for RAG/file access.
-        if agent_runtime and not agent_runtime.workspace_id and run.workspace_id:
+        # SAFETY: always set from the run, then reset after execution to prevent
+        # cross-tenant bleed if the runtime is cached and reused by another workspace.
+        _original_workspace_id = agent_runtime.workspace_id if agent_runtime else None
+        if agent_runtime and run.workspace_id:
             agent_runtime.workspace_id = run.workspace_id
 
         # Mission tasks need longer outputs than the 2000-token default
@@ -982,6 +985,10 @@ class CoordinatorService:
                 exc_info=True,
             )
             result = {"status": "error", "error": str(exc)}
+
+        # Restore original workspace_id to prevent cross-tenant cache bleed
+        if agent_runtime:
+            agent_runtime.workspace_id = _original_workspace_id
 
         # Record completion/failure
         MissionDispatcher.record_task_completion(db, task, result)
