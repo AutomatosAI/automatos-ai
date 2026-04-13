@@ -199,9 +199,9 @@ export function WizardShell({ open, onClose, onComplete }: WizardShellProps) {
     try {
       const plan = await planMutation.mutateAsync(state.profileId)
       toast.success('Mission Zero launched — review the plan and hit Approve.')
+      router.push(`/missions/${plan.mission_id}`)
       onComplete?.()
       handleClose()
-      router.push(`/missions/${plan.mission_id}`)
     } catch (err: any) {
       toast.error(`Mission launch failed: ${err?.message || 'unknown error'}`)
     }
