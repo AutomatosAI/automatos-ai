@@ -254,7 +254,7 @@ def _normalise_extraction(
 async def extract_from_document(
     doc_text: str,
     doc_path: str,
-    workspace_id: int,
+    workspace_id: str,
     team_access: list[str] | None = None,
 ) -> dict[str, list]:
     """Extract knowledge graph from a business document via LLM.
@@ -262,7 +262,7 @@ async def extract_from_document(
     Args:
         doc_text: Full text of the document.
         doc_path: Path/identifier for provenance tracking.
-        workspace_id: Workspace that owns the document (for future scoping).
+        workspace_id: Workspace UUID that owns the document (for future scoping).
         team_access: Teams that can access this document (PRD-124).
             Empty list or None means visible to all agents.
 
