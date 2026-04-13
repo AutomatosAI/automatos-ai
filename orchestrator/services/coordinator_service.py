@@ -940,6 +940,11 @@ class CoordinatorService:
         if not agent_runtime:
             agent_runtime = await factory.activate_agent(agent_id, workspace_dir="/tmp/automatos_workspace")
 
+        # Mission Zero: onboarding agents are global (workspace_id=None) but
+        # need to operate within the mission's workspace for RAG/file access.
+        if agent_runtime and not agent_runtime.workspace_id and run.workspace_id:
+            agent_runtime.workspace_id = run.workspace_id
+
         # Mission tasks need longer outputs than the 2000-token default
         if agent_runtime and hasattr(agent_runtime, "llm_manager"):
             original_max_tokens = agent_runtime.llm_manager.config.max_tokens
