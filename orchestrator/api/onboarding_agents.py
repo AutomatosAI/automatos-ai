@@ -32,13 +32,13 @@ def _require_admin(ctx: RequestContext):
 
 
 def _get_onboarding_agents(db: Session):
-    """Fetch all onboarding agents by tag."""
+    """Fetch all onboarding agents by role. Tags column is JSON (not JSONB) so
+    we filter on is_system_agent + required_role which is already unique."""
     return (
         db.query(Agent)
         .filter(
             Agent.is_system_agent.is_(True),
             Agent.required_role == "onboarding",
-            Agent.tags.contains(["onboarding"]),
         )
         .order_by(Agent.id)
         .all()
