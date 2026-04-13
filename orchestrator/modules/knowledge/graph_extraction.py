@@ -14,6 +14,7 @@ import logging
 import re
 from typing import Any
 
+from config import Config
 from core.llm import create_llm_manager
 
 logger = logging.getLogger(__name__)
@@ -276,7 +277,7 @@ async def extract_from_document(
     prompt = _DOCUMENT_EXTRACTION_PROMPT.format(doc_path=doc_path, doc_text=doc_text)
 
     try:
-        llm = create_llm_manager(service_name="orchestrator")
+        llm = create_llm_manager(service_name="orchestrator", model=Config().GRAPHIFY_MODEL)
         # Graph extraction produces large JSON — default 2000 tokens truncates
         llm.config.max_tokens = 8000
         response = await llm.generate_response([
@@ -321,7 +322,7 @@ async def extract_from_report(
     )
 
     try:
-        llm = create_llm_manager(service_name="orchestrator")
+        llm = create_llm_manager(service_name="orchestrator", model=Config().GRAPHIFY_MODEL)
         llm.config.max_tokens = 8000
         response = await llm.generate_response([
             {"role": "system", "content": "You are a knowledge-graph extraction engine. Output valid JSON only."},

@@ -173,6 +173,7 @@ class Config:
     LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.7"))
     LLM_MAX_TOKENS: int = int(os.getenv("LLM_MAX_TOKENS", "2000"))
     PLANNER_MODEL: str = os.getenv("PLANNER_MODEL", "zhipu/glm-5-1")
+    GRAPHIFY_MODEL: str = os.getenv("GRAPHIFY_MODEL", "zhipu/glm-5-1")
     
     # =============================================================================
     # ENVIRONMENT
