@@ -30,7 +30,8 @@ import {
   Zap,
   Cloud,
   Pin,
-  PinOff
+  PinOff,
+  ExternalLink,
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -623,9 +624,18 @@ export function AgentRoster({
         >
           <Bot className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
           <h3 className="text-lg font-semibold mb-2">No agents found</h3>
-          <p className="text-muted-foreground">
+          <p className="text-muted-foreground mb-4">
             Try adjusting your search or create a new agent.
           </p>
+          <a
+            href="https://automatos.gitbook.io/automatos-ai/agents/creating"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 text-sm text-primary hover:text-primary/80 transition-colors"
+          >
+            Read the Agent Guide
+            <ExternalLink className="w-3 h-3" />
+          </a>
         </motion.div>
       )}
 

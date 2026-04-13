@@ -14,7 +14,9 @@ import {
   Store,
   BarChart3,
   HardDrive,
-  X
+  X,
+  BookOpen,
+  ExternalLink,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { PremiumIcon } from '@/components/shared'
@@ -176,26 +178,40 @@ export function MobileSidebar({ onNavigate }: MobileSidebarProps) {
         })}
       </nav>
 
-      {/* Settings at bottom — visible to all users.
-          Admin-only sections are gated inside the Settings page itself. */}
-      <div className="border-t border-border/50 px-3 py-3">
-        <Link
-          href="/settings"
-          onClick={onNavigate}
-          className={cn(
-            'flex items-center gap-3 w-full px-4 py-3 rounded-xl transition-all duration-200 min-h-[48px]',
-            pathname === '/settings'
-              ? 'bg-primary/10 border border-primary/20'
-              : 'hover:bg-secondary/40 active:bg-secondary/60'
-          )}
+      {/* Docs + Settings at bottom */}
+      <div className="border-t border-border/50 px-3 py-3 space-y-1">
+        {/* Documentation link */}
+        <a
+          href="https://automatos.gitbook.io/automatos-ai"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-3 w-full px-4 py-3 rounded-xl transition-all duration-200 min-h-[48px] hover:bg-secondary/40 active:bg-secondary/60"
         >
-          {iconMappings['nav_settings'] ? (
-            <PremiumIcon name={iconMappings['nav_settings']} size={20} className="shrink-0" />
-          ) : (
-            <Settings className="w-5 h-5 shrink-0 text-muted-foreground" />
-          )}
-          <p className="text-sm font-medium text-muted-foreground">Settings</p>
-        </Link>
+          <BookOpen className="w-5 h-5 shrink-0 text-muted-foreground" />
+          <p className="text-sm font-medium text-muted-foreground">Docs</p>
+          <ExternalLink className="w-3 h-3 text-muted-foreground/50 ml-auto" />
+        </a>
+
+        {/* Settings — Admin only */}
+        {isAdmin && (
+          <Link
+            href="/settings"
+            onClick={onNavigate}
+            className={cn(
+              'flex items-center gap-3 w-full px-4 py-3 rounded-xl transition-all duration-200 min-h-[48px]',
+              pathname === '/settings'
+                ? 'bg-primary/10 border border-primary/20'
+                : 'hover:bg-secondary/40 active:bg-secondary/60'
+            )}
+          >
+            {iconMappings['nav_settings'] ? (
+              <PremiumIcon name={iconMappings['nav_settings']} size={20} className="shrink-0" />
+            ) : (
+              <Settings className="w-5 h-5 shrink-0 text-muted-foreground" />
+            )}
+            <p className="text-sm font-medium text-muted-foreground">Settings</p>
+          </Link>
+        )}
       </div>
     </div>
   )
