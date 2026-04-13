@@ -873,6 +873,55 @@ async def approve_marketplace_item(
 
 
 # ===================================================================
+# POST /api/marketplace/items/:id/toggle-featured (Admin only)
+# ===================================================================
+
+@router.post("/items/{item_id}/toggle-featured")
+async def toggle_featured(
+    item_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """
+    Toggle the is_featured flag on a marketplace item. Admin only.
+    """
+    assert_admin(ctx)
+    try:
+        # Try agent first
+        agent = db.query(Agent).filter(
+            Agent.id == item_id,
+            Agent.owner_type == 'marketplace'
+        ).first()
+
+        if agent:
+            agent.is_featured = not agent.is_featured
+            db.commit()
+            logger.info("Toggled featured for marketplace agent %s → %s", item_id, agent.is_featured)
+            return {"success": True, "is_featured": agent.is_featured, "item_id": item_id}
+
+        # Try recipe
+        recipe = db.query(WorkflowRecipe).filter(
+            WorkflowRecipe.id == item_id,
+            WorkflowRecipe.owner_type == 'marketplace'
+        ).first()
+
+        if recipe:
+            recipe.is_featured = not recipe.is_featured
+            db.commit()
+            logger.info("Toggled featured for marketplace recipe %s → %s", item_id, recipe.is_featured)
+            return {"success": True, "is_featured": recipe.is_featured, "item_id": item_id}
+
+        raise HTTPException(status_code=404, detail="Marketplace item not found")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error toggling featured for item %s: %s", item_id, e)
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# ===================================================================
 # DELETE /api/marketplace/items/:id (Admin only)
 # ===================================================================
 

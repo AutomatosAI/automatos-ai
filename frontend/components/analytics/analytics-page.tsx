@@ -42,6 +42,7 @@ export function AnalyticsPage() {
 
   const handleRefresh = () => {
     queryClient.invalidateQueries({ queryKey: ['unified-analytics'] })
+    queryClient.refetchQueries({ queryKey: ['unified-analytics'] })
   }
 
   const handleWorkspaceChange = useCallback((label: string) => {

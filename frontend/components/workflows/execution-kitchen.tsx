@@ -531,7 +531,7 @@ export function ExecutionKitchen({
         setPlaybookStepResults(data.step_results || [])
         setExecutionData((prev: any) => ({
           ...prev,
-          name: data.recipe_name || prev?.name || 'Recipe',
+          name: data.recipe_name || prev?.name || 'Playbook',
           description: `Execution ${data.execution_id}`,
           execution: data,
         }))
@@ -931,7 +931,7 @@ export function ExecutionKitchen({
             if (isLowQuality || data.suggestions.length > 0) {
               const highPriority = data.suggestions.filter((s: any) => s.priority === 'high')
               toast({
-                title: `${executionData.name || 'Recipe'} has improvement suggestions`,
+                title: `${executionData.name || 'Playbook'} has improvement suggestions`,
                 description: highPriority.length > 0
                   ? `${highPriority.length} high-priority suggestion${highPriority.length !== 1 ? 's' : ''} found`
                   : `${data.suggestions.length} suggestion${data.suggestions.length !== 1 ? 's' : ''} based on execution analysis`,

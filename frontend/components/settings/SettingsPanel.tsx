@@ -10,10 +10,10 @@ import { ApiKeysSettingsTab } from './ApiKeysSettingsTab'
 import { ChannelsSettingsTab } from './ChannelsSettingsTab'
 import { ApiKeyManager } from './ApiKeyManager'
 import { VoiceProfilesSettingsTab } from './VoiceProfilesSettingsTab'
-import { NotificationsSettingsTab } from './NotificationsSettingsTab'
-import { OnboardingAgentsTab } from './OnboardingAgentsTab'
+import { useSystemRole } from '@/contexts/role-context'
 
 export function SettingsPanel() {
+  const { isAdmin } = useSystemRole()
 
   return (
     <div className="space-y-6">
@@ -24,12 +24,14 @@ export function SettingsPanel() {
         </p>
       </div>
 
-      <Tabs defaultValue="system-settings" className="space-y-6">
+      <Tabs defaultValue={isAdmin ? "system-settings" : "orchestrator"} className="space-y-6">
         <TabsList data-tour="settings-tabs" className="w-full justify-start gap-1">
-          <TabsTrigger value="system-settings">
-            <Settings className="w-4 h-4 mr-1 shrink-0" />
-            <span className="hidden sm:inline">System</span> Settings
-          </TabsTrigger>
+          {isAdmin && (
+            <TabsTrigger value="system-settings">
+              <Settings className="w-4 h-4 mr-1 shrink-0" />
+              <span className="hidden sm:inline">System</span> Settings
+            </TabsTrigger>
+          )}
           <TabsTrigger value="orchestrator">
             <Brain className="w-4 h-4 mr-1 shrink-0" />
             Orchestrator
@@ -68,10 +70,12 @@ export function SettingsPanel() {
           </TabsTrigger>
         </TabsList>
 
-        {/* System Settings Tab */}
-        <TabsContent value="system-settings">
-          <SystemSettingsTab />
-        </TabsContent>
+        {/* System Settings Tab — Admin only */}
+        {isAdmin && (
+          <TabsContent value="system-settings">
+            <SystemSettingsTab />
+          </TabsContent>
+        )}
 
         {/* PRD-54/55: Orchestrator Tab (self-loading) */}
         <TabsContent value="orchestrator">

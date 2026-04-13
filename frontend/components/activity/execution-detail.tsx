@@ -46,7 +46,7 @@ const TYPE_CONFIG = {
   },
   recipe: {
     icon: ChefHat,
-    label: 'Recipe',
+    label: 'Playbook',
     accentColor: 'text-[hsl(var(--info))]',
     borderColor: 'border-l-[hsl(var(--info))]',
   },

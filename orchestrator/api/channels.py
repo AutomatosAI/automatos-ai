@@ -320,24 +320,24 @@ async def get_channel_analytics(
     today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
 
     try:
-        # Messages by source from routing_decisions
+        # Messages by source from routing_decisions (normalize to lowercase)
         by_source = db.execute(
             text("""
-                SELECT source, COUNT(*) as count
+                SELECT LOWER(source) as source, COUNT(*) as count
                 FROM routing_decisions
                 WHERE workspace_id = :ws_id AND created_at >= :start
-                GROUP BY source
+                GROUP BY LOWER(source)
             """),
             {"ws_id": ws_id, "start": today_start},
         ).fetchall()
 
-        # Total messages from channel connections
+        # Total messages from channel connections (normalize platform to lowercase)
         channel_stats = db.execute(
             text("""
-                SELECT platform, SUM(message_count) as total, MAX(last_activity_at) as last_activity
+                SELECT LOWER(platform) as platform, SUM(message_count) as total, MAX(last_activity_at) as last_activity
                 FROM channel_connections
                 WHERE workspace_id = :ws_id
-                GROUP BY platform
+                GROUP BY LOWER(platform)
             """),
             {"ws_id": ws_id},
         ).fetchall()

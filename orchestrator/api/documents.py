@@ -578,7 +578,9 @@ async def list_documents(
                 team_access=doc.team_access or [],
                 upload_date=doc.upload_date,
                 processed_date=doc.processed_date,
-                created_by=doc.created_by
+                created_by=doc.created_by,
+                last_accessed=doc.last_accessed,
+                rag_query_count=doc.rag_query_count or 0,
             ) for doc in documents
         ]
         
@@ -1558,22 +1560,37 @@ async def get_usage_analytics(
 
         stats_result = db.execute(stats_query, {"start_time": start_time, "workspace_id": str(ctx.workspace_id)}).fetchone()
         
-        # Get REAL popular search terms from document_usage table (if it exists)
+        # Get REAL event counts and search terms from document_usage table
         popular_search_terms = []
+        usage_event_counts = {"rag_query": 0, "document_searched": 0, "chunk_retrieved": 0, "document_viewed": 0}
+        usage_total_events = 0
         try:
+            # Count all event types in one query
+            event_counts_query = text("""
+                SELECT event_type, COUNT(*) as count
+                FROM document_usage
+                WHERE timestamp >= :start_time
+                GROUP BY event_type
+            """)
+            event_counts_result = db.execute(event_counts_query, {"start_time": start_time}).fetchall()
+            for row in event_counts_result:
+                usage_event_counts[row.event_type] = row.count
+                usage_total_events += row.count
+
+            # Popular search terms
             search_terms_query = text("""
-                SELECT 
+                SELECT
                     metadata->>'query' as query,
                     COUNT(*) as count
                 FROM document_usage
-                WHERE event_type = 'document_searched'
+                WHERE event_type IN ('document_searched', 'rag_query')
                     AND timestamp >= :start_time
                     AND metadata->>'query' IS NOT NULL
                 GROUP BY metadata->>'query'
                 ORDER BY count DESC
                 LIMIT 10
             """)
-            
+
             search_terms_result = db.execute(search_terms_query, {"start_time": start_time}).fetchall()
             popular_search_terms = [
                 {"query": row.query, "count": row.count}
@@ -1581,7 +1598,7 @@ async def get_usage_analytics(
             ]
         except Exception as e:
             # Table might not exist yet - that's OK for MVP
-            logger.debug(f"Could not get search terms (table might not exist): {e}")
+            logger.debug(f"Could not get document_usage data (table might not exist): {e}")
             db.rollback()  # Clear failed transaction
         
         # Time series data (documents uploaded per day)
@@ -1609,12 +1626,12 @@ async def get_usage_analytics(
             "period": period,
             "start_time": start_time.isoformat(),
             "end_time": datetime.now().isoformat(),
-            "total_events": stats_result.documents_this_period if stats_result else 0,
+            "total_events": usage_total_events,
             "event_counts": {
-                "document_viewed": stats_result.processed_documents if stats_result else 0,
-                "document_searched": len(popular_search_terms),
-                "chunk_retrieved": 0,
-                "rag_query": 0
+                "document_viewed": usage_event_counts.get("document_viewed", 0),
+                "document_searched": usage_event_counts.get("document_searched", 0),
+                "chunk_retrieved": usage_event_counts.get("chunk_retrieved", 0),
+                "rag_query": usage_event_counts.get("rag_query", 0),
             },
             "popular_documents": popular_documents,
             "popular_search_terms": popular_search_terms,

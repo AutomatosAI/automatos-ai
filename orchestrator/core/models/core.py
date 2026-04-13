@@ -550,6 +550,10 @@ class Document(Base):
     # PRD-37: Workspace isolation for multi-tenant SaaS
     workspace_id = Column(UUID(as_uuid=True), ForeignKey('workspaces.id'), nullable=False)
 
+    # PRD-72: Document access tracking (columns added by migration)
+    last_accessed = Column(DateTime, nullable=True)
+    rag_query_count = Column(Integer, default=0)
+
 class SystemConfiguration(Base):
     __tablename__ = 'system_configurations'
     
@@ -796,6 +800,8 @@ class DocumentResponse(BaseModel):
     upload_date: datetime
     processed_date: Optional[datetime]
     created_by: Optional[str] = None
+    last_accessed: Optional[datetime] = None
+    rag_query_count: Optional[int] = 0
 
 class SystemConfigCreate(BaseModel):
     config_key: str

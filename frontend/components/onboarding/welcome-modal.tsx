@@ -96,7 +96,7 @@ export function WelcomeModal({ open, onOpenChange, userId }: WelcomeModalProps) 
             </div>
             <div className="p-4 rounded-lg bg-gray-800/50 border border-gray-700">
               <div className="font-medium text-sm text-gray-300 mb-1">
-                Workflows &amp; Recipes
+                Workflows &amp; Playbooks
               </div>
               <div className="text-xs text-gray-400">
                 Build complex automations with no-code visual builder

@@ -431,21 +431,21 @@ export function ToolsDashboard() {
         </div>
 
         {/* Tools grid skeleton */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          {Array.from({ length: 8 }).map((_, i) => (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {Array.from({ length: 6 }).map((_, i) => (
             <Card key={i} className="glass-card card-glow">
-              <CardHeader className="pb-2">
-                <div className="flex items-center justify-between">
-                  <div className="h-8 w-8 bg-secondary/50 rounded" />
-                  <div className="h-6 w-16 bg-secondary/50 rounded" />
+              <CardContent className="p-5 space-y-4">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 bg-secondary/50 rounded-lg shrink-0" />
+                  <div className="flex-1">
+                    <div className="h-4 w-3/4 bg-secondary/50 rounded mb-2" />
+                    <div className="h-4 w-16 bg-secondary/50 rounded" />
+                  </div>
                 </div>
-              </CardHeader>
-              <CardContent>
-                <div className="h-5 w-3/4 bg-secondary/50 rounded mb-2" />
-                <div className="h-4 w-1/2 bg-secondary/50 rounded mb-4" />
-                <div className="flex justify-between">
-                  <div className="h-4 w-16 bg-secondary/50 rounded" />
-                  <div className="h-4 w-20 bg-secondary/50 rounded" />
+                <div className="h-3 w-1/2 bg-secondary/50 rounded" />
+                <div className="flex gap-2">
+                  <div className="h-8 flex-1 bg-secondary/50 rounded" />
+                  <div className="h-8 flex-1 bg-secondary/50 rounded" />
                 </div>
               </CardContent>
             </Card>
@@ -754,7 +754,7 @@ export function ToolsDashboard() {
             {/* Enabled Tools Management */}
             <div className="space-y-4">
               <h3 className="text-xl font-semibold">Applications</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 <AnimatePresence>
                   {enabledTools.map((tool, index) => (
                       <ToolCard
@@ -1001,99 +1001,65 @@ function ToolCard({
           ? 'border-[hsl(var(--success))]/30 hover:border-[hsl(var(--success))]/50'
           : 'hover:border-primary/20'
       }`}>
-        <CardHeader className="pb-3">
-          <div className="flex items-start justify-between">
-            <div className="flex items-center space-x-3">
-              <ToolLogo
-                logo={tool?.logo}
-                name={tool?.name}
-                size={40}
-                fallbackIcon={tool?.icon}
-                showBackground={true}
-              />
-              <div>
-                <h3 className="font-semibold">{tool?.name}</h3>
-                <p className="text-xs text-muted-foreground">{tool?.provider}</p>
-              </div>
+        <CardContent className="p-5 space-y-4">
+          {/* Header row: logo + name + category */}
+          <div className="flex items-center gap-3">
+            <ToolLogo
+              logo={tool?.logo}
+              name={tool?.name}
+              size={40}
+              fallbackIcon={tool?.icon}
+              showBackground={true}
+            />
+            <div className="min-w-0 flex-1">
+              <h3 className="font-semibold text-sm leading-tight">{tool?.name}</h3>
+              <Badge variant="outline" className="mt-1 capitalize text-[10px] h-5">
+                {tool?.category || tool?.provider || 'Integration'}
+              </Badge>
             </div>
-            <div className="flex items-center space-x-2">
-              {isConnected && <Badge className="bg-[hsl(var(--success))]/20 text-[hsl(var(--success))] border-none text-xs px-2 py-0.5">Connected</Badge>}
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <p className="text-sm text-muted-foreground line-clamp-2 min-h-[40px]">
-            {tool?.description}
-          </p>
-
-          <div className="flex items-center justify-between text-xs">
-            {tool?.rating ? (
-              <div className="flex items-center space-x-1">
-                <Star className="w-3 h-3 fill-[hsl(var(--warning))] text-[hsl(var(--warning))]" />
-                <span>{tool.rating}</span>
-              </div>
-            ) : (
-              <div />
+            {isConnected && (
+              <Badge className="bg-[hsl(var(--success))]/20 text-[hsl(var(--success))] border-none text-xs px-2 py-0.5 shrink-0">
+                Connected
+              </Badge>
             )}
-            <div className="flex gap-1">
-              {tool?.tags?.slice(0, 2)?.map((tag) => (
-                <Badge key={tag} variant="outline" className="text-[10px] h-5">
-                  {tag}
-                </Badge>
-              )) || []}
-            </div>
           </div>
 
+          {/* Stats row */}
           <div className="flex items-center gap-4 text-xs text-muted-foreground">
             <div className="flex items-center gap-1">
               <Wrench className="w-3 h-3" />
               <span>{typeof toolsCount === 'number' ? toolsCount : 0} Tools</span>
             </div>
+            <span className="text-border">|</span>
             <div className="flex items-center gap-1">
               <Zap className="w-3 h-3" />
               <span>{typeof triggersCount === 'number' ? triggersCount : 0} Triggers</span>
             </div>
           </div>
 
-          {authSchemes.length > 0 && (
-            <div className="flex flex-wrap gap-2">
-              {authSchemes.slice(0, 2).map((scheme: string) => (
-                <Badge
-                  key={scheme}
-                  variant="outline"
-                  className="text-[10px] h-5 border-primary/30 text-primary"
-                >
-                  {formatAuthScheme(scheme)}
-                </Badge>
-              ))}
-            </div>
-          )}
-
-          <Separator />
-          {/* Action Section */}
-          <div className="flex items-center justify-between">
-            <Button variant="ghost" size="sm" onClick={onDetails} className="text-muted-foreground hover:text-foreground p-0 h-auto">
-              Details
+          {/* Action buttons */}
+          <div className="flex items-center gap-2 pt-1">
+            <Button variant="outline" size="sm" onClick={onDetails} className="flex-1 h-8">
+              View
             </Button>
-
             {isConnected ? (
               <Button
                 size="sm"
                 variant="secondary"
-                className="w-24 bg-secondary/50 hover:bg-secondary border border-white/10"
+                className="flex-1 h-8 bg-[hsl(var(--info))]/10 text-[hsl(var(--info))] border border-[hsl(var(--info))]/30 hover:bg-[hsl(var(--info))]/20"
                 onClick={onUninstall}
               >
-                <Settings className="w-3 h-3 mr-2" />
+                <Settings className="w-3 h-3 mr-1.5" />
                 Manage
               </Button>
             ) : (
               <Button
                 size="sm"
                 variant="outline"
-                className="w-24"
+                className="flex-1 h-8"
                 onClick={onInstall}
-                style={{ height: '32px' }}
               >
+                <ExternalLink className="w-3 h-3 mr-1.5" />
                 Connect
               </Button>
             )}

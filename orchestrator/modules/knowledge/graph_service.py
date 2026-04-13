@@ -154,9 +154,22 @@ class GraphifyService:
         """Full graph build pipeline for a workspace.
 
         Returns a meta dict on success, or raises on failure.
+        Pipeline-level timeout of 10 minutes prevents silent hangs.
         """
         async with self._lock_for(workspace_id):
-            return await self._build_graph_unlocked(workspace_id)
+            try:
+                return await asyncio.wait_for(
+                    self._build_graph_unlocked(workspace_id),
+                    timeout=600,  # 10 min hard cap
+                )
+            except asyncio.TimeoutError:
+                logger.error(
+                    "build_graph: TIMED OUT after 600s for workspace %s",
+                    workspace_id,
+                )
+                raise TimeoutError(
+                    f"Graph build timed out after 10 minutes for workspace {workspace_id}"
+                )
 
     async def _build_graph_unlocked(self, workspace_id: str) -> Dict[str, Any]:
         """Full graph build (caller must hold the workspace lock)."""
@@ -607,40 +620,29 @@ class GraphifyService:
     async def _extract_all(
         self, workspace_id: str, sources: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
-        """Run entity/relation extraction on each source.
+        """Run entity/relation extraction on each source — in parallel.
 
         Dispatches each source to the appropriate extractor:
-          - ``document`` → LLM-based ``extract_from_document``
+          - ``document`` → LLM-based ``extract_from_document`` (parallel, max 5 concurrent)
           - ``agents``   → deterministic ``map_agent_roster``
 
         Returns a list of extraction dicts (each with nodes/edges keys).
         """
+        from core.llm import create_llm_manager
         from modules.knowledge.graph_extraction import (
+            GRAPH_EXTRACTION_MODEL,
             extract_from_document,
             map_agent_roster,
         )
 
         extractions: List[Dict[str, Any]] = []
 
+        # Separate deterministic sources (instant) from LLM sources (parallel)
+        doc_sources: List[Dict[str, Any]] = []
         for source in sources:
             src_type = source.get("type", "")
-            try:
-                if src_type == "document":
-                    extraction = await extract_from_document(
-                        doc_text=source["text"],
-                        doc_path=source["path"],
-                        workspace_id=str(workspace_id),
-                        team_access=source.get("team_access"),
-                    )
-                    extractions.append(extraction)
-                    logger.debug(
-                        "_extract_all: doc '%s' → %d nodes, %d edges",
-                        source["path"],
-                        len(extraction.get("nodes", [])),
-                        len(extraction.get("edges", [])),
-                    )
-
-                elif src_type == "agents":
+            if src_type == "agents":
+                try:
                     extraction = map_agent_roster(source["rows"])
                     extractions.append(extraction)
                     logger.debug(
@@ -648,23 +650,71 @@ class GraphifyService:
                         len(extraction.get("nodes", [])),
                         len(extraction.get("edges", [])),
                     )
+                except Exception:
+                    logger.exception("_extract_all: agent roster mapping failed")
+            elif src_type == "document":
+                doc_sources.append(source)
+            else:
+                logger.warning("_extract_all: unknown source type '%s', skipping", src_type)
 
-                else:
-                    logger.warning(
-                        "_extract_all: unknown source type '%s', skipping",
-                        src_type,
+        if not doc_sources:
+            return extractions
+
+        # Create ONE shared LLM client for all documents
+        llm = create_llm_manager(
+            service_name="orchestrator",
+            model=GRAPH_EXTRACTION_MODEL,
+        )
+        llm.config.max_tokens = 4000
+
+        # Parallel extraction with concurrency limit (avoid rate-limiting)
+        sem = asyncio.Semaphore(5)
+
+        async def _extract_one(source: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+            async with sem:
+                try:
+                    extraction = await extract_from_document(
+                        doc_text=source["text"],
+                        doc_path=source["path"],
+                        workspace_id=int(workspace_id) if workspace_id.isdigit() else 0,
+                        team_access=source.get("team_access"),
+                        llm=llm,
                     )
-            except Exception:
-                logger.exception(
-                    "_extract_all: extraction failed for source type '%s'",
-                    src_type,
-                )
+                    logger.debug(
+                        "_extract_all: doc '%s' → %d nodes, %d edges",
+                        source["path"],
+                        len(extraction.get("nodes", [])),
+                        len(extraction.get("edges", [])),
+                    )
+                    return extraction
+                except Exception:
+                    logger.exception(
+                        "_extract_all: extraction failed for '%s'",
+                        source.get("path", "unknown"),
+                    )
+                    return None
 
         logger.info(
-            "_extract_all: completed %d/%d extractions for workspace %s",
+            "_extract_all: extracting %d documents in parallel (max 5 concurrent) "
+            "using %s for workspace %s",
+            len(doc_sources),
+            GRAPH_EXTRACTION_MODEL,
+            workspace_id,
+        )
+        t0 = time.time()
+        results = await asyncio.gather(*[_extract_one(s) for s in doc_sources])
+        elapsed = time.time() - t0
+
+        for result in results:
+            if result is not None:
+                extractions.append(result)
+
+        logger.info(
+            "_extract_all: completed %d/%d extractions for workspace %s in %.1fs",
             len(extractions),
             len(sources),
             workspace_id,
+            elapsed,
         )
         return extractions
 

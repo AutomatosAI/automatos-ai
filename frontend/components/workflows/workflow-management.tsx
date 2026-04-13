@@ -598,7 +598,7 @@ export function WorkflowManagement() {
             <TabsList className="bg-secondary/50 shrink-0">
               <TabsTrigger value="templates" data-tour="workflows-recipes-tab" className="flex items-center space-x-2">
                 <GitBranch className="w-4 h-4" />
-                <span className="hidden sm:inline">Recipes</span>
+                <span className="hidden sm:inline">Playbooks</span>
               </TabsTrigger>
               <TabsTrigger value="active" data-tour="workflows-active-tab" className="flex items-center space-x-2">
                 <Play className="w-4 h-4" />
@@ -704,7 +704,7 @@ export function WorkflowManagement() {
           <div className="space-y-4 py-4">
             {/* Workflow Name - Read Only */}
             <div className="space-y-2">
-              <Label className="text-sm text-muted-foreground">Recipe</Label>
+              <Label className="text-sm text-muted-foreground">Playbook</Label>
               <div className="px-4 py-3 bg-secondary/50 rounded-lg border border-border/50">
                 <p className="font-medium">{workflowForm.name || 'Untitled Workflow'}</p>
               </div>
