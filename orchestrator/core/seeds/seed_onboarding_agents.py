@@ -4,8 +4,8 @@ Seed Onboarding Agents (Mission Zero)
 
 Seeds 4 hidden system agents used exclusively for new-workspace onboarding.
 When a user starts Mission Zero, these agents research the business, design
-the agent roster, write personas, and build the workspace — using high-quality
-models to create a premium first impression.
+the agent roster, write personas, and build the workspace — using cost-effective
+models that balance quality with token efficiency.
 
 Global (workspace_id=None), hidden from roster (required_role='onboarding').
 Managed via Settings > Onboarding Agents tab.
@@ -31,9 +31,9 @@ ONBOARDING_AGENTS = [
         "team": "Onboarding",
         "model_config": {
             "provider": "openrouter",
-            "model_id": "anthropic/claude-opus-4",
+            "model_id": "anthropic/claude-sonnet-4",
             "temperature": 0.7,
-            "max_tokens": 8000,
+            "max_tokens": 4000,
         },
         "custom_persona_prompt": (
             "You are VOYAGER, the business research lead for Automatos onboarding.\n\n"
@@ -77,7 +77,7 @@ ONBOARDING_AGENTS = [
             "provider": "openrouter",
             "model_id": "anthropic/claude-sonnet-4",
             "temperature": 0.5,
-            "max_tokens": 8000,
+            "max_tokens": 4000,
         },
         "custom_persona_prompt": (
             "You are BLUEPRINT, the workspace architect for Automatos onboarding.\n\n"
@@ -133,7 +133,7 @@ ONBOARDING_AGENTS = [
             "provider": "openrouter",
             "model_id": "openai/gpt-4.1",
             "temperature": 0.7,
-            "max_tokens": 8000,
+            "max_tokens": 4000,
         },
         "custom_persona_prompt": (
             "You are SCRIBE, the persona and playbook writer for Automatos onboarding.\n\n"
@@ -186,7 +186,7 @@ ONBOARDING_AGENTS = [
             "provider": "openrouter",
             "model_id": "anthropic/claude-sonnet-4",
             "temperature": 0.3,
-            "max_tokens": 8000,
+            "max_tokens": 4000,
         },
         "custom_persona_prompt": (
             "You are FORGE, the workspace builder for Automatos onboarding.\n\n"
