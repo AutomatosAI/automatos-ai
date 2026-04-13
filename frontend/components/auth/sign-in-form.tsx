@@ -51,14 +51,42 @@ export function SignInForm() {
             if (result.status === 'complete') {
                 await setActive({ session: result.createdSessionId })
                 router.push('/')
+            } else if (result.status === 'needs_first_factor') {
+                // Account requires email verification — Clerk handles this
+                // via its built-in flows. For now, surface a helpful message.
+                setError('Please verify your email address first. Check your inbox for a verification link.')
+            } else if (result.status === 'needs_second_factor') {
+                setError('Two-factor authentication required. This is not yet supported — please contact support.')
             } else {
-                // Use JSON.stringify for cleaner error handling if object
-                console.log(result)
-                setError('Something went wrong. Please check your credentials.')
+                console.error('Unexpected sign-in status:', result.status, result)
+                setError('Sign-in could not be completed. Please try again or use Google/GitHub.')
             }
         } catch (err: any) {
-            console.error('Error:', err.errors?.[0]?.longMessage)
-            setError(err.errors?.[0]?.longMessage || 'Failed to sign in. Please try again.')
+            const msg = err.errors?.[0]?.longMessage || err.errors?.[0]?.message
+            console.error('Sign-in error:', msg, err.errors)
+            setError(msg || 'Failed to sign in. Please try again.')
+        } finally {
+            setIsLoading(false)
+        }
+    }
+
+    // Handle forgot password via Clerk
+    const handleForgotPassword = async () => {
+        if (!isLoaded || !email) {
+            setError('Please enter your email address first, then click Forgot password.')
+            return
+        }
+        setIsLoading(true)
+        setError(null)
+        try {
+            await signIn.create({
+                strategy: 'reset_password_email_code',
+                identifier: email,
+            })
+            router.push('/reset-password')
+        } catch (err: any) {
+            const msg = err.errors?.[0]?.longMessage || err.errors?.[0]?.message
+            setError(msg || 'Could not send reset email. Please check your email address.')
         } finally {
             setIsLoading(false)
         }
@@ -176,12 +204,13 @@ export function SignInForm() {
                         <div className="space-y-2">
                             <div className="flex items-center justify-between">
                                 <Label htmlFor="password" className="text-slate-300">Password</Label>
-                                <Link
-                                    href="/forgot-password"
+                                <button
+                                    type="button"
+                                    onClick={handleForgotPassword}
                                     className="text-xs text-primary hover:text-primary/90 hover:underline"
                                 >
                                     Forgot password?
-                                </Link>
+                                </button>
                             </div>
                             <div className="relative group">
                                 <Lock className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
