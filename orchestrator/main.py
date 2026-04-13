@@ -306,6 +306,17 @@ async def _boot_phase_1_core():
     except Exception as e:
         logger.warning(f"Onboarding agent seed: {e}")
 
+    # Seed system_settings (coordination, knowledge_graph, llm_cost_audit, etc.)
+    # Idempotent — only creates missing keys, updates defaults on existing.
+    try:
+        from core.seeds.seed_system_settings import seed_system_settings
+        with get_db_session() as db:
+            created, updated = seed_system_settings(db)
+            if created or updated:
+                logger.info(f"System settings seeded: {created} created, {updated} updated")
+    except Exception as e:
+        logger.warning(f"System settings seed: {e}")
+
 
 def _load_cto_soul() -> str:
     """Load the CTO soul document for Auto agent persona."""

@@ -8,9 +8,14 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
-import { Save, ChevronDown, ChevronUp, RefreshCw, Rocket, Pencil, Brain } from 'lucide-react'
+import { Save, ChevronDown, ChevronUp, RefreshCw, Rocket, Pencil, Brain, Target } from 'lucide-react'
 import { toast } from 'sonner'
 import { apiClient } from '@/lib/api-client'
+import {
+  getSettingsByCategory,
+  bulkUpdateSettings,
+  SystemSettingsByCategory,
+} from '@/lib/api/system-settings'
 
 interface OnboardingAgent {
   id: number
@@ -36,6 +41,9 @@ const MODEL_TIERS: Record<string, { label: string; color: string }> = {
   'deepseek/deepseek-chat': { label: 'Budget', color: 'bg-yellow-500' },
 }
 
+// Keys we show in the Planner card (from coordination category)
+const PLANNER_KEYS = ['planner_model', 'planner_max_tokens', 'planner_temperature'] as const
+
 export function OnboardingAgentsTab() {
   const [agents, setAgents] = useState<OnboardingAgent[]>([])
   const [loading, setLoading] = useState(true)
@@ -43,11 +51,34 @@ export function OnboardingAgentsTab() {
   const [expandedSlug, setExpandedSlug] = useState<string | null>(null)
   const [editState, setEditState] = useState<Record<string, Partial<OnboardingAgent>>>({})
 
+  // Planner settings from system_settings (coordination category)
+  const [plannerSettings, setPlannerSettings] = useState<SystemSettingsByCategory | null>(null)
+  const [plannerValues, setPlannerValues] = useState<Record<string, string>>({})
+  const [plannerDirty, setPlannerDirty] = useState(false)
+  const [plannerSaving, setPlannerSaving] = useState(false)
+
   const fetchAgents = useCallback(async () => {
     try {
       setLoading(true)
-      const data = await apiClient.request<{ agents: OnboardingAgent[] }>('/api/settings/onboarding-agents')
-      setAgents(data.agents || [])
+      const [agentsData, allSettings] = await Promise.all([
+        apiClient.request<{ agents: OnboardingAgent[] }>('/api/settings/onboarding-agents'),
+        getSettingsByCategory(),
+      ])
+      setAgents(agentsData.agents || [])
+
+      // Extract coordination category for planner card
+      const coord = allSettings.find(c => c.category === 'coordination')
+      if (coord) {
+        setPlannerSettings(coord)
+        const vals: Record<string, string> = {}
+        for (const s of coord.settings) {
+          if ((PLANNER_KEYS as readonly string[]).includes(s.key)) {
+            vals[s.key] = s.value ?? s.default_value ?? ''
+          }
+        }
+        setPlannerValues(vals)
+        setPlannerDirty(false)
+      }
     } catch (err) {
       console.error('Failed to load onboarding agents:', err)
       toast.error('Failed to load onboarding agents')
@@ -108,6 +139,38 @@ export function OnboardingAgentsTab() {
     }
   }
 
+  const handlePlannerChange = (key: string, val: string) => {
+    setPlannerValues(prev => ({ ...prev, [key]: val }))
+    setPlannerDirty(true)
+  }
+
+  const handlePlannerSave = async () => {
+    if (!plannerSettings) return
+    try {
+      setPlannerSaving(true)
+      const updates = plannerSettings.settings
+        .filter(s => (PLANNER_KEYS as readonly string[]).includes(s.key))
+        .filter(s => {
+          const current = plannerValues[s.key] ?? ''
+          const original = s.value ?? s.default_value ?? ''
+          return current !== original
+        })
+        .map(s => ({ id: s.id, value: plannerValues[s.key] ?? '' }))
+
+      if (updates.length > 0) {
+        await bulkUpdateSettings(updates)
+        toast.success('Planner settings saved')
+        setPlannerDirty(false)
+        await fetchAgents() // reload all
+      }
+    } catch (err) {
+      console.error('Failed to save planner settings:', err)
+      toast.error('Failed to save planner settings')
+    } finally {
+      setPlannerSaving(false)
+    }
+  }
+
   const tierInfo = (modelId: string) => MODEL_TIERS[modelId] || { label: 'Custom', color: 'bg-gray-500' }
 
   if (loading) {
@@ -145,6 +208,66 @@ export function OnboardingAgentsTab() {
           </CardDescription>
         </CardHeader>
       </Card>
+
+      {/* Mission Planner LLM Settings */}
+      {plannerSettings && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Target className="h-5 w-5 text-orange-500" />
+                <div>
+                  <CardTitle className="text-base">Mission Planner</CardTitle>
+                  <CardDescription>
+                    Decomposes the mission into tasks and assigns them to agents. This is the first LLM call in every mission.
+                  </CardDescription>
+                </div>
+              </div>
+              <Button
+                size="sm"
+                disabled={!plannerDirty || plannerSaving}
+                onClick={handlePlannerSave}
+              >
+                <Save className="h-4 w-4 mr-2" />
+                {plannerSaving ? 'Saving...' : 'Save'}
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label>Model</Label>
+                <Input
+                  value={plannerValues.planner_model ?? ''}
+                  onChange={(e) => handlePlannerChange('planner_model', e.target.value)}
+                  placeholder="openai/gpt-4o-mini"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Max Tokens</Label>
+                <Input
+                  type="number"
+                  min={500}
+                  max={32000}
+                  value={plannerValues.planner_max_tokens ?? ''}
+                  onChange={(e) => handlePlannerChange('planner_max_tokens', e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Temperature</Label>
+                <Input
+                  type="number"
+                  step={0.1}
+                  min={0}
+                  max={1}
+                  value={plannerValues.planner_temperature ?? ''}
+                  onChange={(e) => handlePlannerChange('planner_temperature', e.target.value)}
+                />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {agents.map((agent) => {
         const edits = getEdits(agent.slug)

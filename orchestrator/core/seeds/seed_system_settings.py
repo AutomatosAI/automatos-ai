@@ -1290,7 +1290,7 @@ def seed_system_settings(db: Session):
         {
             "category": SettingCategory.COORDINATION.value,
             "key": "planner_model",
-            "default_value": "z-ai/glm-5.1",
+            "default_value": "openai/gpt-4o-mini",
             "value_type": "string",
             "description": "LLM model for mission planning/decomposition (via OpenRouter)",
             "is_required": True,
