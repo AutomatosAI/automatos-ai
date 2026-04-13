@@ -556,6 +556,21 @@ class CoordinatorService:
             .all()
         )
 
+        # Mission Zero: include global onboarding agents so dispatcher
+        # can match VOYAGER/BLUEPRINT/SCRIBE/FORGE to tasks.
+        run_config = run.config or {}
+        if run_config.get("source") == "mission_zero":
+            onboarding_agents: List[Agent] = (
+                db.query(Agent)
+                .filter(
+                    Agent.is_system_agent.is_(True),
+                    Agent.required_role == "onboarding",
+                    Agent.status == "active",
+                )
+                .all()
+            )
+            agents.extend(onboarding_agents)
+
         # --- Dispatch phase (parallel via dispatch_ready) ---
         dispatch_results = MissionDispatcher.dispatch_ready(db, run, agents)
 

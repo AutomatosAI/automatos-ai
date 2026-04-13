@@ -17,9 +17,15 @@ export default function WizardPage() {
   const router = useRouter()
   const [open, setOpen] = useState(true)
 
+  const [completed, setCompleted] = useState(false)
+
   const handleClose = () => {
     setOpen(false)
-    setTimeout(() => router.push('/dashboard'), 250)
+    // Only redirect to activity if the wizard wasn't completed
+    // (completed = mission launched, shell handles its own redirect)
+    if (!completed) {
+      setTimeout(() => router.push('/activity?tab=missions'), 250)
+    }
   }
 
   return (
@@ -27,7 +33,7 @@ export default function WizardPage() {
       <WizardShell
         open={open}
         onClose={handleClose}
-        onComplete={() => router.push('/chat')}
+        onComplete={() => setCompleted(true)}
       />
     </div>
   )
