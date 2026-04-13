@@ -80,6 +80,17 @@ def build_mission_goal(
         "document chunk or graph node."
     )
     lines.append(
+        "## Agent Roles — MANDATORY\n"
+        "You MUST assign tasks to the following specialist agents by their exact role name:\n"
+        "- **voyager** — deep business & market research (web search, competitor analysis, customer segments)\n"
+        "- **blueprint** — evidence-based business profile extraction from the ingested corpus and knowledge graph\n"
+        "- **scribe** — synthesises research into the final onboarding brief, brand voice guide, and recommendations\n"
+        "- **forge** — proposes the onboarding agent team, tool assignments, and workspace configuration\n\n"
+        "Do NOT assign tasks to 'auto'. Every task must use one of the four roles above.\n"
+        "Split work so each agent handles its specialty. VOYAGER researches, BLUEPRINT extracts, "
+        "SCRIBE writes deliverables, FORGE builds the team proposal."
+    )
+    lines.append(
         "Deliver: (1) a concise business brief covering catalog, customers, "
         "compliance, operations, brand voice and integrations; (2) a proposed "
         f"onboarding team (starting from {default_team}) with clear "

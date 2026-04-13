@@ -522,6 +522,7 @@ async def list_agents(
             # in Settings > Orchestrator, not in the agent list.  Global system
             # agents (CTO, workspace_id=None) remain visible to admins.
             .filter(~and_(Agent.is_system_agent.is_(True), Agent.workspace_id.isnot(None)))
+            .filter(Agent.agent_type != "ephemeral")  # Hide Mission Zero ephemeral clones
         )
 
         # Apply filters uniformly to all agents (workspace + system)

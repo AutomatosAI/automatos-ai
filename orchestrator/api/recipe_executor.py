@@ -39,6 +39,50 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# PRD-128: Unified notification dispatch helper
+# ---------------------------------------------------------------------------
+
+async def _dispatch_playbook_event(
+    db: Session,
+    workspace_id: UUID,
+    recipe_execution_id: str,
+    event_type: str,
+    title: str,
+    message: Optional[str],
+    agent_id: Optional[int] = None,
+    agent_name: Optional[str] = None,
+    status: str = "ok",
+) -> None:
+    """Fire a playbook-related event through NotificationDispatcher.
+
+    Uses the executor's DB session so the notification row joins whatever
+    commit follows (per-step persist or final completion). Failures are
+    logged but never block playbook execution.
+    """
+    try:
+        from core.services.notification_dispatcher import NotificationDispatcher
+
+        dispatcher = NotificationDispatcher(db, str(workspace_id))
+        await dispatcher.dispatch(
+            event_type=event_type,
+            title=title,
+            message=message,
+            link_type="playbook",
+            link_id=recipe_execution_id,
+            agent_id=agent_id,
+            agent_name=agent_name,
+            status=status,
+        )
+    except Exception:
+        logger.error(
+            "[recipe_direct] %s dispatch failed for %s",
+            event_type,
+            recipe_execution_id,
+            exc_info=True,
+        )
+
+
+# ---------------------------------------------------------------------------
 # Per-workspace execution semaphore — allows bounded concurrent recipe
 # execution within a workspace.  Keys are workspace_id strings; values are
 # asyncio.Semaphores created on first access.  The dict itself is
@@ -1156,6 +1200,20 @@ async def _execute_recipe_inner(
             # --- DB: store compact summary ---
             compact = _build_compact_step_result(step_result, log_url=log_url)
             step_results.append(compact)
+
+            # PRD-128: dispatch playbook_step_complete (default pref silent)
+            await _dispatch_playbook_event(
+                db=db,
+                workspace_id=workspace_id,
+                recipe_execution_id=recipe_execution_id,
+                event_type="playbook_step_complete",
+                title=f"Playbook step: {recipe.name} ({step_order}/{total_steps})",
+                message=str(step_result.get("output", ""))[:500] or None,
+                agent_id=agent_id,
+                agent_name=agent_name,
+                status="ok",
+            )
+
             _persist_step_results(db, execution, step_results)
 
             # Update board task progress
@@ -1189,6 +1247,22 @@ async def _execute_recipe_inner(
             "total_tokens": total_tokens,
             "steps_completed": len(step_results),
         }
+
+        # PRD-128: dispatch playbook_complete before final commit so the
+        # notification row persists in the same transaction as the status
+        # update.
+        await _dispatch_playbook_event(
+            db=db,
+            workspace_id=workspace_id,
+            recipe_execution_id=recipe_execution_id,
+            event_type="playbook_complete",
+            title=f"Playbook complete: {recipe.name}",
+            message=(
+                f"{len(step_results)} steps completed in {total_duration // 1000}s"
+            ),
+            status="ok",
+        )
+
         db.commit()
 
         # Complete the board task

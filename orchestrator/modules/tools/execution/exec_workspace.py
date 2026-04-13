@@ -10,6 +10,112 @@ from uuid import UUID
 logger = logging.getLogger(__name__)
 
 
+# Keys in caller_context that indicate the source of the execution. First
+# non-None wins. Defaults to "chat" if none present.
+_SOURCE_TYPE_KEYS = (
+    ("heartbeat_id", "heartbeat"),
+    ("mission_id", "mission"),
+    ("task_id", "task"),
+    ("playbook_id", "playbook"),
+    ("trigger_id", "trigger"),
+)
+
+
+def _derive_source(caller_context: Optional[Dict[str, Any]]) -> tuple[str, Optional[str]]:
+    """Derive (source_type, source_id) from caller_context."""
+    if not caller_context:
+        return "chat", None
+    # Explicit override wins
+    if caller_context.get("source_type"):
+        return (
+            str(caller_context.get("source_type")),
+            str(caller_context.get("source_id")) if caller_context.get("source_id") else None,
+        )
+    for key, stype in _SOURCE_TYPE_KEYS:
+        val = caller_context.get(key)
+        if val:
+            return stype, str(val)
+    return "chat", None
+
+
+def _auto_register_deliverable(
+    *,
+    workspace_id: UUID | str,
+    file_path: str,
+    write_result: Dict[str, Any],
+    agent_id: Optional[int],
+    caller_context: Optional[Dict[str, Any]],
+    trace_id: Optional[str],
+) -> None:
+    """Register a freshly-written file as a deliverable.
+
+    Failure MUST NOT break the write flow — all exceptions are caught and
+    logged. See PRD-129 US-004.
+    """
+    try:
+        from services.deliverable_service import (
+            DeliverableService,
+            AGENT_REGISTERABLE_ARTIFACT_TYPES,
+            _infer_artifact_type,
+            _humanize_basename,
+        )
+
+        artifact_type = _infer_artifact_type(file_path)
+        if artifact_type not in AGENT_REGISTERABLE_ARTIFACT_TYPES:
+            return
+
+        # Try to read file_size_bytes from worker response to avoid a follow-up
+        # HTTP round-trip. Workers may return `size`, `bytes_written`, etc.
+        file_size_bytes: Optional[int] = None
+        for key in ("file_size_bytes", "size", "bytes_written", "bytes"):
+            raw = write_result.get(key) if isinstance(write_result, dict) else None
+            if isinstance(raw, int):
+                file_size_bytes = raw
+                break
+
+        # Resolve agent name from DB (cheap LEFT JOIN fallback exists, but
+        # setting it avoids a join at read time and keeps soft-deleted agents
+        # attributable).
+        agent_name: Optional[str] = None
+        if agent_id:
+            try:
+                from core.database.database import SessionLocal
+                from core.models.core import Agent as AgentModel
+                with SessionLocal() as lookup_db:
+                    agent_row = lookup_db.query(AgentModel).filter(
+                        AgentModel.id == agent_id
+                    ).first()
+                    if agent_row:
+                        agent_name = agent_row.name
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(
+                    "[tool-trace %s] Could not resolve agent_name for agent_id=%s: %s",
+                    trace_id or "no-trace", agent_id, exc,
+                )
+
+        source_type, source_id = _derive_source(caller_context)
+
+        from core.database.database import SessionLocal
+        with SessionLocal() as db:
+            service = DeliverableService(db=db, workspace_id=workspace_id)
+            service.register(
+                file_path=file_path,
+                title=_humanize_basename(file_path),
+                source_type=source_type,
+                source_id=source_id,
+                agent_id=agent_id,
+                agent_name=agent_name,
+                artifact_type=artifact_type,
+                storage_type="workspace",
+                file_size_bytes=file_size_bytes,
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "[tool-trace %s] Auto-register deliverable failed path=%s: %s",
+            trace_id or "no-trace", file_path, exc, exc_info=True,
+        )
+
+
 async def resolve_repo_dir(client) -> Optional[str]:
     """Auto-detect the git repo directory inside a workspace.
 
@@ -36,6 +142,8 @@ async def execute_workspace_action(
     parameters: Dict[str, Any],
     workspace_id: Optional[UUID] = None,
     trace_id: Optional[str] = None,
+    agent_id: Optional[int] = None,
+    caller_context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Execute a workspace tool via WorkspaceClient proxy to the worker."""
     if not workspace_id:
@@ -141,6 +249,19 @@ async def execute_workspace_action(
         logger.info(
             f"[tool-trace {trace_id or 'no-trace'}] Workspace action {tool_name} completed"
         )
+
+        # PRD-129 US-004: auto-register deliverable on successful write.
+        # Registration failure MUST NOT break the file write.
+        if tool_name == "workspace_write_file" and workspace_id:
+            _auto_register_deliverable(
+                workspace_id=workspace_id,
+                file_path=path,
+                write_result=result,
+                agent_id=agent_id,
+                caller_context=caller_context,
+                trace_id=trace_id,
+            )
+
         return result
 
     except Exception as e:

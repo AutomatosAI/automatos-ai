@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
 from uuid import UUID, uuid4
 
-from config import COMPLEXITY_TOKEN_BUDGET
+from config import COMPLEXITY_TOKEN_BUDGET, Config
 from core.llm import create_llm_manager
 from core.models.core import Agent
 from core.models.orchestration_enums import ComplexityTier, TaskType
@@ -333,7 +333,7 @@ class MissionPlanner:
         Raises:
             PlanValidationError: if all retry attempts fail structural validation.
         """
-        llm = create_llm_manager(service_name="orchestrator")
+        llm = create_llm_manager(service_name="orchestrator", model=Config().PLANNER_MODEL)
         llm.config.max_tokens = 16000
         agent_roster = _render_agent_roster(agents)
         last_errors: List[str] = []
@@ -524,7 +524,7 @@ class MissionPlanner:
             )
 
         # --- LLM decomposition fallback ---
-        llm = create_llm_manager(service_name="orchestrator")
+        llm = create_llm_manager(service_name="orchestrator", model=Config().PLANNER_MODEL)
         # Mission plans need 3-20 tasks in structured JSON — default 2000 is far too small
         llm.config.max_tokens = 16000
         agent_roster = _render_agent_roster(agents)

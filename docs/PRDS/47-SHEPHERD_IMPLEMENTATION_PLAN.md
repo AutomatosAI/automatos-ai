@@ -896,3 +896,62 @@ import { resetOnboarding } from '@/lib/shepherd/tour-storage'
 6. Iterate based on feedback
 
 Total implementation time: ~4-6 hours
+
+---
+
+## Extension (2026-04-11): Richer Popups & Tab Explainers
+
+The original tours shipped with one-line popups, and since then the platform has
+grown a lot of new top-level tabs on most pages. This extension beefs up every
+tour with a couple of sentences per step plus an explicit **tab walkthrough** on
+pages that have a top tab strip, so first-time users can tell at a glance what
+each tab is for without having to click every one.
+
+### What changed
+
+**New helper** in `frontend/lib/shepherd/tour-utils.ts`:
+
+```ts
+tabList([
+  ['Documents', 'Upload files, chunk, embed, semantic search.'],
+  ['Database',  'Connect SQL sources and query in natural language.'],
+  // ...
+])
+```
+
+Renders a compact `<ul>` with bold tab labels + grey descriptions. Reused by
+every tour.
+
+**CSS tweak** — `frontend/styles/shepherd-custom.css` bumped
+`.shepherd-theme-automatos.shepherd-element` max-width from `420px` → `460px`
+so the tab bullet lists don't get too cramped.
+
+### Per-tour updates
+
+Every tour file under `frontend/lib/shepherd/tours/` was extended:
+
+| Tour | New step(s) | Tabs explained |
+|---|---|---|
+| `welcome-tour.ts` | Sidebar step now lists every nav module | Chat, Activity, Agents, Marketplace, Knowledge Bases, Tools, Analytics, Settings |
+| `chat-tour.ts` | Richer copy on agent / model / history (no tabs) | — |
+| `marketplace-tour.ts` | Tab walkthrough step | Applications, Agents, Recipes, LLMs, Capabilities |
+| `agents-tour.ts` | New tab walkthrough step (5 steps total) | Roster, Org Chart, Configuration, Coordination, Recipes |
+| `tools-tour.ts` | Richer copy on connected / search (single tab) | — |
+| `documents-tour.ts` | Top-tab step **and** sub-tab step (4 steps) | **Top:** Documents, Database, Templates, CodeGraph, Business Graph. **Sub:** Library, Processing, Multimodal, Search, RAG Test, Upload |
+| `activity-tour.ts` | Tab walkthrough step | Summary, Board, Calendar, Memory, Missions, Blog |
+| `analytics-tour.ts` | Tab walkthrough step | Overview, Agents, Missions, Documents, LLM & Costs, Tools & Integrations, Admin |
+| `settings-tour.ts` | Tab walkthrough step | System, Orchestrator, Webhooks, API Keys, Credentials, Channels, Voices, Widget SDK |
+
+### Design rules for extending further
+
+1. **Lead with purpose, then detail.** First sentence says *what the thing is for*;
+   second sentence (or a `tabList`) explains *how*.
+2. **Never an essay.** Cap steps at ~3 short paragraphs OR 1 paragraph + `tabList`.
+3. **Tab walkthroughs attach to the TabsList element**, not individual triggers,
+   using the existing `data-tour="<page>-tabs"` attributes. Add a new
+   `data-tour` attribute to the `TabsList` when adding a new page tour.
+4. **Bullet descriptions stay under ~80 chars** so they don't wrap awkwardly at
+   460px popup width.
+5. **Every tour ends with a finish button** and calls
+   `markTourComplete(TOUR_ID, userId)` / `markTourSkipped(TOUR_ID, userId)` —
+   don't reinvent storage.

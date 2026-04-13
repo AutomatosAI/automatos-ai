@@ -1,7 +1,7 @@
 'use client'
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Settings, Key, Webhook, KeyRound, Radio, Brain, Puzzle, Volume2 } from 'lucide-react'
+import { Settings, Key, Webhook, KeyRound, Radio, Brain, Puzzle, Volume2, Bell, Rocket } from 'lucide-react'
 import { CredentialsTab } from './CredentialsTab'
 import SystemSettingsTab from './SystemSettingsTab'
 import SystemLLMSettingsTab from './SystemLLMSettingsTab'
@@ -52,6 +52,10 @@ export function SettingsPanel() {
             <Radio className="w-4 h-4 mr-1 shrink-0" />
             Channels
           </TabsTrigger>
+          <TabsTrigger value="notifications" data-tour="settings-notifications-tab">
+            <Bell className="w-4 h-4 mr-1 shrink-0" />
+            Notifications
+          </TabsTrigger>
           <TabsTrigger value="voice-profiles">
             <Volume2 className="w-4 h-4 mr-1 shrink-0" />
             Voices
@@ -59,6 +63,10 @@ export function SettingsPanel() {
           <TabsTrigger value="widget-sdk">
             <Puzzle className="w-4 h-4 mr-1 shrink-0" />
             Widget SDK
+          </TabsTrigger>
+          <TabsTrigger value="onboarding-agents">
+            <Rocket className="w-4 h-4 mr-1 shrink-0" />
+            Onboarding
           </TabsTrigger>
         </TabsList>
 
@@ -94,6 +102,11 @@ export function SettingsPanel() {
           <ChannelsSettingsTab />
         </TabsContent>
 
+        {/* PRD-128: Notification Preferences */}
+        <TabsContent value="notifications">
+          <NotificationsSettingsTab />
+        </TabsContent>
+
         {/* PRD-74: Voice Profiles */}
         <TabsContent value="voice-profiles">
           <VoiceProfilesSettingsTab />
@@ -102,6 +115,11 @@ export function SettingsPanel() {
         {/* PRD-38.4: Widget SDK API Keys */}
         <TabsContent value="widget-sdk">
           <ApiKeyManager />
+        </TabsContent>
+
+        {/* Mission Zero: Onboarding Agents */}
+        <TabsContent value="onboarding-agents">
+          <OnboardingAgentsTab />
         </TabsContent>
       </Tabs>
     </div>

@@ -78,7 +78,7 @@ async def submit_report(db: Session, workspace_id: UUID, params: Dict[str, Any])
     try:
         from modules.knowledge.graph_service import get_graph_service
         get_graph_service().schedule_incremental_update(
-            int(workspace_id),
+            str(workspace_id),
             [{"type": "report", "path": title, "id": result.get("report_id")}],
         )
     except Exception:

@@ -338,9 +338,9 @@ class RAGService:
                         UPDATE documents
                         SET last_accessed = NOW(),
                             rag_query_count = COALESCE(rag_query_count, 0) + 1
-                        WHERE id = ANY(:ids) AND workspace_id = :ws
+                        WHERE id = ANY(:ids::int[]) AND workspace_id = :ws::uuid
                     """),
-                    {"ids": list(doc_ids), "ws": workspace_id},
+                    {"ids": list(doc_ids), "ws": str(workspace_id)},
                 )
                 db.commit()
             finally:
@@ -379,11 +379,11 @@ class RAGService:
                 rows = db.execute(
                     sa_text("""
                         SELECT id::text FROM documents
-                        WHERE id = ANY(:ids)
-                          AND workspace_id = :ws
+                        WHERE id = ANY(:ids::int[])
+                          AND workspace_id = :ws::uuid
                           AND (team_access = '{}' OR :team = ANY(team_access))
                     """),
-                    {"ids": list(doc_ids), "ws": workspace_id, "team": team},
+                    {"ids": list(doc_ids), "ws": str(workspace_id), "team": team},
                 ).fetchall()
                 allowed_ids = {str(r[0]) for r in rows}
             finally:

@@ -172,6 +172,8 @@ class Config:
     
     LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.7"))
     LLM_MAX_TOKENS: int = int(os.getenv("LLM_MAX_TOKENS", "2000"))
+    PLANNER_MODEL: str = os.getenv("PLANNER_MODEL", "z-ai/glm-5.1")
+    GRAPHIFY_MODEL: str = os.getenv("GRAPHIFY_MODEL", "z-ai/glm-5.1")
     
     # =============================================================================
     # ENVIRONMENT
@@ -252,6 +254,7 @@ class Config:
     WEBHOOK_SECRET: str = os.getenv("WEBHOOK_SECRET")
     WIDGET_TOKEN_SECRET: str = os.getenv("WIDGET_TOKEN_SECRET", "")
     WIDGET_ORIGIN_ALLOWLIST: str = os.getenv("WIDGET_ORIGIN_ALLOWLIST", "")
+    SHOPIFY_INTERNAL_API_KEY: str = os.getenv("SHOPIFY_INTERNAL_API_KEY", "")
     PLAYBOOKS_REQUIRE_TENANT: bool = os.getenv("PLAYBOOKS_REQUIRE_TENANT", "0").lower() in ("1", "true", "yes")
 
     # =============================================================================

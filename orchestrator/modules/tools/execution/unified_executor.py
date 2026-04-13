@@ -389,7 +389,8 @@ class UnifiedToolExecutor:
                 # Workspace actions registered in ActionRegistry need workspace routing
                 if action_name.startswith("workspace_"):
                     return await self._execute_workspace_action(
-                        action_name, action_params, workspace_id=workspace_id, trace_id=trace
+                        action_name, action_params, workspace_id=workspace_id, trace_id=trace,
+                        agent_id=agent_id, caller_context=caller_context,
                     )
                 return await self._execute_platform_action(
                     action_name, action_params, workspace_id=workspace_id, trace_id=trace,
@@ -408,7 +409,8 @@ class UnifiedToolExecutor:
             if tool_name.startswith("workspace_"):
                 logger.info(f"[tool-trace {trace}] Routing to WorkspaceClient: {tool_name}")
                 return await self._execute_workspace_action(
-                    tool_name, parameters, workspace_id=workspace_id, trace_id=trace
+                    tool_name, parameters, workspace_id=workspace_id, trace_id=trace,
+                    agent_id=agent_id, caller_context=caller_context,
                 )
 
             # PRD-36: Route Composio per-action tools (SDK-provided schemas).
@@ -533,8 +535,12 @@ class UnifiedToolExecutor:
     async def _execute_document_tool(self, tool_name, parameters, agent_id, **kw):
         return await exec_document.execute_document_tool(self, tool_name, parameters, agent_id)
 
-    async def _execute_workspace_action(self, tool_name, parameters, workspace_id=None, trace_id=None):
-        return await exec_workspace.execute_workspace_action(self, tool_name, parameters, workspace_id=workspace_id, trace_id=trace_id)
+    async def _execute_workspace_action(self, tool_name, parameters, workspace_id=None, trace_id=None, agent_id=None, caller_context=None):
+        return await exec_workspace.execute_workspace_action(
+            self, tool_name, parameters,
+            workspace_id=workspace_id, trace_id=trace_id,
+            agent_id=agent_id, caller_context=caller_context,
+        )
 
     async def _execute_planning_tool(self, tool_name, parameters, agent_id, **kw):
         return await exec_planning.execute_planning_tool(self, tool_name, parameters, agent_id)

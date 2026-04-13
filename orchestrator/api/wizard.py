@@ -459,11 +459,10 @@ async def generate_plan(
     archetype = ARCHETYPES.get(profile.archetype or "")
     default_team = list(archetype.default_team) if archetype else []
 
-    # Mission Zero chicken-and-egg: the planner validates task agent_roles
-    # against active workspace agents, but a fresh workspace has none. Seed
-    # a minimal generic onboarding team so validation passes on the first
-    # decomposition attempt. Idempotent — skipped if already present.
-    _ensure_mission_zero_team(db, ctx.workspace_id, ctx.user.id)
+    # Mission Zero uses global onboarding agents (VOYAGER, BLUEPRINT,
+    # SCRIBE, FORGE) seeded at startup.  Verify they exist; if the seed
+    # didn't run for some reason, seed them now.
+    _ensure_onboarding_agents(db)
 
     profile_dict = {
         "domain": profile.domain,
@@ -480,6 +479,7 @@ async def generate_plan(
 
     mission_config = {
         "source": "mission_zero",
+        "auto_approve": True,
         "profile_id": str(profile.id),
         "domain": profile.domain,
         "archetype": profile.archetype,
@@ -537,112 +537,32 @@ async def generate_plan(
 
 
 # ===========================================================================
-# Mission Zero onboarding team
+# Mission Zero onboarding agents — verification helper
 # ===========================================================================
 
-# Generic roles the Mission Zero planner reliably emits for a fresh bootstrap
-# mission. The role name doubles as the agent name so the planner's fuzzy
-# validator matches on equality.
-_MISSION_ZERO_ROLES: list[dict[str, str]] = [
-    {
-        "name": "researcher",
-        "job_title": "Mission Zero Researcher",
-        "description": (
-            "Extracts evidence from the workspace corpus and knowledge graph. "
-            "Cites document chunks and graph nodes — does not invent facts."
-        ),
-    },
-    {
-        "name": "writer",
-        "job_title": "Mission Zero Writer",
-        "description": (
-            "Synthesises researcher findings into concise, well-structured "
-            "briefs written in the company's brand voice."
-        ),
-    },
-    {
-        "name": "analyst",
-        "job_title": "Mission Zero Analyst",
-        "description": (
-            "Prioritises findings into highest-impact next actions and "
-            "surfaces open questions the corpus could not answer."
-        ),
-    },
-    {
-        "name": "strategist",
-        "job_title": "Mission Zero Strategist",
-        "description": (
-            "Designs the proposed onboarding team, responsibilities and "
-            "tool assignments based on the business profile."
-        ),
-    },
-]
 
+def _ensure_onboarding_agents(db: Session) -> None:
+    """Verify the global onboarding agents exist; lazy-seed if missing.
 
-def _ensure_mission_zero_team(
-    db: Session,
-    workspace_id: str,
-    created_by: str | None,
-) -> None:
-    """Seed the minimal generic team Mission Zero decomposes into.
-
-    Idempotent: any role already present in the workspace is left alone.
-    Only creates what's missing so re-running the wizard doesn't duplicate.
+    The 4 onboarding agents (VOYAGER, BLUEPRINT, SCRIBE, FORGE) are seeded
+    at startup by ``seed_onboarding_agents``. This is a safety net for the
+    rare case where the seed didn't run (e.g. first deploy before restart).
     """
-    existing = {
-        (a.name or "").lower()
-        for a in (
-            db.query(Agent)
-            .filter(Agent.workspace_id == workspace_id)
-            .filter(Agent.status == "active")
-            .all()
+    count = (
+        db.query(Agent)
+        .filter(
+            Agent.is_system_agent.is_(True),
+            Agent.required_role == "onboarding",
+            Agent.status == "active",
         )
-    }
+        .count()
+    )
+    if count >= 4:
+        return
 
-    created: list[str] = []
-    for role in _MISSION_ZERO_ROLES:
-        if role["name"].lower() in existing:
-            continue
-        # Explicit model_config — do NOT inherit the DB column default
-        # (historically "gpt-4" with 8K context, which blows up on mission
-        # prompts). Pull from system settings / env so one place controls
-        # the default across all seeded teams.
-        agent = Agent(
-            name=role["name"],
-            description=role["description"],
-            agent_type="custom",
-            status="active",
-            configuration={
-                "source": "mission_zero",
-                "job_title": role["job_title"],
-            },
-            model_config={
-                "provider": config.LLM_PROVIDER,
-                "model_id": config.LLM_MODEL,
-                "temperature": 0.7,
-                "max_tokens": 2000,
-                "top_p": 1.0,
-                "presence_penalty": 0.0,
-                "frequency_penalty": 0.0,
-                "fallback_model_id": None,
-            },
-            tags=[role["name"], "mission_zero", "onboarding"],
-            workspace_id=workspace_id,
-            owner_type="workspace",
-            owner_id=str(workspace_id),
-            created_by=str(created_by) if created_by else None,
-            team="Mission Zero",
-            job_title=role["job_title"],
-        )
-        db.add(agent)
-        created.append(role["name"])
-
-    if created:
-        db.flush()
-        logger.info(
-            "wizard.plan seeded mission_zero team workspace=%s roles=%s",
-            workspace_id, created,
-        )
+    logger.warning("Only %d onboarding agents found — lazy-seeding", count)
+    from core.seeds.seed_onboarding_agents import seed_onboarding_agents
+    seed_onboarding_agents(db)
 
 
 # ===========================================================================

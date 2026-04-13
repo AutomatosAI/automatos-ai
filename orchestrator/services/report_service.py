@@ -127,14 +127,64 @@ class ReportService:
                 },
             )
             row = result.fetchone()
-            self.db.commit()
-
             report_id = str(row[0]) if row else None
+
+            # PRD-128: dispatch report_submitted before commit so the
+            # notification row joins the same transaction as the report
+            # insert. Never blocks the report flow.
+            try:
+                from core.services.notification_dispatcher import NotificationDispatcher
+
+                dispatcher = NotificationDispatcher(self.db, str(self.workspace_id))
+                await dispatcher.dispatch(
+                    event_type="report_submitted",
+                    title=f"Report: {title}",
+                    message=(summary or "")[:500] or None,
+                    link_type="report",
+                    link_id=report_id,
+                    agent_id=agent_id,
+                    agent_name=agent_name,
+                    status=status,
+                )
+            except Exception:
+                logger.error(
+                    "[ReportService] report_submitted dispatch failed for report %s",
+                    report_id,
+                    exc_info=True,
+                )
+
+            self.db.commit()
 
             logger.info(
                 "[ReportService] Created report %s for agent %s (%s): %s",
                 report_id, agent_name, report_type, title,
             )
+
+            # PRD-129 US-004: mirror report into deliverables so it shows up in
+            # the Workspace Outputs gallery. Failure must not break the report.
+            try:
+                from services.deliverable_service import DeliverableService
+                source_type = "task" if heartbeat_result_id is None and report_type != "standup" else "heartbeat"
+                deliverable_service = DeliverableService(db=self.db, workspace_id=self.workspace_id)
+                deliverable_service.register(
+                    file_path=file_path,
+                    title=title,
+                    source_type=source_type,
+                    source_id=str(heartbeat_result_id) if heartbeat_result_id else report_id,
+                    agent_id=agent_id,
+                    agent_name=agent_name,
+                    artifact_type="report",
+                    summary=summary,
+                    storage_type="workspace",
+                    file_type="md",
+                    file_size_bytes=file_size,
+                    extra={"report_id": report_id, "report_type": report_type},
+                )
+            except Exception as reg_exc:  # noqa: BLE001
+                logger.error(
+                    "[ReportService] Deliverable register failed for report %s: %s",
+                    report_id, reg_exc, exc_info=True,
+                )
 
             return {
                 "success": True,

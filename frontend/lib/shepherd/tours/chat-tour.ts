@@ -18,7 +18,13 @@ export function createChatTour(userId: string) {
     title: title('Pick an', 'Agent'),
     text: `
       <p class="text-gray-300 mb-2">
-        Select which AI agent you want to chat with. Each agent has its own personality and tools.
+        Every conversation runs through an agent. Each one has its own persona,
+        memory, tool access and skillset — so picking the right agent changes
+        what the assistant can actually do.
+      </p>
+      <p class="text-gray-400 text-sm">
+        Start with <strong>Auto</strong> if you're not sure — it routes your message
+        to the best agent for the job.
       </p>
       ${stepProgress(1, TOTAL)}
     `,
@@ -32,7 +38,12 @@ export function createChatTour(userId: string) {
     title: title('Choose a', 'Model'),
     text: `
       <p class="text-gray-300 mb-2">
-        Pick the LLM powering your conversation — faster models for quick tasks, smarter ones for complex work.
+        Pick which LLM powers this conversation. Faster, cheaper models (Haiku, GPT-mini,
+        DeepSeek) are great for quick back-and-forth; bigger models (Opus, Sonnet, GPT-4-class)
+        are better for planning, writing, and reasoning.
+      </p>
+      <p class="text-gray-400 text-sm">
+        You can change models mid-conversation — the history stays.
       </p>
       ${stepProgress(2, TOTAL)}
     `,
@@ -49,7 +60,8 @@ export function createChatTour(userId: string) {
     title: title('Chat', 'History'),
     text: `
       <p class="text-gray-300 mb-2">
-        Toggle the sidebar to browse and resume previous conversations.
+        Every conversation is saved automatically. Toggle the chat sidebar to browse,
+        search, rename, pin and resume previous sessions — across any agent.
       </p>
       ${stepProgress(3, TOTAL)}
     `,

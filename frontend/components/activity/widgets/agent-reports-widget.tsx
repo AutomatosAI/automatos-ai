@@ -66,7 +66,9 @@ function ReportCard({ report, premiumIconName }: { report: AgentReport; premiumI
     : 'Never'
 
   const handleViewReport = () => {
-    if (report.agent_id) {
+    if (report.latest_file_path) {
+      router.push(`/workspace?view=explorer&path=${encodeURIComponent(report.latest_file_path)}`)
+    } else if (report.agent_id) {
       router.replace(`/activity?tab=board&agent_id=${report.agent_id}`, { scroll: false })
     }
   }
