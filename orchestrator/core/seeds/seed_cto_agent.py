@@ -84,7 +84,7 @@ def seed_cto_agent(db: Session) -> None:
         existing.custom_persona_prompt = soul
         existing.configuration = {
             "extra_context": ARCHITECTURE_SUMMARY,
-            "suggested_model": "anthropic/claude-sonnet-4-20250514",
+            "suggested_model": "anthropic/claude-sonnet-4",
             "temperature": 0.7,
         }
         existing.tags = ["cto", "platform-builder", "admin-only", "system"]
@@ -103,7 +103,7 @@ def seed_cto_agent(db: Session) -> None:
             custom_persona_prompt=soul,
             configuration={
                 "extra_context": ARCHITECTURE_SUMMARY,
-                "suggested_model": "anthropic/claude-sonnet-4-20250514",
+                "suggested_model": "anthropic/claude-sonnet-4",
                 "temperature": 0.7,
             },
             tags=["cto", "platform-builder", "admin-only", "system"],
