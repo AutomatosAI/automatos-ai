@@ -10,6 +10,8 @@ import { ApiKeysSettingsTab } from './ApiKeysSettingsTab'
 import { ChannelsSettingsTab } from './ChannelsSettingsTab'
 import { ApiKeyManager } from './ApiKeyManager'
 import { VoiceProfilesSettingsTab } from './VoiceProfilesSettingsTab'
+import { NotificationsSettingsTab } from './NotificationsSettingsTab'
+import { OnboardingAgentsTab } from './OnboardingAgentsTab'
 import { useSystemRole } from '@/contexts/role-context'
 
 export function SettingsPanel() {
