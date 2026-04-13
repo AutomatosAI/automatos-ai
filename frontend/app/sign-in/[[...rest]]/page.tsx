@@ -1,6 +1,6 @@
 'use client'
 
-import { SignInForm } from '@/components/auth/sign-in-form'
+import { SignIn } from '@clerk/nextjs'
 
 export default function SignInPage() {
   return (
@@ -10,7 +10,15 @@ export default function SignInPage() {
       <div className="absolute bottom-[-10%] left-[-5%] w-[500px] h-[500px] rounded-full bg-orange-600/10 blur-[120px] pointer-events-none" />
 
       <div className="relative z-10 w-full max-w-md">
-        <SignInForm />
+        <SignIn
+          appearance={{
+            elements: {
+              rootBox: 'mx-auto',
+              card: 'bg-zinc-900/80 border border-zinc-800 shadow-2xl',
+            },
+          }}
+          redirectUrl="/"
+        />
       </div>
     </div>
   )
