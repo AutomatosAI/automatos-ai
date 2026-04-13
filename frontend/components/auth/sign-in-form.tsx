@@ -36,7 +36,7 @@ export function SignInForm() {
         })
     }
 
-    // Handle Email/Password sign in
+    // Handle Email/Password sign in — two-step Clerk flow
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
         if (!isLoaded) return
@@ -45,23 +45,23 @@ export function SignInForm() {
         setError(null)
 
         try {
-            const result = await signIn.create({
-                identifier: email,
+            // Step 1: Create sign-in with identifier
+            const si = await signIn.create({ identifier: email })
+
+            // Step 2: Attempt password as first factor
+            const result = await si.attemptFirstFactor({
+                strategy: 'password',
                 password,
             })
 
             if (result.status === 'complete') {
                 await setActive({ session: result.createdSessionId })
                 router.push('/')
-            } else if (result.status === 'needs_first_factor') {
-                // Account requires email verification — Clerk handles this
-                // via its built-in flows. For now, surface a helpful message.
-                setError('Please verify your email address first. Check your inbox for a verification link.')
             } else if (result.status === 'needs_second_factor') {
                 setPendingSecondFactor(true)
             } else {
-                console.error('Unexpected sign-in status:', result.status, result)
-                setError('Sign-in could not be completed. Please try again or use Google/GitHub.')
+                console.error('Sign-in status:', result.status)
+                setError(`Sign-in returned status: ${result.status}. Please try Google/GitHub or contact support.`)
             }
         } catch (err: any) {
             const msg = err.errors?.[0]?.longMessage || err.errors?.[0]?.message
