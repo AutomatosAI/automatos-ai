@@ -12,7 +12,7 @@ import json
 import logging
 import asyncio
 from typing import Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.jobstores.memory import MemoryJobStore
@@ -294,6 +294,65 @@ class HeartbeatService:
         return current >= start or current <= end
 
     # ------------------------------------------------------------------
+    # Period-based deduplication
+    # ------------------------------------------------------------------
+
+    async def _was_recently_executed(
+        self, source_type: str, source_id: str, interval_minutes: int
+    ) -> bool:
+        """Check if a heartbeat already ran within the current interval window.
+
+        Prevents duplicate executions after service restarts or scheduler
+        re-initialisation.  Queries the most recent successful heartbeat
+        result from the database and skips if it falls inside the current
+        interval.
+        """
+        # Give a 10 % grace margin so we don't skip a tick that's just
+        # barely on the boundary (clock skew, slow queries, etc.)
+        cooldown_minutes = max(interval_minutes * 0.9, interval_minutes - 5)
+
+        try:
+            from core.database.database import SessionLocal
+            from sqlalchemy import text
+
+            db = SessionLocal()
+            try:
+                row = db.execute(
+                    text(
+                        """
+                        SELECT created_at FROM heartbeat_results
+                        WHERE source_type = :source_type
+                          AND source_id   = :source_id
+                          AND status      = 'success'
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                        """
+                    ),
+                    {"source_type": source_type, "source_id": source_id},
+                ).fetchone()
+
+                if row:
+                    last_run: datetime = row[0]
+                    elapsed = (datetime.utcnow() - last_run).total_seconds() / 60
+                    if elapsed < cooldown_minutes:
+                        logger.info(
+                            "[Heartbeat] Skipping %s %s — last successful run %.0f min ago "
+                            "(interval=%d min, cooldown=%.0f min)",
+                            source_type,
+                            source_id,
+                            elapsed,
+                            interval_minutes,
+                            cooldown_minutes,
+                        )
+                        return True
+                return False
+            finally:
+                db.close()
+        except Exception as e:
+            logger.warning("[Heartbeat] Dedup check failed (%s), allowing tick: %s", source_id, e)
+            return False
+
+    # ------------------------------------------------------------------
     # Tick implementations
     # ------------------------------------------------------------------
 
@@ -313,6 +372,10 @@ class HeartbeatService:
                 workspace_id,
             )
             return {"status": "skipped", "reason": "outside_active_hours"}
+
+        interval_minutes = hb_config.get("interval_minutes", 30)
+        if await self._was_recently_executed("orchestrator", workspace_id, interval_minutes):
+            return {"status": "skipped", "reason": "already_ran_this_period"}
 
         self._running_ticks[tick_key] = True
         result: Dict[str, Any] = {
@@ -606,6 +669,10 @@ class HeartbeatService:
                 agent_id, workspace_id,
             )
             return {"status": "skipped", "reason": "outside_active_hours"}
+
+        interval_minutes = hb_config.get("interval_minutes", 60)
+        if await self._was_recently_executed("agent", str(agent_id), interval_minutes):
+            return {"status": "skipped", "reason": "already_ran_this_period"}
 
         self._running_ticks[tick_key] = True
         result: Dict[str, Any] = {

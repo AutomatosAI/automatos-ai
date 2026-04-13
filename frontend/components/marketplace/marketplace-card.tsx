@@ -3,14 +3,17 @@
 import { Download, Star } from 'lucide-react'
 import { Card, CardHeader, CardContent, CardFooter } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import type { MarketplaceItem } from './marketplace-homepage'
 
 interface MarketplaceCardProps {
   item: MarketplaceItem
   onClick: () => void
+  isAdmin?: boolean
+  onToggleFeatured?: (id: number) => void
 }
 
-export function MarketplaceCard({ item, onClick }: MarketplaceCardProps) {
+export function MarketplaceCard({ item, onClick, isAdmin, onToggleFeatured }: MarketplaceCardProps) {
   const formatInstallCount = (count: number) => {
     if (count >= 1000000) return `${(count / 1000000).toFixed(1)}M`
     if (count >= 1000) return `${(count / 1000).toFixed(1)}k`
@@ -43,12 +46,28 @@ export function MarketplaceCard({ item, onClick }: MarketplaceCardProps) {
               <p className="text-sm text-muted-foreground">{item.creator_name}</p>
             </div>
           </div>
-          {item.is_featured && (
-            <Badge className="bg-primary/20 text-primary border-primary/30 flex items-center gap-1 shrink-0">
-              <Star className="h-3 w-3" />
-              Featured
-            </Badge>
-          )}
+          <div className="flex items-center gap-1 shrink-0">
+            {isAdmin && onToggleFeatured && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onToggleFeatured(item.id)
+                }}
+                title={item.is_featured ? 'Remove from featured' : 'Feature this item'}
+              >
+                <Star className={`h-4 w-4 ${item.is_featured ? 'text-primary fill-primary' : 'text-muted-foreground'}`} />
+              </Button>
+            )}
+            {item.is_featured && !isAdmin && (
+              <Badge className="bg-primary/20 text-primary border-primary/30 flex items-center gap-1">
+                <Star className="h-3 w-3" />
+                Featured
+              </Badge>
+            )}
+          </div>
         </div>
       </CardHeader>
 

@@ -114,7 +114,7 @@ const ICON_SECTIONS: IconSection[] = [
             { id: 'global_tool', label: 'Tools' },
             { id: 'global_skill', label: 'Skills / Capabilities' },
             { id: 'global_plugin', label: 'Plugins / Widgets' },
-            { id: 'global_recipe', label: 'Recipes / Workflows' },
+            { id: 'global_recipe', label: 'Playbooks / Workflows' },
             { id: 'global_workflow', label: 'Workflows' },
             { id: 'global_store', label: 'Marketplace' },
             { id: 'global_analytics', label: 'Analytics' },

@@ -9,12 +9,13 @@ import {
   Plus,
   Bot,
   Settings,
-  BarChart,
   Users,
   Zap,
+  AlertTriangle,
   ChefHat,
   RefreshCw,
   Network,
+  Activity,
 } from 'lucide-react'
 
 // Shared components
@@ -97,21 +98,23 @@ export function AgentManagement() {
 
     },
     {
-      label: 'Categories',
-      value: '10',
-      change: '10 categories',
-      icon: Settings,
-      iconColor: 'text-[hsl(var(--info))]',
-
+      label: 'Needs Attention',
+      value: String((agents as any[])?.filter((a: any) => a.status === 'error' || a.status === 'failed' || a.status === 'inactive')?.length || 0),
+      change: (agents as any[])?.filter((a: any) => a.status === 'error' || a.status === 'failed')?.length
+        ? `${(agents as any[]).filter((a: any) => a.status === 'error' || a.status === 'failed').length} failing`
+        : 'All healthy',
+      icon: AlertTriangle,
+      iconColor: 'text-destructive',
     },
     {
-      label: 'Avg Performance',
+      label: 'Avg Success Rate',
       value: `${(agentStats as any)?.average_performance?.toFixed(1) || '0.0'}%`,
-      change: (agentStats as any)?.average_performance ? ((agentStats as any).average_performance > 90 ? '↑ Excellent performance' : '↓ Needs optimization') : 'No data',
-      icon: BarChart,
+      change: (agentStats as any)?.average_performance
+        ? ((agentStats as any).average_performance >= 90 ? 'Healthy' : 'Needs optimization')
+        : 'No data',
+      icon: Activity,
       iconColor: 'text-[hsl(var(--agent))]',
       globalIconKey: 'global_performance',
-
     }
   ]
 
@@ -137,7 +140,7 @@ export function AgentManagement() {
     { value: 'org-chart', label: 'Org Chart', icon: Network },
     { value: 'configuration', label: 'Configuration', icon: Settings },
     { value: 'coordination', label: 'Coordination', icon: Users },
-    { value: 'recipes', label: 'Recipes', icon: ChefHat },
+    { value: 'recipes', label: 'Playbooks', icon: ChefHat },
   ]
 
   return (

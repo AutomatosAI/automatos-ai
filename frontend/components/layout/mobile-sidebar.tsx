@@ -5,7 +5,6 @@ import { usePathname } from 'next/navigation'
 import { motion } from 'framer-motion'
 import {
   Users,
-  Brain,
   Settings,
   Activity,
   Bot,
@@ -14,7 +13,6 @@ import {
   Database,
   Store,
   BarChart3,
-  LayoutDashboard,
   HardDrive,
   X
 } from 'lucide-react'
@@ -74,7 +72,7 @@ const navigationItems = [
     icon: Store,
     iconColor: 'text-primary',
     navIconKey: 'nav_marketplace',
-    description: 'Discover agents, recipes & tools'
+    description: 'Discover agents, playbooks & tools'
   },
   {
     name: 'Knowledge',
@@ -92,23 +90,6 @@ const navigationItems = [
     navIconKey: 'nav_team',
     description: 'Manage workspace members',
     requiredRole: 'admin' as const,
-  },
-  {
-    name: 'Context',
-    href: '/context',
-    icon: Brain,
-    iconColor: 'text-[hsl(var(--chart-4))]',
-    navIconKey: 'nav_context',
-    description: 'RAG system and field theory',
-    requiredRole: 'admin' as const,
-  },
-  {
-    name: 'Dashboard',
-    href: '/dashboard',
-    icon: LayoutDashboard,
-    iconColor: 'text-emerald-400',
-    navIconKey: 'nav_dashboard',
-    description: 'System metrics & health',
   },
   {
     name: 'Analytics',
@@ -195,28 +176,27 @@ export function MobileSidebar({ onNavigate }: MobileSidebarProps) {
         })}
       </nav>
 
-      {/* Settings at bottom — Admin only */}
-      {isAdmin && (
-        <div className="border-t border-border/50 px-3 py-3">
-          <Link
-            href="/settings"
-            onClick={onNavigate}
-            className={cn(
-              'flex items-center gap-3 w-full px-4 py-3 rounded-xl transition-all duration-200 min-h-[48px]',
-              pathname === '/settings'
-                ? 'bg-primary/10 border border-primary/20'
-                : 'hover:bg-secondary/40 active:bg-secondary/60'
-            )}
-          >
-            {iconMappings['nav_settings'] ? (
-              <PremiumIcon name={iconMappings['nav_settings']} size={20} className="shrink-0" />
-            ) : (
-              <Settings className="w-5 h-5 shrink-0 text-muted-foreground" />
-            )}
-            <p className="text-sm font-medium text-muted-foreground">Settings</p>
-          </Link>
-        </div>
-      )}
+      {/* Settings at bottom — visible to all users.
+          Admin-only sections are gated inside the Settings page itself. */}
+      <div className="border-t border-border/50 px-3 py-3">
+        <Link
+          href="/settings"
+          onClick={onNavigate}
+          className={cn(
+            'flex items-center gap-3 w-full px-4 py-3 rounded-xl transition-all duration-200 min-h-[48px]',
+            pathname === '/settings'
+              ? 'bg-primary/10 border border-primary/20'
+              : 'hover:bg-secondary/40 active:bg-secondary/60'
+          )}
+        >
+          {iconMappings['nav_settings'] ? (
+            <PremiumIcon name={iconMappings['nav_settings']} size={20} className="shrink-0" />
+          ) : (
+            <Settings className="w-5 h-5 shrink-0 text-muted-foreground" />
+          )}
+          <p className="text-sm font-medium text-muted-foreground">Settings</p>
+        </Link>
+      </div>
     </div>
   )
 }

@@ -7,23 +7,14 @@ import {
   GitBranch,
   FileText,
   DollarSign,
-  TrendingUp,
-  TrendingDown,
-  Brain,
-  Sparkles,
   Activity,
   MessageSquare,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { Progress } from '@/components/ui/progress'
-import { Skeleton } from '@/components/ui/skeleton'
 import { StatsBar } from '@/components/shared/stats-bar'
-import { useAnalyticsOverview, usePlanUsage, useRecommendations, useWorkspaceMemory, useChartPresets } from '@/hooks/use-unified-analytics'
+import { useAnalyticsOverview, usePlanUsage, useRecommendations } from '@/hooks/use-unified-analytics'
 import { AnalyticsRecommendations } from './analytics-recommendations'
 import { AnalyticsPlanUsage } from './analytics-plan-usage'
-import { AnalyticsMemory } from './analytics-memory'
-import { AnalyticsPandasChart } from './analytics-pandas-chart'
 
 interface OverviewProps {
   days: number
@@ -33,8 +24,6 @@ export function AnalyticsOverview({ days }: OverviewProps) {
   const { data: overview, isLoading } = useAnalyticsOverview(days)
   const { data: planUsage, isLoading: planLoading } = usePlanUsage()
   const { data: recommendations, isLoading: recsLoading } = useRecommendations()
-  const { data: memory, isLoading: memoryLoading } = useWorkspaceMemory()
-  const { data: chartPresets } = useChartPresets()
 
   // PRD-55: Heartbeat and Channel analytics
   const [heartbeatStats, setHeartbeatStats] = useState<any>({ total_heartbeats: 0, total_tokens: 0, successes: 0, errors: 0, recent_events: [] })
@@ -55,7 +44,22 @@ export function AnalyticsOverview({ days }: OverviewProps) {
         .catch((err: any) => console.warn('[Analytics] Heartbeat fetch failed:', err?.message || err))
 
       apiClient.request('/api/channels/analytics')
-        .then((data: any) => setChannelStats(data.today_by_source || {}))
+        .then((data: any) => {
+          // Merge today_by_source (routing_decisions) + channel_connections total messages
+          // Normalize keys to lowercase for matching
+          const merged: Record<string, number> = {}
+          for (const [key, val] of Object.entries(data.today_by_source || {})) {
+            merged[key.toLowerCase()] = (merged[key.toLowerCase()] || 0) + (val as number)
+          }
+          // Add channel_connections totals for channels with no routing_decisions today
+          for (const ch of (data.channels || [])) {
+            const key = (ch.platform || '').toLowerCase()
+            if (key && !merged[key]) {
+              merged[key] = ch.total_messages || 0
+            }
+          }
+          setChannelStats(merged)
+        })
         .catch((err: any) => console.warn('[Analytics] Channel fetch failed:', err?.message || err))
     })
   }, [days])
@@ -70,7 +74,7 @@ export function AnalyticsOverview({ days }: OverviewProps) {
       bgColor: 'from-orange-500/20 to-orange-500/5',
     },
     {
-      label: 'Missions',
+      label: 'Missions / Runs',
       value: overview?.workflows.total || 0,
       sub: `${overview?.workflows.successRate?.toFixed(0) || 0}% success rate`,
       icon: GitBranch,
@@ -78,7 +82,7 @@ export function AnalyticsOverview({ days }: OverviewProps) {
       bgColor: 'from-purple-500/20 to-purple-500/5',
     },
     {
-      label: 'Documents',
+      label: 'Documents / Usage',
       value: overview?.documents.total || 0,
       sub: `${overview?.documents.storageMb?.toFixed(1) || 0} MB stored`,
       icon: FileText,
@@ -121,15 +125,6 @@ export function AnalyticsOverview({ days }: OverviewProps) {
         transition={{ duration: 0.5, delay: 0.4 }}
       >
         <AnalyticsPlanUsage data={planUsage} isLoading={planLoading} />
-      </motion.div>
-
-      {/* Memory Section */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.5 }}
-      >
-        <AnalyticsMemory data={memory} isLoading={memoryLoading} />
       </motion.div>
 
       {/* AI Recommendations */}
@@ -201,27 +196,6 @@ export function AnalyticsOverview({ days }: OverviewProps) {
         </Card>
       </motion.div>
 
-      {/* AI-Generated Insights */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.7 }}
-      >
-        <Card className="glass-card">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-sm">
-              <Sparkles className="w-4 h-4 text-purple-400" />
-              AI-Generated Insights
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <AnalyticsPandasChart presetId="cost-by-model" />
-              <AnalyticsPandasChart presetId="tokens-over-time" />
-            </div>
-          </CardContent>
-        </Card>
-      </motion.div>
     </div>
   )
 }

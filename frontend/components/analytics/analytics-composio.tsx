@@ -291,9 +291,9 @@ export function AnalyticsComposio({ days }: Props) {
               Action Performance
             </CardTitle>
           </CardHeader>
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
             <table className="w-full">
-              <thead>
+              <thead className="sticky top-0 bg-card z-10">
                 <tr className="border-b border-border/50">
                   <th className="text-left p-4 text-xs font-medium text-muted-foreground">Action</th>
                   <th className="text-left p-4 text-xs font-medium text-muted-foreground">App</th>
@@ -417,38 +417,50 @@ export function AnalyticsComposio({ days }: Props) {
               <p className="text-sm text-muted-foreground">No Composio apps connected yet</p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {apps.map((app) => (
-                <div
-                  key={app.app_name}
-                  className="rounded-lg border border-border/30 p-4 hover:border-border/60 transition-colors"
-                >
-                  <div className="flex items-center justify-between mb-3">
-                    <p className="font-medium text-sm">{formatAppName(app.app_name)}</p>
-                    <Badge variant={getStatusVariant(app.status)} className="text-[10px]">
-                      {app.status}
-                    </Badge>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[500px] overflow-y-auto pr-1">
+              {apps.map((app) => {
+                const isStorageApp = ['GOOGLEDRIVE', 'DROPBOX', 'BOX', 'ONEDRIVE', 'S3'].includes(app.app_name.toUpperCase())
+                return (
+                  <div
+                    key={app.app_name}
+                    className="rounded-lg border border-border/30 p-4 hover:border-border/60 transition-colors"
+                  >
+                    <div className="flex items-center justify-between mb-3">
+                      <p className="font-medium text-sm">{formatAppName(app.app_name)}</p>
+                      <Badge variant={getStatusVariant(app.status)} className="text-[10px]">
+                        {app.status}
+                      </Badge>
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs text-muted-foreground">
+                      <div className="flex items-baseline justify-between gap-2">
+                        <span className="text-foreground font-medium tabular-nums">{app.total_actions_used}</span>
+                        <span className="truncate">API Calls</span>
+                      </div>
+                      <div className="flex items-baseline justify-between gap-2">
+                        <span className="text-foreground font-medium tabular-nums">{app.agent_count}</span>
+                        <span className="truncate">Agents</span>
+                      </div>
+                      {isStorageApp ? (
+                        <div className="flex items-baseline justify-between gap-2">
+                          <span className="text-foreground font-medium tabular-nums">{app.documents_synced}</span>
+                          <span className="truncate">Docs Synced</span>
+                        </div>
+                      ) : (
+                        <div className="flex items-baseline justify-between gap-2">
+                          <span className={`font-medium ${app.total_actions_used > 0 ? 'text-[hsl(var(--success))]' : 'text-muted-foreground'}`}>
+                            {app.total_actions_used > 0 ? 'Active' : 'Idle'}
+                          </span>
+                          <span className="truncate">Status</span>
+                        </div>
+                      )}
+                      <div className="flex items-baseline justify-between gap-2">
+                        <span className="text-foreground font-medium">{formatDate(app.last_used_at)}</span>
+                        <span className="truncate">Last Used</span>
+                      </div>
+                    </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs text-muted-foreground">
-                    <div className="flex items-baseline justify-between gap-2">
-                      <span className="text-foreground font-medium tabular-nums">{app.total_actions_used}</span>
-                      <span className="truncate">Actions Used</span>
-                    </div>
-                    <div className="flex items-baseline justify-between gap-2">
-                      <span className="text-foreground font-medium tabular-nums">{app.agent_count}</span>
-                      <span className="truncate">Agents</span>
-                    </div>
-                    <div className="flex items-baseline justify-between gap-2">
-                      <span className="text-foreground font-medium tabular-nums">{app.documents_synced}</span>
-                      <span className="truncate">Docs Synced</span>
-                    </div>
-                    <div className="flex items-baseline justify-between gap-2">
-                      <span className="text-foreground font-medium">{formatDate(app.last_used_at)}</span>
-                      <span className="truncate">Last Used</span>
-                    </div>
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </CardContent>
@@ -462,9 +474,9 @@ export function AnalyticsComposio({ days }: Props) {
             Action Leaderboard
           </CardTitle>
         </CardHeader>
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
           <table className="w-full">
-            <thead>
+            <thead className="sticky top-0 bg-card z-10">
               <tr className="border-b border-border/50">
                 <th
                   className="text-left p-4 text-xs font-medium text-muted-foreground cursor-pointer hover:text-foreground"
@@ -527,7 +539,7 @@ export function AnalyticsComposio({ days }: Props) {
             Agent Tool Mapping
           </CardTitle>
         </CardHeader>
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
           {!agentTools || agentTools.length === 0 ? (
             <div className="text-center py-12">
               <Bot className="w-10 h-10 mx-auto mb-3 opacity-50 text-muted-foreground" />
@@ -535,7 +547,7 @@ export function AnalyticsComposio({ days }: Props) {
             </div>
           ) : (
             <table className="w-full">
-              <thead>
+              <thead className="sticky top-0 bg-card z-10">
                 <tr className="border-b border-border/50">
                   <th className="text-left p-4 text-xs font-medium text-muted-foreground w-8"></th>
                   <th className="text-left p-4 text-xs font-medium text-muted-foreground">Agent</th>

@@ -350,6 +350,40 @@ async def get_agent_tools(
             )
         )
 
+    # Fallback: if AgentAppFeature has no data, derive from ToolExecutionLog
+    if not by_agent:
+        try:
+            log_rows = (
+                db.query(
+                    ToolExecutionLog.agent_id,
+                    ToolExecutionLog.action_name,
+                    ToolExecutionLog.app_name,
+                    func.count(ToolExecutionLog.id).label("usage_count"),
+                )
+                .filter(
+                    ToolExecutionLog.agent_id.in_(agent_ids),
+                    ToolExecutionLog.executed_at >= since,
+                )
+                .group_by(
+                    ToolExecutionLog.agent_id,
+                    ToolExecutionLog.action_name,
+                    ToolExecutionLog.app_name,
+                )
+                .order_by(ToolExecutionLog.agent_id, desc("usage_count"))
+                .all()
+            )
+            for r in log_rows:
+                by_agent[r.agent_id].append(
+                    AgentToolEntry(
+                        tool_name=r.action_name,
+                        app_name=r.app_name,
+                        usage_count=int(r.usage_count or 0),
+                        enabled=True,
+                    )
+                )
+        except Exception as e:
+            logger.warning(f"ToolExecutionLog fallback for agent-tools failed: {e}")
+
     return [
         AgentToolMapping(
             agent_id=aid,
