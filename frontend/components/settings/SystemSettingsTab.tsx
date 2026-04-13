@@ -264,6 +264,7 @@ export default function SystemSettingsTab({ className }: SystemSettingsTabProps)
         <TabsContent value="system_icons">
           <SystemIconsSettingsTab />
         </TabsContent>
+
       </Tabs>
 
       {/* Global Actions */}

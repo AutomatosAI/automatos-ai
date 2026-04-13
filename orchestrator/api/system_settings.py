@@ -31,6 +31,8 @@ class BulkUpdateItem(BaseModel):
     id: int
     value: str
 
+
+
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/system-settings", tags=["system-settings"])
 

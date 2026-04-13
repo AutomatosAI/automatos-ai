@@ -89,17 +89,17 @@ export function MainLayout({ children }: MainLayoutProps) {
       {/* Main Content */}
       <div className={
         isMobileLayout
-          ? 'transition-all duration-300'
-          : 'transition-all duration-300 ml-16'
+          ? 'flex flex-col h-screen transition-all duration-300'
+          : 'flex flex-col h-screen transition-all duration-300 ml-16'
       }>
         <Header onMenuClick={handleMenuClick} />
 
-        <main className="p-4 md:p-6">
+        <main className="flex-1 min-h-0 p-4 md:p-6">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: isMobileLayout ? 0.2 : 0.5 }}
-            className="max-w-7xl mx-auto"
+            className="max-w-7xl mx-auto h-full"
           >
             {children}
           </motion.div>

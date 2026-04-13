@@ -9,13 +9,21 @@ mappers (agents, blueprints, schemas, connected apps).
 Every function returns ``{"nodes": [...], "edges": [...], "hyperedges": [...]}``.
 """
 
+import asyncio
 import json
 import logging
 import re
-from typing import Any
+from typing import Any, Optional
 
 from config import Config
 from core.llm import create_llm_manager
+
+# Fast, cheap model for entity extraction — no need for an expensive reasoning model.
+# google/gemini-2.0-flash: ~$0.10/1M input, ~$0.40/1M output, <2s latency.
+GRAPH_EXTRACTION_MODEL = "google/gemini-2.0-flash"
+
+# Per-document LLM timeout (seconds). Prevents silent hangs on dropped connections.
+_EXTRACTION_TIMEOUT = 90
 
 logger = logging.getLogger(__name__)
 
@@ -257,6 +265,7 @@ async def extract_from_document(
     doc_path: str,
     workspace_id: str,
     team_access: list[str] | None = None,
+    llm: Optional[Any] = None,
 ) -> dict[str, list]:
     """Extract knowledge graph from a business document via LLM.
 
@@ -266,6 +275,7 @@ async def extract_from_document(
         workspace_id: Workspace UUID that owns the document (for future scoping).
         team_access: Teams that can access this document (PRD-124).
             Empty list or None means visible to all agents.
+        llm: Optional pre-created LLM manager to reuse across documents.
 
     Returns:
         ``{"nodes": [...], "edges": [...], "hyperedges": [...]}``
@@ -277,14 +287,23 @@ async def extract_from_document(
     prompt = _DOCUMENT_EXTRACTION_PROMPT.format(doc_path=doc_path, doc_text=doc_text)
 
     try:
-        llm = create_llm_manager(service_name="orchestrator", model=Config().GRAPHIFY_MODEL)
-        # Graph extraction produces large JSON — default 2000 tokens truncates
-        llm.config.max_tokens = 8000
-        response = await llm.generate_response([
-            {"role": "system", "content": "You are a knowledge-graph extraction engine. Output valid JSON only."},
-            {"role": "user", "content": prompt},
-        ])
+        if llm is None:
+            llm = create_llm_manager(
+                service_name="orchestrator",
+                model=GRAPH_EXTRACTION_MODEL,
+            )
+            llm.config.max_tokens = 4000
+        response = await asyncio.wait_for(
+            llm.generate_response([
+                {"role": "system", "content": "You are a knowledge-graph extraction engine. Output valid JSON only."},
+                {"role": "user", "content": prompt},
+            ]),
+            timeout=_EXTRACTION_TIMEOUT,
+        )
         raw_text = response.content if hasattr(response, "content") else str(response)
+    except asyncio.TimeoutError:
+        logger.error("LLM call timed out after %ds for %s", _EXTRACTION_TIMEOUT, doc_path)
+        return _empty_graph()
     except Exception:
         logger.exception("LLM call failed during document extraction for %s", doc_path)
         return _empty_graph()
@@ -300,6 +319,7 @@ async def extract_from_report(
     report_text: str,
     report_path: str,
     agent_name: str,
+    llm: Optional[Any] = None,
 ) -> dict[str, list]:
     """Extract knowledge graph from an agent report via LLM.
 
@@ -307,6 +327,7 @@ async def extract_from_report(
         report_text: Full text of the report.
         report_path: Path/identifier for provenance tracking.
         agent_name: Name of the agent that authored the report.
+        llm: Optional pre-created LLM manager to reuse.
 
     Returns:
         ``{"nodes": [...], "edges": [...], "hyperedges": [...]}``
@@ -322,13 +343,23 @@ async def extract_from_report(
     )
 
     try:
-        llm = create_llm_manager(service_name="orchestrator", model=Config().GRAPHIFY_MODEL)
-        llm.config.max_tokens = 8000
-        response = await llm.generate_response([
-            {"role": "system", "content": "You are a knowledge-graph extraction engine. Output valid JSON only."},
-            {"role": "user", "content": prompt},
-        ])
+        if llm is None:
+            llm = create_llm_manager(
+                service_name="orchestrator",
+                model=GRAPH_EXTRACTION_MODEL,
+            )
+            llm.config.max_tokens = 4000
+        response = await asyncio.wait_for(
+            llm.generate_response([
+                {"role": "system", "content": "You are a knowledge-graph extraction engine. Output valid JSON only."},
+                {"role": "user", "content": prompt},
+            ]),
+            timeout=_EXTRACTION_TIMEOUT,
+        )
         raw_text = response.content if hasattr(response, "content") else str(response)
+    except asyncio.TimeoutError:
+        logger.error("LLM call timed out after %ds for %s", _EXTRACTION_TIMEOUT, report_path)
+        return _empty_graph()
     except Exception:
         logger.exception("LLM call failed during report extraction for %s", report_path)
         return _empty_graph()
