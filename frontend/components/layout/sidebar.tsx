@@ -19,6 +19,8 @@ import {
   BarChart3,
   LayoutDashboard,
   HardDrive,
+  BookOpen,
+  ExternalLink,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { PremiumIcon } from '@/components/shared'
@@ -271,11 +273,35 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         })}
       </nav>
 
-      {/* Settings at bottom - visible to all users.
-          Every user needs access to add their own provider API keys.
-          Admin-only sections (Platform API Keys, System Settings) are
-          gated inside the Settings page itself, not at the nav level. */}
-      <div className="absolute bottom-4 left-3 right-3">
+      {/* Docs + Settings at bottom */}
+      <div className="absolute bottom-4 left-3 right-3 space-y-0.5">
+        {/* Documentation link */}
+        <a
+          href="https://automatos.gitbook.io/automatos-ai"
+          target="_blank"
+          rel="noopener noreferrer"
+          className={cn(
+            'flex items-center gap-3 w-full px-3 py-2 rounded-xl transition-all duration-200 group relative',
+            'hover:bg-secondary/40'
+          )}
+        >
+          <BookOpen className="w-[18px] h-[18px] shrink-0 text-muted-foreground group-hover:text-foreground" />
+
+          {!collapsed && (
+            <div className="min-w-0 flex items-center gap-2">
+              <p className="text-sm font-medium text-muted-foreground group-hover:text-foreground truncate">Docs</p>
+              <ExternalLink className="w-3 h-3 text-muted-foreground/50 shrink-0" />
+            </div>
+          )}
+
+          {collapsed && (
+            <div className="absolute left-full ml-2 px-2 py-1 bg-popover/90 border border-border/50 rounded-xl backdrop-blur-lg text-sm whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
+              Documentation
+            </div>
+          )}
+        </a>
+
+        {/* Settings */}
         <Link
           href="/settings"
           data-tour="nav-settings"

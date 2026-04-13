@@ -1,11 +1,18 @@
 'use client'
 
 import { motion } from 'framer-motion'
-import { Menu } from 'lucide-react'
+import { Menu, BookOpen, ExternalLink, Code2, Bug } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ThemeToggle } from '@/components/ui/theme-toggle'
 import { ProfileMenu } from '@/components/auth/profile-menu'
 import { NotificationBell } from '@/components/notifications/notification-bell'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 
 interface HeaderProps {
   onMenuClick: () => void
@@ -43,6 +50,56 @@ export function Header({ onMenuClick }: HeaderProps) {
 
         {/* Right side */}
         <div className="flex items-center space-x-2 md:space-x-4">
+          {/* Help & Docs */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="text-muted-foreground hover:text-foreground"
+                aria-label="Help & documentation"
+              >
+                <BookOpen className="w-5 h-5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuItem asChild>
+                <a
+                  href="https://automatos.gitbook.io/automatos-ai"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-between"
+                >
+                  Documentation
+                  <ExternalLink className="w-3 h-3 opacity-50" />
+                </a>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <a
+                  href="https://automatos.gitbook.io/automatos-ai/api-reference"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-between"
+                >
+                  API Reference
+                  <Code2 className="w-3 h-3 opacity-50" />
+                </a>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem asChild>
+                <a
+                  href="https://github.com/AutomatosAI/automatos-ai/issues"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-between"
+                >
+                  Report a Bug
+                  <Bug className="w-3 h-3 opacity-50" />
+                </a>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
           {/* Theme Toggle */}
           <ThemeToggle />
 

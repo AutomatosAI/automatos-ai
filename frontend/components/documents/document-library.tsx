@@ -26,7 +26,8 @@ import {
   Calendar,
   User,
   HardDrive,
-  Zap
+  Zap,
+  ExternalLink,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -574,10 +575,21 @@ export function DocumentLibrary({
                 : 'Upload your first document to get started'
               }
             </p>
-            <Button onClick={() => onRefresh()}>
-              <RefreshCw className="w-4 h-4 mr-2" />
-              Refresh
-            </Button>
+            <div className="flex items-center justify-center gap-3">
+              <Button onClick={() => onRefresh()}>
+                <RefreshCw className="w-4 h-4 mr-2" />
+                Refresh
+              </Button>
+              <a
+                href="https://automatos.gitbook.io/automatos-ai/knowledge/documents"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 text-sm text-primary hover:text-primary/80 transition-colors"
+              >
+                Read the Guide
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
           </CardContent>
         </Card>
       )}
