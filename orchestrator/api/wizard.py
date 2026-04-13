@@ -479,6 +479,7 @@ async def generate_plan(
 
     mission_config = {
         "source": "mission_zero",
+        "auto_approve": True,
         "profile_id": str(profile.id),
         "domain": profile.domain,
         "archetype": profile.archetype,
