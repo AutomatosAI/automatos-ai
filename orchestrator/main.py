@@ -39,7 +39,10 @@ from api.workflow_templates import router as workflow_templates_router
 from api.workflow_recipes import router as workflow_recipes_router, webhook_router as recipe_webhook_router
 from api.webhooks import router as general_webhooks_router
 from api.marketplace import router as marketplace_router
-from api.shopify import router as shopify_router
+try:
+    from api.shopify import router as shopify_router
+except ImportError:
+    shopify_router = None
 from api.documents import router as documents_router
 from api.cache import router as cache_router
 from api.system import router as system_router
@@ -89,6 +92,10 @@ from api.workspace_skills import router as workspace_skills_router  # PRD-71: Wo
 from api.agent_plugins import router as agent_plugins_router  # PRD-42: Agent Plugin Assignment
 from api.personas import router as personas_router  # PRD-42: Persona API
 from api.generated_images import router as generated_images_router  # Generated image serving
+from api.notifications import (  # PRD-128: Unified notification system
+    router as notifications_router,
+    preferences_router as notification_preferences_router,
+)
 # Pilot Helper Widget: Jira bug reports (optional — Composio dependency)
 try:
     from api.bug_reports import router as bug_reports_router
@@ -1037,7 +1044,8 @@ app.include_router(workflow_recipes_router)  # US-009: Renamed from templates
 app.include_router(recipe_webhook_router)  # Recipe webhook triggers (no auth)
 app.include_router(general_webhooks_router)  # General workspace webhooks (no auth)
 app.include_router(marketplace_router)  # Community Marketplace
-app.include_router(shopify_router)  # Shopify App Store provisioning & webhook forwarding
+if shopify_router is not None:
+    app.include_router(shopify_router)  # Shopify App Store provisioning & webhook forwarding
 app.include_router(document_generation_router)  # PRD-63: Must be BEFORE documents_router (has /templates, /generated specific routes that would otherwise be caught by documents_router's /{document_id} catch-all → 422)
 app.include_router(documents_router)
 app.include_router(cache_router)  # Cache management and monitoring
@@ -1120,6 +1128,8 @@ app.include_router(personas_router)  # PRD-42: Persona API
 app.include_router(generated_images_router)  # Generated image serving from S3
 if bug_reports_router is not None:
     app.include_router(bug_reports_router)  # Pilot Helper Widget: Jira bug reports
+app.include_router(notifications_router)  # PRD-128: Unified notification system
+app.include_router(notification_preferences_router)  # PRD-128: Notification preferences
 if widget_email_router is not None:
     app.include_router(widget_email_router)  # US-012: Widget Email operations
 if auth_router is not None:
@@ -1143,6 +1153,13 @@ try:
     app.include_router(reports_router)
 except ImportError as e:
     logger.warning("Could not load reports router: %s", e)
+
+# PRD-129: Workspace Outputs Hub — deliverables gallery
+try:
+    from api.deliverables import router as deliverables_router
+    app.include_router(deliverables_router)
+except ImportError as e:
+    logger.warning("Could not load deliverables router: %s", e)
 
 # PRD-72: Board Tasks
 try:

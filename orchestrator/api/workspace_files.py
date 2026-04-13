@@ -92,6 +92,34 @@ async def get_file_content(
 
 
 # ---------------------------------------------------------------------------
+# PUT /api/workspaces/{workspace_id}/files/content — write file (proxied)
+# ---------------------------------------------------------------------------
+class WriteFileRequest(BaseModel):
+    path: str = Field(..., min_length=1, max_length=1024, description="Relative file path inside workspace")
+    content: str = Field(..., description="File content to write")
+
+
+@router.put("/files/content")
+async def write_file_content(
+    workspace_id: str,
+    body: WriteFileRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """Write or create a file in the workspace."""
+    if str(ctx.workspace_id) != workspace_id:
+        raise HTTPException(status_code=403, detail="Workspace access denied")
+
+    client = WorkspaceClient(workspace_id)
+    result = await client.write_file(body.path, body.content)
+
+    if result.get("success") is False:
+        status = result.get("status_code", 503)
+        raise HTTPException(status_code=status, detail=result["error"])
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # POST /api/workspaces/{workspace_id}/exec — run command (proxied)
 # ---------------------------------------------------------------------------
 class ExecRequest(BaseModel):

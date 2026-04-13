@@ -1,7 +1,7 @@
 import Shepherd from 'shepherd.js'
 import { shepherdTheme } from '../shepherd-theme'
 import { markTourComplete, markTourSkipped } from '../tour-storage'
-import { title, waitForElement, stepProgress } from '../tour-utils'
+import { title, waitForElement, stepProgress, tabList } from '../tour-utils'
 
 const TOUR_ID = 'analytics'
 const TOTAL = 3
@@ -18,7 +18,9 @@ export function createAnalyticsTour(userId: string) {
     title: title('', 'Analytics'),
     text: `
       <p class="text-gray-300 mb-2">
-        Track agent performance, workflow success rates, document usage, and LLM costs.
+        Measure what your AI workforce is actually doing. Every agent run, mission,
+        document lookup and LLM call gets tracked here so you can see impact,
+        spot bottlenecks, and keep costs in check.
       </p>
       ${stepProgress(1, TOTAL)}
     `,
@@ -29,11 +31,19 @@ export function createAnalyticsTour(userId: string) {
 
   tour.addStep({
     id: 'analytics-tabs',
-    title: title('Drill', 'Down'),
+    title: title('Six', 'Analytics Views'),
     text: `
       <p class="text-gray-300 mb-2">
-        Switch between Overview, Agents, Workflows, Documents, Costs, and Tools views.
+        Each top tab answers a different question about your workspace:
       </p>
+      ${tabList([
+        ['Overview', 'High-level dashboard — headline KPIs across everything.'],
+        ['Agents', 'Per-agent performance — runs, success rate, time-to-completion.'],
+        ['Missions', 'Mission and workflow execution stats, step-level timings.'],
+        ['Documents', 'How your knowledge base is used — top files, hit rates, RAG quality.'],
+        ['LLM & Costs', 'Token spend by model and provider, cost per agent and per day.'],
+        ['Tools & Integrations', 'Which tools get used most, error rates, latency.'],
+      ])}
       ${stepProgress(2, TOTAL)}
     `,
     beforeShowPromise: () => waitForElement('[data-tour="analytics-tabs"]'),
@@ -49,7 +59,8 @@ export function createAnalyticsTour(userId: string) {
     title: title('Time', 'Range'),
     text: `
       <p class="text-gray-300 mb-2">
-        Filter data by 7, 30, or 90 days to spot trends and track changes.
+        The range picker applies to every chart on the page — flip between 7, 30 and 90 days
+        to compare trends. Pick a wider window to see week-over-week movement.
       </p>
       ${stepProgress(3, TOTAL)}
     `,

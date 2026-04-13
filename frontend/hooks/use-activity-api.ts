@@ -98,6 +98,7 @@ export interface AgentReport {
   summary: string
   last_run: string | null
   execution_id: string | null
+  latest_file_path: string | null
 }
 
 export interface AgentReportsResponse {

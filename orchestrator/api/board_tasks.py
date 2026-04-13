@@ -38,6 +38,48 @@ _PRIORITY_SLA_HOURS: dict[str, int] = {
 }
 
 
+# ── PRD-128: Unified notification dispatch ─────────────────────────
+async def _dispatch_task_complete(db: Session, workspace_id, task: BoardTask) -> None:
+    """Fire a ``task_complete`` event through NotificationDispatcher.
+
+    Uses the caller's DB session so the notification row joins the
+    existing transaction (no extra commits). Dispatcher never raises on
+    delivery failures, but we still wrap in try/except so any programming
+    error cannot block the task-completion flow.
+    """
+    try:
+        from core.services.notification_dispatcher import NotificationDispatcher
+
+        agent_name = None
+        if task.assigned_agent_id:
+            agent = db.query(Agent).filter(Agent.id == task.assigned_agent_id).first()
+            agent_name = agent.name if agent else f"agent-{task.assigned_agent_id}"
+
+        message = None
+        if task.result:
+            message = str(task.result)[:500]
+        elif task.description:
+            message = task.description[:500]
+
+        dispatcher = NotificationDispatcher(db, str(workspace_id))
+        await dispatcher.dispatch(
+            event_type="task_complete",
+            title=f"Task: {task.title}",
+            message=message,
+            link_type="task",
+            link_id=str(task.id),
+            agent_id=task.assigned_agent_id,
+            agent_name=agent_name,
+            status="ok",
+        )
+    except Exception:
+        logger.error(
+            "[BoardTasks] task_complete dispatch failed for task %s",
+            getattr(task, "id", "?"),
+            exc_info=True,
+        )
+
+
 # ── Helpers ──────────────────────────────────────────────────────────
 
 def _enrich_with_agents(tasks: list, db: Session) -> list:
@@ -289,6 +331,10 @@ async def update_task(
         and task.source_type != 'recipe'  # Recipe executor handles its own execution
     )
 
+    # PRD-128: dispatch task_complete on terminal transition
+    if "status" in body and body["status"] == "done":
+        await _dispatch_task_complete(db, ctx.workspace_id, task)
+
     db.commit()
     db.refresh(task)
 
@@ -392,6 +438,11 @@ async def approve_task(
     task.completed_at = datetime.now(timezone.utc)
     if action_result:
         task.result = json.dumps(action_result) if not task.result else task.result
+
+    # PRD-128: dispatch task_complete before commit so notification row
+    # joins the same transaction as the task update.
+    await _dispatch_task_complete(db, ctx.workspace_id, task)
+
     db.commit()
     db.refresh(task)
 
@@ -481,6 +532,10 @@ async def update_task_status(
         task.blocked_at = None
         task.blocked_reason = None
 
+    # PRD-128: dispatch task_complete on drag-to-done transitions
+    if new_status == "done":
+        await _dispatch_task_complete(db, ctx.workspace_id, task)
+
     db.commit()
     db.refresh(task)
 
@@ -543,6 +598,9 @@ def _launch_task_execution(
                 task.result = str(llm_text) if llm_text else None
                 task.status = "done" if review_mode == "auto" else "review"
                 task.completed_at = datetime.now(timezone.utc)
+                # PRD-128: dispatch task_complete only on terminal 'done'
+                if task.status == "done":
+                    await _dispatch_task_complete(db, workspace_id, task)
                 db.commit()
 
             logger.info(

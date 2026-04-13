@@ -1,7 +1,7 @@
 import Shepherd from 'shepherd.js'
 import { shepherdTheme } from '../shepherd-theme'
 import { markTourComplete, markTourSkipped } from '../tour-storage'
-import { title, waitForElement, stepProgress } from '../tour-utils'
+import { title, waitForElement, stepProgress, tabList } from '../tour-utils'
 
 const TOUR_ID = 'activity'
 const TOTAL = 4
@@ -18,7 +18,9 @@ export function createActivityTour(userId: string) {
     title: title('Command', 'Centre'),
     text: `
       <p class="text-gray-300 mb-2">
-        Your AI workforce at a glance — see every chat, routine, recipe, and mission in one place.
+        A single pane of glass over your whole AI workforce. Every chat, scheduled task,
+        running mission and completed report flows through this page, so you always know
+        what's happening and what needs you.
       </p>
       ${stepProgress(1, TOTAL)}
     `,
@@ -32,7 +34,9 @@ export function createActivityTour(userId: string) {
     title: title('Live', 'Stats'),
     text: `
       <p class="text-gray-300 mb-2">
-        Real-time counters — what's working now, connected channels, completions, and anything that needs attention.
+        Real-time counters at the top — what's working right now, connected channels,
+        completions today, and anything that needs your attention. Click any tile
+        to jump straight to a filtered view.
       </p>
       ${stepProgress(2, TOTAL)}
     `,
@@ -46,11 +50,19 @@ export function createActivityTour(userId: string) {
 
   tour.addStep({
     id: 'act-tabs',
-    title: title('Navigate', 'Tabs'),
+    title: title('Six', 'Activity Views'),
     text: `
       <p class="text-gray-300 mb-2">
-        Switch between the unified Feed, Routines (recurring agent tasks), Recipes (automations), and Missions (coming soon).
+        Switch between different ways of looking at the same workforce:
       </p>
+      ${tabList([
+        ['Summary', 'Dashboard of widgets — KPIs, recent reports, alerts, completions.'],
+        ['Board', 'Kanban board of running tasks and executions, grouped by status.'],
+        ['Calendar', 'Scheduled runs, routines and mission deadlines on a calendar.'],
+        ['Memory', 'What your agents remember — long-term memory, daily logs, context.'],
+        ['Missions', 'Multi-step objectives agents are working through.'],
+        ['Blog', 'Chronological event log of everything that happened in the workspace.'],
+      ])}
       ${stepProgress(3, TOTAL)}
     `,
     beforeShowPromise: () => waitForElement('[data-tour="activity-tabs"]'),
@@ -63,10 +75,12 @@ export function createActivityTour(userId: string) {
 
   tour.addStep({
     id: 'act-content',
-    title: title('Activity', 'Feed'),
+    title: title('Drill', 'Into Anything'),
     text: `
       <p class="text-gray-300 mb-2">
-        The live feed shows all activity across your workspace. Filter by type or status, and click any item to drill in.
+        Whichever view you pick, every item is clickable. Open a report to grade it,
+        open a mission to see progress, open a memory entry to inspect what the
+        agent learned.
       </p>
       ${stepProgress(4, TOTAL)}
     `,

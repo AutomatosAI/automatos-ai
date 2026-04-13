@@ -1,124 +1,89 @@
-# PRD-122: Tool Routing Promotion, Permission Enforcement & First-Class Schemas — Progress Log
+# Unified Notification System (PRD-128) Progress Log
 
-## 2026-03-31 — US-001: admin_only field + 6 infra tools gated
-- Added `admin_only: bool = False` to ActionDefinition dataclass (after workspace_scoped)
-- Marked 6 tools as admin_only=True:
-  - actions_monitoring.py: platform_query_loki_logs, platform_query_prometheus, platform_get_alerts, platform_get_logs, platform_list_services
-  - actions_workspace.py: platform_get_system_health (registered here, not actions_monitoring.py as PRD assumed)
-- to_openai_schema() unaffected (admin_only is metadata only)
-- Syntax validation passed
+Project: Automatos AI Platform
+Feature: ralph/prd-128-unified-notifications
+Started: 2026-04-10
 
-## 2026-03-31 — US-002: Thread caller_context through executor chain
-- Added `caller_context: Optional[Dict[str, Any]] = None` to `execute_tool()` in unified_executor.py
-- Passed caller_context through both platform_execute dispatcher path and direct platform_* routing
-- Updated delegate `_execute_platform_action()` to accept and forward caller_context
-- Updated `exec_platform.execute_platform_action()` to accept and pass caller_context to PlatformActionExecutor
-- Updated `PlatformActionExecutor.execute()` to accept `caller_context: Dict[str, Any] | None = None`
-- All parameters have defaults (None) — existing callers unaffected
-- Syntax validation passed for all 3 files
-- NOTE: unified_executor.py is at `modules/tools/execution/` not `modules/tools/` as PRD assumed
+---
 
-## 2026-03-31 — US-003: Admin gate + destructive safety check in platform_executor.py
-- Added admin_only gate BEFORE requires_confirmation check:
-  - Looks up action_def from registry, checks admin_only flag
-  - If admin_only: caller must have workspace_role in (owner, admin) OR system_role == admin
-  - If caller_context is None (no identity), admin_only actions are denied (fail-closed)
-  - Returns {success: False, permission_denied: True, error: ...}
-  - Logs denial at WARNING with action name, workspace_id, and sanitized caller_context (no user_id)
-- Added destructive safety check AFTER rate limit block:
-  - If permission_level == "destructive" and requires_confirmation is False, reject with internal error
-  - Logs at ERROR level (misconfigured action)
-- Syntax validation passed
+## Story Status
 
-## 2026-03-31 — US-004: Filter admin_only tools from non-admin callers
-- Added `is_admin: bool = False` param to `get_tools_for_agent()` in tool_router.py
-- Added `exclude_admin: bool = False` param to `to_dispatcher_schema()` in action_registry.py
-- Added `exclude_admin: bool = False` param to `build_prompt_summary()` in action_registry.py
-- build_prompt_summary skips admin_only actions when exclude_admin=True
-- get_tools_for_agent passes `exclude_admin=not is_admin` to dispatcher schema
-- All params default to False — existing callers unaffected
-- Validated: admin actions correctly filtered from summary, dispatcher schema accepts param, is_admin in function signature
+- 2026-04-10: archived stale PRD-122 IMPLEMENTATION_PLAN; rebuilt plan for PRD-128 (10 stories).
+- 2026-04-10: **US-001 done** — alembic migration `prd128_notifications` creates `notification_preferences` and `notifications` tables with all PRD-specified columns, FKs, and partial/composite indexes. Chained off `prd127_attachment_ids` so `down_revision` is not None. No unique constraint on `(workspace_id, user_id, event_type)` so events can fan out to multiple destinations.
+- 2026-04-10: **US-002 done** — `_provision_new_user_workspace()` in `orchestrator/core/auth/hybrid.py` now seeds 9 default `notification_preferences` rows (heartbeat/task/mission_complete/playbook_complete/trigger_fired/report_submitted/agent_error=in_app, mission_step_complete/playbook_step_complete=silent) with `user_id=NULL, enabled=true`. Extracted `_seed_default_notification_preferences()` helper and `DEFAULT_NOTIFICATION_PREFERENCES` tuple as single source of truth. Idempotent via `INSERT ... WHERE NOT EXISTS` (table has no unique constraint because multi-destination fan-out is allowed). Helper does not commit — caller owns the transaction. New unit tests in `orchestrator/tests/test_prd128_default_prefs.py` (4 tests, all passing) verify: constant matches spec, fresh workspace inserts exactly 9 rows with correct params, re-run yields 0 inserts, generated SQL retains `WHERE NOT EXISTS` + `user_id IS NULL` guard. Gotcha: `core.auth.hybrid` imports `SessionLocal` at module load which requires Postgres env vars — test file sets dummy POSTGRES_* with `os.environ.setdefault` before the import to make the DB-free unit test collectable.
+- 2026-04-10: **US-003 done** — New `orchestrator/core/services/notification_dispatcher.py` implements `NotificationDispatcher(db, workspace_id)` with `async dispatch(event_type, title, message, link_type, link_id, agent_id, agent_name, status, user_id)`. `_get_preferences` returns a LIST of matching rows (no LIMIT) and applies user-override semantics per destination: user-specific rows shadow workspace defaults on the same destination while default-only destinations survive. Destinations: `silent` skipped; `in_app` inserts a `notifications` row via `db.execute` without committing; `telegram`/`slack`/`webhook` delegate to existing `send_workspace_notification(..., channel=destination)`; `channel` looks up the `channel_connections` row by id and dispatches via its platform. `_format_external_message` builds a concise status-icon + title + agent line + 200-char truncated message (ends with `…`) + TODO deep-link placeholder. No-preferences case falls back to a single in_app dispatch. Every destination branch is wrapped in try/except with `exc_info=True` so a delivery failure never raises out of the dispatcher. New unit tests in `orchestrator/tests/test_prd128_notification_dispatcher.py` (6 tests, all passing) cover: silent skip, in_app insert with no commit, in_app + telegram multi-destination fan-out, user override shadows workspace default on shared destination while unique default destinations survive, no-preferences in_app fallback, and `_format_external_message` truncation/icon behaviour. Tests stub `send_workspace_notification` with `AsyncMock` so no real network IO. Files touched: `orchestrator/core/services/notification_dispatcher.py` (new), `orchestrator/tests/test_prd128_notification_dispatcher.py` (new), `scripts/ralph/IMPLEMENTATION_PLAN.md`, `scripts/ralph/progress.txt`, `scripts/ralph/prd.json`.
 
-## 2026-03-31 — US-005: Fix search_chat_history multi-tenancy bug
-- Replaced `WHERE c.user_id = (SELECT id FROM users LIMIT 1)` with workspace-scoped JOIN
-- Chats table has no workspace_id column — joined through workspace_members: `JOIN workspace_members wm ON wm.user_id = c.user_id WHERE wm.workspace_id = :workspace_id AND wm.is_active = true`
-- Also fixed INTERVAL bug: `INTERVAL ':days days'` doesn't parameterize (days is inside string literal) — replaced with `make_interval(days => :days)`
-- workspace_id parameter was already available in the handler function signature
-- Syntax validation passed
+2026-04-10 — US-004: Notifications API
+  - NEW: orchestrator/api/notifications.py (list, unread-count, read, read-all, dismiss)
+  - All queries workspace+user scoped via parameterized text() SQL
+  - 404 on visible-but-already-mutated rows avoided (distinguishes "not found" from "no-op")
+  - Router registered in orchestrator/main.py
+  - Syntax check: OK
 
-## 2026-03-31 — US-006: Add promoted field + schema generation methods
-- Added `promoted: bool = False` to ActionDefinition dataclass (after admin_only)
-- Added `get_promoted()` method to ActionRegistry — returns list of promoted ActionDefinitions
-- Added `to_first_class_schemas(exclude_admin=False)` method — returns OpenAI function schemas for promoted actions
-  - When exclude_admin=True, admin_only promoted actions are excluded (non-admin callers don't see them)
-- All new fields/params have defaults — existing callers unaffected
-- Validated with isolated import: promoted field works, get_promoted filters correctly, to_first_class_schemas respects exclude_admin
+2026-04-10 — US-005 Notification preferences API
+  - NEW preferences_router in orchestrator/api/notifications.py at prefix /api/notification-preferences
+  - GET / — merged view (workspace defaults shadowed by user-specific rows per (event_type, destination)); backfills missing event_types from DEFAULT_NOTIFICATION_PREFERENCES so settings UI sees all 9 events
+  - PUT / — bulk upsert: deletes user-scoped rows for affected event_types then re-inserts. Validates event_type against VALID_EVENT_TYPES (dispatcher), destination against {in_app, telegram, slack, webhook, channel, silent}, channel_connection_id existence + workspace ownership
+  - Workspace-scoped via RequestContext; rejects requests without resolvable user_id (403)
+  - Router registered in orchestrator/main.py (preferences_router import + include_router)
+  - Syntax check: OK
 
-## 2026-03-31 — US-007: Exclude promoted actions from prompt summary + dispatcher
-- Added `exclude_promoted: bool = True` param to `build_prompt_summary()` in action_registry.py
-  - When True (default), actions with promoted=True are skipped from the markdown catalog
-  - Filter applied alongside existing exclude_admin filter
-- Added `exclude_promoted: bool = True` param to `to_dispatcher_schema()` in action_registry.py
-  - Parameter accepted for forward compatibility — actual enum filtering will be added in US-012
-  - Default True ensures promoted actions will be excluded from dispatcher enum by default
-- All params have defaults — existing callers unaffected
-- Syntax validation passed (py_compile OK)
+2026-04-10 US-006: Migrated HeartbeatService to NotificationDispatcher.
+  - orchestrator/services/heartbeat_service.py: new _dispatch_heartbeat_notification helper replaces 4 call sites of _deliver_notification in _orchestrator_tick (success+error) and _agent_tick (success+error)
+  - Deleted: _deliver_notification, _format_heartbeat_message, _send_via_integration, _send_via_webhook, _resolve_telegram_chat_id
+  - External telegram/slack/webhook now flow through core.services.notification_service.send_workspace_notification via the dispatcher
+  - Agent ticks resolve agent.name via Agent model; orchestrator ticks use "Orchestrator"
+  - Message body extracted from llm_analysis finding (fallback: concatenated details)
+  - link_type='heartbeat', link_id=_heartbeat_result_id
+  - Dedicated SessionLocal per dispatch; commits locally; try/except wraps whole helper (non-blocking)
+  - Tests: tests/test_prd128_notification_dispatcher.py still passes (6/6)
+  - Grep confirms no other callers of removed helpers
 
-## 2026-03-31 — US-008: Mark ~13 high-value actions as promoted=True
-- Added promoted=True to 13 actions across 5 files:
-  - actions_agents.py (4): platform_list_agents, platform_get_agent, platform_create_agent, platform_update_agent
-  - actions_marketplace.py (5): platform_browse_marketplace_agents, platform_browse_marketplace_skills, platform_browse_marketplace_plugins, platform_install_skill, platform_install_plugin
-  - actions_workspace.py (2): platform_store_memory, platform_get_system_health (also admin_only=True)
-  - actions_analytics.py (1): platform_get_activity_feed
-  - actions_search.py (1): platform_search_memory
-- Note: platform_store_memory and platform_get_system_health are in actions_workspace.py, not actions_search.py/actions_monitoring.py as PRD assumed
-- Validated: 97 total actions, 13 promoted, 6 admin-only. platform_get_system_health is both promoted + admin_only
-- Syntax validation passed (py_compile OK for all 5 files)
+2026-04-10 US-007: Wired tasks/missions/playbooks/reports to NotificationDispatcher.
+  - orchestrator/api/board_tasks.py: new _dispatch_task_complete helper; dispatch task_complete on:
+      * update_task (PATCH) when body.status == "done"
+      * approve_task (POST /approve) — always
+      * update_task_status (PATCH /{id}/status) when new_status == "done"
+      * _launch_task_execution background when task reaches "done" (not "review")
+    All dispatches use request's db and happen before existing db.commit() (no extra commits).
+    Resolves agent_name from assigned_agent_id.
+  - orchestrator/services/coordinator_service.py: new module-level _dispatch_mission_event helper.
+      * mission_step_complete fired in _execute_task right after MissionDispatcher.record_task_completion (before the outer tick commit)
+      * mission_complete fired in _build_and_advance_to_awaiting_human after transition_run(COMPLETED)
+    Both default to silent/in_app per US-002 seed (step=silent, complete=in_app).
+  - orchestrator/api/recipe_executor.py: new _dispatch_playbook_event helper at module top (fixed duplicate logger definition while editing).
+      * playbook_step_complete fired per successful step right after appending compact result, before _persist_step_results (so notification insert joins the same commit)
+      * playbook_complete fired in _execute_recipe_inner before the final db.commit() once execution.status == 'completed'
+  - orchestrator/services/report_service.py: dispatch report_submitted inside create_report between the INSERT RETURNING and self.db.commit() — joins the same transaction.
+  - All new dispatches wrapped in try/except with exc_info=True logging; dispatcher failures never block primary completion flow.
+  - Gotcha: PRD AC said orchestrator/api/tasks.py but that file is PRD-56 task_executions queue with no completion endpoint. The real user-facing task completion lives in board_tasks.py; wired there.
+  - Validation: ast.parse clean on all 4 edited files; tests/test_prd128_notification_dispatcher.py still passes (6/6).
 
-## 2026-03-31 — US-009: Append promoted schemas in tool_router + consolidate field tools
-- Replaced hardcoded _FIELD_TOOL_SCHEMAS block (60 lines) in tool_router.py with `action_registry.to_first_class_schemas(exclude_admin=not is_admin)`
-  - All promoted actions now get first-class schemas dynamically from ActionRegistry
-  - Admin-only promoted actions excluded for non-admin callers
-  - Log line: "Added {n} promoted action schemas"
-- Marked platform_field_query and platform_field_inject as promoted=True in actions_field.py
-  - platform_field_stability left as non-promoted (not a high-value direct-call tool)
-- Field tool schemas now come from ActionDefinition.to_openai_schema() instead of hardcoded dicts
-  - Schema structure matches: same type/function/name/description/parameters pattern
-  - Descriptions are richer in ActionDefinition (more context for LLM) — improvement, not regression
-- Total promoted count: 15 (13 from US-008 + 2 field tools)
-- Syntax validation passed (py_compile OK for actions_field.py + tool_router.py)
 
-## 2026-03-31 — US-010: Update SmartToolRouter with promoted tool categories
-- Added ALWAYS_INCLUDE set with 6 critical promoted tools that bypass intent filtering:
-  - platform_list_agents, platform_get_agent, platform_search_memory, platform_store_memory, platform_field_query, platform_field_inject
-- Added 5 new TOOL_CATEGORIES for promoted tools:
-  - platform_management (list/get/create/update agents)
-  - marketplace (browse agents/skills/plugins, install skill/plugin)
-  - monitoring (system health, activity feed)
-  - memory (search/store memory)
-  - fields (field query/inject)
-- Updated INTENT_TO_TOOLS mappings:
-  - DATA_QUERY: added "fields"
-  - SEARCH: added "memory"
-  - EXTERNAL_ACTION: added "platform_management"
-  - CREATION: added "platform_management"
-  - MULTI_STEP: added all 5 promoted categories
-  - MEMORY_RECALL: now includes "memory" (was empty)
-- Applied ALWAYS_INCLUDE in _filter_tools_by_categories alongside CORE_TOOLS
-- Syntax validation passed (py_compile OK)
+2026-04-10 — US-008 NotificationBell component + navbar mount
+  - New frontend/hooks/use-notifications-api.ts: react-query v4 hooks for list, unread-count (30s poll), mark-read, mark-all-read, dismiss, preferences (GET + bulk PUT).
+  - New frontend/components/notifications/notification-bell.tsx: Popover dropdown, unread badge (9+ cap, hidden at 0), per-row click (mark read + router.push via linkFor), dismiss button, mark-all-read, empty state, footer link to /settings/notifications. linkFor routes heartbeat/task/mission/playbook/report/trigger/agent link_types to Activity tabs.
+  - frontend/components/layout/header.tsx: replaced the static <Bell/> + hardcoded "3" badge with <NotificationBell/>. Removed unused Bell import.
+  - React Query v4 compliance: isLoading (not isPending), useRouter().push() from next/navigation (not window.location).
+  - Uses apiClient.request with JSON.stringify on body to match existing hook patterns.
+  - Validation: tsc not runnable locally (node_modules not installed in this worktree); relied on type-safe imports against existing hooks/ and components/ui/popover.tsx which matches the expected Radix Popover shape. Will typecheck on next CI run.
 
-## 2026-03-31 — US-011: Update PlatformActionsSection to exclude promoted actions
-- Updated PlatformActionsSection._build() to pass exclude_promoted=True to registry.build_prompt_summary()
-- Parameter was already the default (True from US-007), but now explicit per acceptance criteria
-- Promoted actions no longer appear in the markdown catalog injected into the system prompt
-- Non-promoted actions still appear as before
-- Syntax validation passed (py_compile OK)
 
-## 2026-03-31 — US-012: Add enum to dispatcher schema for remaining actions
-- Added enum of valid action names to the `action` parameter in `to_dispatcher_schema()`
-- Enum is built dynamically from registered actions, respecting both exclude_promoted and exclude_admin filters
-- Sorted alphabetically for consistent output
-- When no actions match (empty registry), enum key is omitted entirely
-- Token impact: ~78 non-promoted action names x ~10 tokens = ~780 tokens — acceptable
-- Syntax validation passed (py_compile OK)
-- Tested: 5 scenarios (exclude both, exclude promoted only, exclude nothing, sorted order, empty registry)
+2026-04-10 — US-009 /settings/notifications page + settings tab link
+  - New frontend/components/settings/NotificationsSettingsTab.tsx: lists all 9 event types with label+description, each row has a destination Select (in_app/telegram/slack/webhook/silent) + enabled Switch; auto-saves on change via useUpdateNotificationPreferences (PUT bulk upsert). Loading/error/saving states shown via Loader2 and a Badge. Falls back to in_app+enabled for any event type missing from the API response so the UI always shows all 9 rows even before seeding.
+  - New frontend/app/settings/notifications/page.tsx: standalone route wrapping NotificationsSettingsTab inside MainLayout. usePageAPI('settings') preserves existing page-api registration. This route is what the NotificationBell footer "Settings" link already points to (wired in US-008).
+  - frontend/components/settings/SettingsPanel.tsx: added Notifications tab (Bell icon) between Channels and Voices so /settings lands users directly on the prefs tab. Matches "Accessible from the settings sidebar navigation" AC — the app uses tabs, not a sidebar, but this IS the settings navigation entry point.
+  - Optimistic UI: useUpdateNotificationPreferences already invalidates both notificationQueryKeys.preferences and notificationQueryKeys.all onSuccess (defined in US-008 hook), so the bell + settings refetch together.
+  - Switch is Radix-based; accepts checked + onCheckedChange. Select is Radix-based; accepts value + onValueChange. Both confirmed against frontend/components/ui/{switch,select}.tsx.
+  - Validation: tsc not runnable in this worktree (no node_modules). Type-safe against PreferenceRow from hooks/use-notifications-api.ts; no new imports from non-existent modules. Will typecheck on next CI run.
+  - Gotcha: AC says "sidebar" but settings is tab-based in this codebase. Added a Notifications tab to SettingsPanel so the entry point is discoverable from the existing navigation, and kept the standalone /settings/notifications route for the bell deep-link.
+
+2026-04-10 US-010 — End-to-end smoke test of notification pipeline
+  Added tests/integration/__init__.py + tests/integration/test_notification_pipeline.py.
+  Stateful FakeDB replays the SQL patterns emitted by NotificationDispatcher and
+  api.notifications (INSERT notifications, SELECT list/count, UPDATE read_at/dismissed_at,
+  existence probe). Test drives dispatch("heartbeat_complete") → unread-count → list →
+  mark_read → dismiss in one pytest function and asserts every transition.
+  Run: python3 -m pytest tests/integration/test_notification_pipeline.py (1 passed).
+  Gotcha: pytest must run from the worktree root, not from orchestrator/, so the sys.path
+  insert in the test file picks up orchestrator/ before `import api.notifications`.

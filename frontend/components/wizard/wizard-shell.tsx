@@ -271,7 +271,7 @@ export function WizardShell({ open, onClose, onComplete }: WizardShellProps) {
                       onChange={(domain) => setState(s => ({ ...s, domain }))}
                       onBack={() => setStep(1)}
                       onScan={handleStartScan}
-                      isScanning={startMutation.isPending || scanMutation.isPending}
+                      isScanning={startMutation.isLoading || scanMutation.isLoading}
                     />
                   </TabsContent>
 
@@ -305,10 +305,10 @@ export function WizardShell({ open, onClose, onComplete }: WizardShellProps) {
                         profile={state.profile}
                         scrape={null}
                         onSave={handleSaveProfile}
-                        isSaving={patchMutation.isPending}
+                        isSaving={patchMutation.isLoading}
                         onBack={() => setStep(4)}
                         onGeneratePlan={handleGeneratePlan}
-                        isGenerating={planMutation.isPending}
+                        isGenerating={planMutation.isLoading}
                       />
                     )}
                   </TabsContent>

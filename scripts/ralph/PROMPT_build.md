@@ -1,25 +1,22 @@
-# Build Mode
+# Build Mode — PRD-128 Unified Notification System
 
-Implement ONE task from the plan, validate, commit, exit.
+Implement ONE story from prd.json, validate, commit, exit.
+
+## HARD RULE — Worktree Lock
+
+**You are running inside the `automatos-NOTIFICATION` worktree at:**
+`/Users/gkavanagh/Development/Automatos-AI-Platform/automatos-NOTIFICATION`
+
+**NEVER `cd` out of this directory.** Do not touch `automatos-ai`, `automatos-skills`, `automatos-WORKSPACE`, or any other worktree. All reads, writes, greps, and git operations happen inside this worktree only. If you need a reference file, read it from this worktree — every path under `orchestrator/`, `frontend/`, `tests/`, `scripts/` already exists here because it is a git worktree of the same repo.
+
+If you catch yourself typing `cd /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai` — STOP. That is a bug. Use relative paths or the current worktree absolute path.
 
 ## Phase 0: Orient
 
-Study with subagents:
-- @CLAUDE.md (how to build/test)
-- @scripts/ralph/IMPLEMENTATION_PLAN.md (current state — tasks + key references + tool reference + quality bar)
-- @scripts/ralph/prd.json (acceptance criteria for each story)
-
-### Key References
-
-- **GOLD STANDARD SKILLS** (read BOTH before writing ANY skill):
-  - `/Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills/sentinel/SKILL.md` — monitoring/devops pattern
-  - `/Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills/scout/SKILL.md` — sales/outreach pattern
-- **Skills repo**: `/Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills/` — all skills live here (NOT in automatos-ai)
-- **Seed script**: `scripts/seed_agent_catalog.py` — parses SKILL.md frontmatter, populates DB
-- **Skill injection**: `orchestrator/modules/context/sections/skills.py` — how skill content becomes system prompt
-- **Platform tools**: `orchestrator/modules/tools/discovery/platform_actions.py` — all registered platform_* tools
-- **Workspace tools**: `orchestrator/modules/tools/discovery/workspace_actions.py` — all workspace_* tools
-- **Agent model**: `orchestrator/core/models/core.py` — Agent fields (persona, skills, model_config)
+Read these files from the CURRENT worktree:
+- `scripts/ralph/prd.json` — PRD-128 stories and acceptance criteria
+- `scripts/ralph/IMPLEMENTATION_PLAN.md` — task checklist (source of truth for what is done)
+- `scripts/ralph/progress.txt` — running log
 
 ### Check for completion
 
@@ -27,101 +24,79 @@ Study with subagents:
 grep -c "^\- \[ \]" scripts/ralph/IMPLEMENTATION_PLAN.md || echo 0
 ```
 
-- If 0: Run validation -> commit -> output **RALPH_COMPLETE** -> exit
-- If > 0: Continue to Phase 1
+- If 0: output **RALPH_COMPLETE** and exit
+- If > 0: continue to Phase 1
 
-## Phase 1: Implement
+## Phase 1: Implement ONE Story
 
-1. **Study the plan** — Choose the FIRST unchecked task from @scripts/ralph/IMPLEMENTATION_PLAN.md
-2. **Read prd.json** — Find the matching US-XXX story and follow its acceptance criteria exactly
-3. **Read reference skills** — ALWAYS read sentinel/SKILL.md and scout/SKILL.md before writing skills
-4. **Read existing skill** — Before rewriting a skill, read the current version to understand what exists
-5. **Implement** — ONE task only. Implement completely — no placeholders or stubs
-6. **Validate** — Check skill quality and format
+1. **Pick the first unchecked task** in `scripts/ralph/IMPLEMENTATION_PLAN.md`
+2. **Match it to a story** in `scripts/ralph/prd.json` (US-001 through US-010)
+3. **Read the acceptance criteria** — these are the contract. Implement every bullet.
+4. **Read relevant existing files** before editing (e.g. `orchestrator/main.py`, `orchestrator/core/auth/hybrid.py`, `orchestrator/services/heartbeat_service.py`, existing Alembic revisions under `orchestrator/alembic/versions/`, `frontend/components/layout/navbar.tsx`, etc.) — use relative paths.
+5. **Implement completely.** No TODOs, no stubs, no "will wire later".
+6. **Key project conventions:**
+   - NO `os.getenv()` outside `config.py` — import from `core.config` instead.
+   - All SQL via SQLAlchemy `text()` with parameter binding (no f-strings into SQL).
+   - API endpoints use `get_request_context_hybrid` for auth/workspace isolation.
+   - Frontend uses React Query v4 (`isLoading`, not `isPending`).
+   - Dispatcher must NOT call `db.commit()` — caller owns the transaction.
 
-### Skill Writing Rules (CRITICAL)
+## Phase 2: Validate
 
-- Skills live in `/Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills/{slug}/SKILL.md`
-- Frontmatter format: name, description, version, tags, category: agent-role, tools: [{name, description}]
-- Body MUST have: identity paragraph, numbered workflow with JSON tool call blocks, output format template, "What NOT To Do" section
-- Tool calls use ```json blocks with realistic parameters — copy the style from Sentinel
-- Every tool name MUST be a real Automatos tool (see IMPLEMENTATION_PLAN.md Tool Reference)
-- 60-100 lines per skill — dense, actionable, no filler
-- No references to external platforms (Cursor, OpenClaw, Qwen, etc.)
-- Agent identity should be Automatos-specific: "You are the X for the Automatos platform" or "You are the workspace's X"
-- Composio tools use: `composio_execute` with `action` and relevant app params
+Run whichever applies to the story you completed:
 
-### Validation
-
-For seed script changes (US-001):
 ```bash
-cd /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai && python3 scripts/seed_agent_catalog.py --dry-run 2>&1 | tail -5
+# Python syntax / import check
+python3 -c "import ast; ast.parse(open('<edited-file>').read())"
+
+# Alembic migration dry check (US-001 only)
+cd orchestrator && python3 -c "from alembic.config import Config; from alembic import command; cfg = Config('alembic.ini'); command.history(cfg)" 2>&1 | tail -5
+
+# Frontend typecheck (US-008, US-009 only)
+cd frontend && npx tsc --noEmit 2>&1 | tail -20
+
+# Python tests for the touched module (US-003, US-006, US-007, US-010)
+cd orchestrator && python3 -m pytest tests/<relevant_test_file> -x 2>&1 | tail -20
 ```
 
-For skill rewrites (US-002 through US-010):
+Only flag NEW errors your change introduced.
+
+## Phase 3: Update Plan & Progress
+
+In `scripts/ralph/IMPLEMENTATION_PLAN.md`:
+- Flip the completed task to `- [x]`
+- Note any discovered follow-ups
+
+In `scripts/ralph/progress.txt`:
+- Append a dated entry: story ID, what was built, files touched, any gotchas.
+
+Also in `prd.json`: set the completed story's `passes: true` and add a short `notes` string.
+
+## Phase 4: Commit & Exit
+
+Single repo commit inside THIS worktree only:
+
 ```bash
-# Check skills were written
-for slug in [LIST_FROM_STORY]; do
-  test -f /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills/$slug/SKILL.md && echo "OK: $slug" || echo "MISSING: $slug"
-done
-
-# Check frontmatter has tools: with name/description format
-for slug in [LIST_FROM_STORY]; do
-  grep -c "  - name:" /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills/$slug/SKILL.md && echo "OK: $slug has tools" || echo "BAD: $slug missing tool format"
-done
-
-# Check body has workflow section
-for slug in [LIST_FROM_STORY]; do
-  grep -c "## Workflow\|## workflow" /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills/$slug/SKILL.md && echo "OK: $slug" || echo "BAD: $slug missing workflow"
-done
+git add -A && git commit -m "feat(prd-128): US-XXX — <short description>"
 ```
 
-For final validation (US-011):
-```bash
-python3 scripts/seed_agent_catalog.py --dry-run 2>&1 | tail -5
-find /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills -name "SKILL.md" | wc -l
-```
+DO NOT push. DO NOT cd into another worktree. DO NOT commit to `automatos-ai` or `automatos-skills`.
 
-Note: Pre-existing errors may exist. Only check for NEW errors introduced by your changes.
+Then:
 
-## Phase 2: Update & Learn
-
-**Update scripts/ralph/IMPLEMENTATION_PLAN.md:**
-- Mark completed task `- [x] Completed`
-- Add any discovered bugs or issues
-
-**Update scripts/ralph/progress.txt:**
-- Log what was completed this iteration
-
-## Phase 3: Commit & Exit
-
-For skill rewrites, commit to BOTH repos:
-```bash
-# Commit skills to skills repo
-cd /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills && git add -A && git commit -m "feat(skills): [category] rewrite [N] skills to Automatos quality"
-
-# Commit plan updates to main repo
-cd /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai && git add -A && git commit -m "chore(skills): update plan — [description]"
-```
-
-For seed script changes (US-001), commit to main repo only:
-```bash
-cd /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai && git add -A && git commit -m "fix(skills): [description]"
-```
-
-Check remaining:
 ```bash
 grep -c "^\- \[ \]" scripts/ralph/IMPLEMENTATION_PLAN.md || echo 0
 ```
 
-- If > 0: Say "X tasks remaining" and EXIT
-- If = 0: Output **RALPH_COMPLETE**
+- If > 0: print "N tasks remaining" and exit
+- If 0: output **RALPH_COMPLETE**
 
-## Guardrails
+## Guardrails (highest priority)
 
-99999. Read sentinel/SKILL.md and scout/SKILL.md EVERY iteration before writing skills.
-999999. Every tool name must be a real Automatos platform/workspace/composio tool.
-9999999. Implement functionality completely. No placeholders or stubs. No generic workflows.
-99999999. Keep @scripts/ralph/IMPLEMENTATION_PLAN.md current with learnings.
-999999999. Skills go in the SKILLS REPO, not in automatos-ai.
-9999999999. ONE task per iteration. Validation MUST pass. Never output RALPH_COMPLETE if tasks remain.
+1. **Worktree lock** — Never cd out of `automatos-NOTIFICATION`. All work happens here.
+2. **One story per iteration.** Never touch US-002 while doing US-001.
+3. **Respect acceptance criteria verbatim** — don't improvise scope.
+4. **No placeholders / TODOs / stubs.** Implement completely or fail loudly.
+5. **No backwards-compat shims** — fix broken patterns cleanly (project rule from MEMORY.md).
+6. **Never push to remote.** Commit locally only.
+7. **Never delete `notification_service.py`** or `channel_connections` table — this PRD reuses them.

@@ -31,7 +31,7 @@ ONBOARDING_AGENTS = [
         "team": "Onboarding",
         "model_config": {
             "provider": "openrouter",
-            "model_id": "anthropic/claude-opus-4-20250514",
+            "model_id": "anthropic/claude-opus-4",
             "temperature": 0.7,
             "max_tokens": 8000,
         },
@@ -75,7 +75,7 @@ ONBOARDING_AGENTS = [
         "team": "Onboarding",
         "model_config": {
             "provider": "openrouter",
-            "model_id": "anthropic/claude-sonnet-4-20250514",
+            "model_id": "anthropic/claude-sonnet-4",
             "temperature": 0.5,
             "max_tokens": 8000,
         },
@@ -184,7 +184,7 @@ ONBOARDING_AGENTS = [
         "team": "Onboarding",
         "model_config": {
             "provider": "openrouter",
-            "model_id": "anthropic/claude-sonnet-4-20250514",
+            "model_id": "anthropic/claude-sonnet-4",
             "temperature": 0.3,
             "max_tokens": 8000,
         },
