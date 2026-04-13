@@ -22,7 +22,8 @@ export function SignInForm() {
     const [error, setError] = useState<string | null>(null)
     const [isLoading, setIsLoading] = useState(false)
     const [pendingSecondFactor, setPendingSecondFactor] = useState(false)
-    const [totpCode, setTotpCode] = useState('')
+    const [secondFactorStrategy, setSecondFactorStrategy] = useState<string>('totp')
+    const [verifyCode, setVerifyCode] = useState('')
     const router = useRouter()
 
     // Handle OAuth sign in
@@ -58,6 +59,18 @@ export function SignInForm() {
                 await setActive({ session: result.createdSessionId })
                 router.push('/')
             } else if (result.status === 'needs_second_factor') {
+                // Check what second factor strategies Clerk supports
+                const factors = result.supportedSecondFactors || []
+                const strategies = factors.map((f: any) => f.strategy)
+                console.log('Second factor strategies:', strategies)
+
+                if (strategies.includes('phone_code')) {
+                    await signIn.prepareSecondFactor({ strategy: 'phone_code' })
+                    setSecondFactorStrategy('phone_code')
+                } else if (strategies.includes('totp')) {
+                    setSecondFactorStrategy('totp')
+                }
+                // totp doesn't need prepare — user has authenticator app
                 setPendingSecondFactor(true)
             } else {
                 console.error('Sign-in status:', result.status)
@@ -82,15 +95,15 @@ export function SignInForm() {
 
         try {
             const result = await signIn.attemptSecondFactor({
-                strategy: 'totp',
-                code: totpCode,
+                strategy: secondFactorStrategy as any,
+                code: verifyCode,
             })
 
             if (result.status === 'complete') {
                 await setActive({ session: result.createdSessionId })
                 router.push('/')
             } else {
-                setError('Verification failed. Please try again.')
+                setError(`Verification returned status: ${result.status}`)
             }
         } catch (err: any) {
             const msg = err.errors?.[0]?.longMessage || err.errors?.[0]?.message
@@ -218,20 +231,22 @@ export function SignInForm() {
                     {pendingSecondFactor ? (
                         <form onSubmit={handleSecondFactor} className="space-y-4">
                             <p className="text-sm text-slate-400">
-                                Enter the verification code from your authenticator app.
+                                {secondFactorStrategy === 'phone_code'
+                                    ? 'Enter the verification code sent to your phone.'
+                                    : 'Enter the verification code from your authenticator app.'}
                             </p>
                             <div className="space-y-2">
-                                <Label htmlFor="totp" className="text-slate-300">Verification Code</Label>
+                                <Label htmlFor="verify-code" className="text-slate-300">Verification Code</Label>
                                 <div className="relative group">
                                     <Lock className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
                                     <Input
-                                        id="totp"
+                                        id="verify-code"
                                         type="text"
                                         inputMode="numeric"
                                         autoComplete="one-time-code"
                                         placeholder="000000"
-                                        value={totpCode}
-                                        onChange={(e) => setTotpCode(e.target.value)}
+                                        value={verifyCode}
+                                        onChange={(e) => setVerifyCode(e.target.value)}
                                         className="pl-9 bg-secondary/20 border-border/40 focus:border-primary/50 focus:bg-secondary/30 transition-all text-center text-lg tracking-widest"
                                         required
                                     />
@@ -250,7 +265,7 @@ export function SignInForm() {
                             </Button>
                             <button
                                 type="button"
-                                onClick={() => { setPendingSecondFactor(false); setTotpCode(''); setError(null) }}
+                                onClick={() => { setPendingSecondFactor(false); setVerifyCode(''); setError(null) }}
                                 className="w-full text-sm text-muted-foreground hover:text-white transition-colors"
                             >
                                 Back to sign in
