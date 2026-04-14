@@ -13,37 +13,35 @@ export function createMarketplaceTour(userId: string) {
     keyboardNavigation: true,
   })
 
+  // Step 1: About (centered)
   tour.addStep({
-    id: 'mp-overview',
+    id: 'mp-about',
     title: title('Community', 'Marketplace'),
     text: `
       <p class="text-gray-300 mb-2">
-        The fastest way to get productive. Browse pre-built agents, recipes,
-        integrations and models — install any of them into your workspace with one click.
-      </p>
-      <p class="text-gray-400 text-sm">
-        Anything you install here becomes available to every agent you create.
+        Pre-built agents, automation playbooks, integration tools, LLM models,
+        and capabilities — all installable with one click. This is the fastest
+        way to get your workspace productive.
       </p>
       ${stepProgress(1, TOTAL)}
     `,
-    beforeShowPromise: () => waitForElement('[data-tour="marketplace-stats"]'),
-    attachTo: { element: '[data-tour="marketplace-stats"]', on: 'bottom' },
-    buttons: [{ text: 'Next', action: tour.next }],
+    buttons: [
+      { text: 'Skip', classes: 'shepherd-button-secondary', action: () => tour.cancel() },
+      { text: 'Next', action: tour.next },
+    ],
   })
 
+  // Step 2: Tabs
   tour.addStep({
     id: 'mp-tabs',
     title: title('Browse by', 'Category'),
     text: `
-      <p class="text-gray-300 mb-2">
-        Five top tabs cover everything you can add to your workspace:
-      </p>
       ${tabList([
-        ['Applications', 'Tool integrations — Gmail, Slack, GitHub, Jira, HubSpot and 150+ more.'],
-        ['Agents', 'Ready-made personas (marketer, researcher, SDR, analyst) you can install and use immediately.'],
-        ['Recipes', 'Multi-step playbooks and workflows — automations you can drop into any agent.'],
-        ['LLMs', 'Model catalogue — pick which providers (OpenAI, Anthropic, DeepSeek, Qwen…) your agents can use.'],
-        ['Capabilities', 'Plugins and skills that extend an agent with new behaviours or tool packs.'],
+        ['Applications', 'Tool integrations — Gmail, Slack, GitHub, and 1,000+ more.'],
+        ['Agents', 'Ready-made personas you can install and customise.'],
+        ['Playbooks', 'Multi-step automation recipes for common workflows.'],
+        ['LLMs', 'Model catalogue with pricing, context windows, and capabilities.'],
+        ['Capabilities', 'Plugins and skills that extend what agents can do.'],
       ])}
       ${stepProgress(2, TOTAL)}
     `,
@@ -55,39 +53,41 @@ export function createMarketplaceTour(userId: string) {
     ],
   })
 
+  // Step 3: Featured
   tour.addStep({
-    id: 'mp-search',
-    title: title('Search', 'Anything'),
+    id: 'mp-featured',
+    title: title('Featured &', 'Recommended'),
     text: `
       <p class="text-gray-300 mb-2">
-        Looking for a specific tool or agent? Filter by name, category, or tag.
-        Search works across whichever top tab you're in.
+        The featured section highlights curated picks. Below that,
+        <strong>Recommended for You</strong> suggests items based on your
+        workspace setup. Browse, search, or filter within any tab.
       </p>
       ${stepProgress(3, TOTAL)}
     `,
-    beforeShowPromise: () => waitForElement('[data-tour="marketplace-search"]'),
-    attachTo: { element: '[data-tour="marketplace-search"]', on: 'bottom' },
+    beforeShowPromise: () => waitForElement('[data-tour="marketplace-content"]'),
+    attachTo: { element: '[data-tour="marketplace-content"]', on: 'top' },
     buttons: [
       { text: 'Back', classes: 'shepherd-button-secondary', action: tour.back },
       { text: 'Next', action: tour.next },
     ],
   })
 
+  // Step 4: Install
   tour.addStep({
     id: 'mp-install',
     title: title('One-Click', 'Install'),
     text: `
       <p class="text-gray-300 mb-2">
-        Every card has an <strong>Install</strong> or <strong>Add</strong> button. Installed items
-        show up in the matching workspace page — Agents, Tools, Playbooks, or Settings → Orchestrator.
+        Click <strong>Add to Workspace</strong> and it's yours.
       </p>
       <p class="text-gray-400 text-sm">
-        You can remove anything later from its home page — installs are never permanent.
+        <strong>Important:</strong> LLMs and Tools must be added from the
+        Marketplace before agents can use them. Installed items appear in
+        their respective pages — Agents, Tools, Playbooks, or Settings.
       </p>
       ${stepProgress(4, TOTAL)}
     `,
-    beforeShowPromise: () => waitForElement('[data-tour="marketplace-content"]'),
-    attachTo: { element: '[data-tour="marketplace-content"]', on: 'top' },
     buttons: [
       { text: 'Back', classes: 'shepherd-button-secondary', action: tour.back },
       { text: 'Got it!', action: tour.complete },

@@ -36,6 +36,7 @@ export function WorkspaceViewToggle({
 }: WorkspaceViewToggleProps) {
   return (
     <ToggleGroup
+      data-tour="workspace-tabs"
       type="single"
       value={view}
       onValueChange={(next) => {

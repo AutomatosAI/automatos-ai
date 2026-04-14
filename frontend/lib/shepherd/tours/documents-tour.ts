@@ -28,9 +28,10 @@ export function createDocumentsTour(userId: string) {
       </p>
       ${stepProgress(1, TOTAL)}
     `,
-    beforeShowPromise: () => waitForElement('[data-tour="documents-page-header"]'),
-    attachTo: { element: '[data-tour="documents-page-header"]', on: 'bottom' },
-    buttons: [{ text: 'Next', action: tour.next }],
+    buttons: [
+      { text: 'Skip', classes: 'shepherd-button-secondary', action: () => tour.cancel() },
+      { text: 'Next', action: tour.next },
+    ],
   })
 
   // Step 2 — Top-level tabs walkthrough
@@ -72,8 +73,7 @@ export function createDocumentsTour(userId: string) {
       </p>
       ${stepProgress(3, TOTAL)}
     `,
-    beforeShowPromise: () => waitForElement('[data-tour="documents-upload-btn"]'),
-    attachTo: { element: '[data-tour="documents-upload-btn"]', on: 'bottom' },
+    // Centered — upload button has no stable data-tour target
     buttons: [
       { text: 'Back', classes: 'shepherd-button-secondary', action: tour.back },
       { text: 'Next', action: tour.next },

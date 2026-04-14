@@ -29,7 +29,10 @@ export function createToolsTour(userId: string) {
     `,
     beforeShowPromise: () => waitForElement('[data-tour="tools-page-header"]'),
     attachTo: { element: '[data-tour="tools-page-header"]', on: 'bottom' },
-    buttons: [{ text: 'Next', action: tour.next }],
+    buttons: [
+      { text: 'Skip', classes: 'shepherd-button-secondary', action: () => tour.cancel() },
+      { text: 'Next', action: tour.next },
+    ],
   })
 
   tour.addStep({
