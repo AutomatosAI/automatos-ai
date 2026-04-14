@@ -32,7 +32,7 @@ import { useSubmitBugReport, type BugReportRequest } from '@/hooks/use-bug-repor
 import { useChat } from '@/lib/chat/hooks'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 
 // =============================================================================
 // Types
@@ -65,8 +65,8 @@ const PAGE_LABELS: Record<string, string> = {
 // Mini Auto Chat Tab
 // =============================================================================
 
-function AutoChatTab({ currentPage }: { currentPage: string }) {
-  const chatContainerId = 'auto-widget-chat'
+function AutoChatTab({ currentPage, onClose }: { currentPage: string; onClose?: () => void }) {
+  const router = useRouter()
   const inputRef = useRef<HTMLInputElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [inputValue, setInputValue] = useState('')
@@ -80,6 +80,17 @@ function AutoChatTab({ currentPage }: { currentPage: string }) {
     id: 'auto-widget',
     selectedAgentId: undefined, // Routes to Auto (default agent)
   })
+
+  const handleOpenFullChat = () => {
+    // Stash widget messages so the full chat page can pick them up
+    if (messages.length > 0) {
+      try {
+        sessionStorage.setItem('auto-widget-handoff', JSON.stringify(messages))
+      } catch { /* quota exceeded — navigate anyway */ }
+    }
+    onClose?.()
+    router.push('/chat')
+  }
 
   // Auto-scroll on new messages
   useEffect(() => {
@@ -162,16 +173,16 @@ function AutoChatTab({ currentPage }: { currentPage: string }) {
         )}
       </div>
 
-      {/* Open in full chat link */}
+      {/* Open in full chat — carries conversation context */}
       {messages.length > 0 && (
         <div className="px-3 pb-1">
-          <Link
-            href="/chat"
+          <button
+            onClick={handleOpenFullChat}
             className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors"
           >
             <ArrowUpRight className="w-3 h-3" />
             Open in full chat
-          </Link>
+          </button>
         </div>
       )}
 
@@ -343,7 +354,7 @@ export function AutoWidget({
 
   const positionClasses = {
     'bottom-right': 'bottom-3 right-3 md:bottom-4 md:right-4',
-    'bottom-left': 'bottom-3 left-3 md:bottom-4 md:left-4',
+    'bottom-left': 'bottom-3 left-3 md:bottom-4 md:left-20',
   }
 
   return (
@@ -396,7 +407,7 @@ export function AutoWidget({
 
               {/* ---- Auto Chat Tab ---- */}
               <TabsContent value="auto" className="mt-0">
-                <AutoChatTab currentPage={currentPage} />
+                <AutoChatTab currentPage={currentPage} onClose={() => setIsOpen(false)} />
               </TabsContent>
 
               {/* ---- Bug Report Tab ---- */}

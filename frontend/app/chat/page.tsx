@@ -41,6 +41,21 @@ export default function ChatPage() {
     setIsHistoryOpen(false)
   }
 
+  // Pick up conversation context handed off from the Auto widget
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem('auto-widget-handoff')
+      if (raw) {
+        sessionStorage.removeItem('auto-widget-handoff')
+        const handoffMessages: ChatMessage[] = JSON.parse(raw)
+        if (handoffMessages.length > 0) {
+          setCurrentMessages(handoffMessages)
+          setChatInstance((v) => v + 1)
+        }
+      }
+    } catch { /* corrupt data — start fresh */ }
+  }, [])
+
   // Toggle chat history from main Automatos sidebar (chat-only menu item)
   useEffect(() => {
     const handler = () => setIsHistoryOpen((v) => !v)
