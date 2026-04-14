@@ -1,7 +1,7 @@
 import Shepherd from 'shepherd.js'
 import { shepherdTheme } from '../shepherd-theme'
 import { markTourComplete, markTourSkipped } from '../tour-storage'
-import { title, waitForElement, stepProgress } from '../tour-utils'
+import { title, waitForElement, stepProgress, tabList } from '../tour-utils'
 
 const TOUR_ID = 'chat'
 const TOTAL = 4
@@ -82,11 +82,14 @@ export function createChatTour(userId: string) {
     title: title('Your', 'Toolbar'),
     text: `
       <p class="text-gray-300 mb-2">
-        Up here you'll find <strong>Docs</strong> (documentation &amp; API reference),
-        <strong>Theme</strong> toggle (light/dark), <strong>Alerts</strong> (notifications),
-        and your <strong>Profile</strong> menu — which is also where you'll find
-        <em>Tour this page</em> on every page.
+        Your toolbar icons, left to right:
       </p>
+      ${tabList([
+        ['Docs (book icon)', 'Opens documentation and API reference in a new tab — everything you need to build with the platform.'],
+        ['Theme (monitor icon)', 'Switch between light and dark mode instantly.'],
+        ['Alerts (bell icon)', 'Notifications from your agents, missions, and system events — check here for anything that needs your attention.'],
+        ['Profile (your avatar)', 'Account settings, workspace management, and Tour this page — click your avatar on any page to relaunch that page\'s tour.'],
+      ])}
       ${stepProgress(4, TOTAL)}
     `,
     beforeShowPromise: () => waitForElement('[data-tour="header-actions"]'),
