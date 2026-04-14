@@ -688,10 +688,10 @@ Conversation turn: {conversation_length}
 ## Classification levels:
 
 - **atom**: Greetings, chitchat, opinions, simple factual questions, jokes, acknowledgements. NO tools needed. This is the most common category — when in doubt, choose atom.
-- **molecule**: Needs ONE tool or action. "Send email", "search docs", "check Jira", "list my agents".
+- **molecule**: Needs 1-3 tools or actions. "Send email", "search docs", "check my emails and calendar", "list my agents". Even if multiple tools are needed, if it's a straightforward fetch-and-display, it's molecule.
 - **cell**: Needs tools + memory/context. "Reply to that email we discussed", "update the report from last week".
-- **organ**: Multiple agents coordinating. "Research this bug, plan a fix, open a PR".
-- **organism**: Enterprise multi-step pipeline. Rare.
+- **organ**: Needs 4+ agents with different specializations coordinating on a multi-phase plan. "Research competitors, write a report, create a presentation, and email it to the team".
+- **organism**: Enterprise multi-step pipeline with verification and feedback loops. Very rare.
 
 ## Examples:
 
@@ -702,9 +702,14 @@ Conversation turn: {conversation_length}
 - "Send an email to John" → molecule (email tool)
 - "What agents do I have?" → molecule (platform query)
 - "Search my docs for the Q4 report" → molecule (search tool)
+- "Check my emails and calendar for today" → molecule (2 tools, but simple fetch)
+- "What meetings do I have and any urgent emails?" → molecule (2 tools, straightforward)
+- "Create an agent with these 3 skills" → molecule (platform tools, one workflow)
 - "Remember last week's meeting? Update those notes" → cell (memory + action)
+- "Research this topic, write a blog post, then publish it" → organ (multi-phase, different skills)
 
 **Default bias: atom.** Most messages are simpler than they look.
+**Multi-tool ≠ complex.** Using 2-3 tools in parallel is molecule, not organ. Organ requires different agents with different specializations working in phases.
 
 Return ONLY valid JSON:
 {{
@@ -716,7 +721,7 @@ Return ONLY valid JSON:
   "reasoning": "one sentence"
 }}
 
-action mapping: "respond" for atom, "delegate" for molecule/cell, "mission" for organ/organism.
+action mapping: "respond" for atom, "delegate" for molecule/cell/organ, "mission" ONLY for organism (very rare, needs 4+ agents in phases).
 tool_hints: short domain keywords like "email", "github", "jira", "code", "database", "platform". Use "platform" when the user wants to create/list/manage agents, skills, plugins, recipes, or workspace resources. Empty for atom."""
 
         try:
