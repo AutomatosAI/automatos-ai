@@ -33,7 +33,6 @@ import { PremiumIcon } from '@/components/shared'
 
 // API hooks
 import { useCreateAgent } from '@/hooks/use-agent-api'
-import { useTourTabBridge } from '@/hooks/use-tour-tab-bridge'
 import { useModels, useUpdateAgentModelConfig } from '@/hooks/use-model-api'
 import { useSystemIcons } from '@/hooks/use-system-config-api'
 import { ModelSelector } from './model-selector'
@@ -109,9 +108,6 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
   const { data: models = [], isLoading: modelsLoading } = useModels()
   const updateModelConfigMutation = useUpdateAgentModelConfig()
   const { data: iconMappings = {} } = useSystemIcons()
-
-  // Allow Shepherd tour to drive which tab is active
-  useTourTabBridge(setStep)
 
   // Fetch workspace-enabled plugins when modal opens
   useEffect(() => {
