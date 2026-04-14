@@ -754,7 +754,10 @@ export function ToolsDashboard() {
             {/* Enabled Tools Management */}
             <div className="space-y-4">
               <h3 className="text-xl font-semibold">Applications</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <div className={viewMode === 'grid'
+                ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6'
+                : 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3'
+              }>
                 <AnimatePresence>
                   {enabledTools.map((tool, index) => (
                       <ToolCard
@@ -926,62 +929,49 @@ function ToolCard({
   const isConnected = tool?.isInstalled
 
   if (viewMode === 'list') {
-    // Compact list view
+    // Compact list card — matches agent roster list style
     return (
       <motion.div
-        initial={{ opacity: 0, y: 20 }}
+        initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: 20 }}
-        transition={{ delay: index * 0.05 }}
+        exit={{ opacity: 0, y: 10 }}
+        transition={{ delay: index * 0.03 }}
       >
-        <Card className="glass-card hover:border-primary/20 transition-all">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3 justify-between">
-              <div className="flex items-center gap-3 flex-1 min-w-0">
-                <ToolLogo
-                  logo={tool?.logo}
-                  name={tool?.name}
-                  size={40}
-                  fallbackIcon={tool?.icon}
-                  showBackground={true}
-                />
-                <div className="flex-1 min-w-0">
-                  <h3 className="font-semibold truncate">{tool?.name}</h3>
-                  <Badge variant="outline" className="mt-1 capitalize text-xs">
-                    {tool?.category || 'Uncategorized'}
-                  </Badge>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
+        <Card className="glass-card hover:border-primary/20 transition-all h-full">
+          <CardContent className="p-3 flex items-center gap-3 h-full">
+            <ToolLogo
+              logo={tool?.logo}
+              name={tool?.name}
+              size={36}
+              fallbackIcon={tool?.icon}
+              showBackground={true}
+            />
+            <div className="flex-1 min-w-0">
+              <h3 className="font-semibold text-sm truncate">{tool?.name}</h3>
+              <p className="text-xs text-muted-foreground truncate">
+                {tool?.category || tool?.provider || 'Integration'}
+              </p>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <Button variant="outline" size="sm" onClick={onDetails} className="h-7 text-xs px-2">
+                View
+              </Button>
+              {isConnected ? (
                 <Button
-                  variant="outline"
                   size="sm"
-                  onClick={onDetails}
+                  variant="ghost"
+                  className="h-7 text-xs px-2 text-[hsl(var(--info))] border border-[hsl(var(--info))]/30 hover:bg-[hsl(var(--info))]/10"
+                  onClick={onUninstall}
                 >
-                  View
+                  <Settings className="w-3 h-3 mr-1" />
+                  Manage
                 </Button>
-                {isConnected ? (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="text-[hsl(var(--info))] border border-[hsl(var(--info))]/30 hover:bg-[hsl(var(--info))]/10"
-                    onClick={onUninstall} // Mapped to Manage
-                  >
-                    <Settings className="w-4 h-4 mr-2" />
-                    Manage
-                  </Button>
-                ) : (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={onInstall} // Mapped to Connect
-                  >
-                    <ExternalLink className="w-4 h-4 mr-2" />
-                    Connect
-                  </Button>
-                )}
-              </div>
+              ) : (
+                <Button size="sm" variant="outline" onClick={onInstall} className="h-7 text-xs px-2">
+                  <ExternalLink className="w-3 h-3 mr-1" />
+                  Connect
+                </Button>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -1001,7 +991,7 @@ function ToolCard({
           ? 'border-[hsl(var(--success))]/30 hover:border-[hsl(var(--success))]/50'
           : 'hover:border-primary/20'
       }`}>
-        <CardContent className="p-5 space-y-4">
+        <CardContent className="p-5 flex flex-col flex-1">
           {/* Header row: logo + name + category */}
           <div className="flex items-center gap-3">
             <ToolLogo
@@ -1012,7 +1002,7 @@ function ToolCard({
               showBackground={true}
             />
             <div className="min-w-0 flex-1">
-              <h3 className="font-semibold text-sm leading-tight">{tool?.name}</h3>
+              <h3 className="font-semibold text-sm leading-tight truncate">{tool?.name}</h3>
               <Badge variant="outline" className="mt-1 capitalize text-[10px] h-5">
                 {tool?.category || tool?.provider || 'Integration'}
               </Badge>
@@ -1025,7 +1015,7 @@ function ToolCard({
           </div>
 
           {/* Stats row */}
-          <div className="flex items-center gap-4 text-xs text-muted-foreground">
+          <div className="flex items-center gap-4 text-xs text-muted-foreground mt-4">
             <div className="flex items-center gap-1">
               <Wrench className="w-3 h-3" />
               <span>{typeof toolsCount === 'number' ? toolsCount : 0} Tools</span>
@@ -1037,8 +1027,8 @@ function ToolCard({
             </div>
           </div>
 
-          {/* Action buttons */}
-          <div className="flex items-center gap-2 pt-1">
+          {/* Action buttons — pushed to bottom */}
+          <div className="flex items-center gap-2 pt-4 mt-auto">
             <Button variant="outline" size="sm" onClick={onDetails} className="flex-1 h-8">
               View
             </Button>
