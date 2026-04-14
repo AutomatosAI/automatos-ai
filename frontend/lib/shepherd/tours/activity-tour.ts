@@ -4,7 +4,7 @@ import { markTourComplete, markTourSkipped } from '../tour-storage'
 import { title, waitForElement, stepProgress, tabList } from '../tour-utils'
 
 const TOUR_ID = 'activity'
-const TOTAL = 4
+const TOTAL = 2
 
 export function createActivityTour(userId: string) {
   const tour = new Shepherd.Tour({
@@ -13,81 +13,41 @@ export function createActivityTour(userId: string) {
     keyboardNavigation: true,
   })
 
+  // Step 1: About (centered)
   tour.addStep({
-    id: 'act-overview',
+    id: 'act-about',
     title: title('Command', 'Centre'),
     text: `
       <p class="text-gray-300 mb-2">
-        A single pane of glass over your whole AI workforce. Every chat, scheduled task,
-        running mission and completed report flows through this page, so you always know
-        what's happening and what needs you.
+        A single pane of glass over your whole AI workforce. Every chat,
+        scheduled task, running mission and completed report flows through
+        this page — so you always know what's happening.
       </p>
       ${stepProgress(1, TOTAL)}
     `,
-    beforeShowPromise: () => waitForElement('[data-tour="activity-page-header"]'),
-    attachTo: { element: '[data-tour="activity-page-header"]', on: 'bottom' },
     buttons: [
       { text: 'Skip', classes: 'shepherd-button-secondary', action: () => tour.cancel() },
       { text: 'Next', action: tour.next },
     ],
   })
 
-  tour.addStep({
-    id: 'act-stats',
-    title: title('Live', 'Stats'),
-    text: `
-      <p class="text-gray-300 mb-2">
-        Real-time counters at the top — what's working right now, connected channels,
-        completions today, and anything that needs your attention. Click any tile
-        to jump straight to a filtered view.
-      </p>
-      ${stepProgress(2, TOTAL)}
-    `,
-    beforeShowPromise: () => waitForElement('[data-tour="activity-stats"]'),
-    attachTo: { element: '[data-tour="activity-stats"]', on: 'bottom' },
-    buttons: [
-      { text: 'Back', classes: 'shepherd-button-secondary', action: tour.back },
-      { text: 'Next', action: tour.next },
-    ],
-  })
-
+  // Step 2: Tabs (attached to tab bar)
   tour.addStep({
     id: 'act-tabs',
-    title: title('Six', 'Activity Views'),
+    title: title('Activity', 'Views'),
     text: `
-      <p class="text-gray-300 mb-2">
-        Switch between different ways of looking at the same workforce:
-      </p>
       ${tabList([
         ['Summary', 'Dashboard of widgets — KPIs, recent reports, alerts, completions.'],
-        ['Board', 'Kanban board of running tasks and executions, grouped by status.'],
-        ['Calendar', 'Scheduled runs, routines and mission deadlines on a calendar.'],
-        ['Memory', 'What your agents remember — long-term memory, daily logs, context.'],
+        ['Board', 'Kanban board of running tasks, grouped by status.'],
+        ['Calendar', 'Scheduled runs, routines and mission deadlines.'],
+        ['Memory', 'What your agents remember — long-term memory and context.'],
         ['Missions', 'Multi-step objectives agents are working through.'],
-        ['Blog', 'Chronological event log of everything that happened in the workspace.'],
+        ['Blog', 'Chronological event log of everything in the workspace.'],
       ])}
-      ${stepProgress(3, TOTAL)}
+      ${stepProgress(2, TOTAL)}
     `,
     beforeShowPromise: () => waitForElement('[data-tour="activity-tabs"]'),
     attachTo: { element: '[data-tour="activity-tabs"]', on: 'bottom' },
-    buttons: [
-      { text: 'Back', classes: 'shepherd-button-secondary', action: tour.back },
-      { text: 'Next', action: tour.next },
-    ],
-  })
-
-  tour.addStep({
-    id: 'act-content',
-    title: title('Drill', 'Into Anything'),
-    text: `
-      <p class="text-gray-300 mb-2">
-        Whichever view you pick, every item is clickable. Open a report to grade it,
-        open a mission to see progress, open a memory entry to inspect what the
-        agent learned.
-      </p>
-      ${stepProgress(4, TOTAL)}
-    `,
-    // Centered — no specific attach target needed for final step
     buttons: [
       { text: 'Back', classes: 'shepherd-button-secondary', action: tour.back },
       { text: 'Got it!', action: tour.complete },
