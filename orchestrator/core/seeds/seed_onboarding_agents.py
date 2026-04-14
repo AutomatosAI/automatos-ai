@@ -131,7 +131,7 @@ ONBOARDING_AGENTS = [
         "team": "Onboarding",
         "model_config": {
             "provider": "openrouter",
-            "model_id": "openai/gpt-4.1",
+            "model_id": "anthropic/claude-sonnet-4",
             "temperature": 0.7,
             "max_tokens": 4000,
         },

@@ -1,15 +1,18 @@
 """
-Verification Service — PRD-82A Sequential Mission Coordinator
-==============================================================
+Verification Service — Advisory Review (no rejection)
+=====================================================
 
-Two-stage task output verification:
-  1. Deterministic checks (free, fast) — short-circuit on must_pass failure
-  2. Cross-model LLM judge — different model family than executor
+Two-stage task output review:
+  1. Deterministic checks (free, fast) — structural quality signals
+  2. Cross-model LLM reviewer — scores + actionable suggestions
 
-Verdicts: pass | fail | partial
+ALL tasks proceed to VERIFIED regardless of scores. Verification is
+advisory only — feedback is stored in task.output_metadata["review_feedback"]
+for downstream consumers (synthesis tasks, reports, humans) to incorporate.
+Tasks are NEVER rejected or retried based on verification.
 
 Source: PRD-103 (Verification Quality)
-        PRD-82A Section 5 (cross-model principle), Section 11 (retry guardrails)
+        PRD-82A Section 5 (cross-model principle)
 """
 
 import hashlib
@@ -52,6 +55,7 @@ class VerificationResult:
     confidence: float = 1.0
     deterministic_passed: bool = True
     deterministic_failures: List[str] = field(default_factory=list)
+    suggestions: List[str] = field(default_factory=list)
     tokens_used: int = 0
 
 
@@ -82,7 +86,7 @@ class ConsistencyResult:
 
 def _parse_verifier_model_mapping() -> Dict[str, str]:
     """Parse the COORDINATOR_VERIFIER_MODEL_MAPPING config string into a dict."""
-    raw = Config.COORDINATOR_VERIFIER_MODEL_MAPPING
+    raw = Config().COORDINATOR_VERIFIER_MODEL_MAPPING
     mapping: Dict[str, str] = {}
     if not raw:
         return mapping
@@ -101,7 +105,7 @@ def _select_verifier_model(executor_model: Optional[str]) -> str:
     Detection: look for family keywords in the executor model string.
     Falls back to COORDINATOR_VERIFIER_FALLBACK_MODEL.
     """
-    fallback = Config.COORDINATOR_VERIFIER_FALLBACK_MODEL
+    fallback = Config().COORDINATOR_VERIFIER_FALLBACK_MODEL
     if not executor_model:
         return fallback
 
@@ -141,14 +145,17 @@ def _select_verifier_model(executor_model: Optional[str]) -> str:
 # ---------------------------------------------------------------------------
 
 _VERIFIER_SYSTEM_PROMPT = """\
-You are a verification judge for an AI agent platform. Your job is to evaluate \
-whether a task's output meets its success criteria.
+You are a quality reviewer for an AI agent platform. Your job is to review \
+a task's output and provide constructive feedback — what's good, what could \
+be improved, and specific suggestions for improvement.
 
 Rules:
 - Score each dimension on a scale of 0.0 to 1.0.
 - Be objective: shorter outputs are not worse if they meet criteria; \
 longer outputs are not better if they don't.
 - Use absolute scoring, not relative comparison.
+- Your feedback is ADVISORY ONLY — it will NOT reject or retry the task.
+- Focus on actionable suggestions: "add X", "clarify Y", "fix Z".
 - Return ONLY a single JSON object (no markdown, no explanation).
 """
 
@@ -258,7 +265,8 @@ Return ONLY a JSON object with this exact structure:
   "accuracy": 0.0-1.0,
   "format_compliance": 0.0-1.0,
   "confidence": 0.0-1.0,
-  "reasoning": "Brief explanation of your assessment"
+  "reasoning": "Brief assessment of quality",
+  "suggestions": ["Specific actionable improvement 1", "Improvement 2"]
 }}
 """
 
@@ -492,6 +500,9 @@ class VerificationService:
                 confidence = max(0.0, min(1.0, float(confidence)))
 
                 reasoning = str(raw.get("reasoning", ""))
+                suggestions = raw.get("suggestions", [])
+                if not isinstance(suggestions, list):
+                    suggestions = []
 
                 # Extract token usage from response if available
                 tokens_used = 0
@@ -545,6 +556,7 @@ class VerificationService:
                     confidence=confidence,
                     deterministic_passed=deterministic_result.passed,
                     deterministic_failures=deterministic_failures,
+                    suggestions=suggestions,
                     tokens_used=tokens_used,
                 )
 

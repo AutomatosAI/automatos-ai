@@ -306,6 +306,30 @@ async def _boot_phase_1_core():
     except Exception as e:
         logger.warning(f"Onboarding agent seed: {e}")
 
+    # Seed system_settings (coordination, knowledge_graph, llm_cost_audit, etc.)
+    # Idempotent — only creates missing keys, updates defaults on existing.
+    try:
+        from core.seeds.seed_system_settings import seed_system_settings
+        with get_db_session() as db:
+            created, updated = seed_system_settings(db)
+            if created or updated:
+                logger.info(f"System settings seeded: {created} created, {updated} updated")
+    except Exception as e:
+        logger.warning(f"System settings seed: {e}")
+
+    # Refresh platform-management skill for all existing Auto agents.
+    # Ensures edits to platform-management-skill.md propagate on every deploy.
+    try:
+        from core.seeds.seed_auto_agent import seed_auto_agent
+        from core.models.workspaces import Workspace
+        with get_db_session() as db:
+            workspace_ids = [w.id for w in db.query(Workspace.id).all()]
+            for ws_id in workspace_ids:
+                seed_auto_agent(db, ws_id)
+            logger.info(f"Auto agent + platform-management skill refreshed for {len(workspace_ids)} workspace(s)")
+    except Exception as e:
+        logger.warning(f"Auto agent skill refresh: {e}")
+
 
 def _load_cto_soul() -> str:
     """Load the CTO soul document for Auto agent persona."""
@@ -354,6 +378,43 @@ async def _schema_migration():
             logger.info("Auto agent schema migration completed (public_id + slug fix)")
     except Exception as e:
         logger.error("Auto agent schema migration failed: %s", e, exc_info=True)
+
+    # CRITICAL: Chat workspace isolation — add workspace_id to chats table
+    try:
+        from sqlalchemy import text as _tc
+        from core.database.database import engine as _engine_c
+        with _engine_c.connect() as conn:
+            # 1. Add column
+            conn.execute(_tc(
+                "ALTER TABLE chats ADD COLUMN IF NOT EXISTS "
+                "workspace_id UUID REFERENCES workspaces(id) ON DELETE CASCADE"
+            ))
+            # 2. Backfill from messages table (each chat's earliest message has workspace_id)
+            result = conn.execute(_tc("""
+                UPDATE chats
+                SET workspace_id = sub.ws
+                FROM (
+                    SELECT DISTINCT ON (chat_id) chat_id, workspace_id AS ws
+                    FROM messages
+                    WHERE workspace_id IS NOT NULL
+                    ORDER BY chat_id, created_at ASC
+                ) sub
+                WHERE chats.id = sub.chat_id
+                  AND chats.workspace_id IS NULL
+            """))
+            backfilled = result.rowcount
+            # 3. Index for workspace+user queries
+            conn.execute(_tc(
+                "CREATE INDEX IF NOT EXISTS ix_chats_workspace_user "
+                "ON chats (workspace_id, user_id)"
+            ))
+            conn.commit()
+            if backfilled:
+                logger.info("Chat workspace isolation: backfilled %d chats", backfilled)
+            else:
+                logger.info("Chat workspace isolation: column present, no backfill needed")
+    except Exception as e:
+        logger.error("Chat workspace isolation migration failed: %s", e, exc_info=True)
 
     # Seed Auto agents for existing workspaces
     try:

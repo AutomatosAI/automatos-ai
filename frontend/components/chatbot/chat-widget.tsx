@@ -5,12 +5,15 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   X,
-  HelpCircle,
-  BookOpen,
+  Send,
+  Bot,
   CheckCircle2,
   AlertCircle,
   ImageIcon,
   Trash2,
+  Bug,
+  Loader2,
+  ArrowUpRight,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -26,102 +29,217 @@ import {
 } from '@/components/ui/select'
 import { useUser } from '@clerk/nextjs'
 import { useSubmitBugReport, type BugReportRequest } from '@/hooks/use-bug-report-api'
-
-// =============================================================================
-// US-006: Per-page help content
-// =============================================================================
-
-interface HelpItem {
-  title: string
-  description: string
-  link?: string
-}
-
-const PAGE_HELP_CONTENT: Record<string, HelpItem[]> = {
-  dashboard: [
-    { title: 'System Overview', description: 'View real-time health, active agents, and recent workflow activity.' },
-    { title: 'Quick Actions', description: 'Use the cards to jump to agents, workflows, or documents.' },
-    { title: 'Performance Metrics', description: 'Monitor response times, throughput, and error rates from the analytics panel.' },
-  ],
-  agents: [
-    { title: 'Create an Agent', description: 'Click "New Agent" to configure a custom AI agent with specific skills and tools.' },
-    { title: 'Assign Tools', description: 'Connect Composio integrations (Slack, Gmail, Jira, etc.) to extend agent capabilities.', link: '/tools' },
-    { title: 'Monitor Performance', description: 'Track each agent\'s success rate, latency, and task throughput on their detail page.' },
-  ],
-  documents: [
-    { title: 'Upload Documents', description: 'Drag and drop files to add them to the RAG knowledge base for agent retrieval.' },
-    { title: 'Cloud Sync', description: 'Connect Google Drive or S3 to automatically sync documents.', link: '/documents?tab=cloud' },
-    { title: 'Search & Query', description: 'Use natural language to search across all uploaded documents.' },
-  ],
-  workflows: [
-    { title: 'Build a Workflow', description: 'Use the visual editor to chain agents, tools, and conditions into automated pipelines.' },
-    { title: 'Templates', description: 'Start from a pre-built template to accelerate workflow creation.' },
-    { title: 'Execution History', description: 'Review past runs, inspect step-by-step logs, and debug failures.' },
-  ],
-  tools: [
-    { title: 'Browse Integrations', description: 'Explore 500+ Composio-powered tools across productivity, dev, and communication apps.' },
-    { title: 'Connect an App', description: 'Click "Connect" on any tool to authenticate via OAuth and enable it for your agents.' },
-    { title: 'Manage Permissions', description: 'Control which agents can access specific tools and actions.' },
-  ],
-  analytics: [
-    { title: 'Performance Trends', description: 'Track agent and workflow performance over time with interactive charts.' },
-    { title: 'Usage Insights', description: 'See which agents and tools are used most frequently.' },
-    { title: 'Export Reports', description: 'Download analytics data as CSV or PDF for offline analysis.' },
-  ],
-  context: [
-    { title: 'Context Engineering', description: 'Fine-tune how agents retrieve and prioritize information from your knowledge base.' },
-    { title: 'Similarity Settings', description: 'Adjust RAG thresholds to control retrieval precision vs. recall.' },
-    { title: 'Memory Management', description: 'View and manage agent memory across short-term and long-term stores.' },
-  ],
-  playbooks: [
-    { title: 'Create Playbooks', description: 'Define step-by-step procedures that agents follow for recurring tasks.' },
-    { title: 'Version Control', description: 'Track changes to playbooks and roll back to previous versions.' },
-    { title: 'Share & Reuse', description: 'Publish playbooks for your team or import community playbooks.' },
-  ],
-  chat: [
-    { title: 'Chat with Agents', description: 'Send messages to any configured agent and get streaming AI responses.' },
-    { title: 'Artifacts', description: 'Agents can generate code, tables, and rich content inline.' },
-    { title: 'History', description: 'All conversations are saved — pick up where you left off anytime.' },
-  ],
-}
+import { useChat } from '@/lib/chat/hooks'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import { useRouter } from 'next/navigation'
 
 // =============================================================================
 // Types
 // =============================================================================
 
-interface ChatWidgetProps {
+interface AutoWidgetProps {
   position?: 'bottom-right' | 'bottom-left'
-  context?: {
-    currentPage: string
-    selectedItems: any[]
-    userRole: string
-    recentActions: any[]
-  }
+  currentPage?: string
+  visible?: boolean
 }
 
 type FormState = 'form' | 'loading' | 'success' | 'error'
+
+// Page labels for context hint
+const PAGE_LABELS: Record<string, string> = {
+  dashboard: 'Dashboard',
+  agents: 'Agent Management',
+  documents: 'Knowledge Base',
+  tools: 'Tools & Integrations',
+  marketplace: 'Marketplace',
+  analytics: 'Analytics',
+  workspace: 'Workspace',
+  activity: 'Activity',
+  settings: 'Settings',
+  team: 'Team Management',
+  chat: 'Chat',
+}
+
+// =============================================================================
+// Mini Auto Chat Tab
+// =============================================================================
+
+function AutoChatTab({ currentPage, onClose }: { currentPage: string; onClose?: () => void }) {
+  const router = useRouter()
+  const inputRef = useRef<HTMLInputElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [inputValue, setInputValue] = useState('')
+
+  const {
+    messages,
+    isLoading,
+    sendMessage,
+    stop,
+  } = useChat({
+    id: 'auto-widget',
+    selectedAgentId: undefined, // Routes to Auto (default agent)
+  })
+
+  const handleOpenFullChat = () => {
+    // Stash widget messages so the full chat page can pick them up
+    if (messages.length > 0) {
+      try {
+        sessionStorage.setItem('auto-widget-handoff', JSON.stringify(messages))
+      } catch { /* quota exceeded — navigate anyway */ }
+    }
+    onClose?.()
+    router.push('/chat')
+  }
+
+  // Auto-scroll on new messages
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+    }
+  }, [messages])
+
+  const handleSend = () => {
+    const text = inputValue.trim()
+    if (!text || isLoading) return
+
+    // Prepend page context as a quiet hint on first message
+    const pageLabel = PAGE_LABELS[currentPage] || currentPage
+    const contextHint = messages.length === 0
+      ? `[Context: User is on the ${pageLabel} page]\n\n${text}`
+      : text
+
+    sendMessage(contextHint)
+    setInputValue('')
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      handleSend()
+    }
+  }
+
+  return (
+    <div className="flex flex-col h-[400px]">
+      {/* Messages area */}
+      <div
+        ref={scrollRef}
+        className="flex-1 overflow-y-auto px-3 py-2 space-y-3"
+      >
+        {messages.length === 0 && (
+          <div className="flex flex-col items-center justify-center h-full text-center px-4">
+            <div className="w-10 h-10 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center mb-3">
+              <Bot className="w-5 h-5 text-primary" />
+            </div>
+            <p className="text-sm font-medium text-foreground mb-1">Hey, I'm Auto</p>
+            <p className="text-xs text-muted-foreground">
+              Ask me anything about {PAGE_LABELS[currentPage] || 'this page'}, or tell me what you need help with.
+            </p>
+          </div>
+        )}
+
+        {messages.map((msg) => (
+          <div
+            key={msg.id}
+            className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+          >
+            <div
+              className={`max-w-[85%] rounded-xl px-3 py-2 text-sm ${
+                msg.role === 'user'
+                  ? 'bg-primary/15 text-foreground'
+                  : 'bg-secondary/40 text-foreground'
+              }`}
+            >
+              {msg.role === 'assistant' ? (
+                <div className="prose prose-sm prose-invert max-w-none [&_p]:mb-1.5 [&_p]:last:mb-0 [&_ul]:mb-1.5 [&_li]:mb-0.5 [&_code]:text-xs [&_pre]:text-xs [&_h1]:text-sm [&_h2]:text-sm [&_h3]:text-xs">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {msg.content || ''}
+                  </ReactMarkdown>
+                </div>
+              ) : (
+                <p className="whitespace-pre-wrap">{msg.content}</p>
+              )}
+            </div>
+          </div>
+        ))}
+
+        {isLoading && messages[messages.length - 1]?.role === 'user' && (
+          <div className="flex justify-start">
+            <div className="bg-secondary/40 rounded-xl px-3 py-2">
+              <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Open in full chat — carries conversation context */}
+      {messages.length > 0 && (
+        <div className="px-3 pb-1">
+          <button
+            onClick={handleOpenFullChat}
+            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors"
+          >
+            <ArrowUpRight className="w-3 h-3" />
+            Open in full chat
+          </button>
+        </div>
+      )}
+
+      {/* Input area */}
+      <div className="px-3 pb-3 pt-1">
+        <div className="flex items-center gap-2">
+          <Input
+            ref={inputRef}
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Ask Auto anything..."
+            disabled={isLoading}
+            className="flex-1 text-sm h-9 bg-secondary/30 border-border/50"
+          />
+          {isLoading ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={stop}
+              className="h-9 w-9 p-0 shrink-0"
+            >
+              <X className="w-4 h-4" />
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              onClick={handleSend}
+              disabled={!inputValue.trim()}
+              className="h-9 w-9 p-0 shrink-0 bg-primary/80 hover:bg-primary"
+            >
+              <Send className="w-4 h-4" />
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
 
 // =============================================================================
 // Component
 // =============================================================================
 
-export function PilotHelperWidget({
-  position = 'bottom-right',
-  context = {
-    currentPage: 'dashboard',
-    selectedItems: [],
-    userRole: 'user',
-    recentActions: [],
-  },
-}: ChatWidgetProps) {
+export function AutoWidget({
+  position = 'bottom-left',
+  currentPage = 'dashboard',
+  visible = true,
+}: AutoWidgetProps) {
   const { user } = useUser()
   const submitBugReport = useSubmitBugReport()
 
   // Widget state
   const [isOpen, setIsOpen] = useState(false)
-  const [activeTab, setActiveTab] = useState('help')
+  const [activeTab, setActiveTab] = useState('auto')
 
-  // Form state
+  // Bug report form state
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [severity, setSeverity] = useState('Minor')
@@ -132,7 +250,7 @@ export function PilotHelperWidget({
   const [successKey, setSuccessKey] = useState('')
   const [successUrl, setSuccessUrl] = useState('')
 
-  // Console error capture
+  // Console error capture for bug reports
   const consoleErrorsRef = useRef<string[]>([])
 
   useEffect(() => {
@@ -204,7 +322,7 @@ export function PilotHelperWidget({
       screenshot_base64: screenshot || undefined,
       context: {
         url: window.location.href,
-        page: context.currentPage,
+        page: currentPage,
         user_agent: navigator.userAgent,
         viewport: `${window.innerWidth}x${window.innerHeight}`,
         user_email: user?.primaryEmailAddress?.emailAddress,
@@ -232,15 +350,15 @@ export function PilotHelperWidget({
     })
   }
 
+  if (!visible) return null
+
   const positionClasses = {
     'bottom-right': 'bottom-3 right-3 md:bottom-4 md:right-4',
-    'bottom-left': 'bottom-3 left-3 md:bottom-4 md:left-4',
+    'bottom-left': 'bottom-3 left-3 md:bottom-4 md:left-20',
   }
 
-  const helpItems = PAGE_HELP_CONTENT[context.currentPage] || PAGE_HELP_CONTENT.dashboard
-
   return (
-    <div data-tour="chat-widget" className={`fixed ${positionClasses[position]} z-[60]`}>
+    <div data-tour="auto-widget" className={`fixed ${positionClasses[position]} z-[60]`}>
       <AnimatePresence mode="wait">
         {isOpen && (
           <motion.div
@@ -249,58 +367,53 @@ export function PilotHelperWidget({
             animate={{ scale: 1, opacity: 1, y: 0 }}
             exit={{ scale: 0.9, opacity: 0, y: 20 }}
             transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-            className="mb-4 w-[calc(100vw-2rem)] sm:w-96 max-h-[70vh] md:max-h-[600px] overflow-y-auto glass-card card-glow rounded-2xl shadow-2xl"
+            className="mb-4 w-[calc(100vw-2rem)] sm:w-[380px] glass-card card-glow rounded-2xl shadow-2xl overflow-hidden"
           >
             {/* Header */}
-            <div className="flex items-center justify-between px-4 pt-4 pb-2">
-              <div className="flex items-center space-x-2">
-                <img src="/brand/jira-logo.svg" alt="Jira" className="w-8 h-8" draggable={false} />
-                <h3 className="font-semibold text-foreground">Pilot Helper</h3>
+            <div className="flex items-center justify-between px-4 pt-3 pb-2">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center">
+                  <Bot className="w-4 h-4 text-primary" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-foreground leading-none">Auto</h3>
+                  <p className="text-[10px] text-muted-foreground">Your AI assistant</p>
+                </div>
               </div>
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => setIsOpen(false)}
-                className="text-muted-foreground hover:text-foreground"
+                className="text-muted-foreground hover:text-foreground h-7 w-7 p-0"
               >
                 <X className="w-4 h-4" />
               </Button>
             </div>
 
             {/* Tabs */}
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="px-4 pb-4">
-              <TabsList className="w-full mb-3">
-                <TabsTrigger value="help" className="flex-1">Help</TabsTrigger>
-                <TabsTrigger value="bug" className="flex-1">Report Bug</TabsTrigger>
-              </TabsList>
+            <Tabs value={activeTab} onValueChange={setActiveTab}>
+              <div className="px-4">
+                <TabsList className="w-full mb-0 h-8">
+                  <TabsTrigger value="auto" className="flex-1 text-xs h-7">
+                    <Bot className="w-3 h-3 mr-1" />
+                    Auto
+                  </TabsTrigger>
+                  <TabsTrigger value="bug" className="flex-1 text-xs h-7">
+                    <Bug className="w-3 h-3 mr-1" />
+                    Report Bug
+                  </TabsTrigger>
+                </TabsList>
+              </div>
 
-              {/* ---- Help Tab ---- */}
-              <TabsContent value="help" className="space-y-3 mt-0">
-                {helpItems.map((item, i) => (
-                  <div
-                    key={i}
-                    className="p-3 rounded-xl bg-secondary/40 hover:bg-secondary/60 transition-colors"
-                  >
-                    <div className="flex items-start gap-2">
-                      {item.link ? (
-                        <BookOpen className="w-4 h-4 mt-0.5 shrink-0 text-orange-400" />
-                      ) : (
-                        <HelpCircle className="w-4 h-4 mt-0.5 shrink-0 text-orange-400" />
-                      )}
-                      <div>
-                        <p className="text-sm font-medium text-foreground">{item.title}</p>
-                        <p className="text-xs text-muted-foreground mt-0.5">{item.description}</p>
-                      </div>
-                    </div>
-                  </div>
-                ))}
+              {/* ---- Auto Chat Tab ---- */}
+              <TabsContent value="auto" className="mt-0">
+                <AutoChatTab currentPage={currentPage} onClose={() => setIsOpen(false)} />
               </TabsContent>
 
               {/* ---- Bug Report Tab ---- */}
-              <TabsContent value="bug" className="mt-0">
+              <TabsContent value="bug" className="mt-0 px-4 pb-4 max-h-[460px] overflow-y-auto">
                 {formState === 'form' || formState === 'loading' ? (
                   <form onSubmit={handleSubmit} className="space-y-3" onPaste={handlePaste}>
-                    {/* Title */}
                     <div className="space-y-1">
                       <Label htmlFor="bug-title" className="text-xs">Title</Label>
                       <Input
@@ -314,7 +427,6 @@ export function PilotHelperWidget({
                       />
                     </div>
 
-                    {/* Description */}
                     <div className="space-y-1">
                       <Label htmlFor="bug-desc" className="text-xs">Description</Label>
                       <Textarea
@@ -328,7 +440,6 @@ export function PilotHelperWidget({
                       />
                     </div>
 
-                    {/* Severity + Category row */}
                     <div className="grid grid-cols-2 gap-2">
                       <div className="space-y-1">
                         <Label className="text-xs">Severity</Label>
@@ -359,7 +470,6 @@ export function PilotHelperWidget({
                       </div>
                     </div>
 
-                    {/* Screenshot paste area */}
                     <div className="space-y-1">
                       <Label className="text-xs">Screenshot</Label>
                       {screenshot ? (
@@ -383,12 +493,10 @@ export function PilotHelperWidget({
                       )}
                     </div>
 
-                    {/* Error message inline */}
                     {errorMessage && formState === 'form' && (
                       <p className="text-xs text-red-400">{errorMessage}</p>
                     )}
 
-                    {/* Submit */}
                     <Button
                       type="submit"
                       disabled={formState === 'loading' || !title.trim() || !description.trim()}
@@ -431,7 +539,6 @@ export function PilotHelperWidget({
                     </Button>
                   </div>
                 ) : (
-                  /* error state */
                   <div className="flex flex-col items-center py-6 space-y-3">
                     <AlertCircle className="w-12 h-12 text-red-500" />
                     <p className="font-medium text-foreground">Something went wrong</p>
@@ -451,7 +558,7 @@ export function PilotHelperWidget({
         )}
       </AnimatePresence>
 
-      {/* Floating Jira button */}
+      {/* Floating Auto button */}
       <motion.div
         initial={{ scale: 0, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
@@ -459,16 +566,17 @@ export function PilotHelperWidget({
       >
         <Button
           onClick={() => setIsOpen((v) => !v)}
-          className="w-11 h-11 md:w-14 md:h-14 rounded-full bg-white hover:bg-gray-50 shadow-lg hover:shadow-xl transition-all duration-300 group p-0 overflow-hidden"
+          className="w-11 h-11 md:w-12 md:h-12 rounded-full bg-primary/90 hover:bg-primary shadow-lg hover:shadow-xl hover:shadow-primary/20 transition-all duration-300 group p-0"
           size="lg"
-          title="Report an issue"
+          title="Ask Auto"
         >
-          <img src="/brand/jira-logo.svg" alt="Jira" className="w-11 h-11 md:w-14 md:h-14 group-hover:scale-110 transition-transform" draggable={false} />
+          <Bot className="w-5 h-5 md:w-6 md:h-6 text-primary-foreground group-hover:scale-110 transition-transform" />
         </Button>
       </motion.div>
     </div>
   )
 }
 
-// Backward compatibility export
-export const ChatWidget = PilotHelperWidget
+// Backward compatibility
+export const ChatWidget = AutoWidget
+export const PilotHelperWidget = AutoWidget

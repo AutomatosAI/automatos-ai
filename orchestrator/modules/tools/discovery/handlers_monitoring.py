@@ -95,13 +95,17 @@ async def query_loki_logs(db: Session, workspace_id: UUID, params: Dict[str, Any
     level = params.get("level")
     search = params.get("search")
 
-    # Build LogQL query
+    # Build LogQL query — Loki rejects empty '{}' selectors
     label_parts = []
     if service:
         label_parts.append(f'service="{service}"')
     if level:
         label_parts.append(f'level="{level}"')
-    label_selector = "{" + ", ".join(label_parts) + "}" if label_parts else '{}'
+    if not label_parts:
+        # Default to the API service when no labels specified —
+        # Loki rejects empty '{}' selectors with 400
+        label_parts.append('service="automatos-backend"')
+    label_selector = "{" + ", ".join(label_parts) + "}"
 
     line_filter = ""
     if search:
@@ -398,7 +402,8 @@ async def get_alerts(db: Session, workspace_id: UUID, params: Dict[str, Any]) ->
 
 
 async def get_system_health(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    """System health check -- database, Redis, API, RAG, server metrics."""
+    """System health check -- database, Redis, Mem0, RAG, server metrics."""
+    import time as _t
     components = {}
 
     # 1. Database
@@ -409,19 +414,61 @@ async def get_system_health(db: Session, workspace_id: UUID, params: Dict[str, A
     except Exception as e:
         components["database"] = {"status": "unhealthy", "error": str(e)[:100]}
 
-    # 2. Redis
+    # 2. Redis — functional read/write test, not just ping
     try:
         from core.redis.client import get_redis_client
-        redis = get_redis_client()
-        if redis:
-            redis.ping()
-            components["redis"] = {"status": "healthy"}
+        rc = get_redis_client()
+        if rc:
+            r = rc.get_redis()
+            # Write + read a probe key to verify the data path works
+            probe_val = str(int(_t.time()))
+            r.set("_health_probe", probe_val, ex=30)
+            readback = r.get("_health_probe")
+            if readback != probe_val:
+                components["redis"] = {
+                    "status": "unhealthy",
+                    "error": f"write/read mismatch: wrote {probe_val!r}, got {readback!r}",
+                }
+            else:
+                info = r.info(section="memory")
+                components["redis"] = {
+                    "status": "healthy",
+                    "used_memory_human": info.get("used_memory_human", "?"),
+                    "connected_clients": r.info(section="clients").get("connected_clients", "?"),
+                    "keys": r.dbsize(),
+                }
         else:
             components["redis"] = {"status": "unavailable"}
     except Exception as e:
         components["redis"] = {"status": "unhealthy", "error": str(e)[:100]}
 
-    # 3. RAG pipeline
+    # 3. Mem0 (long-term memory service)
+    try:
+        from modules.memory.integrations.mem0_client import _breaker as mem0_breaker
+        if mem0_breaker.is_open:
+            elapsed = _t.monotonic() - mem0_breaker.last_failure_time
+            components["mem0"] = {
+                "status": "unhealthy",
+                "error": "circuit breaker open",
+                "failures": mem0_breaker.failures,
+                "cooldown_remaining_s": max(0, int(60 - elapsed)),
+            }
+        else:
+            # Probe with a lightweight search (empty query, limit 1)
+            from modules.memory.unified_memory_service import get_unified_memory_service
+            svc = get_unified_memory_service()
+            probe = await svc.search_long_term(
+                workspace_id=str(workspace_id), query="health_probe", limit=1
+            )
+            components["mem0"] = {
+                "status": "healthy",
+                "circuit_breaker": "closed",
+                "failures": mem0_breaker.failures,
+            }
+    except Exception as e:
+        components["mem0"] = {"status": "unhealthy", "error": str(e)[:100]}
+
+    # 4. RAG pipeline (renumbered)
     try:
         from core.models import Document
         doc_count = (
@@ -445,7 +492,7 @@ async def get_system_health(db: Session, workspace_id: UUID, params: Dict[str, A
     except Exception as e:
         components["rag"] = {"status": "unhealthy", "error": str(e)[:100]}
 
-    # 4. Server metrics (psutil)
+    # 5. Server metrics (psutil)
     try:
         import psutil
         components["server"] = {

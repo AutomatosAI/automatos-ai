@@ -53,6 +53,7 @@ async def list_system_settings(
     ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """List all system settings, optionally filtered by category"""
+    _require_admin(ctx)
     try:
         query = db.query(SystemSetting)
         if category:
@@ -68,7 +69,7 @@ async def list_system_settings(
 @router.get("/categories", response_model=List[str])
 async def list_setting_categories(db: Session = Depends(get_db), ctx: RequestContext = Depends(get_request_context_hybrid)):
     """List all available setting categories"""
-    
+    _require_admin(ctx)
     try:
         categories = db.query(SystemSetting.category).distinct().all()
         return [cat[0] for cat in categories]
@@ -80,7 +81,7 @@ async def list_setting_categories(db: Session = Depends(get_db), ctx: RequestCon
 @router.get("/by-category", response_model=List[SystemSettingsByCategory])
 async def get_settings_by_category(db: Session = Depends(get_db), ctx: RequestContext = Depends(get_request_context_hybrid)):
     """Get all settings grouped by category"""
-    
+    _require_admin(ctx)
     try:
         settings = db.query(SystemSetting).order_by(SystemSetting.category, SystemSetting.key).all()
         
@@ -108,7 +109,7 @@ async def get_settings_by_category(db: Session = Depends(get_db), ctx: RequestCo
 @router.get("/stats", response_model=SystemSettingsStats)
 async def get_settings_stats(db: Session = Depends(get_db), ctx: RequestContext = Depends(get_request_context_hybrid)):
     """Get system settings statistics"""
-    
+    _require_admin(ctx)
     try:
         total_settings = db.query(SystemSetting).count()
         
@@ -143,7 +144,7 @@ async def get_system_setting(
     ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """Get a specific system setting"""
-    
+    _require_admin(ctx)
     try:
         setting = db.query(SystemSetting).filter(SystemSetting.id == setting_id).first()
         if not setting:

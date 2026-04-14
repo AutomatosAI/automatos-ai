@@ -630,7 +630,7 @@ class GraphifyService:
         """
         from core.llm import create_llm_manager
         from modules.knowledge.graph_extraction import (
-            GRAPH_EXTRACTION_MODEL,
+            _get_graph_extraction_model,
             extract_from_document,
             map_agent_roster,
         )
@@ -661,11 +661,11 @@ class GraphifyService:
             return extractions
 
         # Create ONE shared LLM client for all documents
+        extraction_model = _get_graph_extraction_model()
         llm = create_llm_manager(
-            service_name="orchestrator",
-            model=GRAPH_EXTRACTION_MODEL,
+            service_name="graph_extraction",
+            model=extraction_model,
         )
-        llm.config.max_tokens = 4000
 
         # Parallel extraction with concurrency limit (avoid rate-limiting)
         sem = asyncio.Semaphore(5)
@@ -698,7 +698,7 @@ class GraphifyService:
             "_extract_all: extracting %d documents in parallel (max 5 concurrent) "
             "using %s for workspace %s",
             len(doc_sources),
-            GRAPH_EXTRACTION_MODEL,
+            extraction_model,
             workspace_id,
         )
         t0 = time.time()

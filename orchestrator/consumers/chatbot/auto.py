@@ -122,6 +122,8 @@ _PLATFORM_KEYWORDS = {
         "list my recipes", "what recipes do i have", "show my recipes",
         "list my workflows", "show my workflows", "how many recipes",
         "how many workflows",
+        "list my playbooks", "what playbooks do i have", "show my playbooks",
+        "how many playbooks", "show my automations",
     ],
     "platform_get_llm_usage": [
         "token usage", "llm usage", "how much have i spent",
@@ -172,10 +174,14 @@ _PLATFORM_KEYWORDS = {
     "platform_execute_recipe": [
         "run the recipe", "execute recipe", "trigger recipe",
         "run automation", "start recipe",
+        "run the playbook", "execute playbook", "trigger playbook",
+        "start playbook", "run playbook",
     ],
     "platform_get_recipe_execution": [
         "recipe status", "execution status", "recipe result",
         "did the recipe run", "check recipe",
+        "playbook status", "playbook result", "did the playbook run",
+        "check playbook", "playbook execution",
     ],
     "platform_get_system_health": [
         "system health", "platform health", "system status",
@@ -189,8 +195,16 @@ _PLATFORM_KEYWORDS = {
         "reprocess document", "re-embed document", "reindex document",
         "regenerate chunks", "rebuild embeddings",
     ],
+    "platform_create_playbook": [
+        "create a playbook", "create playbook", "make a playbook",
+        "new playbook", "build a playbook", "set up a playbook",
+        "create a workflow", "make a workflow", "new workflow",
+        "create a recipe", "make a recipe", "new recipe",
+        "build a workflow", "set up an automation",
+    ],
     "platform_delete_recipe": [
         "delete recipe", "remove recipe", "delete automation",
+        "delete playbook", "remove playbook",
     ],
     "platform_get_activity_feed": [
         "recent activity", "activity feed", "what's been happening",
@@ -708,7 +722,7 @@ tool_hints: short domain keywords like "email", "github", "jira", "code", "datab
         try:
             from core.llm import create_llm_manager
 
-            llm = create_llm_manager(service_name="complexity_assessor")
+            llm = create_llm_manager(service_name="complexity_assessor", workspace_id=self._workspace_id, request_type="complexity_assessor")
             response = await llm.generate_response(
                 messages=[{"role": "user", "content": prompt}]
             )

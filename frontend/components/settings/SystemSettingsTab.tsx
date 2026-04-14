@@ -12,7 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Loader2, Settings, Save, RotateCcw, AlertCircle, Shield, FileText, Palette } from 'lucide-react'
+import { Loader2, Settings, Save, RotateCcw, AlertCircle, Shield, FileText, Palette, Rocket, BrainCircuit, Brain } from 'lucide-react'
 import { toast } from 'sonner'
 
 import {
@@ -33,6 +33,8 @@ import BackendAPIKeysSettingsTab from './BackendAPIKeysSettingsTab'
 import { CredentialAuditTab } from './CredentialAuditTab'
 import { SystemPromptsTab } from './SystemPromptsTab'
 import { SystemIconsSettingsTab } from './SystemIconsSettingsTab'
+import { OnboardingAgentsTab } from './OnboardingAgentsTab'
+import MemorySettingsTab from './MemorySettingsTab'
 
 interface SystemSettingsTabProps {
   className?: string
@@ -190,7 +192,10 @@ export default function SystemSettingsTab({ className }: SystemSettingsTabProps)
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
         <TabsList className="w-full justify-start gap-1">
           <TabsTrigger value="general">General</TabsTrigger>
-          <TabsTrigger value="codegraph">CodeGraph</TabsTrigger>
+          <TabsTrigger value="system_llms">
+            <BrainCircuit className="w-3.5 h-3.5 mr-1 shrink-0" />
+            System LLMs
+          </TabsTrigger>
           <TabsTrigger value="system_logging">Logging</TabsTrigger>
           <TabsTrigger value="api_rate_limiting">Rate Limiting</TabsTrigger>
           <TabsTrigger value="backend_api_keys">API Keys</TabsTrigger>
@@ -206,6 +211,14 @@ export default function SystemSettingsTab({ className }: SystemSettingsTabProps)
             <Palette className="w-3.5 h-3.5 mr-1 shrink-0" />
             Icons
           </TabsTrigger>
+          <TabsTrigger value="memory_management">
+            <Brain className="w-3.5 h-3.5 mr-1 shrink-0" />
+            Memory
+          </TabsTrigger>
+          <TabsTrigger value="onboarding_agents">
+            <Rocket className="w-3.5 h-3.5 mr-1 shrink-0" />
+            Mission Team
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="general">
@@ -217,12 +230,15 @@ export default function SystemSettingsTab({ className }: SystemSettingsTabProps)
           />
         </TabsContent>
 
-        <TabsContent value="codegraph">
+        <TabsContent value="system_llms">
           <CodeGraphSettingsTab
-            settings={settingsByCategory.find(cat => cat.category === 'codegraph')?.settings || []}
-            onSave={(updates) => saveCategorySettings('codegraph', updates)}
+            codegraphSettings={settingsByCategory.find(cat => cat.category === 'codegraph')?.settings || []}
+            knowledgeGraphSettings={settingsByCategory.find(cat => cat.category === 'knowledge_graph')?.settings || []}
+            onSaveCodegraph={(updates) => saveCategorySettings('codegraph', updates)}
+            onSaveKnowledgeGraph={(updates) => saveCategorySettings('knowledge_graph', updates)}
             saving={saving}
-            onReset={() => resetToDefaults('codegraph')}
+            onResetCodegraph={() => resetToDefaults('codegraph')}
+            onResetKnowledgeGraph={() => resetToDefaults('knowledge_graph')}
           />
         </TabsContent>
 
@@ -263,6 +279,19 @@ export default function SystemSettingsTab({ className }: SystemSettingsTabProps)
 
         <TabsContent value="system_icons">
           <SystemIconsSettingsTab />
+        </TabsContent>
+
+        <TabsContent value="memory_management">
+          <MemorySettingsTab
+            settings={settingsByCategory.find(cat => cat.category === 'memory_management')?.settings || []}
+            onSave={(updates) => saveCategorySettings('memory_management', updates)}
+            saving={saving}
+            onReset={() => resetToDefaults('memory_management')}
+          />
+        </TabsContent>
+
+        <TabsContent value="onboarding_agents">
+          <OnboardingAgentsTab />
         </TabsContent>
 
       </Tabs>

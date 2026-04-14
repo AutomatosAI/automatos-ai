@@ -25,12 +25,13 @@ def register_monitoring_actions(registry: ActionRegistry) -> None:
                     "type": "string",
                     "description": (
                         "Service to query logs from: 'automatos-backend', 'agent-opt-worker', "
-                        "'log-relay', 'prometheus', 'grafana', 'loki', 'alertmanager'."
+                        "'workspace-worker', 'mem0-server', 'voice-service'. "
+                        "Defaults to 'automatos-backend' if omitted."
                     ),
                 },
                 "level": {
                     "type": "string",
-                    "description": "Filter by log level: debug, info, warning, error, critical.",
+                    "description": "Filter by log level: 'info', 'warning', 'error'.",
                 },
                 "search": {
                     "type": "string",

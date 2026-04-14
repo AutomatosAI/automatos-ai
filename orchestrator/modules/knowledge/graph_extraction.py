@@ -18,9 +18,9 @@ from typing import Any, Optional
 from config import Config
 from core.llm import create_llm_manager
 
-# Fast, cheap model for entity extraction — no need for an expensive reasoning model.
-# google/gemini-2.0-flash: ~$0.10/1M input, ~$0.40/1M output, <2s latency.
-GRAPH_EXTRACTION_MODEL = "google/gemini-2.0-flash"
+def _get_graph_extraction_model() -> str:
+    """Read graph extraction model from system_settings (knowledge_graph category)."""
+    return Config().GRAPHIFY_MODEL
 
 # Per-document LLM timeout (seconds). Prevents silent hangs on dropped connections.
 _EXTRACTION_TIMEOUT = 90
@@ -289,10 +289,9 @@ async def extract_from_document(
     try:
         if llm is None:
             llm = create_llm_manager(
-                service_name="orchestrator",
-                model=GRAPH_EXTRACTION_MODEL,
+                service_name="graph_extraction",
+                model=_get_graph_extraction_model(),
             )
-            llm.config.max_tokens = 4000
         response = await asyncio.wait_for(
             llm.generate_response([
                 {"role": "system", "content": "You are a knowledge-graph extraction engine. Output valid JSON only."},
@@ -345,10 +344,9 @@ async def extract_from_report(
     try:
         if llm is None:
             llm = create_llm_manager(
-                service_name="orchestrator",
-                model=GRAPH_EXTRACTION_MODEL,
+                service_name="graph_extraction",
+                model=_get_graph_extraction_model(),
             )
-            llm.config.max_tokens = 4000
         response = await asyncio.wait_for(
             llm.generate_response([
                 {"role": "system", "content": "You are a knowledge-graph extraction engine. Output valid JSON only."},

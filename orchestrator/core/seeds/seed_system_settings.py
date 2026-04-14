@@ -287,20 +287,20 @@ def seed_system_settings(db: Session):
         {
             "category": SettingCategory.ORCHESTRATOR_LLM.value,
             "key": "provider",
-            "default_value": "openai",
+            "default_value": "openrouter",
             "value_type": "string",
-            "description": "LLM provider for orchestrator operations",
+            "description": "LLM provider for orchestrator operations. OpenRouter recommended — single key for 100+ models.",
             "is_required": True,
             "validation_rules": {
-                "options": ["openai", "anthropic", "google", "azure", "huggingface"]
+                "options": ["openrouter", "openai", "anthropic", "google", "azure", "huggingface"]
             }
         },
         {
             "category": SettingCategory.ORCHESTRATOR_LLM.value,
             "key": "model",
-            "default_value": "gpt-4o",
+            "default_value": "google/gemini-2.5-flash",
             "value_type": "string",
-            "description": "LLM model for orchestrator operations (gpt-4o has 128K context vs gpt-4 8K)",
+            "description": "LLM model for orchestrator operations. Use OpenRouter format: provider/model (e.g. google/gemini-2.5-flash).",
             "is_required": True,
             "validation_rules": {
                 "depends_on": {"provider": "..."}
@@ -1282,6 +1282,365 @@ def seed_system_settings(db: Session):
                 "min": 50,
                 "max": 500
             }
+        },
+
+        # ========================================
+        # COORDINATION SETTINGS (Mission planner, verifier, reconciler)
+        # ========================================
+        {
+            "category": SettingCategory.COORDINATION.value,
+            "key": "provider",
+            "default_value": "openrouter",
+            "value_type": "string",
+            "description": "LLM provider for coordination services (planner, verifier)",
+            "is_required": True,
+            "validation_rules": {
+                "options": ["openrouter", "openai", "anthropic", "google", "deepseek"]
+            }
+        },
+        {
+            "category": SettingCategory.COORDINATION.value,
+            "key": "model",
+            "default_value": "openai/gpt-4o-mini",
+            "value_type": "string",
+            "description": "LLM model for mission planning/decomposition",
+            "is_required": True,
+        },
+        {
+            "category": SettingCategory.COORDINATION.value,
+            "key": "planner_max_tokens",
+            "default_value": "4000",
+            "value_type": "number",
+            "description": "Max tokens for planner LLM output",
+            "is_required": False,
+            "validation_rules": {"min": 500, "max": 32000}
+        },
+        {
+            "category": SettingCategory.COORDINATION.value,
+            "key": "planner_temperature",
+            "default_value": "0.4",
+            "value_type": "number",
+            "description": "Temperature for planner (low = more deterministic plans)",
+            "is_required": False,
+            "validation_rules": {"min": 0.0, "max": 1.0, "step": 0.1}
+        },
+        {
+            "category": SettingCategory.COORDINATION.value,
+            "key": "task_max_tokens",
+            "default_value": "4000",
+            "value_type": "number",
+            "description": "Max tokens for mission task agent execution (overrides agent default during missions)",
+            "is_required": False,
+            "validation_rules": {"min": 500, "max": 16000}
+        },
+        {
+            "category": SettingCategory.COORDINATION.value,
+            "key": "verifier_model_mapping",
+            "default_value": "anthropic=openai/gpt-4o-mini,openai=anthropic/claude-haiku-4-5,google=openai/gpt-4o-mini,deepseek=openai/gpt-4o-mini,meta=openai/gpt-4o-mini",
+            "value_type": "string",
+            "description": "Cross-model verifier mapping (family=model pairs, comma-separated)",
+            "is_required": False,
+        },
+        {
+            "category": SettingCategory.COORDINATION.value,
+            "key": "verifier_fallback_model",
+            "default_value": "openai/gpt-4o-mini",
+            "value_type": "string",
+            "description": "Fallback model for verification when no mapping matches",
+            "is_required": True,
+        },
+        {
+            "category": SettingCategory.COORDINATION.value,
+            "key": "verifier_max_tokens",
+            "default_value": "2000",
+            "value_type": "number",
+            "description": "Max tokens for verification LLM output",
+            "is_required": False,
+            "validation_rules": {"min": 200, "max": 8000}
+        },
+        {
+            "category": SettingCategory.COORDINATION.value,
+            "key": "verification_pass_threshold",
+            "default_value": "0.7",
+            "value_type": "number",
+            "description": "Score threshold for PASS verdict (above = pass)",
+            "is_required": False,
+            "validation_rules": {"min": 0.0, "max": 1.0, "step": 0.05}
+        },
+        {
+            "category": SettingCategory.COORDINATION.value,
+            "key": "verification_catastrophic_threshold",
+            "default_value": "0.15",
+            "value_type": "number",
+            "description": "Score below this flags for human review (NOT auto-retry, just alert)",
+            "is_required": False,
+            "validation_rules": {"min": 0.0, "max": 0.5, "step": 0.05}
+        },
+        {
+            "category": SettingCategory.COORDINATION.value,
+            "key": "max_plan_retries",
+            "default_value": "3",
+            "value_type": "number",
+            "description": "Max retries for plan validation failures",
+            "is_required": False,
+            "validation_rules": {"min": 1, "max": 5}
+        },
+        {
+            "category": SettingCategory.COORDINATION.value,
+            "key": "consistency_check_enabled",
+            "default_value": "true",
+            "value_type": "boolean",
+            "description": "Enable cross-task consistency check (adds 1 extra LLM call per mission)",
+            "is_required": False,
+        },
+
+        # ========================================
+        # KNOWLEDGE GRAPH SETTINGS (Graph extraction LLM)
+        # ========================================
+        {
+            "category": SettingCategory.KNOWLEDGE_GRAPH.value,
+            "key": "provider",
+            "default_value": "openrouter",
+            "value_type": "string",
+            "description": "LLM provider for knowledge graph extraction",
+            "is_required": True,
+            "validation_rules": {
+                "options": ["openrouter", "openai", "anthropic", "google"]
+            }
+        },
+        {
+            "category": SettingCategory.KNOWLEDGE_GRAPH.value,
+            "key": "model",
+            "default_value": "google/gemini-2.0-flash",
+            "value_type": "string",
+            "description": "LLM model for knowledge graph entity/relation extraction",
+            "is_required": True,
+        },
+        {
+            "category": SettingCategory.KNOWLEDGE_GRAPH.value,
+            "key": "extraction_max_tokens",
+            "default_value": "4000",
+            "value_type": "number",
+            "description": "Max tokens for graph extraction LLM output",
+            "is_required": False,
+            "validation_rules": {"min": 500, "max": 8000}
+        },
+        {
+            "category": SettingCategory.KNOWLEDGE_GRAPH.value,
+            "key": "extraction_temperature",
+            "default_value": "0.1",
+            "value_type": "number",
+            "description": "Temperature for extraction (low = more consistent entities)",
+            "is_required": False,
+            "validation_rules": {"min": 0.0, "max": 1.0, "step": 0.1}
+        },
+        {
+            "category": SettingCategory.KNOWLEDGE_GRAPH.value,
+            "key": "max_concurrent_extractions",
+            "default_value": "5",
+            "value_type": "number",
+            "description": "Max concurrent document extractions",
+            "is_required": False,
+            "validation_rules": {"min": 1, "max": 20}
+        },
+
+        # ========================================
+        # LLM COST AUDIT SETTINGS (Budget alerts, tracking)
+        # ========================================
+        {
+            "category": SettingCategory.LLM_COST_AUDIT.value,
+            "key": "enabled",
+            "default_value": "true",
+            "value_type": "boolean",
+            "description": "Enable LLM cost tracking and audit logging",
+            "is_required": False,
+        },
+        {
+            "category": SettingCategory.LLM_COST_AUDIT.value,
+            "key": "mission_budget_alert_usd",
+            "default_value": "2.00",
+            "value_type": "number",
+            "description": "Alert threshold per mission (USD). Logs WARNING when exceeded.",
+            "is_required": False,
+            "validation_rules": {"min": 0.10, "max": 100.00, "step": 0.50}
+        },
+        {
+            "category": SettingCategory.LLM_COST_AUDIT.value,
+            "key": "daily_budget_alert_usd",
+            "default_value": "20.00",
+            "value_type": "number",
+            "description": "Alert threshold per day (USD). Logs CRITICAL when exceeded.",
+            "is_required": False,
+            "validation_rules": {"min": 1.00, "max": 500.00, "step": 1.00}
+        },
+        {
+            "category": SettingCategory.LLM_COST_AUDIT.value,
+            "key": "log_every_call",
+            "default_value": "true",
+            "value_type": "boolean",
+            "description": "Log model, tokens, and estimated cost for every LLM call",
+            "is_required": False,
+        },
+
+        # ── Memory Management ──────────────────────────────────────
+        # Storage limits
+        {
+            "category": SettingCategory.MEMORY_MANAGEMENT.value,
+            "key": "store_max_chars",
+            "default_value": "6000",
+            "value_type": "number",
+            "description": "Max characters per message (user + assistant) stored in Mem0. Higher = richer recall, more tokens per save.",
+            "is_required": False,
+            "validation_rules": {"min": 500, "max": 20000, "step": 500},
+        },
+        {
+            "category": SettingCategory.MEMORY_MANAGEMENT.value,
+            "key": "daily_log_max_chars",
+            "default_value": "2000",
+            "value_type": "number",
+            "description": "Max characters for daily activity log entries.",
+            "is_required": False,
+            "validation_rules": {"min": 500, "max": 10000, "step": 500},
+        },
+        # Context injection budgets (tokens)
+        {
+            "category": SettingCategory.MEMORY_MANAGEMENT.value,
+            "key": "context_budget_total",
+            "default_value": "4000",
+            "value_type": "number",
+            "description": "Total token budget for memory context injected into prompts.",
+            "is_required": False,
+            "validation_rules": {"min": 1000, "max": 16000, "step": 500},
+        },
+        {
+            "category": SettingCategory.MEMORY_MANAGEMENT.value,
+            "key": "context_budget_session",
+            "default_value": "500",
+            "value_type": "number",
+            "description": "Token budget for L1 session summary in prompts.",
+            "is_required": False,
+            "validation_rules": {"min": 100, "max": 4000, "step": 100},
+        },
+        {
+            "category": SettingCategory.MEMORY_MANAGEMENT.value,
+            "key": "context_budget_long_term",
+            "default_value": "800",
+            "value_type": "number",
+            "description": "Token budget for L3 long-term memories in prompts.",
+            "is_required": False,
+            "validation_rules": {"min": 200, "max": 4000, "step": 100},
+        },
+        {
+            "category": SettingCategory.MEMORY_MANAGEMENT.value,
+            "key": "context_budget_temporal",
+            "default_value": "600",
+            "value_type": "number",
+            "description": "Token budget for L2 temporal/short-term memories in prompts.",
+            "is_required": False,
+            "validation_rules": {"min": 200, "max": 4000, "step": 100},
+        },
+        {
+            "category": SettingCategory.MEMORY_MANAGEMENT.value,
+            "key": "context_budget_daily",
+            "default_value": "400",
+            "value_type": "number",
+            "description": "Token budget for daily activity logs in prompts.",
+            "is_required": False,
+            "validation_rules": {"min": 100, "max": 2000, "step": 100},
+        },
+        # Retrieval limits
+        {
+            "category": SettingCategory.MEMORY_MANAGEMENT.value,
+            "key": "search_result_limit",
+            "default_value": "8",
+            "value_type": "number",
+            "description": "Max number of memories returned per search query.",
+            "is_required": False,
+            "validation_rules": {"min": 1, "max": 50, "step": 1},
+        },
+        {
+            "category": SettingCategory.MEMORY_MANAGEMENT.value,
+            "key": "long_term_search_limit",
+            "default_value": "5",
+            "value_type": "number",
+            "description": "Max Mem0 memories fetched for context injection.",
+            "is_required": False,
+            "validation_rules": {"min": 1, "max": 20, "step": 1},
+        },
+        # Circuit breaker
+        {
+            "category": SettingCategory.MEMORY_MANAGEMENT.value,
+            "key": "circuit_breaker_threshold",
+            "default_value": "5",
+            "value_type": "number",
+            "description": "Consecutive Mem0 failures before circuit breaker opens.",
+            "is_required": False,
+            "validation_rules": {"min": 2, "max": 20, "step": 1},
+        },
+        {
+            "category": SettingCategory.MEMORY_MANAGEMENT.value,
+            "key": "circuit_breaker_cooldown",
+            "default_value": "60",
+            "value_type": "number",
+            "description": "Seconds circuit breaker stays open before retrying Mem0.",
+            "is_required": False,
+            "validation_rules": {"min": 10, "max": 600, "step": 10},
+        },
+        {
+            "category": SettingCategory.MEMORY_MANAGEMENT.value,
+            "key": "request_timeout",
+            "default_value": "15",
+            "value_type": "number",
+            "description": "Timeout (seconds) for individual Mem0 API calls.",
+            "is_required": False,
+            "validation_rules": {"min": 5, "max": 60, "step": 5},
+        },
+        # Cache TTLs
+        {
+            "category": SettingCategory.MEMORY_MANAGEMENT.value,
+            "key": "cache_ttl",
+            "default_value": "300",
+            "value_type": "number",
+            "description": "Seconds to cache Mem0 search results (avoids repeated queries).",
+            "is_required": False,
+            "validation_rules": {"min": 30, "max": 1800, "step": 30},
+        },
+        {
+            "category": SettingCategory.MEMORY_MANAGEMENT.value,
+            "key": "session_ttl",
+            "default_value": "86400",
+            "value_type": "number",
+            "description": "Seconds before L1 session memory expires in Redis (default 24h).",
+            "is_required": False,
+            "validation_rules": {"min": 3600, "max": 604800, "step": 3600},
+        },
+        # Decay & promotion
+        {
+            "category": SettingCategory.MEMORY_MANAGEMENT.value,
+            "key": "decay_rate",
+            "default_value": "0.1",
+            "value_type": "number",
+            "description": "Memory importance decay rate per cycle (0.0-1.0).",
+            "is_required": False,
+            "validation_rules": {"min": 0.01, "max": 0.5, "step": 0.01},
+        },
+        {
+            "category": SettingCategory.MEMORY_MANAGEMENT.value,
+            "key": "promotion_min_importance",
+            "default_value": "0.7",
+            "value_type": "number",
+            "description": "Minimum importance score for L2 to L3 promotion.",
+            "is_required": False,
+            "validation_rules": {"min": 0.3, "max": 1.0, "step": 0.05},
+        },
+        {
+            "category": SettingCategory.MEMORY_MANAGEMENT.value,
+            "key": "promotion_min_access_count",
+            "default_value": "3",
+            "value_type": "number",
+            "description": "Minimum access count before a memory can be promoted to L3.",
+            "is_required": False,
+            "validation_rules": {"min": 1, "max": 20, "step": 1},
         },
     ]
     

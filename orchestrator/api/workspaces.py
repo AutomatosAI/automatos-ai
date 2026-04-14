@@ -219,7 +219,7 @@ _VALID_PERSONALITY_MODES = {"friendly", "professional", "technical", "custom"}
 _VALID_COMMUNICATION_STYLES = {"concise", "balanced", "detailed"}
 _VALID_PROACTIVE_LEVELS = {"silent", "notify", "act_notify", "autonomous"}
 _VALID_THINKING_LEVELS = {"off", "minimal", "low", "medium", "high"}
-_VALID_HEARTBEAT_INTERVALS = {15, 30, 60, 120}
+_VALID_HEARTBEAT_INTERVALS = {15, 30, 60, 120, 240, 480, 1440, 10080}
 _VALID_NOTIFICATION_CHANNELS = {"in_app", "webhook", "telegram", "slack"}
 
 _ORCHESTRATOR_DEFAULTS = {

@@ -6,7 +6,7 @@ Database Models for Automotas AI System
 Comprehensive data models for agents, skills, workflows, documents, and system configuration.
 """
 
-from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, Float, JSON, ForeignKey, Table, CheckConstraint, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, Float, JSON, ForeignKey, Table, CheckConstraint, UniqueConstraint, Index
 from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY, JSONB, UUID
 # Base moved to core/database/base.py to avoid circular imports
 from core.database.base import Base
@@ -1131,22 +1131,24 @@ class IntegrationAnalysisDB(Base):
 class Chat(Base):
     """Chat session with user (PRD-27)"""
     __tablename__ = 'chats'
-    
+
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey('workspaces.id', ondelete='CASCADE'), nullable=True)
     title = Column(String(255), nullable=False)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
     visibility = Column(String(20), default='private', nullable=False)
     last_context = Column(JSONB, default=dict, server_default='{}')
-    
+
     # Relationships
     messages = relationship("Message", back_populates="chat", cascade="all, delete-orphan")
     votes = relationship("Vote", back_populates="chat", cascade="all, delete-orphan")
     user = relationship("User", backref="chats")
-    
+
     __table_args__ = (
         CheckConstraint("visibility IN ('private', 'public')", name='check_chat_visibility'),
+        Index('ix_chats_workspace_user', 'workspace_id', 'user_id'),
         {'extend_existing': True}
     )
 

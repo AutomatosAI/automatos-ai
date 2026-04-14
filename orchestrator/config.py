@@ -172,8 +172,44 @@ class Config:
     
     LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.7"))
     LLM_MAX_TOKENS: int = int(os.getenv("LLM_MAX_TOKENS", "2000"))
-    PLANNER_MODEL: str = os.getenv("PLANNER_MODEL", "z-ai/glm-5.1")
-    GRAPHIFY_MODEL: str = os.getenv("GRAPHIFY_MODEL", "google/gemini-2.0-flash")
+
+    @property
+    def PLANNER_MODEL(self) -> str:
+        """Get planner model from system_settings → env var fallback only."""
+        try:
+            from core.llm.manager import get_system_setting
+            return get_system_setting("coordination", "model", os.getenv("PLANNER_MODEL"))
+        except Exception:
+            return os.getenv("PLANNER_MODEL")
+
+    @property
+    def PLANNER_MAX_TOKENS(self) -> int:
+        """Get planner max_tokens from system_settings."""
+        try:
+            from core.llm.manager import get_system_setting
+            val = get_system_setting("coordination", "planner_max_tokens", "4000")
+            return int(val)
+        except Exception:
+            return 4000
+
+    @property
+    def GRAPHIFY_MODEL(self) -> str:
+        """Get graphify/knowledge-graph extraction model from system_settings."""
+        try:
+            from core.llm.manager import get_system_setting
+            return get_system_setting("knowledge_graph", "model", os.getenv("GRAPHIFY_MODEL"))
+        except Exception:
+            return os.getenv("GRAPHIFY_MODEL")
+
+    @property
+    def COORDINATOR_TASK_MAX_TOKENS(self) -> int:
+        """Get mission task max_tokens from system_settings → env fallback."""
+        try:
+            from core.llm.manager import get_system_setting
+            val = get_system_setting("coordination", "task_max_tokens", os.getenv("COORDINATOR_TASK_MAX_TOKENS", "4000"))
+            return int(val)
+        except Exception:
+            return int(os.getenv("COORDINATOR_TASK_MAX_TOKENS", "4000"))
     
     # =============================================================================
     # ENVIRONMENT
@@ -327,16 +363,32 @@ class Config:
     COORDINATOR_VERIFICATION_PASS_THRESHOLD: float = float(os.getenv("COORDINATOR_VERIFICATION_PASS_THRESHOLD", "0.7"))
     COORDINATOR_VERIFICATION_FAIL_THRESHOLD: float = float(os.getenv("COORDINATOR_VERIFICATION_FAIL_THRESHOLD", "0.4"))
     COORDINATOR_VERIFICATION_CONFIDENCE_ESCALATION: float = float(os.getenv("COORDINATOR_VERIFICATION_CONFIDENCE_ESCALATION", "0.5"))
-    # Cross-model verification: verifier model per executor model family
-    # Format: comma-separated family=model pairs
-    COORDINATOR_VERIFIER_MODEL_MAPPING: str = os.getenv(
-        "COORDINATOR_VERIFIER_MODEL_MAPPING",
-        "anthropic=openai/gpt-4o-mini,openai=anthropic/claude-haiku-4-5,"
-        "google=openai/gpt-4o-mini,deepseek=openai/gpt-4o-mini,meta=openai/gpt-4o-mini",
-    )
-    COORDINATOR_VERIFIER_FALLBACK_MODEL: str = os.getenv(
-        "COORDINATOR_VERIFIER_FALLBACK_MODEL", "openai/gpt-4o-mini",
-    )
+    # Cross-model verification: reads from system_settings → env fallback
+    @property
+    def COORDINATOR_VERIFIER_MODEL_MAPPING(self) -> str:
+        try:
+            from core.llm.manager import get_system_setting
+            return get_system_setting(
+                "coordination", "verifier_model_mapping",
+                os.getenv(
+                    "COORDINATOR_VERIFIER_MODEL_MAPPING",
+                    "anthropic=openai/gpt-4o-mini,openai=anthropic/claude-haiku-4-5,"
+                    "google=openai/gpt-4o-mini,deepseek=openai/gpt-4o-mini,meta=openai/gpt-4o-mini",
+                ),
+            )
+        except Exception:
+            return os.getenv("COORDINATOR_VERIFIER_MODEL_MAPPING", "")
+
+    @property
+    def COORDINATOR_VERIFIER_FALLBACK_MODEL(self) -> str:
+        try:
+            from core.llm.manager import get_system_setting
+            return get_system_setting(
+                "coordination", "verifier_fallback_model",
+                os.getenv("COORDINATOR_VERIFIER_FALLBACK_MODEL", "openai/gpt-4o-mini"),
+            )
+        except Exception:
+            return os.getenv("COORDINATOR_VERIFIER_FALLBACK_MODEL", "openai/gpt-4o-mini")
     # History-based agent scoring (PRD-82B US-003)
     COORDINATOR_HISTORY_LOOKBACK_DAYS: int = int(os.getenv("COORDINATOR_HISTORY_LOOKBACK_DAYS", "30"))
     COORDINATOR_HISTORY_MIN_DATAPOINTS: int = int(os.getenv("COORDINATOR_HISTORY_MIN_DATAPOINTS", "3"))
@@ -344,12 +396,18 @@ class Config:
     COORDINATOR_COST_PER_1K_TOKENS: float = float(os.getenv("COORDINATOR_COST_PER_1K_TOKENS", "0.003"))
     # Replanning limits (PRD-82B US-005)
     COORDINATOR_MAX_REPLANS: int = int(os.getenv("COORDINATOR_MAX_REPLANS", "2"))
-    # Max tokens for mission task LLM calls (agents default to 2000, missions need more)
-    COORDINATOR_TASK_MAX_TOKENS: int = int(os.getenv("COORDINATOR_TASK_MAX_TOKENS", "8000"))
+    # COORDINATOR_TASK_MAX_TOKENS is now a @property above (reads from system_settings)
     # Maximum seconds a single task execution can take before being timed out
     COORDINATOR_TASK_EXECUTION_TIMEOUT: int = int(os.getenv("COORDINATOR_TASK_EXECUTION_TIMEOUT", "240"))
-    # Cross-task consistency verification (PRD-82B US-006)
-    COORDINATOR_CONSISTENCY_CHECK: bool = os.getenv("COORDINATOR_CONSISTENCY_CHECK", "true").lower() in ("true", "1", "yes")
+    # Cross-task consistency verification — reads from system_settings
+    @property
+    def COORDINATOR_CONSISTENCY_CHECK(self) -> bool:
+        try:
+            from core.llm.manager import get_system_setting
+            val = get_system_setting("coordination", "consistency_check_enabled", "true")
+            return str(val).lower() in ("true", "1", "yes")
+        except Exception:
+            return os.getenv("COORDINATOR_CONSISTENCY_CHECK", "true").lower() in ("true", "1", "yes")
     # Parallel execution & budget governance (PRD-82C)
     # Token budgets per complexity tier — used for task estimation and budget gate
     COMPLEXITY_TOKEN_BUDGET_SIMPLE: int = int(os.getenv("COMPLEXITY_TOKEN_BUDGET_SIMPLE", "15000"))

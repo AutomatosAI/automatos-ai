@@ -7,7 +7,7 @@ import { motion } from 'framer-motion'
 import { Sidebar } from './sidebar'
 import { MobileSidebar } from './mobile-sidebar'
 import { Header } from './header'
-import { ChatWidget } from '../chatbot/chat-widget'
+import { AutoWidget } from '../chatbot/chat-widget'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { useIsTabletOrBelow } from '@/hooks/use-mobile'
 import { usePageTour } from '@/components/onboarding/use-page-tour'
@@ -34,19 +34,18 @@ export function MainLayout({ children }: MainLayoutProps) {
     if (pathname.startsWith('/tools')) return 'tools'
     if (pathname.startsWith('/marketplace')) return 'marketplace'
     if (pathname.startsWith('/analytics')) return 'analytics'
+    if (pathname.startsWith('/activity')) return 'activity'
     if (pathname.startsWith('/context')) return 'context'
     if (pathname.startsWith('/playbooks')) return 'playbooks'
     if (pathname.startsWith('/workspace')) return 'workspace'
+    if (pathname.startsWith('/settings')) return 'settings'
+    if (pathname.startsWith('/team')) return 'team'
     if (pathname.startsWith('/chat')) return 'chat'
     return 'dashboard'
   }
 
-  const chatContext = {
-    currentPage: getCurrentPage(),
-    selectedItems: [], // This could be populated based on page state
-    userRole: 'user', // This could come from authentication
-    recentActions: [] // This could track recent user actions
-  }
+  const currentPage = getCurrentPage()
+  const showAutoWidget = !pathname?.startsWith('/chat')
 
   const handleMenuClick = () => {
     if (isMobileLayout) {
@@ -89,27 +88,28 @@ export function MainLayout({ children }: MainLayoutProps) {
       {/* Main Content */}
       <div className={
         isMobileLayout
-          ? 'flex flex-col h-screen transition-all duration-300'
-          : 'flex flex-col h-screen transition-all duration-300 ml-16'
+          ? 'transition-all duration-300'
+          : 'transition-all duration-300 ml-16'
       }>
         <Header onMenuClick={handleMenuClick} />
 
-        <main className="flex-1 min-h-0 p-4 md:p-6">
+        <main className="p-4 md:p-6">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: isMobileLayout ? 0.2 : 0.5 }}
-            className="max-w-7xl mx-auto h-full"
+            className="max-w-7xl mx-auto"
           >
             {children}
           </motion.div>
         </main>
       </div>
 
-      {/* Pilot Helper Widget — shown on ALL pages (overlay, no navigation) */}
-      <ChatWidget
-        position="bottom-right"
-        context={chatContext}
+      {/* Auto Widget — floating assistant on every page except /chat */}
+      <AutoWidget
+        position="bottom-left"
+        currentPage={currentPage}
+        visible={showAutoWidget}
       />
     </div>
   )

@@ -168,12 +168,14 @@ class ChatService:
         self,
         user_id: int,
         title: str,
-        visibility: str = "private"
+        visibility: str = "private",
+        workspace_id: Optional[uuid.UUID] = None,
     ) -> Chat:
-        """Create a new chat session."""
+        """Create a new chat session scoped to a workspace."""
         chat = Chat(
             id=uuid.uuid4(),
             user_id=user_id,
+            workspace_id=workspace_id,
             title=title,
             visibility=visibility,
             created_at=datetime.utcnow(),
@@ -182,14 +184,17 @@ class ChatService:
         self.db.add(chat)
         self.db.commit()
         self.db.refresh(chat)
-        logger.info(f"Created chat {chat.id} for user {user_id}: {title}")
+        logger.info(f"Created chat {chat.id} for user {user_id} workspace {workspace_id}: {title}")
         return chat
 
-    def get_chat(self, chat_id: str) -> Optional[Chat]:
-        """Get a chat by ID."""
+    def get_chat(self, chat_id: str, workspace_id: Optional[uuid.UUID] = None) -> Optional[Chat]:
+        """Get a chat by ID, optionally scoped to a workspace."""
         try:
             chat_uuid = uuid.UUID(chat_id)
-            return self.db.query(Chat).filter(Chat.id == chat_uuid).first()
+            query = self.db.query(Chat).filter(Chat.id == chat_uuid)
+            if workspace_id is not None:
+                query = query.filter(Chat.workspace_id == workspace_id)
+            return query.first()
         except (ValueError, AttributeError):
             logger.error(f"Invalid chat_id format: {chat_id}")
             return None
@@ -198,10 +203,13 @@ class ChatService:
         self,
         user_id: int,
         limit: int = 20,
-        starting_after: Optional[datetime] = None
+        starting_after: Optional[datetime] = None,
+        workspace_id: Optional[uuid.UUID] = None,
     ) -> List[Chat]:
-        """Get chat history for a user."""
+        """Get chat history for a user within a workspace."""
         query = self.db.query(Chat).filter(Chat.user_id == user_id)
+        if workspace_id is not None:
+            query = query.filter(Chat.workspace_id == workspace_id)
         if starting_after:
             query = query.filter(Chat.created_at < starting_after)
         return query.order_by(desc(Chat.created_at)).limit(limit).all()
@@ -669,6 +677,7 @@ class StreamingChatService:
         if _complexity == Complexity.ATOM:
             llm_messages, use_tools, orchestrated = await self._prepare_atom_path(
                 messages, agent_runtime, smart_chat,
+                atom_tools=all_tools,
                 attachment_ids=attachment_ids,
                 model_id=model_id,
             )
@@ -756,11 +765,12 @@ class StreamingChatService:
         messages: List[Dict[str, Any]],
         agent_runtime,
         smart_chat,
+        atom_tools: Optional[List[Dict[str, Any]]] = None,
         attachment_ids: Optional[List[str]] = None,
         model_id: Optional[str] = None,
-    ) -> Tuple[List[Dict[str, Any]], None, None]:
-        """ATOM path: no tools, no orchestration, lightweight memory only."""
-        logger.info("[PRD-68] ATOM path — skipping tools/orchestration, retrieving memory")
+    ) -> Tuple[List[Dict[str, Any]], Optional[List[Dict[str, Any]]], None]:
+        """ATOM path: lightweight memory only, but keeps platform_execute tool."""
+        logger.info("[PRD-68] ATOM path — lightweight (tools=%d), retrieving memory", len(atom_tools or []))
         _now = datetime.utcnow()
         _time_ctx = (
             "Good morning" if _now.hour < 12
@@ -799,7 +809,7 @@ class StreamingChatService:
             f"{_memory_block}"
         )
         llm_messages = self.prompt_analyzer.convert_to_llm_messages(
-            messages, system_prompt=_atom_prompt, available_tools=None
+            messages, system_prompt=_atom_prompt, available_tools=atom_tools
         )
 
         # PRD-127: Resolve ephemeral attachments for ATOM path.
@@ -833,7 +843,7 @@ class StreamingChatService:
                     exc_info=True,
                 )
 
-        return llm_messages, None, None
+        return llm_messages, atom_tools, None
 
     async def _prepare_full_path(
         self,
@@ -2071,7 +2081,7 @@ class StreamingChatService:
             tools = get_tools_for_agent()
 
         try:
-            llm_manager = create_llm_manager(service_name="chatbot")
+            llm_manager = create_llm_manager(service_name="chatbot", workspace_id=self.workspace_id, request_type="chat")
             messages = self._resolve_file_parts(messages)
             latest_text = self.prompt_analyzer.extract_latest_user_text(messages)
             if self.prompt_analyzer.is_fresh_start_request(latest_text):

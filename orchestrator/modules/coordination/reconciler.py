@@ -402,20 +402,30 @@ class MissionReconciler:
                         },
                     )
 
-            # Apply verdict
-            if result.verdict == VERDICT_PASS:
-                MissionReconciler._apply_verdict_pass(db, task)
-                tasks_verified += 1
+            # Apply verdict — ALWAYS pass through to VERIFIED.
+            # Verification is advisory: feedback is stored in task metadata
+            # for downstream agents to incorporate, but tasks are NEVER
+            # rejected or retried based on verification alone.
+            if result.verdict != VERDICT_PASS:
+                # Store review feedback on the task so downstream consumers
+                # (synthesis tasks, reports, humans) can see it
+                task.output_metadata = {
+                    **(task.output_metadata or {}),
+                    "review_feedback": {
+                        "verdict": result.verdict,
+                        "reasoning": result.reasoning,
+                        "scores": result.scores,
+                        "suggestions": result.suggestions or result.deterministic_failures,
+                    },
+                }
+                logger.info(
+                    "Task %s verification %s — feedback stored, proceeding (no retry)",
+                    task.id,
+                    result.verdict.upper(),
+                )
 
-            elif result.verdict == VERDICT_FAIL:
-                failed = MissionReconciler._apply_verdict_fail(db, task, result)
-                if failed:
-                    tasks_verification_failed += 1
-
-            elif result.verdict == VERDICT_PARTIAL:
-                failed = MissionReconciler._apply_verdict_partial(db, run_id, task, result)
-                if failed:
-                    tasks_verification_failed += 1
+            MissionReconciler._apply_verdict_pass(db, task)
+            tasks_verified += 1
 
             db.flush()
 

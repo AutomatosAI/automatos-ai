@@ -40,20 +40,20 @@ const navigationItems = [
     description: 'Your AI workspace'
   },
   {
-    name: 'Workspace',
-    href: '/workspace',
-    icon: HardDrive,
-    iconColor: 'text-[hsl(var(--chart-3))]',
-    navIconKey: 'nav_workspace',
-    description: 'Files, code & agent output'
-  },
-  {
     name: 'Activity',
     href: '/activity',
     icon: Activity,
     iconColor: 'text-[hsl(var(--info))]',
     navIconKey: 'nav_activity',
     description: 'Your AI workforce at a glance'
+  },
+  {
+    name: 'Workspace',
+    href: '/workspace',
+    icon: HardDrive,
+    iconColor: 'text-[hsl(var(--chart-3))]',
+    navIconKey: 'nav_workspace',
+    description: 'Files, code & agent output'
   },
   {
     name: 'Agent Management',
@@ -72,20 +72,20 @@ const navigationItems = [
     description: 'Development and utility tools'
   },
   {
-    name: 'Community Marketplace',
-    href: '/marketplace',
-    icon: Store,
-    iconColor: 'text-primary',
-    navIconKey: 'nav_marketplace',
-    description: 'Discover agents, playbooks & tools'
-  },
-  {
-    name: 'Knowledge Bases',
+    name: 'Knowledge Base',
     href: '/documents',
     icon: Database,
     iconColor: 'text-[hsl(var(--success))]',
     navIconKey: 'nav_knowledge',
     description: 'Documents, databases & code-graph'
+  },
+  {
+    name: 'Marketplace',
+    href: '/marketplace',
+    icon: Store,
+    iconColor: 'text-primary',
+    navIconKey: 'nav_marketplace',
+    description: 'Discover agents, playbooks & tools'
   },
   {
     name: 'Team Management',

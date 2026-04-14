@@ -333,8 +333,7 @@ class MissionPlanner:
         Raises:
             PlanValidationError: if all retry attempts fail structural validation.
         """
-        llm = create_llm_manager(service_name="orchestrator", model=Config().PLANNER_MODEL)
-        llm.config.max_tokens = 16000
+        llm = create_llm_manager(service_name="planner", model=Config().PLANNER_MODEL)
         agent_roster = _render_agent_roster(agents)
         last_errors: List[str] = []
 
@@ -524,9 +523,7 @@ class MissionPlanner:
             )
 
         # --- LLM decomposition fallback ---
-        llm = create_llm_manager(service_name="orchestrator", model=Config().PLANNER_MODEL)
-        # Mission plans need 3-20 tasks in structured JSON — default 2000 is far too small
-        llm.config.max_tokens = 16000
+        llm = create_llm_manager(service_name="planner", model=Config().PLANNER_MODEL)
         agent_roster = _render_agent_roster(agents)
         last_errors: List[str] = []
 

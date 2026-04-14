@@ -328,11 +328,12 @@ async def stream_chat(
         chat = chat_service.create_chat(
             user_id=user_id,
             title=title,
-            visibility=request.selectedVisibilityType
+            visibility=request.selectedVisibilityType,
+            workspace_id=ctx.workspace_id,
         )
         chat_id = str(chat.id)
     else:
-        chat = chat_service.get_chat(chat_id)
+        chat = chat_service.get_chat(chat_id, workspace_id=ctx.workspace_id)
         if not chat:
             # Be forgiving: if client sends stale/invalid chat id, create a new chat
             parts = get_parts(current_msg)
@@ -354,6 +355,7 @@ async def stream_chat(
                 user_id=user_id,
                 title=title,
                 visibility=request.selectedVisibilityType,
+                workspace_id=ctx.workspace_id,
             )
             chat_id = str(chat.id)
         
@@ -596,11 +598,11 @@ async def get_chat_history(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
-    """Get chat history for the current user"""
+    """Get chat history for the current user within their workspace"""
     chat_service = ChatService(db)
     user_id = get_user_id(db)
-    
-    chats = chat_service.get_chat_history(user_id=user_id, limit=limit)
+
+    chats = chat_service.get_chat_history(user_id=user_id, limit=limit, workspace_id=ctx.workspace_id)
     
     return [
         {
@@ -622,17 +624,17 @@ async def get_chat(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
-    """Get a specific chat"""
+    """Get a specific chat (workspace-scoped)"""
     chat_service = ChatService(db)
     user_id = get_user_id(db)
-    
-    chat = chat_service.get_chat(chat_id)
+
+    chat = chat_service.get_chat(chat_id, workspace_id=ctx.workspace_id)
     if not chat:
         raise HTTPException(status_code=404, detail="Chat not found")
-    
+
     if chat.user_id != user_id:
         raise HTTPException(status_code=403, detail="Access denied")
-    
+
     return {
         "id": str(chat.id),
         "userId": chat.user_id,
@@ -650,15 +652,15 @@ async def get_chat_messages(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
-    """Get all messages for a chat"""
+    """Get all messages for a chat (workspace-scoped)"""
     chat_service = ChatService(db)
     user_id = get_user_id(db)
-    
-    # Verify chat access
-    chat = chat_service.get_chat(chat_id)
+
+    # Verify chat access within workspace
+    chat = chat_service.get_chat(chat_id, workspace_id=ctx.workspace_id)
     if not chat:
         raise HTTPException(status_code=404, detail="Chat not found")
-    
+
     if chat.user_id != user_id:
         raise HTTPException(status_code=403, detail="Access denied")
     
@@ -684,7 +686,7 @@ async def search_chat_history(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
-    """Search across all chat messages by keyword. Returns matching messages with chat context."""
+    """Search across chat messages by keyword (workspace-scoped)."""
     from datetime import datetime, timedelta
 
     user_id = get_user_id(db)
@@ -698,6 +700,7 @@ async def search_chat_history(
             FROM messages m
             JOIN chats c ON c.id = m.chat_id
             WHERE c.user_id = :user_id
+              AND c.workspace_id = :workspace_id
               AND m.created_at >= :since
               AND EXISTS (
                   SELECT 1 FROM jsonb_array_elements(m.parts) AS p
@@ -706,7 +709,7 @@ async def search_chat_history(
             ORDER BY m.created_at DESC
             LIMIT :lim
         """),
-        {"user_id": user_id, "since": since, "search": search_term, "lim": min(limit, 100)},
+        {"user_id": user_id, "workspace_id": str(ctx.workspace_id), "since": since, "search": search_term, "lim": min(limit, 100)},
     ).fetchall()
 
     results = []
@@ -734,18 +737,17 @@ async def delete_chat(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
-    """Delete a chat"""
+    """Delete a chat (workspace-scoped)"""
     chat_service = ChatService(db)
     user_id = get_user_id(db)
-    
-    # Verify chat access
-    chat = chat_service.get_chat(chat_id)
+
+    chat = chat_service.get_chat(chat_id, workspace_id=ctx.workspace_id)
     if not chat:
         raise HTTPException(status_code=404, detail="Chat not found")
-    
+
     if chat.user_id != user_id:
         raise HTTPException(status_code=403, detail="Access denied")
-    
+
     success = chat_service.delete_chat(chat_id)
     return {"success": success}
 
@@ -757,15 +759,14 @@ async def update_chat(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
-    """Update chat title"""
+    """Update chat title (workspace-scoped)"""
     chat_service = ChatService(db)
     user_id = get_user_id(db)
-    
-    # Verify chat access
-    chat = chat_service.get_chat(chat_id)
+
+    chat = chat_service.get_chat(chat_id, workspace_id=ctx.workspace_id)
     if not chat:
         raise HTTPException(status_code=404, detail="Chat not found")
-    
+
     if chat.user_id != user_id:
         raise HTTPException(status_code=403, detail="Access denied")
     
@@ -779,12 +780,11 @@ async def vote_message(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
-    """Vote on a message"""
+    """Vote on a message (workspace-scoped)"""
     chat_service = ChatService(db)
     user_id = get_user_id(db)
-    
-    # Verify chat access
-    chat = chat_service.get_chat(request.chatId)
+
+    chat = chat_service.get_chat(request.chatId, workspace_id=ctx.workspace_id)
     if not chat:
         raise HTTPException(status_code=404, detail="Chat not found")
     
@@ -851,13 +851,13 @@ async def switch_agent(
     chat_service = ChatService(db)
     user_id = get_user_id(db)
     
-    chat = chat_service.get_chat(chat_id)
+    chat = chat_service.get_chat(chat_id, workspace_id=ctx.workspace_id)
     if not chat:
         raise HTTPException(status_code=404, detail="Chat not found")
-    
+
     if chat.user_id != user_id:
         raise HTTPException(status_code=403, detail="Access denied")
-    
+
     # PRD-67: Allow switching to system agents (CTO) if user has the required role
     new_agent = db.query(Agent).filter(
         Agent.id == request.newAgentId,
