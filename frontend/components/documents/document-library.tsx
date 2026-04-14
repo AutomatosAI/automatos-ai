@@ -581,7 +581,7 @@ export function DocumentLibrary({
                 Refresh
               </Button>
               <a
-                href="https://automatos.gitbook.io/automatos-ai/knowledge/documents"
+                href="https://docs.automatos.app/automatos-ai-docs/knowledge/documents"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1.5 text-sm text-primary hover:text-primary/80 transition-colors"

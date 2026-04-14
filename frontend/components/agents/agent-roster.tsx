@@ -628,7 +628,7 @@ export function AgentRoster({
             Try adjusting your search or create a new agent.
           </p>
           <a
-            href="https://automatos.gitbook.io/automatos-ai/agents/creating"
+            href="https://docs.automatos.app/automatos-ai-docs/agents/creating"
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1.5 text-sm text-primary hover:text-primary/80 transition-colors"

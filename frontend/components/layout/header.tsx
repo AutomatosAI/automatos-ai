@@ -1,7 +1,6 @@
 'use client'
 
-import { motion } from 'framer-motion'
-import { Menu, BookOpen, ExternalLink, Code2, Bug } from 'lucide-react'
+import { Menu, BookOpen, ExternalLink, Code2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ThemeToggle } from '@/components/ui/theme-toggle'
 import { ProfileMenu } from '@/components/auth/profile-menu'
@@ -10,7 +9,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 
@@ -65,7 +63,7 @@ export function Header({ onMenuClick }: HeaderProps) {
             <DropdownMenuContent align="end" className="w-48">
               <DropdownMenuItem asChild>
                 <a
-                  href="https://automatos.gitbook.io/automatos-ai"
+                  href="https://docs.automatos.app"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center justify-between"
@@ -76,25 +74,13 @@ export function Header({ onMenuClick }: HeaderProps) {
               </DropdownMenuItem>
               <DropdownMenuItem asChild>
                 <a
-                  href="https://automatos.gitbook.io/automatos-ai/api-reference"
+                  href="https://docs.automatos.app/automatos-ai-docs/api-reference"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center justify-between"
                 >
                   API Reference
                   <Code2 className="w-3 h-3 opacity-50" />
-                </a>
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem asChild>
-                <a
-                  href="https://github.com/AutomatosAI/automatos-ai/issues"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center justify-between"
-                >
-                  Report a Bug
-                  <Bug className="w-3 h-3 opacity-50" />
                 </a>
               </DropdownMenuItem>
             </DropdownMenuContent>

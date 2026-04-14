@@ -182,7 +182,7 @@ export function MobileSidebar({ onNavigate }: MobileSidebarProps) {
       <div className="border-t border-border/50 px-3 py-3 space-y-1">
         {/* Documentation link */}
         <a
-          href="https://automatos.gitbook.io/automatos-ai"
+          href="https://docs.automatos.app"
           target="_blank"
           rel="noopener noreferrer"
           className="flex items-center gap-3 w-full px-4 py-3 rounded-xl transition-all duration-200 min-h-[48px] hover:bg-secondary/40 active:bg-secondary/60"
