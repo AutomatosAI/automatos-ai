@@ -77,6 +77,14 @@ const registry: Record<string, TourRegistryEntry> = {
       return createSettingsTour(userId)
     },
   },
+  '/workspace': {
+    id: 'workspace',
+    label: 'Workspace',
+    factory: async (userId) => {
+      const { createWorkspaceTour } = await import('./tours/workspace-tour')
+      return createWorkspaceTour(userId)
+    },
+  },
 }
 
 /** Get the tour entry for a given pathname, or undefined if no tour exists */

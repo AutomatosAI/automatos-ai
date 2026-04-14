@@ -26,7 +26,10 @@ export function createAnalyticsTour(userId: string) {
     `,
     beforeShowPromise: () => waitForElement('[data-tour="analytics-page-header"]'),
     attachTo: { element: '[data-tour="analytics-page-header"]', on: 'bottom' },
-    buttons: [{ text: 'Next', action: tour.next }],
+    buttons: [
+      { text: 'Skip', classes: 'shepherd-button-secondary', action: () => tour.cancel() },
+      { text: 'Next', action: tour.next },
+    ],
   })
 
   tour.addStep({

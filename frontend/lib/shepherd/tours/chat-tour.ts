@@ -30,7 +30,10 @@ export function createChatTour(userId: string) {
     `,
     beforeShowPromise: () => waitForElement('[data-tour="chat-agent-selector"]'),
     attachTo: { element: '[data-tour="chat-agent-selector"]', on: 'bottom' },
-    buttons: [{ text: 'Next', action: tour.next }],
+    buttons: [
+      { text: 'Skip', classes: 'shepherd-button-secondary', action: () => tour.cancel() },
+      { text: 'Next', action: tour.next },
+    ],
   })
 
   tour.addStep({
@@ -65,8 +68,7 @@ export function createChatTour(userId: string) {
       </p>
       ${stepProgress(3, TOTAL)}
     `,
-    beforeShowPromise: () => waitForElement('[data-tour="nav-chat"]'),
-    attachTo: { element: '[data-tour="nav-chat"]', on: 'right' },
+    // Centered — no specific attach target needed for final step
     buttons: [
       { text: 'Back', classes: 'shepherd-button-secondary', action: tour.back },
       { text: 'Got it!', action: tour.complete },

@@ -49,7 +49,7 @@ export function ChatModeBar({
   }
 
   return (
-    <div className="flex flex-wrap justify-center gap-3 md:gap-2">
+    <div data-tour="chat-mode-bar" className="flex flex-wrap justify-center gap-3 md:gap-2">
       {/* Code mode */}
       <button
         type="button"

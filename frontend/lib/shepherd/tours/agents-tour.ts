@@ -4,7 +4,7 @@ import { markTourComplete, markTourSkipped } from '../tour-storage'
 import { title, waitForElement, stepProgress, tabList } from '../tour-utils'
 
 const TOUR_ID = 'agents'
-const TOTAL = 5
+const TOTAL = 4
 
 export function createAgentsTour(userId: string) {
   const tour = new Shepherd.Tour({
@@ -13,6 +13,7 @@ export function createAgentsTour(userId: string) {
     keyboardNavigation: true,
   })
 
+  // Step 1: Overview (centered)
   tour.addStep({
     id: 'agents-overview',
     title: title('Agent', 'Management'),
@@ -24,18 +25,17 @@ export function createAgentsTour(userId: string) {
       </p>
       ${stepProgress(1, TOTAL)}
     `,
-    beforeShowPromise: () => waitForElement('[data-tour="agents-page-header"]'),
-    attachTo: { element: '[data-tour="agents-page-header"]', on: 'bottom' },
-    buttons: [{ text: 'Next', action: tour.next }],
+    buttons: [
+      { text: 'Skip', classes: 'shepherd-button-secondary', action: () => tour.cancel() },
+      { text: 'Next', action: tour.next },
+    ],
   })
 
+  // Step 2: Tabs
   tour.addStep({
     id: 'agents-tabs',
     title: title('Five', 'Agent Views'),
     text: `
-      <p class="text-gray-300 mb-2">
-        The tab strip below the header gives you every angle on your workforce:
-      </p>
       ${tabList([
         ['Roster', 'The full list of agents as cards or rows — create, edit, start/pause, delete.'],
         ['Org Chart', 'Visualise reporting lines and coordination hierarchy between agents.'],
@@ -45,14 +45,15 @@ export function createAgentsTour(userId: string) {
       ])}
       ${stepProgress(2, TOTAL)}
     `,
-    beforeShowPromise: () => waitForElement('[data-tour="agents-page-header"]'),
-    attachTo: { element: '[data-tour="agents-page-header"]', on: 'bottom' },
+    beforeShowPromise: () => waitForElement('[data-tour="agents-tabs"]'),
+    attachTo: { element: '[data-tour="agents-tabs"]', on: 'bottom' },
     buttons: [
       { text: 'Back', classes: 'shepherd-button-secondary', action: tour.back },
       { text: 'Next', action: tour.next },
     ],
   })
 
+  // Step 3: Create agent button
   tour.addStep({
     id: 'agents-create',
     title: title('Create an', 'Agent'),
@@ -72,36 +73,18 @@ export function createAgentsTour(userId: string) {
     ],
   })
 
+  // Step 4: Agent cards (centered)
   tour.addStep({
-    id: 'agents-roster',
+    id: 'agents-cards',
     title: title('Your', 'Agent Roster'),
     text: `
       <p class="text-gray-300 mb-2">
-        All your agents live here. Toggle between grid and list view, search by name,
-        and filter by status to find what you need quickly.
+        Each agent appears as a card with status, model, and a menu for configure,
+        start/pause, clone, and delete. Click a card to open its full workspace
+        with chat, reports, and memory.
       </p>
       ${stepProgress(4, TOTAL)}
     `,
-    beforeShowPromise: () => waitForElement('[data-tour="agent-roster"]'),
-    attachTo: { element: '[data-tour="agent-roster"]', on: 'top' },
-    buttons: [
-      { text: 'Back', classes: 'shepherd-button-secondary', action: tour.back },
-      { text: 'Next', action: tour.next },
-    ],
-  })
-
-  tour.addStep({
-    id: 'agents-actions',
-    title: title('Agent', 'Actions'),
-    text: `
-      <p class="text-gray-300 mb-2">
-        Each card has a menu for view details, configure, start/pause, clone, and delete.
-        Click the card itself to open the full agent workspace with its chat, reports and memory.
-      </p>
-      ${stepProgress(5, TOTAL)}
-    `,
-    beforeShowPromise: () => waitForElement('[data-tour="agent-card-menu"]'),
-    attachTo: { element: '[data-tour="agent-card-menu"]', on: 'left' },
     buttons: [
       { text: 'Back', classes: 'shepherd-button-secondary', action: tour.back },
       { text: 'Got it!', action: tour.complete },

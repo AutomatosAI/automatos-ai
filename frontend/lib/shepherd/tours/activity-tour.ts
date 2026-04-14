@@ -26,7 +26,10 @@ export function createActivityTour(userId: string) {
     `,
     beforeShowPromise: () => waitForElement('[data-tour="activity-page-header"]'),
     attachTo: { element: '[data-tour="activity-page-header"]', on: 'bottom' },
-    buttons: [{ text: 'Next', action: tour.next }],
+    buttons: [
+      { text: 'Skip', classes: 'shepherd-button-secondary', action: () => tour.cancel() },
+      { text: 'Next', action: tour.next },
+    ],
   })
 
   tour.addStep({
@@ -84,8 +87,7 @@ export function createActivityTour(userId: string) {
       </p>
       ${stepProgress(4, TOTAL)}
     `,
-    beforeShowPromise: () => waitForElement('[data-tour="activity-content"]'),
-    attachTo: { element: '[data-tour="activity-content"]', on: 'top' },
+    // Centered — no specific attach target needed for final step
     buttons: [
       { text: 'Back', classes: 'shepherd-button-secondary', action: tour.back },
       { text: 'Got it!', action: tour.complete },

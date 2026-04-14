@@ -245,7 +245,7 @@ export function AgentManagement() {
         animate={inView ? { opacity: 1, y: 0 } : {}}
         transition={{ duration: 0.6, delay: 0.3 }}
       >
-        <FilterTabs tabs={tabDefs} value={activeTab} onValueChange={setActiveTab} trailing={<ViewToggle value={viewMode} onChange={setViewMode} className="ml-auto" />}>
+        <FilterTabs data-tour="agents-tabs" tabs={tabDefs} value={activeTab} onValueChange={setActiveTab} trailing={<ViewToggle value={viewMode} onChange={setViewMode} className="ml-auto" />}>
           <TabsContent value="roster" className="space-y-6">
             <div data-tour="agent-roster">
               <AgentRoster
