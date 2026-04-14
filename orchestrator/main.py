@@ -366,6 +366,43 @@ async def _schema_migration():
     except Exception as e:
         logger.error("Auto agent schema migration failed: %s", e, exc_info=True)
 
+    # CRITICAL: Chat workspace isolation — add workspace_id to chats table
+    try:
+        from sqlalchemy import text as _tc
+        from core.database.database import engine as _engine_c
+        with _engine_c.connect() as conn:
+            # 1. Add column
+            conn.execute(_tc(
+                "ALTER TABLE chats ADD COLUMN IF NOT EXISTS "
+                "workspace_id UUID REFERENCES workspaces(id) ON DELETE CASCADE"
+            ))
+            # 2. Backfill from messages table (each chat's earliest message has workspace_id)
+            result = conn.execute(_tc("""
+                UPDATE chats
+                SET workspace_id = sub.ws
+                FROM (
+                    SELECT DISTINCT ON (chat_id) chat_id, workspace_id AS ws
+                    FROM messages
+                    WHERE workspace_id IS NOT NULL
+                    ORDER BY chat_id, created_at ASC
+                ) sub
+                WHERE chats.id = sub.chat_id
+                  AND chats.workspace_id IS NULL
+            """))
+            backfilled = result.rowcount
+            # 3. Index for workspace+user queries
+            conn.execute(_tc(
+                "CREATE INDEX IF NOT EXISTS ix_chats_workspace_user "
+                "ON chats (workspace_id, user_id)"
+            ))
+            conn.commit()
+            if backfilled:
+                logger.info("Chat workspace isolation: backfilled %d chats", backfilled)
+            else:
+                logger.info("Chat workspace isolation: column present, no backfill needed")
+    except Exception as e:
+        logger.error("Chat workspace isolation migration failed: %s", e, exc_info=True)
+
     # Seed Auto agents for existing workspaces
     try:
         from sqlalchemy import text as _t2

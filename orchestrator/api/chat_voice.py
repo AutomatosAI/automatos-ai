@@ -54,11 +54,13 @@ async def _collect_streaming_response(
     streaming_service = StreamingChatService(db, workspace_id=workspace_id)
 
     # Save the user message (transcript) into chat history
-    chat = chat_service.get_chat(conversation_id)
+    ws_uuid = uuid.UUID(workspace_id) if isinstance(workspace_id, str) else workspace_id
+    chat = chat_service.get_chat(conversation_id, workspace_id=ws_uuid)
     if not chat:
         chat = chat_service.create_chat(
             user_id=user_id,
             title=transcript[:50],
+            workspace_id=ws_uuid,
         )
         conversation_id = str(chat.id)
 

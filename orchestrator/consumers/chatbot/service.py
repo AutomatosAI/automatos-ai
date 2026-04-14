@@ -168,12 +168,14 @@ class ChatService:
         self,
         user_id: int,
         title: str,
-        visibility: str = "private"
+        visibility: str = "private",
+        workspace_id: Optional[uuid.UUID] = None,
     ) -> Chat:
-        """Create a new chat session."""
+        """Create a new chat session scoped to a workspace."""
         chat = Chat(
             id=uuid.uuid4(),
             user_id=user_id,
+            workspace_id=workspace_id,
             title=title,
             visibility=visibility,
             created_at=datetime.utcnow(),
@@ -182,14 +184,17 @@ class ChatService:
         self.db.add(chat)
         self.db.commit()
         self.db.refresh(chat)
-        logger.info(f"Created chat {chat.id} for user {user_id}: {title}")
+        logger.info(f"Created chat {chat.id} for user {user_id} workspace {workspace_id}: {title}")
         return chat
 
-    def get_chat(self, chat_id: str) -> Optional[Chat]:
-        """Get a chat by ID."""
+    def get_chat(self, chat_id: str, workspace_id: Optional[uuid.UUID] = None) -> Optional[Chat]:
+        """Get a chat by ID, optionally scoped to a workspace."""
         try:
             chat_uuid = uuid.UUID(chat_id)
-            return self.db.query(Chat).filter(Chat.id == chat_uuid).first()
+            query = self.db.query(Chat).filter(Chat.id == chat_uuid)
+            if workspace_id is not None:
+                query = query.filter(Chat.workspace_id == workspace_id)
+            return query.first()
         except (ValueError, AttributeError):
             logger.error(f"Invalid chat_id format: {chat_id}")
             return None
@@ -198,10 +203,13 @@ class ChatService:
         self,
         user_id: int,
         limit: int = 20,
-        starting_after: Optional[datetime] = None
+        starting_after: Optional[datetime] = None,
+        workspace_id: Optional[uuid.UUID] = None,
     ) -> List[Chat]:
-        """Get chat history for a user."""
+        """Get chat history for a user within a workspace."""
         query = self.db.query(Chat).filter(Chat.user_id == user_id)
+        if workspace_id is not None:
+            query = query.filter(Chat.workspace_id == workspace_id)
         if starting_after:
             query = query.filter(Chat.created_at < starting_after)
         return query.order_by(desc(Chat.created_at)).limit(limit).all()

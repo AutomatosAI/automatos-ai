@@ -119,35 +119,23 @@ async def widget_chat(
     chat_id: str
 
     if body.conversation_id:
-        chat = chat_service.get_chat(body.conversation_id)
+        ws_uuid = uuid.UUID(workspace_id) if isinstance(workspace_id, str) else workspace_id
+        chat = chat_service.get_chat(body.conversation_id, workspace_id=ws_uuid)
         if not chat:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Conversation not found",
             )
-        # Ensure the conversation belongs to this workspace by checking
-        # that at least one message was saved with the same workspace_id.
-        ownership_check = db.execute(
-            text(
-                "SELECT 1 FROM messages "
-                "WHERE chat_id = :chat_id AND workspace_id = :ws "
-                "LIMIT 1"
-            ),
-            {"chat_id": body.conversation_id, "ws": workspace_id},
-        ).fetchone()
-        if not ownership_check:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Conversation does not belong to this workspace",
-            )
         chat_id = body.conversation_id
     else:
         short_id = uuid.uuid4().hex[:8]
         title = f"{body.message[:40] if body.message else 'Widget Chat'} [{short_id}]"
+        ws_uuid = uuid.UUID(workspace_id) if isinstance(workspace_id, str) else workspace_id
         chat = chat_service.create_chat(
             user_id=user_id,
             title=title,
             visibility="private",
+            workspace_id=ws_uuid,
         )
         chat_id = str(chat.id)
 
