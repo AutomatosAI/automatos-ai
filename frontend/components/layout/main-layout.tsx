@@ -10,6 +10,7 @@ import { Header } from './header'
 import { AutoWidget } from '../chatbot/chat-widget'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { useIsTabletOrBelow } from '@/hooks/use-mobile'
+import { useAutoTour } from '@/hooks/use-auto-tour'
 
 interface MainLayoutProps {
   children: React.ReactNode
@@ -20,6 +21,9 @@ export function MainLayout({ children }: MainLayoutProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const isMobileLayout = useIsTabletOrBelow()
   const pathname = usePathname()
+
+  // Auto-start page tour on first visit (per-user, per-page)
+  useAutoTour()
 
   // Get current page context for the chat
   const getCurrentPage = () => {

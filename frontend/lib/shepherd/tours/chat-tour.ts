@@ -4,7 +4,7 @@ import { markTourComplete, markTourSkipped } from '../tour-storage'
 import { title, waitForElement, stepProgress, tabList } from '../tour-utils'
 
 const TOUR_ID = 'chat'
-const TOTAL = 4
+const TOTAL = 5
 
 export function createChatTour(userId: string) {
   const tour = new Shepherd.Tour({
@@ -94,6 +94,31 @@ export function createChatTour(userId: string) {
     `,
     beforeShowPromise: () => waitForElement('[data-tour="header-actions"]'),
     attachTo: { element: '[data-tour="header-actions"]', on: 'bottom' },
+    buttons: [
+      { text: 'Back', classes: 'shepherd-button-secondary', action: tour.back },
+      { text: 'Next', action: tour.next },
+    ],
+  })
+
+  // Step 5: Meet Auto
+  tour.addStep({
+    id: 'chat-auto',
+    title: title('Meet', 'Auto'),
+    text: `
+      <p class="text-gray-300 mb-2">
+        See the chat bubble in the <strong>bottom right</strong>? That's <strong>Auto</strong> —
+        your AI assistant that follows you to every page in the platform.
+      </p>
+      <p class="text-gray-300 mb-2">
+        Ask Auto anything — how to build agents, create playbooks, set up missions,
+        connect tools, or understand your analytics. If you're ever stuck, Auto is
+        right there to help.
+      </p>
+      <p class="text-gray-400 text-sm">
+        Try it now — ask Auto <em>"What can you help me with?"</em>
+      </p>
+      ${stepProgress(5, TOTAL)}
+    `,
     buttons: [
       { text: 'Back', classes: 'shepherd-button-secondary', action: tour.back },
       { text: 'Got it!', action: tour.complete },
