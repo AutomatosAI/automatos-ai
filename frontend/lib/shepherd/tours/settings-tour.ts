@@ -26,8 +26,6 @@ export function createSettingsTour(userId: string) {
       </p>
       ${stepProgress(1, TOTAL)}
     `,
-    beforeShowPromise: () => waitForElement('[data-tour="settings-page-header"]'),
-    attachTo: { element: '[data-tour="settings-page-header"]', on: 'bottom' },
     buttons: [
       { text: 'Skip', classes: 'shepherd-button-secondary', action: () => tour.cancel() },
       { text: 'Next', action: tour.next },
@@ -61,18 +59,16 @@ export function createSettingsTour(userId: string) {
   })
 
   tour.addStep({
-    id: 'settings-credentials',
-    title: title('Credentials &', 'API Keys'),
+    id: 'settings-channels',
+    title: title('Connect', 'Channels'),
     text: `
       <p class="text-gray-300 mb-2">
-        The two most common places you'll come back to. <strong>API Keys</strong> is where
-        you drop in LLM provider keys. <strong>Credentials</strong> stores encrypted OAuth
-        tokens and secrets your agents use to sign in to Gmail, Slack, GitHub and friends.
+        The <strong>Channels</strong> tab is where you wire in email, Slack, Teams,
+        Discord, Telegram, WhatsApp, voice, and more — so your agents can receive
+        and respond on the platforms your team already uses.
       </p>
       ${stepProgress(3, TOTAL)}
     `,
-    beforeShowPromise: () => waitForElement('[data-tour="settings-credentials-tab"]'),
-    attachTo: { element: '[data-tour="settings-credentials-tab"]', on: 'bottom' },
     buttons: [
       { text: 'Back', classes: 'shepherd-button-secondary', action: tour.back },
       { text: 'Got it!', action: tour.complete },

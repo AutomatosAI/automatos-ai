@@ -24,8 +24,6 @@ export function createAnalyticsTour(userId: string) {
       </p>
       ${stepProgress(1, TOTAL)}
     `,
-    beforeShowPromise: () => waitForElement('[data-tour="analytics-page-header"]'),
-    attachTo: { element: '[data-tour="analytics-page-header"]', on: 'bottom' },
     buttons: [
       { text: 'Skip', classes: 'shepherd-button-secondary', action: () => tour.cancel() },
       { text: 'Next', action: tour.next },
@@ -58,17 +56,16 @@ export function createAnalyticsTour(userId: string) {
   })
 
   tour.addStep({
-    id: 'analytics-timerange',
-    title: title('Time', 'Range'),
+    id: 'analytics-costs',
+    title: title('Track Every', 'Dollar'),
     text: `
       <p class="text-gray-300 mb-2">
-        The range picker applies to every chart on the page — flip between 7, 30 and 90 days
-        to compare trends. Pick a wider window to see week-over-week movement.
+        The <strong>LLM & Costs</strong> tab breaks down token spend by model,
+        provider, and agent — so you can see exactly where your budget goes.
+        Use the time-range picker at the top to compare periods.
       </p>
       ${stepProgress(3, TOTAL)}
     `,
-    beforeShowPromise: () => waitForElement('[data-tour="analytics-time-range"]'),
-    attachTo: { element: '[data-tour="analytics-time-range"]', on: 'bottom' },
     buttons: [
       { text: 'Back', classes: 'shepherd-button-secondary', action: tour.back },
       { text: 'Got it!', action: tour.complete },

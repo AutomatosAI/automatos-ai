@@ -27,8 +27,6 @@ export function createToolsTour(userId: string) {
       </p>
       ${stepProgress(1, TOTAL)}
     `,
-    beforeShowPromise: () => waitForElement('[data-tour="tools-page-header"]'),
-    attachTo: { element: '[data-tour="tools-page-header"]', on: 'bottom' },
     buttons: [
       { text: 'Skip', classes: 'shepherd-button-secondary', action: () => tour.cancel() },
       { text: 'Next', action: tour.next },

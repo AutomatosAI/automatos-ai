@@ -8,7 +8,7 @@ export function title(white: string, accent: string): string {
 }
 
 /** Wait for a DOM element to appear, with timeout fallback (resolves anyway to prevent hangs) */
-export function waitForElement(selector: string, timeout = 5000): Promise<void> {
+export function waitForElement(selector: string, timeout = 1500): Promise<void> {
   return new Promise((resolve) => {
     if (typeof window === 'undefined') {
       resolve()

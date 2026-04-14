@@ -24,8 +24,6 @@ export function createActivityTour(userId: string) {
       </p>
       ${stepProgress(1, TOTAL)}
     `,
-    beforeShowPromise: () => waitForElement('[data-tour="activity-page-header"]'),
-    attachTo: { element: '[data-tour="activity-page-header"]', on: 'bottom' },
     buttons: [
       { text: 'Skip', classes: 'shepherd-button-secondary', action: () => tour.cancel() },
       { text: 'Next', action: tour.next },
