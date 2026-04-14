@@ -107,7 +107,7 @@ export function MainLayout({ children }: MainLayoutProps) {
 
       {/* Auto Widget — floating assistant on every page except /chat */}
       <AutoWidget
-        position="bottom-left"
+        position="bottom-right"
         currentPage={currentPage}
         visible={showAutoWidget}
       />
