@@ -95,13 +95,17 @@ async def query_loki_logs(db: Session, workspace_id: UUID, params: Dict[str, Any
     level = params.get("level")
     search = params.get("search")
 
-    # Build LogQL query
+    # Build LogQL query — Loki rejects empty '{}' selectors
     label_parts = []
     if service:
         label_parts.append(f'service="{service}"')
     if level:
         label_parts.append(f'level="{level}"')
-    label_selector = "{" + ", ".join(label_parts) + "}" if label_parts else '{}'
+    if not label_parts:
+        # Default to the API service when no labels specified —
+        # Loki rejects empty '{}' selectors with 400
+        label_parts.append('service="automatos-backend"')
+    label_selector = "{" + ", ".join(label_parts) + "}"
 
     line_filter = ""
     if search:
