@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
-import { Save, ChevronDown, ChevronUp, RefreshCw, Rocket, Pencil, Brain, Target } from 'lucide-react'
+import { Save, ChevronDown, ChevronUp, RefreshCw, Rocket, Pencil, Brain, Target, ShieldCheck } from 'lucide-react'
 import { toast } from 'sonner'
 import { apiClient } from '@/lib/api-client'
 import {
@@ -43,6 +43,10 @@ const MODEL_TIERS: Record<string, { label: string; color: string }> = {
 
 // Keys we show in the Planner card (from coordination category)
 const PLANNER_KEYS = ['provider', 'model', 'planner_max_tokens', 'planner_temperature'] as const
+// Keys we show in the Verifier card (from coordination category)
+const VERIFIER_KEYS = ['verifier_fallback_model', 'verifier_model_mapping', 'verifier_max_tokens', 'verification_pass_threshold', 'verification_catastrophic_threshold'] as const
+// All coordination keys we manage
+const ALL_COORD_KEYS = [...PLANNER_KEYS, ...VERIFIER_KEYS] as const
 
 export function OnboardingAgentsTab() {
   const [agents, setAgents] = useState<OnboardingAgent[]>([])
@@ -66,13 +70,13 @@ export function OnboardingAgentsTab() {
       ])
       setAgents(agentsData.agents || [])
 
-      // Extract coordination category for planner card
+      // Extract coordination category for planner + verifier cards
       const coord = allSettings.find(c => c.category === 'coordination')
       if (coord) {
         setPlannerSettings(coord)
         const vals: Record<string, string> = {}
         for (const s of coord.settings) {
-          if ((PLANNER_KEYS as readonly string[]).includes(s.key)) {
+          if ((ALL_COORD_KEYS as readonly string[]).includes(s.key)) {
             vals[s.key] = s.value ?? s.default_value ?? ''
           }
         }
@@ -144,12 +148,12 @@ export function OnboardingAgentsTab() {
     setPlannerDirty(true)
   }
 
-  const handlePlannerSave = async () => {
+  const handleCoordinationSave = async () => {
     if (!plannerSettings) return
     try {
       setPlannerSaving(true)
       const updates = plannerSettings.settings
-        .filter(s => (PLANNER_KEYS as readonly string[]).includes(s.key))
+        .filter(s => (ALL_COORD_KEYS as readonly string[]).includes(s.key))
         .filter(s => {
           const current = plannerValues[s.key] ?? ''
           const original = s.value ?? s.default_value ?? ''
@@ -159,13 +163,13 @@ export function OnboardingAgentsTab() {
 
       if (updates.length > 0) {
         await bulkUpdateSettings(updates)
-        toast.success('Planner settings saved')
+        toast.success('Mission pipeline settings saved')
         setPlannerDirty(false)
-        await fetchAgents() // reload all
+        await fetchAgents()
       }
     } catch (err) {
-      console.error('Failed to save planner settings:', err)
-      toast.error('Failed to save planner settings')
+      console.error('Failed to save coordination settings:', err)
+      toast.error('Failed to save settings')
     } finally {
       setPlannerSaving(false)
     }
@@ -226,10 +230,10 @@ export function OnboardingAgentsTab() {
               <Button
                 size="sm"
                 disabled={!plannerDirty || plannerSaving}
-                onClick={handlePlannerSave}
+                onClick={handleCoordinationSave}
               >
                 <Save className="h-4 w-4 mr-2" />
-                {plannerSaving ? 'Saving...' : 'Save'}
+                {plannerSaving ? 'Saving...' : 'Save Pipeline'}
               </Button>
             </div>
           </CardHeader>
@@ -271,6 +275,83 @@ export function OnboardingAgentsTab() {
                   value={plannerValues.planner_temperature ?? ''}
                   onChange={(e) => handlePlannerChange('planner_temperature', e.target.value)}
                 />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Verification Settings */}
+      {plannerSettings && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-3">
+              <ShieldCheck className="h-5 w-5 text-green-500" />
+              <div>
+                <CardTitle className="text-base">Verification (Advisory)</CardTitle>
+                <CardDescription>
+                  Reviews task outputs after completion. Advisory only — never rejects unless catastrophically low score.
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label>Fallback Model</Label>
+                <Input
+                  value={plannerValues.verifier_fallback_model ?? ''}
+                  onChange={(e) => handlePlannerChange('verifier_fallback_model', e.target.value)}
+                  placeholder="openai/gpt-4o-mini"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Pass Threshold</Label>
+                <Input
+                  type="number"
+                  step={0.05}
+                  min={0}
+                  max={1}
+                  value={plannerValues.verification_pass_threshold ?? ''}
+                  onChange={(e) => handlePlannerChange('verification_pass_threshold', e.target.value)}
+                  placeholder="0.7"
+                />
+                <p className="text-xs text-muted-foreground">Score above this = pass</p>
+              </div>
+              <div className="space-y-2">
+                <Label>Catastrophic Threshold</Label>
+                <Input
+                  type="number"
+                  step={0.05}
+                  min={0}
+                  max={0.5}
+                  value={plannerValues.verification_catastrophic_threshold ?? ''}
+                  onChange={(e) => handlePlannerChange('verification_catastrophic_threshold', e.target.value)}
+                  placeholder="0.15"
+                />
+                <p className="text-xs text-muted-foreground">Below this = flag for review</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Max Tokens</Label>
+                <Input
+                  type="number"
+                  min={200}
+                  max={8000}
+                  value={plannerValues.verifier_max_tokens ?? ''}
+                  onChange={(e) => handlePlannerChange('verifier_max_tokens', e.target.value)}
+                  placeholder="2000"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Model Mapping</Label>
+                <Input
+                  value={plannerValues.verifier_model_mapping ?? ''}
+                  onChange={(e) => handlePlannerChange('verifier_model_mapping', e.target.value)}
+                  placeholder="anthropic=openai/gpt-4o-mini,openai=anthropic/claude-haiku-4-5"
+                />
+                <p className="text-xs text-muted-foreground">Cross-model verification: family=model pairs</p>
               </div>
             </div>
           </CardContent>
