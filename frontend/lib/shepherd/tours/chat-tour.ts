@@ -4,7 +4,7 @@ import { markTourComplete, markTourSkipped } from '../tour-storage'
 import { title, waitForElement, stepProgress } from '../tour-utils'
 
 const TOUR_ID = 'chat'
-const TOTAL = 3
+const TOTAL = 4
 
 export function createChatTour(userId: string) {
   const tour = new Shepherd.Tour({
@@ -70,6 +70,27 @@ export function createChatTour(userId: string) {
     `,
     beforeShowPromise: () => waitForElement('[data-tour="chat-mode-bar"]'),
     attachTo: { element: '[data-tour="chat-mode-bar"]', on: 'top' },
+    buttons: [
+      { text: 'Back', classes: 'shepherd-button-secondary', action: tour.back },
+      { text: 'Next', action: tour.next },
+    ],
+  })
+
+  // Step 4: Header toolbar
+  tour.addStep({
+    id: 'chat-header',
+    title: title('Your', 'Toolbar'),
+    text: `
+      <p class="text-gray-300 mb-2">
+        Up here you'll find <strong>Docs</strong> (documentation &amp; API reference),
+        <strong>Theme</strong> toggle (light/dark), <strong>Alerts</strong> (notifications),
+        and your <strong>Profile</strong> menu — which is also where you'll find
+        <em>Tour this page</em> on every page.
+      </p>
+      ${stepProgress(4, TOTAL)}
+    `,
+    beforeShowPromise: () => waitForElement('[data-tour="header-actions"]'),
+    attachTo: { element: '[data-tour="header-actions"]', on: 'bottom' },
     buttons: [
       { text: 'Back', classes: 'shepherd-button-secondary', action: tour.back },
       { text: 'Got it!', action: tour.complete },
