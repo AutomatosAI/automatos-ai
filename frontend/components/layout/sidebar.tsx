@@ -258,7 +258,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
       <div className="absolute bottom-4 left-3 right-3 space-y-0.5">
         {/* Documentation link */}
         <a
-          href="https://automatos.gitbook.io/automatos-ai"
+          href="https://docs.automatos.app"
           target="_blank"
           rel="noopener noreferrer"
           className={cn(

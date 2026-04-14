@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Target, Search, Plus, RefreshCw, ExternalLink } from 'lucide-react'
+import { Target, Search, Plus, RefreshCw } from 'lucide-react'
 import { motion, useReducedMotion } from 'framer-motion'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -157,15 +157,6 @@ export function MissionList() {
                 <Target className="w-4 h-4 mr-2" />
                 New Mission
               </Button>
-              <a
-                href="https://automatos.gitbook.io/automatos-ai/activity/missions"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 text-sm text-primary hover:text-primary/80 transition-colors"
-              >
-                Read the Guide
-                <ExternalLink className="w-3 h-3" />
-              </a>
             </div>
           )}
         </motion.div>
