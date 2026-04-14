@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { useTooltip } from '@/lib/use-tooltips'
 
-const DOCS_BASE_URL = 'https://automatos.gitbook.io/automatos-ai'
+const DOCS_BASE_URL = 'https://docs.automatos.app'
 
 export interface TooltipHelpProps {
   /** Unique identifier for tooltip content (matches tooltips.json) */
