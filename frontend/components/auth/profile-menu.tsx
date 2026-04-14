@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useUser, useClerk } from '@clerk/nextjs'
-import { User, Settings, LogOut, ChevronDown, Sparkles, Compass, RotateCcw, ChevronRight } from 'lucide-react'
+import { User, Settings, LogOut, ChevronDown, Sparkles, RotateCcw, ChevronRight } from 'lucide-react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { usePathname } from 'next/navigation'
 
@@ -143,25 +143,6 @@ export function ProfileMenu() {
                                 className="min-w-[200px] bg-slate-900/95 backdrop-blur-xl border border-slate-700/50 rounded-xl shadow-2xl p-2 animate-in fade-in-0 zoom-in-95"
                                 sideOffset={8}
                             >
-                                <DropdownMenu.Item
-                                    className="flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm text-slate-300 hover:text-white hover:bg-slate-800/80 cursor-pointer outline-none transition-colors"
-                                    onSelect={() => {
-                                        setOpen(false)
-                                        setTimeout(async () => {
-                                            if (user) {
-                                                const { createWelcomeTour } = await import('@/lib/shepherd/tour-registry')
-                                                const { resetTour } = await import('@/lib/shepherd/tour-storage')
-                                                resetTour('welcome', user.id)
-                                                const tour = await createWelcomeTour(user.id)
-                                                tour.start()
-                                            }
-                                        }, 150)
-                                    }}
-                                >
-                                    <Compass className="w-4 h-4 text-orange-400" />
-                                    <span>Welcome Orientation</span>
-                                </DropdownMenu.Item>
-
                                 <DropdownMenu.Item
                                     className="flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm text-slate-300 hover:text-white hover:bg-slate-800/80 cursor-pointer outline-none transition-colors"
                                     disabled={!pathname}
