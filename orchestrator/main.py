@@ -298,11 +298,21 @@ async def _boot_phase_1_core():
         logger.warning(f"PRD-63 template seed init: {e}")
 
     # Seed onboarding agents (VOYAGER, BLUEPRINT, SCRIBE, FORGE) — Mission Zero team
+    # Advisory lock prevents deadlock when multiple uvicorn workers seed concurrently
     try:
         from core.seeds.seed_onboarding_agents import seed_onboarding_agents
+        from sqlalchemy import text as _text
         with get_db_session() as db:
-            seed_onboarding_agents(db)
-        logger.info("Onboarding agents seeded successfully")
+            lock_acquired = db.execute(_text("SELECT pg_try_advisory_lock(424242)")).scalar()
+            if lock_acquired:
+                try:
+                    seed_onboarding_agents(db)
+                    logger.info("Onboarding agents seeded successfully")
+                finally:
+                    db.execute(_text("SELECT pg_advisory_unlock(424242)"))
+                    db.commit()
+            else:
+                logger.info("Onboarding agent seed: another worker is seeding, skipping")
     except Exception as e:
         logger.warning(f"Onboarding agent seed: {e}")
 
