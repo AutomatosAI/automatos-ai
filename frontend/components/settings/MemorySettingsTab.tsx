@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Save, RotateCcw, Database, Brain, Shield, Clock, TrendingDown } from 'lucide-react'
 import { SystemSetting } from '@/lib/api/system-settings'
+import { InlineHelp } from '@/components/ui/help-tooltip'
 
 interface MemorySettingsTabProps {
   settings: SystemSetting[]
@@ -72,7 +73,7 @@ export default function MemorySettingsTab({
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="store_max_chars">Max Characters Per Message</Label>
+              <Label htmlFor="store_max_chars" className="flex items-center gap-1">Max Characters Per Message <InlineHelp id="settings.memory.store_max_chars" size="sm" /></Label>
               <Input
                 id="store_max_chars"
                 type="number"
@@ -89,7 +90,7 @@ export default function MemorySettingsTab({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="daily_log_max_chars">Daily Log Max Characters</Label>
+              <Label htmlFor="daily_log_max_chars" className="flex items-center gap-1">Daily Log Max Characters <InlineHelp id="settings.memory.daily_log_max_chars" size="sm" /></Label>
               <Input
                 id="daily_log_max_chars"
                 type="number"
@@ -122,7 +123,7 @@ export default function MemorySettingsTab({
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="context_budget_total">Total Budget (tokens)</Label>
+              <Label htmlFor="context_budget_total" className="flex items-center gap-1">Total Budget (tokens) <InlineHelp id="settings.memory.context_budget_total" size="sm" /></Label>
               <Input
                 id="context_budget_total"
                 type="number"
@@ -136,7 +137,7 @@ export default function MemorySettingsTab({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="context_budget_session">Session (L1) Budget</Label>
+              <Label htmlFor="context_budget_session" className="flex items-center gap-1">Session (L1) Budget <InlineHelp id="settings.memory.context_budget_session" size="sm" /></Label>
               <Input
                 id="context_budget_session"
                 type="number"
@@ -150,7 +151,7 @@ export default function MemorySettingsTab({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="context_budget_long_term">Long-Term (L3) Budget</Label>
+              <Label htmlFor="context_budget_long_term" className="flex items-center gap-1">Long-Term (L3) Budget <InlineHelp id="settings.memory.context_budget_long_term" size="sm" /></Label>
               <Input
                 id="context_budget_long_term"
                 type="number"
@@ -164,7 +165,7 @@ export default function MemorySettingsTab({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="context_budget_temporal">Temporal (L2) Budget</Label>
+              <Label htmlFor="context_budget_temporal" className="flex items-center gap-1">Temporal (L2) Budget <InlineHelp id="settings.memory.context_budget_temporal" size="sm" /></Label>
               <Input
                 id="context_budget_temporal"
                 type="number"
@@ -178,7 +179,7 @@ export default function MemorySettingsTab({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="context_budget_daily">Daily Logs Budget</Label>
+              <Label htmlFor="context_budget_daily" className="flex items-center gap-1">Daily Logs Budget <InlineHelp id="settings.memory.context_budget_daily" size="sm" /></Label>
               <Input
                 id="context_budget_daily"
                 type="number"
@@ -208,7 +209,7 @@ export default function MemorySettingsTab({
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="search_result_limit">Search Result Limit</Label>
+              <Label htmlFor="search_result_limit" className="flex items-center gap-1">Search Result Limit <InlineHelp id="settings.memory.search_result_limit" size="sm" /></Label>
               <Input
                 id="search_result_limit"
                 type="number"
@@ -224,7 +225,7 @@ export default function MemorySettingsTab({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="long_term_search_limit">Long-Term Fetch Limit</Label>
+              <Label htmlFor="long_term_search_limit" className="flex items-center gap-1">Long-Term Fetch Limit <InlineHelp id="settings.memory.long_term_search_limit" size="sm" /></Label>
               <Input
                 id="long_term_search_limit"
                 type="number"
@@ -256,7 +257,7 @@ export default function MemorySettingsTab({
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="circuit_breaker_threshold">Failure Threshold</Label>
+              <Label htmlFor="circuit_breaker_threshold" className="flex items-center gap-1">Failure Threshold <InlineHelp id="settings.memory.circuit_breaker_threshold" size="sm" /></Label>
               <Input
                 id="circuit_breaker_threshold"
                 type="number"
@@ -272,7 +273,7 @@ export default function MemorySettingsTab({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="circuit_breaker_cooldown">Cooldown (seconds)</Label>
+              <Label htmlFor="circuit_breaker_cooldown" className="flex items-center gap-1">Cooldown (seconds) <InlineHelp id="settings.memory.circuit_breaker_cooldown" size="sm" /></Label>
               <Input
                 id="circuit_breaker_cooldown"
                 type="number"
@@ -286,7 +287,7 @@ export default function MemorySettingsTab({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="request_timeout">Request Timeout (seconds)</Label>
+              <Label htmlFor="request_timeout" className="flex items-center gap-1">Request Timeout (seconds) <InlineHelp id="settings.memory.request_timeout" size="sm" /></Label>
               <Input
                 id="request_timeout"
                 type="number"
@@ -316,7 +317,7 @@ export default function MemorySettingsTab({
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="cache_ttl">Search Cache TTL (seconds)</Label>
+              <Label htmlFor="cache_ttl" className="flex items-center gap-1">Search Cache TTL (seconds) <InlineHelp id="settings.memory.cache_ttl" size="sm" /></Label>
               <Input
                 id="cache_ttl"
                 type="number"
@@ -333,7 +334,7 @@ export default function MemorySettingsTab({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="session_ttl">Session TTL (seconds)</Label>
+              <Label htmlFor="session_ttl" className="flex items-center gap-1">Session TTL (seconds) <InlineHelp id="settings.memory.session_ttl" size="sm" /></Label>
               <Input
                 id="session_ttl"
                 type="number"
@@ -366,7 +367,7 @@ export default function MemorySettingsTab({
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="decay_rate">Decay Rate</Label>
+              <Label htmlFor="decay_rate" className="flex items-center gap-1">Decay Rate <InlineHelp id="settings.memory.decay_rate" size="sm" /></Label>
               <Input
                 id="decay_rate"
                 type="number"
@@ -383,7 +384,7 @@ export default function MemorySettingsTab({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="promotion_min_importance">Promotion Importance</Label>
+              <Label htmlFor="promotion_min_importance" className="flex items-center gap-1">Promotion Importance <InlineHelp id="settings.memory.promotion_min_importance" size="sm" /></Label>
               <Input
                 id="promotion_min_importance"
                 type="number"
@@ -400,7 +401,7 @@ export default function MemorySettingsTab({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="promotion_min_access_count">Min Access Count</Label>
+              <Label htmlFor="promotion_min_access_count" className="flex items-center gap-1">Min Access Count <InlineHelp id="settings.memory.promotion_min_access_count" size="sm" /></Label>
               <Input
                 id="promotion_min_access_count"
                 type="number"

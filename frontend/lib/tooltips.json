@@ -788,6 +788,76 @@
         "docLink": "/settings/general",
         "example": "Development → DEBUG | Production → WARNING"
       }
+    },
+    "memory": {
+      "store_max_chars": {
+        "text": "How many characters of each message (user + assistant) are sent to Mem0 for fact extraction. Higher values preserve richer conversation context for recall but use more OpenAI tokens per save.",
+        "example": "1500 = headlines only | 6000 = full conversations (~1500 words) | 12000 = detailed technical discussions"
+      },
+      "daily_log_max_chars": {
+        "text": "Max size for daily activity log summaries that agents reference for recent context. These are appended to prompts, so larger = better recall but more tokens per request.",
+        "example": "2000 = concise daily notes | 5000 = detailed activity log"
+      },
+      "context_budget_total": {
+        "text": "Total token budget for ALL memory injected into agent prompts. Split across session, long-term, temporal, and daily layers. Higher = better recall but every request costs more.",
+        "example": "2000 = light memory | 4000 = balanced | 8000 = deep recall (expensive)"
+      },
+      "context_budget_session": {
+        "text": "Tokens reserved for L1 session memory — the rolling summary of the current conversation. Higher values help agents track longer multi-turn conversations.",
+        "example": "300 = short chats | 500 = normal | 1000 = complex multi-step sessions"
+      },
+      "context_budget_long_term": {
+        "text": "Tokens reserved for L3 long-term Mem0 memories — facts extracted from past conversations. This is what lets agents 'remember' you said something last week.",
+        "example": "500 = a few facts | 800 = good recall | 1500 = extensive history"
+      },
+      "context_budget_temporal": {
+        "text": "Tokens reserved for L2 short-term/temporal memories — recent exchanges stored in Postgres. Bridges the gap between session and long-term memory.",
+        "example": "400 = recent highlights | 600 = balanced | 1000 = full recent context"
+      },
+      "context_budget_daily": {
+        "text": "Tokens reserved for daily activity logs — summaries of what happened each day. Helps agents know 'we did X yesterday' without loading the full conversation history.",
+        "example": "200 = just headlines | 400 = good overview | 800 = detailed daily log"
+      },
+      "search_result_limit": {
+        "text": "Maximum number of memories returned per search query. More results = broader recall but adds to prompt size. Mem0 ranks by relevance, so the top N are usually the best.",
+        "example": "5 = focused recall | 8 = balanced | 15 = cast a wide net"
+      },
+      "long_term_search_limit": {
+        "text": "How many Mem0 long-term memories are fetched and injected into agent prompts. These are the 'remember when we discussed...' facts. More = richer context, more tokens.",
+        "example": "3 = just the essentials | 5 = good balance | 10 = deep history injection"
+      },
+      "circuit_breaker_threshold": {
+        "text": "How many consecutive Mem0 failures trigger the circuit breaker. When open, all memory calls are fast-rejected instead of timing out — protecting agent response times.",
+        "example": "3 = aggressive protection | 5 = balanced | 10 = tolerant of flaky connections"
+      },
+      "circuit_breaker_cooldown": {
+        "text": "How long (seconds) the circuit breaker stays open before attempting Mem0 again. During cooldown, memory saves silently skip. Too short = hammers a broken service; too long = slow recovery.",
+        "example": "30s = aggressive retry | 60s = balanced | 300s = conservative (5 min)"
+      },
+      "request_timeout": {
+        "text": "Timeout for individual Mem0 API calls. Mem0 calls OpenAI internally for fact extraction, so it can be slow. Too low = frequent timeouts; too high = blocks agent responses.",
+        "example": "10s = fast-fail | 15s = balanced | 30s = tolerant (complex extractions)"
+      },
+      "cache_ttl": {
+        "text": "How long Mem0 search results are cached in Redis. Avoids repeated identical queries within the window. Lower = fresher results but more Mem0 API calls.",
+        "example": "60s = near-realtime | 300s = balanced (5 min) | 900s = aggressive caching (15 min)"
+      },
+      "session_ttl": {
+        "text": "How long L1 session memory (current conversation context) lives in Redis before expiring. After expiry, a new conversation starts fresh without session history.",
+        "example": "3600 = 1 hour | 86400 = 24 hours (default) | 604800 = 1 week"
+      },
+      "decay_rate": {
+        "text": "How fast memories lose importance over time. Higher decay = faster forgetting. Memories below the archive threshold get cleaned up. This controls the 'forgetting curve'.",
+        "example": "0.05 = slow fade (remembers longer) | 0.1 = balanced | 0.25 = aggressive pruning"
+      },
+      "promotion_min_importance": {
+        "text": "Minimum importance score for a L2 (short-term) memory to be promoted to L3 (long-term Mem0). Higher = only the most important facts persist permanently.",
+        "example": "0.5 = promote liberally | 0.7 = balanced | 0.9 = only critical facts"
+      },
+      "promotion_min_access_count": {
+        "text": "How many times a memory must be accessed (retrieved in searches) before it qualifies for L3 promotion. Ensures only frequently-referenced memories become permanent.",
+        "example": "1 = promote on first recall | 3 = balanced | 5 = must prove its worth"
+      }
     }
   },
 
