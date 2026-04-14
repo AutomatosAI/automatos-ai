@@ -13,6 +13,25 @@ export function createChatTour(userId: string) {
     keyboardNavigation: true,
   })
 
+  // Step 1: About (centered)
+  tour.addStep({
+    id: 'chat-about',
+    title: title('AI', 'Command Line'),
+    text: `
+      <p class="text-gray-300 mb-2">
+        This is your main conversation interface. Chat with any agent,
+        switch models on the fly, and toggle special modes like Code,
+        Plan, and Mission — all from one place.
+      </p>
+      ${stepProgress(1, TOTAL)}
+    `,
+    buttons: [
+      { text: 'Skip', classes: 'shepherd-button-secondary', action: () => tour.cancel() },
+      { text: 'Next', action: tour.next },
+    ],
+  })
+
+  // Step 2: Agent selector
   tour.addStep({
     id: 'chat-agent',
     title: title('Pick an', 'Agent'),
@@ -26,49 +45,31 @@ export function createChatTour(userId: string) {
         Start with <strong>Auto</strong> if you're not sure — it routes your message
         to the best agent for the job.
       </p>
-      ${stepProgress(1, TOTAL)}
+      ${stepProgress(2, TOTAL)}
     `,
     beforeShowPromise: () => waitForElement('[data-tour="chat-agent-selector"]'),
     attachTo: { element: '[data-tour="chat-agent-selector"]', on: 'bottom' },
-    buttons: [
-      { text: 'Skip', classes: 'shepherd-button-secondary', action: () => tour.cancel() },
-      { text: 'Next', action: tour.next },
-    ],
-  })
-
-  tour.addStep({
-    id: 'chat-model',
-    title: title('Choose a', 'Model'),
-    text: `
-      <p class="text-gray-300 mb-2">
-        Pick which LLM powers this conversation. Faster, cheaper models (Haiku, GPT-mini,
-        DeepSeek) are great for quick back-and-forth; bigger models (Opus, Sonnet, GPT-4-class)
-        are better for planning, writing, and reasoning.
-      </p>
-      <p class="text-gray-400 text-sm">
-        You can change models mid-conversation — the history stays.
-      </p>
-      ${stepProgress(2, TOTAL)}
-    `,
-    beforeShowPromise: () => waitForElement('[data-tour="chat-model-selector"]'),
-    attachTo: { element: '[data-tour="chat-model-selector"]', on: 'bottom' },
     buttons: [
       { text: 'Back', classes: 'shepherd-button-secondary', action: tour.back },
       { text: 'Next', action: tour.next },
     ],
   })
 
+  // Step 3: Quick modes
   tour.addStep({
-    id: 'chat-history',
-    title: title('Chat', 'History'),
+    id: 'chat-modes',
+    title: title('Quick', 'Modes'),
     text: `
       <p class="text-gray-300 mb-2">
-        Every conversation is saved automatically. Toggle the chat sidebar to browse,
-        search, rename, pin and resume previous sessions — across any agent.
+        Toggle <strong>Code</strong> for syntax-highlighted output,
+        <strong>Plan</strong> to get a structured step-by-step, or
+        <strong>Mission</strong> to launch a multi-agent objective — all
+        without leaving the chat.
       </p>
       ${stepProgress(3, TOTAL)}
     `,
-    // Centered — no specific attach target needed for final step
+    beforeShowPromise: () => waitForElement('[data-tour="chat-mode-bar"]'),
+    attachTo: { element: '[data-tour="chat-mode-bar"]', on: 'top' },
     buttons: [
       { text: 'Back', classes: 'shepherd-button-secondary', action: tour.back },
       { text: 'Got it!', action: tour.complete },
