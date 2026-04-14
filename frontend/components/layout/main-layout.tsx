@@ -7,7 +7,7 @@ import { motion } from 'framer-motion'
 import { Sidebar } from './sidebar'
 import { MobileSidebar } from './mobile-sidebar'
 import { Header } from './header'
-import { ChatWidget } from '../chatbot/chat-widget'
+import { AutoWidget } from '../chatbot/chat-widget'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { useIsTabletOrBelow } from '@/hooks/use-mobile'
 import { usePageTour } from '@/components/onboarding/use-page-tour'
@@ -41,12 +41,8 @@ export function MainLayout({ children }: MainLayoutProps) {
     return 'dashboard'
   }
 
-  const chatContext = {
-    currentPage: getCurrentPage(),
-    selectedItems: [], // This could be populated based on page state
-    userRole: 'user', // This could come from authentication
-    recentActions: [] // This could track recent user actions
-  }
+  const currentPage = getCurrentPage()
+  const showAutoWidget = !pathname?.startsWith('/chat')
 
   const handleMenuClick = () => {
     if (isMobileLayout) {
@@ -106,10 +102,11 @@ export function MainLayout({ children }: MainLayoutProps) {
         </main>
       </div>
 
-      {/* Pilot Helper Widget — shown on ALL pages (overlay, no navigation) */}
-      <ChatWidget
-        position="bottom-right"
-        context={chatContext}
+      {/* Auto Widget — floating assistant on every page except /chat */}
+      <AutoWidget
+        position="bottom-left"
+        currentPage={currentPage}
+        visible={showAutoWidget}
       />
     </div>
   )
