@@ -21,8 +21,7 @@ export function createChatTour(userId: string) {
       <p class="text-gray-300 mb-2">
         This is your main conversation interface. Chat with any agent,
         switch models on the fly, and toggle special modes like Code,
-        Plan, and Mission — all from one place. Every conversation is
-        saved automatically.
+        Plan, and Mission — all from one place.
       </p>
       ${stepProgress(1, TOTAL)}
     `,
@@ -38,35 +37,39 @@ export function createChatTour(userId: string) {
     title: title('Pick an', 'Agent'),
     text: `
       <p class="text-gray-300 mb-2">
-        Every conversation runs through an agent. Each one has its own
-        persona, memory, tools and skills. Start with <strong>Auto</strong>
-        — it routes your message to the best agent automatically.
+        Every conversation runs through an agent. Each one has its own persona,
+        memory, tool access and skillset — so picking the right agent changes
+        what the assistant can actually do.
+      </p>
+      <p class="text-gray-400 text-sm">
+        Start with <strong>Auto</strong> if you're not sure — it routes your message
+        to the best agent for the job.
       </p>
       ${stepProgress(2, TOTAL)}
     `,
     beforeShowPromise: () => waitForElement('[data-tour="chat-agent-selector"]'),
-    attachTo: { element: '[data-tour="chat-agent-selector"]', on: 'top' },
+    attachTo: { element: '[data-tour="chat-agent-selector"]', on: 'bottom' },
     buttons: [
       { text: 'Back', classes: 'shepherd-button-secondary', action: tour.back },
       { text: 'Next', action: tour.next },
     ],
   })
 
-  // Step 3: Header icons
+  // Step 3: Quick modes
   tour.addStep({
-    id: 'chat-header',
-    title: title('Your', 'Toolbar'),
+    id: 'chat-modes',
+    title: title('Quick', 'Modes'),
     text: `
       <p class="text-gray-300 mb-2">
-        Up here you'll find <strong>Docs</strong> (documentation),
-        <strong>Theme</strong> toggle, <strong>Alerts</strong>, and your
-        <strong>Profile</strong> menu — which is also where you'll find
-        <em>Tour this page</em> on every page.
+        Toggle <strong>Code</strong> for syntax-highlighted output,
+        <strong>Plan</strong> to get a structured step-by-step, or
+        <strong>Mission</strong> to launch a multi-agent objective — all
+        without leaving the chat.
       </p>
       ${stepProgress(3, TOTAL)}
     `,
-    beforeShowPromise: () => waitForElement('[data-tour="header-actions"]'),
-    attachTo: { element: '[data-tour="header-actions"]', on: 'bottom' },
+    beforeShowPromise: () => waitForElement('[data-tour="chat-mode-bar"]'),
+    attachTo: { element: '[data-tour="chat-mode-bar"]', on: 'top' },
     buttons: [
       { text: 'Back', classes: 'shepherd-button-secondary', action: tour.back },
       { text: 'Got it!', action: tour.complete },
