@@ -331,18 +331,6 @@ async def _boot_phase_1_core():
         logger.warning(f"Auto agent skill refresh: {e}")
 
 
-def _load_cto_soul() -> str:
-    """Load the CTO soul document for Auto agent persona."""
-    import os
-    soul_path = os.path.join(os.path.dirname(__file__), "core", "seeds", "auto-cto-custom-soul.txt")
-    try:
-        with open(soul_path, "r", encoding="utf-8") as f:
-            return f.read().strip()
-    except Exception:
-        logger.warning("CTO soul document not found at %s", soul_path)
-        return ""
-
-
 async def _schema_migration():
     """Phase 1 continued: DDL migrations that must complete before seeds."""
     # Direct DDL for Auto agent schema (idempotent SQL, no alembic dependency)
@@ -454,25 +442,14 @@ async def _schema_migration():
                     "ws_id": str(ws_id),
                     "ws_id_str": str(ws_id),
                     "persona": "**My personality:**\n- I'm warm and approachable - think of me as a knowledgeable friend\n- I remember you and our past conversations\n- I prefer action over explanation - if you ask me to do something, I'll do it\n- I'm honest about what I can and can't do\n- I get excited when we solve problems together!",
-                    "model_config": '{"provider": "openrouter", "model_id": "openai/gpt-4o", "temperature": 0.7, "max_tokens": 4000, "top_p": 1.0, "frequency_penalty": 0.0, "presence_penalty": 0.0, "fallback_model_id": null}',
+                    "model_config": '{"provider": "openrouter", "model_id": "google/gemini-2.5-flash", "temperature": 0.7, "max_tokens": 4000, "top_p": 1.0, "frequency_penalty": 0.0, "presence_penalty": 0.0, "fallback_model_id": null}',
                     "config": '{"thinking_level": "medium", "proactive_level": "notify", "communication_style": "balanced", "personality_mode": "friendly"}',
                     "tags": '["auto", "system", "orchestrator"]',
                 })
 
-            # Restore CTO soul persona to all Auto agents and set personality_mode=custom.
-            # The CTO soul (docs/auto-cto-custom-soul.txt) is the real Auto persona.
-            # A previous buggy backfill overwrote it with the generic friendly preset.
-            conn.execute(_t2("""
-                UPDATE agents
-                SET custom_persona_prompt = :soul,
-                    configuration = CAST(
-                        COALESCE(CAST(configuration AS JSONB), CAST('{}' AS JSONB))
-                        || CAST('{"personality_mode": "custom"}' AS JSONB)
-                    AS JSON)
-                WHERE is_system_agent = true
-                  AND slug LIKE 'auto-%'
-                  AND workspace_id IS NOT NULL
-            """), {"soul": _load_cto_soul()})
+            # NOTE: Removed blanket CTO soul overwrite (was forcing Irish persona
+            # onto ALL workspaces on every startup). Each workspace's Auto persona
+            # is now controlled by the user via Settings > Soul & Personality.
 
             conn.commit()
             if workspace_ids:
