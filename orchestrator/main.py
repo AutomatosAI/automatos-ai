@@ -317,6 +317,19 @@ async def _boot_phase_1_core():
     except Exception as e:
         logger.warning(f"System settings seed: {e}")
 
+    # Refresh platform-management skill for all existing Auto agents.
+    # Ensures edits to platform-management-skill.md propagate on every deploy.
+    try:
+        from core.seeds.seed_auto_agent import seed_auto_agent
+        from core.models.workspaces import Workspace
+        with get_db_session() as db:
+            workspace_ids = [w.id for w in db.query(Workspace.id).all()]
+            for ws_id in workspace_ids:
+                seed_auto_agent(db, ws_id)
+            logger.info(f"Auto agent + platform-management skill refreshed for {len(workspace_ids)} workspace(s)")
+    except Exception as e:
+        logger.warning(f"Auto agent skill refresh: {e}")
+
 
 def _load_cto_soul() -> str:
     """Load the CTO soul document for Auto agent persona."""

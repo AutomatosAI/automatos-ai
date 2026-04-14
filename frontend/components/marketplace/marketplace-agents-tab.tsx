@@ -361,8 +361,12 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
                   Details
                 </Button>
                 <Button size="sm" variant="outline"
-                  onClick={(e) => { e.stopPropagation(); handleAgentClick(agent) }}>
-                  Add to Workspace
+                  disabled={installMutation.isLoading}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    installMutation.mutate(agent.id)
+                  }}>
+                  {installMutation.isLoading ? 'Adding...' : 'Add to Workspace'}
                 </Button>
               </div>
             </Card>

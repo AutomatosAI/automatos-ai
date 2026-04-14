@@ -775,22 +775,41 @@ class LLMManager:
 def create_llm_manager(
     service_name: str = "orchestrator",
     provider: str = None,
-    model: str = None
+    model: str = None,
+    workspace_id=None,
+    agent_id=None,
+    request_type: str = None,
 ) -> LLMManager:
     """
     Create an LLM manager with optional overrides.
-    
+
+    If workspace_id is not provided, falls back to the request-scoped
+    ContextVar set by auth middleware so that usage is always tracked.
+
     Args:
         service_name: Service name for per-service settings
         provider: Optional provider override
         model: Optional model override
-        
+        workspace_id: Workspace ID for usage tracking
+        agent_id: Agent ID for usage tracking
+        request_type: Request type label for usage tracking
+
     Returns:
         LLMManager instance
     """
+    if not workspace_id:
+        try:
+            from core.monitoring.automatos_logging import workspace_id_var
+            workspace_id = workspace_id_var.get() or None
+        except Exception:
+            pass
+
     return LLMManager(
         service_name=service_name,
         provider=provider,
-        model=model
+        model=model,
+        workspace_id=workspace_id,
+        agent_id=agent_id,
+        request_type=request_type,
     )
 

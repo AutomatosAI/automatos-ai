@@ -298,9 +298,9 @@ def seed_system_settings(db: Session):
         {
             "category": SettingCategory.ORCHESTRATOR_LLM.value,
             "key": "model",
-            "default_value": "openai/gpt-4o",
+            "default_value": "google/gemini-2.5-flash",
             "value_type": "string",
-            "description": "LLM model for orchestrator operations. Use OpenRouter format: provider/model (e.g. openai/gpt-4o).",
+            "description": "LLM model for orchestrator operations. Use OpenRouter format: provider/model (e.g. google/gemini-2.5-flash).",
             "is_required": True,
             "validation_rules": {
                 "depends_on": {"provider": "..."}

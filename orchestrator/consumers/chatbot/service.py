@@ -2081,7 +2081,7 @@ class StreamingChatService:
             tools = get_tools_for_agent()
 
         try:
-            llm_manager = create_llm_manager(service_name="chatbot")
+            llm_manager = create_llm_manager(service_name="chatbot", workspace_id=self.workspace_id, request_type="chat")
             messages = self._resolve_file_parts(messages)
             latest_text = self.prompt_analyzer.extract_latest_user_text(messages)
             if self.prompt_analyzer.is_fresh_start_request(latest_text):

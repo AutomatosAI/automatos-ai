@@ -21,12 +21,13 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from core.models.core import Agent
+from core.models.core import Agent, Skill, agent_skills
 
 logger = logging.getLogger(__name__)
 
 # Load soul document — lives alongside seed files so it's in the Docker image
 _SOUL_DOC_PATH = Path(__file__).resolve().parent / "auto-cto-custom-soul.txt"
+_PLATFORM_SKILL_PATH = Path(__file__).resolve().parent / "platform-management-skill.md"
 
 _FRIENDLY_FALLBACK = """\
 **My personality:**
@@ -57,10 +58,10 @@ def _get_default_model_config() -> dict:
     try:
         from config import config
         provider = config.LLM_PROVIDER or "openrouter"
-        model_id = config.LLM_MODEL or "openai/gpt-4o"
+        model_id = config.LLM_MODEL or "google/gemini-2.5-flash"
     except Exception:
         provider = "openrouter"
-        model_id = "openai/gpt-4o"
+        model_id = "google/gemini-2.5-flash"
 
     return {
         "provider": provider,
@@ -74,10 +75,77 @@ def _get_default_model_config() -> dict:
     }
 
 
+def _upsert_platform_management_skill(db: Session) -> Skill | None:
+    """Upsert the platform-management skill from the bundled SKILL.md.
+
+    Refreshes prompt_template on every call so deploys pick up edits.
+    Returns the Skill row (global, workspace_id=NULL).
+    """
+    try:
+        if not _PLATFORM_SKILL_PATH.exists():
+            logger.warning("Platform-management SKILL.md not found at %s", _PLATFORM_SKILL_PATH)
+            return None
+
+        raw = _PLATFORM_SKILL_PATH.read_text(encoding="utf-8").strip()
+
+        # Split YAML frontmatter from markdown body
+        if raw.startswith("---"):
+            parts = raw.split("---", 2)
+            markdown_body = parts[2].strip() if len(parts) > 2 else raw
+        else:
+            markdown_body = raw
+
+        skill = db.query(Skill).filter(
+            Skill.name == "platform-management",
+            Skill.skill_source == "builtin-core",
+        ).first()
+
+        if skill:
+            skill.prompt_template = markdown_body
+            skill.description = "Complete platform operations — marketplace, agents, playbooks, heartbeats, board, governance, LLMs, workspace setup"
+            skill.skill_version = "1.0.0"
+            skill.is_active = True
+        else:
+            skill = Skill(
+                name="platform-management",
+                description="Complete platform operations — marketplace, agents, playbooks, heartbeats, board, governance, LLMs, workspace setup",
+                skill_type="technical",
+                category="agent-role",
+                skill_version="1.0.0",
+                skill_source="builtin-core",
+                prompt_template=markdown_body,
+                tags=["platform", "admin", "marketplace", "agents", "playbooks", "governance"],
+                is_active=True,
+                workspace_id=None,  # global skill
+            )
+            db.add(skill)
+
+        db.flush()
+        logger.info("Platform-management skill upserted (id=%s)", skill.id)
+        return skill
+    except Exception:
+        logger.exception("Failed to upsert platform-management skill")
+        return None
+
+
+def _assign_skill_to_agent(db: Session, agent: Agent, skill: Skill) -> None:
+    """Idempotent: link agent ↔ skill via agent_skills join table."""
+    exists = db.execute(
+        agent_skills.select().where(
+            agent_skills.c.agent_id == agent.id,
+            agent_skills.c.skill_id == skill.id,
+        )
+    ).first()
+    if not exists:
+        db.execute(agent_skills.insert().values(agent_id=agent.id, skill_id=skill.id))
+        logger.info("Assigned skill '%s' to agent '%s'", skill.name, agent.name)
+
+
 def seed_auto_agent(db: Session, workspace_id: UUID) -> Agent:
     """Create or return the Auto agent for a workspace.
 
     Safe to call multiple times — returns existing agent if already seeded.
+    Also ensures the platform-management skill is assigned to Auto.
     """
     slug = f"auto-{workspace_id}"
 
@@ -86,32 +154,38 @@ def seed_auto_agent(db: Session, workspace_id: UUID) -> Agent:
         .filter(Agent.slug == slug, Agent.workspace_id == workspace_id)
         .first()
     )
-    if existing:
-        return existing
 
-    agent = Agent(
-        name="Auto",
-        slug=slug,
-        description="Your workspace AI orchestrator — the default agent for chat and settings.",
-        agent_type="system",
-        status="active",
-        is_system_agent=True,
-        required_role=None,
-        workspace_id=workspace_id,
-        owner_type="workspace",
-        owner_id=str(workspace_id),
-        use_custom_persona=True,
-        custom_persona_prompt=_FRIENDLY_FALLBACK,
-        model_config=_get_default_model_config(),
-        configuration={
-            "thinking_level": "medium",
-            "proactive_level": "notify",
-            "communication_style": "balanced",
-            "personality_mode": "friendly",
-        },
-        tags=["auto", "system", "orchestrator"],
-    )
-    db.add(agent)
-    db.flush()
-    logger.info("Seeded Auto agent for workspace %s (agent.id=%s)", workspace_id, agent.id)
+    agent = existing
+    if not agent:
+        agent = Agent(
+            name="Auto",
+            slug=slug,
+            description="Your workspace AI orchestrator — the default agent for chat and settings.",
+            agent_type="system",
+            status="active",
+            is_system_agent=True,
+            required_role=None,
+            workspace_id=workspace_id,
+            owner_type="workspace",
+            owner_id=str(workspace_id),
+            use_custom_persona=True,
+            custom_persona_prompt=_FRIENDLY_FALLBACK,
+            model_config=_get_default_model_config(),
+            configuration={
+                "thinking_level": "medium",
+                "proactive_level": "notify",
+                "communication_style": "balanced",
+                "personality_mode": "friendly",
+            },
+            tags=["auto", "system", "orchestrator"],
+        )
+        db.add(agent)
+        db.flush()
+        logger.info("Seeded Auto agent for workspace %s (agent.id=%s)", workspace_id, agent.id)
+
+    # Ensure platform-management skill is assigned (refreshes content on every startup)
+    platform_skill = _upsert_platform_management_skill(db)
+    if platform_skill:
+        _assign_skill_to_agent(db, agent, platform_skill)
+
     return agent

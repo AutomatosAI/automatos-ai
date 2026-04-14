@@ -722,7 +722,7 @@ tool_hints: short domain keywords like "email", "github", "jira", "code", "datab
         try:
             from core.llm import create_llm_manager
 
-            llm = create_llm_manager(service_name="complexity_assessor")
+            llm = create_llm_manager(service_name="complexity_assessor", workspace_id=self._workspace_id, request_type="complexity_assessor")
             response = await llm.generate_response(
                 messages=[{"role": "user", "content": prompt}]
             )

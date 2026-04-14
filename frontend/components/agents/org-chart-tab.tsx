@@ -45,7 +45,7 @@ export function OrgChartTab() {
 
   // Filter by team if selected
   const filteredNodes = selectedTeam
-    ? data.nodes.filter(n => n.team === selectedTeam || n.is_system_agent)
+    ? data.nodes.filter(n => n.team === selectedTeam)
     : data.nodes
   const filteredNodeIds = new Set(filteredNodes.map(n => n.id))
   const filteredEdges = data.edges.filter(
