@@ -12,7 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Loader2, Settings, Save, RotateCcw, AlertCircle, Shield, FileText, Palette, Rocket, BrainCircuit } from 'lucide-react'
+import { Loader2, Settings, Save, RotateCcw, AlertCircle, Shield, FileText, Palette, Rocket, BrainCircuit, Brain } from 'lucide-react'
 import { toast } from 'sonner'
 
 import {
@@ -34,6 +34,7 @@ import { CredentialAuditTab } from './CredentialAuditTab'
 import { SystemPromptsTab } from './SystemPromptsTab'
 import { SystemIconsSettingsTab } from './SystemIconsSettingsTab'
 import { OnboardingAgentsTab } from './OnboardingAgentsTab'
+import MemorySettingsTab from './MemorySettingsTab'
 
 interface SystemSettingsTabProps {
   className?: string
@@ -210,6 +211,10 @@ export default function SystemSettingsTab({ className }: SystemSettingsTabProps)
             <Palette className="w-3.5 h-3.5 mr-1 shrink-0" />
             Icons
           </TabsTrigger>
+          <TabsTrigger value="memory_management">
+            <Brain className="w-3.5 h-3.5 mr-1 shrink-0" />
+            Memory
+          </TabsTrigger>
           <TabsTrigger value="onboarding_agents">
             <Rocket className="w-3.5 h-3.5 mr-1 shrink-0" />
             Mission Team
@@ -274,6 +279,15 @@ export default function SystemSettingsTab({ className }: SystemSettingsTabProps)
 
         <TabsContent value="system_icons">
           <SystemIconsSettingsTab />
+        </TabsContent>
+
+        <TabsContent value="memory_management">
+          <MemorySettingsTab
+            settings={settingsByCategory.find(cat => cat.category === 'memory_management')?.settings || []}
+            onSave={(updates) => saveCategorySettings('memory_management', updates)}
+            saving={saving}
+            onReset={() => resetToDefaults('memory_management')}
+          />
         </TabsContent>
 
         <TabsContent value="onboarding_agents">

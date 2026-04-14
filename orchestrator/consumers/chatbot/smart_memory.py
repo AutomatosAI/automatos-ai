@@ -78,6 +78,16 @@ class SmartMemoryManager:
                 logger.warning(f"[SmartMemory] Could not initialize UnifiedMemoryService: {e}")
         return self._unified_service
 
+    @staticmethod
+    def _get_store_max_chars() -> int:
+        """Read store_max_chars from system_settings DB, fallback to 6000."""
+        try:
+            from core.llm.manager import get_system_setting
+            val = get_system_setting("memory_management", "store_max_chars", "6000")
+            return int(val)
+        except Exception:
+            return 6000
+
     def _classify_memory_tier(self, user_message: str, assistant_response: str) -> str:
         """
         Classify where a memory should be stored.
@@ -426,9 +436,10 @@ class SmartMemoryManager:
             self._last_tier = tier
             logger.info("[SmartMemory] Memory classified as: %s", tier)
 
+            max_chars = self._get_store_max_chars()
             messages = [
-                {"role": "user", "content": user_message[:1500]},
-                {"role": "assistant", "content": assistant_response[:1500]}
+                {"role": "user", "content": user_message[:max_chars]},
+                {"role": "assistant", "content": assistant_response[:max_chars]}
             ]
 
             base_metadata = {
