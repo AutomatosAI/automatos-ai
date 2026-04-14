@@ -287,20 +287,20 @@ def seed_system_settings(db: Session):
         {
             "category": SettingCategory.ORCHESTRATOR_LLM.value,
             "key": "provider",
-            "default_value": "openai",
+            "default_value": "openrouter",
             "value_type": "string",
-            "description": "LLM provider for orchestrator operations",
+            "description": "LLM provider for orchestrator operations. OpenRouter recommended — single key for 100+ models.",
             "is_required": True,
             "validation_rules": {
-                "options": ["openai", "anthropic", "google", "azure", "huggingface"]
+                "options": ["openrouter", "openai", "anthropic", "google", "azure", "huggingface"]
             }
         },
         {
             "category": SettingCategory.ORCHESTRATOR_LLM.value,
             "key": "model",
-            "default_value": "gpt-4o",
+            "default_value": "openai/gpt-4o",
             "value_type": "string",
-            "description": "LLM model for orchestrator operations (gpt-4o has 128K context vs gpt-4 8K)",
+            "description": "LLM model for orchestrator operations. Use OpenRouter format: provider/model (e.g. openai/gpt-4o).",
             "is_required": True,
             "validation_rules": {
                 "depends_on": {"provider": "..."}

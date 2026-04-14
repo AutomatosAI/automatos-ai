@@ -101,13 +101,13 @@ def seed_auto_agent(db: Session, workspace_id: UUID) -> Agent:
         owner_type="workspace",
         owner_id=str(workspace_id),
         use_custom_persona=True,
-        custom_persona_prompt=_load_default_persona(),
+        custom_persona_prompt=_FRIENDLY_FALLBACK,
         model_config=_get_default_model_config(),
         configuration={
             "thinking_level": "medium",
             "proactive_level": "notify",
             "communication_style": "balanced",
-            "personality_mode": "custom",
+            "personality_mode": "friendly",
         },
         tags=["auto", "system", "orchestrator"],
     )
