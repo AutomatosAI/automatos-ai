@@ -103,8 +103,3 @@ export function getAllTours(): TourRegistryEntry[] {
   return Object.values(registry)
 }
 
-/** Get the welcome tour factory (special — not route-based) */
-export async function createWelcomeTour(userId: string) {
-  const { createWelcomeTour: factory } = await import('./tours/welcome-tour')
-  return factory(userId)
-}
