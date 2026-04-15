@@ -317,8 +317,8 @@ async def get_orchestrator_settings(
             # LLM config
             mc = auto_agent.model_config or {}
             result["llm"] = {
-                "provider": mc.get("provider", config.LLM_PROVIDER or "openrouter"),
-                "model_id": mc.get("model_id", config.LLM_MODEL or "openai/gpt-4o"),
+                "provider": mc.get("provider", "openrouter"),
+                "model_id": mc.get("model_id", "google/gemini-2.5-flash"),
                 "temperature": mc.get("temperature", 0.7),
                 "max_tokens": mc.get("max_tokens", 4000),
                 "top_p": mc.get("top_p", 1.0),
