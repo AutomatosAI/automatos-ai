@@ -23,7 +23,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import {
   Save, RotateCcw, Brain, Zap, Settings, Heart, Sparkles,
   ChevronDown, Clock, MessageSquare, AlertCircle, Loader2,
-  Play, Shield, Calendar
+  Play, Shield, Calendar, Volume2
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { InlineHelp } from '@/components/ui/help-tooltip'
@@ -136,6 +136,10 @@ export default function SystemLLMSettingsTab({
   const [heartbeatOpen, setHeartbeatOpen] = useState(false)
   const [harnessOpen, setHarnessOpen] = useState(false)
 
+  // Voice profiles for Auto's voice
+  const [voiceProfiles, setVoiceProfiles] = useState<Array<{ id: string; name: string; provider: string; voice_id: string }>>([])
+  const [selectedVoiceProfileId, setSelectedVoiceProfileId] = useState<string | null>(null)
+
   // Heartbeat: connected channels, run now, last result
   const [connectedChannels, setConnectedChannels] = useState<Array<{ key: string; platform: string }>>([])
   const [heartbeatRunning, setHeartbeatRunning] = useState(false)
@@ -235,6 +239,22 @@ export default function SystemLLMSettingsTab({
     loadOrchConfig()
   }, [])
 
+
+  // Load voice profiles for Auto's voice selector
+  useEffect(() => {
+    apiClient.request<{ items: any[]; total: number }>('/api/voice/profiles')
+      .then((data) => {
+        if (data?.items && Array.isArray(data.items)) setVoiceProfiles(data.items)
+      })
+      .catch(() => {})
+  }, [])
+
+  // Sync selected voice profile when orchestrator config loads
+  useEffect(() => {
+    if (orchConfig && (orchConfig as any).voice_profile_id) {
+      setSelectedVoiceProfileId((orchConfig as any).voice_profile_id)
+    }
+  }, [orchConfig])
 
   // Load connected channels for notification dropdown + last heartbeat result
   useEffect(() => {
@@ -356,7 +376,7 @@ export default function SystemLLMSettingsTab({
         // Direct platform name (e.g. "telegram" from workspace integrations)
         hb.notification_channel = channelKey
       }
-      const payload = { ...orchConfig, heartbeat: hb }
+      const payload = { ...orchConfig, heartbeat: hb, voice_profile_id: selectedVoiceProfileId || null }
       await apiClient.request('/api/workspaces/current/orchestrator', {
         method: 'PUT',
         body: JSON.stringify(payload),
@@ -757,6 +777,33 @@ export default function SystemLLMSettingsTab({
                     </Select>
                     <p className="text-xs text-muted-foreground">
                       Controls what the orchestrator does when its heartbeat finds something
+                    </p>
+                  </div>
+
+                  {/* Voice Profile */}
+                  <div className="space-y-3">
+                    <Label className="flex items-center gap-1">
+                      <Volume2 className="h-4 w-4" />
+                      Auto&apos;s Voice
+                    </Label>
+                    <Select
+                      value={selectedVoiceProfileId || 'none'}
+                      onValueChange={(v) => setSelectedVoiceProfileId(v === 'none' ? null : v)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="No voice assigned" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">No voice (text only)</SelectItem>
+                        {voiceProfiles.map((vp) => (
+                          <SelectItem key={vp.id} value={vp.id}>
+                            {vp.name} ({vp.provider})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      Voice used for Auto&apos;s TTS responses. Create voice profiles in Settings &gt; Voices.
                     </p>
                   </div>
                 </>

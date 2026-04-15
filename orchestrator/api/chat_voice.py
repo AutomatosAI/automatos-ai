@@ -293,8 +293,8 @@ async def voice_chat(
                 audio_bytes=tts_result.audio,
                 audio_format="mp3",
             )
-        except Exception as e:
-            logger.warning("voice_tts_failed", extra={"error": str(e)})
+        except Exception:
+            logger.warning("voice_tts_failed", exc_info=True)
             # TTS failure is non-fatal -- return text response without audio
 
     total_ms = (time.monotonic() - start_time) * 1000
