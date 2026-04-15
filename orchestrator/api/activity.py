@@ -132,7 +132,7 @@ async def get_board_stats(
             .group_by(BoardTask.status)
             .all()
         )
-        all_statuses = ["inbox", "assigned", "in_progress", "review", "done"]
+        all_statuses = ["inbox", "assigned", "in_progress", "review", "blocked", "done"]
         status_map = dict(status_rows)
         columns = [
             {"status": s, "count": status_map.get(s, 0)}

@@ -66,6 +66,11 @@ export function CostTrackerWidget({ period, className }: CostTrackerWidgetProps)
           <div className="flex items-center justify-center h-full">
             <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
           </div>
+        ) : totalCost === 0 && trend.length === 0 && topAgents.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-2">
+            <DollarSign className="w-8 h-8 opacity-40" />
+            <p className="text-xs">No cost data yet</p>
+          </div>
         ) : (
           <>
             {/* Big number */}
