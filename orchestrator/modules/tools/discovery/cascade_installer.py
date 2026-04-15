@@ -139,10 +139,11 @@ async def cascade_agent_dependencies(
     After cloning a marketplace agent, auto-install its dependencies:
       1. LLM model → workspace
       2. Skills → workspace
-      3. Tools → assigned to cloned agent (both runtime + display tables)
-      4. OAuth warnings for tools that need connection
+      3. Plugins → workspace + assigned to cloned agent
+      4. Tools → assigned to cloned agent (both runtime + display tables)
+      5. OAuth warnings for tools that need connection
     """
-    from .handlers_marketplace import install_model, install_skill
+    from .handlers_marketplace import install_model, install_plugin, install_skill
 
     result = CascadeResult()
 
@@ -187,7 +188,10 @@ async def cascade_agent_dependencies(
                 logger.warning("Cascade: failed to install skill %s: %s", skill.name, e)
                 result.installed_dependencies.append({"type": "skill", "name": skill.name, "status": "failed"})
 
-    # --- 3. Copy tool assignments ---
+    # --- 3. Install plugins to workspace + assign to cloned agent ---
+    await _cascade_plugins(db, workspace_id, marketplace_agent, cloned_agent, result, install_plugin)
+
+    # --- 4. Copy tool assignments ---
     tool_names = _copy_tool_assignments(db, marketplace_agent.id, cloned_agent.id, workspace_id)
 
     for tool_name in tool_names:
@@ -197,7 +201,7 @@ async def cascade_agent_dependencies(
             "status": "assigned",
         })
 
-    # --- 4. OAuth warnings ---
+    # --- 5. OAuth warnings ---
     if tool_names:
         oauth_map = check_oauth_requirements(db, tool_names)
         for tool_name, needs_oauth in oauth_map.items():
@@ -217,6 +221,69 @@ async def cascade_agent_dependencies(
         len(result.installed_dependencies), len(result.warnings),
     )
     return result
+
+
+async def _cascade_plugins(
+    db: Session,
+    workspace_id: UUID,
+    marketplace_agent,
+    cloned_agent,
+    result: CascadeResult,
+    install_plugin_fn,
+) -> None:
+    """
+    Copy plugin assignments from marketplace agent to cloned agent.
+    Also enables each plugin at the workspace level (idempotent).
+    """
+    from core.models.marketplace_plugins import AgentAssignedPlugin
+
+    assigned = getattr(marketplace_agent, 'assigned_plugins', None)
+    if not assigned:
+        assigned = (
+            db.query(AgentAssignedPlugin)
+            .filter(AgentAssignedPlugin.agent_id == marketplace_agent.id)
+            .all()
+        )
+    if not assigned:
+        return
+
+    for ap in assigned:
+        plugin = getattr(ap, 'plugin', None)
+        plugin_id = ap.plugin_id
+        plugin_name = plugin.name if plugin else str(plugin_id)
+
+        try:
+            plugin_result = await install_plugin_fn(db, workspace_id, {"plugin_id": str(plugin_id)})
+            if not plugin_result.get("success"):
+                logger.warning("Cascade: plugin install returned failure for %s: %s", plugin_name, plugin_result.get("error"))
+        except Exception as e:
+            logger.warning("Cascade: failed to install plugin %s: %s", plugin_name, e)
+            result.installed_dependencies.append({"type": "plugin", "name": plugin_name, "status": "failed"})
+            continue
+
+        # Assign plugin to cloned agent
+        existing = (
+            db.query(AgentAssignedPlugin)
+            .filter(
+                AgentAssignedPlugin.agent_id == cloned_agent.id,
+                AgentAssignedPlugin.plugin_id == plugin_id,
+            )
+            .first()
+        )
+        if not existing:
+            db.add(AgentAssignedPlugin(
+                agent_id=cloned_agent.id,
+                plugin_id=plugin_id,
+                priority=getattr(ap, 'priority', 0) or 0,
+            ))
+
+        result.installed_dependencies.append({
+            "type": "plugin",
+            "name": plugin_name,
+            "status": "installed",
+        })
+
+    db.flush()
 
 
 def _copy_tool_assignments(
