@@ -1,8 +1,8 @@
 ---
 name: platform-management
-description: Complete platform operations skill — marketplace, agents, playbooks, heartbeats, board, governance, LLMs, workspace setup, and all administrative tools
-version: "1.0.0"
-tags: [platform, admin, marketplace, agents, playbooks, governance, onboarding]
+description: Complete platform operations skill — marketplace, agents, playbooks, heartbeats, board, scheduling, governance, LLMs, workspace setup, command centre, and all administrative tools
+version: "1.1.0"
+tags: [platform, admin, marketplace, agents, playbooks, governance, onboarding, command-centre, scheduling]
 category: agent-role
 tools:
   - name: platform_browse_marketplace_plugins
@@ -63,28 +63,30 @@ tools:
     description: Modify an existing playbook step
   - name: platform_delete_playbook_step
     description: Remove a step from a playbook
+  - name: platform_schedule_playbook
+    description: Set a cron schedule on a playbook so it runs automatically
   - name: platform_execute_playbook
-    description: Trigger a playbook run
+    description: Trigger an immediate one-off playbook run
   - name: platform_get_playbook_execution
-    description: Check status of a playbook execution
+    description: Check status of a running or completed playbook execution
   - name: platform_delete_playbook
     description: Permanently delete a playbook
   - name: platform_create_task
-    description: Create a task on the board
+    description: Create a task on the board (appears in Kanban columns)
   - name: platform_list_tasks
-    description: List board tasks with filters
+    description: List board tasks with filters (status, priority, agent)
   - name: platform_get_task
     description: Get full task details by ID
   - name: platform_board_summary
-    description: Get board overview — counts by status/priority
+    description: Get Kanban board overview — task counts by status and priority
   - name: platform_assign_task
-    description: Assign a task to an agent
+    description: Assign a board task to an agent
   - name: platform_update_task_status
-    description: Change task status (in_progress triggers execution)
+    description: Move a task between board columns (in_progress triggers agent execution)
   - name: platform_schedule_task
-    description: Schedule a one-shot or recurring task
+    description: Schedule a future one-shot or recurring task (appears in Schedule, not Board)
   - name: platform_list_scheduled_tasks
-    description: List all scheduled tasks
+    description: List upcoming scheduled tasks with next-run times
   - name: platform_cancel_scheduled_task
     description: Cancel a scheduled task
   - name: platform_create_mission
@@ -129,6 +131,60 @@ This skill teaches you HOW to use every operational tool on the platform. Follow
 
 ---
 
+## 0. Command Centre — Mental Model & Glossary
+
+The Command Centre is the operational hub of the workspace. It organises work across distinct concepts. Understanding what each concept represents — and what it is NOT — prevents confusion.
+
+### Core Concepts
+
+| Concept | What It Is | Time Horizon | What It Shows | What It Is NOT |
+|---------|-----------|-------------|---------------|----------------|
+| **Activity Feed** | Live and recent execution events across the workspace | Now + recent past | Running tasks, completed runs, failed executions, heartbeat cycles | Not task state (use Board), not future work (use Schedule) |
+| **Board** | Kanban view of task workflow state | Persistent | Tasks in columns: Inbox → Assigned → In Progress → Review → Blocked → Done | Not an event log (use Activity), not a calendar (use Schedule) |
+| **Schedule** | Upcoming planned work — tasks and playbooks set to run in the future | Future | Scheduled tasks (cron/one-shot), recurring playbook runs, heartbeat timers | Not what's running now (use Activity), not task state (use Board) |
+| **Reports** | Structured outputs submitted by agents after completing work | Recent past | Heartbeat reports, research summaries, incident reports, audits | Not raw execution logs (use Activity Feed) |
+| **Missions** | Higher-level coordinated initiatives that orchestrate multiple agents and tasks | Spanning | Goal, task DAG, step results, agent assignments, timing | Not single tasks (use Board) |
+| **Tasks** | Discrete units of work — created manually or by playbooks, missions, heartbeats | Persistent | Title, description, status, priority, assigned agent, result | The atomic unit; everything else creates or tracks tasks |
+| **Playbooks** | Reusable multi-step workflows that agents execute | Persistent (template) | Steps, agent assignments, execution history, schedule config | Not tasks — playbooks *create* tasks when they run |
+| **Heartbeats** | Recurring autonomous agent check-ins | Recurring | Last run, next run, findings, reports | Not playbooks — heartbeats are agent-level, playbooks are workflow-level |
+
+### Command Centre Widgets
+
+The Summary tab shows 12 configurable widgets. Each widget has a specific data source:
+
+| Widget | Data Source | Shows |
+|--------|-----------|-------|
+| **Active Now** | Activity Feed (status=working) | Currently running tasks, playbook executions, heartbeat cycles |
+| **Status Overview** | Board Stats | Pie chart of task distribution across board columns |
+| **Recent Activity** | Activity Feed (status=done+attention) | Completed and failed executions with duration |
+| **Schedule** | Activity Schedule | Week calendar of upcoming scheduled routines and playbooks |
+| **Agent Reports** | Agent Reports API | Latest reports from pinned agents |
+| **Priority Breakdown** | Board Stats | Bar chart of tasks by priority (Urgent/High/Medium/Low) |
+| **Types of Work** | Board Stats | Distribution of task sources (Routine/Task/Project) |
+| **Team Workload** | Board Stats | Task count per agent as horizontal bars |
+| **Cost Tracker** | KPI: cost-tracker | Total LLM spend, daily trend, top agent spenders |
+| **Agent Performance** | KPI: agent-performance | Success rate per agent |
+| **Playbook Metrics** | KPI: playbook-metrics | Playbook run counts, success %, avg duration |
+| **Approval Gates** | KPI: approval-gates | Pending approvals, avg approval time, waiting missions |
+
+### Tool-to-Concept Mapping
+
+When using platform tools, know which concept you're operating on:
+
+| Action | Tool | Concept |
+|--------|------|---------|
+| See what's running now | `platform_get_activity_feed` (status=working) | Activity |
+| See recent completions | `platform_get_activity_feed` (status=done) | Activity |
+| See board task counts | `platform_board_summary` | Board |
+| Move a task to a new column | `platform_update_task_status` | Board |
+| See upcoming scheduled work | `platform_list_scheduled_tasks` | Schedule |
+| Schedule a one-off or recurring task | `platform_schedule_task` | Schedule |
+| Schedule a playbook to run on cron | `platform_schedule_playbook` | Schedule |
+| Run a playbook right now | `platform_execute_playbook` | Activity (creates execution) |
+| Read an agent's latest report | `platform_get_latest_report` | Reports |
+
+---
+
 ## 1. Understanding the Workspace Model
 
 A workspace starts **blank**. Nothing is installed. The owner decides what goes in:
@@ -140,11 +196,77 @@ A workspace starts **blank**. Nothing is installed. The owner decides what goes 
 
 **Principle:** Keep it clean. Only install what the business actually needs. A Shopify store doesn't need GitHub tools. A dev team doesn't need Shopify plugins.
 
+### THE INSTALL CHAIN
+
+Nothing from the marketplace is usable until it is installed in the workspace.
+
+**For individual items (single plugin, skill, or model) — three manual steps:**
+
+| Step | Action | Tool | What It Does |
+|------|--------|------|-------------|
+| 1. **Find** | Browse the marketplace | `platform_browse_marketplace_*` | Discovers what exists — does NOT make it usable |
+| 2. **Install** | Add to workspace | `platform_install_plugin`, `platform_install_skill`, `platform_install_model` | Makes it available workspace-wide |
+| 3. **Assign** | Wire to a specific agent | `platform_assign_tool_to_agent`, `platform_assign_skill_to_agent`, `platform_assign_plugin_to_agent` | Agent can now actually use it |
+
+### CASCADING INSTALLS — Agents & Playbooks
+
+**When a user installs an agent template or playbook from the marketplace, all dependencies are auto-installed.** This is the "I like this car, it comes with wheels" model.
+
+**Installing a marketplace agent automatically:**
+- Installs the agent's LLM model to the workspace
+- Enables the agent's skills for the workspace
+- Assigns all declared tools (Composio apps) to the cloned agent
+- Warns about any tools that require an OAuth connection (Gmail, Slack, etc.)
+
+**Installing a marketplace playbook automatically:**
+- Clones all recommended agents from the marketplace
+- Cascades each agent's dependencies (model, skills, tools)
+- Remaps playbook steps to point to the newly cloned agents
+- Warns about OAuth connections needed for required tools
+
+**The only manual step is connecting OAuth apps.** If a tool like GMAIL or SLACK is auto-assigned, the user must still connect their account at Settings → Integrations. Always tell the user which connections are needed.
+
+**The install response includes:**
+- `cloned_items` — what was cloned (agent, recipe)
+- `installed_dependencies` — what was auto-installed (models, skills, tools with status)
+- `warnings` — what the user needs to do manually (OAuth connections)
+
+### After Installing — What to Tell the User
+
+After a cascading install, report clearly:
+1. What was installed (agents, models, skills, tools)
+2. What still needs manual action (OAuth connections)
+3. Direct them to Settings → Integrations to connect OAuth apps
+
+Example: "Installed Sales Prospector with model llama-3.3-70b-instruct, skills pattern_recognition and Data Analysis, and tools HUBSPOT, LINKEDIN, GMAIL. ⚠️ HUBSPOT, LINKEDIN, and GMAIL require OAuth connections — connect them at Settings → Integrations."
+
+### Verify After Install
+
+**After any install, always VERIFY:**
+```json
+{ "tool": "platform_get_agent", "params": { "agent_name": "AGENT_NAME" } }
+```
+Check the response shows the tool/skill/plugin in the agent's assignments. If it is not there, the assignment failed — do not tell the user it worked.
+
+**NEVER claim an agent has a capability unless you have verified it with `platform_get_agent`.** Browsing the marketplace or knowing a tool exists is NOT the same as it being installed and assigned.
+
+**Standard for ALL marketplace items — agents, skills, plugins, tools, models:**
+- "Add to Workspace" = install at workspace level
+- "Assign to Agent" = wire to a specific agent
+- Both steps required for individual items. Agent/playbook installs handle this automatically.
+
+**When a user asks for an agent with specific capabilities:**
+1. Search the marketplace for matching agent templates
+2. Install the agent template (dependencies cascade automatically)
+3. Verify the agent's final configuration with `platform_get_agent`
+4. Report what was installed and what OAuth connections are needed
+5. If no matching template exists, build manually: install items, create agent, assign tools, verify
+
 ---
 
 ## 2. Marketplace — Browse, Evaluate, Install
 
-The marketplace has three catalogs: **agents** (templates), **skills** (capabilities), and **plugins** (tool bundles). Always browse before building custom — reuse beats reinvention.
+The marketplace has five catalogs: **agents** (templates), **skills** (capabilities), **plugins** (tool bundles), **LLMs** (models), and **tools** (integrations). Always browse before building custom — reuse beats reinvention.
 
 ### 2a. Browse What's Available
 
@@ -448,7 +570,30 @@ Each step has a `prompt_template` (what to do), an optional `agent_id` (who does
 
 **`output_key`** — Names the output so later steps can reference it.
 
-### 7c. Configure Schedule
+### 7c. Schedule a Playbook
+
+Use `platform_schedule_playbook` to set a cron schedule directly:
+
+```json
+{
+  "tool": "platform_schedule_playbook",
+  "params": {
+    "playbook_name": "Daily CEO Briefing",
+    "cron_expression": "0 9 * * *",
+    "timezone": "UTC",
+    "enabled": true
+  }
+}
+```
+
+**Common cron patterns:**
+- `0 9 * * *` — daily at 09:00
+- `0 9 * * 1` — every Monday at 09:00
+- `0 9 * * 1-5` — weekdays at 09:00
+- `0 */4 * * *` — every 4 hours
+- `0 9 1 * *` — 1st of each month at 09:00
+
+Alternatively, use `platform_update_playbook` with `schedule_config` and `execution_config` for full control:
 
 ```json
 {
@@ -456,7 +601,8 @@ Each step has a `prompt_template` (what to do), an optional `agent_id` (who does
   "params": {
     "playbook_id": 1,
     "schedule_config": {
-      "cron": "0 9 * * *",
+      "type": "cron",
+      "cron_expression": "0 9 * * *",
       "timezone": "UTC"
     },
     "execution_config": {
@@ -507,7 +653,18 @@ Returns step-by-step results, timing, and final status.
 
 ## 8. Board & Task Management
 
-The board is a 6-column Kanban: **Inbox → Assigned → In Progress → Review → Blocked → Done**.
+The board is a 6-column Kanban that tracks task workflow state:
+
+| Column | Status | Meaning | Transition Effect |
+|--------|--------|---------|-------------------|
+| **Inbox** | `inbox` | New task, no agent assigned yet | None — waiting for triage |
+| **Assigned** | `assigned` | Agent assigned but not started | None — waiting for dispatch |
+| **In Progress** | `in_progress` | Agent is actively executing | **Triggers agent execution immediately** |
+| **Review** | `review` | Execution complete, awaiting approval | Human or LLM review required |
+| **Blocked** | `blocked` | Cannot proceed — needs intervention | Sets `blocked_at` + `blocked_reason` |
+| **Done** | `done` | Completed successfully | Sets `completed_at` |
+
+The board is NOT an event log (that's the Activity Feed) and NOT a schedule (that's the Schedule tab).
 
 ### 8a. Create a Task
 
@@ -525,7 +682,7 @@ The board is a 6-column Kanban: **Inbox → Assigned → In Progress → Review 
 }
 ```
 
-**Priority levels:** `"urgent"` (P0), `"high"` (P1), `"medium"` (P2), `"low"` (P3).
+**Priority levels:** `"urgent"` (P0 — 4h SLA), `"high"` (P1 — 12h SLA), `"medium"` (P2 — 24h SLA), `"low"` (P3 — 72h SLA).
 
 **Status options:** `"inbox"` (unassigned), `"assigned"` (ready), `"in_progress"` (executing — **triggers agent immediately**), `"review"` (needs human check), `"blocked"`, `"done"`.
 

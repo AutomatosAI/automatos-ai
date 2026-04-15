@@ -94,6 +94,7 @@ class InstallResponse(BaseModel):
     success: bool
     message: str
     cloned_items: List[Dict[str, Any]] = Field(default_factory=list)
+    installed_dependencies: List[Dict[str, Any]] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
 
 
@@ -484,6 +485,7 @@ async def install_item(
             raise HTTPException(status_code=404, detail="Marketplace item not found")
 
         cloned_items = []
+        installed_dependencies = []
         warnings = []
 
         # Look up database user ID from Clerk user ID
@@ -495,48 +497,14 @@ async def install_item(
             if user:
                 user_id_int = user.id
 
-        # Check if agent name already exists in workspace
-        name_exists = db.query(Agent).filter(
-            Agent.name == marketplace_agent.name,
-            Agent.workspace_id == ctx.workspace_id,
-            Agent.owner_type == 'workspace'
-        ).first() is not None
-
-        agent_name = f"{marketplace_agent.name}-copy" if name_exists else marketplace_agent.name
-
-        # Clone agent to workspace (simple copy with owner swap)
-        cloned_agent = Agent(
-            name=agent_name,
-            description=marketplace_agent.description,
-            agent_type=marketplace_agent.agent_type,
-            configuration=marketplace_agent.configuration,
-            model_config=marketplace_agent.model_config,
-            tags=marketplace_agent.tags,
-            status=marketplace_agent.status,
-
-            # Ownership swap
-            owner_type='workspace',
-            owner_id=str(ctx.workspace_id),
-            workspace_id=ctx.workspace_id,
-            created_by_user_id=user_id_int,
-
-            # Tracking
-            cloned_from_id=marketplace_agent.id,
-            original_creator_id=marketplace_agent.original_creator_id,
-
-            # Reset marketplace fields
-            is_approved=True,
-            is_featured=False,
-            install_count=0,
-            version=marketplace_agent.version
+        # Clone agent to workspace using shared helper
+        from modules.tools.discovery.cascade_installer import (
+            clone_agent_to_workspace, cascade_agent_dependencies,
         )
 
-        db.add(cloned_agent)
-        db.flush()
-
-        # Copy skills relationship
-        if marketplace_agent.skills:
-            cloned_agent.skills = marketplace_agent.skills
+        cloned_agent, agent_name = clone_agent_to_workspace(
+            db, ctx.workspace_id, marketplace_agent, user_id_int,
+        )
 
         cloned_items.append({
             "type": "agent",
@@ -544,8 +512,15 @@ async def install_item(
             "id": cloned_agent.id
         })
 
+        # Cascade dependencies: model, skills, tools, OAuth warnings
+        cascade_result = await cascade_agent_dependencies(
+            db, ctx.workspace_id, marketplace_agent, cloned_agent,
+        )
+        installed_dependencies.extend(cascade_result.installed_dependencies)
+        warnings.extend(cascade_result.warnings)
+
         # Increment marketplace agent install count
-        marketplace_agent.install_count += 1
+        marketplace_agent.install_count = (marketplace_agent.install_count or 0) + 1
 
         # Record installation in marketplace_installs
         install_query = text("""
@@ -566,6 +541,7 @@ async def install_item(
             success=True,
             message=f"{marketplace_agent.name} installed successfully",
             cloned_items=cloned_items,
+            installed_dependencies=installed_dependencies,
             warnings=warnings
         )
 

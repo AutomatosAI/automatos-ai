@@ -1513,6 +1513,7 @@ async def install_recipe_from_marketplace(
             raise HTTPException(status_code=404, detail="Marketplace recipe not found")
 
         cloned_items = []
+        installed_dependencies = []
         warnings = []
 
         # Look up database user ID
@@ -1597,11 +1598,22 @@ async def install_recipe_from_marketplace(
             "template_id": cloned_recipe.template_id
         })
 
-        # TODO: Auto-clone referenced agents if available in marketplace
-        # This would require parsing template_definition and checking for agent references
+        # Cascade: auto-clone referenced agents and their dependencies
+        from modules.tools.discovery.cascade_installer import cascade_recipe_dependencies
+
+        cascade_result = await cascade_recipe_dependencies(
+            db=db,
+            workspace_id=ctx.workspace_id,
+            marketplace_recipe=marketplace_recipe,
+            cloned_recipe=cloned_recipe,
+            user_id_int=user_id_int,
+        )
+        cloned_items.extend(cascade_result.cloned_items)
+        installed_dependencies = cascade_result.installed_dependencies
+        warnings.extend(cascade_result.warnings)
 
         # Increment marketplace recipe install count
-        marketplace_recipe.install_count += 1
+        marketplace_recipe.install_count = (marketplace_recipe.install_count or 0) + 1
 
         # Record installation in marketplace_installs using a savepoint so
         # failures don't roll back the main recipe install.
@@ -1631,6 +1643,7 @@ async def install_recipe_from_marketplace(
             "success": True,
             "message": f"{marketplace_recipe.name} installed successfully",
             "cloned_items": cloned_items,
+            "installed_dependencies": installed_dependencies,
             "warnings": warnings
         }
 
