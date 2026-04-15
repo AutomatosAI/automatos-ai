@@ -344,8 +344,8 @@ export function MultimodalInput({
               />
             )}
 
-            {/* Live Voice Call Button (Phase 3) */}
-            {voiceEnabled && (
+            {/* Live Voice Call Button (Phase 3) — disabled for pilot, WebSocket needs debugging */}
+            {/* {voiceEnabled && (
               <Button
                 type="button"
                 variant="ghost"
@@ -362,7 +362,7 @@ export function MultimodalInput({
               >
                 <Phone className="w-4 h-4" />
               </Button>
-            )}
+            )} */}
 
             {/* PRD: Unified Agent-Chat System - Agent Selector */}
             {onAgentChange ? (
@@ -441,8 +441,8 @@ export function MultimodalInput({
         </div>
       )}
 
-      {/* Live Voice Call Panel (Phase 3) */}
-      <AnimatePresence>
+      {/* Live Voice Call Panel (Phase 3) — disabled for pilot */}
+      {/* <AnimatePresence>
         {showCallPanel && workspace?.id && (
           <VoiceCallPanel
             workspaceId={workspace.id}
@@ -452,7 +452,7 @@ export function MultimodalInput({
             onClose={() => setShowCallPanel(false)}
           />
         )}
-      </AnimatePresence>
+      </AnimatePresence> */}
     </form>
   )
 }
