@@ -38,6 +38,8 @@ class VoiceServiceClient:
     def __init__(self):
         self.base_url = config.VOICE_SERVICE_URL.rstrip("/")
         self.timeout = config.VOICE_SERVICE_TIMEOUT
+        # TTS (especially Chatterbox) needs longer than STT
+        self.tts_timeout = max(self.timeout, 120)
 
     async def transcribe(
         self,
@@ -101,7 +103,7 @@ class VoiceServiceClient:
         """
         effective_model = model or config.VOICE_TTS_MODEL
         start = time.monotonic()
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+        async with httpx.AsyncClient(timeout=self.tts_timeout) as client:
             payload = {
                 "input": text,
                 "model": effective_model,

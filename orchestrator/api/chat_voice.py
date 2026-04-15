@@ -279,8 +279,19 @@ async def voice_chat(
 
     if response_format in ("audio", "both"):
         try:
+            # Cap TTS text to ~500 chars to keep synthesis fast (esp. Chatterbox)
+            tts_text = response_text
+            if len(tts_text) > 500:
+                # Truncate at last sentence boundary within limit
+                truncated = tts_text[:500]
+                last_period = truncated.rfind('.')
+                last_question = truncated.rfind('?')
+                last_exclaim = truncated.rfind('!')
+                cut = max(last_period, last_question, last_exclaim)
+                tts_text = truncated[:cut + 1] if cut > 100 else truncated
+
             tts_result = await _voice_client.synthesize(
-                text=response_text,
+                text=tts_text,
                 voice=tts_voice,
                 model=tts_model,
                 reference_audio=tts_reference_audio,
