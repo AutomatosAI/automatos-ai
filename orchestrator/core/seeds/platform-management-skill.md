@@ -196,11 +196,11 @@ A workspace starts **blank**. Nothing is installed. The owner decides what goes 
 
 **Principle:** Keep it clean. Only install what the business actually needs. A Shopify store doesn't need GitHub tools. A dev team doesn't need Shopify plugins.
 
-### THE INSTALL CHAIN — MANDATORY FOR EVERY ITEM
+### THE INSTALL CHAIN
 
-Nothing from the marketplace is usable until it is installed in the workspace. This is a hard rule with no exceptions.
+Nothing from the marketplace is usable until it is installed in the workspace.
 
-**Three layers — all three must be satisfied before an item works:**
+**For individual items (single plugin, skill, or model) — three manual steps:**
 
 | Step | Action | Tool | What It Does |
 |------|--------|------|-------------|
@@ -208,7 +208,41 @@ Nothing from the marketplace is usable until it is installed in the workspace. T
 | 2. **Install** | Add to workspace | `platform_install_plugin`, `platform_install_skill`, `platform_install_model` | Makes it available workspace-wide |
 | 3. **Assign** | Wire to a specific agent | `platform_assign_tool_to_agent`, `platform_assign_skill_to_agent`, `platform_assign_plugin_to_agent` | Agent can now actually use it |
 
-**After assigning, always VERIFY:**
+### CASCADING INSTALLS — Agents & Playbooks
+
+**When a user installs an agent template or playbook from the marketplace, all dependencies are auto-installed.** This is the "I like this car, it comes with wheels" model.
+
+**Installing a marketplace agent automatically:**
+- Installs the agent's LLM model to the workspace
+- Enables the agent's skills for the workspace
+- Assigns all declared tools (Composio apps) to the cloned agent
+- Warns about any tools that require an OAuth connection (Gmail, Slack, etc.)
+
+**Installing a marketplace playbook automatically:**
+- Clones all recommended agents from the marketplace
+- Cascades each agent's dependencies (model, skills, tools)
+- Remaps playbook steps to point to the newly cloned agents
+- Warns about OAuth connections needed for required tools
+
+**The only manual step is connecting OAuth apps.** If a tool like GMAIL or SLACK is auto-assigned, the user must still connect their account at Settings → Integrations. Always tell the user which connections are needed.
+
+**The install response includes:**
+- `cloned_items` — what was cloned (agent, recipe)
+- `installed_dependencies` — what was auto-installed (models, skills, tools with status)
+- `warnings` — what the user needs to do manually (OAuth connections)
+
+### After Installing — What to Tell the User
+
+After a cascading install, report clearly:
+1. What was installed (agents, models, skills, tools)
+2. What still needs manual action (OAuth connections)
+3. Direct them to Settings → Integrations to connect OAuth apps
+
+Example: "Installed Sales Prospector with model llama-3.3-70b-instruct, skills pattern_recognition and Data Analysis, and tools HUBSPOT, LINKEDIN, GMAIL. ⚠️ HUBSPOT, LINKEDIN, and GMAIL require OAuth connections — connect them at Settings → Integrations."
+
+### Verify After Install
+
+**After any install, always VERIFY:**
 ```json
 { "tool": "platform_get_agent", "params": { "agent_name": "AGENT_NAME" } }
 ```
@@ -219,15 +253,14 @@ Check the response shows the tool/skill/plugin in the agent's assignments. If it
 **Standard for ALL marketplace items — agents, skills, plugins, tools, models:**
 - "Add to Workspace" = install at workspace level
 - "Assign to Agent" = wire to a specific agent
-- Both steps required. No shortcuts.
+- Both steps required for individual items. Agent/playbook installs handle this automatically.
 
 **When a user asks for an agent with specific capabilities:**
-1. Search the marketplace for matching tools, skills, or agent templates
-2. Install any required items to the workspace
-3. Create or configure the agent
-4. Assign every required tool, skill, and plugin to the agent
-5. Verify the agent's final configuration
-6. Report exactly what was installed, assigned, and verified
+1. Search the marketplace for matching agent templates
+2. Install the agent template (dependencies cascade automatically)
+3. Verify the agent's final configuration with `platform_get_agent`
+4. Report what was installed and what OAuth connections are needed
+5. If no matching template exists, build manually: install items, create agent, assign tools, verify
 
 ---
 
