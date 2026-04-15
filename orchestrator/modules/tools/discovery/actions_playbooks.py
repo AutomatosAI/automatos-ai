@@ -282,6 +282,53 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
         ],
     ))
 
+    # ── Scheduling ───────────────────────────────────────────────────
+
+    registry.register(ActionDefinition(
+        name="platform_schedule_playbook",
+        description=(
+            "Schedule a playbook to run automatically on a cron schedule. "
+            "Sets the playbook's schedule_config so it fires at the specified "
+            "times. Use platform_execute_playbook for immediate one-off runs."
+        ),
+        category="playbooks",
+        parameters={
+            "type": "object",
+            "properties": {
+                "playbook_id": {
+                    "type": "integer",
+                    "description": "ID of the playbook to schedule.",
+                },
+                "playbook_name": {
+                    "type": "string",
+                    "description": "Name of the playbook to schedule (alternative to ID).",
+                },
+                "cron_expression": {
+                    "type": "string",
+                    "description": "5-field cron expression (e.g. '0 9 * * 1' = every Monday at 09:00 UTC).",
+                },
+                "timezone": {
+                    "type": "string",
+                    "description": "Timezone for the schedule (e.g. 'UTC', 'Europe/Dublin'). Defaults to 'UTC'.",
+                },
+                "enabled": {
+                    "type": "boolean",
+                    "description": "Whether to activate the schedule immediately. Defaults to true.",
+                },
+            },
+            "required": ["cron_expression"],
+        },
+        permission_level="write",
+        requires_confirmation=False,
+        tags=["playbooks", "schedule", "cron", "automate", "recurring"],
+        examples=[
+            "schedule the daily briefing playbook to run at 9am",
+            "set playbook 5 to run every Monday",
+            "schedule this playbook on a cron",
+            "automate the weekly review playbook",
+        ],
+    ))
+
     # ── Execution ────────────────────────────────────────────────────
 
     registry.register(ActionDefinition(

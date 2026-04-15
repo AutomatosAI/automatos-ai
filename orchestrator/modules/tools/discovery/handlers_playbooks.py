@@ -339,6 +339,74 @@ async def delete_playbook_step(db: Session, workspace_id: UUID, params: Dict[str
     }
 
 
+async def schedule_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Set a cron schedule on a playbook so it runs automatically."""
+    from core.models.core import WorkflowTemplate
+
+    playbook_id = params.get("playbook_id")
+    playbook_name = params.get("playbook_name")
+    cron_expression = params.get("cron_expression")
+
+    if not cron_expression:
+        return {"success": False, "error": "Missing required parameter: cron_expression"}
+
+    # Validate cron expression
+    parts = cron_expression.strip().split()
+    if len(parts) != 5:
+        return {"success": False, "error": f"Invalid cron expression: expected 5 fields, got {len(parts)}. Format: minute hour day_of_month month day_of_week"}
+
+    # Resolve playbook
+    query = db.query(WorkflowTemplate).filter(
+        WorkflowTemplate.workspace_id == workspace_id
+    )
+    if playbook_id:
+        query = query.filter(WorkflowTemplate.id == playbook_id)
+    elif playbook_name:
+        query = query.filter(WorkflowTemplate.name.ilike(f"%{playbook_name}%"))
+    else:
+        return {"success": False, "error": "Provide playbook_id or playbook_name"}
+
+    playbook = query.first()
+    if not playbook:
+        return {"success": False, "error": "Playbook not found"}
+
+    timezone = params.get("timezone", "UTC")
+    enabled = params.get("enabled", True)
+
+    schedule_config = {
+        "type": "cron",
+        "cron_expression": cron_expression,
+        "timezone": timezone,
+        "enabled": enabled,
+    }
+    playbook.schedule_config = schedule_config
+    db.flush()
+
+    # Sync with APScheduler if available
+    try:
+        from services.playbook_scheduler import PlaybookSchedulerService
+        scheduler = PlaybookSchedulerService()
+        if enabled:
+            scheduler.schedule_playbook(playbook.id, cron_expression, timezone)
+        else:
+            scheduler.unschedule_playbook(playbook.id)
+    except Exception as e:
+        logger.warning("[PlatformExecutor] Scheduler sync failed for playbook %d: %s", playbook.id, e)
+
+    logger.info(
+        "[PlatformExecutor] Scheduled playbook '%s' (id=%d) with cron '%s' tz=%s enabled=%s",
+        playbook.name, playbook.id, cron_expression, timezone, enabled,
+    )
+
+    return {
+        "success": True,
+        "playbook_id": playbook.id,
+        "playbook_name": playbook.name,
+        "schedule_config": schedule_config,
+        "message": f"Playbook '{playbook.name}' scheduled: {cron_expression} ({timezone}). {'Active now.' if enabled else 'Paused — set enabled=true to activate.'}",
+    }
+
+
 async def execute_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Trigger a playbook run asynchronously. Returns execution_id immediately."""
     from core.models.core import WorkflowTemplate, RecipeExecution

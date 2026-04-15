@@ -31,6 +31,7 @@ from modules.tools.discovery.handlers_playbooks import (
     add_playbook_step,
     update_playbook_step,
     delete_playbook_step,
+    schedule_playbook,
     execute_playbook,
     get_playbook_execution,
     delete_playbook,
@@ -197,6 +198,7 @@ class PlatformActionExecutor:
             "platform_update_playbook_step": update_playbook_step,
             "platform_delete_recipe_step": delete_playbook_step,
             "platform_delete_playbook_step": delete_playbook_step,
+            "platform_schedule_playbook": schedule_playbook,
             "platform_store_memory": store_memory,
             "platform_delete_agent": delete_agent,
             # Infrastructure / observability

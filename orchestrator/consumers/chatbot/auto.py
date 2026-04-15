@@ -171,6 +171,12 @@ _PLATFORM_KEYWORDS = {
         "how many queries", "agent activity", "what's being used",
         "show stats", "show usage",
     ],
+    "platform_schedule_playbook": [
+        "schedule playbook", "schedule the playbook", "set playbook schedule",
+        "cron playbook", "automate playbook", "recurring playbook",
+        "schedule this playbook", "schedule a playbook",
+        "run playbook on a schedule", "set up recurring playbook",
+    ],
     "platform_execute_recipe": [
         "run the recipe", "execute recipe", "trigger recipe",
         "run automation", "start recipe",
