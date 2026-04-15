@@ -203,14 +203,22 @@ export function VoiceProfilesSettingsTab() {
         setPreviewAudio(null)
         URL.revokeObjectURL(url)
       }
-      audio.onerror = () => {
+      audio.onerror = (e) => {
+        toast.error('Audio playback error')
         setPreviewing(null)
         setPreviewAudio(null)
         URL.revokeObjectURL(url)
       }
 
       setPreviewAudio(audio)
-      await audio.play()
+      try {
+        await audio.play()
+      } catch (playErr: any) {
+        toast.error(`Playback blocked: ${playErr?.message || 'unknown'}`)
+        setPreviewing(null)
+        setPreviewAudio(null)
+        URL.revokeObjectURL(url)
+      }
     } catch (err: any) {
       toast.error(err?.message || 'Preview failed')
       setPreviewing(null)
