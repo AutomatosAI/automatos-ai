@@ -5,6 +5,7 @@ GET  /api/chat/voice/audio/{message_id} -- Retrieve voice audio.
 GET  /api/voice/health -- Voice service health check.
 """
 
+import base64
 import json
 import logging
 import uuid
@@ -276,6 +277,7 @@ async def voice_chat(
 
     tts_latency_ms = 0.0
     audio_s3_key = None
+    audio_bytes_raw: bytes | None = None
 
     if response_format in ("audio", "both"):
         try:
@@ -297,8 +299,9 @@ async def voice_chat(
                 reference_audio=tts_reference_audio,
             )
             tts_latency_ms = tts_result.duration_ms
+            audio_bytes_raw = tts_result.audio
 
-            # Store TTS audio in S3
+            # Store TTS audio in S3 (for persistence / replay)
             audio_s3_key = upload_voice_audio(
                 workspace_id=workspace_id,
                 message_id=message_id,
@@ -331,6 +334,7 @@ async def voice_chat(
         "transcript": transcript,
         "response_text": response_text,
         "audio_url": f"/api/chat/voice/audio/{message_id}" if audio_s3_key else None,
+        "audio_base64": base64.b64encode(audio_bytes_raw).decode() if audio_bytes_raw else None,
         "audio_format": "mp3",
         "stt_latency_ms": round(stt_result.duration_ms, 1),
         "tts_latency_ms": round(tts_latency_ms, 1),

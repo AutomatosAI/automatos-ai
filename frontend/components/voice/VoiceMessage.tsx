@@ -7,6 +7,7 @@ import { VoicePlayer } from './VoicePlayer'
 interface VoiceMessageProps {
   transcript: string
   audioUrl?: string | null
+  audioBase64?: string | null
   isUser: boolean
   sttLatencyMs?: number
   ttsLatencyMs?: number
@@ -16,6 +17,7 @@ interface VoiceMessageProps {
 export function VoiceMessage({
   transcript,
   audioUrl,
+  audioBase64,
   isUser,
   sttLatencyMs,
   ttsLatencyMs,
@@ -47,11 +49,12 @@ export function VoiceMessage({
       ) : (
         /* Assistant voice message: player + text response */
         <div className="space-y-2">
-          {audioUrl && (
+          {(audioBase64 || audioUrl) && (
             <div className="flex items-center gap-2">
               <Volume2 className="w-3.5 h-3.5 text-orange-400 flex-shrink-0" />
               <VoicePlayer
-                audioUrl={audioUrl}
+                audioUrl={audioUrl || ''}
+                audioBase64={audioBase64 || undefined}
                 duration={durationMs}
                 compact
                 className="flex-1"

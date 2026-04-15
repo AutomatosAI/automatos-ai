@@ -8,6 +8,7 @@ import { useVoicePlayback } from '@/hooks/use-voice-playback'
 
 interface VoicePlayerProps {
   audioUrl: string
+  audioBase64?: string  // inline base64 audio (preferred, avoids fetch)
   duration?: number // in ms, for display before loading
   compact?: boolean
   className?: string
@@ -24,6 +25,7 @@ function formatTime(seconds: number): string {
 
 export function VoicePlayer({
   audioUrl,
+  audioBase64,
   duration: initialDurationMs,
   compact = false,
   className = '',
@@ -56,9 +58,14 @@ export function VoicePlayer({
     } else if (state === 'paused') {
       resume()
     } else {
-      play(audioUrl)
+      // Prefer inline base64 (same approach as voice preview — no fetch needed)
+      if (audioBase64) {
+        play(`data:audio/mp3;base64,${audioBase64}`)
+      } else {
+        play(audioUrl)
+      }
     }
-  }, [state, audioUrl, play, pause, resume])
+  }, [state, audioUrl, audioBase64, play, pause, resume])
 
   const handleSeek = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {

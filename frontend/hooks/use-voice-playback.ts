@@ -130,18 +130,29 @@ export function useVoicePlayback(): UseVoicePlaybackReturn {
       currentUrlRef.current = url
 
       try {
-        // Fetch audio bytes with auth (follows redirects, avoids CORS issues with new Audio())
-        const headers: Record<string, string> = {}
-        const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null
-        const wsId = typeof window !== 'undefined' ? localStorage.getItem('last_active_workspace') : null
-        if (token) headers['Authorization'] = `Bearer ${token}`
-        if (wsId) headers['X-Workspace-ID'] = wsId
+        let arrayBuffer: ArrayBuffer
 
-        const response = await fetch(url, { headers })
-        if (!response.ok) {
-          throw new Error(`Audio fetch failed: ${response.status}`)
+        if (url.startsWith('data:')) {
+          // Base64 data URI — decode directly (no fetch needed)
+          const base64 = url.split(',')[1]
+          const raw = atob(base64)
+          const bytes = new Uint8Array(raw.length)
+          for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i)
+          arrayBuffer = bytes.buffer
+        } else {
+          // Fetch audio bytes with auth
+          const headers: Record<string, string> = {}
+          const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null
+          const wsId = typeof window !== 'undefined' ? localStorage.getItem('last_active_workspace') : null
+          if (token) headers['Authorization'] = `Bearer ${token}`
+          if (wsId) headers['X-Workspace-ID'] = wsId
+
+          const response = await fetch(url, { headers })
+          if (!response.ok) {
+            throw new Error(`Audio fetch failed: ${response.status}`)
+          }
+          arrayBuffer = await response.arrayBuffer()
         }
-        const arrayBuffer = await response.arrayBuffer()
 
         // Decode with AudioContext
         const tempCtx = new AudioContext()
