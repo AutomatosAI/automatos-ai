@@ -19,6 +19,9 @@ export function useAutoTour() {
   useEffect(() => {
     if (!isLoaded || !user?.id || !pathname) return
 
+    // No Shepherd tours on mobile — welcome modal only
+    if (typeof window !== 'undefined' && window.innerWidth <= 640) return
+
     // Don't re-trigger if we already started a tour for this exact path this render
     if (startedRef.current === pathname) return
 

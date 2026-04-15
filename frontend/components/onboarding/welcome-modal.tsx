@@ -17,6 +17,7 @@ interface WelcomeModalProps {
 export function WelcomeModal({ open, onOpenChange, userId }: WelcomeModalProps) {
   const [isStarting, setIsStarting] = useState(false)
   const router = useRouter()
+  const isMobile = typeof window !== 'undefined' && window.innerWidth <= 640
 
   const handleSkip = () => {
     markTourSkipped('welcome', userId)
@@ -30,10 +31,13 @@ export function WelcomeModal({ open, onOpenChange, userId }: WelcomeModalProps) 
   }
 
   const handleStartTour = () => {
-    setIsStarting(true)
     markTourSkipped('welcome', userId)
     onOpenChange(false)
 
+    // Mobile: welcome modal only, no Shepherd tour
+    if (isMobile) return
+
+    setIsStarting(true)
     // Small delay for modal close animation, then launch the Chat page
     // Shepherd tour (the main tour we built — no separate welcome tour).
     setTimeout(async () => {
@@ -135,23 +139,25 @@ export function WelcomeModal({ open, onOpenChange, userId }: WelcomeModalProps) 
             </div>
           </div> */}
 
-          {/* Tour CTA */}
-          <div
-            className="p-3 rounded-lg bg-orange-500/10 border border-orange-500/30 cursor-pointer hover:bg-orange-500/20 transition-colors"
-            onClick={handleStartTour}
-          >
-            <div className="flex items-center gap-3">
-              <Sparkles className="w-5 h-5 text-orange-400 flex-shrink-0" />
-              <div className="flex-1">
-                <div className="font-medium text-sm text-gray-200">
-                  Take a quick tour
-                </div>
-                <div className="text-xs text-gray-400">
-                  Step by step — press <kbd className="px-1 py-0.5 text-xs bg-gray-700 rounded">ESC</kbd> to exit anytime
+          {/* Tour CTA — desktop only */}
+          {!isMobile && (
+            <div
+              className="p-3 rounded-lg bg-orange-500/10 border border-orange-500/30 cursor-pointer hover:bg-orange-500/20 transition-colors"
+              onClick={handleStartTour}
+            >
+              <div className="flex items-center gap-3">
+                <Sparkles className="w-5 h-5 text-orange-400 flex-shrink-0" />
+                <div className="flex-1">
+                  <div className="font-medium text-sm text-gray-200">
+                    Take a quick tour
+                  </div>
+                  <div className="text-xs text-gray-400">
+                    Step by step — press <kbd className="px-1 py-0.5 text-xs bg-gray-700 rounded">ESC</kbd> to exit anytime
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
+          )}
 
           {/* Actions */}
           <div className="flex items-center justify-between">
@@ -161,7 +167,7 @@ export function WelcomeModal({ open, onOpenChange, userId }: WelcomeModalProps) 
               onClick={handleSkip}
               className="text-gray-400 hover:text-gray-200 text-sm"
             >
-              Skip, I&apos;ll explore on my own
+              {isMobile ? 'Close' : "Skip, I'll explore on my own"}
             </Button>
             <Button
               onClick={handleStartTour}
@@ -169,7 +175,7 @@ export function WelcomeModal({ open, onOpenChange, userId }: WelcomeModalProps) 
               variant="outline"
               size="sm"
             >
-              {isStarting ? 'Starting...' : 'Start Tour'}
+              {isMobile ? "Let's Go" : isStarting ? 'Starting...' : 'Start Tour'}
               <Sparkles className="w-4 h-4 ml-2" />
             </Button>
           </div>
