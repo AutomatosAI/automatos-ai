@@ -35,7 +35,7 @@ async def _collect_streaming_response(
     workspace_id: str,
     user_id: int,
     agent_id: Optional[int],
-) -> str:
+) -> tuple[str, Optional[int]]:
     """
     Feed a text message through the existing streaming chat pipeline
     and collect the full text response (non-streaming).
@@ -146,7 +146,7 @@ async def _collect_streaming_response(
             except (json.JSONDecodeError, ValueError):
                 pass
 
-    return "".join(collected_text)
+    return "".join(collected_text), effective_agent_id
 
 
 @router.post("/api/chat/voice")
@@ -226,7 +226,7 @@ async def voice_chat(
     user_id = get_user_id(db)
 
     try:
-        response_text = await _collect_streaming_response(
+        response_text, effective_agent_id = await _collect_streaming_response(
             db=db,
             transcript=transcript,
             conversation_id=conversation_id,
@@ -246,15 +246,16 @@ async def voice_chat(
         response_text = "I received your message but couldn't generate a response. Please try again."
 
     # 4. TTS: agent response -> audio
-    # Look up agent's voice profile for personalized TTS
+    # Look up the responding agent's voice profile (effective_agent_id from routing)
     tts_voice = voice or config.VOICE_TTS_DEFAULT_VOICE
     tts_model = None
     tts_reference_audio = None
+    tts_agent_id = effective_agent_id
 
-    if parsed_agent_id:
+    if tts_agent_id:
         try:
             from core.models.core import Agent
-            agent_row = db.query(Agent).filter(Agent.id == parsed_agent_id).first()
+            agent_row = db.query(Agent).filter(Agent.id == tts_agent_id).first()
             if agent_row and getattr(agent_row, 'voice_profile_id', None):
                 from core.models.voice_profiles import VoiceProfile
                 vp = db.query(VoiceProfile).filter(
@@ -265,7 +266,7 @@ async def voice_chat(
                     tts_model = vp.provider
                     tts_reference_audio = vp.reference_audio
                     logger.info("voice_profile_resolved", extra={
-                        "agent_id": parsed_agent_id,
+                        "agent_id": tts_agent_id,
                         "profile_id": str(vp.id),
                         "provider": vp.provider,
                         "voice_id": vp.voice_id,
