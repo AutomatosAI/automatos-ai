@@ -23,10 +23,15 @@ export const shepherdTheme = {
     modalOverlayOpeningPadding: isMobile() ? 4 : 8,
     modalOverlayOpeningRadius: 8,
     when: {
-      show() {
-        const currentStepElement = document.querySelector('.shepherd-element')
-        if (currentStepElement) {
-          currentStepElement.classList.add('animate-in', 'fade-in', 'zoom-in-95')
+      show(this: any) {
+        const el = this.el as HTMLElement | undefined
+        if (!el) return
+        el.classList.add('animate-in', 'fade-in', 'zoom-in-95')
+        // Mark unattached steps so CSS can center them on mobile
+        if (!this.options?.attachTo?.element) {
+          el.classList.add('shepherd-centered')
+        } else {
+          el.classList.remove('shepherd-centered')
         }
       },
     },
