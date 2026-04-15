@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ArrowDown, Target, X } from 'lucide-react'
+import { LLM_DEFAULTS } from '@/lib/llm-defaults'
 import { Button } from '@/components/ui/button'
 import { useChat } from '@/lib/chat/hooks'
 import { Message } from './message'
@@ -56,7 +57,7 @@ export interface ChatProps {
 export function Chat({
   id,
   initialMessages = [],
-  initialChatModel = 'gpt-4',
+  initialChatModel = LLM_DEFAULTS.model_id,
   initialVisibilityType = 'private',
   isReadonly = false,
   autoResume = false,

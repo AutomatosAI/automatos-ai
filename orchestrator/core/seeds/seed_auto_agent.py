@@ -68,21 +68,14 @@ def _load_default_persona() -> str:
 def _get_default_model_config() -> dict:
     """Build default model_config for new Auto agents.
 
-    Uses a safe default (OpenRouter / Gemini Flash). The user configures the
-    actual provider+model via Settings > Orchestrator which writes directly to
-    the Auto agent row — that is the single source of truth.  We do NOT read
-    from system_settings or env vars here to avoid stale cached values.
+    Uses the shared defaults from core.llm.defaults (single source of truth
+    for LLM fallbacks).  The user configures the actual provider+model via
+    Settings > Orchestrator which writes directly to the Auto agent row.
     """
-    return {
-        "provider": "openrouter",
-        "model_id": "google/gemini-2.5-flash",
-        "temperature": 0.7,
-        "max_tokens": 4000,
-        "top_p": 1.0,
-        "frequency_penalty": 0.0,
-        "presence_penalty": 0.0,
-        "fallback_model_id": None,
-    }
+    from core.llm.defaults import get_default_model_config
+    mc = get_default_model_config()
+    mc["max_tokens"] = 4000  # Auto gets higher limit than default agents
+    return mc
 
 
 def _upsert_platform_management_skill(db: Session) -> Skill | None:

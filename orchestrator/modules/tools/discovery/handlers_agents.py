@@ -131,21 +131,15 @@ async def create_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
     temperature = params.get("temperature")
     tags = params.get("tags")
 
-    # Build model_config (the field the chat service actually reads)
-    model_config: Dict[str, Any] = {
-        "provider": "openai",
-        "model_id": "gpt-4o",
-        "temperature": 0.7,
-        "max_tokens": 2000,
-        "top_p": 1.0,
-        "frequency_penalty": 0.0,
-        "presence_penalty": 0.0,
-        "fallback_model_id": None,
-    }
+    # Build model_config from shared defaults (core.llm.defaults is the single source)
+    from core.llm.defaults import get_default_model_config
+    model_config: Dict[str, Any] = get_default_model_config()
     if model_id:
         model_config["model_id"] = model_id
-        # Infer provider from model name
-        if "claude" in model_id.lower() or "anthropic" in model_id.lower():
+        # Infer provider from model name — slash-format = OpenRouter
+        if "/" in model_id:
+            model_config["provider"] = "openrouter"
+        elif "claude" in model_id.lower() or "anthropic" in model_id.lower():
             model_config["provider"] = "anthropic"
         elif "gemini" in model_id.lower():
             model_config["provider"] = "google"
@@ -252,8 +246,10 @@ async def update_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
                 mc["provider"] = "google"
             elif "llama" in model_id.lower() or "mixtral" in model_id.lower():
                 mc["provider"] = "groq"
+            elif "/" in model_id:
+                mc["provider"] = "openrouter"
             else:
-                mc["provider"] = "openai"
+                mc["provider"] = "openrouter"
             changes.append(f"model -> '{model_id}'")
         if temperature is not None:
             mc["temperature"] = max(0.0, min(2.0, float(temperature)))

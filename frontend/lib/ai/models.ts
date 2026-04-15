@@ -4,7 +4,9 @@
 
 import type { Model } from '@/types'
 
-export const DEFAULT_CHAT_MODEL = 'gpt-4'
+import { LLM_DEFAULTS } from '@/lib/llm-defaults'
+export { LLM_DEFAULTS }
+export const DEFAULT_CHAT_MODEL = LLM_DEFAULTS.model_id
 
 export const chatModels: Model[] = [
   {

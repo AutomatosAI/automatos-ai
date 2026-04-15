@@ -150,30 +150,32 @@ class Config:
     COHERE_API_KEY: str = os.getenv("COHERE_API_KEY")
 
     # LLM settings - loaded from database system_settings
-    # Safe defaults: openrouter / gemini-2.5-flash (used when env vars are not set)
+    # Fallback defaults come from core.llm.defaults (single source of truth)
     @property
     def LLM_PROVIDER(self) -> str:
         """Get LLM provider from system settings (database) or environment."""
+        from core.llm.defaults import DEFAULT_LLM_PROVIDER
         try:
             from core.llm.manager import get_system_setting
             return get_system_setting(
                 "orchestrator_llm", "provider",
-                os.getenv("LLM_PROVIDER", "openrouter"),
+                os.getenv("LLM_PROVIDER", DEFAULT_LLM_PROVIDER),
             )
         except Exception:
-            return os.getenv("LLM_PROVIDER", "openrouter")
+            return os.getenv("LLM_PROVIDER", DEFAULT_LLM_PROVIDER)
 
     @property
     def LLM_MODEL(self) -> str:
         """Get LLM model from system settings (database) or environment."""
+        from core.llm.defaults import DEFAULT_LLM_MODEL
         try:
             from core.llm.manager import get_system_setting
             return get_system_setting(
                 "orchestrator_llm", "model",
-                os.getenv("LLM_MODEL", "google/gemini-2.5-flash"),
+                os.getenv("LLM_MODEL", DEFAULT_LLM_MODEL),
             )
         except Exception:
-            return os.getenv("LLM_MODEL", "google/gemini-2.5-flash")
+            return os.getenv("LLM_MODEL", DEFAULT_LLM_MODEL)
     
     LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.7"))
     LLM_MAX_TOKENS: int = int(os.getenv("LLM_MAX_TOKENS", "2000"))

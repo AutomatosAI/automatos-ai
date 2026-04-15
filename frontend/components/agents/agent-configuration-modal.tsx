@@ -3,6 +3,7 @@
 import * as React from 'react'
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { getDefaultModelConfig, LLM_DEFAULTS } from '@/lib/llm-defaults'
 import {
   X,
   Save,
@@ -420,16 +421,7 @@ export function AgentConfigurationModal({
       formInitializedRef.current = true
 
       // PRD-15: Get model config from agentModelConfig or use defaults
-      const modelConfig = (agentModelConfig as any)?.model_config || {
-        provider: 'openai',
-        model_id: 'gpt-4',
-        temperature: 0.7,
-        max_tokens: 2000,
-        top_p: 1.0,
-        frequency_penalty: 0.0,
-        presence_penalty: 0.0,
-        fallback_model_id: null
-      }
+      const modelConfig = (agentModelConfig as any)?.model_config || getDefaultModelConfig()
 
       // Initialize form data with real agent data
       const dbAgentType = (agent as any).agent_type || 'custom'
@@ -1561,7 +1553,7 @@ export function AgentConfigurationModal({
                     <CardContent className="space-y-6">
                       {/* Model Selection */}
                       <ModelSelector
-                        value={formData.model_config?.model_id || 'gpt-4'}
+                        value={formData.model_config?.model_id || LLM_DEFAULTS.model_id}
                         onChange={(modelId) => updateModelConfig('model_id', modelId)}
                         agentType={formData.agent_type}
                       />

@@ -1647,10 +1647,11 @@ def seed_system_settings(db: Session):
     # ── One-time cleanup: fix stale orchestrator_llm values ──────────
     # The env vars LLM_PROVIDER=openai / LLM_MODEL=openai/gpt-5.4 were
     # captured into system_settings before they were deleted from Railway.
-    # Reset to the correct defaults so config.LLM_PROVIDER returns "openrouter".
+    # Reset to the correct defaults so config.LLM_PROVIDER returns the right value.
+    from core.llm.defaults import DEFAULT_LLM_PROVIDER, DEFAULT_LLM_MODEL
     _STALE_FIXES = {
-        ("orchestrator_llm", "provider"): "openrouter",
-        ("orchestrator_llm", "model"): "google/gemini-2.5-flash",
+        ("orchestrator_llm", "provider"): DEFAULT_LLM_PROVIDER,
+        ("orchestrator_llm", "model"): DEFAULT_LLM_MODEL,
     }
     for (cat, key), correct_value in _STALE_FIXES.items():
         stale = db.query(SystemSetting).filter(

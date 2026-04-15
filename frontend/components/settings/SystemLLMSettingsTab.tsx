@@ -31,6 +31,7 @@ import {
   SystemSetting,
   getSettingsForCategory,
 } from '@/lib/api/system-settings'
+import { LLM_DEFAULTS } from '@/lib/llm-defaults'
 import { useWorkspaceModels } from '@/hooks/use-model-api'
 import { apiClient } from '@/lib/api-client'
 
@@ -215,16 +216,10 @@ export default function SystemLLMSettingsTab({
             notification_channel: 'in_app',
           },
           llm: {
-            provider: 'openrouter',
-            model_id: 'google/gemini-2.5-flash',
-            temperature: 0.7,
+            ...LLM_DEFAULTS,
             max_tokens: 4000,
-            top_p: 1.0,
-            frequency_penalty: 0.0,
-            presence_penalty: 0.0,
             stop: null,
             timeout: null,
-            fallback_model_id: null,
           },
           harness: {
             enabled: false,
@@ -396,7 +391,7 @@ export default function SystemLLMSettingsTab({
       setSelfSaving(true)
       await apiClient.request('/api/workspaces/current/orchestrator', {
         method: 'PUT',
-        body: JSON.stringify({ llm: { provider: 'openrouter', model_id: 'google/gemini-2.5-flash', temperature: 0.7, max_tokens: 4000, top_p: 1.0, frequency_penalty: 0.0, presence_penalty: 0.0, stop: null, timeout: null, fallback_model_id: null } }),
+        body: JSON.stringify({ llm: { ...LLM_DEFAULTS, max_tokens: 4000, stop: null, timeout: null } }),
       })
       // Reload orchestrator config to get fresh values
       const data = await apiClient.request<OrchestratorConfig>('/api/workspaces/current/orchestrator')

@@ -20,6 +20,7 @@ from core.models.workspaces import Workspace
 
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
+from core.llm.defaults import DEFAULT_LLM_PROVIDER, DEFAULT_LLM_MODEL, get_default_model_config
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -60,7 +61,7 @@ async def get_current_workspace(
     # Exclude system agents (Auto) — they're seeded automatically during provisioning
     agent_count = db.query(Agent).filter(
         Agent.workspace_id == workspace.id,
-        Agent.is_system_agent != True,
+        Agent.is_system_agent.isnot(True),
     ).count()
 
     # Auto-generate webhook_key if missing (for workspaces created before migration)
@@ -321,8 +322,8 @@ async def get_orchestrator_settings(
             # LLM config
             mc = auto_agent.model_config or {}
             result["llm"] = {
-                "provider": mc.get("provider", "openrouter"),
-                "model_id": mc.get("model_id", "google/gemini-2.5-flash"),
+                "provider": mc.get("provider", DEFAULT_LLM_PROVIDER),
+                "model_id": mc.get("model_id", DEFAULT_LLM_MODEL),
                 "temperature": mc.get("temperature", 0.7),
                 "max_tokens": mc.get("max_tokens", 4000),
                 "top_p": mc.get("top_p", 1.0),
@@ -372,16 +373,9 @@ async def get_orchestrator_settings(
                 len(auto_agent.custom_persona_prompt or ""),
             )
         else:
-            result["llm"] = {
-                "provider": "openrouter",
-                "model_id": "google/gemini-2.5-flash",
-                "temperature": 0.7,
-                "max_tokens": 4000,
-                "top_p": 1.0,
-                "frequency_penalty": 0.0,
-                "presence_penalty": 0.0,
-                "fallback_model_id": None,
-            }
+            mc = get_default_model_config()
+            mc["max_tokens"] = 4000
+            result["llm"] = mc
     except Exception:
         logger.exception("Failed to read Auto agent config for workspace %s", ctx.workspace_id)
         result["llm"] = None
@@ -577,8 +571,8 @@ async def save_orchestrator_settings(
         if auto_agent and auto_agent.model_config:
             mc = auto_agent.model_config
             result["llm"] = {
-                "provider": mc.get("provider", "openrouter"),
-                "model_id": mc.get("model_id", "google/gemini-2.5-flash"),
+                "provider": mc.get("provider", DEFAULT_LLM_PROVIDER),
+                "model_id": mc.get("model_id", DEFAULT_LLM_MODEL),
                 "temperature": mc.get("temperature", 0.7),
                 "max_tokens": mc.get("max_tokens", 4000),
                 "top_p": mc.get("top_p", 1.0),
