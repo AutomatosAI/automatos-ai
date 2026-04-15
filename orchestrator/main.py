@@ -269,13 +269,17 @@ async def _boot_phase_1_core():
     # DDL — safe for all workers (idempotent, fast no-op when tables exist)
     create_tables()
 
-    # PRD-58 Phase 1B: Column migration (idempotent DDL, harmless on all workers)
+    # Idempotent column migrations (safe on all workers, fast no-op when columns exist)
     try:
         from sqlalchemy import text
         with engine.connect() as conn:
             conn.execute(text(
                 "ALTER TABLE system_prompts ADD COLUMN IF NOT EXISTS "
                 "futureagi_eval_enabled BOOLEAN NOT NULL DEFAULT FALSE"
+            ))
+            conn.execute(text(
+                "ALTER TABLE skills ADD COLUMN IF NOT EXISTS "
+                "content_hash VARCHAR(64)"
             ))
             conn.commit()
     except Exception as col_err:
