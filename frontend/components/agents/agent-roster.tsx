@@ -548,31 +548,42 @@ export function AgentRoster({
                     <p className="text-xs text-muted-foreground">Tasks Completed</p>
                   </div>
                   <div>
-                    <p className="text-lg font-bold">{(agent.plugins?.length || 0) + (agent.skills?.length || 0)}</p>
+                    <p className="text-lg font-bold">{(agent.tools?.length || 0) + (agent.plugins?.length || 0) + (agent.skills?.length || 0)}</p>
                     <p className="text-xs text-muted-foreground">Capabilities</p>
                   </div>
                 </div>
 
-                {/* Plugins Preview */}
+                {/* Capabilities — tools + skills + plugins */}
                 <div className="mb-4">
                   <p className="text-xs text-muted-foreground mb-2">Capabilities</p>
-                  <div className="flex flex-wrap gap-1">
-                    {((agent.plugins?.length || 0) + (agent.skills?.length || 0)) > 0 ? (
+                  <div className="flex flex-wrap gap-1.5 items-center">
+                    {((agent.tools?.length || 0) + (agent.plugins?.length || 0) + (agent.skills?.length || 0)) > 0 ? (
                       <>
-                        {agent.skills?.slice(0, 3).map((skill: any) => (
+                        {agent.tools?.slice(0, 5).map((tool: any) => (
+                          <div key={`tool-${tool.id || tool.name}`} title={tool.name}>
+                            <ToolLogo
+                              name={tool.name}
+                              logo={tool.icon}
+                              size={24}
+                              showBackground={true}
+                              className="bg-secondary/30 border border-border/50"
+                            />
+                          </div>
+                        ))}
+                        {agent.skills?.slice(0, Math.max(0, 5 - (agent.tools?.length || 0))).map((skill: any) => (
                           <Badge key={`skill-${skill.id}`} variant="secondary" className="text-xs">
                             {skill.name}
                           </Badge>
                         ))}
-                        {agent.plugins?.slice(0, Math.max(0, 3 - (agent.skills?.length || 0))).map((plugin: any) => (
+                        {agent.plugins?.slice(0, Math.max(0, 5 - (agent.tools?.length || 0) - (agent.skills?.length || 0))).map((plugin: any) => (
                           <Badge key={`plugin-${plugin.plugin_id}`} variant="secondary" className="text-xs">
                             {plugin.name}
                           </Badge>
                         ))}
-                        {(agent.plugins?.length || 0) + (agent.skills?.length || 0) > 3 && (
-                          <Badge variant="secondary" className="text-xs">
-                            +{(agent.plugins?.length || 0) + (agent.skills?.length || 0) - 3} more
-                          </Badge>
+                        {(agent.tools?.length || 0) + (agent.plugins?.length || 0) + (agent.skills?.length || 0) > 5 && (
+                          <div className="bg-secondary/30 px-1.5 h-[24px] flex items-center justify-center rounded-md border border-border/50 text-[10px] text-muted-foreground">
+                            +{(agent.tools?.length || 0) + (agent.plugins?.length || 0) + (agent.skills?.length || 0) - 5} more
+                          </div>
                         )}
                       </>
                     ) : (
@@ -580,30 +591,6 @@ export function AgentRoster({
                     )}
                   </div>
                 </div>
-
-                {/* Tools Preview */}
-                {agent.tools && agent.tools.length > 0 && (
-                  <div className="mb-4 pt-3 border-t border-border/50">
-                    <div className="flex flex-wrap gap-2">
-                      {agent.tools.slice(0, 5).map((tool: any) => (
-                        <div key={tool.id} title={tool.name}>
-                          <ToolLogo
-                            name={tool.name}
-                            logo={tool.icon}
-                            size={24}
-                            showBackground={true}
-                            className="bg-secondary/30 border border-border/50"
-                          />
-                        </div>
-                      ))}
-                      {agent.tools.length > 5 && (
-                        <div className="bg-secondary/30 px-1.5 h-[24px] flex items-center justify-center rounded-md border border-border/50 text-[10px] text-muted-foreground">
-                          +{agent.tools.length - 5}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
 
                 {/* Created Date */}
                 <p className="text-xs text-muted-foreground mt-auto pt-3">
