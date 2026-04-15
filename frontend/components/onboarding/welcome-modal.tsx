@@ -88,7 +88,7 @@ export function WelcomeModal({ open, onOpenChange, userId }: WelcomeModalProps) 
             </div>
             <div className="p-4 rounded-lg bg-gray-800/50 border border-gray-700">
               <div className="font-medium text-sm text-gray-300 mb-1">
-                150+ Integrations
+                1,000+ Integrations
               </div>
               <div className="text-xs text-gray-400">
                 Connect to Gmail, Slack, Jira, GitHub, and all your tools
@@ -112,8 +112,8 @@ export function WelcomeModal({ open, onOpenChange, userId }: WelcomeModalProps) 
             </div>
           </div>
 
-          {/* Business Intake CTA — PRD-130 */}
-          <div className="p-4 rounded-lg bg-primary/10 border border-primary/30">
+          {/* Business Intake CTA — PRD-130 (hidden for pilot) */}
+          {/* <div className="p-4 rounded-lg bg-primary/10 border border-primary/30">
             <div className="flex items-start gap-3">
               <div className="mt-0.5">
                 <Building2 className="w-5 h-5 text-primary" />
@@ -136,17 +136,20 @@ export function WelcomeModal({ open, onOpenChange, userId }: WelcomeModalProps) 
                 </Button>
               </div>
             </div>
-          </div>
+          </div> */}
 
           {/* Tour CTA */}
-          <div className="p-4 rounded-lg bg-orange-500/10 border border-orange-500/30">
+          <div
+            className="p-4 rounded-lg bg-orange-500/10 border border-orange-500/30 cursor-pointer hover:bg-orange-500/20 transition-colors"
+            onClick={handleStartTour}
+          >
             <div className="flex items-start gap-3">
               <div className="mt-0.5">
                 <Sparkles className="w-5 h-5 text-orange-400" />
               </div>
               <div className="flex-1">
                 <div className="font-medium text-gray-200 mb-1">
-                  Or take a quick tour
+                  Take a quick tour
                 </div>
                 <div className="text-sm text-gray-400">
                   We&apos;ll guide you step by step — you can skip or exit anytime by pressing{' '}

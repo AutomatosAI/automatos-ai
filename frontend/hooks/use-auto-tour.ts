@@ -28,6 +28,9 @@ export function useAutoTour() {
       const { getTourForRoute } = await import('@/lib/shepherd/tour-registry')
       const { hasSeenTour } = await import('@/lib/shepherd/tour-storage')
 
+      // Don't auto-start page tours until the welcome modal has been dismissed
+      if (!hasSeenTour('welcome', user.id)) return
+
       const entry = getTourForRoute(pathname)
       if (!entry) return
       if (hasSeenTour(entry.id, user.id)) return
