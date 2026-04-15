@@ -35,18 +35,73 @@ import {
 import { apiClient } from '@/lib/api-client'
 import { toast } from 'sonner'
 
-// Known voices per provider
+// Known voices per provider — full Kokoro-82M catalogue
 const KOKORO_VOICES = [
-  { id: 'af_heart', label: 'Heart (Female)' },
-  { id: 'af_bella', label: 'Bella (Female)' },
-  { id: 'af_nicole', label: 'Nicole (Female)' },
-  { id: 'af_sarah', label: 'Sarah (Female)' },
-  { id: 'af_sky', label: 'Sky (Female)' },
-  { id: 'am_adam', label: 'Adam (Male)' },
-  { id: 'am_michael', label: 'Michael (Male)' },
+  // American English — Female
+  { id: 'af_heart', label: 'Heart (American F)' },
+  { id: 'af_alloy', label: 'Alloy (American F)' },
+  { id: 'af_aoede', label: 'Aoede (American F)' },
+  { id: 'af_bella', label: 'Bella (American F)' },
+  { id: 'af_jessica', label: 'Jessica (American F)' },
+  { id: 'af_kore', label: 'Kore (American F)' },
+  { id: 'af_nicole', label: 'Nicole (American F)' },
+  { id: 'af_nova', label: 'Nova (American F)' },
+  { id: 'af_river', label: 'River (American F)' },
+  { id: 'af_sarah', label: 'Sarah (American F)' },
+  { id: 'af_sky', label: 'Sky (American F)' },
+  // American English — Male
+  { id: 'am_adam', label: 'Adam (American M)' },
+  { id: 'am_echo', label: 'Echo (American M)' },
+  { id: 'am_eric', label: 'Eric (American M)' },
+  { id: 'am_fenrir', label: 'Fenrir (American M)' },
+  { id: 'am_liam', label: 'Liam (American M)' },
+  { id: 'am_michael', label: 'Michael (American M)' },
+  { id: 'am_onyx', label: 'Onyx (American M)' },
+  { id: 'am_puck', label: 'Puck (American M)' },
+  { id: 'am_santa', label: 'Santa (American M)' },
+  // British English — Female
+  { id: 'bf_alice', label: 'Alice (British F)' },
   { id: 'bf_emma', label: 'Emma (British F)' },
+  { id: 'bf_isabella', label: 'Isabella (British F)' },
+  { id: 'bf_lily', label: 'Lily (British F)' },
+  // British English — Male
+  { id: 'bm_daniel', label: 'Daniel (British M)' },
+  { id: 'bm_fable', label: 'Fable (British M)' },
   { id: 'bm_george', label: 'George (British M)' },
   { id: 'bm_lewis', label: 'Lewis (British M)' },
+  // Spanish
+  { id: 'ef_dora', label: 'Dora (Spanish F)' },
+  { id: 'em_alex', label: 'Alex (Spanish M)' },
+  { id: 'em_santa', label: 'Santa (Spanish M)' },
+  // French
+  { id: 'ff_siwis', label: 'Siwis (French F)' },
+  // Hindi
+  { id: 'hf_alpha', label: 'Alpha (Hindi F)' },
+  { id: 'hf_beta', label: 'Beta (Hindi F)' },
+  { id: 'hm_omega', label: 'Omega (Hindi M)' },
+  { id: 'hm_psi', label: 'Psi (Hindi M)' },
+  // Italian
+  { id: 'if_sara', label: 'Sara (Italian F)' },
+  { id: 'im_nicola', label: 'Nicola (Italian M)' },
+  // Japanese
+  { id: 'jf_alpha', label: 'Alpha (Japanese F)' },
+  { id: 'jf_gongitsune', label: 'Gongitsune (Japanese F)' },
+  { id: 'jf_nezumi', label: 'Nezumi (Japanese F)' },
+  { id: 'jf_tebukuro', label: 'Tebukuro (Japanese F)' },
+  { id: 'jm_kumo', label: 'Kumo (Japanese M)' },
+  // Brazilian Portuguese
+  { id: 'pf_dora', label: 'Dora (Portuguese F)' },
+  { id: 'pm_alex', label: 'Alex (Portuguese M)' },
+  { id: 'pm_santa', label: 'Santa (Portuguese M)' },
+  // Mandarin Chinese
+  { id: 'zf_xiaobei', label: 'Xiaobei (Chinese F)' },
+  { id: 'zf_xiaoni', label: 'Xiaoni (Chinese F)' },
+  { id: 'zf_xiaoxiao', label: 'Xiaoxiao (Chinese F)' },
+  { id: 'zf_xiaoyi', label: 'Xiaoyi (Chinese F)' },
+  { id: 'zm_yunjian', label: 'Yunjian (Chinese M)' },
+  { id: 'zm_yunxi', label: 'Yunxi (Chinese M)' },
+  { id: 'zm_yunxia', label: 'Yunxia (Chinese M)' },
+  { id: 'zm_yunyang', label: 'Yunyang (Chinese M)' },
 ]
 
 const CHATTERBOX_VOICES = [
