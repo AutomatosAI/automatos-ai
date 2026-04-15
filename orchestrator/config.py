@@ -149,26 +149,31 @@ class Config:
     XAI_API_KEY: str = os.getenv("XAI_API_KEY")
     COHERE_API_KEY: str = os.getenv("COHERE_API_KEY")
 
-    # LLM settings - loaded from database system_settings (NO hardcoded defaults)
+    # LLM settings - loaded from database system_settings
+    # Safe defaults: openrouter / gemini-2.5-flash (used when env vars are not set)
     @property
     def LLM_PROVIDER(self) -> str:
-        """Get LLM provider from system settings (database) or environment"""
+        """Get LLM provider from system settings (database) or environment."""
         try:
             from core.llm.manager import get_system_setting
-            # Get from database settings, fallback to env var only (NO hardcoded default)
-            return get_system_setting("orchestrator_llm", "provider", os.getenv("LLM_PROVIDER"))
+            return get_system_setting(
+                "orchestrator_llm", "provider",
+                os.getenv("LLM_PROVIDER", "openrouter"),
+            )
         except Exception:
-            return os.getenv("LLM_PROVIDER")  # No hardcoded default - must be set in settings or env
-    
+            return os.getenv("LLM_PROVIDER", "openrouter")
+
     @property
     def LLM_MODEL(self) -> str:
-        """Get LLM model from system settings (database) or environment"""
+        """Get LLM model from system settings (database) or environment."""
         try:
             from core.llm.manager import get_system_setting
-            # Get from database settings, fallback to env var only (NO hardcoded default)
-            return get_system_setting("orchestrator_llm", "model", os.getenv("LLM_MODEL"))
+            return get_system_setting(
+                "orchestrator_llm", "model",
+                os.getenv("LLM_MODEL", "google/gemini-2.5-flash"),
+            )
         except Exception:
-            return os.getenv("LLM_MODEL")  # No hardcoded default - must be set in settings or env
+            return os.getenv("LLM_MODEL", "google/gemini-2.5-flash")
     
     LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.7"))
     LLM_MAX_TOKENS: int = int(os.getenv("LLM_MAX_TOKENS", "2000"))

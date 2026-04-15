@@ -214,7 +214,13 @@ class AgentFactory:
     # ==================================================================
 
     def _get_default_llm_config_from_settings(self) -> Dict[str, Any]:
-        """Get default LLM config from system settings, falling back to config.py."""
+        """Get default LLM config — used when agent has no model_config.
+
+        The single source of truth is Settings > Orchestrator (Auto agent row).
+        This fallback is only hit for non-Auto agents without their own config.
+        We use safe defaults (OpenRouter/Gemini Flash) instead of reading from
+        system_settings which may have stale cached values.
+        """
         try:
             from core.llm.manager import get_system_setting
 
@@ -225,14 +231,14 @@ class AgentFactory:
             if not model:
                 model = get_system_setting("orchestrator_llm", "model")
             if not provider:
-                provider = config.LLM_PROVIDER
+                provider = "openrouter"
             if not model:
-                model = config.LLM_MODEL
+                model = "google/gemini-2.5-flash"
             if not provider or not model:
-                self.logger.warning("LLM provider/model not in system settings, using config defaults")
+                self.logger.warning("LLM provider/model not in system settings, using defaults")
                 return {
-                    "provider": config.LLM_PROVIDER,
-                    "model": config.LLM_MODEL,
+                    "provider": "openrouter",
+                    "model": "google/gemini-2.5-flash",
                     "temperature": 0.7,
                     "max_tokens": 2000,
                     "context_window": 8192,
@@ -259,10 +265,10 @@ class AgentFactory:
                 "context_window": context_window,
             }
         except Exception as e:
-            self.logger.warning(f"Could not get LLM config from settings: {e}, using config defaults")
+            self.logger.warning(f"Could not get LLM config from settings: {e}, using defaults")
             return {
-                "provider": config.LLM_PROVIDER,
-                "model": config.LLM_MODEL,
+                "provider": "openrouter",
+                "model": "google/gemini-2.5-flash",
                 "temperature": 0.7,
                 "max_tokens": 2000,
                 "context_window": 8192,

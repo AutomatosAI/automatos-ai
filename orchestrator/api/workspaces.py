@@ -497,6 +497,30 @@ async def save_orchestrator_settings(
                 if key in llm:
                     new_mc[key] = llm[key]
             auto_agent.model_config = new_mc
+
+            # Sync to system_settings so config.LLM_PROVIDER/LLM_MODEL stay in sync
+            # (used by internal orchestrator operations: agent_factory, chatbot, etc.)
+            try:
+                from core.models.system_settings import SystemSetting
+                for ss_key, llm_key in [("provider", "provider"), ("model", "model_id")]:
+                    if llm_key in llm:
+                        ss = db.query(SystemSetting).filter(
+                            SystemSetting.category == "orchestrator_llm",
+                            SystemSetting.key == ss_key,
+                        ).first()
+                        if ss:
+                            ss.value = llm[llm_key]
+                        else:
+                            db.add(SystemSetting(
+                                category="orchestrator_llm",
+                                key=ss_key,
+                                value=llm[llm_key],
+                                default_value=llm[llm_key],
+                                value_type="string",
+                                is_required=True,
+                            ))
+            except Exception:
+                logger.warning("Failed to sync LLM settings to system_settings table")
             flag_modified(auto_agent, "model_config")
 
         # Soul / Personality → Auto agent custom_persona_prompt

@@ -31,14 +31,14 @@ export function WelcomeModal({ open, onOpenChange, userId }: WelcomeModalProps) 
 
   const handleStartTour = () => {
     setIsStarting(true)
+    markTourSkipped('welcome', userId)
     onOpenChange(false)
 
-    // Small delay for modal close animation
+    // Small delay for modal close animation, then launch the Chat page
+    // Shepherd tour (the main tour we built — no separate welcome tour).
     setTimeout(async () => {
-      // Dynamic import — shepherd.js accesses `window` at module init,
-      // so it must NOT be imported at the top level (breaks SSR).
-      const { createWelcomeTour } = await import('@/lib/shepherd/tours/welcome-tour')
-      const tour = createWelcomeTour(userId)
+      const { createChatTour } = await import('@/lib/shepherd/tours/chat-tour')
+      const tour = createChatTour(userId)
       tour.start()
       setIsStarting(false)
     }, 300)
