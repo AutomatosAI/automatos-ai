@@ -72,7 +72,6 @@ export function VoiceProfilesSettingsTab() {
   const [creating, setCreating] = useState(false)
   const [deleting, setDeleting] = useState<string | null>(null)
   const [previewing, setPreviewing] = useState<string | null>(null)
-  const [previewAudio, setPreviewAudio] = useState<HTMLAudioElement | null>(null)
 
   // Create form state
   const [showCreate, setShowCreate] = useState(false)
@@ -175,50 +174,39 @@ export function VoiceProfilesSettingsTab() {
   }
 
   const handlePreview = async (profile: VoiceProfile) => {
-    // Stop any current preview
-    if (previewAudio) {
-      previewAudio.pause()
-      setPreviewAudio(null)
-      if (previewing === profile.id) {
-        setPreviewing(null)
-        return
-      }
-    }
+    if (previewing) return // Already playing a preview
 
     setPreviewing(profile.id)
     try {
-      const data = await apiClient.request<{
-        audio_base64: string
-        format: string
-        duration_ms: number
-      }>(`/api/voice/profiles/${profile.id}/preview`, { method: 'POST' })
-
-      const audioBytes = Uint8Array.from(atob(data.audio_base64), (c) => c.charCodeAt(0))
-      const blob = new Blob([audioBytes], { type: 'audio/mpeg' })
-      const url = URL.createObjectURL(blob)
-      const audio = new Audio(url)
-
-      audio.onended = () => {
-        setPreviewing(null)
-        setPreviewAudio(null)
-        URL.revokeObjectURL(url)
+      const headers = await apiClient.getAuthHeaders()
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL || ''}/api/voice/profiles/${profile.id}/preview`,
+        { method: 'POST', headers }
+      )
+      if (!response.ok) {
+        throw new Error(`Preview failed (${response.status})`)
       }
-      audio.onerror = (e) => {
-        toast.error('Audio playback error')
+      const data = await response.json()
+
+      // Decode base64 to raw bytes
+      const raw = atob(data.audio_base64)
+      const bytes = new Uint8Array(raw.length)
+      for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i)
+
+      // Use AudioContext for reliable playback (avoids autoplay restrictions)
+      const ctx = new AudioContext()
+      const buffer = await ctx.decodeAudioData(bytes.buffer)
+      const source = ctx.createBufferSource()
+      source.buffer = buffer
+      source.connect(ctx.destination)
+
+      source.onended = () => {
         setPreviewing(null)
-        setPreviewAudio(null)
-        URL.revokeObjectURL(url)
+        ctx.close()
       }
 
-      setPreviewAudio(audio)
-      try {
-        await audio.play()
-      } catch (playErr: any) {
-        toast.error(`Playback blocked: ${playErr?.message || 'unknown'}`)
-        setPreviewing(null)
-        setPreviewAudio(null)
-        URL.revokeObjectURL(url)
-      }
+      source.start(0)
+      toast.success(`Playing ${profile.name}...`, { duration: 2000 })
     } catch (err: any) {
       toast.error(err?.message || 'Preview failed')
       setPreviewing(null)
