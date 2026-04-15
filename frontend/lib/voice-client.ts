@@ -6,6 +6,7 @@ export interface VoiceChatResponse {
   transcript: string
   response_text: string
   audio_url: string | null
+  audio_base64: string | null
   audio_format: string
   stt_latency_ms: number
   tts_latency_ms: number

@@ -26,7 +26,18 @@ export function useAutoTour() {
 
     const maybeStart = async () => {
       const { getTourForRoute } = await import('@/lib/shepherd/tour-registry')
-      const { hasSeenTour } = await import('@/lib/shepherd/tour-storage')
+      const { hasSeenTour, hasCompletedOnboarding } = await import('@/lib/shepherd/tour-storage')
+
+      // If the welcome modal is still pending (user hasn't dismissed it yet),
+      // don't fire page tours on top of it.  But for existing users who never
+      // got the welcome modal at all, don't block them — check whether there's
+      // a DOM element for the modal currently open.
+      const welcomeSeen = hasSeenTour('welcome', user.id) || hasCompletedOnboarding(user.id)
+      if (!welcomeSeen) {
+        // The welcome modal might be about to appear — bail and let the
+        // modal's own handlers mark it seen, then next navigation triggers tours.
+        return
+      }
 
       const entry = getTourForRoute(pathname)
       if (!entry) return

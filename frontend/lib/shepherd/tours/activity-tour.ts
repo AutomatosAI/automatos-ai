@@ -17,10 +17,18 @@ export function createActivityTour(userId: string) {
     id: 'act-overview',
     title: title('Command', 'Centre'),
     text: `
-      <p class="text-gray-300 mb-2">
-        A single pane of glass over your whole AI workforce. Every chat, scheduled task,
-        running mission and completed report flows through this page, so you always know
-        what's happening and what needs you.
+      <p class="text-gray-300 mb-3">
+        A single pane of glass over your whole AI workforce — this is where you
+        monitor, manage, and steer everything that's happening in your workspace.
+      </p>
+      <p class="text-gray-300 mb-3">
+        See which agents are <strong>running right now</strong>, review completed
+        <strong>reports</strong>, track <strong>mission progress</strong>, check
+        <strong>scheduled tasks</strong>, and catch anything that needs your attention.
+      </p>
+      <p class="text-gray-400 text-sm">
+        Think of it as mission control — everything flows through here so
+        nothing slips through the cracks.
       </p>
       ${stepProgress(1, TOTAL)}
     `,
@@ -78,14 +86,18 @@ export function createActivityTour(userId: string) {
     id: 'act-content',
     title: title('Drill', 'Into Anything'),
     text: `
+      <p class="text-gray-300 mb-3">
+        Every item is clickable — open a report to grade it,
+        open a mission to see progress, open a memory entry to inspect what
+        an agent learned.
+      </p>
       <p class="text-gray-300 mb-2">
-        Whichever view you pick, every item is clickable. Open a report to grade it,
-        open a mission to see progress, open a memory entry to inspect what the
-        agent learned.
+        Hit the <strong>Customize</strong> button on the Summary dashboard to
+        rearrange widgets, hide ones you don't need, and make the layout yours.
+        Drag and drop to reorder — your layout is saved automatically.
       </p>
       ${stepProgress(4, TOTAL)}
     `,
-    // Centered — no specific attach target needed for final step
     buttons: [
       { text: 'Back', classes: 'shepherd-button-secondary', action: tour.back },
       { text: 'Got it!', action: tour.complete },

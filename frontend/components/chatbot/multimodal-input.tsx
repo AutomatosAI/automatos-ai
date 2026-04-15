@@ -12,7 +12,7 @@ import { ToolLogo } from '@/components/ui/tool-logo'
 import { VoiceMicButton } from '@/components/voice/VoiceMicButton'
 import { VoiceRecordingIndicator } from '@/components/voice/VoiceRecordingIndicator'
 import { useVoiceRecorder } from '@/hooks/use-voice-recorder'
-import { sendVoiceMessage, checkVoiceHealth } from '@/lib/voice-client'
+import { sendVoiceMessage, checkVoiceHealth, getVoiceAudioUrl } from '@/lib/voice-client'
 import { VoiceCallPanel } from '@/components/voice/VoiceCallPanel'
 import type { VisibilityType, AppUsage } from '@/types'
 import { apiClient } from '@/lib/api-client'
@@ -24,6 +24,7 @@ export interface MultimodalInputProps {
   status: any
   stop: () => void
   sendMessage: (message: any) => void
+  setMessages?: React.Dispatch<React.SetStateAction<any[]>>
   selectedModelId: string
   onModelChange: (modelId: string) => void
   selectedAgentId?: number | null
@@ -39,6 +40,7 @@ export function MultimodalInput({
   status,
   stop,
   sendMessage,
+  setMessages,
   selectedModelId,
   onModelChange,
   selectedAgentId,
@@ -74,26 +76,49 @@ export function MultimodalInput({
           authToken: token,
         })
 
-        // Build user voice message parts
-        const userParts: any[] = [
-          {
-            type: 'voice',
-            transcript: response.transcript,
-            durationMs,
-          },
-        ]
-
-        // Send the transcribed text as user message through the normal chat flow
-        sendMessage({
-          role: 'user',
-          content: response.transcript,
-          parts: userParts,
-        })
+        // The voice endpoint already ran the full pipeline (STT → agent → TTS)
+        // and saved messages to the DB. Inject both messages directly into the
+        // chat UI — do NOT call sendMessage() which would trigger a second agent call.
+        if (setMessages) {
+          const userMsg = {
+            id: crypto.randomUUID(),
+            role: 'user' as const,
+            content: response.transcript,
+            parts: [{
+              type: 'voice' as const,
+              transcript: response.transcript,
+              audioUrl: undefined,
+              durationMs,
+            }],
+          }
+          const assistantMsg = {
+            id: response.message_id || crypto.randomUUID(),
+            role: 'assistant' as const,
+            content: response.response_text,
+            parts: [
+              { type: 'text' as const, text: response.response_text },
+              ...((response.audio_base64 || response.audio_url) ? [{
+                type: 'voice' as const,
+                transcript: response.response_text,
+                audioUrl: getVoiceAudioUrl(response.message_id),
+                audioBase64: response.audio_base64 || undefined,
+              }] : []),
+            ],
+          }
+          setMessages(prev => [...prev, userMsg, assistantMsg])
+        } else {
+          // Fallback if setMessages not available — send transcript through chat
+          sendMessage({
+            role: 'user',
+            content: response.transcript,
+            parts: [{ type: 'voice', transcript: response.transcript, durationMs }],
+          })
+        }
       } catch (err: any) {
         toast.error(err?.message || 'Voice message failed')
       }
     },
-    [chatId, selectedAgentId, sendMessage, getToken]
+    [chatId, selectedAgentId, sendMessage, setMessages, getToken]
   )
 
   const voiceRecorder = useVoiceRecorder({
@@ -319,8 +344,8 @@ export function MultimodalInput({
               />
             )}
 
-            {/* Live Voice Call Button (Phase 3) */}
-            {voiceEnabled && (
+            {/* Live Voice Call Button (Phase 3) — disabled for pilot, WebSocket needs debugging */}
+            {/* {voiceEnabled && (
               <Button
                 type="button"
                 variant="ghost"
@@ -337,7 +362,7 @@ export function MultimodalInput({
               >
                 <Phone className="w-4 h-4" />
               </Button>
-            )}
+            )} */}
 
             {/* PRD: Unified Agent-Chat System - Agent Selector */}
             {onAgentChange ? (
@@ -416,8 +441,8 @@ export function MultimodalInput({
         </div>
       )}
 
-      {/* Live Voice Call Panel (Phase 3) */}
-      <AnimatePresence>
+      {/* Live Voice Call Panel (Phase 3) — disabled for pilot */}
+      {/* <AnimatePresence>
         {showCallPanel && workspace?.id && (
           <VoiceCallPanel
             workspaceId={workspace.id}
@@ -427,7 +452,7 @@ export function MultimodalInput({
             onClose={() => setShowCallPanel(false)}
           />
         )}
-      </AnimatePresence>
+      </AnimatePresence> */}
     </form>
   )
 }

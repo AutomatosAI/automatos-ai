@@ -19,6 +19,7 @@ export interface FilterTabsProps {
   trailing?: ReactNode
   children: ReactNode
   className?: string
+  dataTour?: string
 }
 
 export function FilterTabs({
@@ -28,10 +29,11 @@ export function FilterTabs({
   trailing,
   children,
   className,
+  dataTour,
 }: FilterTabsProps) {
   return (
     <Tabs value={value} onValueChange={onValueChange} className={cn('space-y-6', className)}>
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-4" {...(dataTour ? { 'data-tour': dataTour } : {})}>
         <TabsList className="bg-secondary/50 shrink-0">
           {tabs.map((tab) => (
             <TabsTrigger key={tab.value} value={tab.value} className="flex items-center gap-1.5 min-h-[44px] sm:min-h-0">

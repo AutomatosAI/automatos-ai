@@ -149,26 +149,33 @@ class Config:
     XAI_API_KEY: str = os.getenv("XAI_API_KEY")
     COHERE_API_KEY: str = os.getenv("COHERE_API_KEY")
 
-    # LLM settings - loaded from database system_settings (NO hardcoded defaults)
+    # LLM settings - loaded from database system_settings
+    # Fallback defaults come from core.llm.defaults (single source of truth)
     @property
     def LLM_PROVIDER(self) -> str:
-        """Get LLM provider from system settings (database) or environment"""
+        """Get LLM provider from system settings (database) or environment."""
+        from core.llm.defaults import DEFAULT_LLM_PROVIDER
         try:
             from core.llm.manager import get_system_setting
-            # Get from database settings, fallback to env var only (NO hardcoded default)
-            return get_system_setting("orchestrator_llm", "provider", os.getenv("LLM_PROVIDER"))
+            return get_system_setting(
+                "orchestrator_llm", "provider",
+                os.getenv("LLM_PROVIDER", DEFAULT_LLM_PROVIDER),
+            )
         except Exception:
-            return os.getenv("LLM_PROVIDER")  # No hardcoded default - must be set in settings or env
-    
+            return os.getenv("LLM_PROVIDER", DEFAULT_LLM_PROVIDER)
+
     @property
     def LLM_MODEL(self) -> str:
-        """Get LLM model from system settings (database) or environment"""
+        """Get LLM model from system settings (database) or environment."""
+        from core.llm.defaults import DEFAULT_LLM_MODEL
         try:
             from core.llm.manager import get_system_setting
-            # Get from database settings, fallback to env var only (NO hardcoded default)
-            return get_system_setting("orchestrator_llm", "model", os.getenv("LLM_MODEL"))
+            return get_system_setting(
+                "orchestrator_llm", "model",
+                os.getenv("LLM_MODEL", DEFAULT_LLM_MODEL),
+            )
         except Exception:
-            return os.getenv("LLM_MODEL")  # No hardcoded default - must be set in settings or env
+            return os.getenv("LLM_MODEL", DEFAULT_LLM_MODEL)
     
     LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.7"))
     LLM_MAX_TOKENS: int = int(os.getenv("LLM_MAX_TOKENS", "2000"))
@@ -582,7 +589,7 @@ class Config:
     # VOICE SERVICE (PRD-74)
     # =============================================================================
     VOICE_SERVICE_URL: str = os.getenv("VOICE_SERVICE_URL", "http://voice-service.railway.internal:8300")
-    VOICE_SERVICE_TIMEOUT: int = int(os.getenv("VOICE_SERVICE_TIMEOUT", "30"))
+    VOICE_SERVICE_TIMEOUT: int = int(os.getenv("VOICE_SERVICE_TIMEOUT", "90"))
     VOICE_STT_MODEL: str = os.getenv("VOICE_STT_MODEL", "Systran/faster-whisper-large-v3")
     VOICE_TTS_MODEL: str = os.getenv("VOICE_TTS_MODEL", "kokoro")
     VOICE_TTS_DEFAULT_VOICE: str = os.getenv("VOICE_TTS_DEFAULT_VOICE", "af_heart")

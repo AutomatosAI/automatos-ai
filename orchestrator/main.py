@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 from dotenv import load_dotenv
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, Query, Header, HTTPException
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Depends, Query, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -255,234 +255,72 @@ api_call_stats = defaultdict(lambda: {
 
 async def _boot_phase_1_core():
     """
-    Phase 1: Core infrastructure — database, migrations, seeds.
+    Phase 1: Core infrastructure — database tables + per-deploy seeds.
 
-    PRD-123 Pattern #2: Nothing third-party executes before trust_gate passes.
+    Seeds run once per deploy (not per worker) via pg_advisory_lock.
+    Per-workspace seeding (templates, Auto agent) happens at signup time
+    in _provision_new_user_workspace(), NOT here.
     """
-    # PRD-58: Ensure system_prompts tables exist + seed on every startup (idempotent).
+    import core.models.system_prompts  # register models with Base.metadata
+    import core.models.core  # noqa: F811 — registers all models with Base
+    from core.database.database import create_tables, get_db_session, engine
+    from core.database.boot_lock import boot_leader_lock
+
+    # DDL — safe for all workers (idempotent, fast no-op when tables exist)
+    create_tables()
+
+    # Idempotent column migrations (safe on all workers, fast no-op when columns exist)
     try:
-        import core.models.system_prompts  # register models with Base.metadata
-        from core.database.database import create_tables, get_db_session
-        create_tables()
-        # PRD-58 Phase 1B: Add futureagi_eval_enabled column if missing
-        try:
-            from sqlalchemy import text
-            from core.database.database import engine
-            with engine.connect() as conn:
-                conn.execute(text(
-                    "ALTER TABLE system_prompts ADD COLUMN IF NOT EXISTS "
-                    "futureagi_eval_enabled BOOLEAN NOT NULL DEFAULT FALSE"
-                ))
-                conn.commit()
-        except Exception as col_err:
-            logger.debug(f"Column migration check: {col_err}")
-        from core.seeds.seed_system_prompts import seed_system_prompts
-        with get_db_session() as db:
-            seed_system_prompts(db)
-    except Exception as e:
-        logger.warning(f"PRD-58 table/seed init: {e}")
-
-    # PRD-63: Ensure document_templates table exists + seed starter templates
-    try:
-        import core.models.core  # noqa: F811 — registers DocumentTemplate with Base
-        from core.database.database import create_tables as _ct, get_db_session as _gdb
-        _ct()  # idempotent — creates any missing tables
-        from modules.documents.seed_templates import seed_starter_templates
-        from core.models.workspaces import Workspace
-        with _gdb() as db:
-            workspace_ids = [w.id for w in db.query(Workspace.id).all()]
-            for ws_id in workspace_ids:
-                seed_starter_templates(db, ws_id)
-        logger.info(f"PRD-63: Document templates seeded for {len(workspace_ids)} workspace(s)")
-    except Exception as e:
-        logger.warning(f"PRD-63 template seed init: {e}")
-
-    # Seed onboarding agents (VOYAGER, BLUEPRINT, SCRIBE, FORGE) — Mission Zero team
-    # Advisory lock prevents deadlock when multiple uvicorn workers seed concurrently
-    try:
-        from core.seeds.seed_onboarding_agents import seed_onboarding_agents
-        from sqlalchemy import text as _text
-        with get_db_session() as db:
-            lock_acquired = db.execute(_text("SELECT pg_try_advisory_lock(424242)")).scalar()
-            if lock_acquired:
-                try:
-                    seed_onboarding_agents(db)
-                    logger.info("Onboarding agents seeded successfully")
-                finally:
-                    db.execute(_text("SELECT pg_advisory_unlock(424242)"))
-                    db.commit()
-            else:
-                logger.info("Onboarding agent seed: another worker is seeding, skipping")
-    except Exception as e:
-        logger.warning(f"Onboarding agent seed: {e}")
-
-    # Seed system_settings (coordination, knowledge_graph, llm_cost_audit, etc.)
-    # Idempotent — only creates missing keys, updates defaults on existing.
-    try:
-        from core.seeds.seed_system_settings import seed_system_settings
-        with get_db_session() as db:
-            created, updated = seed_system_settings(db)
-            if created or updated:
-                logger.info(f"System settings seeded: {created} created, {updated} updated")
-    except Exception as e:
-        logger.warning(f"System settings seed: {e}")
-
-    # Refresh platform-management skill for all existing Auto agents.
-    # Ensures edits to platform-management-skill.md propagate on every deploy.
-    try:
-        from core.seeds.seed_auto_agent import seed_auto_agent
-        from core.models.workspaces import Workspace
-        with get_db_session() as db:
-            workspace_ids = [w.id for w in db.query(Workspace.id).all()]
-            for ws_id in workspace_ids:
-                seed_auto_agent(db, ws_id)
-            logger.info(f"Auto agent + platform-management skill refreshed for {len(workspace_ids)} workspace(s)")
-    except Exception as e:
-        logger.warning(f"Auto agent skill refresh: {e}")
-
-
-async def _schema_migration():
-    """Phase 1 continued: DDL migrations that must complete before seeds."""
-    # Direct DDL for Auto agent schema (idempotent SQL, no alembic dependency)
-    try:
-        from sqlalchemy import text as _t
-        from core.database.database import engine as _engine
-        with _engine.connect() as conn:
-            # 1. public_id UUID column
-            conn.execute(_t("ALTER TABLE agents ADD COLUMN IF NOT EXISTS public_id UUID"))
-            conn.execute(_t("UPDATE agents SET public_id = gen_random_uuid() WHERE public_id IS NULL"))
-            conn.execute(_t("CREATE UNIQUE INDEX IF NOT EXISTS ix_agents_public_id ON agents (public_id)"))
-
-            # 2. Widen slug to 255
-            conn.execute(_t("ALTER TABLE agents ALTER COLUMN slug TYPE VARCHAR(255)"))
-
-            # 3. Drop old global slug unique constraint
-            conn.execute(_t("DROP INDEX IF EXISTS ix_agents_slug"))
-            try:
-                conn.execute(_t("ALTER TABLE agents DROP CONSTRAINT IF EXISTS agents_slug_key"))
-            except Exception:
-                pass
-
-            # 4. Per-workspace unique constraint on (workspace_id, slug)
-            conn.execute(_t("""
-                DO $$ BEGIN
-                    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_agent_workspace_slug') THEN
-                        ALTER TABLE agents ADD CONSTRAINT uq_agent_workspace_slug UNIQUE (workspace_id, slug);
-                    END IF;
-                END $$;
-            """))
-
-            conn.commit()
-            logger.info("Auto agent schema migration completed (public_id + slug fix)")
-    except Exception as e:
-        logger.error("Auto agent schema migration failed: %s", e, exc_info=True)
-
-    # CRITICAL: Chat workspace isolation — add workspace_id to chats table
-    try:
-        from sqlalchemy import text as _tc
-        from core.database.database import engine as _engine_c
-        with _engine_c.connect() as conn:
-            # 1. Add column
-            conn.execute(_tc(
-                "ALTER TABLE chats ADD COLUMN IF NOT EXISTS "
-                "workspace_id UUID REFERENCES workspaces(id) ON DELETE CASCADE"
+        from sqlalchemy import text
+        with engine.connect() as conn:
+            conn.execute(text(
+                "ALTER TABLE system_prompts ADD COLUMN IF NOT EXISTS "
+                "futureagi_eval_enabled BOOLEAN NOT NULL DEFAULT FALSE"
             ))
-            # 2. Backfill from messages table (each chat's earliest message has workspace_id)
-            result = conn.execute(_tc("""
-                UPDATE chats
-                SET workspace_id = sub.ws
-                FROM (
-                    SELECT DISTINCT ON (chat_id) chat_id, workspace_id AS ws
-                    FROM messages
-                    WHERE workspace_id IS NOT NULL
-                    ORDER BY chat_id, created_at ASC
-                ) sub
-                WHERE chats.id = sub.chat_id
-                  AND chats.workspace_id IS NULL
-            """))
-            backfilled = result.rowcount
-            # 3. Index for workspace+user queries
-            conn.execute(_tc(
-                "CREATE INDEX IF NOT EXISTS ix_chats_workspace_user "
-                "ON chats (workspace_id, user_id)"
-            ))
-            conn.commit()
-            if backfilled:
-                logger.info("Chat workspace isolation: backfilled %d chats", backfilled)
-            else:
-                logger.info("Chat workspace isolation: column present, no backfill needed")
-    except Exception as e:
-        logger.error("Chat workspace isolation migration failed: %s", e, exc_info=True)
-
-    # Seed Auto agents for existing workspaces
-    try:
-        from sqlalchemy import text as _t2
-        from core.database.database import engine as _engine2
-        with _engine2.connect() as conn:
-            result = conn.execute(_t2("""
-                SELECT w.id FROM workspaces w
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM agents a
-                    WHERE a.workspace_id = w.id
-                      AND a.is_system_agent = true
-                      AND a.slug = CONCAT('auto-', CAST(w.id AS TEXT))
-                )
-            """))
-            workspace_ids = [row[0] for row in result]
-
-            for ws_id in workspace_ids:
-                conn.execute(_t2("""
-                    INSERT INTO agents (
-                        public_id, name, slug, description, agent_type, status,
-                        is_system_agent, required_role, workspace_id,
-                        owner_type, owner_id,
-                        use_custom_persona, custom_persona_prompt,
-                        model_config, configuration, tags,
-                        created_at, updated_at
-                    ) VALUES (
-                        gen_random_uuid(), 'Auto', CONCAT('auto-', :ws_id),
-                        'Your workspace AI orchestrator — the default agent for chat and settings.',
-                        'system', 'active', true, NULL, CAST(:ws_id AS UUID),
-                        'workspace', :ws_id_str,
-                        true, :persona,
-                        CAST(:model_config AS JSONB), CAST(:config AS JSONB), CAST(:tags AS JSONB),
-                        NOW(), NOW()
-                    ) ON CONFLICT DO NOTHING
-                """), {
-                    "ws_id": str(ws_id),
-                    "ws_id_str": str(ws_id),
-                    "persona": "**Who I Am:**\nI'm Auto \u2014 your AI assistant and orchestrator for the Automatos platform. I live inside your workspace and I'm here to help you get the most out of your AI workforce.\n\n**My Personality:**\n- Warm, friendly, and approachable \u2014 think of me as a knowledgeable colleague\n- I prefer action over explanation \u2014 ask me to do something and I'll do it\n- I'm honest about what I can and can't do\n- I remember you and our past conversations\n\n**What I Can Help With:**\n- Getting started \u2014 setting up your workspace, connecting tools, choosing models\n- Building agents \u2014 creating and configuring AI agents with skills and tools\n- Running playbooks \u2014 automating workflows, scheduling tasks, managing recipes\n- Marketplace \u2014 browsing and installing agents, skills, plugins, and models\n- Managing your workspace \u2014 documents, knowledge bases, team settings, API keys\n- Missions \u2014 coordinating multi-agent tasks with planning and approval gates\n- Monitoring \u2014 tracking agent activity, costs, performance, and reports\n\n**How I Work:**\nI have access to your workspace's tools, agents, and data. When you ask me to do something, I can take real actions \u2014 not just give advice. If you're not sure where to start, just ask: \"What can I do here?\"",
-                    "model_config": '{"provider": "openrouter", "model_id": "google/gemini-2.5-flash", "temperature": 0.7, "max_tokens": 4000, "top_p": 1.0, "frequency_penalty": 0.0, "presence_penalty": 0.0, "fallback_model_id": null}',
-                    "config": '{"thinking_level": "medium", "proactive_level": "notify", "communication_style": "balanced", "personality_mode": "friendly"}',
-                    "tags": '["auto", "system", "orchestrator"]',
-                })
-
-            # NOTE: Removed blanket CTO soul overwrite (was forcing Irish persona
-            # onto ALL workspaces on every startup). Each workspace's Auto persona
-            # is now controlled by the user via Settings > Soul & Personality.
-
-            conn.commit()
-            if workspace_ids:
-                logger.info("Seeded Auto agents for %d existing workspaces", len(workspace_ids))
-    except Exception as e:
-        logger.error("Auto agent seeding failed: %s", e, exc_info=True)
-
-    # PRD-64: Ensure semantic routing columns exist on agents table
-    try:
-        from sqlalchemy import text as _t64
-        from core.database.database import engine as _engine64
-        with _engine64.connect() as conn:
-            conn.execute(_t64(
-                "ALTER TABLE agents ADD COLUMN IF NOT EXISTS "
-                "semantic_embedding JSONB"
-            ))
-            conn.execute(_t64(
-                "ALTER TABLE agents ADD COLUMN IF NOT EXISTS "
-                "semantic_text_hash VARCHAR(64)"
+            conn.execute(text(
+                "ALTER TABLE skills ADD COLUMN IF NOT EXISTS "
+                "content_hash VARCHAR(64)"
             ))
             conn.commit()
     except Exception as col_err:
-        logger.debug(f"PRD-64 column migration check: {col_err}")
+        logger.debug("Column migration check: %s", col_err)
+
+    # ── Single-worker seed gate ──
+    # Only 1 of N workers runs seeds. The rest skip immediately.
+    # Per-workspace seeds (templates, Auto agent) are NOT here —
+    # they run at workspace creation time in hybrid.py.
+    with boot_leader_lock(engine) as is_leader:
+        if not is_leader:
+            return
+
+        # Seed system prompts (new prompts may ship with code changes)
+        try:
+            from core.seeds.seed_system_prompts import seed_system_prompts
+            with get_db_session() as db:
+                seed_system_prompts(db)
+        except Exception as e:
+            logger.warning("System prompts seed: %s", e)
+
+        # Seed onboarding agents (personas/configs may change per release)
+        try:
+            from core.seeds.seed_onboarding_agents import seed_onboarding_agents
+            with get_db_session() as db:
+                seed_onboarding_agents(db)
+            logger.info("Onboarding agents seeded")
+        except Exception as e:
+            logger.warning("Onboarding agent seed: %s", e)
+
+        # Seed system settings (new setting keys may ship with code changes)
+        try:
+            from core.seeds.seed_system_settings import seed_system_settings
+            with get_db_session() as db:
+                created, updated = seed_system_settings(db)
+                if created or updated:
+                    logger.info("System settings seeded: %d created, %d updated", created, updated)
+        except Exception as e:
+            logger.warning("System settings seed: %s", e)
+
+        logger.info("Boot seeds completed (leader worker)")
 
 
 async def _seed_semantic_embeddings():
@@ -705,12 +543,11 @@ async def lifespan(app: FastAPI):
     report.started_at = datetime.now(timezone.utc)
 
     logger.info("Starting Automotas AI API Server...")
+    app.state.ready = False
 
     try:
         # ── Phase 1: Core Infrastructure ──
         await run_stage(report, BootstrapStage.DATABASE_INIT, _boot_phase_1_core)
-        await run_stage(report, BootstrapStage.SCHEMA_MIGRATION, _schema_migration)
-
         # Seed embeddings (fire-and-forget background task)
         await run_stage(report, BootstrapStage.SEMANTIC_EMBEDDINGS, _seed_semantic_embeddings)
 
@@ -743,6 +580,7 @@ async def lifespan(app: FastAPI):
         report.ready_at = datetime.now(timezone.utc)
         await run_stage(report, BootstrapStage.READY, lambda: None)
         app.state.bootstrap_report = report
+        app.state.ready = True
 
         failed = report.failed_stages
         if failed:
@@ -1303,6 +1141,21 @@ async def serve_export(file_path: str, ctx = Depends(get_request_context_hybrid)
 
 # WebSocket endpoint removed - using AI SDK SSE streaming instead
 # See consumers/workflows/streaming.py and consumers/chatbot/streaming.py
+
+# Readiness probe — Railway healthcheck target.
+# Returns 200 only after full boot (seeds, trust gate, extensions).
+# During startup returns 503 so Railway holds traffic on the old container.
+@app.get("/health/ready",
+         summary="Readiness probe",
+         tags=["🏥 System Health"])
+async def readiness_probe(request: Request):
+    if not getattr(request.app.state, "ready", False):
+        return JSONResponse(
+            status_code=503,
+            content={"status": "starting", "message": "Boot in progress"},
+        )
+    return {"status": "ready"}
+
 
 # Health check endpoint
 @app.get("/health",

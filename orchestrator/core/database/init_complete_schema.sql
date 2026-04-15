@@ -105,7 +105,7 @@ CREATE TABLE IF NOT EXISTS agents (
     eci FLOAT,
     validity FLOAT,
     discriminatory_power FLOAT,
-    model_config JSONB DEFAULT '{"provider": "openai", "model_id": "gpt-4", "temperature": 0.7}'::jsonb,
+    model_config JSONB DEFAULT '{"provider": "openrouter", "model_id": "google/gemini-2.5-flash", "temperature": 0.7}'::jsonb,
     model_usage_stats JSONB DEFAULT '{"total_tokens": 0, "total_cost": 0.0}'::jsonb,
 
     -- Marketplace fields (PRD-48: Single-table architecture)

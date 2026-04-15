@@ -1644,10 +1644,33 @@ def seed_system_settings(db: Session):
         },
     ]
     
+    # ── One-time cleanup: fix stale orchestrator_llm values ──────────
+    # The env vars LLM_PROVIDER=openai / LLM_MODEL=openai/gpt-5.4 were
+    # captured into system_settings before they were deleted from Railway.
+    # Reset to the correct defaults so config.LLM_PROVIDER returns the right value.
+    from core.llm.defaults import DEFAULT_LLM_PROVIDER, DEFAULT_LLM_MODEL
+    _STALE_FIXES = {
+        ("orchestrator_llm", "provider"): DEFAULT_LLM_PROVIDER,
+        ("orchestrator_llm", "model"): DEFAULT_LLM_MODEL,
+    }
+    for (cat, key), correct_value in _STALE_FIXES.items():
+        stale = db.query(SystemSetting).filter(
+            SystemSetting.category == cat,
+            SystemSetting.key == key,
+        ).first()
+        if stale and stale.value and stale.value != correct_value:
+            old_val = stale.value
+            stale.value = correct_value
+            stale.default_value = correct_value
+            logger.info(
+                "Fixed stale system_setting %s.%s: '%s' → '%s'",
+                cat, key, old_val, correct_value,
+            )
+
     created_count = 0
     updated_count = 0
     preserved_count = 0
-    
+
     for setting_data in settings_to_create:
         # Check if setting already exists
         existing = db.query(SystemSetting).filter(

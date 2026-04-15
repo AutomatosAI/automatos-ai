@@ -220,6 +220,7 @@ export function Message({
                 key={index}
                 transcript={part.transcript}
                 audioUrl={'audioUrl' in part ? part.audioUrl : undefined}
+                audioBase64={'audioBase64' in part ? part.audioBase64 : undefined}
                 isUser={isUser}
                 durationMs={'durationMs' in part ? part.durationMs : undefined}
               />

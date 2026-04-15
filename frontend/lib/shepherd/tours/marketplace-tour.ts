@@ -65,8 +65,8 @@ export function createMarketplaceTour(userId: string) {
       </p>
       ${stepProgress(3, TOTAL)}
     `,
-    beforeShowPromise: () => waitForElement('[data-tour="marketplace-content"]'),
-    attachTo: { element: '[data-tour="marketplace-content"]', on: 'top' },
+    beforeShowPromise: () => waitForElement('[data-tour="marketplace-tabs"]'),
+    attachTo: { element: '[data-tour="marketplace-tabs"]', on: 'bottom' },
     buttons: [
       { text: 'Back', classes: 'shepherd-button-secondary', action: tour.back },
       { text: 'Next', action: tour.next },

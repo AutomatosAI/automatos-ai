@@ -99,8 +99,8 @@ export function createDocumentsTour(userId: string) {
       ])}
       ${stepProgress(4, TOTAL)}
     `,
-    beforeShowPromise: () => waitForElement('[data-tour="documents-tabs"]'),
-    attachTo: { element: '[data-tour="documents-tabs"]', on: 'bottom' },
+    beforeShowPromise: () => waitForElement('[data-tour="documents-subtabs"]'),
+    attachTo: { element: '[data-tour="documents-subtabs"]', on: 'bottom' },
     buttons: [
       { text: 'Back', classes: 'shepherd-button-secondary', action: tour.back },
       { text: 'Got it!', action: tour.complete },

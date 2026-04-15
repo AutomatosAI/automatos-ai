@@ -103,7 +103,7 @@ BEGIN
         SELECT 1 FROM information_schema.columns 
         WHERE table_name = 'agents' AND column_name = 'model_config'
     ) THEN
-        ALTER TABLE agents ADD COLUMN model_config JSONB DEFAULT '{"provider": "openai", "model_id": "gpt-4", "temperature": 0.7}'::jsonb;
+        ALTER TABLE agents ADD COLUMN model_config JSONB DEFAULT '{"provider": "openrouter", "model_id": "google/gemini-2.5-flash", "temperature": 0.7}'::jsonb;
         RAISE NOTICE 'Added column: agents.model_config';
     END IF;
 

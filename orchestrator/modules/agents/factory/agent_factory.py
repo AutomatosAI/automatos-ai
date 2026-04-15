@@ -83,9 +83,10 @@ class ModelConfiguration:
 
     @staticmethod
     def from_dict(data: Dict[str, Any]) -> "ModelConfiguration":
+        from core.llm.defaults import DEFAULT_LLM_PROVIDER, DEFAULT_LLM_MODEL
         return ModelConfiguration(
-            provider=data.get("provider") or config.LLM_PROVIDER,
-            model_id=data.get("model_id", config.LLM_MODEL),
+            provider=data.get("provider") or DEFAULT_LLM_PROVIDER,
+            model_id=data.get("model_id", DEFAULT_LLM_MODEL),
             temperature=data.get("temperature", 0.7),
             max_tokens=data.get("max_tokens", 2000),
             top_p=data.get("top_p", 1.0),
@@ -96,7 +97,8 @@ class ModelConfiguration:
 
     @staticmethod
     def get_default() -> "ModelConfiguration":
-        return ModelConfiguration(provider=config.LLM_PROVIDER, model_id=config.LLM_MODEL)
+        from core.llm.defaults import DEFAULT_LLM_PROVIDER, DEFAULT_LLM_MODEL
+        return ModelConfiguration(provider=DEFAULT_LLM_PROVIDER, model_id=DEFAULT_LLM_MODEL)
 
 
 @dataclass
@@ -118,7 +120,8 @@ class AgentMetadata:
         if self.model_config:
             return self.model_config
         if self.preferred_model:
-            provider = config.LLM_PROVIDER
+            from core.llm.defaults import DEFAULT_LLM_PROVIDER
+            provider = DEFAULT_LLM_PROVIDER
             if "claude" in self.preferred_model.lower():
                 provider = "anthropic"
             elif "llama" in self.preferred_model.lower() or "mistral" in self.preferred_model.lower():
@@ -214,7 +217,13 @@ class AgentFactory:
     # ==================================================================
 
     def _get_default_llm_config_from_settings(self) -> Dict[str, Any]:
-        """Get default LLM config from system settings, falling back to config.py."""
+        """Get default LLM config — used when agent has no model_config.
+
+        The single source of truth is Settings > Orchestrator (Auto agent row).
+        This fallback is only hit for non-Auto agents without their own config.
+        We use safe defaults (OpenRouter/Gemini Flash) instead of reading from
+        system_settings which may have stale cached values.
+        """
         try:
             from core.llm.manager import get_system_setting
 
@@ -224,15 +233,16 @@ class AgentFactory:
             model = get_system_setting("orchestrator_llm", "llm_model")
             if not model:
                 model = get_system_setting("orchestrator_llm", "model")
+            from core.llm.defaults import DEFAULT_LLM_PROVIDER, DEFAULT_LLM_MODEL
             if not provider:
-                provider = config.LLM_PROVIDER
+                provider = DEFAULT_LLM_PROVIDER
             if not model:
-                model = config.LLM_MODEL
+                model = DEFAULT_LLM_MODEL
             if not provider or not model:
-                self.logger.warning("LLM provider/model not in system settings, using config defaults")
+                self.logger.warning("LLM provider/model not in system settings, using defaults")
                 return {
-                    "provider": config.LLM_PROVIDER,
-                    "model": config.LLM_MODEL,
+                    "provider": DEFAULT_LLM_PROVIDER,
+                    "model": DEFAULT_LLM_MODEL,
                     "temperature": 0.7,
                     "max_tokens": 2000,
                     "context_window": 8192,
@@ -259,10 +269,11 @@ class AgentFactory:
                 "context_window": context_window,
             }
         except Exception as e:
-            self.logger.warning(f"Could not get LLM config from settings: {e}, using config defaults")
+            from core.llm.defaults import DEFAULT_LLM_PROVIDER, DEFAULT_LLM_MODEL
+            self.logger.warning(f"Could not get LLM config from settings: {e}, using defaults")
             return {
-                "provider": config.LLM_PROVIDER,
-                "model": config.LLM_MODEL,
+                "provider": DEFAULT_LLM_PROVIDER,
+                "model": DEFAULT_LLM_MODEL,
                 "temperature": 0.7,
                 "max_tokens": 2000,
                 "context_window": 8192,
@@ -614,8 +625,9 @@ class AgentFactory:
                 }
                 self.logger.info(f"Agent {agent_id} using LLM: {llm_config_dict.get('provider')}/{llm_config_dict.get('model')} ({reason})")
 
-            provider_str = llm_config_dict.get("provider") or config.LLM_PROVIDER
-            model_id_str = llm_config_dict.get("model", config.LLM_MODEL)
+            from core.llm.defaults import DEFAULT_LLM_PROVIDER, DEFAULT_LLM_MODEL
+            provider_str = llm_config_dict.get("provider") or DEFAULT_LLM_PROVIDER
+            model_id_str = llm_config_dict.get("model", DEFAULT_LLM_MODEL)
             provider_str = self._resolve_provider_for_model(provider_str, model_id_str)
 
             provider = LLMProvider(provider_str)

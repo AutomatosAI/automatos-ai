@@ -921,6 +921,52 @@ class SkillLoader:
             return None
     
     # ========================================================================
+    # Builtin-core runtime freshness
+    # ========================================================================
+
+    # Map builtin-core skill names to their on-disk .md paths
+    _BUILTIN_PATHS: Dict[str, Path] = {
+        "platform-management": Path(__file__).resolve().parents[3] / "core" / "seeds" / "platform-management-skill.md",
+    }
+
+    def _refresh_builtin_if_stale(self, skill, db: Session) -> Optional[str]:
+        """Check if a builtin-core skill's DB row is stale vs the on-disk .md.
+
+        Compares SHA-256 of the on-disk content against skill.content_hash.
+        If different, updates prompt_template + content_hash inline (~5ms).
+        Returns the (possibly refreshed) prompt_template, or None to fall through.
+        """
+        import hashlib
+
+        disk_path = self._BUILTIN_PATHS.get(skill.name)
+        if not disk_path or not disk_path.exists():
+            return skill.prompt_template
+
+        raw = disk_path.read_text(encoding="utf-8").strip()
+        if raw.startswith("---"):
+            parts = raw.split("---", 2)
+            markdown_body = parts[2].strip() if len(parts) > 2 else raw
+        else:
+            markdown_body = raw
+
+        disk_hash = hashlib.sha256(markdown_body.encode("utf-8")).hexdigest()
+
+        if skill.content_hash == disk_hash:
+            return skill.prompt_template
+
+        # Stale — update DB inline
+        skill.prompt_template = markdown_body
+        skill.content_hash = disk_hash
+        try:
+            db.commit()
+            logger.info("Refreshed builtin-core skill '%s' from disk (hash=%s…)", skill.name, disk_hash[:12])
+        except Exception:
+            db.rollback()
+            logger.warning("Failed to refresh builtin skill '%s' — using DB version", skill.name, exc_info=True)
+
+        return skill.prompt_template
+
+    # ========================================================================
     # Progressive Disclosure - Level 2: Core Content
     # ========================================================================
     
@@ -961,10 +1007,17 @@ class SkillLoader:
             if not skill:
                 logger.warning(f"Skill not found: {skill_name}")
                 return None
-            
+
+            # Runtime freshness check for builtin-core skills
+            if skill.skill_source == "builtin-core":
+                core_content = self._refresh_builtin_if_stale(skill, db)
+                if core_content:
+                    self.core_content_cache[skill_name] = core_content
+                    return core_content
+
             # Get core content
             core_content = None
-            
+
             if skill.prompt_template:
                 # PRD-22 skill - use prompt_template
                 core_content = skill.prompt_template

@@ -696,7 +696,7 @@ export function DocumentManagement() {
             ) : (
               /* Document sub-tabs */
               <Tabs defaultValue="library" className="space-y-6">
-                <TabsList className="bg-secondary/30">
+                <TabsList data-tour="documents-subtabs" className="bg-secondary/30">
                   <TabsTrigger value="library" className="flex items-center space-x-2">
                     <FileText className="w-4 h-4" />
                     <span>Library</span>

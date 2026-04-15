@@ -211,8 +211,8 @@ export function ChannelsSettingsTab() {
         {PLATFORMS.map(platform => {
           const connected = getConnectedChannel(platform.id)
           return (
-            <Card key={platform.id} className="border-border/40 bg-card/50 backdrop-blur-sm">
-              <CardHeader>
+            <Card key={platform.id} className="glass-card card-glow hover:border-primary/20 transition-all duration-300 flex flex-col">
+              <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-base flex items-center gap-2">
                     <span className="text-xl">{platform.icon}</span> {platform.name}
@@ -227,45 +227,47 @@ export function ChannelsSettingsTab() {
                   )}
                 </div>
               </CardHeader>
-              <CardContent className="space-y-3">
+              <CardContent className="flex flex-col flex-1 pt-0">
                 {connected ? (
                   <>
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <MessageSquare className="h-3 w-3" />
-                      {connected.message_count} messages
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground flex-1">
+                      <MessageSquare className="h-3 w-3 shrink-0" />
+                      <span>{connected.message_count} messages</span>
                       {connected.last_activity_at && (
-                        <span>· Last: {new Date(connected.last_activity_at).toLocaleDateString()}</span>
+                        <span>· {new Date(connected.last_activity_at).toLocaleDateString()}</span>
                       )}
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 mt-4 pt-3 border-t border-border/30">
                       <Button size="sm" variant="outline" onClick={() => testChannel(connected.id)} disabled={testing === connected.id}>
                         {testing === connected.id ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Zap className="h-3 w-3 mr-1" />}
                         Test
                       </Button>
-                      <Button size="sm" variant="destructive" onClick={() => disconnectChannel(connected.id)}>
+                      <Button size="sm" variant="outline" className="text-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))] hover:bg-[hsl(var(--destructive))]/10 hover:border-[hsl(var(--destructive))]/30" onClick={() => disconnectChannel(connected.id)}>
                         <Trash2 className="h-3 w-3 mr-1" /> Disconnect
                       </Button>
                     </div>
                   </>
                 ) : (
                   <>
-                    {platform.fields.map(field => (
-                      <div key={field.key} className="space-y-1">
-                        <Label className="text-xs">{field.label}</Label>
-                        <Input
-                          type="password"
-                          placeholder={field.placeholder}
-                          value={newConfigs[platform.id]?.[field.key] || ''}
-                          onChange={e => updateConfig(platform.id, field.key, e.target.value)}
-                        />
-                      </div>
-                    ))}
-                    <div className="flex gap-2">
-                      <Button size="sm" onClick={() => connectChannel(platform.id)} disabled={connecting === platform.id}>
+                    <div className="space-y-3 flex-1">
+                      {platform.fields.map(field => (
+                        <div key={field.key} className="space-y-1">
+                          <Label className="text-xs">{field.label}</Label>
+                          <Input
+                            type="password"
+                            placeholder={field.placeholder}
+                            value={newConfigs[platform.id]?.[field.key] || ''}
+                            onChange={e => updateConfig(platform.id, field.key, e.target.value)}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex gap-2 mt-4 pt-3 border-t border-border/30">
+                      <Button size="sm" variant="outline" onClick={() => connectChannel(platform.id)} disabled={connecting === platform.id}>
                         {connecting === platform.id ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Plus className="h-3 w-3 mr-1" />}
                         Connect
                       </Button>
-                      <Button size="sm" variant="link" asChild>
+                      <Button size="sm" variant="ghost" className="text-muted-foreground" asChild>
                         <a href={platform.helpLink} target="_blank" rel="noreferrer">Setup Guide</a>
                       </Button>
                     </div>

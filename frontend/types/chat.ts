@@ -165,7 +165,7 @@ export type MessagePart =
   | { type: 'file'; filename: string; mediaType: string; url: string }
   | { type: 'tool-result'; toolName: string; result: any }
   | { type: 'artifact'; artifact: Artifact }
-  | { type: 'voice'; transcript: string; audioUrl?: string; durationMs?: number }
+  | { type: 'voice'; transcript: string; audioUrl?: string; audioBase64?: string; durationMs?: number }
 
 /**
  * Voice message metadata from STT/TTS pipeline

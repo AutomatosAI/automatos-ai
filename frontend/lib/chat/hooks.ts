@@ -2,13 +2,14 @@
 
 import { useState, useCallback, useRef } from 'react'
 import { useAuth } from '@clerk/nextjs'
+import { LLM_DEFAULTS } from '@/lib/llm-defaults'
 import type { ChatMessage, AppUsage, ToolCall, RoutingInfo } from '@/types'
 import { toast } from 'sonner'
 
 export function useChat({
   id,
   initialMessages = [],
-  selectedModelId = 'gpt-4',
+  selectedModelId = LLM_DEFAULTS.model_id,
   selectedAgentId,
   missionMode = false,
   planMode = false,

@@ -5,6 +5,7 @@ GET  /api/chat/voice/audio/{message_id} -- Retrieve voice audio.
 GET  /api/voice/health -- Voice service health check.
 """
 
+import base64
 import json
 import logging
 import uuid
@@ -35,7 +36,7 @@ async def _collect_streaming_response(
     workspace_id: str,
     user_id: int,
     agent_id: Optional[int],
-) -> str:
+) -> tuple[str, Optional[int]]:
     """
     Feed a text message through the existing streaming chat pipeline
     and collect the full text response (non-streaming).
@@ -146,7 +147,7 @@ async def _collect_streaming_response(
             except (json.JSONDecodeError, ValueError):
                 pass
 
-    return "".join(collected_text)
+    return "".join(collected_text), effective_agent_id
 
 
 @router.post("/api/chat/voice")
@@ -226,7 +227,7 @@ async def voice_chat(
     user_id = get_user_id(db)
 
     try:
-        response_text = await _collect_streaming_response(
+        response_text, effective_agent_id = await _collect_streaming_response(
             db=db,
             transcript=transcript,
             conversation_id=conversation_id,
@@ -246,15 +247,16 @@ async def voice_chat(
         response_text = "I received your message but couldn't generate a response. Please try again."
 
     # 4. TTS: agent response -> audio
-    # Look up agent's voice profile for personalized TTS
+    # Look up the responding agent's voice profile (effective_agent_id from routing)
     tts_voice = voice or config.VOICE_TTS_DEFAULT_VOICE
     tts_model = None
     tts_reference_audio = None
+    tts_agent_id = effective_agent_id
 
-    if parsed_agent_id:
+    if tts_agent_id:
         try:
             from core.models.core import Agent
-            agent_row = db.query(Agent).filter(Agent.id == parsed_agent_id).first()
+            agent_row = db.query(Agent).filter(Agent.id == tts_agent_id).first()
             if agent_row and getattr(agent_row, 'voice_profile_id', None):
                 from core.models.voice_profiles import VoiceProfile
                 vp = db.query(VoiceProfile).filter(
@@ -265,7 +267,7 @@ async def voice_chat(
                     tts_model = vp.provider
                     tts_reference_audio = vp.reference_audio
                     logger.info("voice_profile_resolved", extra={
-                        "agent_id": parsed_agent_id,
+                        "agent_id": tts_agent_id,
                         "profile_id": str(vp.id),
                         "provider": vp.provider,
                         "voice_id": vp.voice_id,
@@ -275,26 +277,39 @@ async def voice_chat(
 
     tts_latency_ms = 0.0
     audio_s3_key = None
+    audio_bytes_raw: bytes | None = None
 
     if response_format in ("audio", "both"):
         try:
+            # Cap TTS text to ~500 chars to keep synthesis fast (esp. Chatterbox)
+            tts_text = response_text
+            if len(tts_text) > 500:
+                # Truncate at last sentence boundary within limit
+                truncated = tts_text[:500]
+                last_period = truncated.rfind('.')
+                last_question = truncated.rfind('?')
+                last_exclaim = truncated.rfind('!')
+                cut = max(last_period, last_question, last_exclaim)
+                tts_text = truncated[:cut + 1] if cut > 100 else truncated
+
             tts_result = await _voice_client.synthesize(
-                text=response_text,
+                text=tts_text,
                 voice=tts_voice,
                 model=tts_model,
                 reference_audio=tts_reference_audio,
             )
             tts_latency_ms = tts_result.duration_ms
+            audio_bytes_raw = tts_result.audio
 
-            # Store TTS audio in S3
+            # Store TTS audio in S3 (for persistence / replay)
             audio_s3_key = upload_voice_audio(
                 workspace_id=workspace_id,
                 message_id=message_id,
                 audio_bytes=tts_result.audio,
                 audio_format="mp3",
             )
-        except Exception as e:
-            logger.warning("voice_tts_failed", extra={"error": str(e)})
+        except Exception:
+            logger.warning("voice_tts_failed", exc_info=True)
             # TTS failure is non-fatal -- return text response without audio
 
     total_ms = (time.monotonic() - start_time) * 1000
@@ -319,6 +334,7 @@ async def voice_chat(
         "transcript": transcript,
         "response_text": response_text,
         "audio_url": f"/api/chat/voice/audio/{message_id}" if audio_s3_key else None,
+        "audio_base64": base64.b64encode(audio_bytes_raw).decode() if audio_bytes_raw else None,
         "audio_format": "mp3",
         "stt_latency_ms": round(stt_result.duration_ms, 1),
         "tts_latency_ms": round(tts_latency_ms, 1),

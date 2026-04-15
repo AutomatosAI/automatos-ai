@@ -90,8 +90,8 @@ export function AnalyticsPage() {
       />
       </div>
 
-      <div data-tour="analytics-tabs">
-      <FilterTabs tabs={tabDefs} value={activeTab} onValueChange={setActiveTab}>
+      <div>
+      <FilterTabs tabs={tabDefs} value={activeTab} onValueChange={setActiveTab} dataTour="analytics-tabs">
         <TabsContent value="overview">
           <AnalyticsOverview days={days} />
         </TabsContent>

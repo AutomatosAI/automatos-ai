@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { LLM_DEFAULTS } from '@/lib/llm-defaults'
 import { X, Download, Zap, Wrench, Brain, Settings, Info } from 'lucide-react'
 import {
   Dialog,
@@ -93,8 +94,8 @@ export function MarketplaceItemModal({
   const capabilities = item?.metadata?.configuration?.capabilities || []
 
   // Get model info (prefer model_config, fallback to llm_config)
-  const modelProvider = modelConfig.provider || llmConfig.provider || 'openai'
-  const modelId = modelConfig.model_id || llmConfig.model || 'gpt-4'
+  const modelProvider = modelConfig.provider || llmConfig.provider || 'openrouter'
+  const modelId = modelConfig.model_id || llmConfig.model || LLM_DEFAULTS.model_id
   const temperature = modelConfig.temperature || llmConfig.temperature
   const maxTokens = modelConfig.max_tokens || llmConfig.max_tokens
   const contextWindow = llmConfig.context_window

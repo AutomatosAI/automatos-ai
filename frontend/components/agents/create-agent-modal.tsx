@@ -3,6 +3,7 @@
 
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { getDefaultModelConfig } from '@/lib/llm-defaults'
 import {
   X,
   Bot,
@@ -77,16 +78,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
   })
 
   // PRD-15: Model configuration state
-  const [modelConfig, setModelConfig] = useState({
-    provider: 'openai',
-    model_id: 'gpt-4',
-    temperature: 0.7,
-    max_tokens: 2000,
-    top_p: 1.0,
-    frequency_penalty: 0.0,
-    presence_penalty: 0.0,
-    fallback_model_id: null as string | null
-  })
+  const [modelConfig, setModelConfig] = useState(getDefaultModelConfig())
 
   // Persona state (US-021)
   const [personaMode, setPersonaMode] = useState<PersonaMode>('none')
@@ -314,16 +306,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
         specializations: [],
         shareToMarketplace: false
       })
-      setModelConfig({
-        provider: 'openai',
-        model_id: 'gpt-4',
-        temperature: 0.7,
-        max_tokens: 2000,
-        top_p: 1.0,
-        frequency_penalty: 0.0,
-        presence_penalty: 0.0,
-        fallback_model_id: null
-      })
+      setModelConfig(getDefaultModelConfig())
       setPersonaMode('none')
       setSelectedPersonaId(null)
       setCustomPersonaPrompt('')

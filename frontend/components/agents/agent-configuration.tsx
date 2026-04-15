@@ -3,6 +3,7 @@
 
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
+import { getDefaultModelConfig, LLM_DEFAULTS } from '@/lib/llm-defaults'
 import {
   Settings,
   Save,
@@ -199,16 +200,7 @@ export function AgentConfiguration({
   // PRD-15: Initialize model config data
   useEffect(() => {
     if (agentModelConfig) {
-      const modelConfig = (agentModelConfig as any)?.model_config || {
-        provider: 'openai',
-        model_id: 'gpt-4',
-        temperature: 0.7,
-        max_tokens: 2000,
-        top_p: 1.0,
-        frequency_penalty: 0.0,
-        presence_penalty: 0.0,
-        fallback_model_id: null
-      }
+      const modelConfig = (agentModelConfig as any)?.model_config || getDefaultModelConfig()
       setModelConfigData(modelConfig)
     }
   }, [agentModelConfig])
@@ -386,16 +378,7 @@ export function AgentConfiguration({
       setHasUnsavedChanges(false)
     }
     if (agentModelConfig) {
-      const modelConfig = (agentModelConfig as any)?.model_config || {
-        provider: 'openai',
-        model_id: 'gpt-4',
-        temperature: 0.7,
-        max_tokens: 2000,
-        top_p: 1.0,
-        frequency_penalty: 0.0,
-        presence_penalty: 0.0,
-        fallback_model_id: null
-      }
+      const modelConfig = (agentModelConfig as any)?.model_config || getDefaultModelConfig()
       setModelConfigData(modelConfig)
     }
     if (agent && (agent as any).tools && Array.isArray((agent as any).tools)) {
@@ -1085,7 +1068,7 @@ export function AgentConfiguration({
           <div className="space-y-3">
             <Label>AI Model</Label>
             <ModelSelector
-              value={modelConfigData?.model_id || 'gpt-4'}
+              value={modelConfigData?.model_id || LLM_DEFAULTS.model_id}
               onChange={(modelId) => handleModelConfigChange('model_id', modelId)}
               agentType={(agent as any)?.agent_type}
             />

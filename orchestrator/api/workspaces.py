@@ -20,6 +20,7 @@ from core.models.workspaces import Workspace
 
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
+from core.llm.defaults import DEFAULT_LLM_PROVIDER, DEFAULT_LLM_MODEL, get_default_model_config
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -56,8 +57,12 @@ async def get_current_workspace(
     if not workspace:
         raise HTTPException(status_code=404, detail="Workspace not found")
 
-    # Detect brand-new workspace: no agents created yet
-    agent_count = db.query(Agent).filter(Agent.workspace_id == workspace.id).count()
+    # Detect brand-new workspace: no user-created agents yet
+    # Exclude system agents (Auto) — they're seeded automatically during provisioning
+    agent_count = db.query(Agent).filter(
+        Agent.workspace_id == workspace.id,
+        Agent.is_system_agent.isnot(True),
+    ).count()
 
     # Auto-generate webhook_key if missing (for workspaces created before migration)
     if not workspace.webhook_key:
@@ -317,8 +322,8 @@ async def get_orchestrator_settings(
             # LLM config
             mc = auto_agent.model_config or {}
             result["llm"] = {
-                "provider": mc.get("provider", config.LLM_PROVIDER or "openrouter"),
-                "model_id": mc.get("model_id", config.LLM_MODEL or "openai/gpt-4o"),
+                "provider": mc.get("provider", DEFAULT_LLM_PROVIDER),
+                "model_id": mc.get("model_id", DEFAULT_LLM_MODEL),
                 "temperature": mc.get("temperature", 0.7),
                 "max_tokens": mc.get("max_tokens", 4000),
                 "top_p": mc.get("top_p", 1.0),
@@ -357,6 +362,9 @@ async def get_orchestrator_settings(
             if agent_cfg.get("thinking_level"):
                 result["thinking_level"] = agent_cfg["thinking_level"]
 
+            # Voice profile
+            result["voice_profile_id"] = str(auto_agent.voice_profile_id) if auto_agent.voice_profile_id else None
+
             logger.info(
                 "Orchestrator GET for ws=%s: personality_mode=%s, llm_model=%s, auto_agent_id=%s, "
                 "stored_config_keys=%s, persona_len=%s",
@@ -365,16 +373,9 @@ async def get_orchestrator_settings(
                 len(auto_agent.custom_persona_prompt or ""),
             )
         else:
-            result["llm"] = {
-                "provider": config.LLM_PROVIDER or "openrouter",
-                "model_id": config.LLM_MODEL or "openai/gpt-4o",
-                "temperature": 0.7,
-                "max_tokens": 4000,
-                "top_p": 1.0,
-                "frequency_penalty": 0.0,
-                "presence_penalty": 0.0,
-                "fallback_model_id": None,
-            }
+            mc = get_default_model_config()
+            mc["max_tokens"] = 4000
+            result["llm"] = mc
     except Exception:
         logger.exception("Failed to read Auto agent config for workspace %s", ctx.workspace_id)
         result["llm"] = None
@@ -490,6 +491,30 @@ async def save_orchestrator_settings(
                 if key in llm:
                     new_mc[key] = llm[key]
             auto_agent.model_config = new_mc
+
+            # Sync to system_settings so config.LLM_PROVIDER/LLM_MODEL stay in sync
+            # (used by internal orchestrator operations: agent_factory, chatbot, etc.)
+            try:
+                from core.models.system_settings import SystemSetting
+                for ss_key, llm_key in [("provider", "provider"), ("model", "model_id")]:
+                    if llm_key in llm:
+                        ss = db.query(SystemSetting).filter(
+                            SystemSetting.category == "orchestrator_llm",
+                            SystemSetting.key == ss_key,
+                        ).first()
+                        if ss:
+                            ss.value = llm[llm_key]
+                        else:
+                            db.add(SystemSetting(
+                                category="orchestrator_llm",
+                                key=ss_key,
+                                value=llm[llm_key],
+                                default_value=llm[llm_key],
+                                value_type="string",
+                                is_required=True,
+                            ))
+            except Exception:
+                logger.warning("Failed to sync LLM settings to system_settings table")
             flag_modified(auto_agent, "model_config")
 
         # Soul / Personality → Auto agent custom_persona_prompt
@@ -522,6 +547,12 @@ async def save_orchestrator_settings(
             auto_agent.configuration = new_cfg
             flag_modified(auto_agent, "configuration")
 
+        # Voice profile → Auto agent voice_profile_id
+        if "voice_profile_id" in payload:
+            from uuid import UUID
+            vp_id = payload["voice_profile_id"]
+            auto_agent.voice_profile_id = UUID(vp_id) if vp_id else None
+
     except Exception:
         logger.exception("Failed to sync orchestrator settings to Auto agent for workspace %s", ctx.workspace_id)
 
@@ -540,8 +571,8 @@ async def save_orchestrator_settings(
         if auto_agent and auto_agent.model_config:
             mc = auto_agent.model_config
             result["llm"] = {
-                "provider": mc.get("provider", "openrouter"),
-                "model_id": mc.get("model_id", "openai/gpt-4o"),
+                "provider": mc.get("provider", DEFAULT_LLM_PROVIDER),
+                "model_id": mc.get("model_id", DEFAULT_LLM_MODEL),
                 "temperature": mc.get("temperature", 0.7),
                 "max_tokens": mc.get("max_tokens", 4000),
                 "top_p": mc.get("top_p", 1.0),
