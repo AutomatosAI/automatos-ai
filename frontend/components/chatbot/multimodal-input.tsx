@@ -24,6 +24,7 @@ export interface MultimodalInputProps {
   status: any
   stop: () => void
   sendMessage: (message: any) => void
+  setMessages?: React.Dispatch<React.SetStateAction<any[]>>
   selectedModelId: string
   onModelChange: (modelId: string) => void
   selectedAgentId?: number | null
@@ -39,6 +40,7 @@ export function MultimodalInput({
   status,
   stop,
   sendMessage,
+  setMessages,
   selectedModelId,
   onModelChange,
   selectedAgentId,
@@ -74,26 +76,48 @@ export function MultimodalInput({
           authToken: token,
         })
 
-        // Build user voice message parts
-        const userParts: any[] = [
-          {
-            type: 'voice',
-            transcript: response.transcript,
-            durationMs,
-          },
-        ]
-
-        // Send the transcribed text as user message through the normal chat flow
-        sendMessage({
-          role: 'user',
-          content: response.transcript,
-          parts: userParts,
-        })
+        // The voice endpoint already ran the full pipeline (STT → agent → TTS)
+        // and saved messages to the DB. Inject both messages directly into the
+        // chat UI — do NOT call sendMessage() which would trigger a second agent call.
+        if (setMessages) {
+          const userMsg = {
+            id: crypto.randomUUID(),
+            role: 'user' as const,
+            content: response.transcript,
+            parts: [{
+              type: 'voice' as const,
+              transcript: response.transcript,
+              audioUrl: undefined,
+              durationMs,
+            }],
+          }
+          const assistantMsg = {
+            id: response.message_id || crypto.randomUUID(),
+            role: 'assistant' as const,
+            content: response.response_text,
+            parts: [
+              { type: 'text' as const, text: response.response_text },
+              ...(response.audio_url ? [{
+                type: 'voice' as const,
+                transcript: response.response_text,
+                audioUrl: response.audio_url,
+              }] : []),
+            ],
+          }
+          setMessages(prev => [...prev, userMsg, assistantMsg])
+        } else {
+          // Fallback if setMessages not available — send transcript through chat
+          sendMessage({
+            role: 'user',
+            content: response.transcript,
+            parts: [{ type: 'voice', transcript: response.transcript, durationMs }],
+          })
+        }
       } catch (err: any) {
         toast.error(err?.message || 'Voice message failed')
       }
     },
-    [chatId, selectedAgentId, sendMessage, getToken]
+    [chatId, selectedAgentId, sendMessage, setMessages, getToken]
   )
 
   const voiceRecorder = useVoiceRecorder({

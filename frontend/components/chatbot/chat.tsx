@@ -1116,6 +1116,7 @@ export function Chat({
                   status={status}
                   stop={stop}
                   sendMessage={handleSendMessage}
+                  setMessages={setMessages}
                   selectedModelId={currentModelId}
                   onModelChange={setCurrentModelId}
                   selectedAgentId={selectedAgentId}
@@ -1278,6 +1279,7 @@ export function Chat({
                   status={status}
                   stop={stop}
                   sendMessage={handleSendMessage}
+                  setMessages={setMessages}
                   selectedModelId={currentModelId}
                   onModelChange={setCurrentModelId}
                   selectedAgentId={selectedAgentId}
