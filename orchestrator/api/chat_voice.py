@@ -48,6 +48,7 @@ async def _collect_streaming_response(
     We extract only the text chunks (prefix '0:') to build the response.
     """
     from consumers.chatbot import ChatService, StreamingChatService
+    from consumers.chatbot.auto import AutoBrain, Action
 
     chat_service = ChatService(db)
     streaming_service = StreamingChatService(db, workspace_id=workspace_id)
@@ -74,20 +75,58 @@ async def _collect_streaming_response(
     messages = chat_service.get_messages_by_chat_id(conversation_id)
     message_history = [{"role": msg.role, "parts": msg.parts} for msg in messages]
 
-    # Voice fast-path: skip AutoBrain classification + routing.
-    # Voice messages are conversational — always use system LLM via default agent.
-    # This saves ~10-30s of LLM classification + router overhead.
+    # Determine agent via AutoBrain (same logic as chat.py)
+    use_system_llm = False
+    complexity_assessment = None
+
     if agent_id:
         effective_agent_id = agent_id
-        use_system_llm = False
     else:
-        from api.chat import get_default_agent_id
-        effective_agent_id = get_default_agent_id(db, workspace_id)
-        use_system_llm = True
+        auto_brain = AutoBrain(db, workspace_id)
+        complexity_assessment = await auto_brain.assess(transcript, len(message_history))
+
+        if complexity_assessment.action == Action.RESPOND:
+            from api.chat import get_default_agent_id
+            effective_agent_id = get_default_agent_id(db, workspace_id)
+            use_system_llm = True
+        elif complexity_assessment.action in (Action.DELEGATE, Action.MISSION):
+            from core.routing.cache import get_routing_cache
+            from core.routing.engine import UniversalRouter
+            from core.routing.ingestors.chatbot import ChatbotIngestor
+
+            try:
+                ingestor = ChatbotIngestor()
+                envelope = ingestor.ingest(
+                    message=transcript,
+                    agent_id=None,
+                    session_id=conversation_id,
+                    request_context=None,
+                )
+                universal_router = UniversalRouter(db, cache=get_routing_cache())
+                routing_decision = await universal_router.route(envelope)
+
+                if routing_decision and routing_decision.route_type == "agent" and routing_decision.agent_id:
+                    effective_agent_id = routing_decision.agent_id
+                else:
+                    from api.chat import get_default_agent_id
+                    effective_agent_id = get_default_agent_id(db, workspace_id)
+                    use_system_llm = True
+            except Exception:
+                logger.exception("[voice] Router failed, falling back to default agent")
+                from api.chat import get_default_agent_id
+                effective_agent_id = get_default_agent_id(db, workspace_id)
+                use_system_llm = True
+        else:
+            from api.chat import get_default_agent_id
+            effective_agent_id = get_default_agent_id(db, workspace_id)
+            use_system_llm = True
 
     # Collect streaming output into a single string
     collected_text = []
-    skip_composio = True  # Voice never needs Composio tools
+    skip_composio = (
+        complexity_assessment is not None
+        and complexity_assessment.action == Action.RESPOND
+    )
 
     async for chunk in streaming_service.stream_response_with_agent(
         chat_id=conversation_id,
@@ -96,7 +135,7 @@ async def _collect_streaming_response(
         user_id=user_id,
         use_system_llm=use_system_llm,
         skip_composio=skip_composio,
-        complexity_assessment=None,
+        complexity_assessment=complexity_assessment,
     ):
         # AI SDK format: text lines are '0:"escaped text"\n'
         if chunk.startswith("0:"):
