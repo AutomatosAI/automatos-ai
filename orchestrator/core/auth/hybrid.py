@@ -282,6 +282,14 @@ def _provision_new_user_workspace(
     except Exception:
         logger.exception("Failed to seed Auto agent for workspace %s — non-fatal", ws_id)
 
+    # 5) Seed starter document templates for this workspace
+    try:
+        from modules.documents.seed_templates import seed_starter_templates
+        seed_starter_templates(db, ws_id)
+        db.commit()
+    except Exception:
+        logger.exception("Failed to seed document templates for workspace %s — non-fatal", ws_id)
+
     logger.info(
         "Provisioned personal workspace %s (%s) for user %s (clerk=%s)",
         ws_id, ws_name, uid, clerk_user_id,

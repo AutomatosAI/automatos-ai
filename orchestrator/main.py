@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 from dotenv import load_dotenv
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, Query, Header, HTTPException
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Depends, Query, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -255,80 +255,68 @@ api_call_stats = defaultdict(lambda: {
 
 async def _boot_phase_1_core():
     """
-    Phase 1: Core infrastructure — database, migrations, seeds.
+    Phase 1: Core infrastructure — database tables + per-deploy seeds.
 
-    PRD-123 Pattern #2: Nothing third-party executes before trust_gate passes.
+    Seeds run once per deploy (not per worker) via pg_advisory_lock.
+    Per-workspace seeding (templates, Auto agent) happens at signup time
+    in _provision_new_user_workspace(), NOT here.
     """
-    # PRD-58: Ensure system_prompts tables exist + seed on every startup (idempotent).
+    import core.models.system_prompts  # register models with Base.metadata
+    import core.models.core  # noqa: F811 — registers all models with Base
+    from core.database.database import create_tables, get_db_session, engine
+    from core.database.boot_lock import boot_leader_lock
+
+    # DDL — safe for all workers (idempotent, fast no-op when tables exist)
+    create_tables()
+
+    # PRD-58 Phase 1B: Column migration (idempotent DDL, harmless on all workers)
     try:
-        import core.models.system_prompts  # register models with Base.metadata
-        from core.database.database import create_tables, get_db_session
-        create_tables()
-        # PRD-58 Phase 1B: Add futureagi_eval_enabled column if missing
+        from sqlalchemy import text
+        with engine.connect() as conn:
+            conn.execute(text(
+                "ALTER TABLE system_prompts ADD COLUMN IF NOT EXISTS "
+                "futureagi_eval_enabled BOOLEAN NOT NULL DEFAULT FALSE"
+            ))
+            conn.commit()
+    except Exception as col_err:
+        logger.debug("Column migration check: %s", col_err)
+
+    # ── Single-worker seed gate ──
+    # Only 1 of N workers runs seeds. The rest skip immediately.
+    # Per-workspace seeds (templates, Auto agent) are NOT here —
+    # they run at workspace creation time in hybrid.py.
+    with boot_leader_lock(engine) as is_leader:
+        if not is_leader:
+            return
+
+        # Seed system prompts (new prompts may ship with code changes)
         try:
-            from sqlalchemy import text
-            from core.database.database import engine
-            with engine.connect() as conn:
-                conn.execute(text(
-                    "ALTER TABLE system_prompts ADD COLUMN IF NOT EXISTS "
-                    "futureagi_eval_enabled BOOLEAN NOT NULL DEFAULT FALSE"
-                ))
-                conn.commit()
-        except Exception as col_err:
-            logger.debug(f"Column migration check: {col_err}")
-        from core.seeds.seed_system_prompts import seed_system_prompts
-        with get_db_session() as db:
-            seed_system_prompts(db)
-    except Exception as e:
-        logger.warning(f"PRD-58 table/seed init: {e}")
+            from core.seeds.seed_system_prompts import seed_system_prompts
+            with get_db_session() as db:
+                seed_system_prompts(db)
+        except Exception as e:
+            logger.warning("System prompts seed: %s", e)
 
-    # PRD-63: Ensure document_templates table exists + seed starter templates
-    try:
-        import core.models.core  # noqa: F811 — registers DocumentTemplate with Base
-        from core.database.database import create_tables as _ct, get_db_session as _gdb
-        _ct()  # idempotent — creates any missing tables
-        from modules.documents.seed_templates import seed_starter_templates
-        from core.models.workspaces import Workspace
-        with _gdb() as db:
-            workspace_ids = [w.id for w in db.query(Workspace.id).all()]
-            for ws_id in workspace_ids:
-                seed_starter_templates(db, ws_id)
-        logger.info(f"PRD-63: Document templates seeded for {len(workspace_ids)} workspace(s)")
-    except Exception as e:
-        logger.warning(f"PRD-63 template seed init: {e}")
+        # Seed onboarding agents (personas/configs may change per release)
+        try:
+            from core.seeds.seed_onboarding_agents import seed_onboarding_agents
+            with get_db_session() as db:
+                seed_onboarding_agents(db)
+            logger.info("Onboarding agents seeded")
+        except Exception as e:
+            logger.warning("Onboarding agent seed: %s", e)
 
-    # Seed onboarding agents (VOYAGER, BLUEPRINT, SCRIBE, FORGE) — Mission Zero team
-    try:
-        from core.seeds.seed_onboarding_agents import seed_onboarding_agents
-        with get_db_session() as db:
-            seed_onboarding_agents(db)
-        logger.info("Onboarding agents seeded successfully")
-    except Exception as e:
-        logger.warning(f"Onboarding agent seed: {e}")
+        # Seed system settings (new setting keys may ship with code changes)
+        try:
+            from core.seeds.seed_system_settings import seed_system_settings
+            with get_db_session() as db:
+                created, updated = seed_system_settings(db)
+                if created or updated:
+                    logger.info("System settings seeded: %d created, %d updated", created, updated)
+        except Exception as e:
+            logger.warning("System settings seed: %s", e)
 
-    # Seed system_settings (coordination, knowledge_graph, llm_cost_audit, etc.)
-    # Idempotent — only creates missing keys, updates defaults on existing.
-    try:
-        from core.seeds.seed_system_settings import seed_system_settings
-        with get_db_session() as db:
-            created, updated = seed_system_settings(db)
-            if created or updated:
-                logger.info(f"System settings seeded: {created} created, {updated} updated")
-    except Exception as e:
-        logger.warning(f"System settings seed: {e}")
-
-    # Refresh platform-management skill for all existing Auto agents.
-    # Ensures edits to platform-management-skill.md propagate on every deploy.
-    try:
-        from core.seeds.seed_auto_agent import seed_auto_agent
-        from core.models.workspaces import Workspace
-        with get_db_session() as db:
-            workspace_ids = [w.id for w in db.query(Workspace.id).all()]
-            for ws_id in workspace_ids:
-                seed_auto_agent(db, ws_id)
-            logger.info(f"Auto agent + platform-management skill refreshed for {len(workspace_ids)} workspace(s)")
-    except Exception as e:
-        logger.warning(f"Auto agent skill refresh: {e}")
+        logger.info("Boot seeds completed (leader worker)")
 
 
 async def _schema_migration():
@@ -695,6 +683,7 @@ async def lifespan(app: FastAPI):
     report.started_at = datetime.now(timezone.utc)
 
     logger.info("Starting Automotas AI API Server...")
+    app.state.ready = False
 
     try:
         # ── Phase 1: Core Infrastructure ──
@@ -733,6 +722,7 @@ async def lifespan(app: FastAPI):
         report.ready_at = datetime.now(timezone.utc)
         await run_stage(report, BootstrapStage.READY, lambda: None)
         app.state.bootstrap_report = report
+        app.state.ready = True
 
         failed = report.failed_stages
         if failed:
@@ -1293,6 +1283,21 @@ async def serve_export(file_path: str, ctx = Depends(get_request_context_hybrid)
 
 # WebSocket endpoint removed - using AI SDK SSE streaming instead
 # See consumers/workflows/streaming.py and consumers/chatbot/streaming.py
+
+# Readiness probe — Railway healthcheck target.
+# Returns 200 only after full boot (seeds, trust gate, extensions).
+# During startup returns 503 so Railway holds traffic on the old container.
+@app.get("/health/ready",
+         summary="Readiness probe",
+         tags=["🏥 System Health"])
+async def readiness_probe(request: Request):
+    if not getattr(request.app.state, "ready", False):
+        return JSONResponse(
+            status_code=503,
+            content={"status": "starting", "message": "Boot in progress"},
+        )
+    return {"status": "ready"}
+
 
 # Health check endpoint
 @app.get("/health",
