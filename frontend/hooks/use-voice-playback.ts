@@ -130,8 +130,14 @@ export function useVoicePlayback(): UseVoicePlaybackReturn {
       currentUrlRef.current = url
 
       try {
-        // Fetch audio bytes (follows redirects, avoids CORS issues with new Audio())
-        const response = await fetch(url)
+        // Fetch audio bytes with auth (follows redirects, avoids CORS issues with new Audio())
+        const headers: Record<string, string> = {}
+        const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null
+        const wsId = typeof window !== 'undefined' ? localStorage.getItem('last_active_workspace') : null
+        if (token) headers['Authorization'] = `Bearer ${token}`
+        if (wsId) headers['X-Workspace-ID'] = wsId
+
+        const response = await fetch(url, { headers })
         if (!response.ok) {
           throw new Error(`Audio fetch failed: ${response.status}`)
         }

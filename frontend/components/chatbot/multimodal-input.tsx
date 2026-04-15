@@ -12,7 +12,7 @@ import { ToolLogo } from '@/components/ui/tool-logo'
 import { VoiceMicButton } from '@/components/voice/VoiceMicButton'
 import { VoiceRecordingIndicator } from '@/components/voice/VoiceRecordingIndicator'
 import { useVoiceRecorder } from '@/hooks/use-voice-recorder'
-import { sendVoiceMessage, checkVoiceHealth } from '@/lib/voice-client'
+import { sendVoiceMessage, checkVoiceHealth, getVoiceAudioUrl } from '@/lib/voice-client'
 import { VoiceCallPanel } from '@/components/voice/VoiceCallPanel'
 import type { VisibilityType, AppUsage } from '@/types'
 import { apiClient } from '@/lib/api-client'
@@ -100,7 +100,7 @@ export function MultimodalInput({
               ...(response.audio_url ? [{
                 type: 'voice' as const,
                 transcript: response.response_text,
-                audioUrl: response.audio_url,
+                audioUrl: getVoiceAudioUrl(response.message_id),
               }] : []),
             ],
           }
