@@ -1155,46 +1155,58 @@ export function useAdminDashboard(period: string = '30d') {
 
 // ============= ADMIN: CROSS-WORKSPACE =============
 export function useAdminWorkspaceAnalytics(days: number = 30) {
+  const period = days <= 7 ? '7d' : days <= 30 ? '30d' : '90d'
   return useQuery({
     queryKey: unifiedAnalyticsKeys.adminWorkspaces(days),
     queryFn: async () => {
-      const safeRequest = <T,>(fn: () => Promise<T>, fallback: T): Promise<T> =>
-        Promise.resolve().then(fn).catch((err) => {
-          console.warn('[Analytics] API call failed:', err?.message || err)
-          return fallback
-        })
+      const data = await apiClient.request<{
+        overview: {
+          total_cost: number
+          total_tokens: number
+          total_requests: number
+          total_workspaces: number
+          daily_average: number
+          projected_monthly: number
+        }
+        workspaces: Array<{
+          id: string
+          name: string
+          plan: string
+          is_personal: boolean
+          created_at: string | null
+          agents: number
+          recipes: number
+          executions: number
+          cost: number
+          tokens: number
+          requests: number
+        }>
+      }>(`/api/admin/analytics/dashboard?period=${period}`)
 
-      const [agents] = await Promise.all([
-        safeRequest(() => apiClient.getAgents(), []),
-      ])
-
-      const agentList = Array.isArray(agents) ? agents : []
-      const totalTokens = agentList.reduce((sum: number, a: any) => sum + (a.model_usage_stats?.total_tokens || 0), 0)
-      const totalCost = agentList.reduce((sum: number, a: any) => sum + (a.model_usage_stats?.total_cost || 0), 0)
-      const totalRequests = agentList.reduce((sum: number, a: any) => sum + (a.model_usage_stats?.total_requests || 0), 0)
-
+      const overview = data.overview
       return {
         platformSummary: {
-          totalWorkspaces: 1,
-          totalUsers: 1,
-          totalApiCalls: totalRequests,
-          totalTokens,
-          totalCost,
+          totalWorkspaces: overview.total_workspaces,
+          totalUsers: overview.total_workspaces,
+          totalApiCalls: overview.total_requests,
+          totalTokens: overview.total_tokens,
+          totalCost: overview.total_cost,
+          dailyAverage: overview.daily_average,
+          projectedMonthly: overview.projected_monthly,
         },
-        workspaces: [
-          {
-            id: 'current',
-            name: 'Current Workspace',
-            plan: 'Pilot',
-            users: 1,
-            agents: agentList.length,
-            workflows: 0,
-            apiCalls: totalRequests,
-            tokens: totalTokens,
-            cost: totalCost,
-            status: 'active',
-          },
-        ],
+        workspaces: data.workspaces.map((ws) => ({
+          id: ws.id,
+          name: ws.name,
+          plan: ws.plan,
+          users: 1,
+          agents: ws.agents,
+          workflows: ws.recipes,
+          executions: ws.executions,
+          apiCalls: ws.requests,
+          tokens: ws.tokens,
+          cost: ws.cost,
+          status: 'active' as const,
+        })),
       }
     },
     staleTime: 120000,

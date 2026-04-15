@@ -1,5 +1,5 @@
 import Shepherd from 'shepherd.js'
-import { shepherdTheme } from '../shepherd-theme'
+import { shepherdTheme, mobilePosition } from '../shepherd-theme'
 import { markTourComplete, markTourSkipped } from '../tour-storage'
 import { title, waitForElement, stepProgress, tabList } from '../tour-utils'
 
@@ -139,7 +139,7 @@ export function createChatTour(userId: string) {
       ${stepProgress(5, TOTAL)}
     `,
     beforeShowPromise: () => waitForElement('[data-tour="sidebar"]'),
-    attachTo: { element: '[data-tour="sidebar"]', on: 'right' },
+    attachTo: { element: '[data-tour="sidebar"]', on: mobilePosition('right') },
     buttons: [
       { text: 'Back', classes: 'shepherd-button-secondary', action: tour.back },
       { text: 'Got it!', action: tour.complete },

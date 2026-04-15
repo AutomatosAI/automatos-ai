@@ -72,6 +72,7 @@ export function stepProgress(current: number, total: number): string {
 /**
  * Render a compact bullet list explaining what each top-level tab does.
  * Use inside a tour step to walk the user through a page's tab strip.
+ * On mobile (≤640px), descriptions are truncated for readability.
  *
  * Example:
  *   tabList([
@@ -80,11 +81,12 @@ export function stepProgress(current: number, total: number): string {
  *   ])
  */
 export function tabList(items: ReadonlyArray<readonly [string, string]>): string {
+  const mobile = typeof window !== 'undefined' && window.innerWidth <= 640
   const rows = items
-    .map(
-      ([label, desc]) =>
-        `<li><strong class="text-gray-200">${label}</strong> <span class="text-gray-400">— ${desc}</span></li>`,
-    )
+    .map(([label, desc]) => {
+      const text = mobile && desc.length > 60 ? desc.slice(0, 57) + '…' : desc
+      return `<li><strong class="text-gray-200">${label}</strong> <span class="text-gray-400">— ${text}</span></li>`
+    })
     .join('')
   return `<ul class="shepherd-tab-list text-xs text-gray-300 mt-2 space-y-1 list-disc pl-4">${rows}</ul>`
 }

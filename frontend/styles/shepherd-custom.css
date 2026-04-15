@@ -241,3 +241,74 @@
   background: hsl(16, 100%, 60%);
   box-shadow: 0 0 8px hsla(16, 100%, 60%, 0.5);
 }
+
+/* ===== Mobile Responsiveness ===== */
+@media (max-width: 640px) {
+  /* Constrain tooltip width and position to viewport */
+  .shepherd-theme-automatos.shepherd-element {
+    max-width: calc(100vw - 2rem) !important;
+    margin: 0 1rem !important;
+    border-radius: 12px !important;
+  }
+
+  /* Tighter padding */
+  .shepherd-theme-automatos .shepherd-header {
+    padding: 1rem 1rem 0.375rem !important;
+  }
+
+  .shepherd-theme-automatos .shepherd-text {
+    padding: 0.375rem 1rem 0.75rem !important;
+    font-size: 0.8125rem !important;
+    line-height: 1.6 !important;
+  }
+
+  .shepherd-theme-automatos .shepherd-text p,
+  .shepherd-theme-automatos .shepherd-text span,
+  .shepherd-theme-automatos .shepherd-text li {
+    font-size: 0.8125rem !important;
+    line-height: 1.6 !important;
+  }
+
+  .shepherd-theme-automatos .shepherd-title {
+    font-size: 1rem !important;
+  }
+
+  .shepherd-theme-automatos .shepherd-footer {
+    padding: 0.5rem 1rem 0.75rem !important;
+  }
+
+  .shepherd-theme-automatos .shepherd-button {
+    padding: 0.4rem 1rem !important;
+    font-size: 0.75rem !important;
+  }
+
+  /* Tab lists: smaller text, tighter spacing */
+  .shepherd-theme-automatos .shepherd-text .shepherd-tab-list {
+    font-size: 0.75rem !important;
+  }
+
+  .shepherd-theme-automatos .shepherd-text .shepherd-tab-list li {
+    font-size: 0.75rem !important;
+    line-height: 1.5 !important;
+  }
+}
+
+/* Extra small screens (< 400px) */
+@media (max-width: 400px) {
+  .shepherd-theme-automatos.shepherd-element {
+    max-width: calc(100vw - 1rem) !important;
+    margin: 0 0.5rem !important;
+  }
+
+  .shepherd-theme-automatos .shepherd-header {
+    padding: 0.75rem 0.75rem 0.25rem !important;
+  }
+
+  .shepherd-theme-automatos .shepherd-text {
+    padding: 0.25rem 0.75rem 0.5rem !important;
+  }
+
+  .shepherd-theme-automatos .shepherd-footer {
+    padding: 0.5rem 0.75rem !important;
+  }
+}
