@@ -326,6 +326,7 @@ class Skill(Base):
     tags = Column(JSONB, nullable=True)  # Tags array for categorization
     skill_metadata = Column(JSONB, nullable=True)  # Flexible metadata JSON
     last_sync_at = Column(DateTime(timezone=True), nullable=True)  # Last Git sync timestamp
+    content_hash = Column(String(64), nullable=True)  # SHA-256 of on-disk content for freshness check
     
     # Relationships
     agents = relationship("Agent", secondary=agent_skills, back_populates="skills")

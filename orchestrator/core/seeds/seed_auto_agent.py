@@ -93,12 +93,24 @@ def _get_default_model_config() -> dict:
 
 
 def _upsert_platform_management_skill(db: Session) -> Skill | None:
-    """Upsert the platform-management skill from the bundled SKILL.md.
+    """Create the platform-management skill if it doesn't exist.
 
-    Refreshes prompt_template on every call so deploys pick up edits.
-    Returns the Skill row (global, workspace_id=NULL).
+    Create-only at boot time. Runtime freshness is handled by
+    skill_loader.py via content-hash-cache — no need to rewrite
+    prompt_template on every restart.
     """
+    import hashlib
+
     try:
+        skill = db.query(Skill).filter(
+            Skill.name == "platform-management",
+            Skill.skill_source == "builtin-core",
+        ).first()
+
+        if skill:
+            logger.info("Platform-management skill exists (id=%s), skipping seed", skill.id)
+            return skill
+
         if not _PLATFORM_SKILL_PATH.exists():
             logger.warning("Platform-management SKILL.md not found at %s", _PLATFORM_SKILL_PATH)
             return None
@@ -112,36 +124,27 @@ def _upsert_platform_management_skill(db: Session) -> Skill | None:
         else:
             markdown_body = raw
 
-        skill = db.query(Skill).filter(
-            Skill.name == "platform-management",
-            Skill.skill_source == "builtin-core",
-        ).first()
+        content_hash = hashlib.sha256(markdown_body.encode("utf-8")).hexdigest()
 
-        if skill:
-            skill.prompt_template = markdown_body
-            skill.description = "Complete platform operations — marketplace, agents, playbooks, heartbeats, board, governance, LLMs, workspace setup"
-            skill.skill_version = "1.0.0"
-            skill.is_active = True
-        else:
-            skill = Skill(
-                name="platform-management",
-                description="Complete platform operations — marketplace, agents, playbooks, heartbeats, board, governance, LLMs, workspace setup",
-                skill_type="technical",
-                category="agent-role",
-                skill_version="1.0.0",
-                skill_source="builtin-core",
-                prompt_template=markdown_body,
-                tags=["platform", "admin", "marketplace", "agents", "playbooks", "governance"],
-                is_active=True,
-                workspace_id=None,  # global skill
-            )
-            db.add(skill)
-
+        skill = Skill(
+            name="platform-management",
+            description="Complete platform operations — marketplace, agents, playbooks, heartbeats, board, governance, LLMs, workspace setup",
+            skill_type="technical",
+            category="agent-role",
+            skill_version="1.0.0",
+            skill_source="builtin-core",
+            prompt_template=markdown_body,
+            content_hash=content_hash,
+            tags=["platform", "admin", "marketplace", "agents", "playbooks", "governance"],
+            is_active=True,
+            workspace_id=None,  # global skill
+        )
+        db.add(skill)
         db.flush()
-        logger.info("Platform-management skill upserted (id=%s)", skill.id)
+        logger.info("Platform-management skill created (id=%s)", skill.id)
         return skill
     except Exception:
-        logger.exception("Failed to upsert platform-management skill")
+        logger.exception("Failed to seed platform-management skill")
         return None
 
 
