@@ -175,7 +175,7 @@
       "port": 8300,
       "healthcheck": null,
       "restart_policy": {"type": "ON_FAILURE", "max_retries": 10},
-      "sleep": true,
+      "sleep": false,
       "replicas": null,
       "domains": {
         "railway": ["voice-service-production-bb28.up.railway.app"],
@@ -198,7 +198,7 @@
       "port": 8301,
       "healthcheck": null,
       "restart_policy": {"type": "ON_FAILURE", "max_retries": 10},
-      "sleep": true,
+      "sleep": false,
       "replicas": null,
       "domains": {
         "railway": ["voice-pipeline-production.up.railway.app"],
