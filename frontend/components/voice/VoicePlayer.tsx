@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { Play, Pause, Volume2 } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { Button } from '@/components/ui/button'
@@ -9,6 +9,7 @@ import { useVoicePlayback } from '@/hooks/use-voice-playback'
 interface VoicePlayerProps {
   audioUrl: string
   audioBase64?: string  // inline base64 audio (preferred, avoids fetch)
+  autoPlay?: boolean
   duration?: number // in ms, for display before loading
   compact?: boolean
   className?: string
@@ -26,6 +27,7 @@ function formatTime(seconds: number): string {
 export function VoicePlayer({
   audioUrl,
   audioBase64,
+  autoPlay = false,
   duration: initialDurationMs,
   compact = false,
   className = '',
@@ -43,6 +45,16 @@ export function VoicePlayer({
 
   const [rateIndex, setRateIndex] = useState(0)
   const currentRate = PLAYBACK_RATES[rateIndex]
+  const didAutoPlay = useRef(false)
+
+  // Auto-play on mount when autoPlay is set
+  useEffect(() => {
+    if (autoPlay && !didAutoPlay.current && (audioBase64 || audioUrl)) {
+      didAutoPlay.current = true
+      const src = audioBase64 ? `data:audio/mp3;base64,${audioBase64}` : audioUrl
+      play(src)
+    }
+  }, [autoPlay, audioBase64, audioUrl, play])
 
   const displayDuration = useMemo(() => {
     if (audioDuration > 0) return audioDuration

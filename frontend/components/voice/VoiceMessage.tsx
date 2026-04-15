@@ -55,6 +55,7 @@ export function VoiceMessage({
               <VoicePlayer
                 audioUrl={audioUrl || ''}
                 audioBase64={audioBase64 || undefined}
+                autoPlay={!isUser}
                 duration={durationMs}
                 compact
                 className="flex-1"
