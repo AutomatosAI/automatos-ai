@@ -19,7 +19,7 @@ export function createToolsTour(userId: string) {
     text: `
       <p class="text-gray-300 mb-2">
         This is where your workspace plugs into the outside world. Connect Gmail,
-        Slack, GitHub, Jira, HubSpot, CRMs, databases — 150+ integrations — and any
+        Slack, GitHub, Jira, HubSpot, CRMs, databases — 1,000+ integrations — and any
         agent you give access to can start calling them as tools.
       </p>
       <p class="text-gray-400 text-sm">

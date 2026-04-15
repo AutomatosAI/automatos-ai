@@ -41,7 +41,7 @@ export function createAgentsTour(userId: string) {
         ['Org Chart', 'Visualise reporting lines and coordination hierarchy between agents.'],
         ['Configuration', 'Deep settings — model, system prompt, memory, guardrails.'],
         ['Coordination', 'Rules for how agents hand off work to each other and share context.'],
-        ['Recipes', 'Reusable playbooks assigned to an agent — the jobs they know how to run.'],
+        ['Playbooks', 'Reusable playbooks assigned to an agent — the jobs they know how to run.'],
       ])}
       ${stepProgress(2, TOTAL)}
     `,
