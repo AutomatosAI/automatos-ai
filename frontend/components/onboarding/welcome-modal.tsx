@@ -46,68 +46,65 @@ export function WelcomeModal({ open, onOpenChange, userId }: WelcomeModalProps) 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-lg sm:max-w-xl">
         <DialogHeader>
-          <div className="flex items-center gap-3 mb-2">
+          <div className="flex items-center gap-3 mb-1">
             <Image
               src="/brand/automatos-mark.png"
               alt="Automatos AI"
-              width={48}
-              height={48}
+              width={40}
+              height={40}
               className="rounded-lg"
             />
             <div>
-              <DialogTitle className="text-2xl">
+              <DialogTitle className="text-xl">
                 Welcome to <span className="text-white">Automatos</span>{' '}
                 <span className="gradient-text">AI</span>
               </DialogTitle>
-              <DialogDescription className="text-gray-400 mt-1">
+              <DialogDescription className="text-gray-400 text-sm">
                 Your intelligent automation platform
               </DialogDescription>
             </div>
           </div>
         </DialogHeader>
 
-        <div className="space-y-6 py-4">
+        <div className="space-y-4 py-2">
           {/* Friendly overview */}
-          <div>
-            <p className="text-gray-300 leading-relaxed">
-              Quick 60-second orientation — we&apos;ll show you where everything lives.
-              Each page also has its own mini-tour that appears on your first visit.
-            </p>
-          </div>
+          <p className="text-sm text-gray-300 leading-relaxed">
+            Quick 60-second orientation — we&apos;ll show you where everything lives.
+          </p>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="p-4 rounded-lg bg-gray-800/50 border border-gray-700">
-              <div className="font-medium text-sm text-gray-300 mb-1">
+          <div className="grid grid-cols-2 gap-2">
+            <div className="p-3 rounded-lg bg-gray-800/50 border border-gray-700">
+              <div className="font-medium text-sm text-gray-300 mb-0.5">
                 AI Agents
               </div>
               <div className="text-xs text-gray-400">
-                Create autonomous workers for email, data, research, and more
+                Autonomous workers for email, data, research &amp; more
               </div>
             </div>
-            <div className="p-4 rounded-lg bg-gray-800/50 border border-gray-700">
-              <div className="font-medium text-sm text-gray-300 mb-1">
+            <div className="p-3 rounded-lg bg-gray-800/50 border border-gray-700">
+              <div className="font-medium text-sm text-gray-300 mb-0.5">
                 1,000+ Integrations
               </div>
               <div className="text-xs text-gray-400">
-                Connect to Gmail, Slack, Jira, GitHub, and all your tools
+                Gmail, Slack, Jira, GitHub and all your tools
               </div>
             </div>
-            <div className="p-4 rounded-lg bg-gray-800/50 border border-gray-700">
-              <div className="font-medium text-sm text-gray-300 mb-1">
-                Workflows &amp; Playbooks
+            <div className="p-3 rounded-lg bg-gray-800/50 border border-gray-700">
+              <div className="font-medium text-sm text-gray-300 mb-0.5">
+                Playbooks
               </div>
               <div className="text-xs text-gray-400">
-                Build complex automations with no-code visual builder
+                Multi-agent workflows with no-code builder
               </div>
             </div>
-            <div className="p-4 rounded-lg bg-gray-800/50 border border-gray-700">
-              <div className="font-medium text-sm text-gray-300 mb-1">
+            <div className="p-3 rounded-lg bg-gray-800/50 border border-gray-700">
+              <div className="font-medium text-sm text-gray-300 mb-0.5">
                 AI Chat
               </div>
               <div className="text-xs text-gray-400">
-                Get help anytime from your AI assistant
+                Get help anytime from Auto, your assistant
               </div>
             </div>
           </div>
@@ -140,31 +137,29 @@ export function WelcomeModal({ open, onOpenChange, userId }: WelcomeModalProps) 
 
           {/* Tour CTA */}
           <div
-            className="p-4 rounded-lg bg-orange-500/10 border border-orange-500/30 cursor-pointer hover:bg-orange-500/20 transition-colors"
+            className="p-3 rounded-lg bg-orange-500/10 border border-orange-500/30 cursor-pointer hover:bg-orange-500/20 transition-colors"
             onClick={handleStartTour}
           >
-            <div className="flex items-start gap-3">
-              <div className="mt-0.5">
-                <Sparkles className="w-5 h-5 text-orange-400" />
-              </div>
+            <div className="flex items-center gap-3">
+              <Sparkles className="w-5 h-5 text-orange-400 flex-shrink-0" />
               <div className="flex-1">
-                <div className="font-medium text-gray-200 mb-1">
+                <div className="font-medium text-sm text-gray-200">
                   Take a quick tour
                 </div>
-                <div className="text-sm text-gray-400">
-                  We&apos;ll guide you step by step — you can skip or exit anytime by pressing{' '}
-                  <kbd className="px-1.5 py-0.5 text-xs bg-gray-700 rounded">ESC</kbd>
+                <div className="text-xs text-gray-400">
+                  Step by step — press <kbd className="px-1 py-0.5 text-xs bg-gray-700 rounded">ESC</kbd> to exit anytime
                 </div>
               </div>
             </div>
           </div>
 
           {/* Actions */}
-          <div className="flex items-center justify-between pt-2">
+          <div className="flex items-center justify-between">
             <Button
               variant="ghost"
+              size="sm"
               onClick={handleSkip}
-              className="text-gray-400 hover:text-gray-200"
+              className="text-gray-400 hover:text-gray-200 text-sm"
             >
               Skip, I&apos;ll explore on my own
             </Button>
@@ -172,6 +167,7 @@ export function WelcomeModal({ open, onOpenChange, userId }: WelcomeModalProps) 
               onClick={handleStartTour}
               disabled={isStarting}
               variant="outline"
+              size="sm"
             >
               {isStarting ? 'Starting...' : 'Start Tour'}
               <Sparkles className="w-4 h-4 ml-2" />
