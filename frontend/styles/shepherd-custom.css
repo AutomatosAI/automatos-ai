@@ -244,11 +244,26 @@
 
 /* ===== Mobile Responsiveness ===== */
 @media (max-width: 640px) {
-  /* Constrain tooltip width and position to viewport */
+  /* Force all tooltips to stay within viewport */
   .shepherd-theme-automatos.shepherd-element {
     max-width: calc(100vw - 2rem) !important;
-    margin: 0 1rem !important;
+    width: calc(100vw - 2rem) !important;
+    left: 1rem !important;
+    right: 1rem !important;
     border-radius: 12px !important;
+    box-sizing: border-box !important;
+  }
+
+  /* Centered step (added via JS): pin to center of screen */
+  .shepherd-theme-automatos.shepherd-element.shepherd-centered {
+    position: fixed !important;
+    top: 50% !important;
+    left: 50% !important;
+    right: auto !important;
+    transform: translate(-50%, -50%) !important;
+    width: calc(100vw - 2rem) !important;
+    max-height: calc(100vh - 4rem) !important;
+    overflow-y: auto !important;
   }
 
   /* Tighter padding */
@@ -297,7 +312,13 @@
 @media (max-width: 400px) {
   .shepherd-theme-automatos.shepherd-element {
     max-width: calc(100vw - 1rem) !important;
-    margin: 0 0.5rem !important;
+    width: calc(100vw - 1rem) !important;
+    left: 0.5rem !important;
+    right: 0.5rem !important;
+  }
+
+  .shepherd-theme-automatos.shepherd-element.shepherd-centered {
+    width: calc(100vw - 1rem) !important;
   }
 
   .shepherd-theme-automatos .shepherd-header {
