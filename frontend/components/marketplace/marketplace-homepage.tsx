@@ -28,6 +28,7 @@ import { apiClient } from '@/lib/api-client'
 import { useWorkspace } from '@/hooks/use-workspace'
 import { useFeaturedItems, useToggleFeatured } from '@/hooks/use-marketplace-api'
 import { useSystemRole } from '@/contexts/role-context'
+import { MarketplaceItemModal } from './marketplace-item-modal'
 
 export interface MarketplaceItem {
   id: number
@@ -71,7 +72,7 @@ function CapabilitiesTab({ searchQuery, workspaceId }: { searchQuery: string; wo
 
 // ── Featured Banner ─────────────────────────────────────────────────
 
-function FeaturedBanner({ items, isAdmin }: { items: MarketplaceItem[]; isAdmin: boolean }) {
+function FeaturedBanner({ items, isAdmin, onItemClick }: { items: MarketplaceItem[]; isAdmin: boolean; onItemClick: (id: number) => void }) {
   const toggleFeatured = useToggleFeatured()
 
   if (!items || items.length === 0) return null
@@ -98,7 +99,7 @@ function FeaturedBanner({ items, isAdmin }: { items: MarketplaceItem[]; isAdmin:
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Hero card */}
-        <Card className="lg:col-span-2 overflow-hidden border-primary/20 bg-gradient-to-br from-primary/10 via-card/80 to-card/50 backdrop-blur-sm">
+        <Card className="lg:col-span-2 overflow-hidden border-primary/20 bg-gradient-to-br from-primary/10 via-card/80 to-card/50 backdrop-blur-sm cursor-pointer hover:border-primary/40 transition-colors" onClick={() => onItemClick(hero.id)}>
           <CardContent className="p-6 flex flex-col justify-between h-full min-h-[180px]">
             <div>
               <div className="flex items-start justify-between mb-2">
@@ -114,7 +115,7 @@ function FeaturedBanner({ items, isAdmin }: { items: MarketplaceItem[]; isAdmin:
                     variant="ghost"
                     size="sm"
                     className="text-primary hover:text-primary/80"
-                    onClick={() => toggleFeatured.mutate(hero.id)}
+                    onClick={(e) => { e.stopPropagation(); toggleFeatured.mutate(hero.id) }}
                     disabled={toggleFeatured.isLoading}
                   >
                     <Star className="h-4 w-4 fill-current" />
@@ -136,7 +137,7 @@ function FeaturedBanner({ items, isAdmin }: { items: MarketplaceItem[]; isAdmin:
         {/* Side rail */}
         <div className="flex flex-col gap-3">
           {rail.map((item) => (
-            <Card key={item.id} className="border-border/40 bg-card/50 backdrop-blur-sm hover:border-primary/20 transition-colors">
+            <Card key={item.id} className="border-border/40 bg-card/50 backdrop-blur-sm hover:border-primary/20 transition-colors cursor-pointer" onClick={() => onItemClick(item.id)}>
               <CardContent className="p-3 flex items-center gap-3">
                 {item.icon && <span className="text-2xl shrink-0">{item.icon}</span>}
                 <div className="flex-1 min-w-0">
@@ -149,7 +150,7 @@ function FeaturedBanner({ items, isAdmin }: { items: MarketplaceItem[]; isAdmin:
                       variant="ghost"
                       size="icon"
                       className="h-7 w-7 text-primary/60 hover:text-primary"
-                      onClick={() => toggleFeatured.mutate(item.id)}
+                      onClick={(e) => { e.stopPropagation(); toggleFeatured.mutate(item.id) }}
                       disabled={toggleFeatured.isLoading}
                     >
                       <Star className="h-3 w-3 fill-current" />
@@ -173,7 +174,7 @@ function FeaturedBanner({ items, isAdmin }: { items: MarketplaceItem[]; isAdmin:
 
 // ── Recommendations Rail ────────────────────────────────────────────
 
-function RecommendationsRail({ items }: { items: MarketplaceItem[] }) {
+function RecommendationsRail({ items, onItemClick }: { items: MarketplaceItem[]; onItemClick: (id: number) => void }) {
   if (!items || items.length === 0) return null
 
   const formatInstalls = (n: number) => {
@@ -197,6 +198,7 @@ function RecommendationsRail({ items }: { items: MarketplaceItem[] }) {
           <Card
             key={item.id}
             className="min-w-[200px] max-w-[220px] shrink-0 border-border/40 bg-card/50 backdrop-blur-sm hover:border-primary/20 transition-colors cursor-pointer"
+            onClick={() => onItemClick(item.id)}
           >
             <CardContent className="p-4">
               <div className="flex items-center gap-2 mb-2">
@@ -254,6 +256,7 @@ export function MarketplaceHomepage() {
       .catch(() => {})
   }, [])
 
+  const [selectedItemId, setSelectedItemId] = useState<number | null>(null)
   const [recItems, setRecItems] = useState<MarketplaceItem[]>([])
   useEffect(() => {
     apiClient.get('/api/marketplace/items?limit=20')
@@ -314,11 +317,11 @@ export function MarketplaceHomepage() {
 
       {/* ── Featured Banner ─────────────────────────────────── */}
       {!featuredLoading && (featuredItems as MarketplaceItem[] | undefined)?.length ? (
-        <FeaturedBanner items={featuredItems as MarketplaceItem[]} isAdmin={isAdmin} />
+        <FeaturedBanner items={featuredItems as MarketplaceItem[]} isAdmin={isAdmin} onItemClick={setSelectedItemId} />
       ) : null}
 
       {/* ── Recommendations Rail ────────────────────────────── */}
-      <RecommendationsRail items={recItems} />
+      <RecommendationsRail items={recItems} onItemClick={setSelectedItemId} />
 
       {/* ── Category Tabs ───────────────────────────────────── */}
       <motion.div
@@ -366,6 +369,14 @@ export function MarketplaceHomepage() {
           </TabsContent>
         </Tabs>
       </motion.div>
+
+      {/* Item detail modal for featured/recommended clicks */}
+      {selectedItemId !== null && (
+        <MarketplaceItemModal
+          itemId={selectedItemId}
+          onClose={() => setSelectedItemId(null)}
+        />
+      )}
     </div>
   )
 }
