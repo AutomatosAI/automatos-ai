@@ -66,23 +66,16 @@ def _load_default_persona() -> str:
 
 
 def _get_default_model_config() -> dict:
-    """Build default model_config from system_settings / env.
+    """Build default model_config for new Auto agents.
 
-    Reads from the global system_settings table (orchestrator_llm category)
-    which serves as the deployment-level default for new workspaces.
-    Falls back to env vars (LLM_PROVIDER, LLM_MODEL) if DB is unavailable.
+    Uses a safe default (OpenRouter / Gemini Flash). The user configures the
+    actual provider+model via Settings > Orchestrator which writes directly to
+    the Auto agent row — that is the single source of truth.  We do NOT read
+    from system_settings or env vars here to avoid stale cached values.
     """
-    try:
-        from config import config
-        provider = config.LLM_PROVIDER or "openrouter"
-        model_id = config.LLM_MODEL or "google/gemini-2.5-flash"
-    except Exception:
-        provider = "openrouter"
-        model_id = "google/gemini-2.5-flash"
-
     return {
-        "provider": provider,
-        "model_id": model_id,
+        "provider": "openrouter",
+        "model_id": "google/gemini-2.5-flash",
         "temperature": 0.7,
         "max_tokens": 4000,
         "top_p": 1.0,

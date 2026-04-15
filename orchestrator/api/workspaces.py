@@ -56,8 +56,12 @@ async def get_current_workspace(
     if not workspace:
         raise HTTPException(status_code=404, detail="Workspace not found")
 
-    # Detect brand-new workspace: no agents created yet
-    agent_count = db.query(Agent).filter(Agent.workspace_id == workspace.id).count()
+    # Detect brand-new workspace: no user-created agents yet
+    # Exclude system agents (Auto) — they're seeded automatically during provisioning
+    agent_count = db.query(Agent).filter(
+        Agent.workspace_id == workspace.id,
+        Agent.is_system_agent != True,
+    ).count()
 
     # Auto-generate webhook_key if missing (for workspaces created before migration)
     if not workspace.webhook_key:
@@ -369,8 +373,8 @@ async def get_orchestrator_settings(
             )
         else:
             result["llm"] = {
-                "provider": config.LLM_PROVIDER or "openrouter",
-                "model_id": config.LLM_MODEL or "openai/gpt-4o",
+                "provider": "openrouter",
+                "model_id": "google/gemini-2.5-flash",
                 "temperature": 0.7,
                 "max_tokens": 4000,
                 "top_p": 1.0,
@@ -550,7 +554,7 @@ async def save_orchestrator_settings(
             mc = auto_agent.model_config
             result["llm"] = {
                 "provider": mc.get("provider", "openrouter"),
-                "model_id": mc.get("model_id", "openai/gpt-4o"),
+                "model_id": mc.get("model_id", "google/gemini-2.5-flash"),
                 "temperature": mc.get("temperature", 0.7),
                 "max_tokens": mc.get("max_tokens", 4000),
                 "top_p": mc.get("top_p", 1.0),
