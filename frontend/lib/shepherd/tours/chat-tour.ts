@@ -16,12 +16,27 @@ export function createChatTour(userId: string) {
   // Step 1: About (centered)
   tour.addStep({
     id: 'chat-about',
-    title: title('AI', 'Command Line'),
+    title: title('Meet', 'Auto'),
     text: `
-      <p class="text-gray-300 mb-2">
-        This is your main conversation interface. Chat with any agent,
-        switch models on the fly, and toggle special modes like Code,
-        Plan, and Mission — all from one place.
+      <p class="text-gray-300 mb-3">
+        Welcome to your AI command line. This is where you talk to <strong>Auto</strong> —
+        your personal AI assistant who knows the entire platform inside and out.
+      </p>
+      <p class="text-gray-300 mb-3">
+        Auto <strong>remembers you</strong> between conversations — introduce yourself,
+        tell him about your work, and he'll tailor every interaction to you from now on.
+      </p>
+      <p class="text-gray-300 mb-3">
+        Auto can <strong>manage the platform for you</strong>: create agents, launch missions,
+        connect tools, check analytics, read your emails — just ask in plain English.
+      </p>
+      <p class="text-gray-300 mb-3">
+        Auto <strong>follows you everywhere</strong> — on other pages you'll see a chat bubble
+        in the bottom-right corner so you can ask questions without leaving the page.
+        You can always jump back here for a full conversation.
+      </p>
+      <p class="text-gray-400 text-sm">
+        Try saying: <em>"Hi Auto, I'm [your name]. What can you help me with?"</em>
       </p>
       ${stepProgress(1, TOTAL)}
     `,
@@ -100,25 +115,31 @@ export function createChatTour(userId: string) {
     ],
   })
 
-  // Step 5: Meet Auto
+  // Step 5: Navigation sidebar
   tour.addStep({
-    id: 'chat-auto',
-    title: title('Meet', 'Auto'),
+    id: 'chat-nav',
+    title: title('Your', 'Navigation'),
     text: `
       <p class="text-gray-300 mb-2">
-        See the chat bubble in the <strong>bottom right</strong>? That's <strong>Auto</strong> —
-        your AI assistant that follows you to every page in the platform.
+        This sidebar is your launchpad to every part of the platform:
       </p>
-      <p class="text-gray-300 mb-2">
-        Ask Auto anything — how to build agents, create playbooks, set up missions,
-        connect tools, or understand your analytics. If you're ever stuck, Auto is
-        right there to help.
-      </p>
-      <p class="text-gray-400 text-sm">
-        Try it now — ask Auto <em>"What can you help me with?"</em>
+      ${tabList([
+        ['Activity', 'Live dashboard of everything your agents are doing — missions, tasks, and reports.'],
+        ['Workspace', 'Your shared file system — agent outputs, code, and collaboration files.'],
+        ['Agents', 'Build, configure, and manage your AI workforce.'],
+        ['Tools', 'Connect integrations like Gmail, Slack, GitHub, and more.'],
+        ['Knowledge Base', 'Upload documents, connect data sources — give your agents context.'],
+        ['Marketplace', 'Discover and install pre-built agents, playbooks, and tools.'],
+        ['Analytics', 'Track performance, costs, and usage across your workspace.'],
+      ])}
+      <p class="text-gray-400 text-sm mt-2">
+        Each page has its own guided tour — click your avatar and select
+        <em>Tour this page</em> on any page to learn more.
       </p>
       ${stepProgress(5, TOTAL)}
     `,
+    beforeShowPromise: () => waitForElement('[data-tour="sidebar"]'),
+    attachTo: { element: '[data-tour="sidebar"]', on: 'right' },
     buttons: [
       { text: 'Back', classes: 'shepherd-button-secondary', action: tour.back },
       { text: 'Got it!', action: tour.complete },

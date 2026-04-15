@@ -162,8 +162,8 @@ export function ActivityPage() {
         <StatsBar stats={stats} className="grid gap-3 md:gap-4" />
       </div>
 
-      <div data-tour="activity-tabs">
-        <FilterTabs tabs={TAB_DEFS} value={activeTab} onValueChange={setActiveTab}>
+      <div>
+        <FilterTabs tabs={TAB_DEFS} value={activeTab} onValueChange={setActiveTab} dataTour="activity-tabs">
           <TabsContent value="summary">
             <div data-tour="activity-summary">
               <CommandCentreDashboard

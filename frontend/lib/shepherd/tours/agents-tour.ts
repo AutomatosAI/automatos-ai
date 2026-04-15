@@ -73,7 +73,7 @@ export function createAgentsTour(userId: string) {
     ],
   })
 
-  // Step 4: Agent cards (centered)
+  // Step 4: Agent cards
   tour.addStep({
     id: 'agents-cards',
     title: title('Your', 'Agent Roster'),
@@ -85,6 +85,8 @@ export function createAgentsTour(userId: string) {
       </p>
       ${stepProgress(4, TOTAL)}
     `,
+    beforeShowPromise: () => waitForElement('[data-tour="agent-roster"]'),
+    attachTo: { element: '[data-tour="agent-roster"]', on: 'top' },
     buttons: [
       { text: 'Back', classes: 'shepherd-button-secondary', action: tour.back },
       { text: 'Got it!', action: tour.complete },
