@@ -21,9 +21,14 @@ export function useVoicePlayback(): UseVoicePlaybackReturn {
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
 
-  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const ctxRef = useRef<AudioContext | null>(null)
+  const sourceRef = useRef<AudioBufferSourceNode | null>(null)
+  const bufferRef = useRef<AudioBuffer | null>(null)
+  const startTimeRef = useRef(0)
+  const offsetRef = useRef(0)
   const rafRef = useRef<number | null>(null)
   const currentUrlRef = useRef<string | null>(null)
+  const rateRef = useRef(1)
 
   const stopAnimationFrame = useCallback(() => {
     if (rafRef.current !== null) {
@@ -34,23 +39,30 @@ export function useVoicePlayback(): UseVoicePlaybackReturn {
 
   const startTimeTracking = useCallback(() => {
     const tick = () => {
-      if (audioRef.current) {
-        setCurrentTime(audioRef.current.currentTime)
+      if (ctxRef.current && state === 'playing') {
+        const elapsed = ctxRef.current.currentTime - startTimeRef.current
+        setCurrentTime(offsetRef.current + elapsed * rateRef.current)
       }
       rafRef.current = requestAnimationFrame(tick)
     }
     rafRef.current = requestAnimationFrame(tick)
-  }, [])
+  }, [state])
 
   const destroyAudio = useCallback(() => {
     stopAnimationFrame()
-    if (audioRef.current) {
-      audioRef.current.pause()
-      audioRef.current.removeAttribute('src')
-      audioRef.current.load()
-      audioRef.current = null
+    if (sourceRef.current) {
+      try { sourceRef.current.stop() } catch { /* already stopped */ }
+      sourceRef.current.disconnect()
+      sourceRef.current = null
     }
+    if (ctxRef.current) {
+      ctxRef.current.close()
+      ctxRef.current = null
+    }
+    bufferRef.current = null
     currentUrlRef.current = null
+    startTimeRef.current = 0
+    offsetRef.current = 0
     setState('idle')
     setCurrentTime(0)
     setDuration(0)
@@ -63,91 +75,142 @@ export function useVoicePlayback(): UseVoicePlaybackReturn {
     }
   }, [destroyAudio])
 
+  const playBuffer = useCallback((buffer: AudioBuffer, offset = 0) => {
+    // Create fresh context + source for each play
+    if (ctxRef.current) {
+      ctxRef.current.close()
+    }
+    const ctx = new AudioContext()
+    ctxRef.current = ctx
+
+    const source = ctx.createBufferSource()
+    source.buffer = buffer
+    source.playbackRate.value = rateRef.current
+    source.connect(ctx.destination)
+    sourceRef.current = source
+
+    offsetRef.current = offset
+    startTimeRef.current = ctx.currentTime
+
+    source.onended = () => {
+      stopAnimationFrame()
+      // Only set to idle if it played to the end (not manually stopped)
+      if (sourceRef.current === source) {
+        setCurrentTime(buffer.duration)
+        setState('idle')
+      }
+    }
+
+    source.start(0, offset)
+    setState('playing')
+
+    // Time tracking via rAF
+    const tick = () => {
+      if (ctxRef.current && sourceRef.current === source) {
+        const elapsed = ctx.currentTime - startTimeRef.current
+        const t = offset + elapsed * rateRef.current
+        setCurrentTime(Math.min(t, buffer.duration))
+      }
+      rafRef.current = requestAnimationFrame(tick)
+    }
+    rafRef.current = requestAnimationFrame(tick)
+  }, [stopAnimationFrame])
+
   const play = useCallback(
-    (url: string) => {
-      // If playing the same URL, restart
-      if (audioRef.current && currentUrlRef.current === url) {
-        audioRef.current.currentTime = 0
-        audioRef.current.play()
-        setState('playing')
-        startTimeTracking()
+    async (url: string) => {
+      // If we have the same buffer cached, replay from start
+      if (bufferRef.current && currentUrlRef.current === url) {
+        playBuffer(bufferRef.current, 0)
         return
       }
 
       // New URL — destroy old audio
       destroyAudio()
-
       setState('loading')
-      const audio = new Audio(url)
-      audioRef.current = audio
       currentUrlRef.current = url
 
-      audio.onloadedmetadata = () => {
-        setDuration(audio.duration)
-      }
-
-      audio.oncanplaythrough = () => {
-        if (state === 'loading' || audioRef.current === audio) {
-          audio.play()
-          setState('playing')
-          startTimeTracking()
+      try {
+        // Fetch audio bytes (follows redirects, avoids CORS issues with new Audio())
+        const response = await fetch(url)
+        if (!response.ok) {
+          throw new Error(`Audio fetch failed: ${response.status}`)
         }
-      }
+        const arrayBuffer = await response.arrayBuffer()
 
-      audio.onended = () => {
-        stopAnimationFrame()
-        setCurrentTime(audio.duration)
+        // Decode with AudioContext
+        const tempCtx = new AudioContext()
+        const buffer = await tempCtx.decodeAudioData(arrayBuffer)
+        tempCtx.close()
+
+        bufferRef.current = buffer
+        setDuration(buffer.duration)
+
+        // Check we haven't been cancelled while loading
+        if (currentUrlRef.current !== url) return
+
+        playBuffer(buffer, 0)
+      } catch (err) {
+        console.error('Voice playback failed:', err)
         setState('idle')
       }
-
-      audio.onerror = () => {
-        destroyAudio()
-        setState('idle')
-      }
-
-      audio.load()
     },
-    [destroyAudio, startTimeTracking, stopAnimationFrame, state]
+    [destroyAudio, playBuffer]
   )
 
   const pause = useCallback(() => {
-    if (audioRef.current && state === 'playing') {
-      audioRef.current.pause()
+    if (sourceRef.current && ctxRef.current && state === 'playing') {
+      // Record current position
+      const elapsed = ctxRef.current.currentTime - startTimeRef.current
+      offsetRef.current = offsetRef.current + elapsed * rateRef.current
       stopAnimationFrame()
+      try { sourceRef.current.stop() } catch { /* ok */ }
+      sourceRef.current.disconnect()
+      sourceRef.current = null
+      ctxRef.current.close()
+      ctxRef.current = null
       setState('paused')
     }
   }, [state, stopAnimationFrame])
 
   const resume = useCallback(() => {
-    if (audioRef.current && state === 'paused') {
-      audioRef.current.play()
-      setState('playing')
-      startTimeTracking()
+    if (bufferRef.current && state === 'paused') {
+      playBuffer(bufferRef.current, offsetRef.current)
     }
-  }, [state, startTimeTracking])
+  }, [state, playBuffer])
 
   const stop = useCallback(() => {
-    if (audioRef.current) {
-      audioRef.current.pause()
-      audioRef.current.currentTime = 0
-      stopAnimationFrame()
-      setCurrentTime(0)
-      setState('idle')
+    stopAnimationFrame()
+    if (sourceRef.current) {
+      try { sourceRef.current.stop() } catch { /* ok */ }
+      sourceRef.current.disconnect()
+      sourceRef.current = null
     }
+    if (ctxRef.current) {
+      ctxRef.current.close()
+      ctxRef.current = null
+    }
+    offsetRef.current = 0
+    setCurrentTime(0)
+    setState('idle')
   }, [stopAnimationFrame])
 
   const setPlaybackRate = useCallback((rate: number) => {
-    if (audioRef.current) {
-      audioRef.current.playbackRate = rate
+    rateRef.current = rate
+    if (sourceRef.current) {
+      sourceRef.current.playbackRate.value = rate
     }
   }, [])
 
   const seek = useCallback((time: number) => {
-    if (audioRef.current) {
-      audioRef.current.currentTime = time
+    if (bufferRef.current) {
       setCurrentTime(time)
+      if (state === 'playing') {
+        playBuffer(bufferRef.current, time)
+      } else {
+        offsetRef.current = time
+      }
     }
-  }, [])
+  }, [state, playBuffer])
 
   return {
     state,
