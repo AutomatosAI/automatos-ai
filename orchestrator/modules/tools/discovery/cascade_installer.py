@@ -294,11 +294,13 @@ def _copy_tool_assignments(
 ) -> List[str]:
     """
     Copy tool assignments from a marketplace agent to a cloned workspace agent.
-    Writes to BOTH tables:
+    Writes to THREE tables:
       - agent_app_assignments (runtime — used by get_tools_for_agent)
       - agent_tool_assignments (display — used by marketplace browse)
+      - composio_connections (workspace — used by Settings > Integrations)
     Returns list of tool_id strings that were copied.
     """
+    from core.composio.entity_manager import EntityManager
     from core.models.composio_cache import AgentAppAssignment
 
     # Read from legacy display table (what marketplace agents use)
@@ -310,6 +312,11 @@ def _copy_tool_assignments(
     tool_names = [row[0] for row in rows if row[0]]
     if not tool_names:
         return []
+
+    # Ensure workspace has a Composio entity for tool connections
+    entity_manager = EntityManager(db)
+    entity = entity_manager.get_or_create_entity(workspace_id)
+    entity_id = entity["id"]
 
     for tool_name in tool_names:
         upper_name = tool_name.upper()
@@ -342,6 +349,21 @@ def _copy_tool_assignments(
                 INSERT INTO agent_tool_assignments (agent_id, tool_id, enabled, created_at, updated_at)
                 VALUES (:agent_id, :tool_id, true, NOW(), NOW())
             """), {"agent_id": target_agent_id, "tool_id": tool_name})
+
+        # --- Workspace entity connection (composio_connections) ---
+        # "added" status = tool registered but OAuth not yet connected
+        ws_conn_exists = db.execute(text("""
+            SELECT 1 FROM composio_connections
+            WHERE entity_id = :entity_id AND app_name = :app_name
+        """), {"entity_id": entity_id, "app_name": upper_name}).first()
+
+        if not ws_conn_exists:
+            db.execute(text("""
+                INSERT INTO composio_connections
+                    (entity_id, app_name, status, connected_at, updated_at)
+                VALUES
+                    (:entity_id, :app_name, 'added', NOW(), NOW())
+            """), {"entity_id": entity_id, "app_name": upper_name})
 
     db.flush()
     return [t.upper() for t in tool_names]
