@@ -1,5 +1,5 @@
 """
-Seed marketplace with 18 NEW professional agents (v2).
+Seed marketplace with 22 professional agents (v2).
 
 Expands the marketplace with real-world use cases across sales, finance,
 recruiting, security, marketing, and operations. Tools map to real Composio
@@ -221,12 +221,54 @@ MARKETPLACE_AGENTS_V2 = [
         "model_id": "llama-3.1-8b-instruct",
         "skills": ["Data Analysis", "task_decomposition"],
     },
+
+    # ─── E-COMMERCE / SHOPIFY ───────────────────────────────────
+    {
+        "name": "E-commerce Manager",
+        "agent_type": "custom",
+        "description": "Manages your online store operations end-to-end. Monitors Shopify for new orders and inventory levels, tracks payment analytics via Stripe, and logs sales data in Google Sheets. Alerts on low stock, identifies best-selling products, and helps optimize pricing strategies. Perfect for e-commerce businesses scaling their operations. Uses Llama 3.3 70B for analyzing sales patterns and customer behavior.",
+        "category": "E-commerce",
+        "tags": ["ecommerce", "shopify", "stripe", "sales", "inventory", "payments", "orders"],
+        "tools": ["SHOPIFY", "STRIPE", "GOOGLESHEETS"],
+        "model_id": "llama-3.3-70b-instruct",
+        "skills": ["Data Analysis", "pattern_recognition"],
+    },
+    {
+        "name": "Shopify Product Optimizer",
+        "agent_type": "custom",
+        "description": "Optimizes your Shopify product listings for maximum conversion. Analyzes product performance data, rewrites descriptions for SEO, monitors competitor pricing, and tracks A/B test results in Google Sheets. Generates weekly product performance reports and suggests inventory reorder points. Uses Llama 3.3 70B for data-driven product optimization without premium LLM costs.",
+        "category": "E-commerce",
+        "tags": ["shopify", "products", "seo", "optimization", "conversion", "ecommerce"],
+        "tools": ["SHOPIFY", "GOOGLESHEETS", "GOOGLEDOCS"],
+        "model_id": "llama-3.3-70b-instruct",
+        "skills": ["Data Analysis", "pattern_recognition"],
+    },
+    {
+        "name": "Shopify Customer Engagement",
+        "agent_type": "custom",
+        "description": "Drives customer retention and repeat purchases for your Shopify store. Monitors order history for VIP customers, sends personalized follow-up emails via Gmail, tracks customer segments in Google Sheets, and posts engagement campaigns to Slack for team review. Identifies churn risks and automates win-back sequences. Uses Llama 3.3 70B for personalized customer communication at scale.",
+        "category": "E-commerce",
+        "tags": ["shopify", "customer engagement", "retention", "email", "ecommerce", "crm"],
+        "tools": ["SHOPIFY", "GMAIL", "GOOGLESHEETS", "SLACK"],
+        "model_id": "llama-3.3-70b-instruct",
+        "skills": ["Data Analysis", "pattern_recognition"],
+    },
+    {
+        "name": "Shopify Analytics & Reporting",
+        "agent_type": "custom",
+        "description": "Your e-commerce data analyst. Pulls sales, traffic, and conversion data from Shopify, enriches with payment data from Stripe, and builds automated dashboards in Google Sheets. Generates daily revenue summaries, weekly trend reports, and monthly business reviews. Spots anomalies in real-time and alerts via Slack. Powered by DeepSeek R1 for deep analytical reasoning on complex e-commerce datasets.",
+        "category": "E-commerce",
+        "tags": ["shopify", "analytics", "reporting", "stripe", "dashboards", "ecommerce", "data"],
+        "tools": ["SHOPIFY", "STRIPE", "GOOGLESHEETS", "SLACK"],
+        "model_id": "deepseek-ai/DeepSeek-R1",
+        "skills": ["Data Analysis", "pattern_recognition"],
+    },
 ]
 
 
 def seed_marketplace_agents_v2():
-    """Seed the marketplace with 18 new professional agents (v2 expansion)."""
-    print("🌱 Seeding marketplace with v2 agents (18 new agent types)...")
+    """Seed the marketplace with 22 professional agents (v2 expansion)."""
+    print("🌱 Seeding marketplace with v2 agents (22 agent types)...")
 
     database_url = get_database_url()
     engine = create_engine(database_url)

@@ -522,18 +522,27 @@ async def install_item(
         # Increment marketplace agent install count
         marketplace_agent.install_count = (marketplace_agent.install_count or 0) + 1
 
-        # Record installation in marketplace_installs
+        # Record installation in marketplace_installs using a savepoint so
+        # failures don't roll back the main agent install.
+        # item_id is NOT NULL in production (migration 20260326 was never applied),
+        # so we populate it with the marketplace agent's id.
         install_query = text("""
-            INSERT INTO marketplace_installs (user_id, marketplace_agent_id, cloned_agent_id, version, installed_at)
-            VALUES (:user_id, :marketplace_agent_id, :cloned_agent_id, :version, NOW())
+            INSERT INTO marketplace_installs (item_id, user_id, marketplace_agent_id, cloned_agent_id, version, installed_at)
+            VALUES (:item_id, :user_id, :marketplace_agent_id, :cloned_agent_id, :version, NOW())
+            ON CONFLICT DO NOTHING
         """)
 
-        db.execute(install_query, {
-            "user_id": user_id_int,
-            "marketplace_agent_id": marketplace_agent.id,
-            "cloned_agent_id": cloned_agent.id,
-            "version": marketplace_agent.version
-        })
+        try:
+            with db.begin_nested():
+                db.execute(install_query, {
+                    "item_id": marketplace_agent.id,
+                    "user_id": user_id_int,
+                    "marketplace_agent_id": marketplace_agent.id,
+                    "cloned_agent_id": cloned_agent.id,
+                    "version": marketplace_agent.version
+                })
+        except Exception as e:
+            logger.warning(f"Could not record agent install in marketplace_installs: {e}")
 
         db.commit()
 

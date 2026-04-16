@@ -76,6 +76,7 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
   const [approvingId, setApprovingId] = useState<number | null>(null)
   const [deletingId, setDeletingId] = useState<number | null>(null)
   const [installingId, setInstallingId] = useState<number | null>(null)
+  const [installedIds, setInstalledIds] = useState<Set<number>>(new Set())
 
   // Check if user is admin (you can adjust this check based on your admin logic)
   const isAdmin = user?.emailAddresses?.[0]?.emailAddress?.includes('automatos.app') || false
@@ -361,17 +362,26 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
                   className="text-muted-foreground hover:text-foreground p-0 h-auto">
                   Details
                 </Button>
-                <Button size="sm" variant="outline"
-                  disabled={installingId === agent.id}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setInstallingId(agent.id)
-                    installMutation.mutate(agent.id, {
-                      onSettled: () => setInstallingId(null),
-                    })
-                  }}>
-                  {installingId === agent.id ? 'Adding...' : 'Add to Workspace'}
-                </Button>
+                {installedIds.has(agent.id) ? (
+                  <Button size="sm" variant="secondary"
+                    className="bg-secondary/50 hover:bg-secondary border border-white/10">
+                    <Check className="w-3 h-3 mr-2" />
+                    Added
+                  </Button>
+                ) : (
+                  <Button size="sm" variant="outline"
+                    disabled={installingId === agent.id}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setInstallingId(agent.id)
+                      installMutation.mutate(agent.id, {
+                        onSuccess: () => setInstalledIds(prev => new Set([...prev, agent.id])),
+                        onSettled: () => setInstallingId(null),
+                      })
+                    }}>
+                    {installingId === agent.id ? 'Adding...' : 'Add to Workspace'}
+                  </Button>
+                )}
               </div>
             </Card>
           ))}
