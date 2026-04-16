@@ -51,7 +51,6 @@ from api.memory import router as memory_router
 from api.widget_memory import router as widget_memory_router  # US-013: Widget memory panel
 from api.analytics import router as analytics_router
 from api.workflow_history import router as workflow_history_router
-from api.benchmarking import router as benchmarking_router
 from api.memory_stats import router as memory_stats_router
 from api.context_policy import router as context_policy_router
 from api.codegraph import router as codegraph_router  # PRD-11: New CodeGraph implementation
@@ -144,7 +143,6 @@ except ImportError:
     workspace_github_router = None
 
 # Import MISSING API routers
-from api.orchestrator import router as orchestrator_router
 from api.analytics_api import router as analytics_api_router
 from api.analytics_real import router as analytics_real_router
 from api.kpi_api import router as kpi_router  # KPI Command Centre Widgets
@@ -689,7 +687,6 @@ app = FastAPI(
     | Endpoint Group | Base URL | Description |
     |---|---|---|
     | 🤖 **Agents** | `/api/agents` | Agent lifecycle management |
-    | 👥 **Multi-Agent** | `/api/multi-agent` | Collaborative systems |
     | 🌐 **Field Theory** | `/api/field-theory` | Context field management |
     | 🔄 **Workflows** | `/api/workflows` | Workflow orchestration |
     | 📄 **Documents** | `/api/documents` | Document processing |
@@ -700,7 +697,6 @@ app = FastAPI(
     
     ### 🔌 **Real-time Features**
     - **WebSocket Endpoint**: `/ws` - Real-time communication
-    - **Behavior Monitoring**: `/api/multi-agent/behavior/monitor/realtime`
     - **Live Notifications**: System-wide event streaming
     
     ### 🎛️ **Quick Start**
@@ -943,7 +939,6 @@ app.include_router(widget_memory_router)  # US-013: Widget memory panel (/api/me
 app.include_router(analytics_router)
 app.include_router(workflow_history_router)
 app.include_router(execution_history_router)  # Enhanced execution history API
-app.include_router(benchmarking_router)  # Workflow and agent analytics
 app.include_router(context_policy_router)
 app.include_router(codegraph_router)  # PRD-11: CodeGraph
 app.include_router(github_webhooks_router)  # GitHub PR automation
@@ -966,7 +961,6 @@ app.include_router(templates_router)
 app.include_router(context_summarization_router)  # Context Engineering 2.0: Self-baking
 
 # Include MISSING API routers
-app.include_router(orchestrator_router)
 app.include_router(analytics_api_router)
 app.include_router(analytics_real_router)
 app.include_router(kpi_router)  # KPI Command Centre Widgets
@@ -1363,8 +1357,7 @@ async def root():
         },
         
         "🔌 real_time": {
-            "websocket": "/ws",
-            "behavior_monitoring": "/api/multi-agent/behavior/monitor/realtime"
+            "websocket": "/ws"
         },
         
         "🏥 health_monitoring": {
