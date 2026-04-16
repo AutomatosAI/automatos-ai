@@ -251,6 +251,23 @@ export function ToolDetailsModal({
                                 className="pl-9"
                               />
                             </div>
+                            {actions.length > 0 && (() => {
+                              const allEnabled = actions.every(a => a.enabled)
+                              const noneEnabled = actions.every(a => !a.enabled)
+                              return (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="shrink-0 text-xs"
+                                  onClick={() => {
+                                    const enableAll = !allEnabled
+                                    setActions(prev => prev.map(a => ({ ...a, enabled: enableAll })))
+                                  }}
+                                >
+                                  {allEnabled ? 'Disable All' : noneEnabled ? 'Enable All' : 'Enable All'}
+                                </Button>
+                              )
+                            })()}
                           </div>
 
                           <div className="space-y-2 mb-4">
