@@ -184,7 +184,7 @@ def _get_available_providers(db: Session, workspace_id) -> set:
                 continue
             for variation in [f"{provider}_api", provider]:
                 try:
-                    key = resolver.get_credential_field(variation, "api_key", silent=True)
+                    key = resolver.get_credential_field(variation, "api_key")
                     if key:
                         available.add(provider)
                         break
@@ -271,26 +271,20 @@ async def get_installed_models(
     db: Session = Depends(get_db),
 ):
     """
-    Get usable models for the current workspace.
+    Get installed models for the current workspace.
 
-    Two-gate filter:
-      1. Provider gate — does the provider have an API key? (env, BYOK, cred store)
-      2. Model gate   — has the user installed this model to the workspace?
-
-    Result: only models the user explicitly chose AND can actually call.
+    Returns ALL models the workspace has installed — the UI needs to show
+    them for selection and management. Provider availability (API key
+    checks) is enforced at execution time, not at display time.
     """
     if not ctx.workspace_id:
         raise HTTPException(400, "Workspace context required")
 
     installed_ids = _get_installed_ids(db, ctx.workspace_id)
-    available_providers = _get_available_providers(db, ctx.workspace_id)
 
     if not installed_ids:
-        # Workspace has no models installed yet — return empty so the UI
-        # can prompt the user to visit the marketplace.
         return []
 
-    # Fetch only workspace-installed models
     models = (
         db.query(LLMModel)
         .filter(
@@ -301,21 +295,7 @@ async def get_installed_models(
         .all()
     )
 
-    # Gate 1: filter to models we can actually call.
-    # Aggregator-tier models route through OpenRouter → need openrouter key.
-    # Direct-tier models call the provider directly → need that provider's key.
-    usable = []
-    for m in models:
-        tier = (m.tier or "direct").lower()
-        if tier in ("aggregator", "openrouter"):
-            routing_provider = "openrouter"
-        else:
-            routing_provider = (m.provider or "").lower()
-
-        if routing_provider in available_providers:
-            usable.append(m)
-
-    return [_model_to_out(m, installed_ids) for m in usable]
+    return [_model_to_out(m, installed_ids) for m in models]
 
 
 @router.get("/installed-ids")
