@@ -152,7 +152,29 @@ async def cascade_agent_dependencies(
     if marketplace_agent.model_config and isinstance(marketplace_agent.model_config, dict):
         model_id = marketplace_agent.model_config.get("model_id")
 
+    # Fallback: check configuration dict or marketplace_items metadata
+    if not model_id:
+        config = getattr(marketplace_agent, 'configuration', None)
+        if isinstance(config, dict):
+            model_id = config.get("model_id")
+    if not model_id:
+        # Last resort: look up in marketplace_items table by name
+        mi_row = db.execute(
+            text("SELECT metadata FROM marketplace_items WHERE type='agent' AND name=:name LIMIT 1"),
+            {"name": marketplace_agent.name},
+        ).first()
+        if mi_row and mi_row[0]:
+            mi_meta = mi_row[0] if isinstance(mi_row[0], dict) else {}
+            model_id = mi_meta.get("model_id")
+
     if model_id:
+        # Write model_config onto cloned agent so the model selector pre-selects it
+        if not cloned_agent.model_config or not cloned_agent.model_config.get("model_id"):
+            cloned_agent.model_config = {"model_id": model_id}
+            from sqlalchemy.orm.attributes import flag_modified
+            flag_modified(cloned_agent, "model_config")
+            db.flush()
+
         try:
             model_result = await install_model(db, workspace_id, {"model_id": model_id})
             status = "already_installed" if model_result.get("already_installed") else "installed"
