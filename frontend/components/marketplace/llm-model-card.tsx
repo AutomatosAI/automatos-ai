@@ -178,25 +178,23 @@ export function LLMModelCard({
                 <span>In: {formatCostPer1M(model.input_cost_per_1k)}/1M</span>
               </div>
             </div>
-            <Button
-              size="sm"
-              variant={model.is_installed ? 'secondary' : 'outline'}
-              className={
-                model.is_installed
-                  ? 'h-7 text-xs bg-[hsl(var(--success))]/10 text-[hsl(var(--success))] border-[hsl(var(--success))]/30 shrink-0'
-                  : 'h-7 text-xs shrink-0'
-              }
-              disabled={installing}
-              onClick={handleInstallToggle}
-            >
-              {installing ? (
-                <Loader2 className="w-3 h-3 animate-spin" />
-              ) : model.is_installed ? (
-                <CheckCircle className="w-3 h-3" />
-              ) : (
-                <Download className="w-3 h-3" />
-              )}
-            </Button>
+            {model.is_installed ? (
+              <Button size="sm" variant="secondary"
+                className="h-7 text-xs bg-secondary/50 hover:bg-secondary border border-white/10 shrink-0"
+                disabled={installing}
+                onClick={handleInstallToggle}
+              >
+                {installing ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle className="w-3 h-3" />}
+              </Button>
+            ) : (
+              <Button size="sm" variant="outline"
+                className="h-7 text-xs shrink-0"
+                disabled={installing}
+                onClick={handleInstallToggle}
+              >
+                {installing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
+              </Button>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -386,31 +384,34 @@ export function LLMModelCard({
             )}
           </div>
 
-          <Button
-            size="sm"
-            variant={model.is_installed ? 'secondary' : 'outline'}
-            className={
-              model.is_installed
-                ? 'h-7 text-xs bg-[hsl(var(--success))]/10 text-[hsl(var(--success))] border-[hsl(var(--success))]/30 hover:bg-[hsl(var(--destructive))]/10 hover:text-[hsl(var(--destructive))] hover:border-[hsl(var(--destructive))]/30'
-                : 'h-7 text-xs'
-            }
-            disabled={installing}
-            onClick={handleInstallToggle}
-          >
-            {installing ? (
-              <Loader2 className="w-3 h-3 animate-spin" />
-            ) : model.is_installed ? (
-              <>
-                <CheckCircle className="w-3 h-3 mr-1" />
-                Installed
-              </>
-            ) : (
-              <>
-                <Download className="w-3 h-3 mr-1" />
-                Install
-              </>
-            )}
-          </Button>
+          {model.is_installed ? (
+            <Button size="sm" variant="secondary"
+              className="h-7 text-xs bg-secondary/50 hover:bg-secondary border border-white/10"
+              disabled={installing}
+              onClick={handleInstallToggle}
+            >
+              {installing ? (
+                <Loader2 className="w-3 h-3 animate-spin" />
+              ) : (
+                <>
+                  <CheckCircle className="w-3 h-3 mr-1" />
+                  Added
+                </>
+              )}
+            </Button>
+          ) : (
+            <Button size="sm" variant="outline"
+              className="h-7 text-xs"
+              disabled={installing}
+              onClick={handleInstallToggle}
+            >
+              {installing ? (
+                <Loader2 className="w-3 h-3 animate-spin" />
+              ) : (
+                'Add to Workspace'
+              )}
+            </Button>
+          )}
         </div>
       </CardContent>
     </Card>

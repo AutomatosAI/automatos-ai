@@ -848,38 +848,11 @@ function PluginCard({
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-1 flex-shrink-0">
-              {plugin.security_status === 'safe' && (
-                <StatusBadge size="sm" status="success" className="flex-shrink-0">
-                  Verified
-                </StatusBadge>
-              )}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={(e) => e.stopPropagation()}>
-                    <MoreVertical className="h-4 w-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onClick() }}>
-                    <Eye className="w-4 h-4 mr-2" />
-                    View Details
-                  </DropdownMenuItem>
-                  {!isEnabled && (
-                    <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onEnable() }} disabled={isEnabling}>
-                      <Sparkles className="w-4 h-4 mr-2" />
-                      {isEnabling ? 'Enabling...' : 'Enable for Workspace'}
-                    </DropdownMenuItem>
-                  )}
-                  {isEnabled && (
-                    <DropdownMenuItem disabled>
-                      <CheckCircle className="w-4 h-4 mr-2" />
-                      Enabled
-                    </DropdownMenuItem>
-                  )}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
+            {plugin.security_status === 'safe' && (
+              <StatusBadge size="sm" status="success" className="flex-shrink-0">
+                Verified
+              </StatusBadge>
+            )}
           </div>
         </CardHeader>
 
@@ -929,6 +902,27 @@ function PluginCard({
           </div>
 
         </CardContent>
+        <Separator />
+        <div className="flex items-center justify-between px-6 py-3">
+          <Button variant="ghost" size="sm"
+            onClick={(e) => { e.stopPropagation(); onClick() }}
+            className="text-muted-foreground hover:text-foreground p-0 h-auto">
+            Details
+          </Button>
+          {isEnabled ? (
+            <Button size="sm" variant="secondary"
+              className="bg-secondary/50 hover:bg-secondary border border-white/10">
+              <CheckCircle className="w-3 h-3 mr-2" />
+              Added
+            </Button>
+          ) : (
+            <Button size="sm" variant="outline"
+              onClick={(e) => { e.stopPropagation(); onEnable() }}
+              disabled={isEnabling}>
+              {isEnabling ? 'Adding...' : 'Add to Workspace'}
+            </Button>
+          )}
+        </div>
       </Card>
     </motion.div>
   )

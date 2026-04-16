@@ -282,23 +282,21 @@ export function MarketplacePlaybooksTab({ searchQuery }: MarketplacePlaybooksTab
                       </p>
                     </div>
                   </div>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={(e) => e.stopPropagation()}>
-                        <MoreVertical className="h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleViewPlaybook(recipe) }}>
-                        <Eye className="w-4 h-4 mr-2" />
-                        View Details
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleInstall(e as any, recipe.id) }} disabled={installingPlaybookId === recipe.id}>
-                        <Download className="w-4 h-4 mr-2" />
-                        {installingPlaybookId === recipe.id ? 'Adding...' : 'Add to Workspace'}
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                  {isAdmin && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={(e) => e.stopPropagation()}>
+                          <MoreVertical className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleViewPlaybook(recipe) }}>
+                          <Eye className="w-4 h-4 mr-2" />
+                          View Details
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
                 </div>
               </CardHeader>
 
@@ -337,6 +335,22 @@ export function MarketplacePlaybooksTab({ searchQuery }: MarketplacePlaybooksTab
                 </div>
 
               </CardContent>
+              <Separator />
+              <div className="flex items-center justify-between px-6 py-3">
+                <Button variant="ghost" size="sm"
+                  onClick={(e) => { e.stopPropagation(); handleViewPlaybook(recipe) }}
+                  className="text-muted-foreground hover:text-foreground p-0 h-auto">
+                  Details
+                </Button>
+                <Button size="sm" variant="outline"
+                  disabled={installingPlaybookId === recipe.id}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleInstall(e as any, recipe.id)
+                  }}>
+                  {installingPlaybookId === recipe.id ? 'Adding...' : 'Add to Workspace'}
+                </Button>
+              </div>
             </Card>
           ))}
         </div>
