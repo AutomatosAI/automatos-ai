@@ -514,6 +514,8 @@ def _remap_recipe_steps(
     Steps may reference agents by:
       - agent_name (string) — matched by name (case-insensitive)
       - agent_id (int) — matched by marketplace agent ID → cloned ID map
+      - prompt_template text — fuzzy match agent name in prompt text
+      - (none) — round-robin assign from cloned agents list
     """
     from sqlalchemy.orm.attributes import flag_modified
 
@@ -522,14 +524,16 @@ def _remap_recipe_steps(
         return
 
     id_map = marketplace_id_to_cloned_id or {}
+    cloned_ids = list(agent_name_to_id.values())
     changed = False
-    for step in steps:
+
+    for idx, step in enumerate(steps):
         if not isinstance(step, dict):
             continue
 
         matched = False
 
-        # Match by agent_name (exact, case-insensitive)
+        # 1. Match by agent_name (exact, case-insensitive)
         step_agent_name = step.get("agent_name")
         if step_agent_name:
             for original_name, cloned_id in agent_name_to_id.items():
@@ -539,12 +543,29 @@ def _remap_recipe_steps(
                     matched = True
                     break
 
-        # Fallback: match by agent_id (marketplace ID → cloned ID)
+        # 2. Fallback: match by agent_id (marketplace ID → cloned ID)
         if not matched and id_map:
             step_agent_id = step.get("agent_id")
             if step_agent_id and step_agent_id in id_map:
                 step["agent_id"] = id_map[step_agent_id]
                 changed = True
+                matched = True
+
+        # 3. Fallback: fuzzy-match agent name in prompt_template text
+        if not matched and not step.get("agent_id") and agent_name_to_id:
+            prompt = (step.get("prompt_template") or "").lower()
+            if prompt:
+                for original_name, cloned_id in agent_name_to_id.items():
+                    if original_name.lower() in prompt:
+                        step["agent_id"] = cloned_id
+                        changed = True
+                        matched = True
+                        break
+
+        # 4. Last resort: round-robin assign from cloned agents
+        if not matched and not step.get("agent_id") and cloned_ids:
+            step["agent_id"] = cloned_ids[idx % len(cloned_ids)]
+            changed = True
 
     if changed:
         cloned_recipe.steps = steps

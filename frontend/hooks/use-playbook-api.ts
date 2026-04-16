@@ -154,9 +154,10 @@ export function useInstallPlaybookFromMarketplace() {
     onSuccess: () => {
       // Invalidate workspace playbooks to show the newly installed playbook
       queryClient.invalidateQueries({ queryKey: playbookKeys.lists() })
-      // Cascade installs agents + tools — refresh both caches
+      // Cascade installs agents + tools + models — refresh all caches
       queryClient.invalidateQueries({ queryKey: ['agents'] })
       queryClient.invalidateQueries({ queryKey: ['tools'] })
+      queryClient.invalidateQueries({ queryKey: ['workspace-models'] })
     },
   })
 }
