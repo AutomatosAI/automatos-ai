@@ -13,7 +13,6 @@ Available Modules (Complete):
 - nl2sql/     - Natural language to SQL ✅
 - codegraph/   - Code analysis and search ✅
 - learning/    - Self-improvement (patterns, playbooks, feedback) ✅
-- reasoning/   - Collaborative reasoning engine ✅
 - evaluation/  - Evaluation and benchmarking (structure ready)
 
 Usage:
@@ -22,20 +21,18 @@ Usage:
     from modules.memory import MemoryType
     from modules.agents import AgentService, AgentFactory
     from modules.tools import ToolService, ToolRegistry
-    from modules.learning import LearningSystemUpdater, PlaybookMiner
-    from modules.reasoning import CollaborativeReasoningEngine
+    from modules.learning import PlaybookMiner
 """
 
 # Lazy imports - use these to access modules
 __all__ = [
     "search",
-    "rag", 
+    "rag",
     "memory",
     "agents",
     "tools",
     "nl2sql",
     "codegraph",
     "learning",
-    "reasoning",
     "evaluation",
 ]
