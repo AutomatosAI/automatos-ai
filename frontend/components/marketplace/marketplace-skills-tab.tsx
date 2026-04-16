@@ -11,6 +11,7 @@ import {
   Search,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
+import { Separator } from '@/components/ui/separator'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { StatusBadge, PremiumIcon } from '@/components/shared'
@@ -269,6 +270,7 @@ export function MarketplaceSkillsTab({ searchQuery, workspaceId }: MarketplaceSk
                 isEnabled={false}
                 isEnabling={enabling === skill.id}
                 onEnable={() => enableSkill(skill.id, skill.name)}
+                onDetails={() => toast.info(skill.name, { description: skill.description || 'No description' })}
                 iconName={(skill.category && iconMappings[skill.category]) || iconMappings['global_skill'] || null}
               />
             ))}
@@ -310,6 +312,7 @@ export function MarketplaceSkillsTab({ searchQuery, workspaceId }: MarketplaceSk
                     isEnabled
                     isDisabling={disabling === skill.skill_id}
                     onDisable={() => disableSkill(skill.skill_id, skill.name)}
+                    onDetails={() => toast.info(skill.name, { description: skill.description || 'No description' })}
                     iconName={(skill.category && iconMappings[skill.category]) || iconMappings['global_skill'] || null}
                   />
                 ))}
@@ -407,10 +410,11 @@ interface SkillGridCardProps {
   isDisabling?: boolean
   onEnable?: () => void
   onDisable?: () => void
+  onDetails?: () => void
   iconName?: string | null
 }
 
-function SkillGridCard({ skill, index, isEnabled, isEnabling, isDisabling, onEnable, onDisable, iconName }: SkillGridCardProps) {
+function SkillGridCard({ skill, index, isEnabled, isEnabling, isDisabling, onEnable, onDisable, onDetails, iconName }: SkillGridCardProps) {
   const name = skill.name
   const tokens = skill.estimated_tokens
   const version = skill.skill_version
@@ -444,7 +448,7 @@ function SkillGridCard({ skill, index, isEnabled, isEnabling, isDisabling, onEna
             {isEnabled && (
               <StatusBadge size="sm" status="success" className="flex-shrink-0">
                 <CheckCircle className="w-2.5 h-2.5 mr-0.5" />
-                Enabled
+                Added
               </StatusBadge>
             )}
           </div>
@@ -469,45 +473,34 @@ function SkillGridCard({ skill, index, isEnabled, isEnabling, isDisabling, onEna
             ))}
           </div>
 
-          {/* Stats + Action Row */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3 text-xs text-muted-foreground">
-              {tokens > 0 && (
-                <span>~{tokens} tokens</span>
-              )}
+          {/* Token estimate */}
+          {tokens > 0 && (
+            <div className="text-xs text-muted-foreground pb-2">
+              ~{tokens} tokens
             </div>
-            {isEnabled ? (
-              <Button
-                size="sm"
-                variant="ghost"
-                className="text-destructive hover:text-destructive"
-                onClick={onDisable}
-                disabled={isDisabling}
-              >
-                {isDisabling ? (
-                  <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                ) : (
-                  <Trash2 className="h-3 w-3 mr-1" />
-                )}
-                Disable
-              </Button>
-            ) : (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={onEnable}
-                disabled={isEnabling}
-              >
-                {isEnabling ? (
-                  <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                ) : (
-                  <Download className="h-3 w-3 mr-1" />
-                )}
-                Enable
-              </Button>
-            )}
-          </div>
+          )}
         </CardContent>
+        <Separator />
+        <div className="flex items-center justify-between px-6 py-3">
+          <Button variant="ghost" size="sm"
+            onClick={onDetails}
+            className="text-muted-foreground hover:text-foreground p-0 h-auto">
+            Details
+          </Button>
+          {isEnabled ? (
+            <Button size="sm" variant="secondary"
+              className="bg-secondary/50 hover:bg-secondary border border-white/10">
+              <CheckCircle className="w-3 h-3 mr-2" />
+              Added
+            </Button>
+          ) : (
+            <Button size="sm" variant="outline"
+              onClick={onEnable}
+              disabled={isEnabling}>
+              {isEnabling ? 'Adding...' : 'Add to Workspace'}
+            </Button>
+          )}
+        </div>
       </Card>
     </motion.div>
   )

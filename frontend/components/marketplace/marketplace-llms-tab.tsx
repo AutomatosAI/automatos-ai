@@ -31,6 +31,8 @@ import {
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
 import { toast } from 'sonner'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { ArrowRightLeft, CheckCircle } from 'lucide-react'
 import { LLMModelCard } from './llm-model-card'
 import { LLMModelDetailModal } from './llm-model-detail-modal'
 import type { LLMModel } from './llm-model-card'
@@ -549,22 +551,116 @@ export function MarketplaceLlmsTab({ searchQuery }: MarketplaceLlmsTabProps) {
           </div>
         )}
 
-        {/* Compare bar */}
-        {comparing.size > 0 && (
-          <div className="flex items-center gap-3 p-3 rounded-lg border border-[hsl(var(--info))]/30 bg-[hsl(var(--info))]/5">
-            <span className="text-xs text-[hsl(var(--info))] font-medium">
-              Comparing {comparing.size} model{comparing.size > 1 ? 's' : ''}
-            </span>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 text-xs border-[hsl(var(--info))]/30 text-[hsl(var(--info))]"
-              onClick={() => setComparing(new Set())}
-            >
-              Clear
-            </Button>
-          </div>
-        )}
+        {/* Model Comparison Panel */}
+        {comparing.size > 0 && (() => {
+          const COMPARISON_COLORS = ['#3b82f6', '#f59e0b', '#10b981', '#ef4444']
+          const comparedModels = models.filter(m => comparing.has(m.model_id))
+          return (
+            <Card className="glass-card">
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center justify-between">
+                  <span className="flex items-center gap-2 text-sm">
+                    <ArrowRightLeft className="w-4 h-4 text-[hsl(var(--info))]" />
+                    Model Comparison
+                  </span>
+                  <Button size="sm" variant="ghost" className="h-7 text-xs text-muted-foreground"
+                    onClick={() => setComparing(new Set())}>
+                    <X className="w-3 h-3 mr-1" /> Clear
+                  </Button>
+                </CardTitle>
+                <div className="flex flex-wrap gap-2">
+                  {comparedModels.map((m, idx) => (
+                    <Badge key={m.model_id} variant="secondary"
+                      className="font-mono text-xs flex items-center gap-1.5 py-1"
+                      style={{ borderColor: COMPARISON_COLORS[idx] }}>
+                      <span className="w-2 h-2 rounded-full" style={{ background: COMPARISON_COLORS[idx] }} />
+                      {m.display_name}
+                      <button onClick={() => handleCompareToggle(m.model_id)}
+                        className="ml-0.5 hover:text-destructive transition-colors">
+                        <X className="w-3 h-3" />
+                      </button>
+                    </Badge>
+                  ))}
+                  {comparing.size < 4 && (
+                    <span className="text-xs text-muted-foreground self-center">
+                      Click &quot;Compare&quot; on cards to add (up to 4)
+                    </span>
+                  )}
+                </div>
+              </CardHeader>
+              {comparedModels.length >= 2 && (
+                <CardContent>
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b border-border/50">
+                          <th className="text-left p-3 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Metric</th>
+                          {comparedModels.map((m, idx) => (
+                            <th key={m.model_id} className="text-right p-3 text-[11px] font-medium uppercase tracking-wider"
+                              style={{ color: COMPARISON_COLORS[idx] }}>
+                              {m.display_name}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[
+                          { label: 'Provider', render: (m: LLMModel) => m.provider },
+                          { label: 'Context Window', render: (m: LLMModel) => {
+                            const n = m.context_window
+                            return n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1_000 ? `${(n / 1_000).toFixed(0)}K` : String(n)
+                          }},
+                          { label: 'Max Output', render: (m: LLMModel) => {
+                            const n = m.max_output_tokens
+                            return n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1_000 ? `${(n / 1_000).toFixed(0)}K` : String(n)
+                          }},
+                          { label: 'Input Cost/1M', render: (m: LLMModel) => {
+                            const per1M = m.input_cost_per_1k * 1000
+                            return per1M === 0 ? 'Free' : per1M < 1 ? `$${per1M.toFixed(3)}` : `$${per1M.toFixed(2)}`
+                          }},
+                          { label: 'Output Cost/1M', render: (m: LLMModel) => {
+                            const per1M = m.output_cost_per_1k * 1000
+                            return per1M === 0 ? 'Free' : per1M < 1 ? `$${per1M.toFixed(3)}` : `$${per1M.toFixed(2)}`
+                          }},
+                          { label: 'Functions', render: (m: LLMModel) => m.supports_functions ? 'Yes' : 'No' },
+                          { label: 'Vision', render: (m: LLMModel) => m.supports_vision ? 'Yes' : 'No' },
+                          { label: 'Streaming', render: (m: LLMModel) => m.supports_streaming ? 'Yes' : 'No' },
+                          { label: 'Status', render: (m: LLMModel) => (
+                            <span className="inline-flex items-center gap-1">
+                              {m.is_installed && <CheckCircle className="w-3 h-3 text-[hsl(var(--success))]" />}
+                              {m.is_installed ? 'Added' : 'Not added'}
+                            </span>
+                          )},
+                        ].map((row) => (
+                          <tr key={row.label} className="border-b border-border/20">
+                            <td className="p-3 text-xs text-muted-foreground">{row.label}</td>
+                            {comparedModels.map(m => (
+                              <td key={m.model_id} className="p-3 text-sm text-right tabular-nums">
+                                {row.render(m)}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                        <tr>
+                          <td className="p-3 text-xs text-muted-foreground">Tags</td>
+                          {comparedModels.map(m => (
+                            <td key={m.model_id} className="p-3 text-right">
+                              <div className="flex flex-wrap gap-1 justify-end">
+                                {(m.recommended_for || []).slice(0, 3).map(tag => (
+                                  <Badge key={tag} variant="outline" className="text-[10px] px-1.5 py-0">{tag}</Badge>
+                                ))}
+                              </div>
+                            </td>
+                          ))}
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </CardContent>
+              )}
+            </Card>
+          )
+        })()}
       </div>
 
       {/* Results */}
