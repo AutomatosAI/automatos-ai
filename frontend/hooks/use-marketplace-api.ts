@@ -145,6 +145,8 @@ export function useInstallMarketplaceItem() {
     onSuccess: (data) => {
       // Invalidate agents list to show the new cloned agent
       queryClient.invalidateQueries({ queryKey: ['agents'] })
+      // Cascade installs tools to workspace — refresh tools cache so agent config sees them
+      queryClient.invalidateQueries({ queryKey: ['tools'] })
 
       toast.success('Agent installed successfully!', {
         description: data.message || 'The agent has been added to your workspace.'

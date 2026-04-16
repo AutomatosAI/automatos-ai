@@ -393,6 +393,7 @@ async def cascade_recipe_dependencies(
 
     # --- 1. Clone recommended agents ---
     agent_name_to_cloned_id: Dict[str, int] = {}
+    marketplace_id_to_cloned_id: Dict[int, int] = {}
     recommended = marketplace_recipe.recommended_agents or []
 
     # Also check metadata for suggested_agents (seed data uses this)
@@ -438,6 +439,7 @@ async def cascade_recipe_dependencies(
                 db, workspace_id, marketplace_agent, user_id_int,
             )
             agent_name_to_cloned_id[marketplace_agent.name] = cloned_agent.id
+            marketplace_id_to_cloned_id[marketplace_agent.id] = cloned_agent.id
 
             result.cloned_items.append({
                 "type": "agent",
@@ -464,8 +466,8 @@ async def cascade_recipe_dependencies(
             result.warnings.append(f"Failed to install agent '{agent_name}': {e}")
 
     # --- 2. Remap recipe steps ---
-    if agent_name_to_cloned_id and cloned_recipe.steps:
-        _remap_recipe_steps(db, cloned_recipe, agent_name_to_cloned_id)
+    if (agent_name_to_cloned_id or marketplace_id_to_cloned_id) and cloned_recipe.steps:
+        _remap_recipe_steps(db, cloned_recipe, agent_name_to_cloned_id, marketplace_id_to_cloned_id)
 
     # --- 3. OAuth warnings for recipe-level required_tools not covered by agents ---
     recipe_tools = marketplace_recipe.required_tools or []
@@ -500,13 +502,18 @@ async def cascade_recipe_dependencies(
     return result
 
 
-def _remap_recipe_steps(db: Session, cloned_recipe, agent_name_to_id: Dict[str, int]) -> None:
+def _remap_recipe_steps(
+    db: Session,
+    cloned_recipe,
+    agent_name_to_id: Dict[str, int],
+    marketplace_id_to_cloned_id: Optional[Dict[int, int]] = None,
+) -> None:
     """
     Walk the recipe's steps and remap agent references to newly cloned IDs.
 
     Steps may reference agents by:
-      - agent_name (string) — matched by name
-      - agent_id (int) — matched by looking up original marketplace agent
+      - agent_name (string) — matched by name (case-insensitive)
+      - agent_id (int) — matched by marketplace agent ID → cloned ID map
     """
     from sqlalchemy.orm.attributes import flag_modified
 
@@ -514,10 +521,13 @@ def _remap_recipe_steps(db: Session, cloned_recipe, agent_name_to_id: Dict[str, 
     if not isinstance(steps, list):
         return
 
+    id_map = marketplace_id_to_cloned_id or {}
     changed = False
     for step in steps:
         if not isinstance(step, dict):
             continue
+
+        matched = False
 
         # Match by agent_name (exact, case-insensitive)
         step_agent_name = step.get("agent_name")
@@ -526,7 +536,15 @@ def _remap_recipe_steps(db: Session, cloned_recipe, agent_name_to_id: Dict[str, 
                 if step_agent_name.lower() == original_name.lower():
                     step["agent_id"] = cloned_id
                     changed = True
+                    matched = True
                     break
+
+        # Fallback: match by agent_id (marketplace ID → cloned ID)
+        if not matched and id_map:
+            step_agent_id = step.get("agent_id")
+            if step_agent_id and step_agent_id in id_map:
+                step["agent_id"] = id_map[step_agent_id]
+                changed = True
 
     if changed:
         cloned_recipe.steps = steps
