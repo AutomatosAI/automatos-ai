@@ -31,11 +31,36 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/tools", tags=["Tools"])
 
 
-def _assert_workspace_admin(ctx: RequestContext) -> None:
-    """Raise 403 unless the user has admin or owner role."""
+def _assert_workspace_admin(ctx: RequestContext, db: Session = None) -> None:
+    """Raise 403 unless the user has admin or owner role.
+
+    Checks workspace_members.role (DB truth) first, falls back to
+    Clerk JWT claims. Clerk tokens don't carry workspace-level roles,
+    so the DB check is needed for workspace owners/admins.
+    """
+    # 1. Check DB workspace membership role (source of truth)
+    if db and ctx.workspace_id and ctx.user:
+        clerk_id = getattr(ctx.user, 'clerk_user_id', None)
+        if clerk_id:
+            row = db.execute(
+                text(
+                    "SELECT wm.role FROM workspace_members wm "
+                    "JOIN users u ON u.id = wm.user_id "
+                    "WHERE wm.workspace_id = :ws_id AND u.clerk_user_id = :cid AND wm.is_active = true "
+                    "LIMIT 1"
+                ),
+                {"ws_id": str(ctx.workspace_id), "cid": clerk_id},
+            ).first()
+            if row and row[0] in ('admin', 'owner'):
+                return
+
+    # 2. Fallback: Clerk JWT role (for super_admin accounts)
     role = getattr(ctx.user, 'role', 'user') if ctx.user else 'user'
-    if role not in ('admin', 'owner'):
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    system_role = getattr(ctx.user, 'system_role', 'user') if ctx.user else 'user'
+    if role in ('admin', 'owner') or system_role in ('admin', 'super_admin'):
+        return
+
+    raise HTTPException(status_code=403, detail="Insufficient permissions")
 
 INTERNAL_APP_NAMES = {"RAG", "MEMORY", "NL2SQL", "CODEGRAPH"}
 
@@ -560,7 +585,7 @@ async def debug_connections(
     """
     DEBUG: Show all connection records for this workspace
     """
-    _assert_workspace_admin(ctx)
+    _assert_workspace_admin(ctx, db)
     entity_manager = EntityManager(db)
     entity = entity_manager.get_entity_by_workspace(ctx.workspace_id)
     if not entity:
@@ -597,7 +622,7 @@ async def remove_from_workspace(
     Remove an app from workspace (deletes the connection record).
     Works for both connected and unconnected apps.
     """
-    _assert_workspace_admin(ctx)
+    _assert_workspace_admin(ctx, db)
     entity_manager = EntityManager(db)
     entity = entity_manager.get_entity_by_workspace(ctx.workspace_id)
     if not entity:
