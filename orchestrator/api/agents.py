@@ -918,15 +918,36 @@ async def delete_agent(agent_id: int, ctx: RequestContext = Depends(get_request_
         agent = db.query(Agent).filter(Agent.id == agent_id, Agent.workspace_id == ctx.workspace_id).first()
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
-        
+
+        # Block delete if any recipe references this agent in its steps JSON.
+        # Recipe steps store agent_id in opaque JSONB (no FK) — without this check,
+        # the recipe will crash with FK violation next time it runs.
+        agent_ref = f'[{{"agent_id": {agent_id}}}]'
+        recipes_using_agent = db.execute(
+            text(
+                "SELECT id, name FROM workflow_recipes "
+                "WHERE workspace_id = :workspace_id "
+                "AND steps @> CAST(:agent_ref AS jsonb)"
+            ),
+            {"workspace_id": ctx.workspace_id, "agent_ref": agent_ref},
+        ).fetchall()
+        if recipes_using_agent:
+            names = [r.name for r in recipes_using_agent]
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": f"Agent is used by {len(names)} recipe(s). Reassign or remove the recipe step(s) first.",
+                    "recipes": [{"id": r.id, "name": r.name} for r in recipes_using_agent],
+                },
+            )
+
         # Delete related records first (tables without CASCADE) - use savepoints to handle errors
         # Order matters: delete in correct order to avoid FK violations
-        
+
         deletions = [
             ("agent_skills", "DELETE FROM agent_skills WHERE agent_id = :agent_id", True),
             ("workflow_agents", "DELETE FROM workflow_agents WHERE agent_id = :agent_id", True),
             ("memory_items", "DELETE FROM memory_items WHERE agent_id = :agent_id", True),
-            ("tasks", "DELETE FROM tasks WHERE agent_id = :agent_id", False),
             ("workflow_executions", "DELETE FROM workflow_executions WHERE agent_id = :agent_id", False),
         ]
         

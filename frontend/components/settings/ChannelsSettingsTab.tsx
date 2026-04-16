@@ -156,8 +156,14 @@ export function ChannelsSettingsTab() {
   const connectChannel = async (platform: string) => {
     const config = newConfigs[platform] || {}
     const platformDef = PLATFORMS.find(p => p.id === platform)
-    const firstField = platformDef?.fields[0]?.key
-    if (firstField && !config[firstField]) return
+    const missing = (platformDef?.fields ?? [])
+      .filter(f => !f.label.toLowerCase().includes('(optional)'))
+      .filter(f => !(config[f.key] ?? '').trim())
+      .map(f => f.label)
+    if (missing.length) {
+      alert(`Please fill in: ${missing.join(', ')}`)
+      return
+    }
     setConnecting(platform)
     try {
       await apiClient.request('/api/channels', {
