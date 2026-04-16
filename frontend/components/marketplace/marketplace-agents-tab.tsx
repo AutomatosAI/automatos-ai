@@ -75,6 +75,7 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
   const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null)
   const [approvingId, setApprovingId] = useState<number | null>(null)
   const [deletingId, setDeletingId] = useState<number | null>(null)
+  const [installingId, setInstallingId] = useState<number | null>(null)
 
   // Check if user is admin (you can adjust this check based on your admin logic)
   const isAdmin = user?.emailAddresses?.[0]?.emailAddress?.includes('automatos.app') || false
@@ -361,12 +362,15 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
                   Details
                 </Button>
                 <Button size="sm" variant="outline"
-                  disabled={installMutation.isLoading}
+                  disabled={installingId === agent.id}
                   onClick={(e) => {
                     e.stopPropagation()
-                    installMutation.mutate(agent.id)
+                    setInstallingId(agent.id)
+                    installMutation.mutate(agent.id, {
+                      onSettled: () => setInstallingId(null),
+                    })
                   }}>
-                  {installMutation.isLoading ? 'Adding...' : 'Add to Workspace'}
+                  {installingId === agent.id ? 'Adding...' : 'Add to Workspace'}
                 </Button>
               </div>
             </Card>
