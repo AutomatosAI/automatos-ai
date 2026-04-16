@@ -483,11 +483,21 @@ async def install_model(db: Session, workspace_id: UUID, params: Dict[str, Any])
         return {"success": False, "error": "Missing required parameter: model_id"}
 
     # Find or create LLMModel from OpenRouter cache
+    # Try exact match first, then suffix match (seed data may omit provider prefix)
     llm = db.query(LLMModel).filter(LLMModel.model_id == model_id).first()
+    if not llm:
+        # Suffix match: "llama-3.3-70b-instruct" → "meta-llama/llama-3.3-70b-instruct"
+        llm = db.query(LLMModel).filter(LLMModel.model_id.endswith(f"/{model_id}")).first()
+
     if not llm:
         cached = db.query(OpenRouterModelCache).filter(
             OpenRouterModelCache.model_id == model_id,
         ).first()
+        if not cached:
+            # Suffix match on OpenRouter cache
+            cached = db.query(OpenRouterModelCache).filter(
+                OpenRouterModelCache.model_id.endswith(f"/{model_id}"),
+            ).first()
         if not cached:
             return {"success": False, "error": f"Model '{model_id}' not found in OpenRouter catalog"}
 

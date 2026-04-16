@@ -139,10 +139,11 @@ async def cascade_agent_dependencies(
     After cloning a marketplace agent, auto-install its dependencies:
       1. LLM model → workspace
       2. Skills → workspace
-      3. Tools → assigned to cloned agent (both runtime + display tables)
-      4. OAuth warnings for tools that need connection
+      3. Plugins → workspace + assigned to cloned agent
+      4. Tools → assigned to cloned agent (both runtime + display tables)
+      5. OAuth warnings for tools that need connection
     """
-    from .handlers_marketplace import install_model, install_skill
+    from .handlers_marketplace import install_model, install_plugin, install_skill
 
     result = CascadeResult()
 
@@ -187,7 +188,10 @@ async def cascade_agent_dependencies(
                 logger.warning("Cascade: failed to install skill %s: %s", skill.name, e)
                 result.installed_dependencies.append({"type": "skill", "name": skill.name, "status": "failed"})
 
-    # --- 3. Copy tool assignments ---
+    # --- 3. Install plugins to workspace + assign to cloned agent ---
+    await _cascade_plugins(db, workspace_id, marketplace_agent, cloned_agent, result, install_plugin)
+
+    # --- 4. Copy tool assignments ---
     tool_names = _copy_tool_assignments(db, marketplace_agent.id, cloned_agent.id, workspace_id)
 
     for tool_name in tool_names:
@@ -197,7 +201,7 @@ async def cascade_agent_dependencies(
             "status": "assigned",
         })
 
-    # --- 4. OAuth warnings ---
+    # --- 5. OAuth warnings ---
     if tool_names:
         oauth_map = check_oauth_requirements(db, tool_names)
         for tool_name, needs_oauth in oauth_map.items():
@@ -219,6 +223,69 @@ async def cascade_agent_dependencies(
     return result
 
 
+async def _cascade_plugins(
+    db: Session,
+    workspace_id: UUID,
+    marketplace_agent,
+    cloned_agent,
+    result: CascadeResult,
+    install_plugin_fn,
+) -> None:
+    """
+    Copy plugin assignments from marketplace agent to cloned agent.
+    Also enables each plugin at the workspace level (idempotent).
+    """
+    from core.models.marketplace_plugins import AgentAssignedPlugin
+
+    assigned = getattr(marketplace_agent, 'assigned_plugins', None)
+    if not assigned:
+        assigned = (
+            db.query(AgentAssignedPlugin)
+            .filter(AgentAssignedPlugin.agent_id == marketplace_agent.id)
+            .all()
+        )
+    if not assigned:
+        return
+
+    for ap in assigned:
+        plugin = getattr(ap, 'plugin', None)
+        plugin_id = ap.plugin_id
+        plugin_name = plugin.name if plugin else str(plugin_id)
+
+        try:
+            plugin_result = await install_plugin_fn(db, workspace_id, {"plugin_id": str(plugin_id)})
+            if not plugin_result.get("success"):
+                logger.warning("Cascade: plugin install returned failure for %s: %s", plugin_name, plugin_result.get("error"))
+        except Exception as e:
+            logger.warning("Cascade: failed to install plugin %s: %s", plugin_name, e)
+            result.installed_dependencies.append({"type": "plugin", "name": plugin_name, "status": "failed"})
+            continue
+
+        # Assign plugin to cloned agent
+        existing = (
+            db.query(AgentAssignedPlugin)
+            .filter(
+                AgentAssignedPlugin.agent_id == cloned_agent.id,
+                AgentAssignedPlugin.plugin_id == plugin_id,
+            )
+            .first()
+        )
+        if not existing:
+            db.add(AgentAssignedPlugin(
+                agent_id=cloned_agent.id,
+                plugin_id=plugin_id,
+                priority=getattr(ap, 'priority', 0) or 0,
+            ))
+
+        result.installed_dependencies.append({
+            "type": "plugin",
+            "name": plugin_name,
+            "status": "installed",
+        })
+
+    db.flush()
+
+
 def _copy_tool_assignments(
     db: Session,
     source_agent_id: int,
@@ -227,11 +294,13 @@ def _copy_tool_assignments(
 ) -> List[str]:
     """
     Copy tool assignments from a marketplace agent to a cloned workspace agent.
-    Writes to BOTH tables:
+    Writes to THREE tables:
       - agent_app_assignments (runtime — used by get_tools_for_agent)
       - agent_tool_assignments (display — used by marketplace browse)
+      - composio_connections (workspace — used by Settings > Integrations)
     Returns list of tool_id strings that were copied.
     """
+    from core.composio.entity_manager import EntityManager
     from core.models.composio_cache import AgentAppAssignment
 
     # Read from legacy display table (what marketplace agents use)
@@ -243,6 +312,11 @@ def _copy_tool_assignments(
     tool_names = [row[0] for row in rows if row[0]]
     if not tool_names:
         return []
+
+    # Ensure workspace has a Composio entity for tool connections
+    entity_manager = EntityManager(db)
+    entity = entity_manager.get_or_create_entity(workspace_id)
+    entity_id = entity["id"]
 
     for tool_name in tool_names:
         upper_name = tool_name.upper()
@@ -276,6 +350,21 @@ def _copy_tool_assignments(
                 VALUES (:agent_id, :tool_id, true, NOW(), NOW())
             """), {"agent_id": target_agent_id, "tool_id": tool_name})
 
+        # --- Workspace entity connection (composio_connections) ---
+        # "added" status = tool registered but OAuth not yet connected
+        ws_conn_exists = db.execute(text("""
+            SELECT 1 FROM composio_connections
+            WHERE entity_id = :entity_id AND app_name = :app_name
+        """), {"entity_id": entity_id, "app_name": upper_name}).first()
+
+        if not ws_conn_exists:
+            db.execute(text("""
+                INSERT INTO composio_connections
+                    (entity_id, app_name, status, connected_at, updated_at)
+                VALUES
+                    (:entity_id, :app_name, 'added', NOW(), NOW())
+            """), {"entity_id": entity_id, "app_name": upper_name})
+
     db.flush()
     return [t.upper() for t in tool_names]
 
@@ -304,6 +393,7 @@ async def cascade_recipe_dependencies(
 
     # --- 1. Clone recommended agents ---
     agent_name_to_cloned_id: Dict[str, int] = {}
+    marketplace_id_to_cloned_id: Dict[int, int] = {}
     recommended = marketplace_recipe.recommended_agents or []
 
     # Also check metadata for suggested_agents (seed data uses this)
@@ -349,6 +439,7 @@ async def cascade_recipe_dependencies(
                 db, workspace_id, marketplace_agent, user_id_int,
             )
             agent_name_to_cloned_id[marketplace_agent.name] = cloned_agent.id
+            marketplace_id_to_cloned_id[marketplace_agent.id] = cloned_agent.id
 
             result.cloned_items.append({
                 "type": "agent",
@@ -375,8 +466,8 @@ async def cascade_recipe_dependencies(
             result.warnings.append(f"Failed to install agent '{agent_name}': {e}")
 
     # --- 2. Remap recipe steps ---
-    if agent_name_to_cloned_id and cloned_recipe.steps:
-        _remap_recipe_steps(db, cloned_recipe, agent_name_to_cloned_id)
+    if (agent_name_to_cloned_id or marketplace_id_to_cloned_id) and cloned_recipe.steps:
+        _remap_recipe_steps(db, cloned_recipe, agent_name_to_cloned_id, marketplace_id_to_cloned_id)
 
     # --- 3. OAuth warnings for recipe-level required_tools not covered by agents ---
     recipe_tools = marketplace_recipe.required_tools or []
@@ -411,13 +502,20 @@ async def cascade_recipe_dependencies(
     return result
 
 
-def _remap_recipe_steps(db: Session, cloned_recipe, agent_name_to_id: Dict[str, int]) -> None:
+def _remap_recipe_steps(
+    db: Session,
+    cloned_recipe,
+    agent_name_to_id: Dict[str, int],
+    marketplace_id_to_cloned_id: Optional[Dict[int, int]] = None,
+) -> None:
     """
     Walk the recipe's steps and remap agent references to newly cloned IDs.
 
     Steps may reference agents by:
-      - agent_name (string) — matched by name
-      - agent_id (int) — matched by looking up original marketplace agent
+      - agent_name (string) — matched by name (case-insensitive)
+      - agent_id (int) — matched by marketplace agent ID → cloned ID map
+      - prompt_template text — fuzzy match agent name in prompt text
+      - (none) — round-robin assign from cloned agents list
     """
     from sqlalchemy.orm.attributes import flag_modified
 
@@ -425,19 +523,49 @@ def _remap_recipe_steps(db: Session, cloned_recipe, agent_name_to_id: Dict[str, 
     if not isinstance(steps, list):
         return
 
+    id_map = marketplace_id_to_cloned_id or {}
+    cloned_ids = list(agent_name_to_id.values())
     changed = False
-    for step in steps:
+
+    for idx, step in enumerate(steps):
         if not isinstance(step, dict):
             continue
 
-        # Match by agent_name (exact, case-insensitive)
+        matched = False
+
+        # 1. Match by agent_name (exact, case-insensitive)
         step_agent_name = step.get("agent_name")
         if step_agent_name:
             for original_name, cloned_id in agent_name_to_id.items():
                 if step_agent_name.lower() == original_name.lower():
                     step["agent_id"] = cloned_id
                     changed = True
+                    matched = True
                     break
+
+        # 2. Fallback: match by agent_id (marketplace ID → cloned ID)
+        if not matched and id_map:
+            step_agent_id = step.get("agent_id")
+            if step_agent_id and step_agent_id in id_map:
+                step["agent_id"] = id_map[step_agent_id]
+                changed = True
+                matched = True
+
+        # 3. Fallback: fuzzy-match agent name in prompt_template text
+        if not matched and not step.get("agent_id") and agent_name_to_id:
+            prompt = (step.get("prompt_template") or "").lower()
+            if prompt:
+                for original_name, cloned_id in agent_name_to_id.items():
+                    if original_name.lower() in prompt:
+                        step["agent_id"] = cloned_id
+                        changed = True
+                        matched = True
+                        break
+
+        # 4. Last resort: round-robin assign from cloned agents
+        if not matched and not step.get("agent_id") and cloned_ids:
+            step["agent_id"] = cloned_ids[idx % len(cloned_ids)]
+            changed = True
 
     if changed:
         cloned_recipe.steps = steps

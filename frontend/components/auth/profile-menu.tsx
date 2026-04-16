@@ -31,6 +31,8 @@ export function ProfileMenu() {
     })()
 
     const handleSignOut = async () => {
+        localStorage.removeItem('last_active_workspace')
+        localStorage.removeItem('last_active_org')
         await signOut()
         router.push('/')
     }
