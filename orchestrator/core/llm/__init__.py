@@ -28,6 +28,7 @@ from core.llm.manager import (
 from core.llm.clients.base import (
     LLMConfig,
     LLMProvider,
+    LLMResponse,
 )
 from core.llm.embedding_manager import (
     EmbeddingManager,
@@ -36,7 +37,6 @@ from core.llm.embedding_manager import (
 )
 
 # LLM utilities (original core/llm)
-from core.llm.orchestrator_llm import OrchestratorLLM, LLMResponse, ReasoningMode
 from core.llm.function_registry import FunctionRegistry, FunctionSpec, FunctionParameter, FunctionCategory
 from core.llm.function_executor import FunctionExecutor, FunctionResult
 from core.llm.response_parser import ResponseParser, ParsedResponse
@@ -49,17 +49,13 @@ __all__ = [
     'create_llm_manager',
     'LLMConfig',
     'LLMProvider',
-    
+    'LLMResponse',
+
     # Embeddings
     'EmbeddingManager',
     'create_embedding_manager',
     'get_embedding_manager',
-    
-    # Orchestrator LLM
-    'OrchestratorLLM',
-    'LLMResponse',
-    'ReasoningMode',
-    
+
     # Function calling
     'FunctionRegistry',
     'FunctionSpec',

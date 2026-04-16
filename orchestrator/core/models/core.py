@@ -960,27 +960,6 @@ class User(Base):
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
-class MemoryItem(Base):
-    """Memory items for the advanced memory system"""
-    __tablename__ = 'memory_items'
-    
-    id = Column(String(255), primary_key=True)
-    session_id = Column(String(255), nullable=False)
-    content = Column(JSON, nullable=False)
-    memory_type = Column(String(50), nullable=False)  # semantic, episodic, procedural, etc.
-    memory_level = Column(String(50), nullable=False)  # immediate, working, short_term, long_term, archival
-    
-    importance = Column(Float, default=0.5)
-    access_count = Column(Integer, default=0)
-    decay_factor = Column(Float, default=0.1)
-    consolidation_score = Column(Float, default=0.0)
-    
-    tags = Column(JSON, nullable=True)  # List of tags
-    
-    created_at = Column(DateTime, default=func.now())
-    last_access = Column(DateTime, default=func.now())
-    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
-
 class ExternalKnowledge(Base):
     """External knowledge for memory augmentation"""
     __tablename__ = 'external_knowledge'
