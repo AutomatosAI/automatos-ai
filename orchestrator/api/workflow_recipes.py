@@ -1619,14 +1619,15 @@ async def install_recipe_from_marketplace(
         # failures don't roll back the main recipe install.
         from sqlalchemy import text
         install_query = text("""
-            INSERT INTO marketplace_installs (user_id, marketplace_recipe_id, cloned_recipe_id, version, installed_at)
-            VALUES (:user_id, :marketplace_recipe_id, :cloned_recipe_id, :version, NOW())
+            INSERT INTO marketplace_installs (item_id, user_id, marketplace_recipe_id, cloned_recipe_id, version, installed_at)
+            VALUES (:item_id, :user_id, :marketplace_recipe_id, :cloned_recipe_id, :version, NOW())
             ON CONFLICT DO NOTHING
         """)
 
         try:
             with db.begin_nested():
                 db.execute(install_query, {
+                    "item_id": marketplace_recipe.id,
                     "user_id": user_id_int,
                     "marketplace_recipe_id": marketplace_recipe.id,
                     "cloned_recipe_id": cloned_recipe.id,
