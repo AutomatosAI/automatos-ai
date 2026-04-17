@@ -2141,11 +2141,13 @@ class ApiClient {
   }
 
   async startAgent(id: string) {
-    return this.request(`/api/agents/${id}/start`, { method: 'POST' })
+    // Agent "start/stop" is a status toggle on the record — no dedicated
+    // route exists (and never did). Reuse the canonical PUT /api/agents/{id}.
+    return this.updateAgent(id, { status: 'active' })
   }
 
   async stopAgent(id: string) {
-    return this.request(`/api/agents/${id}/stop`, { method: 'POST' })
+    return this.updateAgent(id, { status: 'inactive' })
   }
 
   async getDocumentAnalytics() {
