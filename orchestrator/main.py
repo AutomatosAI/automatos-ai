@@ -81,6 +81,7 @@ from api.context_summarization import router as context_summarization_router  # 
 from api.team import router as team_router  # PRD-37: Team Management
 from api.routing import router as routing_router  # PRD-50: Universal Orchestrator Router
 from api.admin_plugins import router as admin_plugins_router  # PRD-42: Admin Plugin Marketplace
+from api.admin_workspaces import router as admin_workspaces_router  # Admin workspace lifecycle (pause/delete)
 try:
     from api.admin_prompts import router as admin_prompts_router  # PRD-58: System Prompt Management
 except ImportError:
@@ -991,6 +992,7 @@ if workspace_github_router is not None:
 app.include_router(team_router)  # PRD-37: Team Management
 app.include_router(routing_router)  # PRD-50: Universal Orchestrator Router
 app.include_router(admin_plugins_router)  # PRD-42: Admin Plugin Marketplace
+app.include_router(admin_workspaces_router)  # Admin workspace lifecycle
 if admin_prompts_router is not None:
     app.include_router(admin_prompts_router)  # PRD-58: System Prompt Management
 app.include_router(marketplace_plugins_router)  # PRD-42: Public Marketplace Plugins
