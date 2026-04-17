@@ -44,18 +44,34 @@ _BRANCH_RE = re.compile(r"^[A-Za-z0-9._/\-]+$")
 # Helpers
 # ---------------------------------------------------------------------------
 
+_GITHUB_NOT_CONNECTED_MSG = (
+    "GitHub is not connected for this workspace. "
+    "Install the GitHub tool and connect your GitHub account in "
+    "Workspace → Tools & Accounts before cloning a repo."
+)
+
+
 def _get_entity_id(db: Session, workspace_id) -> str:
-    """Resolve the Composio entity_id for a workspace, or raise 404."""
+    """Resolve the Composio entity_id for a workspace, or raise 424."""
     from uuid import UUID
     ws_uuid = UUID(str(workspace_id)) if not isinstance(workspace_id, UUID) else workspace_id
     manager = EntityManager(db)
     entity = manager.get_entity_by_workspace(ws_uuid)
     if not entity or not entity.get("composio_entity_id"):
-        raise HTTPException(
-            status_code=404,
-            detail="No Composio entity found for this workspace. Connect GitHub first.",
-        )
+        raise HTTPException(status_code=424, detail=_GITHUB_NOT_CONNECTED_MSG)
     return entity["composio_entity_id"]
+
+
+def _is_github_not_connected(error_msg: str) -> bool:
+    """Detect Composio's ConnectedAccountNotFound error for GitHub."""
+    if not error_msg:
+        return False
+    lowered = error_msg.lower()
+    return (
+        "connectedaccountnotfound" in lowered
+        or "no connected account found" in lowered
+        or "no active connection exists for toolkit 'github'" in lowered
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -123,6 +139,8 @@ async def list_github_repos(
 
     if isinstance(result, dict) and not result.get("success", result.get("successful", True)):
         error_msg = result.get("error", "Failed to list GitHub repos")
+        if _is_github_not_connected(str(error_msg)):
+            raise HTTPException(status_code=424, detail=_GITHUB_NOT_CONNECTED_MSG)
         raise HTTPException(status_code=502, detail=f"GitHub API error: {error_msg}")
 
     # Extract repo list from Composio response
