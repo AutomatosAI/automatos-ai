@@ -409,11 +409,21 @@ async def browse_memories(
 
         logger.info("[browse] Collected %d memories (L2+L3)", len(all_results))
 
-        # Sort by created_at DESC and truncate to caller's limit
-        all_results.sort(
-            key=lambda x: x.get("created_at") or "",
-            reverse=True,
-        )
+        # Sort by created_at DESC and truncate to caller's limit.
+        # Mem0 (L3) occasionally returns unix-int timestamps while L2 always
+        # returns ISO strings — coerce to a comparable string form.
+        def _sort_key(x: Dict[str, Any]) -> str:
+            v = x.get("created_at")
+            if v is None:
+                return ""
+            if isinstance(v, (int, float)):
+                try:
+                    return datetime.utcfromtimestamp(v).isoformat()
+                except (ValueError, OSError, OverflowError):
+                    return ""
+            return str(v)
+
+        all_results.sort(key=_sort_key, reverse=True)
         memories = all_results[:limit]
 
         if memories:
