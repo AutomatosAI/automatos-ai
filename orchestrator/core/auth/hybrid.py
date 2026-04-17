@@ -227,6 +227,34 @@ def _provision_new_user_workspace(
     uid = uid_row[0]
     logger.info("Resolved user record id=%s for clerk_user_id=%s", uid, clerk_user_id)
 
+    # Serialize concurrent provisioning for the same user via transaction-scoped
+    # advisory lock. Without this, two simultaneous requests for a brand-new
+    # Clerk user both miss the SELECT and both INSERT a workspace — the slug
+    # retry loop then silently succeeds with random suffixes, giving the user
+    # N duplicate workspaces. Lock key uses a namespace (-hash of this call
+    # site) to avoid colliding with other advisory locks.
+    db.execute(
+        text("SELECT pg_advisory_xact_lock(:ns, :uid)"),
+        {"ns": 0x70726F76, "uid": int(uid)},  # 'prov'
+    )
+
+    # Re-check under the lock: another request may have just provisioned.
+    existing = db.execute(
+        text(
+            "SELECT id FROM workspaces "
+            "WHERE owner_id = :uid AND is_personal = true AND deleted_at IS NULL "
+            "ORDER BY created_at ASC LIMIT 1"
+        ),
+        {"uid": uid},
+    ).fetchone()
+    if existing and existing[0]:
+        logger.info(
+            "Personal workspace already exists for user %s (id=%s) — skipping provisioning",
+            uid, existing[0],
+        )
+        db.commit()
+        return existing[0]
+
     # 2) Create personal workspace with slug collision handling
     ws_id = uuid4()
     ws_name = f"{name or email or 'My'}'s Workspace"
