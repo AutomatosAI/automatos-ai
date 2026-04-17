@@ -9,6 +9,17 @@ import { apiClient } from '@/lib/api-client'
 
 // ============= TYPES =============
 
+export type MemoryLayer = 'l2' | 'l3'
+
+export type MemoryContentType =
+  | 'transcript'
+  | 'mission_summary'
+  | 'task_failure'
+  | 'retry_recovery'
+  | 'exchange'
+  | 'playbook_execution'
+  | string
+
 export interface MemoryItem {
   id: string
   content: string
@@ -16,7 +27,10 @@ export interface MemoryItem {
   metadata: Record<string, any> | null
   created_at: string | null
   updated_at: string | null
-  tier?: 'global' | 'agent' | 'daily'
+  tier?: 'global' | 'agent' | 'daily' | 'short_term'
+  layer?: MemoryLayer
+  content_type?: MemoryContentType | null
+  importance?: number | null
 }
 
 export interface MemoryBrowseResponse {
@@ -69,6 +83,10 @@ export interface MemoryConsolidateResponse {
 export interface MemoryFilters {
   query?: string
   limit?: number
+  /** CSV filter restricted to L2 (transcript, mission_summary, task_failure, retry_recovery). */
+  content_type?: string
+  /** Layer scope: "l2" (short-term only), "l3" (Mem0 facts only), or undefined for both. */
+  tier?: 'l2' | 'l3' | 'all'
 }
 
 // ============= QUERY KEYS =============
@@ -89,6 +107,8 @@ export function useMemoryBrowse(filters: MemoryFilters = {}) {
   const params = new URLSearchParams()
   if (filters.query) params.set('query', filters.query)
   if (filters.limit) params.set('limit', String(filters.limit))
+  if (filters.content_type) params.set('content_type', filters.content_type)
+  if (filters.tier && filters.tier !== 'all') params.set('tier', filters.tier)
 
   const qs = params.toString()
 

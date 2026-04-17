@@ -54,6 +54,23 @@ function truncate(text: string, max: number): string {
 
 // ── Component ───────────────────────────────────────────
 
+type FilterKey =
+  | 'all'
+  | 'transcript'
+  | 'mission_summary'
+  | 'task_failure'
+  | 'retry_recovery'
+  | 'facts'
+
+const FILTER_CHIPS: { key: FilterKey; label: string; title: string }[] = [
+  { key: 'all', label: 'All', title: 'All memories (raw + facts)' },
+  { key: 'transcript', label: 'Transcripts', title: 'Raw chat exchanges' },
+  { key: 'mission_summary', label: 'Missions', title: 'Mission outcome summaries' },
+  { key: 'task_failure', label: 'Failures', title: 'Permanent task failures' },
+  { key: 'retry_recovery', label: 'Recoveries', title: 'Tasks that passed after retry' },
+  { key: 'facts', label: 'Facts', title: 'Mem0-extracted facts (L3)' },
+]
+
 interface MemorySidebarProps {
   memories: MemoryItem[]
   selectedId: string | null
@@ -65,6 +82,8 @@ interface MemorySidebarProps {
   hasActiveQuery: boolean
   total: number
   isLoading: boolean
+  activeFilter?: FilterKey
+  onFilterChange?: (filter: FilterKey) => void
 }
 
 export function MemorySidebar({
@@ -78,6 +97,8 @@ export function MemorySidebar({
   hasActiveQuery,
   total,
   isLoading,
+  activeFilter = 'all',
+  onFilterChange,
 }: MemorySidebarProps) {
   const grouped = useMemo(() => groupMemories(memories), [memories])
 
@@ -106,6 +127,25 @@ export function MemorySidebar({
             </button>
           )}
         </div>
+        {onFilterChange && (
+          <div className="flex flex-wrap gap-1 pt-1">
+            {FILTER_CHIPS.map((chip) => (
+              <button
+                key={chip.key}
+                title={chip.title}
+                onClick={() => onFilterChange(chip.key)}
+                className={cn(
+                  'px-2 py-0.5 rounded-full text-[10px] font-medium transition-colors border',
+                  activeFilter === chip.key
+                    ? 'bg-[hsl(var(--info))]/15 border-[hsl(var(--info))]/40 text-foreground'
+                    : 'bg-secondary/30 border-transparent text-muted-foreground hover:text-foreground hover:bg-secondary/50'
+                )}
+              >
+                {chip.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Grouped list */}
@@ -149,7 +189,13 @@ export function MemorySidebar({
                     <p className="text-sm leading-snug line-clamp-2">{truncate(m.content, 120)}</p>
                     <div className="flex items-center gap-2 mt-1 text-[10px] text-muted-foreground">
                       <span>{formatTime(m.created_at)}</span>
-                      {m.tier && <span className="capitalize">{m.tier}</span>}
+                      {m.content_type ? (
+                        <span className="px-1.5 py-0.5 rounded bg-[hsl(var(--info))]/10 text-[hsl(var(--info))] font-medium">
+                          {m.content_type.replace(/_/g, ' ')}
+                        </span>
+                      ) : m.tier ? (
+                        <span className="capitalize">{m.tier}</span>
+                      ) : null}
                       {m.metadata?.agent_name && (
                         <span className="truncate max-w-[80px]">{m.metadata.agent_name}</span>
                       )}
