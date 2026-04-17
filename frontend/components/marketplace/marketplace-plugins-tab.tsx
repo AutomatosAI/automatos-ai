@@ -84,13 +84,14 @@ interface PluginCategory {
 
 interface MarketplacePluginsTabProps {
   searchQuery: string
+  workspaceId?: string
 }
 
 // ===================================================================
 // Component
 // ===================================================================
 
-export function MarketplacePluginsTab({ searchQuery }: MarketplacePluginsTabProps) {
+export function MarketplacePluginsTab({ searchQuery, workspaceId }: MarketplacePluginsTabProps) {
   const { toast } = useToast()
   const { user } = useUser()
   const [viewMode, setViewMode] = useViewMode('mp-plugins')
@@ -115,11 +116,12 @@ export function MarketplacePluginsTab({ searchQuery }: MarketplacePluginsTabProp
   const [deactivatingId, setDeactivatingId] = useState<string | null>(null)
   const [showImportModal, setShowImportModal] = useState(false)
 
-  // Get workspace ID from localStorage (same pattern as api-client.ts)
+  // Workspace ID: prop (e.g. admin override) wins, else localStorage fallback.
   const getWorkspaceId = useCallback((): string | null => {
+    if (workspaceId) return workspaceId
     if (typeof window === 'undefined') return null
     return localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
-  }, [])
+  }, [workspaceId])
 
   // Fetch categories
   useEffect(() => {

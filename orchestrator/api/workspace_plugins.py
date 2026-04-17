@@ -28,6 +28,17 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/workspaces", tags=["Workspace Plugins"])
 
 
+def _is_admin(ctx: RequestContext) -> bool:
+    """System admins can operate on any workspace (mirrors admin_plugins.py)."""
+    return getattr(ctx.user, "system_role", "user") == "admin"
+
+
+def _assert_workspace_access(ctx: RequestContext, workspace_id: UUID) -> None:
+    """Allow own workspace or system admin; otherwise 403."""
+    if ctx.workspace_id != workspace_id and not _is_admin(ctx):
+        raise HTTPException(status_code=403, detail="Access denied: workspace mismatch")
+
+
 # ===================================================================
 # Pydantic Models
 # ===================================================================
@@ -65,9 +76,7 @@ async def list_workspace_plugins(
     db: Session = Depends(get_db),
 ):
     """List plugins enabled for a workspace (joined with marketplace_plugins for details)."""
-    # Validate workspace matches authenticated user's workspace
-    if ctx.workspace_id != workspace_id:
-        raise HTTPException(status_code=403, detail="Access denied: workspace mismatch")
+    _assert_workspace_access(ctx, workspace_id)
 
     try:
         from core.models.marketplace_plugins import (
@@ -129,9 +138,7 @@ async def enable_plugin(
     db: Session = Depends(get_db),
 ):
     """Enable a marketplace plugin for a workspace."""
-    # Validate workspace matches authenticated user's workspace
-    if ctx.workspace_id != workspace_id:
-        raise HTTPException(status_code=403, detail="Access denied: workspace mismatch")
+    _assert_workspace_access(ctx, workspace_id)
 
     try:
         from core.models.marketplace_plugins import (
@@ -207,9 +214,7 @@ async def disable_plugin(
     db: Session = Depends(get_db),
 ):
     """Disable a plugin for a workspace. Also removes agent assignments for this workspace's agents."""
-    # Validate workspace matches authenticated user's workspace
-    if ctx.workspace_id != workspace_id:
-        raise HTTPException(status_code=403, detail="Access denied: workspace mismatch")
+    _assert_workspace_access(ctx, workspace_id)
 
     try:
         from core.models.marketplace_plugins import (
