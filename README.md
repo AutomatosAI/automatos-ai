@@ -18,6 +18,10 @@ Automatos AI is an open-source platform for building AI workforces. Create speci
 
 It is not a chatbot wrapper. It is an operating system for AI agents.
 
+<p align="center">
+  <strong>1,000+ tool integrations &middot; 300+ LLMs &middot; 150+ skills &middot; Bring-your-own-keys</strong>
+</p>
+
 <br>
 
 ## Talk to your agents
@@ -40,15 +44,23 @@ A unified chat interface that routes your messages to the right agent automatica
 
 <br>
 
-## 500+ tool integrations
+## 1,000+ tool integrations
 
-Connect your agents to GitHub, Slack, Jira, Stripe, Shopify, Datadog, and dozens more through the community marketplace. Browse, install, and manage integrations from a single dashboard.
+Connect your agents to GitHub, Slack, Jira, Stripe, Shopify, Datadog, Notion, HubSpot, and a thousand more through the community marketplace. Browse, install, and assign integrations to specific agents from a single dashboard — no glue code, no per-tool SDKs.
 
 <p align="center">
   <img src="docs/assets/03-Marketplace-tools.png" alt="Community Marketplace" width="800">
 </p>
 
 <br>
+
+## 150+ reusable skills
+
+Skills are portable, versioned capability packs — a system prompt, a set of tools, and an output contract. Drop *Sentinel* onto a security agent, *Scout* onto a research agent, or write your own. One skill, any agent, instantly productive.
+
+## 300+ LLMs, one router
+
+Route any agent to any model. OpenAI, Anthropic, Google, DeepSeek, GLM, Mistral, Qwen, Llama — through OpenRouter or direct provider keys. Mix cheap models for heartbeat work with frontier models for reasoning, and see the cost impact per request.
 
 ## Command centre
 
