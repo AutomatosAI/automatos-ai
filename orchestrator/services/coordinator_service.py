@@ -307,6 +307,30 @@ def _cleanup_ephemeral_agents(db: Session, run: OrchestrationRun) -> int:
     return count
 
 
+async def _store_mission_memory_safe(
+    db: Session,
+    run_id,
+    outcome: str,
+    failure_reason: Optional[str] = None,
+) -> None:
+    """PRD-131d Phase 1: persist mission summary to L2+L3 memory.
+
+    Wrapped in a try/except so memory failures never break a mission transition.
+    """
+    try:
+        from core.services.mission_memory_service import MissionMemoryService
+        await MissionMemoryService(db=db).store_mission_summary(
+            run_id=run_id,
+            outcome=outcome,
+            failure_reason=failure_reason,
+        )
+    except Exception:
+        logger.warning(
+            "Mission memory storage skipped for run %s (outcome=%s)",
+            run_id, outcome, exc_info=True,
+        )
+
+
 # ---------------------------------------------------------------------------
 # CoordinatorService
 # ---------------------------------------------------------------------------
@@ -1389,6 +1413,10 @@ class CoordinatorService:
                 stop_reason="coordinator_error",
                 stop_detail="Plan validation failed after all retries",
             )
+            await _store_mission_memory_safe(
+                db, run.id, outcome="failed",
+                failure_reason="Plan validation failed after all retries",
+            )
             raise
 
         # Store the plan on the run
@@ -1991,6 +2019,10 @@ class CoordinatorService:
                 reason="Replan validation failed after all retries",
                 stop_reason="coordinator_error",
                 stop_detail="Replan validation failed after all retries",
+            )
+            await _store_mission_memory_safe(
+                db, run.id, outcome="failed",
+                failure_reason="Replan validation failed after all retries",
             )
             raise
 
@@ -2631,6 +2663,9 @@ class CoordinatorService:
                 summary["total_duration_seconds"],
                 "pass" if (consistency_result and consistency_result.passed) else "issues",
             )
+
+            # PRD-131d Phase 1: persist mission summary to memory (success)
+            await _store_mission_memory_safe(db, run.id, outcome="completed")
 
         except Exception:
             logger.error(

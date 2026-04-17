@@ -1293,17 +1293,17 @@ async def _execute_recipe_inner(
             except Exception as e:
                 logger.warning(f"[recipe_direct] Auto-learning failed (non-blocking): {e}")
 
-        # Store execution memories in Mem0
+        # Store execution memories in Mem0 + L2 short-term
         try:
-            from core.services.recipe_memory_service import RecipeMemoryService
-            memory_svc = RecipeMemoryService(db=db)
+            from core.services.playbook_memory_service import PlaybookMemoryService
+            memory_svc = PlaybookMemoryService(db=db)
             await memory_svc.store_execution_memory(
                 recipe_execution_id,
                 learnings=learning_result,
             )
-            logger.info(f"[recipe_direct] Stored Mem0 memories for {recipe_execution_id}")
+            logger.info(f"[recipe_direct] Stored playbook memories for {recipe_execution_id}")
         except Exception as e:
-            logger.info(f"[recipe_direct] Mem0 memory storage skipped: {e}")
+            logger.warning(f"[recipe_direct] Playbook memory storage skipped: {e}", exc_info=True)
 
     except Exception as e:
         logger.error(f"[recipe_direct] Fatal error in execution {recipe_execution_id}: {e}", exc_info=True)
@@ -1502,6 +1502,21 @@ async def _fail_execution(
             logger.info(f"[recipe_direct] Execution {execution_id} marked FAILED: {error_message}")
             # Update agent performance_metrics for failure
             _update_agent_performance_metrics(db, step_results or [], success=False)
+
+            # Capture failure context into memory so future runs can learn from it
+            try:
+                from core.services.playbook_memory_service import PlaybookMemoryService
+                memory_svc = PlaybookMemoryService(db=db)
+                await memory_svc.store_execution_memory(
+                    execution_id,
+                    learnings={"failure_reason": error_message},
+                )
+                logger.info(f"[recipe_direct] Stored failure memory for {execution_id}")
+            except Exception as mem_err:
+                logger.warning(
+                    f"[recipe_direct] Failure memory storage skipped for {execution_id}: {mem_err}",
+                    exc_info=True,
+                )
     except Exception as e:
         logger.error(f"[recipe_direct] Failed to mark execution as failed: {e}")
         db.rollback()
