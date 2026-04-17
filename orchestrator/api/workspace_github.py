@@ -255,8 +255,9 @@ async def clone_github_repo(
     })
     db.commit()
 
-    # Enqueue to Redis (after DB commit succeeds)
-    redis = await runner._get_redis()
+    # Enqueue to Redis (after DB commit succeeds).
+    # QueuedTaskRunner exposes an async client as `_aredis` — use it directly.
+    redis = runner._aredis
     try:
         status_key = f"workspace:task:{task_id}:status"
         await redis.hset(status_key, mapping={
