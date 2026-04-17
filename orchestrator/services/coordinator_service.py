@@ -1251,6 +1251,19 @@ class CoordinatorService:
         """Record task completion/failure — runs serially on shared session."""
         MissionDispatcher.record_task_completion(db, task, result)
 
+        # PRD-131d Phase 2: capture permanent agent-error failures into memory.
+        # record_task_completion transitions to FAILED only when retries are
+        # exhausted; re-queued retries stay in QUEUED and should not fire here.
+        try:
+            if task.state == TaskState.FAILED.value:
+                from core.services.mission_memory_service import MissionMemoryService
+                await MissionMemoryService(db=db).store_task_failure(task=task)
+        except Exception:
+            logger.warning(
+                "Task failure memory capture skipped for task %s",
+                task.id, exc_info=True,
+            )
+
         # PRD-128: dispatch mission_step_complete (default pref is 'silent'
         # so this is opt-in per workspace/user)
         try:
