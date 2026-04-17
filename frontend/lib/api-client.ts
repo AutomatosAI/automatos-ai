@@ -805,7 +805,7 @@ class ApiClient {
   async getAuthHeaders(): Promise<Record<string, string>> {
     const headers: Record<string, string> = {}
     if (typeof window !== 'undefined') {
-      const workspaceId = localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
+      const workspaceId = _adminWorkspaceOverride || localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
       if (workspaceId) headers['X-Workspace-ID'] = workspaceId
     }
     if (this.getClerkToken) {
@@ -1565,7 +1565,7 @@ class ApiClient {
     delete headers['Content-Type'] // Let browser set multipart/form-data with boundary
 
     if (typeof window !== 'undefined') {
-      const workspaceId = localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
+      const workspaceId = _adminWorkspaceOverride || localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
       if (workspaceId) headers['X-Workspace-ID'] = workspaceId
     }
 
@@ -1605,7 +1605,7 @@ class ApiClient {
 
     const headers: any = { ...this.defaultHeaders }
     if (typeof window !== 'undefined') {
-      const workspaceId = localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
+      const workspaceId = _adminWorkspaceOverride || localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
       if (workspaceId) headers['X-Workspace-ID'] = workspaceId
     }
     if (this.getClerkToken) {
@@ -1645,7 +1645,7 @@ class ApiClient {
 
     // Inject Workspace ID from LocalStorage
     if (typeof window !== 'undefined') {
-      const workspaceId = localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
+      const workspaceId = _adminWorkspaceOverride || localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
       if (workspaceId) {
         headers['X-Workspace-ID'] = workspaceId
       }
@@ -1722,7 +1722,7 @@ class ApiClient {
 
     // Inject Workspace ID from LocalStorage (same as request method)
     if (typeof window !== 'undefined') {
-      const workspaceId = localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
+      const workspaceId = _adminWorkspaceOverride || localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
       if (workspaceId) {
         headers['X-Workspace-ID'] = workspaceId
         console.log('[Upload] 🏢 Injected workspace context:', workspaceId)
