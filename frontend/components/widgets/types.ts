@@ -473,7 +473,7 @@ export interface FileWidgetData {
   currentPath?: string
   // Preview content
   previewContent?: string
-  previewType?: 'text' | 'image' | 'pdf' | 'code' | 'binary'
+  previewType?: 'text' | 'image' | 'pdf' | 'code' | 'binary' | 'html'
 }
 
 // ============================================

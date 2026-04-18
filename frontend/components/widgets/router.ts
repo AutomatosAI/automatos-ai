@@ -654,6 +654,8 @@ function transformToFileWidget(
     const mimeType = (result.mime_type as string) || ''
     if (mimeType.startsWith('image/')) previewType = 'image'
     else if (mimeType === 'application/pdf') previewType = 'pdf'
+    else if (mimeType === 'text/html' || mimeType === 'application/xhtml+xml')
+      previewType = 'html'
     else if (mimeType.includes('text') || mimeType.includes('json') || mimeType.includes('xml'))
       previewType = 'text'
     else previewType = 'code'

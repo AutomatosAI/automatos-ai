@@ -9,7 +9,7 @@
  * - binary: not-available message
  */
 
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { FileQuestion } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -18,7 +18,7 @@ import 'prismjs/themes/prism-tomorrow.css'
 
 interface FilePreviewProps {
   content?: string
-  previewType?: 'text' | 'image' | 'pdf' | 'code' | 'binary'
+  previewType?: 'text' | 'image' | 'pdf' | 'code' | 'binary' | 'html'
   filename?: string
   className?: string
 }
@@ -82,6 +82,9 @@ export function FilePreview({
   filename,
   className,
 }: FilePreviewProps) {
+  // HTML preview vs source toggle
+  const [htmlView, setHtmlView] = useState<'preview' | 'source'>('preview')
+
   // Compute syntax-highlighted HTML for code previews
   const highlightedHtml = useMemo(() => {
     if (previewType !== 'code' || !content || !filename) return null
@@ -129,6 +132,57 @@ export function FilePreview({
           style={{ maxWidth: '100%', maxHeight: '100%' }}
           className="object-contain rounded-md"
         />
+      </div>
+    )
+  }
+
+  // HTML preview — rendered in sandboxed iframe, with source toggle
+  if (previewType === 'html') {
+    return (
+      <div className={cn('flex flex-col h-full', className)}>
+        <div className="flex items-center gap-1 border-b bg-muted/30 px-2 py-1">
+          <button
+            type="button"
+            onClick={() => setHtmlView('preview')}
+            className={cn(
+              'rounded px-2 py-1 text-xs font-medium transition-colors',
+              htmlView === 'preview'
+                ? 'bg-background text-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground'
+            )}
+          >
+            Preview
+          </button>
+          <button
+            type="button"
+            onClick={() => setHtmlView('source')}
+            className={cn(
+              'rounded px-2 py-1 text-xs font-medium transition-colors',
+              htmlView === 'source'
+                ? 'bg-background text-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground'
+            )}
+          >
+            Source
+          </button>
+        </div>
+        {htmlView === 'preview' ? (
+          <iframe
+            // Sandboxed: allow-scripts only. No allow-same-origin → iframe
+            // cannot access parent cookies, storage, or DOM. Agent-generated
+            // HTML is untrusted input.
+            sandbox="allow-scripts"
+            srcDoc={content}
+            title={filename || 'HTML preview'}
+            className="flex-1 w-full border-0 bg-white"
+          />
+        ) : (
+          <ScrollArea className="flex-1">
+            <pre className="p-4 text-sm font-mono whitespace-pre-wrap text-gray-200 bg-[#2d2d2d] min-h-full">
+              <code>{content}</code>
+            </pre>
+          </ScrollArea>
+        )}
       </div>
     )
   }
