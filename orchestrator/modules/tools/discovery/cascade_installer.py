@@ -168,13 +168,6 @@ async def cascade_agent_dependencies(
             model_id = mi_meta.get("model_id")
 
     if model_id:
-        # Write model_config onto cloned agent so the model selector pre-selects it
-        if not cloned_agent.model_config or not cloned_agent.model_config.get("model_id"):
-            cloned_agent.model_config = {"model_id": model_id}
-            from sqlalchemy.orm.attributes import flag_modified
-            flag_modified(cloned_agent, "model_config")
-            db.flush()
-
         try:
             model_result = await install_model(db, workspace_id, {"model_id": model_id})
             status = "already_installed" if model_result.get("already_installed") else "installed"
@@ -183,6 +176,24 @@ async def cascade_agent_dependencies(
             if not model_result.get("success"):
                 status = "failed"
                 result.warnings.append(f"Failed to install model {model_id}: {model_result.get('error', 'unknown')}")
+            else:
+                # Normalise cloned agent's model_config to match the resolved LLMModel.
+                # This overwrites any legacy provider value (e.g. 'aiml') copied from
+                # the marketplace row, so activation uses a valid LLMProvider enum.
+                resolved_model = model_result.get("model") or {}
+                resolved_model_id = resolved_model.get("model_id") or model_id
+                resolved_provider = resolved_model.get("provider")
+                existing_cfg = cloned_agent.model_config or {}
+                new_cfg = {
+                    **existing_cfg,
+                    "model_id": resolved_model_id,
+                }
+                if resolved_provider:
+                    new_cfg["provider"] = resolved_provider
+                cloned_agent.model_config = new_cfg
+                from sqlalchemy.orm.attributes import flag_modified
+                flag_modified(cloned_agent, "model_config")
+                db.flush()
             result.installed_dependencies.append({
                 "type": "model",
                 "name": model_id,
