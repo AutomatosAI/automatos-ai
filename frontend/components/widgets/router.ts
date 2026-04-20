@@ -27,6 +27,7 @@ import type {
   FileInfo,
   WorkflowStatus,
 } from './types'
+import { inferPreviewType } from './FileWidget/FilePreview'
 
 /**
  * Mapping of tool names to widget types
@@ -648,17 +649,13 @@ function transformToFileWidget(
     ? parseFileInfo(result as Record<string, unknown>)
     : undefined
 
-  // Determine preview type
+  // Determine preview type — delegate to FilePreview's shared inference so
+  // all surfaces (chat, Outputs, Explorer) use the same detection logic.
   let previewType: FileWidgetData['previewType']
-  if (result.content) {
+  if (result.content || result.preview_url) {
     const mimeType = (result.mime_type as string) || ''
-    if (mimeType.startsWith('image/')) previewType = 'image'
-    else if (mimeType === 'application/pdf') previewType = 'pdf'
-    else if (mimeType === 'text/html' || mimeType === 'application/xhtml+xml')
-      previewType = 'html'
-    else if (mimeType.includes('text') || mimeType.includes('json') || mimeType.includes('xml'))
-      previewType = 'text'
-    else previewType = 'code'
+    const filename = file?.name || (result.path as string | undefined) || ''
+    previewType = inferPreviewType(filename, mimeType)
   }
 
   const data: FileWidgetData = {
@@ -667,6 +664,9 @@ function transformToFileWidget(
     files: files.length > 0 ? files : undefined,
     currentPath: result.current_path as string | undefined,
     previewContent: result.content as string | undefined,
+    previewUrl: (result.preview_url as string | undefined) ||
+      (result.content_url as string | undefined) ||
+      (result.download_url as string | undefined),
     previewType,
   }
 

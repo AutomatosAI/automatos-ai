@@ -15,6 +15,7 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
@@ -89,6 +90,34 @@ async def get_file_content(
         raise HTTPException(status_code=status, detail=result["error"])
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# GET /api/workspaces/{workspace_id}/files/raw — raw bytes (proxied)
+# ---------------------------------------------------------------------------
+@router.get("/files/raw")
+async def get_file_raw(
+    workspace_id: str,
+    path: str = Query(..., description="Relative file path inside workspace"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """Return raw binary bytes of a file (for PDF/DOCX/XLSX/image preview)."""
+    if str(ctx.workspace_id) != workspace_id:
+        raise HTTPException(status_code=403, detail="Workspace access denied")
+
+    client = WorkspaceClient(workspace_id)
+    result = await client.download_file(path)
+
+    if result.get("success") is False:
+        status = result.get("status_code", 503)
+        raise HTTPException(status_code=status, detail=result["error"])
+
+    filename = result.get("filename") or path.rsplit("/", 1)[-1]
+    return Response(
+        content=result["content"],
+        media_type=result.get("content_type", "application/octet-stream"),
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
 
 
 # ---------------------------------------------------------------------------

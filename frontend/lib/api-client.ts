@@ -2586,6 +2586,15 @@ class ApiClient {
     })
   }
 
+  /**
+   * Build a raw-bytes URL for a workspace file. Used by FilePreview for
+   * binary types (PDF/DOCX/XLSX/image/video/audio) which fetch as arrayBuffer.
+   * Returns a relative path; FilePreview will prepend baseUrl and add auth headers.
+   */
+  getWorkspaceFileRawUrl(workspaceId: string, path: string): string {
+    return `/api/workspaces/${workspaceId}/files/raw?path=${encodeURIComponent(path)}`
+  }
+
   async listGithubRepos(workspaceId: string, page = 1, perPage = 30) {
     return this.request(`/api/workspaces/${workspaceId}/github/repos?page=${page}&per_page=${perPage}`)
   }

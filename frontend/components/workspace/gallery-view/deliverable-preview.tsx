@@ -4,31 +4,15 @@
  *
  * Slide-over sheet that shows a single deliverable's content with Download,
  * Delete, and "Open in Explorer" actions. Fetches full content via useDeliverable
- * with include_content=true. Renders images, code (Prism), markdown/reports
- * (react-markdown), and plain text. Unsupported types show a friendly
- * fallback with a Download link.
+ * with include_content=true. All rendering is delegated to the shared
+ * FilePreview component so Outputs, Chat, and Explorer stay aligned.
  */
 
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { formatDistanceToNow } from 'date-fns'
-import ReactMarkdown from 'react-markdown'
-import Prism from 'prismjs'
-import 'prismjs/themes/prism-tomorrow.css'
-import 'prismjs/components/prism-python'
-import 'prismjs/components/prism-typescript'
-import 'prismjs/components/prism-javascript'
-import 'prismjs/components/prism-json'
-import 'prismjs/components/prism-bash'
-import 'prismjs/components/prism-sql'
-import 'prismjs/components/prism-css'
-import 'prismjs/components/prism-markup'
-import 'prismjs/components/prism-go'
-import 'prismjs/components/prism-yaml'
-import 'prismjs/components/prism-markdown'
-import 'prismjs/components/prism-docker'
 import {
   Download,
   ExternalLink,
@@ -36,6 +20,10 @@ import {
   Loader2,
   Trash2,
 } from 'lucide-react'
+import {
+  FilePreview,
+  inferPreviewType,
+} from '@/components/widgets/FileWidget/FilePreview'
 
 import {
   Sheet,
@@ -59,44 +47,18 @@ interface DeliverablePreviewProps {
 
 // ============= HELPERS =============
 
-const EXT_TO_LANG: Record<string, string> = {
-  py: 'python',
-  ts: 'typescript',
-  tsx: 'typescript',
-  js: 'javascript',
-  jsx: 'javascript',
-  json: 'json',
-  sh: 'bash',
-  bash: 'bash',
-  zsh: 'bash',
-  sql: 'sql',
-  css: 'css',
-  html: 'markup',
-  xml: 'markup',
-  go: 'go',
-  yaml: 'yaml',
-  yml: 'yaml',
-  md: 'markdown',
-  markdown: 'markdown',
-  dockerfile: 'docker',
-}
-
-export function getLanguageFromPath(filePath: string | null | undefined): string {
-  if (!filePath) return ''
-  const base = filePath.split('/').pop() || ''
-  if (base.toLowerCase() === 'dockerfile') return 'docker'
-  const lastDot = base.lastIndexOf('.')
-  if (lastDot === -1) return ''
-  const ext = base.slice(lastDot + 1).toLowerCase()
-  return EXT_TO_LANG[ext] || ''
-}
-
-function isMarkdownDeliverable(d: Deliverable): boolean {
-  if (d.artifact_type === 'report') return true
-  const ft = (d.file_type || '').toLowerCase()
-  if (ft === 'md' || ft === 'markdown') return true
-  const lang = getLanguageFromPath(d.file_path)
-  return lang === 'markdown'
+/**
+ * Derive a FilePreview-compatible type for a deliverable. Combines deliverable
+ * metadata (artifact_type, file_type) with the filename-based inference used
+ * by the shared FilePreview component, so the three preview surfaces
+ * (Chat, Outputs, Explorer) stay aligned.
+ */
+function getPreviewTypeForDeliverable(d: Deliverable) {
+  if (d.artifact_type === 'report') return 'markdown' as const
+  return inferPreviewType(
+    d.file_name || d.file_path || '',
+    d.file_type || '',
+  )
 }
 
 /**
@@ -119,59 +81,9 @@ async function downloadViaApi(url: string, filename: string): Promise<void> {
   URL.revokeObjectURL(objectUrl)
 }
 
-// ============= CONTENT RENDERERS =============
+// ============= FALLBACK =============
 
-function ImageContent({ url, title }: { url: string; title: string }) {
-  return (
-    <div className="flex items-center justify-center rounded-lg border border-border/50 bg-muted/20 p-4">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={url}
-        alt={title}
-        className="max-h-[70vh] w-auto max-w-full rounded object-contain"
-      />
-    </div>
-  )
-}
-
-function CodeContent({ code, language }: { code: string; language: string }) {
-  const codeRef = useRef<HTMLElement>(null)
-
-  useEffect(() => {
-    if (codeRef.current) {
-      Prism.highlightElement(codeRef.current)
-    }
-  }, [code, language])
-
-  return (
-    <pre className="overflow-x-auto rounded-lg border border-border/50 bg-[#1a1a1a] p-4 text-[13px] leading-relaxed">
-      <code
-        ref={codeRef}
-        className={language ? `language-${language}` : undefined}
-      >
-        {code}
-      </code>
-    </pre>
-  )
-}
-
-function MarkdownContent({ content }: { content: string }) {
-  return (
-    <div className="prose prose-sm dark:prose-invert max-w-none rounded-lg border border-border/50 bg-background p-6">
-      <ReactMarkdown>{content}</ReactMarkdown>
-    </div>
-  )
-}
-
-function PlainTextContent({ content }: { content: string }) {
-  return (
-    <pre className="overflow-x-auto whitespace-pre-wrap rounded-lg border border-border/50 bg-muted/20 p-4 text-[13px] leading-relaxed">
-      {content}
-    </pre>
-  )
-}
-
-function UnavailableContent({
+function ContentUnavailable({
   message,
   downloadUrl,
   filename,
@@ -188,7 +100,6 @@ function UnavailableContent({
     try {
       await downloadViaApi(downloadUrl, filename)
     } catch {
-      // fallback: open in new tab
       window.open(`${apiClient.getBaseUrl()}${downloadUrl}`, '_blank')
     } finally {
       setDownloading(false)
@@ -240,13 +151,11 @@ export function DeliverablePreview({
     return () => window.removeEventListener('keydown', onKey)
   }, [open, onOpenChange])
 
-  const language = useMemo(
-    () => (deliverable ? getLanguageFromPath(deliverable.file_path) : ''),
-    [deliverable],
-  )
-
   const downloadUrl = deliverable?.content_url || deliverable?.preview_url || null
-  const filename = deliverable?.file_name || deliverable?.file_path?.split('/').pop() || 'download'
+  const filename =
+    deliverable?.file_name ||
+    deliverable?.file_path?.split('/').pop() ||
+    'download'
 
   const handleDownload = useCallback(async () => {
     if (!downloadUrl) return
@@ -254,7 +163,6 @@ export function DeliverablePreview({
     try {
       await downloadViaApi(downloadUrl, filename)
     } catch {
-      // fallback: open in new tab
       window.open(`${apiClient.getBaseUrl()}${downloadUrl}`, '_blank')
     } finally {
       setDownloading(false)
@@ -351,9 +259,27 @@ export function DeliverablePreview({
               </div>
             </SheetHeader>
 
-            {/* Content body */}
+            {/* Content body — delegated to shared FilePreview */}
             <div>
-              <PreviewBody deliverable={deliverable} language={language} />
+              {deliverable.content_error ? (
+                <ContentUnavailable
+                  message={`Unable to load content: ${deliverable.content_error}`}
+                  downloadUrl={downloadUrl}
+                  filename={filename}
+                />
+              ) : (
+                <FilePreview
+                  content={
+                    typeof deliverable.content === 'string'
+                      ? deliverable.content
+                      : undefined
+                  }
+                  url={downloadUrl ?? undefined}
+                  previewType={getPreviewTypeForDeliverable(deliverable)}
+                  filename={filename}
+                  className="rounded-lg border border-border/50"
+                />
+              )}
             </div>
 
             {/* Summary card */}
@@ -369,83 +295,5 @@ export function DeliverablePreview({
         )}
       </SheetContent>
     </Sheet>
-  )
-}
-
-function PreviewBody({
-  deliverable,
-  language,
-}: {
-  deliverable: Deliverable
-  language: string
-}) {
-  const filename = deliverable.file_name || deliverable.file_path?.split('/').pop() || 'download'
-
-  // 1. Image — render <img> via content_url (backend provides this for images)
-  if (deliverable.artifact_type === 'image') {
-    const url = deliverable.content_url || deliverable.preview_url
-    if (!url) {
-      return (
-        <UnavailableContent
-          message="Image preview unavailable"
-          downloadUrl={null}
-          filename={filename}
-        />
-      )
-    }
-    return <ImageContent url={url} title={deliverable.title} />
-  }
-
-  // Error fetching content
-  if (deliverable.content_error) {
-    return (
-      <UnavailableContent
-        message={`Unable to load content: ${deliverable.content_error}`}
-        downloadUrl={deliverable.content_url ?? deliverable.preview_url ?? null}
-        filename={filename}
-      />
-    )
-  }
-
-  // 2. Code — syntax highlight via Prism
-  if (deliverable.artifact_type === 'code') {
-    if (typeof deliverable.content !== 'string') {
-      return (
-        <UnavailableContent
-          message="Code content unavailable"
-          downloadUrl={deliverable.content_url ?? deliverable.preview_url ?? null}
-          filename={filename}
-        />
-      )
-    }
-    return <CodeContent code={deliverable.content} language={language} />
-  }
-
-  // 3. Report or markdown — render via react-markdown
-  if (isMarkdownDeliverable(deliverable)) {
-    if (typeof deliverable.content !== 'string') {
-      return (
-        <UnavailableContent
-          message="Report content unavailable"
-          downloadUrl={deliverable.content_url ?? deliverable.preview_url ?? null}
-          filename={filename}
-        />
-      )
-    }
-    return <MarkdownContent content={deliverable.content} />
-  }
-
-  // 4. Other text content — plain <pre>
-  if (typeof deliverable.content === 'string') {
-    return <PlainTextContent content={deliverable.content} />
-  }
-
-  // 5. Unsupported
-  return (
-    <UnavailableContent
-      message="Preview not available for this file type"
-      downloadUrl={deliverable.content_url ?? deliverable.preview_url ?? null}
-      filename={filename}
-    />
   )
 }
