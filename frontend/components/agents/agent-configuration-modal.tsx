@@ -53,6 +53,7 @@ import {
 } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
 import { useAgent, useAgentConfig, useUpdateAgentConfig, useAgentSkills, useAddSkillToAgent, useRemoveSkillFromAgent } from '@/hooks/use-agent-api'
+import { useWorkspace } from '@/components/workspace-provider'
 import { useSkillsApi } from '@/hooks/use-skills-api'
 import { ModelSelector } from './model-selector'
 import { useAgentModelConfig, useUpdateAgentModelConfig } from '@/hooks/use-model-api'
@@ -99,6 +100,7 @@ export function AgentConfigurationModal({
   onClose,
   onSave
 }: AgentConfigurationModalProps) {
+  const { workspace } = useWorkspace()
   const [activeTab, setActiveTab] = useState('general')
   const [hasChanges, setHasChanges] = useState(false)
 
@@ -193,16 +195,12 @@ export function AgentConfigurationModal({
   // PRD-42: Fetch workspace-enabled plugins and agent plugin assignments when modal opens
   useEffect(() => {
     if (!open || !agentId) return
+    const workspaceId = workspace?.id
+    if (!workspaceId) return
     let mounted = true
       ; (async () => {
         setPluginsLoading(true)
         try {
-          const workspaceId = localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
-          if (!workspaceId) {
-            if (mounted) setPluginsLoading(false)
-            return
-          }
-
           // Fetch workspace-enabled plugins and agent's assigned plugins in parallel
           const [wpRes, apRes] = await Promise.all([
             apiClient.request<any>(`/api/workspaces/${workspaceId}/plugins`, { method: 'GET' }),
@@ -228,21 +226,19 @@ export function AgentConfigurationModal({
         }
       })()
     return () => { mounted = false }
-  }, [open, agentId])
+  }, [open, agentId, workspace?.id])
 
   // PRD-71: Fetch workspace-enabled skills and agent skill assignments when modal opens
   useEffect(() => {
     if (!open || !agentId) return
+    // Wait for workspace context to load — reading localStorage directly was racy
+    // for new users whose last_active_workspace wasn't persisted yet.
+    const workspaceId = workspace?.id
+    if (!workspaceId) return
     let mounted = true
       ; (async () => {
         setSkillsLoading(true)
         try {
-          const workspaceId = localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
-          if (!workspaceId) {
-            if (mounted) setSkillsLoading(false)
-            return
-          }
-
           const [wsRes, asRes] = await Promise.all([
             apiClient.request<any>(`/api/workspaces/${workspaceId}/skills`, { method: 'GET' }),
             apiClient.request<any>(`/api/agents/${agentId}/skills`, { method: 'GET' }),
@@ -267,7 +263,7 @@ export function AgentConfigurationModal({
         }
       })()
     return () => { mounted = false }
-  }, [open, agentId])
+  }, [open, agentId, workspace?.id])
 
   // US-023: Fetch personas list and current agent persona when modal opens
   useEffect(() => {

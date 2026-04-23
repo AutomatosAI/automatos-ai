@@ -19,6 +19,7 @@ import {
   HardDrive,
   BookOpen,
   ExternalLink,
+  Building2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { PremiumIcon } from '@/components/shared'
@@ -103,6 +104,15 @@ const navigationItems = [
     iconColor: 'text-cyan-400',
     navIconKey: 'nav_analytics',
     description: 'Performance, costs & insights',
+  },
+  {
+    name: 'Workspace Admin',
+    href: '/admin/workspaces',
+    icon: Building2,
+    iconColor: 'text-[hsl(var(--warning))]',
+    navIconKey: 'nav_admin_workspaces',
+    description: 'Manage all workspaces (admin only)',
+    requiredRole: 'admin' as const,
   },
 ]
 

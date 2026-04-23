@@ -279,18 +279,50 @@ class AgentFactory:
                 "context_window": 8192,
             }
 
-    def _resolve_provider_for_model(self, provider_str: str, model_id: str) -> str:
-        """Auto-detect and correct provider-model mismatches."""
+    def _resolve_provider_for_model(self, provider_str: str, model_id: str) -> tuple[str, str]:
+        """Auto-detect and correct provider-model mismatches.
+
+        Returns (provider, model_id) — both may be rewritten.
+        """
         DIRECT_PROVIDERS = {
             "openai", "anthropic", "google", "grok", "azure", "azure_openai",
             "aws_bedrock", "bedrock", "huggingface", "openrouter",
         }
+        # Known OpenRouter vendor prefixes for bare model-id recovery
+        VENDOR_PREFIX_RULES = (
+            ("llama", "meta-llama"),
+            ("qwen", "qwen"),
+            ("deepseek", "deepseek-ai"),
+            ("mistral", "mistralai"),
+            ("mixtral", "mistralai"),
+            ("gemma", "google"),
+            ("phi", "microsoft"),
+            ("yi-", "01-ai"),
+        )
         model_lower = model_id.lower()
 
-        # Unknown provider + slash format = OpenRouter marketplace model
-        if provider_str not in DIRECT_PROVIDERS and "/" in model_id:
-            self.logger.info(f"Provider '{provider_str}' not recognized, routing '{model_id}' through OpenRouter")
-            return "openrouter"
+        # Unknown/deprecated provider (e.g. legacy 'aiml') → route through OpenRouter
+        if provider_str not in DIRECT_PROVIDERS:
+            # Already slash-format: pass straight to OpenRouter
+            if "/" in model_id:
+                self.logger.info(
+                    f"Provider '{provider_str}' not recognized, routing '{model_id}' through OpenRouter"
+                )
+                return "openrouter", model_id
+            # Bare id → infer vendor prefix so OpenRouter can resolve it
+            for needle, vendor in VENDOR_PREFIX_RULES:
+                if model_lower.startswith(needle):
+                    rewritten = f"{vendor}/{model_id}"
+                    self.logger.warning(
+                        f"Provider '{provider_str}' unknown and model '{model_id}' has no slash; "
+                        f"rewriting to '{rewritten}' and routing through OpenRouter"
+                    )
+                    return "openrouter", rewritten
+            # Last resort: assume OpenRouter can handle it
+            self.logger.warning(
+                f"Provider '{provider_str}' unknown; routing bare model '{model_id}' through OpenRouter"
+            )
+            return "openrouter", model_id
 
         # Slash-format model IDs are OpenRouter marketplace models
         if "/" in model_id and provider_str != "openrouter":
@@ -300,7 +332,7 @@ class AgentFactory:
                     f"Slash-format model '{model_id}' with provider='{provider_str}' "
                     f"detected as OpenRouter marketplace model. Routing through OpenRouter."
                 )
-                return "openrouter"
+                return "openrouter", model_id
 
         # Fix provider-model mismatches
         inferred = None
@@ -318,9 +350,9 @@ class AgentFactory:
                 f"Provider-model mismatch: provider='{provider_str}' but model='{model_id}' "
                 f"suggests '{inferred}'. Auto-correcting."
             )
-            return inferred
+            return inferred, model_id
 
-        return provider_str
+        return provider_str, model_id
 
     async def _resolve_api_key(self, provider_name: str, agent_name: str = "", workspace_id=None) -> Optional[ResolvedKey]:
         """
@@ -416,7 +448,9 @@ class AgentFactory:
             "bedrock": LLMProviderEnum.AWS_BEDROCK,
         }
 
-        effective_provider = self._resolve_provider_for_model(model_config.provider, model_config.model_id)
+        effective_provider, effective_model_id = self._resolve_provider_for_model(
+            model_config.provider, model_config.model_id
+        )
         if effective_provider not in provider_map:
             raise ValueError(f"Unsupported provider: {effective_provider}")
 
@@ -427,7 +461,7 @@ class AgentFactory:
 
         llm_config = LLMConfig(
             provider=provider,
-            model=model_config.model_id,
+            model=effective_model_id,
             temperature=model_config.temperature,
             max_tokens=model_config.max_tokens,
             api_key=resolved.api_key,
@@ -628,9 +662,22 @@ class AgentFactory:
             from core.llm.defaults import DEFAULT_LLM_PROVIDER, DEFAULT_LLM_MODEL
             provider_str = llm_config_dict.get("provider") or DEFAULT_LLM_PROVIDER
             model_id_str = llm_config_dict.get("model", DEFAULT_LLM_MODEL)
-            provider_str = self._resolve_provider_for_model(provider_str, model_id_str)
+            provider_str, model_id_str = self._resolve_provider_for_model(provider_str, model_id_str)
 
-            provider = LLMProvider(provider_str)
+            try:
+                provider = LLMProvider(provider_str)
+            except ValueError:
+                # Safety net: any provider that survived the resolver without being
+                # normalised (e.g. stale enum value) is forced through OpenRouter.
+                self.logger.warning(
+                    f"Provider '{provider_str}' is not a valid LLMProvider enum; forcing OpenRouter"
+                )
+                provider_str = "openrouter"
+                if "/" not in model_id_str:
+                    original = (llm_config_dict.get("provider") or "").lower()
+                    if original and original != provider_str:
+                        model_id_str = f"{original}/{model_id_str}"
+                provider = LLMProvider(provider_str)
             resolved = await self._resolve_api_key(provider_str, db_agent.name, workspace_id=db_agent.workspace_id)
 
             # Fallback: if direct provider has no credential, try OpenRouter

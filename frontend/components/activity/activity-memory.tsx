@@ -26,8 +26,17 @@ interface ActivityMemoryProps {
   period?: string
 }
 
+type MemoryFilterKey =
+  | 'all'
+  | 'transcript'
+  | 'mission_summary'
+  | 'task_failure'
+  | 'retry_recovery'
+  | 'facts'
+
 export function ActivityMemory({ period = '30d' }: ActivityMemoryProps) {
   const [filters, setFilters] = useState<MemoryFilters>({ limit: 50 })
+  const [activeFilter, setActiveFilter] = useState<MemoryFilterKey>('all')
   const [searchInput, setSearchInput] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -96,6 +105,23 @@ export function ActivityMemory({ period = '30d' }: ActivityMemoryProps) {
     [selectedIds, consolidate]
   )
 
+  const handleFilterChange = useCallback((next: MemoryFilterKey) => {
+    setActiveFilter(next)
+    setSelectedId(null)
+    setFilters((prev) => {
+      const { content_type, tier, ...rest } = prev
+      switch (next) {
+        case 'all':
+          return { ...rest }
+        case 'facts':
+          return { ...rest, tier: 'l3' }
+        default:
+          // Restrict to an L2 content type
+          return { ...rest, tier: 'l2', content_type: next }
+      }
+    })
+  }, [])
+
   return (
     <div className="space-y-4">
       <HealthBanner />
@@ -119,6 +145,8 @@ export function ActivityMemory({ period = '30d' }: ActivityMemoryProps) {
               hasActiveQuery={!!filters.query}
               total={total}
               isLoading={isLoading}
+              activeFilter={activeFilter}
+              onFilterChange={handleFilterChange}
             />
           </div>
 

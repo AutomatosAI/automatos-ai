@@ -33,6 +33,7 @@ class MemoryJobScheduler:
     JOB_ID_CONSOLIDATION = "memory_session_consolidation"
     JOB_ID_DECAY = "memory_decay_scoring"
     JOB_ID_PROMOTION = "memory_l2_l3_promotion"
+    JOB_ID_ARCHIVAL = "memory_graphify_archival"
 
     def __init__(self):
         self._scheduler: Optional[AsyncIOScheduler] = None
@@ -88,12 +89,32 @@ class MemoryJobScheduler:
             max_instances=1,
         )
 
+        # Monthly: graphify archival (L2+L3 → workspace knowledge graph)
+        archival_enabled = getattr(app_config, "MEMORY_ARCHIVAL_ENABLED", True)
+        archival_day = getattr(app_config, "MEMORY_ARCHIVAL_CRON_DAY", 1)
+        archival_hour = getattr(app_config, "MEMORY_ARCHIVAL_CRON_HOUR", 3)
+        if archival_enabled:
+            self._scheduler.add_job(
+                self._run_archival,
+                "cron",
+                day=archival_day,
+                hour=archival_hour,
+                minute=0,
+                id=self.JOB_ID_ARCHIVAL,
+                replace_existing=True,
+                max_instances=1,
+            )
+
         logger.info(
             "[MemoryJobs] Started — consolidation every %ds, "
-            "decay every %ds, promotion daily at %02d:00 UTC",
+            "decay every %ds, promotion daily at %02d:00 UTC, "
+            "archival %s (day=%d hour=%02d)",
             consolidation_interval,
             decay_interval,
             promotion_hour,
+            "enabled" if archival_enabled else "disabled",
+            archival_day,
+            archival_hour,
         )
 
     async def stop(self):
@@ -104,6 +125,7 @@ class MemoryJobScheduler:
             self.JOB_ID_CONSOLIDATION,
             self.JOB_ID_DECAY,
             self.JOB_ID_PROMOTION,
+            self.JOB_ID_ARCHIVAL,
         ):
             if self._scheduler.get_job(job_id):
                 self._scheduler.remove_job(job_id)
@@ -193,6 +215,34 @@ class MemoryJobScheduler:
             )
 
     # ------------------------------------------------------------------
+    # Job: Graphify Archival (L2+L3 → workspace knowledge graph)
+    # ------------------------------------------------------------------
+
+    async def _run_archival(self):
+        """Fold aged L2+L3 memories into the workspace graph, then purge."""
+        try:
+            from services.memory_archival_job import MemoryArchivalJob
+
+            result = await MemoryArchivalJob().run_once()
+            logger.info(
+                "[MemoryJobs] Graphify archival complete: "
+                "workspaces=%d, with_candidates=%d, imported=%d, "
+                "l2_archived=%d, l3_archived=%d, errors=%d",
+                result.get("workspaces_processed", 0),
+                result.get("workspaces_with_candidates", 0),
+                result.get("nodes_imported", 0),
+                result.get("l2_archived", 0),
+                result.get("l3_archived", 0),
+                result.get("errors", 0),
+            )
+        except Exception as e:
+            logger.error(
+                "[MemoryJobs] Graphify archival failed: %s",
+                e,
+                exc_info=True,
+            )
+
+    # ------------------------------------------------------------------
     # Status
     # ------------------------------------------------------------------
 
@@ -206,6 +256,7 @@ class MemoryJobScheduler:
             self.JOB_ID_CONSOLIDATION,
             self.JOB_ID_DECAY,
             self.JOB_ID_PROMOTION,
+            self.JOB_ID_ARCHIVAL,
         ):
             job = self._scheduler.get_job(job_id)
             jobs[job_id] = {

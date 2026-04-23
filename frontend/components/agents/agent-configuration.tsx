@@ -51,6 +51,7 @@ import { ModelSelector } from './model-selector'
 import { Checkbox } from '@/components/ui/checkbox'
 import { apiClient } from '@/lib/api-client'
 import { useTools } from '@/hooks/use-tools-api'
+import { useWorkspace } from '@/components/workspace-provider'
 
 interface AgentConfigurationProps {
   agents: any[]
@@ -63,6 +64,7 @@ export function AgentConfiguration({
   selectedAgentId,
   onAgentSelect
 }: AgentConfigurationProps) {
+  const { workspace } = useWorkspace()
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   const [configData, setConfigData] = useState<any>({})
   const [modelConfigData, setModelConfigData] = useState<any>({})
@@ -106,19 +108,12 @@ export function AgentConfiguration({
   // Fetch workspace-enabled plugins and agent plugin assignments
   useEffect(() => {
     if (!selectedAgentId) return
+    const workspaceId = workspace?.id
+    if (!workspaceId) return
     let mounted = true
     setPluginsLoading(true)
     ;(async () => {
       try {
-        const workspaceId = localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
-        if (!workspaceId) {
-          if (mounted) {
-            setWorkspacePlugins([])
-            setAssignedPluginIds(new Set())
-            setPluginsLoading(false)
-          }
-          return
-        }
         const [wpRes, apRes] = await Promise.all([
           apiClient.request<any>(`/api/workspaces/${workspaceId}/plugins`, { method: 'GET' }),
           apiClient.request<any>(`/api/agents/${selectedAgentId}/plugins`, { method: 'GET' }),
@@ -146,19 +141,12 @@ export function AgentConfiguration({
   // PRD-71: Fetch workspace-enabled skills and agent skill assignments
   useEffect(() => {
     if (!selectedAgentId) return
+    const workspaceId = workspace?.id
+    if (!workspaceId) return
     let mounted = true
     setSkillsLoading(true)
     ;(async () => {
       try {
-        const workspaceId = localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
-        if (!workspaceId) {
-          if (mounted) {
-            setWorkspaceSkills([])
-            setAssignedSkillIds(new Set())
-            setSkillsLoading(false)
-          }
-          return
-        }
         const [wsRes, asRes] = await Promise.all([
           apiClient.request<any>(`/api/workspaces/${workspaceId}/skills`, { method: 'GET' }),
           apiClient.request<any>(`/api/agents/${selectedAgentId}/skills`, { method: 'GET' }),

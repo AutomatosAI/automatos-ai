@@ -21,8 +21,6 @@ export const API_ENDPOINTS = {
   // Agents
   AGENTS: '/api/agents',
   AGENT_DETAILS: (id: string) => `/api/agents/${id}`,
-  AGENT_START: (id: string) => `/api/agents/${id}/start`,
-  AGENT_STOP: (id: string) => `/api/agents/${id}/stop`,
   AGENT_LOGS: (id: string) => `/api/agents/${id}/logs`,
   AGENT_STATS: (id: string) => `/api/agents/${id}/stats`,
   

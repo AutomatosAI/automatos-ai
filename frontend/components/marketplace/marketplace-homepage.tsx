@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { motion } from 'framer-motion'
 import {
   Download,
@@ -24,11 +24,12 @@ import { MarketplaceLlmsTab } from './marketplace-llms-tab'
 import { MarketplacePlaybooksTab } from './marketplace-playbooks-tab'
 import { MarketplacePluginsTab } from './marketplace-plugins-tab'
 import { MarketplaceSkillsTab } from './marketplace-skills-tab'
-import { apiClient } from '@/lib/api-client'
+import { apiClient, getAdminWorkspaceOverride } from '@/lib/api-client'
 import { useWorkspace } from '@/hooks/use-workspace'
 import { useFeaturedItems, useToggleFeatured } from '@/hooks/use-marketplace-api'
 import { useSystemRole } from '@/contexts/role-context'
 import { MarketplaceItemModal } from './marketplace-item-modal'
+import { AdminWorkspaceSwitcher } from '@/components/analytics/admin-workspace-switcher'
 
 export interface MarketplaceItem {
   id: number
@@ -59,7 +60,7 @@ function CapabilitiesTab({ searchQuery, workspaceId }: { searchQuery: string; wo
         </TabsList>
 
         <TabsContent value="plugins" className="mt-4">
-          <MarketplacePluginsTab searchQuery={searchQuery} />
+          <MarketplacePluginsTab searchQuery={searchQuery} workspaceId={workspaceId} />
         </TabsContent>
 
         <TabsContent value="skills" className="mt-4">
@@ -243,6 +244,22 @@ export function MarketplaceHomepage() {
   const [stats, setStats] = useState({ totalItems: 0, totalInstalls: 0 })
   const { data: featuredItems, isLoading: featuredLoading } = useFeaturedItems(5)
 
+  // Admin override: lets a system admin install to a different workspace.
+  // AdminWorkspaceSwitcher mutates a module-level override via setAdminWorkspaceOverride().
+  // We mirror it in local state so React re-renders and the effective ID propagates to tabs.
+  const [adminOverrideId, setAdminOverrideId] = useState<string | null>(() => {
+    const v = getAdminWorkspaceOverride()
+    // '__all__' is an analytics-only aggregation; don't use it for install targeting.
+    return v && v !== '__all__' ? v : null
+  })
+
+  const handleAdminWorkspaceChange = useCallback(() => {
+    const v = getAdminWorkspaceOverride()
+    setAdminOverrideId(v && v !== '__all__' ? v : null)
+  }, [])
+
+  const effectiveWorkspaceId = adminOverrideId || workspaceId || ''
+
   // Lightweight stats for pills (no StatsBar)
   useEffect(() => {
     apiClient.setCurrentPage('marketplace')
@@ -291,8 +308,11 @@ export function MarketplaceHomepage() {
               </p>
             </div>
 
-            {/* Stat pills + search */}
+            {/* Stat pills + admin workspace switcher + search */}
             <div className="flex items-center gap-3 shrink-0">
+              {isAdmin && (
+                <AdminWorkspaceSwitcher onWorkspaceChange={handleAdminWorkspaceChange} />
+              )}
               <Badge variant="outline" className="text-xs px-2.5 py-1 border-border">
                 {stats.totalItems} items
               </Badge>
@@ -365,7 +385,7 @@ export function MarketplaceHomepage() {
           </TabsContent>
 
           <TabsContent value="capabilities" className="mt-0">
-            <CapabilitiesTab searchQuery={searchQuery} workspaceId={workspaceId || ''} />
+            <CapabilitiesTab searchQuery={searchQuery} workspaceId={effectiveWorkspaceId} />
           </TabsContent>
         </Tabs>
       </motion.div>

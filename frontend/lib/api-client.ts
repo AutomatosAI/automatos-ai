@@ -805,7 +805,7 @@ class ApiClient {
   async getAuthHeaders(): Promise<Record<string, string>> {
     const headers: Record<string, string> = {}
     if (typeof window !== 'undefined') {
-      const workspaceId = localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
+      const workspaceId = _adminWorkspaceOverride || localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
       if (workspaceId) headers['X-Workspace-ID'] = workspaceId
     }
     if (this.getClerkToken) {
@@ -1565,7 +1565,7 @@ class ApiClient {
     delete headers['Content-Type'] // Let browser set multipart/form-data with boundary
 
     if (typeof window !== 'undefined') {
-      const workspaceId = localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
+      const workspaceId = _adminWorkspaceOverride || localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
       if (workspaceId) headers['X-Workspace-ID'] = workspaceId
     }
 
@@ -1605,7 +1605,7 @@ class ApiClient {
 
     const headers: any = { ...this.defaultHeaders }
     if (typeof window !== 'undefined') {
-      const workspaceId = localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
+      const workspaceId = _adminWorkspaceOverride || localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
       if (workspaceId) headers['X-Workspace-ID'] = workspaceId
     }
     if (this.getClerkToken) {
@@ -1645,7 +1645,7 @@ class ApiClient {
 
     // Inject Workspace ID from LocalStorage
     if (typeof window !== 'undefined') {
-      const workspaceId = localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
+      const workspaceId = _adminWorkspaceOverride || localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
       if (workspaceId) {
         headers['X-Workspace-ID'] = workspaceId
       }
@@ -1722,7 +1722,7 @@ class ApiClient {
 
     // Inject Workspace ID from LocalStorage (same as request method)
     if (typeof window !== 'undefined') {
-      const workspaceId = localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
+      const workspaceId = _adminWorkspaceOverride || localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
       if (workspaceId) {
         headers['X-Workspace-ID'] = workspaceId
         console.log('[Upload] 🏢 Injected workspace context:', workspaceId)
@@ -2141,11 +2141,13 @@ class ApiClient {
   }
 
   async startAgent(id: string) {
-    return this.request(`/api/agents/${id}/start`, { method: 'POST' })
+    // Agent "start/stop" is a status toggle on the record — no dedicated
+    // route exists (and never did). Reuse the canonical PUT /api/agents/{id}.
+    return this.updateAgent(id, { status: 'active' })
   }
 
   async stopAgent(id: string) {
-    return this.request(`/api/agents/${id}/stop`, { method: 'POST' })
+    return this.updateAgent(id, { status: 'inactive' })
   }
 
   async getDocumentAnalytics() {
@@ -2582,6 +2584,15 @@ class ApiClient {
       method: 'PUT',
       body: JSON.stringify({ path, content }),
     })
+  }
+
+  /**
+   * Build a raw-bytes URL for a workspace file. Used by FilePreview for
+   * binary types (PDF/DOCX/XLSX/image/video/audio) which fetch as arrayBuffer.
+   * Returns a relative path; FilePreview will prepend baseUrl and add auth headers.
+   */
+  getWorkspaceFileRawUrl(workspaceId: string, path: string): string {
+    return `/api/workspaces/${workspaceId}/files/raw?path=${encodeURIComponent(path)}`
   }
 
   async listGithubRepos(workspaceId: string, page = 1, perPage = 30) {

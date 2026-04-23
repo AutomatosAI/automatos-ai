@@ -18,6 +18,10 @@ Automatos AI is an open-source platform for building AI workforces. Create speci
 
 It is not a chatbot wrapper. It is an operating system for AI agents.
 
+<p align="center">
+  <strong>100+ marketplace agents &middot; 1,000+ tool integrations &middot; 300+ LLMs &middot; 150+ skills &middot; Bring-your-own-keys</strong>
+</p>
+
 <br>
 
 ## Talk to your agents
@@ -32,7 +36,7 @@ A unified chat interface that routes your messages to the right agent automatica
 
 ## Manage your AI workforce
 
-18+ agent types out of the box — Code Reviewer, QA Engineer, Sentinel, Scribe, and more. Each agent has its own model configuration, capabilities, persona, and performance metrics. Create custom agents in seconds.
+100+ agents in the community marketplace — install what you need, when you need it. Code Reviewer, QA Engineer, Sentinel, Scribe, researcher and marketer roles, Shopify specialists, and more. Each agent has its own model configuration, capabilities, persona, and performance metrics. Install from the marketplace or build a custom agent in seconds.
 
 <p align="center">
   <img src="docs/assets/02-Agents.png" alt="Agent Management" width="800">
@@ -40,15 +44,27 @@ A unified chat interface that routes your messages to the right agent automatica
 
 <br>
 
-## 500+ tool integrations
+## 1,000+ tool integrations
 
-Connect your agents to GitHub, Slack, Jira, Stripe, Shopify, Datadog, and dozens more through the community marketplace. Browse, install, and manage integrations from a single dashboard.
+Connect your agents to GitHub, Slack, Jira, Stripe, Shopify, Datadog, Notion, HubSpot, and a thousand more through the community marketplace. Browse, install, and assign integrations to specific agents from a single dashboard — no glue code, no per-tool SDKs.
 
 <p align="center">
   <img src="docs/assets/03-Marketplace-tools.png" alt="Community Marketplace" width="800">
 </p>
 
 <br>
+
+## Workspace templates — entire teams in one click
+
+Packaged bundles install a full operations team in a single step — agents, skills, playbooks, and dashboard widgets pre-wired together. Example: the **Shopify package** ships with 12 specialised agents, 32 Shopify skills, and a widget set for store ops, inventory, merchandising, SEO, campaigns, and customer support. Install it once, and your workspace goes from empty to a running e-commerce back office.
+
+## 150+ reusable skills
+
+Skills are portable, versioned capability packs — a system prompt, a set of tools, and an output contract. Drop *Sentinel* onto a security agent, *Scout* onto a research agent, or write your own. One skill, any agent, instantly productive.
+
+## 300+ LLMs, one router
+
+Route any agent to any model. OpenAI, Anthropic, Google, DeepSeek, GLM, Mistral, Qwen, Llama — through OpenRouter or direct provider keys. Mix cheap models for heartbeat work with frontier models for reasoning, and see the cost impact per request.
 
 ## Command centre
 

@@ -1784,6 +1784,165 @@ class UnifiedMemoryService:
             )
         return row_id
 
+    async def store_transcript(
+        self,
+        workspace_id: str,
+        turns: List[Dict[str, str]],
+        agent_id: Optional[int] = None,
+        conversation_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Optional[str]:
+        """
+        Store a raw multi-turn transcript in L2 short-term memory — PRD-131d Phase 3.
+
+        Bypasses Mem0's fact-extraction pipeline entirely. The transcript is
+        preserved verbatim (up to a generous char cap) so agents and users can
+        read back the full conversation context, not just Mem0's distilled facts.
+
+        Args:
+            workspace_id: Workspace scope (UUID string).
+            turns: Ordered list of {"role": "user"|"assistant"|"system", "content": "..."}.
+            agent_id: Optional agent scope.
+            conversation_id: Optional chat session ID for grouping.
+            metadata: Optional extra metadata (merged into the row).
+
+        Returns:
+            The L2 row UUID as string, or None on failure.
+        """
+        if not turns:
+            return None
+
+        # Serialize turns as readable multi-line text; cap at 20k chars total
+        # (roughly 5k tokens — well above Mem0's tiny fact-extraction output).
+        lines: List[str] = []
+        for turn in turns:
+            role = str(turn.get("role", "user")).strip() or "user"
+            content = str(turn.get("content", "")).strip()
+            if not content:
+                continue
+            lines.append(f"{role.capitalize()}: {content}")
+        body = "\n\n".join(lines)
+        if not body:
+            return None
+        body = body[:20000]
+
+        turn_count = len(lines)
+        first_user = next(
+            (t.get("content", "")[:200] for t in turns if t.get("role") == "user"),
+            "",
+        )
+        last_assistant = next(
+            (
+                t.get("content", "")[:200]
+                for t in reversed(turns)
+                if t.get("role") == "assistant"
+            ),
+            "",
+        )
+
+        meta: Dict[str, Any] = {
+            "conversation_id": conversation_id,
+            "agent_id": agent_id,
+            "turn_count": turn_count,
+            "first_user_msg": first_user,
+            "last_assistant_msg": last_assistant,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+        if metadata:
+            meta.update(metadata)
+
+        row_id = await self.store_short_term(
+            workspace_id=workspace_id,
+            content=body,
+            content_type="transcript",
+            agent_id=agent_id,
+            importance=0.6,
+            metadata=meta,
+        )
+
+        if row_id:
+            logger.info(
+                "[UnifiedMemoryService] store_transcript L2 id=%s ws=%s turns=%d chars=%d",
+                row_id, workspace_id, turn_count, len(body),
+            )
+        return row_id
+
+    @staticmethod
+    def _list_short_term_by_type_sync(
+        workspace_id: str,
+        content_types: Optional[List[str]],
+        limit: int,
+        query: Optional[str],
+    ) -> List[Dict[str, Any]]:
+        """
+        List L2 short-term memories filtered by content_type list (sync).
+
+        If query is provided, performs case-insensitive substring match on
+        content. Results ordered by created_at DESC.
+        """
+        from core.database.database import get_db_session
+        from modules.memory.models import MemoryShortTerm
+
+        with get_db_session() as db:
+            q = (
+                db.query(MemoryShortTerm)
+                .filter(
+                    MemoryShortTerm.workspace_id == workspace_id,
+                    MemoryShortTerm.archived_at.is_(None),
+                )
+            )
+            if content_types:
+                q = q.filter(MemoryShortTerm.content_type.in_(content_types))
+            if query:
+                q = q.filter(MemoryShortTerm.content.ilike(f"%{query}%"))
+            rows = q.order_by(MemoryShortTerm.created_at.desc()).limit(limit).all()
+            return [
+                {
+                    "id": str(row.id),
+                    "content": row.content,
+                    "content_type": row.content_type,
+                    "importance": row.importance,
+                    "decay_score": row.decay_score,
+                    "access_count": row.access_count,
+                    "metadata": row.metadata_ or {},
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                    "last_accessed_at": row.last_accessed_at.isoformat() if row.last_accessed_at else None,
+                }
+                for row in rows
+            ]
+
+    async def list_short_term_by_type(
+        self,
+        workspace_id: str,
+        content_types: Optional[List[str]] = None,
+        limit: int = 50,
+        query: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        List L2 rows for a workspace, optionally filtered by content_type.
+
+        Used by the Memory Explorer to surface raw transcripts, mission
+        summaries, task failures, and retry recoveries that never make it to
+        Mem0 — or whose Mem0 version was distilled down to a fragment.
+        """
+        try:
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(
+                None,
+                self._list_short_term_by_type_sync,
+                workspace_id,
+                content_types,
+                limit,
+                query,
+            )
+        except Exception:
+            logger.error(
+                "[UnifiedMemoryService] list_short_term_by_type failed ws=%s",
+                workspace_id,
+                exc_info=True,
+            )
+            return []
+
     async def promote_to_long_term(self, memory_id: str) -> bool:
         """
         Promote a single L2 item to L3 long-term memory via Mem0.

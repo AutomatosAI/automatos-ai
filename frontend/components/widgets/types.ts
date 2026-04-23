@@ -471,9 +471,23 @@ export interface FileWidgetData {
   // File list
   files?: FileInfo[]
   currentPath?: string
-  // Preview content
+  // Preview content (text-based) OR URL (binary: pdf, image, video, audio, docx, xlsx)
   previewContent?: string
-  previewType?: 'text' | 'image' | 'pdf' | 'code' | 'binary'
+  previewUrl?: string
+  previewType?:
+    | 'text'
+    | 'image'
+    | 'pdf'
+    | 'code'
+    | 'binary'
+    | 'html'
+    | 'markdown'
+    | 'csv'
+    | 'video'
+    | 'audio'
+    | 'docx'
+    | 'xlsx'
+    | 'json'
 }
 
 // ============================================
@@ -503,6 +517,8 @@ export interface OpenFileTab {
   content?: string
   isLoading?: boolean
   isDirty?: boolean
+  /** Per-tab view mode: 'source' shows Monaco editor, 'preview' shows FilePreview */
+  viewMode?: 'source' | 'preview'
 }
 
 /**

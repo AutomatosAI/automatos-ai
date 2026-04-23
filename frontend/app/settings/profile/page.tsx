@@ -3,8 +3,9 @@
 import { useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { useUser } from '@clerk/nextjs'
-import { User, Mail, Shield, Trash2, Upload, Save, X, CheckCircle, AlertCircle, Loader2, ArrowLeft } from 'lucide-react'
+import { User, Mail, Shield, Trash2, Upload, Save, X, CheckCircle, AlertCircle, Loader2, ArrowLeft, Briefcase, Copy, Check } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { useWorkspace } from '@/hooks/use-workspace'
 
 /**
  * Custom Profile Page
@@ -30,6 +31,19 @@ export default function ProfilePage() {
         lastName: '',
         username: '',
     })
+    const { workspaceId, loading: workspaceLoading } = useWorkspace()
+    const [copiedWorkspaceId, setCopiedWorkspaceId] = useState(false)
+
+    const handleCopyWorkspaceId = async () => {
+        if (!workspaceId) return
+        try {
+            await navigator.clipboard.writeText(workspaceId)
+            setCopiedWorkspaceId(true)
+            setTimeout(() => setCopiedWorkspaceId(false), 2000)
+        } catch (err) {
+            console.error('Failed to copy workspace ID:', err)
+        }
+    }
 
     if (!isLoaded) {
         return (
@@ -324,6 +338,52 @@ export default function ProfilePage() {
                                         </div>
                                     </div>
                                 ))}
+                            </div>
+                        </div>
+
+                        {/* Workspace */}
+                        <div className="pt-6 border-t border-slate-700/50">
+                            <h3 className="text-lg font-semibold text-white mb-4 flex items-center">
+                                <Briefcase className="w-5 h-5 mr-2 text-orange-400" />
+                                Workspace
+                            </h3>
+                            <div>
+                                <label className="block text-sm font-medium text-slate-300 mb-2">
+                                    Workspace ID
+                                </label>
+                                <div className="flex items-center space-x-2">
+                                    <div className="flex-1 px-4 py-2 bg-slate-800/30 border border-slate-700/50 rounded-lg">
+                                        {workspaceLoading ? (
+                                            <span className="text-slate-500 font-mono text-sm">Loading…</span>
+                                        ) : workspaceId ? (
+                                            <span className="text-white font-mono text-sm break-all">{workspaceId}</span>
+                                        ) : (
+                                            <span className="text-slate-500 font-mono text-sm">No workspace</span>
+                                        )}
+                                    </div>
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={handleCopyWorkspaceId}
+                                        disabled={!workspaceId}
+                                        className="border-slate-700 text-slate-300 hover:bg-slate-800 hover:text-white disabled:opacity-50"
+                                    >
+                                        {copiedWorkspaceId ? (
+                                            <>
+                                                <Check className="w-4 h-4 mr-2 text-green-400" />
+                                                Copied
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Copy className="w-4 h-4 mr-2" />
+                                                Copy
+                                            </>
+                                        )}
+                                    </Button>
+                                </div>
+                                <p className="mt-2 text-xs text-slate-500">
+                                    Include this ID when reporting an issue — it helps support trace your workspace in logs.
+                                </p>
                             </div>
                         </div>
 

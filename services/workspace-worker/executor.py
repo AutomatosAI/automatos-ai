@@ -142,7 +142,15 @@ class WorkspaceToolExecutor:
         if validation:
             return {"error": validation, "exit_code": -1, "stdout": "", "stderr": ""}
 
-        # 2. Resolve working directory
+        # 2. Intercept `cd` — it's a shell builtin, not a binary, so we can't
+        # subprocess it. Resolve + validate on the server and return the new
+        # relative path (from workspace root) in stdout so the interactive
+        # terminal can use it as the cwd for subsequent commands.
+        cd_result = self._try_handle_cd(command, cwd)
+        if cd_result is not None:
+            return cd_result
+
+        # 3. Resolve working directory
         if cwd:
             work_dir = self.ws.resolve_safe_path(cwd)
         else:
@@ -444,6 +452,99 @@ class WorkspaceToolExecutor:
     # =========================================================================
     # Command validation
     # =========================================================================
+
+    def _try_handle_cd(
+        self, command: str, cwd: Optional[str]
+    ) -> Optional[Dict[str, Any]]:
+        """Intercept `cd <path>` so we can track working directory across calls.
+
+        `cd` is a shell builtin, not a binary — subprocessing it fails with
+        [Errno 2]. And even if we used shell mode, a fresh subprocess per
+        request resets CWD anyway. Instead the interactive terminal passes
+        its current cwd on every request; we validate the requested target
+        here, resolve it relative to the workspace root, and return the new
+        relative path as stdout so the client can adopt it.
+
+        Returns:
+            - None if this isn't a `cd` command (caller falls through to
+              normal subprocess execution).
+            - A result dict (exit_code, stdout, stderr) if we handled it.
+        """
+        stripped = command.strip()
+
+        # Only intercept simple `cd` invocations — compound commands like
+        # `cd foo && ls` should keep going through the shell path.
+        if any(op in stripped for op in ("|", "&&", "||", ";", ">", "<")):
+            return None
+
+        try:
+            tokens = shlex.split(stripped)
+        except ValueError:
+            return None
+
+        if not tokens or tokens[0] != "cd":
+            return None
+
+        # cd / cd ~ / cd / → workspace root
+        if len(tokens) == 1 or tokens[1] in ("~", "/"):
+            return {"exit_code": 0, "stdout": ".", "stderr": "", "duration_ms": 0}
+
+        if len(tokens) > 2:
+            return {
+                "exit_code": 1,
+                "stdout": "",
+                "stderr": "cd: too many arguments",
+                "duration_ms": 0,
+            }
+
+        target = tokens[1]
+
+        # Combine with current cwd for relative paths. Absolute paths are
+        # treated as absolute *within* the workspace (leading slash stripped).
+        if target.startswith("/"):
+            combined = target.lstrip("/")
+        else:
+            base = (cwd or ".").strip()
+            if base in ("", "."):
+                combined = target
+            else:
+                combined = f"{base.rstrip('/')}/{target}"
+
+        # Normalize (strips `..` segments etc) before handing to the safe
+        # path resolver. The resolver itself re-validates containment.
+        try:
+            resolved = self.ws.resolve_safe_path(combined)
+        except SecurityError as e:
+            return {
+                "exit_code": 1,
+                "stdout": "",
+                "stderr": f"cd: {e}",
+                "duration_ms": 0,
+            }
+
+        if not resolved.exists():
+            return {
+                "exit_code": 1,
+                "stdout": "",
+                "stderr": f"cd: no such file or directory: {target}",
+                "duration_ms": 0,
+            }
+        if not resolved.is_dir():
+            return {
+                "exit_code": 1,
+                "stdout": "",
+                "stderr": f"cd: not a directory: {target}",
+                "duration_ms": 0,
+            }
+
+        # Return the relative path from workspace root. Client stores this
+        # as its new cwd and sends it back on subsequent requests. Using
+        # relative keeps the existing resolve_safe_path security invariant
+        # (absolute paths are rejected) intact.
+        rel = resolved.relative_to(self.ws.root.resolve())
+        rel_str = str(rel) if str(rel) != "." else "."
+
+        return {"exit_code": 0, "stdout": rel_str, "stderr": "", "duration_ms": 0}
 
     def _validate_command(self, command: str) -> Optional[str]:
         """Validate command against whitelist and blocked patterns.

@@ -144,9 +144,10 @@ export function FileWidget({
             </div>
 
             {/* Preview if available */}
-            {data.previewContent && (
+            {(data.previewContent || data.previewUrl) && (
               <FilePreview
                 content={data.previewContent}
+                url={data.previewUrl}
                 previewType={data.previewType}
                 filename={data.file.name}
                 className="flex-1"
@@ -174,6 +175,7 @@ export function FileWidget({
             {/* Preview content */}
             <FilePreview
               content={data.previewContent}
+              url={data.previewUrl}
               previewType={data.previewType}
               filename={data.file?.name}
               className="flex-1"

@@ -87,9 +87,17 @@ export function InteractiveTerminal({ workspaceId, className }: InteractiveTermi
         }
       ) as ExecResult
 
+      // Real shells print nothing on successful `cd` — suppress stdout for
+      // that case (the worker uses it to return the new cwd, but we consume
+      // it below instead of showing it).
+      const trimmed = command.trim()
+      const isCd = trimmed === 'cd' || trimmed.startsWith('cd ')
+      const isCdSuccess = isCd && result.exit_code === 0
+      const displayStdout = isCdSuccess ? '' : (result.stdout || '')
+
       const entry: HistoryEntry = {
         command,
-        output: (result.stdout || '') + (result.stderr ? `\n\x1b[31m${result.stderr}\x1b[0m` : ''),
+        output: displayStdout + (result.stderr ? `\n\x1b[31m${result.stderr}\x1b[0m` : ''),
         exitCode: result.exit_code ?? 0,
         duration: result.duration_ms,
         cwd,
@@ -97,26 +105,11 @@ export function InteractiveTerminal({ workspaceId, className }: InteractiveTermi
 
       setHistory(prev => [...prev, entry])
 
-      // Update cwd if the command was cd
-      if (command.trim().startsWith('cd ')) {
-        const newDir = command.trim().slice(3).trim()
-        if (newDir && result.exit_code === 0) {
-          // Ask the worker for the actual cwd after cd
-          try {
-            const pwdResult = await apiClient.request(
-              `/api/workspaces/${workspaceId}/exec`,
-              {
-                method: 'POST',
-                body: { command: 'pwd', cwd: newDir } as any,
-              }
-            ) as ExecResult
-            if (pwdResult.exit_code === 0 && pwdResult.stdout) {
-              setCwd(pwdResult.stdout.trim())
-            }
-          } catch {
-            // Best effort — keep existing cwd
-          }
-        }
+      // Adopt the worker-returned relative path as the new cwd for
+      // subsequent commands. No `pwd` round-trip needed.
+      if (isCdSuccess) {
+        const newCwd = (result.stdout || '.').trim() || '.'
+        setCwd(newCwd)
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Command failed'

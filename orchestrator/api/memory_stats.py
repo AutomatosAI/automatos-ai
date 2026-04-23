@@ -319,54 +319,119 @@ async def get_recent_memories(
 async def browse_memories(
     query: Optional[str] = None,
     limit: int = 20,
+    content_type: Optional[str] = None,
+    tier: Optional[str] = None,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """
-    Browse/search all memories — PRD-77 Memory Explorer.
-    Queries ALL memory tiers (global, per-agent, daily) for the workspace.
-    If query is provided, performs vector similarity search.
-    Otherwise returns all memories sorted by recency.
+    Browse/search all memories — PRD-77 Memory Explorer, extended PRD-131d.
+
+    Queries BOTH memory layers for the workspace:
+      - L3 (Mem0): distilled facts across global/agent/daily tiers
+      - L2 (Postgres memory_short_term): raw transcripts, mission summaries,
+        task failures, retry recoveries — preserved verbatim
+
+    Args:
+        query: Optional substring/semantic search.
+        limit: Max total rows returned.
+        content_type: Optional CSV filter restricted to L2 (e.g.
+            "transcript,mission_summary,task_failure,retry_recovery").
+        tier: Optional scope filter: "l2" (short-term only), "l3" (Mem0 only),
+            or None/"all" for both.
     """
     service = _get_memory_service()
     if not service:
         return {"success": False, "error": "Memory service unavailable", "memories": []}
 
-    try:
-        agent_ids = _get_agent_ids(ctx.workspace_id, db)
-
-        logger.info("[browse] Querying all scopes for workspace %s", ctx.workspace_id)
-
-        scoped_items = await _fetch_all_scoped_memories(
-            service, str(ctx.workspace_id), agent_ids,
-            limit=limit, query=query,
-        )
-
-        all_results: List[Dict] = [
-            {
-                "id": str(m.get("id", "")),
-                "content": m.get("memory") or m.get("content", ""),
-                "score": m.get("score"),
-                "metadata": m.get("metadata") or m.get("metadata_"),
-                "created_at": m.get("created_at"),
-                "updated_at": m.get("updated_at"),
-                "tier": tier,
-            }
-            for tier, m in scoped_items
+    tier_scope = (tier or "all").lower()
+    content_type_list: Optional[List[str]] = None
+    if content_type:
+        content_type_list = [
+            ct.strip() for ct in content_type.split(",") if ct.strip()
         ]
 
-        logger.info("[browse] Collected %d unique memories", len(all_results))
+    all_results: List[Dict[str, Any]] = []
 
-        # Sort by created_at descending (newest first), then truncate
-        all_results.sort(
-            key=lambda x: x.get("created_at") or "",
-            reverse=True,
-        )
+    try:
+        # --- L3 (Mem0) ---
+        if tier_scope in ("all", "l3") and not content_type_list:
+            # Mem0 has no content_type concept; if the caller explicitly asked
+            # for specific content types, skip Mem0 and query L2 only.
+            agent_ids = _get_agent_ids(ctx.workspace_id, db)
+            logger.info("[browse] L3 scan workspace=%s", ctx.workspace_id)
+            scoped_items = await _fetch_all_scoped_memories(
+                service, str(ctx.workspace_id), agent_ids,
+                limit=limit, query=query,
+            )
+            all_results.extend(
+                {
+                    "id": str(m.get("id", "")),
+                    "content": m.get("memory") or m.get("content", ""),
+                    "score": m.get("score"),
+                    "metadata": m.get("metadata") or m.get("metadata_"),
+                    "created_at": m.get("created_at"),
+                    "updated_at": m.get("updated_at"),
+                    "tier": scope_tier,
+                    "layer": "l3",
+                    "content_type": None,
+                }
+                for scope_tier, m in scoped_items
+            )
+
+        # --- L2 (Postgres short-term) — PRD-131d ---
+        if tier_scope in ("all", "l2"):
+            logger.info(
+                "[browse] L2 scan workspace=%s content_types=%s",
+                ctx.workspace_id, content_type_list,
+            )
+            l2_rows = await service.list_short_term_by_type(
+                workspace_id=str(ctx.workspace_id),
+                content_types=content_type_list,
+                limit=limit,
+                query=query,
+            )
+            all_results.extend(
+                {
+                    "id": row.get("id", ""),
+                    "content": row.get("content", ""),
+                    "score": None,
+                    "metadata": row.get("metadata") or {},
+                    "created_at": row.get("created_at"),
+                    "updated_at": row.get("last_accessed_at"),
+                    "tier": "short_term",
+                    "layer": "l2",
+                    "content_type": row.get("content_type"),
+                    "importance": row.get("importance"),
+                }
+                for row in l2_rows
+            )
+
+        logger.info("[browse] Collected %d memories (L2+L3)", len(all_results))
+
+        # Sort by created_at DESC and truncate to caller's limit.
+        # Mem0 (L3) occasionally returns unix-int timestamps while L2 always
+        # returns ISO strings — coerce to a comparable string form.
+        def _sort_key(x: Dict[str, Any]) -> str:
+            v = x.get("created_at")
+            if v is None:
+                return ""
+            if isinstance(v, (int, float)):
+                try:
+                    return datetime.utcfromtimestamp(v).isoformat()
+                except (ValueError, OSError, OverflowError):
+                    return ""
+            return str(v)
+
+        all_results.sort(key=_sort_key, reverse=True)
         memories = all_results[:limit]
 
         if memories:
-            logger.info("[browse] Returning %d memories, first: id=%s content=%s",
-                        len(memories), memories[0].get("id"), str(memories[0].get("content", ""))[:60])
+            logger.info(
+                "[browse] Returning %d memories, first: id=%s layer=%s content=%s",
+                len(memories), memories[0].get("id"), memories[0].get("layer"),
+                str(memories[0].get("content", ""))[:60],
+            )
         else:
             logger.warning("[browse] Returning 0 memories")
 
@@ -374,7 +439,7 @@ async def browse_memories(
             "success": True,
             "memories": memories,
             "total": len(all_results),
-            "source": "mem0",
+            "source": "unified_l2_l3",
             "search_query": query,
         }
     except Exception as e:

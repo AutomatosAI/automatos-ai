@@ -115,6 +115,14 @@ class Config:
     MEMORY_PROMOTION_HOUR_UTC: int = int(os.getenv("MEMORY_PROMOTION_HOUR_UTC", "3"))
     MEMORY_JOBS_ENABLED: bool = os.getenv("MEMORY_JOBS_ENABLED", "true").lower() in ("true", "1", "yes")
     MEMORY_LAYERS_CACHE_TTL_SECONDS: int = int(os.getenv("MEMORY_LAYERS_CACHE_TTL_SECONDS", "60"))
+    # Graphify archival (PRD-131d Phase 4): monthly job that folds aged L2+L3
+    # memories into the workspace business knowledge graph, then purges sources.
+    MEMORY_ARCHIVAL_ENABLED: bool = os.getenv("MEMORY_ARCHIVAL_ENABLED", "true").lower() in ("true", "1", "yes")
+    MEMORY_ARCHIVAL_CRON_DAY: int = int(os.getenv("MEMORY_ARCHIVAL_CRON_DAY", "1"))
+    MEMORY_ARCHIVAL_CRON_HOUR: int = int(os.getenv("MEMORY_ARCHIVAL_CRON_HOUR", "3"))
+    MEMORY_ARCHIVAL_L2_DECAY_THRESHOLD: float = float(os.getenv("MEMORY_ARCHIVAL_L2_DECAY_THRESHOLD", "0.2"))
+    MEMORY_ARCHIVAL_L3_RETENTION_DAYS: int = int(os.getenv("MEMORY_ARCHIVAL_L3_RETENTION_DAYS", "180"))
+    MEMORY_ARCHIVAL_BATCH_SIZE: int = int(os.getenv("MEMORY_ARCHIVAL_BATCH_SIZE", "500"))
 
     # =============================================================================
     # API SECURITY

@@ -56,6 +56,39 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Memory capture helpers (PRD-131d Phase 2)
+# ---------------------------------------------------------------------------
+
+
+async def _store_task_failure_safe(db: Session, task: OrchestrationTask) -> None:
+    """Store a permanently-failed task into memory. Never raises."""
+    try:
+        from core.services.mission_memory_service import MissionMemoryService
+        await MissionMemoryService(db=db).store_task_failure(task=task)
+    except Exception:
+        logger.warning(
+            "[Reconciler] Task failure memory capture skipped for task %s",
+            task.id,
+            exc_info=True,
+        )
+
+
+async def _store_retry_recovery_safe(db: Session, task: OrchestrationTask) -> None:
+    """Store a successful recovery after retry. Never raises. Skips first-attempt wins."""
+    if (task.attempt_number or 0) <= 0:
+        return
+    try:
+        from core.services.mission_memory_service import MissionMemoryService
+        await MissionMemoryService(db=db).store_retry_recovery(task=task)
+    except Exception:
+        logger.warning(
+            "[Reconciler] Retry recovery memory capture skipped for task %s",
+            task.id,
+            exc_info=True,
+        )
+
+
+# ---------------------------------------------------------------------------
 # Result dataclass
 # ---------------------------------------------------------------------------
 
@@ -119,7 +152,7 @@ class MissionReconciler:
             tasks_verification_failed = verify_counts[1]
 
             # --- Stall detection + recovery ---
-            stall_counts = MissionReconciler._detect_and_recover_stalls(db, run_id)
+            stall_counts = await MissionReconciler._detect_and_recover_stalls(db, run_id)
             stalls_detected = stall_counts[0]
             stalls_recovered = stall_counts[1]
 
@@ -277,7 +310,7 @@ class MissionReconciler:
                     actor_id="reconciler",
                     reason="Verification skipped — transitioning through VERIFYING",
                 )
-                MissionReconciler._apply_verdict_pass(db, task)
+                await MissionReconciler._apply_verdict_pass(db, task)
                 emit_event(
                     db=db,
                     run_id=run_id,
@@ -424,7 +457,7 @@ class MissionReconciler:
                     result.verdict.upper(),
                 )
 
-            MissionReconciler._apply_verdict_pass(db, task)
+            await MissionReconciler._apply_verdict_pass(db, task)
             tasks_verified += 1
 
             db.flush()
@@ -442,7 +475,7 @@ class MissionReconciler:
         return agent.model_config.get("model_id")
 
     @staticmethod
-    def _apply_verdict_pass(
+    async def _apply_verdict_pass(
         db: Session,
         task: OrchestrationTask,
     ) -> None:
@@ -460,6 +493,8 @@ class MissionReconciler:
             logger.info(
                 "Task %s verified (pass)", task.id,
             )
+            # PRD-131d Phase 2: capture recoveries (passed after >=1 retry)
+            await _store_retry_recovery_safe(db, task)
         except ConflictError:
             logger.warning("Conflict transitioning task %s to verified", task.id)
 
@@ -649,7 +684,7 @@ class MissionReconciler:
     # -----------------------------------------------------------------------
 
     @staticmethod
-    def _detect_and_recover_stalls(
+    async def _detect_and_recover_stalls(
         db: Session,
         run_id: UUID,
     ) -> tuple:
@@ -747,14 +782,14 @@ class MissionReconciler:
 
                 # Recover: transition STALLED → QUEUED for re-dispatch (not ASSIGNED,
         # which would block the dispatcher's has_active_task check)
-                recovered = MissionReconciler._recover_stalled_task(db, task)
+                recovered = await MissionReconciler._recover_stalled_task(db, task)
                 if recovered:
                     stalls_recovered += 1
 
         return (stalls_detected, stalls_recovered)
 
     @staticmethod
-    def _recover_stalled_task(db: Session, task: OrchestrationTask) -> bool:
+    async def _recover_stalled_task(db: Session, task: OrchestrationTask) -> bool:
         """
         Recover a stalled task by transitioning back to QUEUED for re-dispatch.
 
@@ -782,6 +817,8 @@ class MissionReconciler:
                     reason="Max retries exhausted after stall",
                 )
                 sync_board_status(db, task)
+                # PRD-131d Phase 2: capture stall-fatal failure
+                await _store_task_failure_safe(db, task)
             except ConflictError:
                 logger.warning(
                     "Conflict failing stalled task %s", task.id,

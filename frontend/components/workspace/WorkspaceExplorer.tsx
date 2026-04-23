@@ -26,7 +26,26 @@ import { EditorTabs } from '../widgets/CodingCanvasWidget/EditorTabs'
 import { useWorkspaceFiles } from '../widgets/CodingCanvasWidget/useWorkspaceFiles'
 import { RepoSelector } from '../widgets/CodingCanvasWidget/RepoSelector'
 import { InteractiveTerminal } from '../widgets/TerminalWidget/InteractiveTerminal'
+import { FilePreview, inferPreviewType } from '../widgets/FileWidget/FilePreview'
+import type { FilePreviewType } from '../widgets/FileWidget/FilePreview'
 import type { OpenFileTab } from '../widgets/types'
+
+/**
+ * Preview-capable types. For all others, the toggle is hidden and only
+ * the Monaco source view is shown.
+ */
+const PREVIEWABLE_TYPES: ReadonlySet<FilePreviewType> = new Set([
+  'html',
+  'markdown',
+  'pdf',
+  'image',
+  'video',
+  'audio',
+  'docx',
+  'xlsx',
+  'csv',
+  'json',
+])
 
 export interface WorkspaceExplorerProps {
   workspaceId: string
@@ -218,6 +237,27 @@ export function WorkspaceExplorer({
   const isWorkspaceEmpty = !isLoadingTree && !treeError && tree.length === 0
   const hasDirtyTabs = openTabs.some((t) => t.isDirty)
 
+  // Determine preview type + whether the active file supports preview mode.
+  const activePreviewType = activeFile
+    ? inferPreviewType(activeFile.path, '')
+    : null
+  const activeSupportsPreview = !!(
+    activePreviewType && PREVIEWABLE_TYPES.has(activePreviewType)
+  )
+  const activeViewMode: 'source' | 'preview' = activeFile?.viewMode ?? 'source'
+
+  const handleSetViewMode = useCallback(
+    (mode: 'source' | 'preview') => {
+      if (!activeTabPath) return
+      setOpenTabs((prev) =>
+        prev.map((t) =>
+          t.path === activeTabPath ? { ...t, viewMode: mode } : t
+        )
+      )
+    },
+    [activeTabPath]
+  )
+
   return (
     <div className={className}>
       <PanelGroup direction="horizontal" className="h-full min-h-[300px]">
@@ -278,6 +318,9 @@ export function WorkspaceExplorer({
                       activeTabPath={activeTabPath}
                       onSelectTab={setActiveTabPath}
                       onCloseTab={handleCloseTab}
+                      activeSupportsPreview={activeSupportsPreview}
+                      activeViewMode={activeViewMode}
+                      onSetViewMode={handleSetViewMode}
                     />
                   </div>
                   {/* Save button — visible when active file is dirty */}
@@ -306,13 +349,23 @@ export function WorkspaceExplorer({
                   </Button>
                 </div>
 
-                {/* Monaco editor */}
+                {/* Monaco source OR FilePreview, depending on per-tab view mode */}
                 <div className="flex-1 min-h-0">
-                  <CodeEditor
-                    file={activeFile}
-                    onContentChange={handleContentChange}
-                    onSave={handleSave}
-                  />
+                  {activeFile && activeViewMode === 'preview' && activeSupportsPreview ? (
+                    <FilePreview
+                      content={activeFile.content}
+                      url={apiClient.getWorkspaceFileRawUrl(workspaceId, activeFile.path)}
+                      previewType={activePreviewType ?? undefined}
+                      filename={activeFile.name}
+                      className="h-full"
+                    />
+                  ) : (
+                    <CodeEditor
+                      file={activeFile}
+                      onContentChange={handleContentChange}
+                      onSave={handleSave}
+                    />
+                  )}
                 </div>
               </div>
             </Panel>

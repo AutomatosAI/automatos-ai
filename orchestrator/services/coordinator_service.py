@@ -307,6 +307,30 @@ def _cleanup_ephemeral_agents(db: Session, run: OrchestrationRun) -> int:
     return count
 
 
+async def _store_mission_memory_safe(
+    db: Session,
+    run_id,
+    outcome: str,
+    failure_reason: Optional[str] = None,
+) -> None:
+    """PRD-131d Phase 1: persist mission summary to L2+L3 memory.
+
+    Wrapped in a try/except so memory failures never break a mission transition.
+    """
+    try:
+        from core.services.mission_memory_service import MissionMemoryService
+        await MissionMemoryService(db=db).store_mission_summary(
+            run_id=run_id,
+            outcome=outcome,
+            failure_reason=failure_reason,
+        )
+    except Exception:
+        logger.warning(
+            "Mission memory storage skipped for run %s (outcome=%s)",
+            run_id, outcome, exc_info=True,
+        )
+
+
 # ---------------------------------------------------------------------------
 # CoordinatorService
 # ---------------------------------------------------------------------------
@@ -1227,6 +1251,19 @@ class CoordinatorService:
         """Record task completion/failure — runs serially on shared session."""
         MissionDispatcher.record_task_completion(db, task, result)
 
+        # PRD-131d Phase 2: capture permanent agent-error failures into memory.
+        # record_task_completion transitions to FAILED only when retries are
+        # exhausted; re-queued retries stay in QUEUED and should not fire here.
+        try:
+            if task.state == TaskState.FAILED.value:
+                from core.services.mission_memory_service import MissionMemoryService
+                await MissionMemoryService(db=db).store_task_failure(task=task)
+        except Exception:
+            logger.warning(
+                "Task failure memory capture skipped for task %s",
+                task.id, exc_info=True,
+            )
+
         # PRD-128: dispatch mission_step_complete (default pref is 'silent'
         # so this is opt-in per workspace/user)
         try:
@@ -1388,6 +1425,10 @@ class CoordinatorService:
                 reason="Plan validation failed after all retries",
                 stop_reason="coordinator_error",
                 stop_detail="Plan validation failed after all retries",
+            )
+            await _store_mission_memory_safe(
+                db, run.id, outcome="failed",
+                failure_reason="Plan validation failed after all retries",
             )
             raise
 
@@ -1991,6 +2032,10 @@ class CoordinatorService:
                 reason="Replan validation failed after all retries",
                 stop_reason="coordinator_error",
                 stop_detail="Replan validation failed after all retries",
+            )
+            await _store_mission_memory_safe(
+                db, run.id, outcome="failed",
+                failure_reason="Replan validation failed after all retries",
             )
             raise
 
@@ -2631,6 +2676,9 @@ class CoordinatorService:
                 summary["total_duration_seconds"],
                 "pass" if (consistency_result and consistency_result.passed) else "issues",
             )
+
+            # PRD-131d Phase 1: persist mission summary to memory (success)
+            await _store_mission_memory_safe(db, run.id, outcome="completed")
 
         except Exception:
             logger.error(

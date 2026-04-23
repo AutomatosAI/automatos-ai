@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Loader2, Plus, Trash2, Zap, CheckCircle2, XCircle, MessageSquare } from 'lucide-react'
+import { toast } from 'sonner'
 import { apiClient } from '@/lib/api-client'
 
 interface ChannelConnection {
@@ -135,6 +136,7 @@ export function ChannelsSettingsTab() {
   const [connecting, setConnecting] = useState<string | null>(null)
   const [testing, setTesting] = useState<string | null>(null)
   const [newConfigs, setNewConfigs] = useState<Record<string, Record<string, string>>>({})
+  const [fieldErrors, setFieldErrors] = useState<Record<string, Record<string, boolean>>>({})
 
   useEffect(() => {
     loadChannels()
@@ -156,8 +158,26 @@ export function ChannelsSettingsTab() {
   const connectChannel = async (platform: string) => {
     const config = newConfigs[platform] || {}
     const platformDef = PLATFORMS.find(p => p.id === platform)
-    const firstField = platformDef?.fields[0]?.key
-    if (firstField && !config[firstField]) return
+    const requiredFields = (platformDef?.fields ?? []).filter(
+      f => !f.label.toLowerCase().includes('(optional)')
+    )
+    const missing = requiredFields.filter(f => !(config[f.key] ?? '').trim())
+    if (missing.length) {
+      setFieldErrors(prev => ({
+        ...prev,
+        [platform]: missing.reduce<Record<string, boolean>>((acc, f) => {
+          acc[f.key] = true
+          return acc
+        }, {}),
+      }))
+      toast.error(
+        missing.length === 1
+          ? `${missing[0].label} is required`
+          : `Missing required fields: ${missing.map(f => f.label).join(', ')}`
+      )
+      return
+    }
+    setFieldErrors(prev => ({ ...prev, [platform]: {} }))
     setConnecting(platform)
     try {
       await apiClient.request('/api/channels', {
@@ -166,9 +186,10 @@ export function ChannelsSettingsTab() {
       })
       await loadChannels()
       setNewConfigs(prev => ({ ...prev, [platform]: {} }))
+      toast.success(`${platformDef?.name ?? platform} connected`)
     } catch (err) {
       console.error('[Channels] connect error:', err)
-      alert(err instanceof Error ? err.message : 'Failed to connect channel')
+      toast.error(err instanceof Error ? err.message : 'Failed to connect channel')
     } finally {
       setConnecting(null)
     }
@@ -178,7 +199,10 @@ export function ChannelsSettingsTab() {
     if (!confirm('Disconnect this channel?')) return
     try {
       await apiClient.request(`/api/channels/${channelId}`, { method: 'DELETE' })
-    } catch {}
+      toast.success('Channel disconnected')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to disconnect channel')
+    }
     await loadChannels()
   }
 
@@ -186,9 +210,13 @@ export function ChannelsSettingsTab() {
     setTesting(channelId)
     try {
       const data = await apiClient.request<{ status: string; error?: string }>(`/api/channels/${channelId}/test`, { method: 'POST' })
-      alert(data.status === 'ok' ? 'Connection successful!' : `Test failed: ${data.error || 'Unknown error'}`)
+      if (data.status === 'ok') {
+        toast.success('Connection successful')
+      } else {
+        toast.error(`Test failed: ${data.error || 'Unknown error'}`)
+      }
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Test failed')
+      toast.error(err instanceof Error ? err.message : 'Test failed')
     } finally {
       setTesting(null)
     }
@@ -199,6 +227,13 @@ export function ChannelsSettingsTab() {
       ...prev,
       [platform]: { ...(prev[platform] || {}), [key]: value }
     }))
+    // Clear the field error as soon as the user starts typing
+    setFieldErrors(prev => {
+      if (!prev[platform]?.[key]) return prev
+      const next = { ...prev[platform] }
+      delete next[key]
+      return { ...prev, [platform]: next }
+    })
   }
 
   const getConnectedChannel = (platform: string) => channels.find(c => c.platform === platform)
@@ -250,17 +285,25 @@ export function ChannelsSettingsTab() {
                 ) : (
                   <>
                     <div className="space-y-3 flex-1">
-                      {platform.fields.map(field => (
-                        <div key={field.key} className="space-y-1">
-                          <Label className="text-xs">{field.label}</Label>
-                          <Input
-                            type="password"
-                            placeholder={field.placeholder}
-                            value={newConfigs[platform.id]?.[field.key] || ''}
-                            onChange={e => updateConfig(platform.id, field.key, e.target.value)}
-                          />
-                        </div>
-                      ))}
+                      {platform.fields.map(field => {
+                        const hasError = !!fieldErrors[platform.id]?.[field.key]
+                        return (
+                          <div key={field.key} className="space-y-1">
+                            <Label className="text-xs">{field.label}</Label>
+                            <Input
+                              type="password"
+                              placeholder={field.placeholder}
+                              value={newConfigs[platform.id]?.[field.key] || ''}
+                              onChange={e => updateConfig(platform.id, field.key, e.target.value)}
+                              aria-invalid={hasError}
+                              className={hasError ? 'border-[hsl(var(--destructive))] focus-visible:ring-[hsl(var(--destructive))]' : undefined}
+                            />
+                            {hasError && (
+                              <p className="text-xs text-[hsl(var(--destructive))]">Required</p>
+                            )}
+                          </div>
+                        )
+                      })}
                     </div>
                     <div className="flex gap-2 mt-4 pt-3 border-t border-border/30">
                       <Button size="sm" variant="outline" onClick={() => connectChannel(platform.id)} disabled={connecting === platform.id}>

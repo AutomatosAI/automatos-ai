@@ -457,6 +457,26 @@ class SmartMemoryManager:
                 metadata=base_metadata,
             )
 
+            # PRD-131d Phase 3: also preserve the raw transcript in L2 so the
+            # Memory Explorer can surface full convos, not just Mem0's distilled
+            # facts. Dual-write is intentional — Mem0 keeps facts for retrieval,
+            # L2 keeps the literal text for audit/review.
+            try:
+                await self.unified_service.store_transcript(
+                    workspace_id=workspace_id,
+                    turns=[
+                        {"role": "user", "content": user_message},
+                        {"role": "assistant", "content": assistant_response},
+                    ],
+                    agent_id=agent_id,
+                    conversation_id=chat_id,
+                    metadata={"tier": tier, "widget_mode": widget_mode},
+                )
+            except Exception:
+                logger.warning(
+                    "[SmartMemory] Transcript storage skipped", exc_info=True,
+                )
+
             # Check if any storage succeeded
             success = any(r[1] and not r[1].get("error") for r in results)
 

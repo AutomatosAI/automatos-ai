@@ -541,7 +541,11 @@ async def install_model(db: Session, workspace_id: UUID, params: Dict[str, Any])
             return {
                 "success": True,
                 "already_installed": True,
-                "model": {"model_id": llm.model_id, "display_name": llm.display_name},
+                "model": {
+                    "model_id": llm.model_id,
+                    "display_name": llm.display_name,
+                    "provider": llm.provider,
+                },
                 "message": f"Model '{llm.display_name}' is already installed.",
             }
         # Re-activate
@@ -551,7 +555,11 @@ async def install_model(db: Session, workspace_id: UUID, params: Dict[str, Any])
         return {
             "success": True,
             "reactivated": True,
-            "model": {"model_id": llm.model_id, "display_name": llm.display_name},
+            "model": {
+                "model_id": llm.model_id,
+                "display_name": llm.display_name,
+                "provider": llm.provider,
+            },
             "message": f"Model '{llm.display_name}' re-activated for this workspace.",
         }
 
@@ -574,6 +582,10 @@ async def install_model(db: Session, workspace_id: UUID, params: Dict[str, Any])
 
     return {
         "success": True,
-        "model": {"model_id": llm.model_id, "display_name": llm.display_name},
+        "model": {
+            "model_id": llm.model_id,
+            "display_name": llm.display_name,
+            "provider": llm.provider,
+        },
         "message": f"Model '{llm.display_name}' installed for this workspace.",
     }

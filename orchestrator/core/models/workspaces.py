@@ -39,5 +39,10 @@ class Workspace(Base):
     # General workspace webhook key (URL-as-secret pattern)
     webhook_key = Column(String(64), unique=True, nullable=True)
 
+    # Admin lifecycle (pause / soft-delete) — see add_workspace_admin_lifecycle_fields migration
+    paused_at = Column(DateTime, nullable=True)
+    paused_reason = Column(Text, nullable=True)
+    deleted_at = Column(DateTime, nullable=True)
+
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
