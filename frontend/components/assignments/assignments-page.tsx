@@ -18,6 +18,7 @@ import { CreateMissionModal } from '@/components/missions/create-mission-modal'
 import { CreatePlaybookModal } from '@/components/workflows/create-playbook-modal'
 import { CreateTaskDialog } from '@/components/activity/board/create-task-dialog'
 import { AssignmentsPlaybooksGrid } from '@/components/assignments/assignments-playbooks-grid'
+import { AssignmentsMissionsGrid } from '@/components/assignments/assignments-missions-grid'
 import { useWorkflowPlaybooks } from '@/hooks/use-playbook-api'
 import { useMissions } from '@/hooks/use-missions-api'
 
@@ -262,10 +263,7 @@ export function AssignmentsPage() {
           </TabsContent>
 
           <TabsContent value="missions" className="mt-0">
-            {/* Missions grid wired in US-013 */}
-            <div className="rounded-lg border border-dashed border-border/50 bg-card/30 p-8 flex items-center justify-center min-h-[200px]">
-              <p className="text-sm text-muted-foreground">Missions grid — US-013</p>
-            </div>
+            <AssignmentsMissionsGrid />
           </TabsContent>
         </Tabs>
       </motion.div>
