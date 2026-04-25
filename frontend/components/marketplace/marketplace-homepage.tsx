@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { useSearchParams, useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import {
   Download,
@@ -30,6 +31,7 @@ import { useFeaturedItems, useToggleFeatured } from '@/hooks/use-marketplace-api
 import { useSystemRole } from '@/contexts/role-context'
 import { MarketplaceItemModal } from './marketplace-item-modal'
 import { AdminWorkspaceSwitcher } from '@/components/analytics/admin-workspace-switcher'
+import { FeaturedShowcaseCard } from './featured-showcase-card'
 
 export interface MarketplaceItem {
   id: number
@@ -99,41 +101,16 @@ function FeaturedBanner({ items, isAdmin, onItemClick }: { items: MarketplaceIte
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Hero card */}
-        <Card className="lg:col-span-2 overflow-hidden border-primary/20 bg-gradient-to-br from-primary/10 via-card/80 to-card/50 backdrop-blur-sm cursor-pointer hover:border-primary/40 transition-colors" onClick={() => onItemClick(hero.id)}>
-          <CardContent className="p-6 flex flex-col justify-between h-full min-h-[180px]">
-            <div>
-              <div className="flex items-start justify-between mb-2">
-                <div className="flex items-center gap-3">
-                  {hero.icon && <span className="text-4xl">{hero.icon}</span>}
-                  <div>
-                    <h3 className="text-xl font-bold">{hero.name}</h3>
-                    <p className="text-sm text-muted-foreground">by {hero.creator_name}</p>
-                  </div>
-                </div>
-                {isAdmin && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-primary hover:text-primary/80"
-                    onClick={(e) => { e.stopPropagation(); toggleFeatured.mutate(hero.id) }}
-                    disabled={toggleFeatured.isLoading}
-                  >
-                    <Star className="h-4 w-4 fill-current" />
-                  </Button>
-                )}
-              </div>
-              <p className="text-sm text-muted-foreground line-clamp-2 mt-2">{hero.description}</p>
-            </div>
-            <div className="flex items-center gap-3 mt-4">
-              <Badge variant="outline" className="text-xs">{hero.category || hero.type}</Badge>
-              <span className="text-xs text-muted-foreground flex items-center gap-1">
-                <Download className="h-3 w-3" /> {formatInstalls(hero.install_count)} installs
-              </span>
-              <span className="text-xs text-muted-foreground">v{hero.version}</span>
-            </div>
-          </CardContent>
-        </Card>
+        {/* Hero card — animated Showcase */}
+        <div className="lg:col-span-2">
+          <FeaturedShowcaseCard
+            item={hero}
+            isAdmin={isAdmin}
+            onItemClick={onItemClick}
+            onToggleFeatured={() => toggleFeatured.mutate(hero.id)}
+            toggleDisabled={toggleFeatured.isLoading}
+          />
+        </div>
 
         {/* Side rail */}
         <div className="flex flex-col gap-3">
@@ -273,12 +250,31 @@ export function MarketplaceHomepage() {
       .catch(() => {})
   }, [])
 
+  const searchParams = useSearchParams()
+  const router = useRouter()
   const [selectedItemId, setSelectedItemId] = useState<number | null>(null)
+
+  // Deep-link: ?id=N opens the item modal (used by Recommended strip on /assignments)
+  useEffect(() => {
+    const idParam = searchParams?.get('id')
+    if (!idParam) return
+    const parsed = parseInt(idParam, 10)
+    if (!Number.isNaN(parsed)) setSelectedItemId(parsed)
+  }, [searchParams])
+
+  const handleCloseModal = useCallback(() => {
+    setSelectedItemId(null)
+    if (searchParams?.get('id')) {
+      // Strip ?id= so refresh doesn't re-open
+      router.replace('/marketplace')
+    }
+  }, [router, searchParams])
+
   const [recItems, setRecItems] = useState<MarketplaceItem[]>([])
   useEffect(() => {
     apiClient.get('/api/marketplace/items?limit=20')
       .then((items: MarketplaceItem[]) => {
-        const featuredIds = new Set((featuredItems || []).map((f: MarketplaceItem) => f.id))
+        const featuredIds = new Set(((featuredItems as MarketplaceItem[] | undefined) || []).map((f: MarketplaceItem) => f.id))
         const recs = items
           .filter((i: MarketplaceItem) => !featuredIds.has(i.id))
           .sort((a: MarketplaceItem, b: MarketplaceItem) => b.install_count - a.install_count)
@@ -394,7 +390,7 @@ export function MarketplaceHomepage() {
       {selectedItemId !== null && (
         <MarketplaceItemModal
           itemId={selectedItemId}
-          onClose={() => setSelectedItemId(null)}
+          onClose={handleCloseModal}
         />
       )}
     </div>
