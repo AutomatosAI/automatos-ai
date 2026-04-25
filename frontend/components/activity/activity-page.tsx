@@ -15,7 +15,6 @@ import {
   Calendar,
   Brain,
   Target,
-  BookOpen,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -24,7 +23,6 @@ import { StatsBar } from '@/components/shared/stats-bar'
 import { FilterTabs, TabsContent } from '@/components/shared/filter-tabs'
 import { MissionList } from '@/components/missions/mission-list'
 import { ActivityMemory } from './activity-memory'
-import { ActivityBlog } from './activity-blog'
 import { ActivityCalendar } from './calendar'
 import { useActivityStats } from '@/hooks/use-activity-api'
 import type { StatItem } from '@/components/shared/stats-bar'
@@ -84,7 +82,6 @@ const TAB_DEFS = [
   { value: 'calendar', label: 'Calendar', icon: Calendar },
   { value: 'memory', label: 'Memory', icon: Brain },
   { value: 'missions', label: 'Missions', icon: Target },
-  { value: 'blog', label: 'Blog', icon: BookOpen },
 ]
 
 export function ActivityPage() {
@@ -198,11 +195,6 @@ export function ActivityPage() {
             </div>
           </TabsContent>
 
-          <TabsContent value="blog">
-            <div data-tour="activity-blog">
-              <ActivityBlog period={period} />
-            </div>
-          </TabsContent>
         </FilterTabs>
       </div>
     </div>

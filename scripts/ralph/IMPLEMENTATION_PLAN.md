@@ -17,7 +17,7 @@ Mark a task `- [x]` only when:
 - [x] US-001 — Page renames: Workspace → Deliverables, Activity → Command Center
 - [x] US-002 — Deliverables: "Created today" hero section above tabs
 - [x] US-003 — Deliverables tabs scaffold (Created today / Explorer / Templates / Blog)
-- [ ] US-004 — Move Blog tab from Activity → Deliverables (verify d9941e36d first)
+- [x] US-004 — Move Blog tab from Activity → Deliverables (verify d9941e36d first)
 - [ ] US-005 — Blog: SEO fields + Publish toggle on blog detail/edit view
 - [ ] US-006 — Templates: move from Deliverables top-level into Deliverables → Templates tab
 - [ ] US-007 — Explorer takes the full page area inside the Explorer tab

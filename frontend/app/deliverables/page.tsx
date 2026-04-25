@@ -13,6 +13,7 @@ import {
 
 import { MainLayout } from '@/components/layout/main-layout'
 import { CreatedToday } from '@/components/deliverables/created-today'
+import { DeliverablesBlog } from '@/components/deliverables/deliverables-blogs'
 import { GalleryView } from '@/components/workspace/gallery-view'
 import { useWorkspace } from '@/components/workspace-provider'
 import { usePageAPI } from '@/hooks/use-page-api'
@@ -104,8 +105,10 @@ export default function DeliverablesPage() {
             </TabsContent>
 
             <TabsContent value="blogs" className="flex-1 min-h-0 mt-0">
-              <div className="flex items-center justify-center h-full text-muted-foreground">
-                <p className="text-sm">Blog posts will appear here</p>
+              <div className="h-full overflow-y-auto p-4">
+                <div className="mx-auto max-w-[1600px]">
+                  <DeliverablesBlog />
+                </div>
               </div>
             </TabsContent>
 

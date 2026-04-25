@@ -236,11 +236,7 @@ function BlogPostCard({
 
 // ─── Main Component ─────────────────────────────────────
 
-interface ActivityBlogProps {
-  period?: string
-}
-
-export function ActivityBlog({ period }: ActivityBlogProps) {
+export function DeliverablesBlog() {
   const [filters, setFilters] = useState<BlogFilters>({ per_page: 20 })
   const [isEditorOpen, setIsEditorOpen] = useState(false)
   const [editingPostId, setEditingPostId] = useState<string | null>(null)
