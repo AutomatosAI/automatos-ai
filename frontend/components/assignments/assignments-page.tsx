@@ -400,6 +400,9 @@ export function AssignmentsPage() {
       {/* ── Contextual Hint (US-011) ─────────────────────────── */}
       <ContextualHeroHint />
 
+      {/* ── Recommended for You (US-016) ─────────────────────── */}
+      <RecommendedGrid />
+
       {/* ── Category Tabs ────────────────────────────────────── */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
@@ -425,9 +428,6 @@ export function AssignmentsPage() {
           </TabsContent>
         </Tabs>
       </motion.div>
-
-      {/* ── Recommended for You (US-016) ─────────────────────── */}
-      <RecommendedGrid />
     </div>
   )
 }
