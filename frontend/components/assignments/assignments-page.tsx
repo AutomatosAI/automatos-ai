@@ -271,7 +271,7 @@ function RecommendedGrid() {
       if (item.source === 'marketplace') {
         router.push(`/marketplace?id=${item.id}`)
       } else if (item.type === 'mission') {
-        router.push(`/command-center?tab=missions&id=${item.id}`)
+        router.push(`/assignments?tab=missions&id=${item.id}`)
       } else {
         router.push(`/assignments?tab=playbooks&id=${item.id}`)
       }

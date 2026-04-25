@@ -32,7 +32,7 @@ const actions = [
   },
   {
     label: 'Start Mission',
-    href: '/activity',
+    href: '/assignments',
     icon: Play,
     description: 'Launch a new mission',
     type: 'link'

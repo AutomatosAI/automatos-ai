@@ -72,7 +72,7 @@ export function RecentActivityWidget({ period, onViewAll, className }: RecentAct
     } else {
       // Navigate to Board tab with task focused
       const taskId = item.id.replace(/^(recipe|routine)-/, '')
-      router.replace(`/activity?tab=board&task_id=${taskId}`, { scroll: false })
+      router.replace(`/command-center?tab=board&task_id=${taskId}`, { scroll: false })
     }
   }
 

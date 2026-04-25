@@ -1133,7 +1133,7 @@ export function Chat({
                     isMissionActive={isMissionMode}
                     onCodeClick={handleOpenCodeCanvas}
                     onPlanClick={() => setPlanMode(!isPlanMode)}
-                    onMissionClick={() => router.push('/activity?tab=missions')}
+                    onMissionClick={() => router.push('/assignments?tab=missions')}
                     pinnedAgentIds={pinnedIds}
                     agents={agents}
                     selectedAgentId={selectedAgentId}
@@ -1296,7 +1296,7 @@ export function Chat({
                     isMissionActive={isMissionMode}
                     onCodeClick={handleOpenCodeCanvas}
                     onPlanClick={() => setPlanMode(!isPlanMode)}
-                    onMissionClick={() => router.push('/activity?tab=missions')}
+                    onMissionClick={() => router.push('/assignments?tab=missions')}
                     pinnedAgentIds={pinnedIds}
                     agents={agents}
                     selectedAgentId={selectedAgentId}

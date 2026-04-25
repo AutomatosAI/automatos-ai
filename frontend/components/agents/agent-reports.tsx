@@ -171,7 +171,7 @@ export function AgentReports({ agentId, agentName }: AgentReportsProps) {
               size="sm"
               className="text-xs"
               onClick={() => {
-                window.location.href = `/activity?tab=board&agent_id=${agentId}`
+                window.location.href = `/command-center?tab=board&agent_id=${agentId}`
               }}
             >
               View All ({total}) <ExternalLink className="w-3 h-3 ml-1" />

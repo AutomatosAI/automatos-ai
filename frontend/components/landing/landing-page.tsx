@@ -217,7 +217,7 @@ export function LandingPage() {
               Start Your First Mission
             </Button>
           </Link>
-          <Link href="/activity?tab=missions">
+          <Link href="/assignments?tab=missions">
             <Button variant="outline" size="lg" className="text-lg px-8 py-4">
               <Eye className="w-5 h-5 mr-2" />
               See It In Action
@@ -477,7 +477,7 @@ export function LandingPage() {
                   Start Your First Mission
                 </Button>
               </Link>
-              <Link href="/activity?tab=missions">
+              <Link href="/assignments?tab=missions">
                 <Button variant="outline" size="lg" className="text-lg px-12 py-4">
                   <Workflow className="w-5 h-5 mr-2" />
                   See Missions in Action

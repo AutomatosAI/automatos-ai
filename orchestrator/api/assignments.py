@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import case, func as sa_func
 
 from core.database.database import get_db
-from core.models import WorkflowTemplate as WorkflowRecipe
+from core.models import WorkflowTemplate
 from core.models.orchestration import OrchestrationRun
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
@@ -46,21 +46,21 @@ async def get_recommended(
     # recency_score: days since last use, clamped to 30, inverted so recent = higher
     recency_expr = case(
         (
-            WorkflowRecipe.last_used_at.isnot(None),
+            WorkflowTemplate.last_used_at.isnot(None),
             30 - sa_func.least(
-                sa_func.extract("epoch", sa_func.now() - WorkflowRecipe.last_used_at) / 86400,
+                sa_func.extract("epoch", sa_func.now() - WorkflowTemplate.last_used_at) / 86400,
                 30,
             ),
         ),
         else_=0,
     )
-    score_expr = (sa_func.coalesce(WorkflowRecipe.use_count, 0) * 0.6) + (recency_expr * 0.4)
+    score_expr = (sa_func.coalesce(WorkflowTemplate.use_count, 0) * 0.6) + (recency_expr * 0.4)
 
     workspace_playbooks = (
-        db.query(WorkflowRecipe)
+        db.query(WorkflowTemplate)
         .filter(
-            WorkflowRecipe.owner_type == "workspace",
-            WorkflowRecipe.workspace_id == ctx.workspace_id,
+            WorkflowTemplate.owner_type == "workspace",
+            WorkflowTemplate.workspace_id == ctx.workspace_id,
         )
         .order_by(score_expr.desc())
         .limit(half)
@@ -110,12 +110,12 @@ async def get_recommended(
     # ── Marketplace items by install count ────────────────────────
     marketplace_limit = limit - len(workspace_items)
     marketplace_rows = (
-        db.query(WorkflowRecipe)
+        db.query(WorkflowTemplate)
         .filter(
-            WorkflowRecipe.owner_type == "marketplace",
-            WorkflowRecipe.is_approved.is_(True),
+            WorkflowTemplate.owner_type == "marketplace",
+            WorkflowTemplate.is_approved.is_(True),
         )
-        .order_by(WorkflowRecipe.install_count.desc(), WorkflowRecipe.created_at.desc())
+        .order_by(WorkflowTemplate.install_count.desc(), WorkflowTemplate.created_at.desc())
         .limit(marketplace_limit)
         .all()
     )

@@ -17,6 +17,7 @@ import {
   BookOpen,
   ExternalLink,
   Radar,
+  ClipboardList,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { PremiumIcon } from '@/components/shared'
@@ -35,6 +36,14 @@ const navigationItems = [
     iconColor: 'text-primary',
     navIconKey: 'nav_chat',
     description: 'Your AI workspace'
+  },
+  {
+    name: 'Assignments',
+    href: '/assignments',
+    icon: ClipboardList,
+    iconColor: 'text-[hsl(var(--chart-4))]',
+    navIconKey: 'nav_assignments',
+    description: 'Plan, schedule & orchestrate work'
   },
   {
     name: 'Deliverables',
