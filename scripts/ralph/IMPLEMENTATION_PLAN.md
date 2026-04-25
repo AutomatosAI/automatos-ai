@@ -19,7 +19,7 @@ Mark a task `- [x]` only when:
 - [x] US-003 — Deliverables tabs scaffold (Created today / Explorer / Templates / Blog)
 - [x] US-004 — Move Blog tab from Activity → Deliverables (verify d9941e36d first)
 - [x] US-005 — Blog: SEO fields + Publish toggle on blog detail/edit view
-- [ ] US-006 — Templates: move from Deliverables top-level into Deliverables → Templates tab
+- [x] US-006 — Templates: move from Deliverables top-level into Deliverables → Templates tab
 - [ ] US-007 — Explorer takes the full page area inside the Explorer tab
 - [ ] US-008 — Command Center: add History tab (unified view of past Mission + Playbook runs)
 - [ ] US-009 — Assignments page shell using Marketplace pattern (FeaturedBanner + tabs + grid)

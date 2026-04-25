@@ -14,6 +14,7 @@ import {
 import { MainLayout } from '@/components/layout/main-layout'
 import { CreatedToday } from '@/components/deliverables/created-today'
 import { DeliverablesBlog } from '@/components/deliverables/deliverables-blogs'
+import { TemplatesTab } from '@/components/workflows/templates-tab'
 import { GalleryView } from '@/components/workspace/gallery-view'
 import { useWorkspace } from '@/components/workspace-provider'
 import { usePageAPI } from '@/hooks/use-page-api'
@@ -51,6 +52,15 @@ export default function DeliverablesPage() {
   const handleBrowseRecent = useCallback(() => {
     galleryRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [])
+
+  const handleUseTemplate = useCallback(
+    (template: { template_id?: string; name?: string }) => {
+      router.push(
+        `/assignments?tab=playbooks&templateId=${encodeURIComponent(template.template_id ?? '')}`,
+      )
+    },
+    [router],
+  )
 
   return (
     <MainLayout>
@@ -113,8 +123,10 @@ export default function DeliverablesPage() {
             </TabsContent>
 
             <TabsContent value="templates" className="flex-1 min-h-0 mt-0">
-              <div className="flex items-center justify-center h-full text-muted-foreground">
-                <p className="text-sm">Templates will appear here</p>
+              <div className="h-full overflow-y-auto p-4">
+                <div className="mx-auto max-w-[1600px]">
+                  <TemplatesTab onUseTemplate={handleUseTemplate} />
+                </div>
               </div>
             </TabsContent>
           </Tabs>
