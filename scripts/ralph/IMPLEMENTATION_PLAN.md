@@ -31,7 +31,7 @@ Mark a task `- [x]` only when:
 - [x] US-015 — Plan card deep-links to `/chat?mode=plan&from=assignments`
 - [x] US-016 — Recommended-for-you grid (read-only suggestions endpoint)
 - [x] US-017 — Cleanup: remove old Workspace/Activity entry points + dead surfaces we replaced
-- [ ] US-018 — Legacy redirects: `/workspace → /deliverables`, `/activity → /command-center`
+- [x] US-018 — Legacy redirects: `/workspace → /deliverables`, `/activity → /command-center`
 
 ## Definition of done for the whole cluster
 

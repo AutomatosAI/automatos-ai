@@ -19,6 +19,19 @@ const nextConfig = {
   // Next.js rewrites require env vars at build time, which is problematic on Railway
   // The API client will use NEXT_PUBLIC_API_URL for direct calls to backend
 
+  // Cluster 1A rehouse: permanent redirects from old routes to new IA
+  async redirects() {
+    return [
+      { source: '/workspace', destination: '/deliverables', permanent: true },
+      { source: '/workspace/explorer', destination: '/deliverables/explorer', permanent: true },
+      { source: '/workspace/templates', destination: '/deliverables?tab=templates', permanent: true },
+      { source: '/workspace/blog', destination: '/deliverables?tab=blogs', permanent: true },
+      { source: '/activity', destination: '/command-center', permanent: true },
+      { source: '/activity/blog', destination: '/deliverables?tab=blogs', permanent: true },
+      { source: '/activity/board', destination: '/command-center?tab=board', permanent: true },
+    ]
+  },
+
   // SECURITY: HTTP response headers for all routes (OWASP A05:2021 - Security Misconfiguration)
   async headers() {
     return [
