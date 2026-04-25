@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback } from 'react'
+import { useCallback, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import {
@@ -8,8 +8,15 @@ import {
   BookOpen,
   Rocket,
   Sparkles,
+  Lightbulb,
+  Zap,
 } from 'lucide-react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Card, CardContent } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { CreateMissionModal } from '@/components/missions/create-mission-modal'
+import { CreatePlaybookModal } from '@/components/workflows/create-playbook-modal'
+import { CreateTaskDialog } from '@/components/activity/board/create-task-dialog'
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -22,9 +29,14 @@ function resolveTab(param: string | null): AssignmentTab {
   return 'playbooks'
 }
 
-// ── Featured Area Placeholder (US-010) ─────────────────────────────
+// ── Featured Hero Cards (US-010) ─────────────────────────────────
 
-function FeaturedHeroPlaceholder() {
+function FeaturedHeroCards() {
+  const router = useRouter()
+  const [missionOpen, setMissionOpen] = useState(false)
+  const [playbookOpen, setPlaybookOpen] = useState(false)
+  const [taskOpen, setTaskOpen] = useState(false)
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -32,14 +44,86 @@ function FeaturedHeroPlaceholder() {
       transition={{ duration: 0.5, delay: 0.1 }}
     >
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Hero cards will be added in US-010 */}
-        <div className="lg:col-span-2 rounded-lg border border-dashed border-border/50 bg-card/30 p-8 flex items-center justify-center min-h-[160px]">
-          <p className="text-sm text-muted-foreground">Hero cards loading in US-010</p>
-        </div>
-        <div className="rounded-lg border border-dashed border-border/50 bg-card/30 p-8 flex items-center justify-center min-h-[160px]">
-          <p className="text-sm text-muted-foreground">Quick actions</p>
+        {/* Mission — hero card (large, top-left) */}
+        <Card className="lg:col-span-2 overflow-hidden border-primary/20 bg-gradient-to-br from-primary/10 via-card/80 to-card/50 backdrop-blur-sm hover:border-primary/40 transition-colors">
+          <CardContent className="p-6 flex flex-col justify-between min-h-[200px]">
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <Rocket className="h-6 w-6 text-primary" />
+                <h3 className="text-xl font-bold">Mission</h3>
+              </div>
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                Big complex work. 6&ndash;9 agents, field memory, parallel reasoning.
+              </p>
+            </div>
+            <div className="mt-4">
+              <Button onClick={() => setMissionOpen(true)}>
+                Start <span aria-hidden="true">&rarr;</span>
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Right column: Playbook + Plan + Task stacked */}
+        <div className="flex flex-col gap-4">
+          {/* Playbook card (medium) */}
+          <Card className="border-border/50 bg-card/50 backdrop-blur-sm hover:border-primary/20 transition-colors">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-2 mb-1.5">
+                <BookOpen className="h-5 w-5 text-primary" />
+                <h3 className="font-semibold">Playbook</h3>
+              </div>
+              <p className="text-xs text-muted-foreground mb-3">
+                Routines. Multi-task, schedulable, triggerable, reusable.
+              </p>
+              <Button size="sm" variant="secondary" onClick={() => setPlaybookOpen(true)}>
+                + Playbook
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* Plan card (medium) */}
+          <Card className="border-border/50 bg-card/50 backdrop-blur-sm hover:border-primary/20 transition-colors">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-2 mb-1.5">
+                <Lightbulb className="h-5 w-5 text-[hsl(var(--warning))]" />
+                <h3 className="font-semibold">Plan</h3>
+              </div>
+              <p className="text-xs text-muted-foreground mb-3">
+                Iterate with Auto first.
+              </p>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => router.push('/chat?mode=plan&from=assignments')}
+              >
+                + Plan
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* Task card (small) */}
+          <Card className="border-border/50 bg-card/50 backdrop-blur-sm hover:border-primary/20 transition-colors">
+            <CardContent className="p-3 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Zap className="h-4 w-4 text-muted-foreground" />
+                <div>
+                  <h3 className="text-sm font-semibold">Task</h3>
+                  <p className="text-xs text-muted-foreground">Quick single action.</p>
+                </div>
+              </div>
+              <Button size="sm" variant="ghost" onClick={() => setTaskOpen(true)}>
+                + Task
+              </Button>
+            </CardContent>
+          </Card>
         </div>
       </div>
+
+      {/* Create modals */}
+      <CreateMissionModal open={missionOpen} onOpenChange={setMissionOpen} />
+      <CreatePlaybookModal open={playbookOpen} onClose={() => setPlaybookOpen(false)} />
+      <CreateTaskDialog open={taskOpen} onOpenChange={setTaskOpen} />
     </motion.div>
   )
 }
@@ -120,7 +204,7 @@ export function AssignmentsPage() {
       </motion.div>
 
       {/* ── Featured Hero Area (US-010) ──────────────────────── */}
-      <FeaturedHeroPlaceholder />
+      <FeaturedHeroCards />
 
       {/* ── Contextual Hint (US-011) ─────────────────────────── */}
       <HeroHintPlaceholder />

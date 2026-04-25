@@ -23,7 +23,7 @@ Mark a task `- [x]` only when:
 - [x] US-007 — Explorer takes the full page area inside the Explorer tab
 - [x] US-008 — Command Center: add History tab (unified view of past Mission + Playbook runs)
 - [x] US-009 — Assignments page shell using Marketplace pattern (FeaturedBanner + tabs + grid)
-- [ ] US-010 — Assignments hero cards: Mission (lead) + Playbook + Plan + Task
+- [x] US-010 — Assignments hero cards: Mission (lead) + Playbook + Plan + Task
 - [ ] US-011 — Contextual hero hint based on workspace state
 - [ ] US-012 — Assignments: Playbooks tab grid (reuse existing playbook list data)
 - [ ] US-013 — Assignments: Missions tab grid (reuse existing mission list data)
