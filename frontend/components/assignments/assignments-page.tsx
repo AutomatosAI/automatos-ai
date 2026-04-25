@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button'
 import { CreateMissionModal } from '@/components/missions/create-mission-modal'
 import { CreatePlaybookModal } from '@/components/workflows/create-playbook-modal'
 import { CreateTaskDialog } from '@/components/activity/board/create-task-dialog'
+import { AssignmentsPlaybooksGrid } from '@/components/assignments/assignments-playbooks-grid'
 import { useWorkflowPlaybooks } from '@/hooks/use-playbook-api'
 import { useMissions } from '@/hooks/use-missions-api'
 
@@ -257,10 +258,7 @@ export function AssignmentsPage() {
           </TabsList>
 
           <TabsContent value="playbooks" className="mt-0">
-            {/* Playbooks grid wired in US-012 */}
-            <div className="rounded-lg border border-dashed border-border/50 bg-card/30 p-8 flex items-center justify-center min-h-[200px]">
-              <p className="text-sm text-muted-foreground">Playbooks grid — US-012</p>
-            </div>
+            <AssignmentsPlaybooksGrid />
           </TabsContent>
 
           <TabsContent value="missions" className="mt-0">
