@@ -27,7 +27,7 @@ Mark a task `- [x]` only when:
 - [x] US-011 — Contextual hero hint based on workspace state
 - [x] US-012 — Assignments: Playbooks tab grid (reuse existing playbook list data)
 - [x] US-013 — Assignments: Missions tab grid (reuse existing mission list data)
-- [ ] US-014 — Quick Task modal (reuse existing CreateTaskDialog component)
+- [x] US-014 — Quick Task modal (reuse existing CreateTaskDialog component)
 - [ ] US-015 — Plan card deep-links to `/chat?mode=plan&from=assignments`
 - [ ] US-016 — Recommended-for-you grid (read-only suggestions endpoint)
 - [ ] US-017 — Cleanup: remove old Workspace/Activity entry points + dead surfaces we replaced
