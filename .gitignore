@@ -117,5 +117,6 @@ tests/api/reports/*.json
 
 # Vendored external repos (cloned for import scripts)
 scripts/vendor/
-# Graphify knowledge graph outputs
-graphify-out/
+# Graphify knowledge graph outputs (ignore contents, but keep snapshots/)
+graphify-out/*
+!graphify-out/snapshots/
