@@ -1,46 +1,51 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { useSearchParams } from 'next/navigation'
-import { Package, Loader2 } from 'lucide-react'
+import { useCallback, useRef } from 'react'
+import { useSearchParams, useRouter } from 'next/navigation'
+import {
+  Package,
+  Loader2,
+  LayoutGrid,
+  FileText,
+  BookOpen,
+  FolderTree,
+} from 'lucide-react'
 
 import { MainLayout } from '@/components/layout/main-layout'
-import { ActivityFeed } from '@/components/activity/activity-feed'
 import { CreatedToday } from '@/components/deliverables/created-today'
 import { GalleryView } from '@/components/workspace/gallery-view'
-import { WorkspaceExplorer } from '@/components/workspace/WorkspaceExplorer'
-import {
-  WorkspaceViewToggle,
-  type WorkspaceView,
-} from '@/components/workspace/workspace-view-toggle'
 import { useWorkspace } from '@/components/workspace-provider'
 import { usePageAPI } from '@/hooks/use-page-api'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
-function resolveInitialView(
-  viewParam: string | null,
-  hasPath: boolean,
-): WorkspaceView {
-  if (hasPath) return 'explorer'
-  if (viewParam === 'explorer' || viewParam === 'activity') return viewParam
-  return 'gallery'
+type DeliverableTab = 'outputs' | 'blogs' | 'templates'
+
+const VALID_TABS: ReadonlyArray<DeliverableTab> = ['outputs', 'blogs', 'templates']
+
+function resolveTab(param: string | null): DeliverableTab {
+  if (param && VALID_TABS.includes(param as DeliverableTab)) return param as DeliverableTab
+  return 'outputs'
 }
 
 export default function DeliverablesPage() {
   usePageAPI('workspace')
   const { workspace, isLoading } = useWorkspace()
   const searchParams = useSearchParams()
-
-  const viewParam = searchParams?.get('view') ?? null
-  const pathParam = searchParams?.get('path') ?? null
-
-  const [view, setView] = useState<WorkspaceView>(() =>
-    resolveInitialView(viewParam, Boolean(pathParam)),
-  )
+  const router = useRouter()
   const galleryRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    setView(resolveInitialView(viewParam, Boolean(pathParam)))
-  }, [viewParam, pathParam])
+  const activeTab = resolveTab(searchParams?.get('tab') ?? null)
+
+  const handleTabChange = useCallback(
+    (value: string) => {
+      if (value === 'explorer') {
+        router.push('/deliverables/explorer')
+        return
+      }
+      router.replace(`/deliverables?tab=${value}`)
+    },
+    [router],
+  )
 
   const handleBrowseRecent = useCallback(() => {
     galleryRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -60,36 +65,56 @@ export default function DeliverablesPage() {
             <span className="text-xs text-muted-foreground">
               Files, reports & agent output
             </span>
-            <div className="ml-auto">
-              <WorkspaceViewToggle view={view} onViewChange={setView} />
-            </div>
           </div>
-          <div className="flex-1 min-h-0">
-            {view === 'gallery' && (
+          <Tabs
+            value={activeTab}
+            onValueChange={handleTabChange}
+            className="flex-1 flex flex-col min-h-0"
+          >
+            <div className="px-4 pt-2">
+              <TabsList data-tour="deliverables-tabs" className="bg-secondary/50">
+                <TabsTrigger value="outputs" className="flex items-center gap-1.5">
+                  <LayoutGrid className="h-4 w-4" />
+                  Outputs
+                </TabsTrigger>
+                <TabsTrigger value="blogs" className="flex items-center gap-1.5">
+                  <FileText className="h-4 w-4" />
+                  Blogs
+                </TabsTrigger>
+                <TabsTrigger value="templates" className="flex items-center gap-1.5">
+                  <BookOpen className="h-4 w-4" />
+                  Templates
+                </TabsTrigger>
+                <TabsTrigger value="explorer" className="flex items-center gap-1.5">
+                  <FolderTree className="h-4 w-4" />
+                  Explorer
+                </TabsTrigger>
+              </TabsList>
+            </div>
+
+            <TabsContent value="outputs" className="flex-1 min-h-0 mt-0">
               <div className="h-full overflow-y-auto p-4">
                 <div className="mx-auto max-w-[1600px] space-y-6">
                   <CreatedToday onBrowseRecent={handleBrowseRecent} />
                   <div ref={galleryRef}>
-                    <GalleryView
-                      workspaceId={workspace.id}
-                    />
+                    <GalleryView workspaceId={workspace.id} />
                   </div>
                 </div>
               </div>
-            )}
-            {view === 'explorer' && (
-              <WorkspaceExplorer
-                workspaceId={workspace.id}
-                initialFilePath={pathParam}
-                className="h-full"
-              />
-            )}
-            {view === 'activity' && (
-              <div className="h-full overflow-y-auto">
-                <ActivityFeed />
+            </TabsContent>
+
+            <TabsContent value="blogs" className="flex-1 min-h-0 mt-0">
+              <div className="flex items-center justify-center h-full text-muted-foreground">
+                <p className="text-sm">Blog posts will appear here</p>
               </div>
-            )}
-          </div>
+            </TabsContent>
+
+            <TabsContent value="templates" className="flex-1 min-h-0 mt-0">
+              <div className="flex items-center justify-center h-full text-muted-foreground">
+                <p className="text-sm">Templates will appear here</p>
+              </div>
+            </TabsContent>
+          </Tabs>
         </div>
       )}
     </MainLayout>
