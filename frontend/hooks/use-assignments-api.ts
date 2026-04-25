@@ -10,6 +10,8 @@ export interface RecommendedItem {
   category: string
   use_count?: number
   install_count?: number
+  is_featured?: boolean
+  created_at?: string | null
   source: 'workspace' | 'marketplace'
 }
 

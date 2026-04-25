@@ -209,7 +209,12 @@ function RecommendedCard({
   const isMarketplace = item.source === 'marketplace'
   const isMission = item.type === 'mission'
   const Icon = isMission ? Rocket : BookOpen
-  const isNew = !isMarketplace && (item.use_count ?? 0) === 0
+  const isNew = (() => {
+    if (!item.created_at) return false
+    const ageMs = Date.now() - new Date(item.created_at).getTime()
+    return ageMs < 14 * 24 * 60 * 60 * 1000
+  })()
+  const isFeatured = !!item.is_featured
 
   return (
     <motion.div
@@ -246,11 +251,15 @@ function RecommendedCard({
                 <h3 className="font-semibold text-sm leading-tight line-clamp-1 flex-1">
                   {item.name}
                 </h3>
-                {isNew && (
+                {isFeatured ? (
+                  <span className="font-mono text-[9px] tracking-wider px-1.5 py-px rounded bg-primary/15 text-primary border border-primary/30 shrink-0">
+                    FEATURED
+                  </span>
+                ) : isNew ? (
                   <span className="font-mono text-[9px] tracking-wider px-1.5 py-px rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shrink-0">
                     NEW
                   </span>
-                )}
+                ) : null}
               </div>
               <p className="text-[11px] text-muted-foreground line-clamp-2 leading-snug mt-0.5">
                 {item.description || 'No description'}
