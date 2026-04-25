@@ -12,11 +12,9 @@ import {
   Zap,
   Download,
   Play,
-  Store,
 } from 'lucide-react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Card, CardContent, CardFooter } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
+import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { CreateMissionModal } from '@/components/missions/create-mission-modal'
@@ -24,6 +22,7 @@ import { CreatePlaybookModal } from '@/components/workflows/create-playbook-moda
 import { CreateTaskDialog } from '@/components/activity/board/create-task-dialog'
 import { AssignmentsPlaybooksGrid } from '@/components/assignments/assignments-playbooks-grid'
 import { AssignmentsMissionsGrid } from '@/components/assignments/assignments-missions-grid'
+import { MissionConstellationCard } from '@/components/assignments/mission-card-constellation'
 import { useWorkflowPlaybooks } from '@/hooks/use-playbook-api'
 import { useMissions } from '@/hooks/use-missions-api'
 import { useRecommendedAssignments } from '@/hooks/use-assignments-api'
@@ -49,83 +48,95 @@ function FeaturedHeroCards() {
   const [taskOpen, setTaskOpen] = useState(false)
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5, delay: 0.1 }}
-    >
+    <div>
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Mission — hero card (large, top-left) */}
-        <Card className="lg:col-span-2 overflow-hidden border-primary/20 bg-gradient-to-br from-primary/10 via-card/80 to-card/50 backdrop-blur-sm hover:border-primary/40 transition-colors">
-          <CardContent className="p-6 flex flex-col justify-between min-h-[200px]">
-            <div>
-              <div className="flex items-center gap-2 mb-2">
-                <Rocket className="h-6 w-6 text-primary" />
-                <h3 className="text-xl font-bold">Mission</h3>
-              </div>
-              <p className="text-sm text-muted-foreground leading-relaxed">
-                Big complex work. 6&ndash;9 agents, field memory, parallel reasoning.
-              </p>
-            </div>
-            <div className="mt-4">
-              <Button onClick={() => setMissionOpen(true)}>
-                Start <span aria-hidden="true">&rarr;</span>
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+        {/* Mission — Constellation hero card (large, top-left) */}
+        <MissionConstellationCard onStart={() => setMissionOpen(true)} />
 
         {/* Right column: Playbook + Plan + Task stacked */}
-        <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-3">
           {/* Playbook card (medium) */}
-          <Card className="border-border/50 bg-card/50 backdrop-blur-sm hover:border-primary/20 transition-colors">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2 mb-1.5">
+          <Card
+            role="button"
+            tabIndex={0}
+            onClick={() => setPlaybookOpen(true)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                setPlaybookOpen(true)
+              }
+            }}
+            className="cursor-pointer overflow-hidden border-border/50 bg-card/60 backdrop-blur-sm hover:border-primary/30 hover:bg-card/80 transition-all group focus:outline-none focus:ring-2 focus:ring-primary/40"
+          >
+            <CardContent className="p-4 flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-primary/15 border border-primary/20 flex items-center justify-center shrink-0 group-hover:bg-primary/25 transition-colors">
                 <BookOpen className="h-5 w-5 text-primary" />
-                <h3 className="font-semibold">Playbook</h3>
               </div>
-              <p className="text-xs text-muted-foreground mb-3">
-                Routines. Multi-task, schedulable, triggerable, reusable.
-              </p>
-              <Button size="sm" variant="secondary" onClick={() => setPlaybookOpen(true)}>
-                + Playbook
-              </Button>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between mb-0.5">
+                  <h3 className="font-semibold text-sm">Playbook</h3>
+                  <span className="text-xs text-muted-foreground/70 group-hover:text-primary transition-colors">+</span>
+                </div>
+                <p className="text-xs text-muted-foreground leading-snug">
+                  Reusable routines. Schedulable, triggerable.
+                </p>
+              </div>
             </CardContent>
           </Card>
 
           {/* Plan card (medium) */}
-          <Card className="border-border/50 bg-card/50 backdrop-blur-sm hover:border-primary/20 transition-colors">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2 mb-1.5">
+          <Card
+            role="button"
+            tabIndex={0}
+            onClick={() => router.push('/chat?mode=plan&from=assignments')}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                router.push('/chat?mode=plan&from=assignments')
+              }
+            }}
+            className="cursor-pointer overflow-hidden border-border/50 bg-card/60 backdrop-blur-sm hover:border-[hsl(var(--warning))]/30 hover:bg-card/80 transition-all group focus:outline-none focus:ring-2 focus:ring-[hsl(var(--warning))]/40"
+          >
+            <CardContent className="p-4 flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-[hsl(var(--warning))]/15 border border-[hsl(var(--warning))]/20 flex items-center justify-center shrink-0 group-hover:bg-[hsl(var(--warning))]/25 transition-colors">
                 <Lightbulb className="h-5 w-5 text-[hsl(var(--warning))]" />
-                <h3 className="font-semibold">Plan</h3>
               </div>
-              <p className="text-xs text-muted-foreground mb-3">
-                Iterate with Auto first.
-              </p>
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => router.push('/chat?mode=plan&from=assignments')}
-              >
-                + Plan
-              </Button>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between mb-0.5">
+                  <h3 className="font-semibold text-sm">Plan</h3>
+                  <span className="text-xs text-muted-foreground/70 group-hover:text-[hsl(var(--warning))] transition-colors">+</span>
+                </div>
+                <p className="text-xs text-muted-foreground leading-snug">
+                  Iterate with Auto. Refine before launching.
+                </p>
+              </div>
             </CardContent>
           </Card>
 
           {/* Task card (small) */}
-          <Card className="border-border/50 bg-card/50 backdrop-blur-sm hover:border-primary/20 transition-colors">
-            <CardContent className="p-3 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Zap className="h-4 w-4 text-muted-foreground" />
-                <div>
-                  <h3 className="text-sm font-semibold">Task</h3>
-                  <p className="text-xs text-muted-foreground">Quick single action.</p>
-                </div>
+          <Card
+            role="button"
+            tabIndex={0}
+            onClick={() => setTaskOpen(true)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                setTaskOpen(true)
+              }
+            }}
+            className="cursor-pointer overflow-hidden border-border/50 bg-card/60 backdrop-blur-sm hover:border-cyan-500/30 hover:bg-card/80 transition-all group focus:outline-none focus:ring-2 focus:ring-cyan-500/40"
+          >
+            <CardContent className="p-3 flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-cyan-500/15 border border-cyan-500/20 flex items-center justify-center shrink-0 group-hover:bg-cyan-500/25 transition-colors">
+                <Zap className="h-4 w-4 text-cyan-400" />
               </div>
-              <Button size="sm" variant="ghost" onClick={() => setTaskOpen(true)}>
-                + Task
-              </Button>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold">Task</h3>
+                  <span className="text-xs text-muted-foreground/70 group-hover:text-cyan-400 transition-colors">+</span>
+                </div>
+                <p className="text-xs text-muted-foreground leading-snug">Quick single action.</p>
+              </div>
             </CardContent>
           </Card>
         </div>
@@ -135,7 +146,7 @@ function FeaturedHeroCards() {
       <CreateMissionModal open={missionOpen} onOpenChange={setMissionOpen} />
       <CreatePlaybookModal open={playbookOpen} onClose={() => setPlaybookOpen(false)} />
       <CreateTaskDialog open={taskOpen} onOpenChange={setTaskOpen} />
-    </motion.div>
+    </div>
   )
 }
 
@@ -198,17 +209,19 @@ function RecommendedCard({
   const isMarketplace = item.source === 'marketplace'
   const isMission = item.type === 'mission'
   const Icon = isMission ? Rocket : BookOpen
+  const isNew = !isMarketplace && (item.use_count ?? 0) === 0
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3, delay: index * 0.05 }}
+      transition={{ duration: 0.3, delay: index * 0.04 }}
+      className="snap-start shrink-0"
     >
       <Card
         role="button"
         tabIndex={0}
-        className="cursor-pointer glass-card card-glow hover:border-primary/20 transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-primary/50 h-full flex flex-col"
+        className="cursor-pointer w-[260px] h-[148px] flex flex-col overflow-hidden border-border/50 bg-card/60 backdrop-blur-sm hover:border-primary/30 hover:bg-card/80 transition-all focus:outline-none focus:ring-2 focus:ring-primary/40 group"
         onClick={onClick}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -217,44 +230,50 @@ function RecommendedCard({
           }
         }}
       >
-        <CardContent className="p-4 flex-1">
-          <div className="flex items-start gap-3 mb-2">
-            <div className="w-10 h-10 rounded-xl bg-primary/20 border border-primary/30 flex items-center justify-center shrink-0">
-              <Icon className="h-5 w-5 text-primary" />
+        <CardContent className="p-3.5 flex-1 flex flex-col gap-2">
+          <div className="flex items-start gap-2.5">
+            <div
+              className={`w-9 h-9 rounded-lg border flex items-center justify-center shrink-0 transition-colors ${
+                isMission
+                  ? 'bg-primary/15 border-primary/25 group-hover:bg-primary/25'
+                  : 'bg-primary/10 border-primary/20 group-hover:bg-primary/20'
+              }`}
+            >
+              <Icon className="h-4 w-4 text-primary" />
             </div>
             <div className="flex-1 min-w-0">
-              <h3 className="font-semibold text-sm line-clamp-1">{item.name}</h3>
-              <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">
-                {item.description}
+              <div className="flex items-start gap-1.5">
+                <h3 className="font-semibold text-sm leading-tight line-clamp-1 flex-1">
+                  {item.name}
+                </h3>
+                {isNew && (
+                  <span className="font-mono text-[9px] tracking-wider px-1.5 py-px rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shrink-0">
+                    NEW
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-muted-foreground line-clamp-2 leading-snug mt-0.5">
+                {item.description || 'No description'}
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2 mt-3">
-            <Badge variant="outline" className="text-xs border-border text-muted-foreground">
-              {item.category}
-            </Badge>
-            {isMarketplace && (
-              <Badge className="text-xs bg-primary/20 text-primary border-primary/30">
-                <Store className="h-3 w-3 mr-1" />
-                Marketplace
-              </Badge>
+        </CardContent>
+        <div className="px-3.5 pb-2.5 pt-1 flex items-center justify-between text-[10.5px] text-muted-foreground border-t border-border/40">
+          <span className="capitalize truncate max-w-[120px]">{item.category}</span>
+          <div className="flex items-center gap-1 shrink-0">
+            {isMarketplace ? (
+              <>
+                <Download className="h-3 w-3 text-[hsl(var(--success))]" />
+                <span>{item.install_count ?? 0}</span>
+              </>
+            ) : (
+              <>
+                <Play className="h-3 w-3" />
+                <span>{item.use_count ?? 0}</span>
+              </>
             )}
           </div>
-        </CardContent>
-        <CardFooter className="pt-2 pb-3 px-4 border-t border-border flex items-center justify-between text-xs text-muted-foreground">
-          {isMarketplace ? (
-            <div className="flex items-center gap-1">
-              <Download className="h-3.5 w-3.5 text-[hsl(var(--success))]" />
-              <span>{item.install_count ?? 0} installs</span>
-            </div>
-          ) : (
-            <div className="flex items-center gap-1">
-              <Play className="h-3.5 w-3.5 text-muted-foreground" />
-              <span>{item.use_count ?? 0} runs</span>
-            </div>
-          )}
-          <span className="capitalize">{item.type}</span>
-        </CardFooter>
+        </div>
       </Card>
     </motion.div>
   )
@@ -262,7 +281,7 @@ function RecommendedCard({
 
 function RecommendedGrid() {
   const router = useRouter()
-  const { data, isLoading } = useRecommendedAssignments(8)
+  const { data, isLoading } = useRecommendedAssignments(12)
 
   const items = data?.items ?? []
 
@@ -287,19 +306,32 @@ function RecommendedGrid() {
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5, delay: 0.25 }}
     >
-      <div className="flex items-center gap-2 mb-3">
-        <Sparkles className="h-5 w-5 text-[hsl(var(--warning))]" />
-        <h2 className="text-lg font-semibold">Recommended for You</h2>
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <Sparkles className="h-4 w-4 text-[hsl(var(--warning))]" />
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+            Recommended
+          </h2>
+        </div>
+        <button
+          onClick={() => router.push('/marketplace')}
+          className="text-xs text-muted-foreground hover:text-primary transition-colors flex items-center gap-1"
+        >
+          Browse Marketplace <span aria-hidden="true">&rarr;</span>
+        </button>
       </div>
 
       {isLoading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {[...Array(4)].map((_: unknown, i: number) => (
-            <Skeleton key={i} className="h-48 rounded-lg" />
+        <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1">
+          {[...Array(6)].map((_: unknown, i: number) => (
+            <Skeleton key={i} className="h-[148px] w-[260px] shrink-0 rounded-lg" />
           ))}
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        <div
+          className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1 snap-x scroll-smooth"
+          style={{ scrollbarWidth: 'thin' }}
+        >
           {items.map((item: RecommendedItem, i: number) => (
             <RecommendedCard
               key={`${item.source}-${item.id}`}
