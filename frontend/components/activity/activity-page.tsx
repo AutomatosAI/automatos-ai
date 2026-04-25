@@ -13,16 +13,16 @@ import {
   LayoutDashboard,
   Columns,
   Calendar,
-  Brain,
-  Target,
+  Rss,
+  History,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { PageHeader } from '@/components/shared/page-header'
 import { StatsBar } from '@/components/shared/stats-bar'
 import { FilterTabs, TabsContent } from '@/components/shared/filter-tabs'
-import { MissionList } from '@/components/missions/mission-list'
-import { ActivityMemory } from './activity-memory'
+import { ActivityFeed } from './activity-feed'
+import { CommandCenterHistory } from './command-center-history'
 import { ActivityCalendar } from './calendar'
 import { useActivityStats } from '@/hooks/use-activity-api'
 import type { StatItem } from '@/components/shared/stats-bar'
@@ -80,8 +80,8 @@ const TAB_DEFS = [
   { value: 'summary', label: 'Summary', icon: LayoutDashboard },
   { value: 'board', label: 'Board', icon: Columns },
   { value: 'calendar', label: 'Calendar', icon: Calendar },
-  { value: 'memory', label: 'Memory', icon: Brain },
-  { value: 'missions', label: 'Missions', icon: Target },
+  { value: 'feed', label: 'Feed', icon: Rss },
+  { value: 'history', label: 'History', icon: History },
 ]
 
 export function ActivityPage() {
@@ -101,7 +101,7 @@ export function ActivityPage() {
     if (tabParam && TAB_DEFS.some((t) => t.value === tabParam)) {
       setActiveTab(tabParam)
     } else if (openExecution) {
-      setActiveTab('board')
+      setActiveTab('feed')
     }
   }, [tabParam, openExecution])
 
@@ -183,15 +183,19 @@ export function ActivityPage() {
             </div>
           </TabsContent>
 
-          <TabsContent value="memory">
-            <div data-tour="activity-memory">
-              <ActivityMemory period={period} />
+          <TabsContent value="feed">
+            <div data-tour="activity-feed">
+              <ActivityFeed
+                period={period}
+                openExecution={openExecution}
+                deepLinkRecipeId={deepLinkRecipeId}
+              />
             </div>
           </TabsContent>
 
-          <TabsContent value="missions">
-            <div data-tour="activity-missions">
-              <MissionList />
+          <TabsContent value="history">
+            <div data-tour="activity-history">
+              <CommandCenterHistory period={period} />
             </div>
           </TabsContent>
 
