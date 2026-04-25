@@ -2,12 +2,16 @@
 
 import { useEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
+import { useSearchParams, useRouter } from 'next/navigation'
+import { ArrowLeft } from 'lucide-react'
 import { MainLayout } from '@/components/layout/main-layout'
 import { Chat } from '@/components/chatbot/chat'
 import { AppSidebar } from '@/components/chatbot/sidebar'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
+import { Button } from '@/components/ui/button'
 import { usePageAPI } from '@/hooks/use-page-api'
 import { useIsMobile } from '@/hooks/use-mobile'
+import { useMissionStore } from '@/stores/mission-store'
 import type { Chat as ChatType, ChatMessage } from '@/types'
 
 // Force dynamic rendering
@@ -16,6 +20,20 @@ export const dynamic = 'force-dynamic'
 export default function ChatPage() {
   usePageAPI('chat')
   const isMobile = useIsMobile()
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const setPlanMode = useMissionStore((s) => s.setPlanMode)
+
+  // US-015: Deep-link params — ?mode=plan&from=assignments
+  const modeParam = searchParams?.get('mode') ?? null
+  const fromParam = searchParams?.get('from') ?? null
+
+  // Activate plan mode when arriving via ?mode=plan
+  useEffect(() => {
+    if (modeParam === 'plan') {
+      setPlanMode(true)
+    }
+  }, [modeParam, setPlanMode])
 
   // State for current chat
   const [currentChatId, setCurrentChatId] = useState('')
@@ -67,6 +85,20 @@ export default function ChatPage() {
     <MainLayout>
       {/* Use dvh for mobile to handle browser chrome, vh for desktop */}
       <div className="relative h-[calc(100dvh-5rem)] md:h-[calc(100vh-8rem)]">
+        {/* US-015: Back-link when navigated from Assignments */}
+        {fromParam === 'assignments' && (
+          <div className="absolute top-2 left-3 z-30">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="gap-1.5 text-muted-foreground hover:text-foreground"
+              onClick={() => router.push('/assignments')}
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Assignments
+            </Button>
+          </div>
+        )}
         {/* Mobile: chat history as Sheet overlay */}
         {isMobile ? (
           <Sheet open={isHistoryOpen} onOpenChange={setIsHistoryOpen}>
