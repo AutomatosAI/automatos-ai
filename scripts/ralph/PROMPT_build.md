@@ -1,102 +1,138 @@
-# Build Mode — PRD-128 Unified Notification System
+# Ralph Build Prompt — Cluster 1 Part A (Rehouse)
 
-Implement ONE story from prd.json, validate, commit, exit.
+You are an autonomous build agent. Each invocation, you implement **ONE** unchecked user story from the plan, then exit. The loop runs you again on the next story.
 
-## HARD RULE — Worktree Lock
+## Hard worktree lock
 
-**You are running inside the `automatos-NOTIFICATION` worktree at:**
-`/Users/gkavanagh/Development/Automatos-AI-Platform/automatos-NOTIFICATION`
+Your working directory is **`/Users/gkavanagh/Development/Automatos-AI-Platform/automatos-CLUSTER-1A`** on branch **`ralph/cluster-1a-rehouse`**.
 
-**NEVER `cd` out of this directory.** Do not touch `automatos-ai`, `automatos-skills`, `automatos-WORKSPACE`, or any other worktree. All reads, writes, greps, and git operations happen inside this worktree only. If you need a reference file, read it from this worktree — every path under `orchestrator/`, `frontend/`, `tests/`, `scripts/` already exists here because it is a git worktree of the same repo.
+- NEVER `cd` to another worktree (e.g. `automatos-ai`, `automatos-BUGS`, `automatos-PLAYBOOKS`).
+- NEVER check out a different branch.
+- All file edits, all reads, all commits happen inside this worktree.
+- If you accidentally drift, abort with `RALPH_ABORT: drifted out of worktree`.
 
-If you catch yourself typing `cd /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai` — STOP. That is a bug. Use relative paths or the current worktree absolute path.
+## The PRD
 
-## Phase 0: Orient
+- `scripts/ralph/prd.json` — 18 user stories (cluster-1a-rehouse)
+- `scripts/ralph/IMPLEMENTATION_PLAN.md` — checkbox list, single source of truth for progress
+- `docs/PRDS/AUTOMATOS-0.2/10-PRD-CLUSTER-1-WORK-LOOP.md` — full PRD context
+- `docs/PRDS/AUTOMATOS-0.2/VISION.md` — 11-page architecture, Auto character, work loop, terminology
 
-Read these files from the CURRENT worktree:
-- `scripts/ralph/prd.json` — PRD-128 stories and acceptance criteria
-- `scripts/ralph/IMPLEMENTATION_PLAN.md` — task checklist (source of truth for what is done)
-- `scripts/ralph/progress.txt` — running log
+## What this cluster is
 
-### Check for completion
+**Cluster 1 Part A is a REHOUSE, not a build.** 80%+ of the components already exist:
 
-```bash
-grep -c "^\- \[ \]" scripts/ralph/IMPLEMENTATION_PLAN.md || echo 0
-```
+- ChatModeBar with Plan/Mission toggles → already built
+- useMissionStore.isPlanMode → already exists
+- MarketplaceGrid + FeaturedBanner → reuse for Assignments
+- FilePreview → universal preview already in use
+- WorkspaceExplorer → file tree + preview + terminal already built
+- CreateTaskDialog → reuse for Quick Task modal
+- Playbook list + Mission list data hooks → already exist
 
-- If 0: output **RALPH_COMPLETE** and exit
-- If > 0: continue to Phase 1
+Your job is to **rearrange, rename, and wire** these existing pieces into the new IA. Do not invent new components when an existing one fits. If you find yourself writing a brand-new component for something that sounds familiar, **stop and search the codebase first** with Grep/Glob.
 
-## Phase 1: Implement ONE Story
+## Canonical terminology (from VISION.md and project CLAUDE.md)
 
-1. **Pick the first unchecked task** in `scripts/ralph/IMPLEMENTATION_PLAN.md`
-2. **Match it to a story** in `scripts/ralph/prd.json` (US-001 through US-010)
-3. **Read the acceptance criteria** — these are the contract. Implement every bullet.
-4. **Read relevant existing files** before editing (e.g. `orchestrator/main.py`, `orchestrator/core/auth/hybrid.py`, `orchestrator/services/heartbeat_service.py`, existing Alembic revisions under `orchestrator/alembic/versions/`, `frontend/components/layout/navbar.tsx`, etc.) — use relative paths.
-5. **Implement completely.** No TODOs, no stubs, no "will wire later".
-6. **Key project conventions:**
-   - NO `os.getenv()` outside `config.py` — import from `core.config` instead.
-   - All SQL via SQLAlchemy `text()` with parameter binding (no f-strings into SQL).
-   - API endpoints use `get_request_context_hybrid` for auth/workspace isolation.
-   - Frontend uses React Query v4 (`isLoading`, not `isPending`).
-   - Dispatcher must NOT call `db.commit()` — caller owns the transaction.
+- **Task** = single small job (BoardTask row)
+- **Playbook** = repeatable, scheduled, triggerable routine (workflow_recipes row)
+- **Mission** = complex multi-agent orchestration with field memory + parallel processing (orchestration_runs row)
+- **Plan** = transient draft state. NOT a DB table in Part A.
 
-## Phase 2: Validate
+Do not call a Playbook a "Recipe". Do not call a Mission a "Workflow". Do not invent new nouns.
 
-Run whichever applies to the story you completed:
+## 4-phase loop
 
-```bash
-# Python syntax / import check
-python3 -c "import ast; ast.parse(open('<edited-file>').read())"
+### Phase 1 — Orient
 
-# Alembic migration dry check (US-001 only)
-cd orchestrator && python3 -c "from alembic.config import Config; from alembic import command; cfg = Config('alembic.ini'); command.history(cfg)" 2>&1 | tail -5
+1. Read `scripts/ralph/IMPLEMENTATION_PLAN.md`. Find the **first unchecked** `- [ ] US-XXX` task.
+2. If every task is checked, write the completion commit (see Phase 4) and emit `RALPH_COMPLETE`.
+3. Read the corresponding user story in `scripts/ralph/prd.json` — `acceptanceCriteria` AND `notes`. The notes are critical; they often say "verify existing code before reimplementing".
+4. Run `git status` and `git log --oneline -10` on this worktree to confirm clean state and recent history.
 
-# Frontend typecheck (US-008, US-009 only)
-cd frontend && npx tsc --noEmit 2>&1 | tail -20
+### Phase 2 — Implement ONE story
 
-# Python tests for the touched module (US-003, US-006, US-007, US-010)
-cd orchestrator && python3 -m pytest tests/<relevant_test_file> -x 2>&1 | tail -20
-```
+- Read existing code first. Use Grep/Glob aggressively. Reuse what's there.
+- Make the smallest change that satisfies the acceptance criteria.
+- If you must delete a surface that the story replaces, delete it. No `_legacy_` shims, no `// TODO remove later`.
+- Frontend changes go in `frontend/`. Backend changes go in `orchestrator/`.
+- For US-008 and US-016 (the only stories with backend additions), they are **read-only** endpoints. No schema changes. No migrations. No new tables.
 
-Only flag NEW errors your change introduced.
+### Phase 3 — Validate
 
-## Phase 3: Update Plan & Progress
-
-In `scripts/ralph/IMPLEMENTATION_PLAN.md`:
-- Flip the completed task to `- [x]`
-- Note any discovered follow-ups
-
-In `scripts/ralph/progress.txt`:
-- Append a dated entry: story ID, what was built, files touched, any gotchas.
-
-Also in `prd.json`: set the completed story's `passes: true` and add a short `notes` string.
-
-## Phase 4: Commit & Exit
-
-Single repo commit inside THIS worktree only:
+For frontend stories (US-001 through US-007, US-009 through US-018):
 
 ```bash
-git add -A && git commit -m "feat(prd-128): US-XXX — <short description>"
+cd frontend && npx tsc --noEmit
 ```
 
-DO NOT push. DO NOT cd into another worktree. DO NOT commit to `automatos-ai` or `automatos-skills`.
+Must pass cleanly (no new errors vs. baseline). If pre-existing errors are unrelated to your story, note them in the commit message but do not fix them.
 
-Then:
+For backend stories (US-008 server query, US-016 endpoint):
 
 ```bash
-grep -c "^\- \[ \]" scripts/ralph/IMPLEMENTATION_PLAN.md || echo 0
+cd orchestrator && python -c "from main import app; print('import OK')"
 ```
 
-- If > 0: print "N tasks remaining" and exit
-- If 0: output **RALPH_COMPLETE**
+Must import without exception.
 
-## Guardrails (highest priority)
+If validation fails:
+- If a quick fix is obvious, apply it.
+- Otherwise, revert your changes (`git checkout -- .`) and exit with a commit message starting `BLOCKED:`. Don't half-ship.
 
-1. **Worktree lock** — Never cd out of `automatos-NOTIFICATION`. All work happens here.
-2. **One story per iteration.** Never touch US-002 while doing US-001.
-3. **Respect acceptance criteria verbatim** — don't improvise scope.
-4. **No placeholders / TODOs / stubs.** Implement completely or fail loudly.
-5. **No backwards-compat shims** — fix broken patterns cleanly (project rule from MEMORY.md).
-6. **Never push to remote.** Commit locally only.
-7. **Never delete `notification_service.py`** or `channel_connections` table — this PRD reuses them.
+### Phase 4 — Update plan + Commit + Exit
+
+1. Edit `scripts/ralph/IMPLEMENTATION_PLAN.md` and change `- [ ] US-XXX` to `- [x] US-XXX` for the story you just finished.
+2. Stage the relevant files **by name** (not `git add .`). Skip `.env`, anything in `archive/`, anything you didn't touch.
+3. Commit with this format:
+
+   ```
+   feat(cluster-1a): US-XXX — <one-line description>
+
+   <2-4 line body explaining what was rehoused/wired and why>
+
+   Story: scripts/ralph/prd.json US-XXX
+   ```
+
+4. If this was the **last** unchecked task, instead use:
+
+   ```
+   feat(cluster-1a): US-XXX — <description>; complete
+
+   <body>
+
+   RALPH_COMPLETE
+   ```
+
+5. Exit. Do not loop into the next story yourself — the outer loop will re-invoke you.
+
+## Project conventions (do not violate)
+
+- NO `os.getenv()` outside `orchestrator/config.py`
+- NO hardcoded URLs / API keys / tokens
+- SQLAlchemy: use `text()` with bind params, never f-string SQL
+- Pydantic: schemas in `orchestrator/api/schemas/`
+- Frontend types: `frontend/lib/types/`
+- API client: `frontend/lib/api-client.ts`
+- React Query v4 (uses `isLoading`, NOT `isPending`)
+- LLM defaults: `frontend/lib/llm-defaults.ts` + `orchestrator/core/llm/defaults.py` (do not duplicate)
+
+## Anti-patterns (will be reverted on review)
+
+- Adding a new DB table or migration in Part A
+- Importing `os` to read env vars in feature code
+- Creating a `Recipe*` or `Workflow*` named component
+- Adding `// @ts-ignore` to make typecheck pass
+- Adding emoji to source files unless asked
+- Writing a `README.md` for a feature unless asked
+- Touching files outside `frontend/`, `orchestrator/`, or `docs/PRDS/AUTOMATOS-0.2/`
+
+## When in doubt
+
+- Re-read the user story's `notes` field
+- Read CLAUDE.md at the repo root (`/Users/gkavanagh/Development/Automatos-AI-Platform/automatos-CLUSTER-1A/CLAUDE.md`)
+- Search before you build
+- Smaller diff > bigger diff
+- Match existing patterns; do not invent new ones
+
+Begin Phase 1.
