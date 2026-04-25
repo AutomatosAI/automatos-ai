@@ -1,20 +1,30 @@
 """
-Deliverable Service (PRD-129: Workspace Outputs Hub)
-====================================================
+Deliverable Service (PRD-133b corrected: Unified Outputs via view)
+==================================================================
 
-Owns CRUD for the ``deliverables`` table — metadata about every agent output
-(reports, images, documents, code, slides, spreadsheets, archives, audio, video).
+Reads the ``v_workspace_outputs`` view which UNIONs:
+  * ``blog_posts``   — owned by BlogService
+  * ``agent_reports``— owned by ReportService
+  * ``deliverables`` — ad-hoc artifacts (code/images/etc.) with no native home
+
+Write paths branch by artifact_type:
+  * ``blog_post`` / ``report`` are rejected from ``register()`` — use
+    BlogService or ReportService directly (those are the source of truth).
+  * ``soft_delete()`` routes the UPDATE at the correct source table based on
+    the row's ``artifact_type``.
+  * ``apply_retention()`` targets ``agent_reports`` directly (the only place
+    with ``source_type='heartbeat'`` after PRD-133b).
 
 Design principles
 -----------------
-- Registration is idempotent via ``ON CONFLICT (workspace_id, file_path)`` —
-  callers can re-register safely (e.g. file overwrite, backfill reruns).
+- One write path per artifact type. No shadow writes, no drift.
+- ``register()`` for ad-hoc artifacts stays idempotent via
+  ``ON CONFLICT (workspace_id, file_path)``.
 - ``register()`` does NOT touch WorkspaceClient. Callers that already have
-  ``file_size_bytes`` pass it in — avoids a hot-path HTTP round-trip on every
-  file write.
+  ``file_size_bytes`` pass it in — avoids a hot-path HTTP round-trip.
 - File content is only fetched on ``get_deliverable(include_content=True)``.
-- Soft delete via ``deleted_at``; the unique constraint is partial
-  (``WHERE deleted_at IS NULL``), so re-creating a path after delete works.
+  Blog posts return inline content from ``blog_posts.content`` (no workspace
+  fetch needed — the content lives in the DB).
 - All SQL uses ``sqlalchemy.text()`` with bound params. No string interpolation
   of user input.
 - All public methods return dict envelopes with a ``success`` key.
@@ -169,6 +179,21 @@ class DeliverableService:
             return {"success": False, "error": "file_path is required"}
 
         inferred_type = artifact_type or _infer_artifact_type(file_path)
+
+        # Guard against reintroducing the PRD-129/133 double-write. Blog posts
+        # live in ``blog_posts`` (BlogService), reports in ``agent_reports``
+        # (ReportService). The Outputs view already surfaces both — callers
+        # must write to the native service, never register() here.
+        if inferred_type in ("blog_post", "report"):
+            return {
+                "success": False,
+                "error": (
+                    f"register() refuses artifact_type='{inferred_type}'. "
+                    "Blog posts and reports are written by their native "
+                    "services and surfaced via v_workspace_outputs."
+                ),
+            }
+
         final_title = title or _humanize_basename(file_path)
         file_name = os.path.basename(file_path)
         if file_type is None:
@@ -289,52 +314,52 @@ class DeliverableService:
         limit = max(1, min(int(limit or 24), 100))
         offset = max(0, int(offset or 0))
 
-        conditions = ["d.workspace_id = :workspace_id", "d.deleted_at IS NULL"]
+        conditions = ["o.workspace_id = :workspace_id", "o.deleted_at IS NULL"]
         params: Dict[str, Any] = {"workspace_id": str(self.workspace_id)}
 
         if artifact_type:
-            conditions.append("d.artifact_type = :artifact_type")
+            conditions.append("o.artifact_type = :artifact_type")
             params["artifact_type"] = artifact_type
         if source_type:
-            conditions.append("d.source_type = :source_type")
+            conditions.append("o.source_type = :source_type")
             params["source_type"] = source_type
         if agent_id is not None:
-            conditions.append("d.agent_id = :agent_id")
+            conditions.append("o.agent_id = :agent_id")
             params["agent_id"] = agent_id
         if date_from:
-            conditions.append("d.created_at >= :date_from")
+            conditions.append("o.created_at >= :date_from")
             params["date_from"] = date_from
         if date_to:
-            conditions.append("d.created_at <= :date_to")
+            conditions.append("o.created_at <= :date_to")
             params["date_to"] = date_to
         if search:
-            conditions.append("(d.title ILIKE :search OR d.summary ILIKE :search OR d.file_path ILIKE :search)")
+            conditions.append("(o.title ILIKE :search OR o.summary ILIKE :search OR o.file_path ILIKE :search)")
             params["search"] = f"%{search}%"
 
         where = " AND ".join(conditions)
 
         try:
             total = self.db.execute(
-                text(f"SELECT COUNT(*) FROM deliverables d WHERE {where}"),
+                text(f"SELECT COUNT(*) FROM v_workspace_outputs o WHERE {where}"),
                 params,
             ).scalar() or 0
 
             rows = self.db.execute(
                 text(f"""
                     SELECT
-                        d.id, d.workspace_id,
-                        d.source_type, d.source_id,
-                        d.agent_id,
-                        COALESCE(d.agent_name, a.name) AS agent_name,
-                        d.artifact_type, d.title, d.summary,
-                        d.storage_type, d.file_path, d.file_name, d.file_type, d.file_size_bytes,
-                        d.preview_url, d.preview_type,
-                        d.extra, d.status,
-                        d.created_at, d.updated_at
-                    FROM deliverables d
-                    LEFT JOIN agents a ON a.id = d.agent_id
+                        o.id, o.workspace_id,
+                        o.source_type, o.source_id,
+                        o.agent_id,
+                        COALESCE(o.agent_name, a.name) AS agent_name,
+                        o.artifact_type, o.title, o.summary,
+                        o.storage_type, o.file_path, o.file_name, o.file_type, o.file_size_bytes,
+                        o.preview_url, o.preview_type,
+                        o.extra, o.status,
+                        o.created_at, o.updated_at
+                    FROM v_workspace_outputs o
+                    LEFT JOIN agents a ON a.id = o.agent_id
                     WHERE {where}
-                    ORDER BY d.created_at DESC
+                    ORDER BY o.created_at DESC
                     LIMIT :limit OFFSET :offset
                 """),
                 {**params, "limit": limit, "offset": offset},
@@ -375,20 +400,20 @@ class DeliverableService:
             row = self.db.execute(
                 text("""
                     SELECT
-                        d.id, d.workspace_id,
-                        d.source_type, d.source_id,
-                        d.agent_id,
-                        COALESCE(d.agent_name, a.name) AS agent_name,
-                        d.artifact_type, d.title, d.summary,
-                        d.storage_type, d.file_path, d.file_name, d.file_type, d.file_size_bytes,
-                        d.preview_url, d.preview_type,
-                        d.extra, d.status,
-                        d.created_at, d.updated_at
-                    FROM deliverables d
-                    LEFT JOIN agents a ON a.id = d.agent_id
-                    WHERE d.id = :id
-                      AND d.workspace_id = :workspace_id
-                      AND d.deleted_at IS NULL
+                        o.id, o.workspace_id,
+                        o.source_type, o.source_id,
+                        o.agent_id,
+                        COALESCE(o.agent_name, a.name) AS agent_name,
+                        o.artifact_type, o.title, o.summary,
+                        o.storage_type, o.file_path, o.file_name, o.file_type, o.file_size_bytes,
+                        o.preview_url, o.preview_type,
+                        o.extra, o.status,
+                        o.created_at, o.updated_at
+                    FROM v_workspace_outputs o
+                    LEFT JOIN agents a ON a.id = o.agent_id
+                    WHERE o.id = :id
+                      AND o.workspace_id = :workspace_id
+                      AND o.deleted_at IS NULL
                 """),
                 {"id": deliverable_id, "workspace_id": str(self.workspace_id)},
             ).fetchone()
@@ -398,37 +423,48 @@ class DeliverableService:
 
             data = self._row_to_dict(row)
 
-            if include_content and data["storage_type"] == "workspace":
-                # Every workspace file has a streamable content URL (used for
-                # <img src> on images and Download links on everything else).
-                # Fall back to building it from file_path if register() didn't
-                # set preview_url (legacy rows before C2 fix).
-                data["content_url"] = data.get("preview_url") or _workspace_file_url(
-                    self.workspace_id, data["file_path"]
-                )
+            if include_content:
+                # Blog posts store content inline in blog_posts.content — no
+                # workspace round-trip needed. Side-effect: also fixes the
+                # historic "blog posts render empty" bug caused by NULL
+                # blog_posts.file_path when BlogService._write_content failed.
+                if data["artifact_type"] == "blog_post":
+                    blog_row = self.db.execute(
+                        text("SELECT content FROM blog_posts WHERE id = :id"),
+                        {"id": deliverable_id},
+                    ).fetchone()
+                    data["content_url"] = data.get("preview_url")
+                    data["content"] = (blog_row[0] if blog_row else "") or ""
+                    data["content_truncated"] = False
+                elif data["storage_type"] == "workspace" and data["file_path"]:
+                    # Every workspace file has a streamable content URL (used for
+                    # <img src> on images and Download links on everything else).
+                    data["content_url"] = data.get("preview_url") or _workspace_file_url(
+                        self.workspace_id, data["file_path"]
+                    )
 
-                if data["artifact_type"] == "image":
-                    # Images stream via URL, never inline.
-                    data["content"] = None
-                else:
-                    ws_client = WorkspaceClient(str(self.workspace_id))
-                    file_result = await ws_client.read_file(data["file_path"])
-                    if file_result.get("success"):
-                        content = file_result.get("content", "") or ""
-                        # Cap inline content to prevent OOM on huge files —
-                        # caller can hit content_url for the full stream.
-                        if len(content.encode("utf-8", errors="ignore")) > MAX_INLINE_CONTENT_BYTES:
-                            truncated = content.encode("utf-8", errors="ignore")[
-                                :MAX_INLINE_CONTENT_BYTES
-                            ].decode("utf-8", errors="ignore")
-                            data["content"] = truncated
-                            data["content_truncated"] = True
-                        else:
-                            data["content"] = content
-                            data["content_truncated"] = False
-                    else:
+                    if data["artifact_type"] == "image":
+                        # Images stream via URL, never inline.
                         data["content"] = None
-                        data["content_error"] = file_result.get("error", "Could not read file")
+                    else:
+                        ws_client = WorkspaceClient(str(self.workspace_id))
+                        file_result = await ws_client.read_file(data["file_path"])
+                        if file_result.get("success"):
+                            content = file_result.get("content", "") or ""
+                            # Cap inline content to prevent OOM on huge files —
+                            # caller can hit content_url for the full stream.
+                            if len(content.encode("utf-8", errors="ignore")) > MAX_INLINE_CONTENT_BYTES:
+                                truncated = content.encode("utf-8", errors="ignore")[
+                                    :MAX_INLINE_CONTENT_BYTES
+                                ].decode("utf-8", errors="ignore")
+                                data["content"] = truncated
+                                data["content_truncated"] = True
+                            else:
+                                data["content"] = content
+                                data["content_truncated"] = False
+                        else:
+                            data["content"] = None
+                            data["content_error"] = file_result.get("error", "Could not read file")
 
             return {"success": True, "deliverable": data}
         except Exception as exc:
@@ -448,7 +484,7 @@ class DeliverableService:
             total = self.db.execute(
                 text("""
                     SELECT COUNT(*)
-                    FROM deliverables
+                    FROM v_workspace_outputs
                     WHERE workspace_id = :workspace_id
                       AND deleted_at IS NULL
                 """),
@@ -458,7 +494,7 @@ class DeliverableService:
             by_type_rows = self.db.execute(
                 text("""
                     SELECT artifact_type, COUNT(*) AS cnt
-                    FROM deliverables
+                    FROM v_workspace_outputs
                     WHERE workspace_id = :workspace_id
                       AND deleted_at IS NULL
                     GROUP BY artifact_type
@@ -470,14 +506,14 @@ class DeliverableService:
             by_agent_rows = self.db.execute(
                 text("""
                     SELECT
-                        d.agent_id,
-                        COALESCE(d.agent_name, a.name, 'Unknown') AS agent_name,
+                        o.agent_id,
+                        COALESCE(o.agent_name, a.name, 'Unknown') AS agent_name,
                         COUNT(*) AS cnt
-                    FROM deliverables d
-                    LEFT JOIN agents a ON a.id = d.agent_id
-                    WHERE d.workspace_id = :workspace_id
-                      AND d.deleted_at IS NULL
-                    GROUP BY d.agent_id, COALESCE(d.agent_name, a.name, 'Unknown')
+                    FROM v_workspace_outputs o
+                    LEFT JOIN agents a ON a.id = o.agent_id
+                    WHERE o.workspace_id = :workspace_id
+                      AND o.deleted_at IS NULL
+                    GROUP BY o.agent_id, COALESCE(o.agent_name, a.name, 'Unknown')
                     ORDER BY cnt DESC
                 """),
                 {"workspace_id": str(self.workspace_id)},
@@ -513,28 +549,49 @@ class DeliverableService:
     # soft_delete
     # ------------------------------------------------------------------
 
+    # Map artifact_type → native table for soft-delete. Everything else
+    # (code/image/document/etc.) lives in deliverables.
+    _SOFT_DELETE_TARGET = {
+        "blog_post": "blog_posts",
+        "report":    "agent_reports",
+    }
+
     def soft_delete(self, deliverable_id: str) -> Dict[str, Any]:
-        """Mark deliverable as deleted (sets deleted_at = NOW())."""
+        """Mark output as deleted (sets deleted_at = NOW()) on the correct
+        source table based on artifact_type."""
         try:
+            # Resolve artifact_type via the view so we UPDATE the right table.
             row = self.db.execute(
                 text("""
-                    UPDATE deliverables
-                    SET deleted_at = NOW(), updated_at = NOW()
-                    WHERE id = :id
-                      AND workspace_id = :workspace_id
-                      AND deleted_at IS NULL
-                    RETURNING id
+                    SELECT artifact_type
+                      FROM v_workspace_outputs
+                     WHERE id = :id
+                       AND workspace_id = :workspace_id
+                       AND deleted_at IS NULL
                 """),
                 {"id": deliverable_id, "workspace_id": str(self.workspace_id)},
             ).fetchone()
-            self.db.commit()
 
             if not row:
                 return {"success": False, "error": "Deliverable not found"}
 
+            target_table = self._SOFT_DELETE_TARGET.get(row.artifact_type, "deliverables")
+            # Table name is from a fixed allow-list above — safe to interpolate.
+            self.db.execute(
+                text(f"""
+                    UPDATE {target_table}
+                       SET deleted_at = NOW(), updated_at = NOW()
+                     WHERE id = :id
+                       AND workspace_id = :workspace_id
+                       AND deleted_at IS NULL
+                """),
+                {"id": deliverable_id, "workspace_id": str(self.workspace_id)},
+            )
+            self.db.commit()
+
             logger.info(
-                "[DeliverableService] Soft-deleted deliverable %s",
-                deliverable_id,
+                "[DeliverableService] Soft-deleted %s %s",
+                row.artifact_type, deliverable_id,
             )
             return {"success": True, "deliverable_id": deliverable_id}
         except Exception as exc:
@@ -555,40 +612,72 @@ class DeliverableService:
         source_type: str = "heartbeat",
         keep_per_agent: int = 50,
     ) -> Dict[str, Any]:
-        """Soft-delete old deliverables beyond *keep_per_agent* most recent per agent.
+        """Soft-delete old outputs beyond *keep_per_agent* most recent per agent.
 
         Only targets rows matching *source_type* (default: heartbeat) so that
         user-initiated outputs (chat, mission, task) are never auto-pruned.
 
-        Uses a window function to rank rows per agent by created_at DESC, then
-        soft-deletes everything outside the top N.
+        After PRD-133b, ``source_type='heartbeat'`` rows live in
+        ``agent_reports`` — the only place they're ever written. For other
+        source_types (e.g. task-driven code/image retention), we still target
+        ``deliverables``.
         """
+        target_table = "agent_reports" if source_type == "heartbeat" else "deliverables"
         try:
-            result = self.db.execute(
-                text("""
+            if target_table == "agent_reports":
+                # agent_reports has its own source_type semantics baked into
+                # heartbeat_result_id — we retain any row tied to a heartbeat.
+                rank_sql = text("""
                     WITH ranked AS (
                         SELECT id,
                                ROW_NUMBER() OVER (
                                    PARTITION BY COALESCE(agent_id, 0)
                                    ORDER BY created_at DESC
                                ) AS rn
-                        FROM deliverables
-                        WHERE workspace_id = :workspace_id
-                          AND source_type  = :source_type
-                          AND deleted_at   IS NULL
+                          FROM agent_reports
+                         WHERE workspace_id        = :workspace_id
+                           AND heartbeat_result_id IS NOT NULL
+                           AND deleted_at          IS NULL
+                    )
+                    UPDATE agent_reports
+                       SET deleted_at = NOW(), updated_at = NOW()
+                     WHERE id IN (SELECT id FROM ranked WHERE rn > :keep)
+                    RETURNING id
+                """)
+                result = self.db.execute(
+                    rank_sql,
+                    {
+                        "workspace_id": str(self.workspace_id),
+                        "keep": keep_per_agent,
+                    },
+                )
+            else:
+                rank_sql = text("""
+                    WITH ranked AS (
+                        SELECT id,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY COALESCE(agent_id, 0)
+                                   ORDER BY created_at DESC
+                               ) AS rn
+                          FROM deliverables
+                         WHERE workspace_id = :workspace_id
+                           AND source_type  = :source_type
+                           AND deleted_at   IS NULL
                     )
                     UPDATE deliverables
-                       SET deleted_at  = NOW(),
-                           updated_at = NOW()
-                    WHERE id IN (SELECT id FROM ranked WHERE rn > :keep)
+                       SET deleted_at = NOW(), updated_at = NOW()
+                     WHERE id IN (SELECT id FROM ranked WHERE rn > :keep)
                     RETURNING id
-                """),
-                {
-                    "workspace_id": str(self.workspace_id),
-                    "source_type": source_type,
-                    "keep": keep_per_agent,
-                },
-            )
+                """)
+                result = self.db.execute(
+                    rank_sql,
+                    {
+                        "workspace_id": str(self.workspace_id),
+                        "source_type": source_type,
+                        "keep": keep_per_agent,
+                    },
+                )
+
             pruned_ids = [str(r.id) for r in result.fetchall()]
             self.db.commit()
 

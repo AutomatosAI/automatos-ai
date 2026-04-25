@@ -160,31 +160,10 @@ class ReportService:
                 report_id, agent_name, report_type, title,
             )
 
-            # PRD-129 US-004: mirror report into deliverables so it shows up in
-            # the Workspace Outputs gallery. Failure must not break the report.
-            try:
-                from services.deliverable_service import DeliverableService
-                source_type = "task" if heartbeat_result_id is None and report_type != "standup" else "heartbeat"
-                deliverable_service = DeliverableService(db=self.db, workspace_id=self.workspace_id)
-                deliverable_service.register(
-                    file_path=file_path,
-                    title=title,
-                    source_type=source_type,
-                    source_id=str(heartbeat_result_id) if heartbeat_result_id else report_id,
-                    agent_id=agent_id,
-                    agent_name=agent_name,
-                    artifact_type="report",
-                    summary=summary,
-                    storage_type="workspace",
-                    file_type="md",
-                    file_size_bytes=file_size,
-                    extra={"report_id": report_id, "report_type": report_type},
-                )
-            except Exception as reg_exc:  # noqa: BLE001
-                logger.error(
-                    "[ReportService] Deliverable register failed for report %s: %s",
-                    report_id, reg_exc, exc_info=True,
-                )
+            # PRD-133b: reports are surfaced to the Workspace Outputs gallery
+            # through v_workspace_outputs (UNION view), not a second write into
+            # `deliverables`. The old double-write drifted — 29 reports ended up
+            # orphaned from the shadow registry over time.
 
             return {
                 "success": True,

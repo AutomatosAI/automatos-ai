@@ -1,8 +1,15 @@
-"""Unit tests for DeliverableService (PRD-129).
+"""Unit tests for DeliverableService (PRD-133b corrected).
 
 These tests use a MagicMock SQLAlchemy session — they assert the SQL that
 the service issues and the shape of the dict envelopes it returns. A proper
 integration test against a real Postgres lives in the API test suite.
+
+PRD-133b changes exercised here:
+  * ``register()`` now refuses ``artifact_type in {'blog_post','report'}``.
+  * Reads (list/get/stats) go through ``v_workspace_outputs``.
+  * ``soft_delete()`` resolves artifact_type first, then targets the right
+    source table (blog_posts / agent_reports / deliverables).
+  * ``apply_retention()`` branches heartbeat → agent_reports, else → deliverables.
 """
 from __future__ import annotations
 
@@ -115,10 +122,10 @@ class TestRegister:
 
         svc = DeliverableService(db, WORKSPACE_ID)
         out = svc.register(
-            file_path="reports/scout/weekly.md",
-            title="Weekly Report",
-            source_type="heartbeat",
-            source_id="hb-1",
+            file_path="outputs/scout/chart.png",
+            title="Weekly Chart",
+            source_type="task",
+            source_id="task-1",
             agent_id=42,
             agent_name="Scout",
             summary="Summary",
@@ -126,8 +133,8 @@ class TestRegister:
         )
 
         assert out["success"] is True
-        assert out["artifact_type"] == "report"
-        assert out["title"] == "Weekly Report"
+        assert out["artifact_type"] == "image"
+        assert out["title"] == "Weekly Chart"
         assert out["created"] is True
         db.execute.assert_called_once()
         db.commit.assert_called_once()
@@ -135,10 +142,10 @@ class TestRegister:
         # Bound params passed correctly
         _, params = db.execute.call_args[0]
         assert params["workspace_id"] == str(WORKSPACE_ID)
-        assert params["file_path"] == "reports/scout/weekly.md"
-        assert params["source_type"] == "heartbeat"
+        assert params["file_path"] == "outputs/scout/chart.png"
+        assert params["source_type"] == "task"
         assert params["file_size_bytes"] == 2048
-        assert params["artifact_type"] == "report"
+        assert params["artifact_type"] == "image"
 
     def test_register_idempotent_update(self):
         """Re-registering the same path returns created=False."""
@@ -150,10 +157,28 @@ class TestRegister:
         db.execute.return_value = result_mock
 
         svc = DeliverableService(db, WORKSPACE_ID)
-        out = svc.register(file_path="reports/scout/weekly.md")
+        out = svc.register(file_path="outputs/scout/chart.png")
 
         assert out["success"] is True
         assert out["created"] is False
+
+    def test_register_refuses_blog_post(self):
+        """PRD-133b: blog posts are owned by BlogService; never writable here."""
+        db = MagicMock()
+        svc = DeliverableService(db, WORKSPACE_ID)
+        out = svc.register(file_path="posts/intro.md", artifact_type="blog_post")
+        assert out["success"] is False
+        assert "blog_post" in out["error"]
+        db.execute.assert_not_called()
+
+    def test_register_refuses_report_by_inference(self):
+        """PRD-133b: .md files infer 'report' — must be rejected."""
+        db = MagicMock()
+        svc = DeliverableService(db, WORKSPACE_ID)
+        out = svc.register(file_path="reports/scout/weekly.md")
+        assert out["success"] is False
+        assert "report" in out["error"]
+        db.execute.assert_not_called()
 
     def test_register_infers_artifact_type_when_omitted(self):
         db = MagicMock()
@@ -182,7 +207,8 @@ class TestRegister:
         db = MagicMock()
         db.execute.side_effect = RuntimeError("boom")
         svc = DeliverableService(db, WORKSPACE_ID)
-        out = svc.register(file_path="reports/x.md")
+        # Non-report/blog path so we reach the INSERT, which then explodes.
+        out = svc.register(file_path="outputs/chart.png")
         assert out["success"] is False
         db.rollback.assert_called_once()
 
@@ -195,7 +221,7 @@ class TestRegister:
 
         with patch("services.deliverable_service.WorkspaceClient") as wc_mock:
             svc = DeliverableService(db, WORKSPACE_ID)
-            svc.register(file_path="x.md", file_size_bytes=100)
+            svc.register(file_path="outputs/chart.png", file_size_bytes=100)
             wc_mock.assert_not_called()
 
 
@@ -391,32 +417,70 @@ class TestGetStats:
 
 
 # ---------------------------------------------------------------------------
-# soft_delete()
+# soft_delete() — two-step: resolve artifact_type via view, UPDATE source table
 # ---------------------------------------------------------------------------
 
 class TestSoftDelete:
-    def test_soft_delete_success(self):
+    @staticmethod
+    def _setup(db, artifact_type: str | None):
+        """Wire db.execute to return a row with .artifact_type on first call
+        (SELECT via view), then swallow subsequent UPDATE."""
+        select_result = MagicMock()
+        if artifact_type is None:
+            select_result.fetchone.return_value = None
+        else:
+            lookup_row = MagicMock()
+            lookup_row.artifact_type = artifact_type
+            select_result.fetchone.return_value = lookup_row
+        update_result = MagicMock()
+        db.execute.side_effect = [select_result, update_result]
+
+    def _extract_update_sql(self, db):
+        """Second execute call is the UPDATE — return its SQL text."""
+        update_call = db.execute.call_args_list[1]
+        return str(update_call[0][0])
+
+    def test_soft_delete_report_targets_agent_reports(self):
         db = MagicMock()
-        result_mock = MagicMock()
-        result_mock.fetchone.return_value = (uuid4(),)
-        db.execute.return_value = result_mock
+        self._setup(db, artifact_type="report")
 
         svc = DeliverableService(db, WORKSPACE_ID)
         out = svc.soft_delete("some-id")
 
         assert out["success"] is True
         db.commit.assert_called_once()
+        assert "UPDATE agent_reports" in self._extract_update_sql(db)
+
+    def test_soft_delete_blog_post_targets_blog_posts(self):
+        db = MagicMock()
+        self._setup(db, artifact_type="blog_post")
+
+        svc = DeliverableService(db, WORKSPACE_ID)
+        out = svc.soft_delete("blog-id")
+
+        assert out["success"] is True
+        assert "UPDATE blog_posts" in self._extract_update_sql(db)
+
+    def test_soft_delete_ad_hoc_targets_deliverables(self):
+        db = MagicMock()
+        self._setup(db, artifact_type="image")
+
+        svc = DeliverableService(db, WORKSPACE_ID)
+        out = svc.soft_delete("img-id")
+
+        assert out["success"] is True
+        assert "UPDATE deliverables" in self._extract_update_sql(db)
 
     def test_soft_delete_not_found(self):
         db = MagicMock()
-        result_mock = MagicMock()
-        result_mock.fetchone.return_value = None
-        db.execute.return_value = result_mock
+        self._setup(db, artifact_type=None)
 
         svc = DeliverableService(db, WORKSPACE_ID)
         out = svc.soft_delete("missing-id")
         assert out["success"] is False
         assert "not found" in out["error"].lower()
+        # No UPDATE issued
+        assert db.execute.call_count == 1
 
     def test_soft_delete_rolls_back_on_error(self):
         db = MagicMock()
@@ -425,3 +489,87 @@ class TestSoftDelete:
         out = svc.soft_delete("some-id")
         assert out["success"] is False
         db.rollback.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# apply_retention() — heartbeat → agent_reports, else → deliverables
+# ---------------------------------------------------------------------------
+
+class TestApplyRetention:
+    def test_heartbeat_targets_agent_reports(self):
+        db = MagicMock()
+        result_mock = MagicMock()
+        result_mock.fetchall.return_value = [MagicMock(id=uuid4()) for _ in range(3)]
+        db.execute.return_value = result_mock
+
+        svc = DeliverableService(db, WORKSPACE_ID)
+        out = svc.apply_retention(source_type="heartbeat", keep_per_agent=50)
+
+        assert out["success"] is True
+        assert out["pruned"] == 3
+        sql = str(db.execute.call_args[0][0])
+        assert "agent_reports" in sql
+        assert "heartbeat_result_id IS NOT NULL" in sql
+        db.commit.assert_called_once()
+
+    def test_non_heartbeat_targets_deliverables(self):
+        db = MagicMock()
+        result_mock = MagicMock()
+        result_mock.fetchall.return_value = []
+        db.execute.return_value = result_mock
+
+        svc = DeliverableService(db, WORKSPACE_ID)
+        out = svc.apply_retention(source_type="task", keep_per_agent=10)
+
+        assert out["success"] is True
+        assert out["pruned"] == 0
+        sql = str(db.execute.call_args[0][0])
+        assert "FROM deliverables" in sql
+        params = db.execute.call_args[0][1]
+        assert params["source_type"] == "task"
+        assert params["keep"] == 10
+
+    def test_apply_retention_rolls_back_on_error(self):
+        db = MagicMock()
+        db.execute.side_effect = RuntimeError("boom")
+        svc = DeliverableService(db, WORKSPACE_ID)
+        out = svc.apply_retention(source_type="heartbeat")
+        assert out["success"] is False
+        db.rollback.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# get_deliverable() — blog_post inline branch (PRD-133b)
+# ---------------------------------------------------------------------------
+
+class TestGetBlogPostInline:
+    @pytest.mark.asyncio
+    async def test_blog_post_returns_content_from_blog_posts_table(self):
+        """PRD-133b: blog_post content is read inline from blog_posts.content,
+        never from workspace filesystem."""
+        blog_id = uuid4()
+        view_row = _make_row(
+            id=blog_id,
+            artifact_type="blog_post",
+            file_path="posts/intro.md",
+            preview_url="/api/workspaces/x/files/content?path=posts/intro.md",
+        )
+        blog_row = MagicMock()
+        blog_row.__getitem__ = lambda self, i: ["# Inline content"][i]
+
+        view_result = MagicMock()
+        view_result.fetchone.return_value = view_row
+        blog_result = MagicMock()
+        blog_result.fetchone.return_value = blog_row
+
+        db = MagicMock()
+        db.execute.side_effect = [view_result, blog_result]
+
+        with patch("services.deliverable_service.WorkspaceClient") as wc_mock:
+            svc = DeliverableService(db, WORKSPACE_ID)
+            out = await svc.get_deliverable(str(blog_id), include_content=True)
+            wc_mock.assert_not_called()  # never touches filesystem for blogs
+
+        assert out["success"] is True
+        assert out["deliverable"]["content"] == "# Inline content"
+        assert out["deliverable"]["content_truncated"] is False
