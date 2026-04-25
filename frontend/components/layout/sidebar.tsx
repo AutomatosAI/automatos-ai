@@ -6,7 +6,6 @@ import { usePathname } from 'next/navigation'
 import { motion } from 'framer-motion'
 import {
   Users,
-  Activity,
   Settings,
   ChevronLeft,
   Bot,
@@ -16,10 +15,11 @@ import {
   Database,
   Store,
   BarChart3,
-  HardDrive,
+  Package,
   BookOpen,
   ExternalLink,
   Building2,
+  Radar,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { PremiumIcon } from '@/components/shared'
@@ -41,17 +41,17 @@ const navigationItems = [
     description: 'Your AI workspace'
   },
   {
-    name: 'Activity',
-    href: '/activity',
-    icon: Activity,
+    name: 'Command Center',
+    href: '/command-center',
+    icon: Radar,
     iconColor: 'text-[hsl(var(--info))]',
     navIconKey: 'nav_activity',
     description: 'Your AI workforce at a glance'
   },
   {
-    name: 'Workspace',
-    href: '/workspace',
-    icon: HardDrive,
+    name: 'Deliverables',
+    href: '/deliverables',
+    icon: Package,
     iconColor: 'text-[hsl(var(--chart-3))]',
     navIconKey: 'nav_workspace',
     description: 'Files, code & agent output'
