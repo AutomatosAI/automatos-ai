@@ -3,11 +3,29 @@
 import { useState, useEffect, useMemo } from 'react'
 import DOMPurify from 'dompurify'
 import ReactMarkdown from 'react-markdown'
-import { X, Save, ArrowUpFromLine } from 'lucide-react'
+import { Save } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
+import { Switch } from '@/components/ui/switch'
+import { Label } from '@/components/ui/label'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import {
   Sheet,
   SheetContent,
@@ -15,7 +33,8 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { toast } from 'react-hot-toast'
-import { useBlogPost, useCreatePost, useUpdatePost, usePublishPost } from '@/hooks/use-blogs-api'
+import { useBlogPost, useCreatePost, useUpdatePost, usePublishPost, useUnpublishPost } from '@/hooks/use-blogs-api'
+import { useSystemRole } from '@/contexts/role-context'
 
 interface BlogEditorProps {
   postId: string | null
@@ -25,8 +44,10 @@ interface BlogEditorProps {
 export function BlogEditor({ postId, onClose }: BlogEditorProps) {
   const isEditMode = !!postId
   const { data: existingPost } = useBlogPost(postId)
+  const { isAdmin } = useSystemRole()
 
   const [title, setTitle] = useState('')
+  const [slug, setSlug] = useState('')
   const [content, setContent] = useState('')
   const [excerpt, setExcerpt] = useState('')
   const [coverImageUrl, setCoverImageUrl] = useState('')
@@ -34,14 +55,21 @@ export function BlogEditor({ postId, onClose }: BlogEditorProps) {
   const [tagsInput, setTagsInput] = useState('')
   const [seoTitle, setSeoTitle] = useState('')
   const [seoDescription, setSeoDescription] = useState('')
+  const [isPublished, setIsPublished] = useState(false)
+  const [showPublishConfirm, setShowPublishConfirm] = useState(false)
 
   const createMutation = useCreatePost()
   const updateMutation = useUpdatePost()
   const publishMutation = usePublishPost()
+  const unpublishMutation = useUnpublishPost()
+
+  // Track whether post was already published when opened (for first-publish confirmation)
+  const wasPublished = existingPost?.status === 'published'
 
   useEffect(() => {
     if (existingPost && isEditMode) {
       setTitle(existingPost.title || '')
+      setSlug(existingPost.slug || '')
       setContent(existingPost.content || '')
       setExcerpt(existingPost.excerpt || '')
       setCoverImageUrl(existingPost.cover_image_url || '')
@@ -49,6 +77,7 @@ export function BlogEditor({ postId, onClose }: BlogEditorProps) {
       setTagsInput((existingPost.tags || []).join(', '))
       setSeoTitle(existingPost.seo_title || '')
       setSeoDescription(existingPost.seo_description || '')
+      setIsPublished(existingPost.status === 'published')
     }
   }, [existingPost, isEditMode])
 
@@ -62,70 +91,70 @@ export function BlogEditor({ postId, onClose }: BlogEditorProps) {
     [content]
   )
 
-  const handleSaveDraft = async () => {
+  const buildPostData = () => ({
+    title: title.trim(),
+    slug: slug.trim() || undefined,
+    content: content.trim(),
+    excerpt: excerpt.trim() || undefined,
+    cover_image_url: coverImageUrl.trim() || undefined,
+    category: category.trim() || undefined,
+    tags,
+    seo_title: seoTitle.trim() || undefined,
+    seo_description: seoDescription.trim() || undefined,
+  })
+
+  const handleSave = async () => {
     if (!title.trim() || !content.trim()) {
       toast.error('Title and content are required')
       return
     }
 
-    const data = {
-      title: title.trim(),
-      content: content.trim(),
-      excerpt: excerpt.trim() || undefined,
-      cover_image_url: coverImageUrl.trim() || undefined,
-      category: category.trim() || undefined,
-      tags,
-      status: 'draft' as const,
-      seo_title: seoTitle.trim() || undefined,
-      seo_description: seoDescription.trim() || undefined,
-    }
+    const data = buildPostData()
 
     if (isEditMode && postId) {
       await updateMutation.mutateAsync({ postId, data })
     } else {
-      await createMutation.mutateAsync(data)
+      await createMutation.mutateAsync({ ...data, status: isPublished ? 'published' : 'draft' })
     }
     onClose()
   }
 
-  const handlePublish = async () => {
-    if (!title.trim() || !content.trim()) {
-      toast.error('Title and content are required')
-      return
-    }
-
-    if (isEditMode && postId) {
-      await updateMutation.mutateAsync({
-        postId,
-        data: {
-          title: title.trim(),
-          content: content.trim(),
-          excerpt: excerpt.trim() || undefined,
-          cover_image_url: coverImageUrl.trim() || undefined,
-          category: category.trim() || undefined,
-          tags,
-          seo_title: seoTitle.trim() || undefined,
-          seo_description: seoDescription.trim() || undefined,
-        },
-      })
-      await publishMutation.mutateAsync(postId)
+  const handleTogglePublish = (checked: boolean) => {
+    if (checked && !wasPublished) {
+      // First publish — show confirmation modal
+      setShowPublishConfirm(true)
+    } else if (checked && wasPublished) {
+      // Re-publishing (was published before) — no confirmation needed
+      handlePublishAction()
     } else {
-      const post = await createMutation.mutateAsync({
-        title: title.trim(),
-        content: content.trim(),
-        excerpt: excerpt.trim() || undefined,
-        cover_image_url: coverImageUrl.trim() || undefined,
-        category: category.trim() || undefined,
-        tags,
-        status: 'published',
-        seo_title: seoTitle.trim() || undefined,
-        seo_description: seoDescription.trim() || undefined,
-      })
+      // Unpublishing
+      handleUnpublishAction()
     }
-    onClose()
   }
 
-  const isSaving = createMutation.isLoading || updateMutation.isLoading || publishMutation.isLoading
+  const handlePublishAction = async () => {
+    if (isEditMode && postId) {
+      // Save pending edits first, then publish
+      const data = buildPostData()
+      await updateMutation.mutateAsync({ postId, data })
+      await publishMutation.mutateAsync(postId)
+      setIsPublished(true)
+    }
+  }
+
+  const handleUnpublishAction = async () => {
+    if (isEditMode && postId) {
+      await unpublishMutation.mutateAsync(postId)
+      setIsPublished(false)
+    }
+  }
+
+  const handleConfirmPublish = async () => {
+    setShowPublishConfirm(false)
+    await handlePublishAction()
+  }
+
+  const isSaving = createMutation.isLoading || updateMutation.isLoading || publishMutation.isLoading || unpublishMutation.isLoading
 
   return (
     <Sheet open onOpenChange={() => onClose()}>
@@ -201,46 +230,79 @@ export function BlogEditor({ postId, onClose }: BlogEditorProps) {
               </div>
             </div>
 
-            <details className="text-xs">
-              <summary className="cursor-pointer text-muted-foreground font-medium">SEO Fields</summary>
-              <div className="space-y-3 mt-2">
-                <div>
-                  <label className="text-xs text-muted-foreground">SEO Title</label>
-                  <Input
-                    value={seoTitle}
-                    onChange={(e) => setSeoTitle(e.target.value)}
-                    placeholder="Override title for search engines"
-                    className="mt-1"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground">SEO Description</label>
-                  <Textarea
-                    value={seoDescription}
-                    onChange={(e) => setSeoDescription(e.target.value)}
-                    placeholder="Meta description for search engines"
-                    className="mt-1"
-                    rows={2}
-                  />
-                </div>
+            {/* SEO Metadata Panel */}
+            <div className="glass-card p-4 space-y-3">
+              <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">SEO Metadata</h4>
+              <div>
+                <label className="text-xs text-muted-foreground">Slug</label>
+                <Input
+                  value={slug}
+                  onChange={(e) => setSlug(e.target.value)}
+                  placeholder="my-blog-post-url"
+                  className="mt-1"
+                />
               </div>
-            </details>
+              <div>
+                <label className="text-xs text-muted-foreground">SEO Title</label>
+                <Input
+                  value={seoTitle}
+                  onChange={(e) => setSeoTitle(e.target.value)}
+                  placeholder="Override title for search engines"
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground">Meta Description</label>
+                <Textarea
+                  value={seoDescription}
+                  onChange={(e) => setSeoDescription(e.target.value)}
+                  placeholder="Meta description for search engines"
+                  className="mt-1"
+                  rows={2}
+                />
+              </div>
+            </div>
 
-            <div className="flex gap-2 pt-2">
+            {/* Draft / Publish toggle + Save */}
+            <div className="flex items-center justify-between pt-2">
+              <div className="flex items-center gap-3">
+                {isEditMode ? (
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <div className="flex items-center gap-2">
+                          <Switch
+                            id="publish-toggle"
+                            checked={isPublished}
+                            onCheckedChange={handleTogglePublish}
+                            disabled={!isAdmin || isSaving}
+                          />
+                          <Label
+                            htmlFor="publish-toggle"
+                            className={`text-sm font-medium ${isPublished ? 'text-[hsl(var(--success))]' : 'text-muted-foreground'}`}
+                          >
+                            {isPublished ? 'Published' : 'Draft'}
+                          </Label>
+                        </div>
+                      </TooltipTrigger>
+                      {!isAdmin && (
+                        <TooltipContent>
+                          <p>Workspace admin can publish</p>
+                        </TooltipContent>
+                      )}
+                    </Tooltip>
+                  </TooltipProvider>
+                ) : (
+                  <span className="text-xs text-muted-foreground">New post will be saved as draft</span>
+                )}
+              </div>
+
               <Button
-                variant="outline"
-                onClick={handleSaveDraft}
+                onClick={handleSave}
                 disabled={isSaving}
               >
                 <Save className="w-4 h-4 mr-1" />
-                Save Draft
-              </Button>
-              <Button
-                onClick={handlePublish}
-                disabled={isSaving}
-              >
-                <ArrowUpFromLine className="w-4 h-4 mr-1" />
-                Publish
+                Save
               </Button>
             </div>
           </div>
@@ -267,6 +329,24 @@ export function BlogEditor({ postId, onClose }: BlogEditorProps) {
             </div>
           </div>
         </div>
+
+        {/* First-publish confirmation modal */}
+        <AlertDialog open={showPublishConfirm} onOpenChange={setShowPublishConfirm}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Publish this post?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will make your blog visible at <span className="font-mono text-xs">/blog/{slug || existingPost?.slug || '...'}</span>. Publish?
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={handleConfirmPublish}>
+                Publish
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </SheetContent>
     </Sheet>
   )
