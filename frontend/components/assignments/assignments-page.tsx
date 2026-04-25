@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import {
@@ -17,6 +17,8 @@ import { Button } from '@/components/ui/button'
 import { CreateMissionModal } from '@/components/missions/create-mission-modal'
 import { CreatePlaybookModal } from '@/components/workflows/create-playbook-modal'
 import { CreateTaskDialog } from '@/components/activity/board/create-task-dialog'
+import { useWorkflowPlaybooks } from '@/hooks/use-playbook-api'
+import { useMissions } from '@/hooks/use-missions-api'
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -128,18 +130,47 @@ function FeaturedHeroCards() {
   )
 }
 
-// ── Hero Hint Placeholder (US-011) ─────────────────────────────────
+// ── Contextual Hero Hint (US-011) ──────────────────────────────────
 
-function HeroHintPlaceholder() {
+const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000
+
+function useHintMessage(): string | null {
+  const { data: playbookData } = useWorkflowPlaybooks({ limit: 1 })
+  const { data: missionData } = useMissions({ limit: 1 })
+  const { data: failedData } = useMissions({ state: 'failed', limit: 5 })
+
+  return useMemo(() => {
+    const playbookCount = ((playbookData as any)?.items ?? []).length
+    const missionCount = missionData?.missions?.length ?? 0
+
+    // Check for recent failed runs in last 24h
+    const now = Date.now()
+    const recentFailed = (failedData?.missions ?? []).some((m) => {
+      const ts = m.updated_at ?? m.created_at
+      return ts && now - new Date(ts).getTime() < TWENTY_FOUR_HOURS_MS
+    })
+
+    if (recentFailed) return 'Something not working? Re-plan it with Auto.'
+    if (playbookCount === 0 && missionCount === 0) return 'Not sure where to start? Plan it with Auto.'
+    if (playbookCount > 0 && missionCount === 0) return 'Ready for something bigger? Try a Mission.'
+    if (missionCount > 0 && playbookCount > 0) return 'What\u2019s next? Browse the Marketplace.'
+
+    return null
+  }, [playbookData, missionData, failedData])
+}
+
+function ContextualHeroHint() {
+  const hint = useHintMessage()
+
+  if (!hint) return null
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5, delay: 0.15 }}
     >
-      <div className="rounded-lg border border-dashed border-border/50 bg-card/30 p-4">
-        <p className="text-sm text-muted-foreground">Contextual hint — wired in US-011</p>
-      </div>
+      <p className="text-sm text-muted-foreground">{hint}</p>
     </motion.div>
   )
 }
@@ -207,7 +238,7 @@ export function AssignmentsPage() {
       <FeaturedHeroCards />
 
       {/* ── Contextual Hint (US-011) ─────────────────────────── */}
-      <HeroHintPlaceholder />
+      <ContextualHeroHint />
 
       {/* ── Category Tabs ────────────────────────────────────── */}
       <motion.div
