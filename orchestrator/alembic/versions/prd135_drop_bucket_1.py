@@ -33,7 +33,7 @@ artifact, NOT this migration's downgrade() — the downgrade() here is
 intentionally a no-op because reconstructing 11 tables blindly carries
 its own risk and is never the right move when no data is involved.
 
-Revision ID: prd135_bucket_1_drop_backup_tables
+Revision ID: prd135_drop_bucket_1
 Revises: None  (independent head, matches alembic convention in this repo)
 Create Date: 2026-04-25
 """
@@ -42,7 +42,8 @@ from alembic import op
 
 
 # revision identifiers, used by Alembic.
-revision = "prd135_bucket_1_drop_backup_tables"
+# (Short ID — alembic_version.version_num is varchar(32))
+revision = "prd135_drop_bucket_1"
 down_revision = None
 branch_labels = None
 depends_on = None
