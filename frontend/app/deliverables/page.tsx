@@ -1,11 +1,12 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { Package, Loader2 } from 'lucide-react'
 
 import { MainLayout } from '@/components/layout/main-layout'
 import { ActivityFeed } from '@/components/activity/activity-feed'
+import { CreatedToday } from '@/components/deliverables/created-today'
 import { GalleryView } from '@/components/workspace/gallery-view'
 import { WorkspaceExplorer } from '@/components/workspace/WorkspaceExplorer'
 import {
@@ -35,10 +36,15 @@ export default function DeliverablesPage() {
   const [view, setView] = useState<WorkspaceView>(() =>
     resolveInitialView(viewParam, Boolean(pathParam)),
   )
+  const galleryRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     setView(resolveInitialView(viewParam, Boolean(pathParam)))
   }, [viewParam, pathParam])
+
+  const handleBrowseRecent = useCallback(() => {
+    galleryRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [])
 
   return (
     <MainLayout>
@@ -61,10 +67,14 @@ export default function DeliverablesPage() {
           <div className="flex-1 min-h-0">
             {view === 'gallery' && (
               <div className="h-full overflow-y-auto p-4">
-                <GalleryView
-                  workspaceId={workspace.id}
-                  className="mx-auto max-w-[1600px]"
-                />
+                <div className="mx-auto max-w-[1600px] space-y-6">
+                  <CreatedToday onBrowseRecent={handleBrowseRecent} />
+                  <div ref={galleryRef}>
+                    <GalleryView
+                      workspaceId={workspace.id}
+                    />
+                  </div>
+                </div>
               </div>
             )}
             {view === 'explorer' && (
