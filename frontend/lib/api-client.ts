@@ -71,6 +71,7 @@ const PAGE_MOCK_CONFIG: Record<string, boolean> = {
   'tools': false,            // ✅ Use real APIs - tools endpoints working
   'credentials': false,      // ✅ Use real APIs - credentials system ready
   'marketplace': false,      // ✅ Use real APIs - marketplace/composio endpoints working
+  'assignments': false,      // ✅ Use real APIs - recommendations endpoint
   'admin': false,            // ✅ Use real APIs - admin plugin management
 
   // Testing/Development
@@ -2624,6 +2625,12 @@ class ApiClient {
   // ===== EVALUATION ENDPOINTS (Working ✅) =====
   async getPerformanceMetrics() {
     return this.request('/api/evaluation/performance-metrics')
+  }
+
+  // ===== ASSIGNMENTS ENDPOINTS =====
+
+  async getRecommendedAssignments(limit: number = 8) {
+    return this.request(`/api/assignments/recommended?limit=${limit}`)
   }
 
   // ===== RAG CONFIGURATION ENDPOINTS =====

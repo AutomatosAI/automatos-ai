@@ -1058,6 +1058,13 @@ try:
 except ImportError as e:
     logger.warning("Could not load missions router: %s", e)
 
+# Cluster 1A: Assignments recommendations
+try:
+    from api.assignments import router as assignments_router
+    app.include_router(assignments_router)
+except ImportError as e:
+    logger.warning("Could not load assignments router: %s", e)
+
 # PRD-77: Agent Self-Scheduling
 try:
     from api.scheduled_tasks import router as scheduled_tasks_router
