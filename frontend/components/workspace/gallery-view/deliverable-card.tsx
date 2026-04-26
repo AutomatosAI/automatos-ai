@@ -10,20 +10,12 @@
 import { memo } from 'react'
 import { formatDistanceToNow } from 'date-fns'
 import {
-  Archive,
   Bot,
   Calendar,
-  File,
-  FileCode,
   FileText,
-  Image as ImageIcon,
   LucideIcon,
   MessageSquare,
-  Music,
-  Presentation,
-  Sheet,
   Upload,
-  Video,
   Workflow,
   Wrench,
   Zap,
@@ -31,32 +23,9 @@ import {
 
 import { cn } from '@/lib/utils'
 import type { Deliverable } from '@/hooks/use-deliverables-api'
+import { DeliverableArtwork } from '@/components/deliverables/deliverable-artwork'
 
 // ============= STYLE MAPS =============
-
-const ARTIFACT_ICONS: Record<string, LucideIcon> = {
-  report: FileText,
-  document: FileText,
-  image: ImageIcon,
-  code: FileCode,
-  slide: Presentation,
-  spreadsheet: Sheet,
-  archive: Archive,
-  audio: Music,
-  video: Video,
-}
-
-const ARTIFACT_COLORS: Record<string, string> = {
-  report: 'bg-blue-500/10 text-blue-500',
-  document: 'bg-slate-500/10 text-slate-500',
-  image: 'bg-purple-500/10 text-purple-500',
-  code: 'bg-emerald-500/10 text-emerald-500',
-  slide: 'bg-orange-500/10 text-orange-500',
-  spreadsheet: 'bg-green-500/10 text-green-500',
-  archive: 'bg-amber-500/10 text-amber-500',
-  audio: 'bg-pink-500/10 text-pink-500',
-  video: 'bg-red-500/10 text-red-500',
-}
 
 const SOURCE_ICONS: Record<string, LucideIcon> = {
   chat: MessageSquare,
@@ -107,8 +76,6 @@ function DeliverableCardImpl({ deliverable, onClick, className }: DeliverableCar
     file_size_bytes,
   } = deliverable
 
-  const ArtifactIcon = ARTIFACT_ICONS[artifact_type] ?? File
-  const artifactColor = ARTIFACT_COLORS[artifact_type] ?? 'bg-muted text-muted-foreground'
   const SourceIcon = SOURCE_ICONS[source_type] ?? Calendar
 
   const isImage = artifact_type === 'image' && !!preview_url
@@ -136,7 +103,7 @@ function DeliverableCardImpl({ deliverable, onClick, className }: DeliverableCar
       )}
     >
       {/* Preview area */}
-      <div className={cn('relative flex aspect-square items-center justify-center', !isImage && artifactColor)}>
+      <div className="relative flex aspect-square items-center justify-center overflow-hidden">
         {isImage ? (
           <img
             src={preview_url!}
@@ -145,7 +112,7 @@ function DeliverableCardImpl({ deliverable, onClick, className }: DeliverableCar
             className="h-full w-full object-cover"
           />
         ) : (
-          <ArtifactIcon className="h-12 w-12" strokeWidth={1.5} />
+          <DeliverableArtwork type={artifact_type} className="absolute inset-0" />
         )}
 
         {/* Source badge */}
