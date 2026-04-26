@@ -4,13 +4,12 @@
  * DeliverableArtwork
  * ==================
  *
- * Animated SVG artwork for deliverable cards. Each artifact_type gets
- * a unique illustrated tile with a subtle motion accent — the same
- * design spirit as the Constellation hero card and Marketplace Showcase.
+ * Static SVG artwork for deliverable cards. Each artifact_type gets
+ * a unique illustrated tile with type-specific glyph + accent colour.
  *
  * - 100% width/height SVG, square aspect (parent enforces aspect-square)
  * - Dark canvas + type-specific accent colour
- * - SMIL animations (no JS) so SSR-safe
+ * - Static — no animations (a wall of these tiles needs to feel calm)
  * - Deterministic IDs via useId() so multiple cards on a page don't collide
  */
 
@@ -34,15 +33,15 @@ interface DeliverableArtworkProps {
 }
 
 const TYPE_ACCENT: Record<ArtworkType, { fg: string; bg: string }> = {
-  report: { fg: '#60a5fa', bg: '#0c1626' }, // blue
-  document: { fg: '#cbd5e1', bg: '#16181c' }, // slate
-  image: { fg: '#c084fc', bg: '#1a1326' }, // purple
-  code: { fg: '#34d399', bg: '#0c1f1a' }, // emerald
-  slide: { fg: '#fb923c', bg: '#1f1308' }, // orange
-  spreadsheet: { fg: '#4ade80', bg: '#0c1f12' }, // green
-  archive: { fg: '#fbbf24', bg: '#1f1808' }, // amber
-  audio: { fg: '#f472b6', bg: '#1f0c1a' }, // pink
-  video: { fg: '#f87171', bg: '#1f0c0c' }, // red
+  report: { fg: '#60a5fa', bg: '#0c1626' },
+  document: { fg: '#cbd5e1', bg: '#16181c' },
+  image: { fg: '#c084fc', bg: '#1a1326' },
+  code: { fg: '#34d399', bg: '#0c1f1a' },
+  slide: { fg: '#fb923c', bg: '#1f1308' },
+  spreadsheet: { fg: '#4ade80', bg: '#0c1f12' },
+  archive: { fg: '#fbbf24', bg: '#1f1808' },
+  audio: { fg: '#f472b6', bg: '#1f0c1a' },
+  video: { fg: '#f87171', bg: '#1f0c0c' },
   default: { fg: '#94a3b8', bg: '#16181c' },
 }
 
@@ -54,16 +53,14 @@ function normalizeType(t: string): ArtworkType {
 // ─── Per-type artwork pieces ────────────────────────────────────────
 
 function ReportArt({ fg }: { fg: string }) {
-  // Bar chart with growing bars + sparkline
   const bars = [
-    { x: 50, h: 40, delay: 0 },
-    { x: 80, h: 70, delay: 0.3 },
-    { x: 110, h: 55, delay: 0.6 },
-    { x: 140, h: 90, delay: 0.9 },
+    { x: 50, h: 40 },
+    { x: 80, h: 70 },
+    { x: 110, h: 55 },
+    { x: 140, h: 90 },
   ]
   return (
     <g>
-      {/* baseline */}
       <line x1="40" y1="150" x2="160" y2="150" stroke={fg} strokeOpacity="0.3" strokeWidth="1" />
       {bars.map((b, i) => (
         <rect
@@ -75,24 +72,8 @@ function ReportArt({ fg }: { fg: string }) {
           rx="2"
           fill={fg}
           fillOpacity="0.7"
-        >
-          <animate
-            attributeName="height"
-            values={`0;${b.h};${b.h}`}
-            dur="3s"
-            begin={`${b.delay}s`}
-            repeatCount="indefinite"
-          />
-          <animate
-            attributeName="y"
-            values={`150;${150 - b.h};${150 - b.h}`}
-            dur="3s"
-            begin={`${b.delay}s`}
-            repeatCount="indefinite"
-          />
-        </rect>
+        />
       ))}
-      {/* sparkline above */}
       <polyline
         points="50,70 80,50 110,60 140,30"
         fill="none"
@@ -107,7 +88,6 @@ function ReportArt({ fg }: { fg: string }) {
 }
 
 function DocumentArt({ fg }: { fg: string }) {
-  // Folded sheet with writing line
   return (
     <g>
       <path
@@ -119,7 +99,6 @@ function DocumentArt({ fg }: { fg: string }) {
         strokeWidth="1.5"
       />
       <path d="M 130 40 L 130 55 L 145 55" fill="none" stroke={fg} strokeOpacity="0.5" strokeWidth="1.5" />
-      {/* lines */}
       {[80, 100, 120, 140].map((y, i) => (
         <line
           key={y}
@@ -133,23 +112,15 @@ function DocumentArt({ fg }: { fg: string }) {
           strokeLinecap="round"
         />
       ))}
-      {/* writing cursor on first line */}
-      <line x1="80" y1="80" x2="80" y2="80" stroke={fg} strokeWidth="2" strokeLinecap="round">
-        <animate attributeName="x2" values="80;120;80" dur="3s" repeatCount="indefinite" />
-      </line>
     </g>
   )
 }
 
 function ImageArt({ fg }: { fg: string }) {
-  // Mountains + sun
   return (
     <g>
       <rect x="50" y="50" width="100" height="100" rx="6" fill={fg} fillOpacity="0.08" stroke={fg} strokeOpacity="0.5" strokeWidth="1.5" />
-      <circle cx="125" cy="80" r="10" fill={fg} fillOpacity="0.7">
-        <animate attributeName="r" values="9;11;9" dur="3s" repeatCount="indefinite" />
-        <animate attributeName="fill-opacity" values="0.5;0.9;0.5" dur="3s" repeatCount="indefinite" />
-      </circle>
+      <circle cx="125" cy="80" r="10" fill={fg} fillOpacity="0.7" />
       <path
         d="M 50 140 L 80 105 L 105 125 L 130 95 L 150 125 L 150 150 L 50 150 Z"
         fill={fg}
@@ -160,7 +131,6 @@ function ImageArt({ fg }: { fg: string }) {
 }
 
 function CodeArt({ fg }: { fg: string }) {
-  // Brackets with cursor
   return (
     <g>
       <text
@@ -185,11 +155,6 @@ function CodeArt({ fg }: { fg: string }) {
       >
         {'}'}
       </text>
-      {/* cursor */}
-      <rect x="98" y="92" width="4" height="22" fill={fg}>
-        <animate attributeName="opacity" values="1;0;1" dur="1.2s" repeatCount="indefinite" />
-      </rect>
-      {/* code lines below */}
       <line x1="55" y1="145" x2="80" y2="145" stroke={fg} strokeOpacity="0.4" strokeWidth="1.5" />
       <line x1="85" y1="145" x2="120" y2="145" stroke={fg} strokeOpacity="0.25" strokeWidth="1.5" />
       <line x1="125" y1="145" x2="145" y2="145" stroke={fg} strokeOpacity="0.4" strokeWidth="1.5" />
@@ -198,16 +163,11 @@ function CodeArt({ fg }: { fg: string }) {
 }
 
 function SlideArt({ fg }: { fg: string }) {
-  // Stacked slides
   return (
     <g>
-      {/* back slides */}
       <rect x="55" y="55" width="90" height="65" rx="4" fill={fg} fillOpacity="0.12" stroke={fg} strokeOpacity="0.3" strokeWidth="1" />
       <rect x="60" y="65" width="90" height="65" rx="4" fill={fg} fillOpacity="0.18" stroke={fg} strokeOpacity="0.4" strokeWidth="1" />
-      {/* front slide */}
-      <rect x="65" y="75" width="90" height="65" rx="4" fill={fg} fillOpacity="0.25" stroke={fg} strokeOpacity="0.6" strokeWidth="1.5">
-        <animate attributeName="fill-opacity" values="0.2;0.35;0.2" dur="3s" repeatCount="indefinite" />
-      </rect>
+      <rect x="65" y="75" width="90" height="65" rx="4" fill={fg} fillOpacity="0.25" stroke={fg} strokeOpacity="0.6" strokeWidth="1.5" />
       <line x1="75" y1="92" x2="135" y2="92" stroke={fg} strokeOpacity="0.7" strokeWidth="2" strokeLinecap="round" />
       <line x1="75" y1="108" x2="120" y2="108" stroke={fg} strokeOpacity="0.5" strokeWidth="1.5" />
       <line x1="75" y1="120" x2="125" y2="120" stroke={fg} strokeOpacity="0.5" strokeWidth="1.5" />
@@ -216,7 +176,6 @@ function SlideArt({ fg }: { fg: string }) {
 }
 
 function SpreadsheetArt({ fg }: { fg: string }) {
-  // 3x4 grid with one cell pulsing
   const cellW = 25
   const cellH = 22
   const cols = 4
@@ -240,16 +199,7 @@ function SpreadsheetArt({ fg }: { fg: string }) {
               stroke={fg}
               strokeOpacity="0.4"
               strokeWidth="0.8"
-            >
-              {isHighlight && (
-                <animate
-                  attributeName="fill-opacity"
-                  values="0.25;0.55;0.25"
-                  dur="2s"
-                  repeatCount="indefinite"
-                />
-              )}
-            </rect>
+            />
           )
         }),
       )}
@@ -258,26 +208,16 @@ function SpreadsheetArt({ fg }: { fg: string }) {
 }
 
 function ArchiveArt({ fg }: { fg: string }) {
-  // Box with strap
   return (
     <g>
-      {/* box body */}
       <rect x="55" y="80" width="90" height="70" rx="3" fill={fg} fillOpacity="0.15" stroke={fg} strokeOpacity="0.6" strokeWidth="1.5" />
-      {/* lid */}
       <rect x="50" y="65" width="100" height="20" rx="2" fill={fg} fillOpacity="0.25" stroke={fg} strokeOpacity="0.7" strokeWidth="1.5" />
-      {/* strap */}
       <line x1="100" y1="60" x2="100" y2="155" stroke={fg} strokeOpacity="0.6" strokeWidth="3" />
-      {/* shimmer over strap */}
-      <rect x="96" y="60" width="8" height="6" fill={fg} fillOpacity="0.9">
-        <animate attributeName="y" values="60;150;60" dur="3s" repeatCount="indefinite" />
-        <animate attributeName="fill-opacity" values="0;0.8;0" dur="3s" repeatCount="indefinite" />
-      </rect>
     </g>
   )
 }
 
 function AudioArt({ fg }: { fg: string }) {
-  // Waveform
   const bars = [
     { x: 50, base: 30 },
     { x: 65, base: 55 },
@@ -299,59 +239,22 @@ function AudioArt({ fg }: { fg: string }) {
           rx="2"
           fill={fg}
           fillOpacity="0.7"
-        >
-          <animate
-            attributeName="height"
-            values={`${b.base * 0.4};${b.base};${b.base * 0.4}`}
-            dur={`${1.2 + (i % 3) * 0.3}s`}
-            repeatCount="indefinite"
-          />
-          <animate
-            attributeName="y"
-            values={`${100 - (b.base * 0.4) / 2};${100 - b.base / 2};${100 - (b.base * 0.4) / 2}`}
-            dur={`${1.2 + (i % 3) * 0.3}s`}
-            repeatCount="indefinite"
-          />
-        </rect>
+        />
       ))}
     </g>
   )
 }
 
-function VideoArt({ fg, gradId }: { fg: string; gradId: string }) {
-  // Play triangle in circle with progress arc
+function VideoArt({ fg }: { fg: string }) {
   return (
     <g>
       <circle cx="100" cy="100" r="50" fill={fg} fillOpacity="0.15" stroke={fg} strokeOpacity="0.4" strokeWidth="1.5" />
-      {/* progress arc */}
-      <circle
-        cx="100"
-        cy="100"
-        r="50"
-        fill="none"
-        stroke={fg}
-        strokeWidth="2.5"
-        strokeOpacity="0.85"
-        strokeLinecap="round"
-        strokeDasharray={2 * Math.PI * 50}
-        transform="rotate(-90 100 100)"
-      >
-        <animate
-          attributeName="stroke-dashoffset"
-          values={`${2 * Math.PI * 50};0;${2 * Math.PI * 50}`}
-          dur="4s"
-          repeatCount="indefinite"
-        />
-      </circle>
-      {/* play triangle */}
       <polygon points="90,80 90,120 125,100" fill={fg} fillOpacity="0.85" />
-      <use href={`#${gradId}`} />
     </g>
   )
 }
 
 function DefaultArt({ fg }: { fg: string }) {
-  // generic doc
   return (
     <g>
       <path
@@ -392,11 +295,9 @@ function DeliverableArtworkImpl({ type, className }: DeliverableArtworkProps) {
         </radialGradient>
       </defs>
 
-      {/* canvas */}
       <rect x="0" y="0" width="200" height="200" fill={accent.bg} />
       <rect x="0" y="0" width="200" height="200" fill={`url(#${gradId})`} />
 
-      {/* per-type art */}
       {norm === 'report' && <ReportArt fg={accent.fg} />}
       {norm === 'document' && <DocumentArt fg={accent.fg} />}
       {norm === 'image' && <ImageArt fg={accent.fg} />}
@@ -405,7 +306,7 @@ function DeliverableArtworkImpl({ type, className }: DeliverableArtworkProps) {
       {norm === 'spreadsheet' && <SpreadsheetArt fg={accent.fg} />}
       {norm === 'archive' && <ArchiveArt fg={accent.fg} />}
       {norm === 'audio' && <AudioArt fg={accent.fg} />}
-      {norm === 'video' && <VideoArt fg={accent.fg} gradId={gradId} />}
+      {norm === 'video' && <VideoArt fg={accent.fg} />}
       {norm === 'default' && <DefaultArt fg={accent.fg} />}
     </svg>
   )
