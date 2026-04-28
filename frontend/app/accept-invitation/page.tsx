@@ -59,8 +59,12 @@ function AcceptInvitationInner() {
     }, [token])
 
     // Once Clerk is loaded and the user is signed in, exchange the token.
+    // CRITICAL: acceptError MUST gate this effect — without it, a server
+    // failure causes an infinite POST loop (setAccepting(false) re-fires
+    // the effect, which retries, which fails, which re-fires…).
     useEffect(() => {
-        if (!authLoaded || !isSignedIn || !token || accepted || accepting) return
+        if (!authLoaded || !isSignedIn || !token) return
+        if (accepted || accepting || acceptError) return
         if (!info || info.expired || info.accepted) return
 
         setAccepting(true)
@@ -82,7 +86,7 @@ function AcceptInvitationInner() {
                 setAcceptError(e.message || 'Failed to accept invitation')
             })
             .finally(() => setAccepting(false))
-    }, [authLoaded, isSignedIn, token, info, accepted, accepting, router])
+    }, [authLoaded, isSignedIn, token, info, accepted, accepting, acceptError, router])
 
     if (!token) {
         return <ErrorState title="Invalid link" detail="This invitation link is missing a token." />
