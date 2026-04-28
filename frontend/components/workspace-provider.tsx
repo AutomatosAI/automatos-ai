@@ -2,6 +2,9 @@
 
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
 import { useAuth, useOrganization } from '@clerk/nextjs'
+import { usePathname } from 'next/navigation'
+
+const ACCEPT_INVITATION_ROUTE = /^\/accept-invitation(\/|$|\?)/
 
 /**
  * PRD-37: Workspace Context
@@ -49,9 +52,12 @@ export function useWorkspace() {
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
     const { isSignedIn, getToken } = useAuth()
     const { organization } = useOrganization()
+    const pathname = usePathname()
     const [workspace, setWorkspace] = useState<Workspace | null>(null)
     const [isLoading, setIsLoading] = useState(true)
     const [error, setError] = useState<Error | null>(null)
+
+    const isAcceptInvitationRoute = ACCEPT_INVITATION_ROUTE.test(pathname || '')
 
     const fetchWorkspace = async () => {
         if (!isSignedIn) {
@@ -74,6 +80,24 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 }
             )
 
+            if (response.status === 409) {
+                const body = await response.json().catch(() => ({}))
+                const code = body?.detail?.code || body?.code
+                if (code === 'pending_invitation') {
+                    const tokenParam =
+                        typeof window !== 'undefined'
+                            ? new URL(window.location.href).searchParams.get('token')
+                            : null
+                    const target = tokenParam
+                        ? `/accept-invitation?token=${encodeURIComponent(tokenParam)}`
+                        : '/accept-invitation'
+                    if (typeof window !== 'undefined') {
+                        window.location.href = target
+                    }
+                    return
+                }
+            }
+
             if (!response.ok) {
                 throw new Error('Failed to fetch workspace')
             }
@@ -92,7 +116,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 settings: data.settings || {},
             })
 
-            // Persist for api-client.ts
             if (typeof window !== 'undefined') {
                 localStorage.setItem('last_active_workspace', data.id)
             }
@@ -107,8 +130,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
 
     useEffect(() => {
+        // Skip workspace fetch on the invitation acceptance route — that flow
+        // owns workspace selection explicitly via /api/team/accept-invitation.
+        // Without this guard, WorkspaceProvider races accept-invitation and
+        // can auto-provision a personal workspace before consent fires.
+        if (isAcceptInvitationRoute) {
+            setIsLoading(false)
+            return
+        }
         fetchWorkspace()
-    }, [isSignedIn, organization?.id])
+    }, [isSignedIn, organization?.id, isAcceptInvitationRoute])
 
     const refreshWorkspace = async () => {
         await fetchWorkspace()

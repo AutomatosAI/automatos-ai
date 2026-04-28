@@ -163,6 +163,27 @@ def _user_has_workspace_access(db, clerk_user_id: Optional[str], workspace_id: U
     return bool(row)
 
 
+def _has_pending_invitations(db, email: Optional[str]) -> bool:
+    """Return True if the email has a pending (unaccepted, unexpired) invitation.
+
+    Gates auto-provisioning so an invitee never silently lands in a personal
+    workspace before the explicit /accept-invitation flow can run.
+    """
+    if not email:
+        return False
+    row = db.execute(
+        text(
+            "SELECT 1 FROM workspace_invitations "
+            "WHERE LOWER(email) = LOWER(:email) "
+            "AND accepted_at IS NULL "
+            "AND expires_at > NOW() "
+            "LIMIT 1"
+        ),
+        {"email": email},
+    ).fetchone()
+    return bool(row)
+
+
 # PRD-128: Default notification routing seeded on workspace provisioning.
 # Kept as a module-level constant so tests can import and assert against it
 # without duplicating the list.
@@ -365,15 +386,15 @@ def _resolve_workspace_for_clerk_user(
 
     Priority:
     1. Org workspace (workspaces.clerk_org_id == org_id)
-    2. Personal workspace owned by mapped user
-    3. Auto-provision a new personal workspace (new user signup)
+    2. Any workspace the user can access (owned OR active membership), owner-biased
+    3. Auto-provision a new personal workspace (only when no pending invitation)
     """
     # 1) Org workspace
     if org_id:
         row = db.execute(
             text(
                 "SELECT id FROM workspaces "
-                "WHERE clerk_org_id = :org_id AND is_active = true "
+                "WHERE clerk_org_id = :org_id AND is_active = true AND deleted_at IS NULL "
                 "ORDER BY updated_at DESC NULLS LAST "
                 "LIMIT 1"
             ),
@@ -382,28 +403,49 @@ def _resolve_workspace_for_clerk_user(
         if row and row[0]:
             return row[0]
 
-    # 2) Personal workspace via existing user record
+    # 2) Workspace via ownership OR active membership.
+    # Mirrors the LEFT JOIN access pattern in `_user_has_workspace_access` so
+    # invitees who joined a workspace as members (not owners) resolve correctly
+    # when no X-Workspace-ID header is present. Owner-bias keeps existing solo
+    # users on their personal workspace; recency tiebreaker favours the most
+    # recent join for users with multiple memberships.
     if clerk_user_id:
-        user_row = db.execute(
-            text("SELECT id FROM users WHERE clerk_user_id = :cid LIMIT 1"),
+        ws_row = db.execute(
+            text(
+                "SELECT w.id FROM users u "
+                "JOIN workspaces w "
+                "  ON w.owner_id = u.id "
+                "  OR EXISTS ("
+                "    SELECT 1 FROM workspace_members wm "
+                "    WHERE wm.workspace_id = w.id "
+                "      AND wm.user_id = u.id "
+                "      AND wm.is_active = true "
+                "  ) "
+                "LEFT JOIN workspace_members wm2 "
+                "  ON wm2.workspace_id = w.id AND wm2.user_id = u.id AND wm2.is_active = true "
+                "WHERE u.clerk_user_id = :cid "
+                "  AND w.is_active = true "
+                "  AND w.deleted_at IS NULL "
+                "ORDER BY "
+                "  CASE WHEN w.owner_id = u.id OR COALESCE(wm2.role, '') = 'owner' THEN 0 ELSE 1 END, "
+                "  wm2.joined_at DESC NULLS LAST, "
+                "  w.created_at DESC "
+                "LIMIT 1"
+            ),
             {"cid": clerk_user_id},
         ).fetchone()
-        if user_row and user_row[0]:
-            uid = user_row[0]
-            ws_row = db.execute(
-                text(
-                    "SELECT id FROM workspaces "
-                    "WHERE owner_id = :uid AND is_active = true "
-                    "ORDER BY is_personal DESC, updated_at DESC NULLS LAST "
-                    "LIMIT 1"
-                ),
-                {"uid": uid},
-            ).fetchone()
-            if ws_row and ws_row[0]:
-                return ws_row[0]
+        if ws_row and ws_row[0]:
+            return ws_row[0]
 
-    # 3) No workspace found -- auto-provision for authenticated Clerk users
+    # 3) No workspace found -- auto-provision for authenticated Clerk users,
+    # unless they have a pending invitation (which owns the consent UX).
     if clerk_user_id:
+        if _has_pending_invitations(db, email):
+            logger.info(
+                "Pending invitation for %s — refusing auto-provision; caller must surface 409",
+                email,
+            )
+            return None
         logger.info(
             "No workspace found for clerk_user_id=%s -- provisioning new personal workspace",
             clerk_user_id,
@@ -526,6 +568,15 @@ async def get_request_context_hybrid(request: Request) -> RequestContext:
                     name=info.get("name"),
                 )
                 if not resolved:
+                    if _has_pending_invitations(db, info.get("email")):
+                        raise HTTPException(
+                            status_code=status.HTTP_409_CONFLICT,
+                            detail={
+                                "code": "pending_invitation",
+                                "redirect": "/accept-invitation",
+                                "message": "Accept your pending invitation before continuing.",
+                            },
+                        )
                     logger.warning("Auth failed: Workspace not resolved for user %s", info.get("email"))
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
