@@ -20,11 +20,10 @@ from uuid import UUID
 import httpx
 from sqlalchemy.orm import Session
 
+from config import config
 from core.composio.tool_executor import ComposioToolExecutor
 
 logger = logging.getLogger(__name__)
-
-COMPOSIO_API_BASE = "https://backend.composio.dev/api/v3"
 
 # Composio action names for downloading files per cloud provider
 _DOWNLOAD_ACTIONS = {
@@ -199,16 +198,17 @@ class CloudFileDownloader:
         workspace_id: UUID,
     ) -> Dict[str, Any]:
         """
-        Call Composio v3 REST API directly.
+        Call Composio REST API directly.
 
-        v3 endpoint: POST /api/v3/tools/execute/{action}
-        Uses entity_id (snake_case) instead of v2's entityId (camelCase).
+        Endpoint: POST {COMPOSIO_API_BASE_URL}/tools/execute/{action}
+        Defaults to v3.1 (latest toolkit version served automatically) via the
+        canonical config var. Uses entity_id (snake_case) — v3+ convention.
         """
         api_key = self._get_api_key()
         entity_id = self._get_entity_id(workspace_id)
 
-        url = f"{COMPOSIO_API_BASE}/tools/execute/{action}"
-        logger.info(f"Calling Composio v3: {url}")
+        url = f"{config.COMPOSIO_API_BASE_URL}/tools/execute/{action}"
+        logger.info(f"Calling Composio: {url}")
 
         async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(

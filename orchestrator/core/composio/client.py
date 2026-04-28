@@ -634,7 +634,8 @@ class ComposioClient:
             return []
 
         url = f"{config.COMPOSIO_API_BASE_URL}/triggers_types"
-        params: Dict[str, Any] = {"toolkit_versions": "latest", "limit": 1000}
+        # v3.1 defaults toolkit_versions to "latest" — no explicit param needed.
+        params: Dict[str, Any] = {"limit": 1000}
         if toolkit_slugs:
             params["toolkit_slugs"] = toolkit_slugs
 
@@ -773,7 +774,8 @@ class ComposioClient:
 
         logger.info(f"Starting bulk actions fetch (limit={limit} per page)...")
         while True:
-            params: Dict[str, Any] = {"toolkit_versions": "latest", "limit": int(limit)}
+            # v3.1 defaults toolkit_versions to "latest" — no explicit param needed.
+            params: Dict[str, Any] = {"limit": int(limit)}
             if cursor:
                 params["cursor"] = cursor
 
@@ -1183,12 +1185,15 @@ class ComposioClient:
             raise ValueError("Composio client not initialized.")
         
         try:
-            # New API: composio.tools.execute(tool_name, user_id, arguments)
+            # New API: composio.tools.execute(tool_name, user_id, arguments).
+            # `dangerously_skip_version_check` was needed pre-v3.1 to avoid
+            # version-mismatch failures between cached schemas and runtime
+            # versions; v3.1 always serves the latest toolkit, so the check
+            # is no longer a footgun and we let the SDK enforce it normally.
             result = self.composio.tools.execute(
                 slug=action,
                 user_id=entity_id,
                 arguments=params,
-                dangerously_skip_version_check=True
             )
 
             # Composio API may return errors in the response data without
