@@ -356,27 +356,27 @@ export default function AdminWorkspacesPage() {
         <Card>
           <CardContent className="p-0">
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm table-fixed">
                 <thead className="bg-muted/40 text-xs uppercase text-muted-foreground">
                   <tr>
-                    <th className="text-left px-4 py-3">Workspace</th>
-                    <th className="text-left px-4 py-3">Owner</th>
-                    <th className="text-left px-4 py-3">Plan</th>
-                    <th className="text-left px-4 py-3">State</th>
-                    <th className="text-right px-4 py-3">
+                    <th className="text-left px-3 py-2.5 w-[260px]">Workspace</th>
+                    <th className="text-left px-3 py-2.5 w-[200px]">Owner</th>
+                    <th className="text-left px-3 py-2.5 w-[110px]">Plan</th>
+                    <th className="text-left px-3 py-2.5 w-[90px]">State</th>
+                    <th className="text-right px-2 py-2.5 w-[52px]">
                       <Users className="h-3.5 w-3.5 inline" />
                     </th>
-                    <th className="text-right px-4 py-3">
+                    <th className="text-right px-2 py-2.5 w-[52px]">
                       <FileText className="h-3.5 w-3.5 inline" />
                     </th>
-                    <th className="text-right px-4 py-3">
+                    <th className="text-right px-2 py-2.5 w-[68px]">
                       <HardDrive className="h-3.5 w-3.5 inline" />
                     </th>
-                    <th className="text-right px-4 py-3">
+                    <th className="text-right px-2 py-2.5 w-[52px]">
                       <MessageSquare className="h-3.5 w-3.5 inline" />
                     </th>
-                    <th className="text-left px-4 py-3">Created</th>
-                    <th className="text-right px-4 py-3">Actions</th>
+                    <th className="text-left px-3 py-2.5 w-[90px]">Created</th>
+                    <th className="text-right px-3 py-2.5 w-[100px]">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -399,15 +399,15 @@ export default function AdminWorkspacesPage() {
                       key={w.id}
                       className="border-t border-border hover:bg-muted/20"
                     >
-                      <td className="px-4 py-3">
-                        <div className="font-medium">{w.name}</div>
+                      <td className="px-3 py-2.5">
+                        <div className="font-medium truncate" title={w.name}>{w.name}</div>
                         <div className="flex items-center gap-1 mt-0.5">
-                          <code className="text-[10px] font-mono text-muted-foreground">
+                          <code className="text-[10px] font-mono text-muted-foreground truncate">
                             {w.id}
                           </code>
                           <button
                             onClick={() => copyWorkspaceId(w.id)}
-                            className="opacity-60 hover:opacity-100"
+                            className="opacity-60 hover:opacity-100 shrink-0"
                             title="Copy UUID"
                           >
                             {copiedId === w.id ? (
@@ -418,13 +418,18 @@ export default function AdminWorkspacesPage() {
                           </button>
                         </div>
                       </td>
-                      <td className="px-4 py-3">
-                        <div>{w.owner_name || '—'}</div>
-                        <div className="text-xs text-muted-foreground">
+                      <td className="px-3 py-2.5">
+                        <div className="truncate" title={w.owner_name || ''}>
+                          {w.owner_name || '—'}
+                        </div>
+                        <div
+                          className="text-xs text-muted-foreground truncate"
+                          title={w.owner_email || ''}
+                        >
                           {w.owner_email || '—'}
                         </div>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-3 py-2.5">
                         <Badge variant="outline" className="capitalize">
                           {w.plan || '—'}
                         </Badge>
@@ -434,23 +439,23 @@ export default function AdminWorkspacesPage() {
                           </Badge>
                         )}
                       </td>
-                      <td className="px-4 py-3">{stateBadge(w)}</td>
-                      <td className="px-4 py-3 text-right tabular-nums">
+                      <td className="px-3 py-2.5">{stateBadge(w)}</td>
+                      <td className="px-2 py-2.5 text-right tabular-nums">
                         {w.agents_count}
                       </td>
-                      <td className="px-4 py-3 text-right tabular-nums">
+                      <td className="px-2 py-2.5 text-right tabular-nums">
                         {w.documents_count}
                       </td>
-                      <td className="px-4 py-3 text-right tabular-nums">
+                      <td className="px-2 py-2.5 text-right tabular-nums whitespace-nowrap">
                         {formatBytes(w.storage_bytes)}
                       </td>
-                      <td className="px-4 py-3 text-right tabular-nums">
+                      <td className="px-2 py-2.5 text-right tabular-nums">
                         {w.chats_count}
                       </td>
-                      <td className="px-4 py-3 text-xs text-muted-foreground">
+                      <td className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap">
                         {formatDate(w.created_at)}
                       </td>
-                      <td className="px-4 py-3 text-right">
+                      <td className="px-3 py-2.5 text-right">
                         <div className="flex items-center justify-end gap-1">
                           {w.deleted_at ? (
                             <Button
