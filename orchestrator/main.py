@@ -78,7 +78,7 @@ from api.permissions import router as permissions_router
 from api.skills import router as skills_router
 from api.templates import router as templates_router
 from api.context_summarization import router as context_summarization_router  # Context Engineering 2.0
-from api.team import router as team_router  # PRD-37: Team Management
+from api.team import router as team_router, public_router as team_public_router  # PRD-37: Team Management
 from api.routing import router as routing_router  # PRD-50: Universal Orchestrator Router
 from api.admin_plugins import router as admin_plugins_router  # PRD-42: Admin Plugin Marketplace
 from api.admin_workspaces import router as admin_workspaces_router  # Admin workspace lifecycle (pause/delete)
@@ -990,6 +990,7 @@ app.include_router(workspace_files_router)  # PRD-66: Workspace file browser
 if workspace_github_router is not None:
     app.include_router(workspace_github_router)  # PRD-66: Workspace GitHub integration
 app.include_router(team_router)  # PRD-37: Team Management
+app.include_router(team_public_router)  # Accept-invitation public endpoints
 app.include_router(routing_router)  # PRD-50: Universal Orchestrator Router
 app.include_router(admin_plugins_router)  # PRD-42: Admin Plugin Marketplace
 app.include_router(admin_workspaces_router)  # Admin workspace lifecycle

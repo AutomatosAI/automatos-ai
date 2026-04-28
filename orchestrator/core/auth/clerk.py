@@ -312,6 +312,67 @@ class ClerkAuth:
             error_msg = response.json().get("errors", [{}])[0].get("message", "Unknown error")
             raise ValueError(f"Clerk Invitation Failed: {error_msg}")
 
+    async def create_user_invitation(
+        self,
+        email: str,
+        redirect_url: str,
+        public_metadata: Optional[Dict[str, Any]] = None,
+        expires_in_days: int = 7,
+    ) -> dict:
+        """Create a Clerk user invitation (POST /v1/invitations).
+
+        Sends an email via Clerk with a link to sign up. Does NOT require an
+        organization. After the invitee signs up, Clerk redirects them to
+        ``redirect_url`` and copies ``public_metadata`` onto the new User.
+
+        Returns the Clerk invitation payload (includes ``id`` for revoke).
+        Raises ValueError on Clerk API failure.
+        """
+        if not self.clerk_secret_key:
+            raise ValueError("Clerk secret key not configured")
+
+        api_url = f"{self.clerk_api_base}/v1/invitations"
+        headers = {
+            "Authorization": f"Bearer {self.clerk_secret_key}",
+            "Content-Type": "application/json",
+        }
+        payload: Dict[str, Any] = {
+            "email_address": email,
+            "redirect_url": redirect_url,
+            "notify": True,
+            "expires_in_days": expires_in_days,
+        }
+        if public_metadata:
+            payload["public_metadata"] = public_metadata
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(api_url, headers=headers, json=payload)
+            if response.status_code == 200:
+                return response.json()
+
+            try:
+                err = response.json().get("errors", [{}])[0]
+                error_msg = err.get("long_message") or err.get("message") or "Unknown error"
+            except Exception:
+                error_msg = response.text[:300]
+            raise ValueError(f"Clerk user invitation failed ({response.status_code}): {error_msg}")
+
+    async def revoke_user_invitation(self, clerk_invitation_id: str) -> bool:
+        """Revoke a Clerk user invitation by ID. Idempotent on 404."""
+        if not self.clerk_secret_key or not clerk_invitation_id:
+            return False
+        api_url = f"{self.clerk_api_base}/v1/invitations/{clerk_invitation_id}/revoke"
+        headers = {"Authorization": f"Bearer {self.clerk_secret_key}"}
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(api_url, headers=headers)
+            if response.status_code in (200, 204):
+                return True
+            if response.status_code == 404:
+                logger.info("Clerk invitation already gone: %s", clerk_invitation_id)
+                return True
+            logger.error("Failed to revoke Clerk invitation %s: %s", clerk_invitation_id, response.text)
+            return False
+
     async def remove_from_org(self, org_id: str, user_id: str) -> None:
         """Remove a user from a Clerk organization."""
         if not self.clerk_secret_key:

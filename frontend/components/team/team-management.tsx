@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { Users, UserPlus, Shield, Trash2, Mail, Search, RefreshCw } from 'lucide-react'
+import { Users, UserPlus, Shield, Trash2, Mail, Search, RefreshCw, Clock, X } from 'lucide-react'
 import { apiClient } from '@/lib/api-client'
 import { useWorkspace } from '@/hooks/use-workspace'
 import { InviteModal } from './invite-modal'
@@ -21,10 +21,20 @@ interface TeamMember {
     joined_at: string
 }
 
+interface PendingInvitation {
+    id: number
+    email: string
+    role: string
+    status: string
+    expires_at: string
+    created_at: string
+}
+
 export function TeamManagement() {
     const { orgId } = useAuth()
     const { workspaceId, loading: workspaceLoading } = useWorkspace()
     const [members, setMembers] = useState<TeamMember[]>([])
+    const [pendingInvites, setPendingInvites] = useState<PendingInvitation[]>([])
     const [loadingMembers, setLoadingMembers] = useState(false)
     const [isInviteOpen, setIsInviteOpen] = useState(false)
     const [searchTerm, setSearchTerm] = useState('')
@@ -37,13 +47,30 @@ export function TeamManagement() {
         if (!workspaceId) return
         try {
             setLoadingMembers(true)
-            const response = await apiClient.request<TeamMember[]>(`/api/workspaces/${workspaceId}/team/members`)
-            setMembers(response)
+            const [membersRes, invitesRes] = await Promise.all([
+                apiClient.request<TeamMember[]>(`/api/workspaces/${workspaceId}/team/members`),
+                apiClient.request<PendingInvitation[]>(`/api/workspaces/${workspaceId}/team/invitations`).catch(() => []),
+            ])
+            setMembers(membersRes)
+            setPendingInvites(invitesRes)
         } catch (err) {
             console.error("Failed to fetch members:", err)
             setError("Failed to load team members.")
         } finally {
             setLoadingMembers(false)
+        }
+    }
+
+    const handleRevokeInvite = async (invitationId: number) => {
+        if (!confirm("Revoke this pending invitation?")) return
+        try {
+            await apiClient.request(`/api/workspaces/${workspaceId}/team/invitations/${invitationId}`, {
+                method: 'DELETE',
+            })
+            fetchMembers()
+        } catch (err) {
+            console.error("Failed to revoke invitation:", err)
+            alert("Failed to revoke invitation")
         }
     }
 
@@ -156,6 +183,49 @@ export function TeamManagement() {
                     />
                 </div>
             </motion.div>
+
+            {/* Pending invitations */}
+            {pendingInvites.length > 0 && (
+                <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.6, delay: 0.15 }}
+                    className="glass-card rounded-xl border border-border/30 overflow-hidden"
+                >
+                    <div className="p-4 border-b border-border/30 bg-white/5 flex items-center gap-2">
+                        <Clock className="w-4 h-4 text-amber-400" />
+                        <h3 className="font-medium text-sm">Pending invitations ({pendingInvites.length})</h3>
+                    </div>
+                    <div className="divide-y divide-white/5">
+                        {pendingInvites.map((inv) => (
+                            <div key={inv.id} className="flex items-center justify-between p-4 hover:bg-white/5 transition-colors group">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-9 h-9 rounded-full bg-amber-400/10 border border-amber-400/30 flex items-center justify-center">
+                                        <Mail className="w-4 h-4 text-amber-400" />
+                                    </div>
+                                    <div>
+                                        <div className="font-medium text-foreground">{inv.email}</div>
+                                        <div className="text-xs text-muted-foreground">
+                                            Invited as <span className="text-foreground">{inv.role}</span> ·
+                                            expires {new Date(inv.expires_at).toLocaleDateString()}
+                                        </div>
+                                    </div>
+                                </div>
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleRevokeInvite(inv.id)}
+                                    className="text-muted-foreground hover:text-red-400 hover:bg-red-400/10"
+                                    title="Revoke invitation"
+                                >
+                                    <X className="w-4 h-4 mr-1" />
+                                    Revoke
+                                </Button>
+                            </div>
+                        ))}
+                    </div>
+                </motion.div>
+            )}
 
             {/* Members List */}
             <motion.div
