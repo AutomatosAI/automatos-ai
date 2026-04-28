@@ -80,7 +80,7 @@ function AcceptInvitationInner() {
                 if (typeof window !== 'undefined') {
                     localStorage.setItem('last_active_workspace', res.workspace_id)
                 }
-                setTimeout(() => router.push('/dashboard'), 1500)
+                setTimeout(() => router.push('/chat'), 1500)
             })
             .catch((e: Error) => {
                 setAcceptError(e.message || 'Failed to accept invitation')
@@ -125,7 +125,7 @@ function AcceptInvitationInner() {
                         Joined <span className="text-foreground font-medium">{accepted.workspace_name}</span> as{' '}
                         <span className="text-foreground font-medium">{accepted.role}</span>.
                     </p>
-                    <p className="text-sm text-muted-foreground">Redirecting to your dashboard…</p>
+                    <p className="text-sm text-muted-foreground">Redirecting to chat…</p>
                 </div>
             </Shell>
         )
@@ -184,10 +184,10 @@ function AcceptInvitationInner() {
                         </p>
                     )}
                     <Link
-                        href="/dashboard"
+                        href="/chat"
                         className="text-sm text-orange-500 hover:text-orange-400"
                     >
-                        Go to dashboard
+                        Go to chat
                     </Link>
                 </div>
             </Shell>
