@@ -1411,23 +1411,23 @@ def seed_system_settings(db: Session):
         {
             "category": SettingCategory.KNOWLEDGE_GRAPH.value,
             "key": "model",
-            "default_value": "google/gemini-2.0-flash",
+            "default_value": "google/gemini-2.5-flash",
             "value_type": "string",
             "description": "LLM model for knowledge graph entity/relation extraction",
             "is_required": True,
         },
         {
             "category": SettingCategory.KNOWLEDGE_GRAPH.value,
-            "key": "extraction_max_tokens",
-            "default_value": "4000",
+            "key": "max_tokens",
+            "default_value": "8000",
             "value_type": "number",
-            "description": "Max tokens for graph extraction LLM output",
+            "description": "Max tokens for graph extraction LLM output (read by core.llm.manager)",
             "is_required": False,
-            "validation_rules": {"min": 500, "max": 8000}
+            "validation_rules": {"min": 500, "max": 16000}
         },
         {
             "category": SettingCategory.KNOWLEDGE_GRAPH.value,
-            "key": "extraction_temperature",
+            "key": "temperature",
             "default_value": "0.1",
             "value_type": "number",
             "description": "Temperature for extraction (low = more consistent entities)",

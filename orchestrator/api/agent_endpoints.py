@@ -93,7 +93,7 @@ async def create_specialized_agent_endpoint(
         try:
             from modules.knowledge.graph_service import get_graph_service
             get_graph_service().schedule_incremental_update(
-                int(ctx.workspace_id),
+                str(ctx.workspace_id),
                 [{"type": "roster", "path": name, "id": agent_runtime.agent_id}],
             )
         except Exception:
@@ -669,7 +669,7 @@ async def update_agent_model_config(
         try:
             from modules.knowledge.graph_service import get_graph_service
             get_graph_service().schedule_incremental_update(
-                int(ctx.workspace_id),
+                str(ctx.workspace_id),
                 [{"type": "roster", "path": agent.name, "id": agent_id}],
             )
         except Exception:

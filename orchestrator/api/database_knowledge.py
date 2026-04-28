@@ -147,7 +147,7 @@ async def create_database_source(
         try:
             from modules.knowledge.graph_service import get_graph_service
             get_graph_service().schedule_incremental_update(
-                int(ctx.workspace_id),
+                str(ctx.workspace_id),
                 [{"type": "db_schema", "path": source.name, "id": result.id}],
             )
         except Exception:
