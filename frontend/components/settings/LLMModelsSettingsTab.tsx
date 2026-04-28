@@ -1,38 +1,32 @@
 /**
- * LLM Models Settings Tab (PRD-136)
- * =================================
+ * System & Embeddings Settings Tab (PRD-136)
+ * ==========================================
  *
- * Three tier cards (Auto / System / Embeddings), one canonical schema each.
- * Replaces: System LLMs (CodeGraph + Knowledge Graph), Memory Management,
- * and the embedding section that lived in General Settings.
+ * Two tier cards (System / Embeddings). The third tier — Auto — is configured
+ * in the top-level Orchestrator tab and writes to the Auto agent's
+ * model_config (per-workspace), NOT to system_settings.
  */
 
 import React from 'react'
-import { Brain, Cog, Database } from 'lucide-react'
+import { Cog, Database } from 'lucide-react'
 import { SystemSetting } from '@/lib/api/system-settings'
 import LLMTierCard from './LLMTierCard'
 
 interface LLMModelsSettingsTabProps {
-  orchestratorSettings: SystemSetting[]
   systemSettings: SystemSetting[]
   embeddingsSettings: SystemSetting[]
-  onSaveOrchestrator: (updates: Record<string, string>) => Promise<void> | void
   onSaveSystem: (updates: Record<string, string>) => Promise<void> | void
   onSaveEmbeddings: (updates: Record<string, string>) => Promise<void> | void
-  onResetOrchestrator: () => Promise<void> | void
   onResetSystem: () => Promise<void> | void
   onResetEmbeddings: () => Promise<void> | void
   saving: boolean
 }
 
 export default function LLMModelsSettingsTab({
-  orchestratorSettings,
   systemSettings,
   embeddingsSettings,
-  onSaveOrchestrator,
   onSaveSystem,
   onSaveEmbeddings,
-  onResetOrchestrator,
   onResetSystem,
   onResetEmbeddings,
   saving,
@@ -41,23 +35,12 @@ export default function LLMModelsSettingsTab({
     <div className="space-y-6">
       <div className="rounded-lg bg-secondary/30 p-4 text-sm text-muted-foreground">
         <p>
-          Three tiers handle every LLM call across the platform.
-          <strong className="text-foreground"> Auto</strong> is the brain that talks to users.
-          <strong className="text-foreground"> System</strong> powers background work — codegraph, RAG, knowledge extraction, planners, verifiers.
-          <strong className="text-foreground"> Embeddings</strong> is used wherever vectors are needed (RAG, memory, semantic search).
+          Two tiers handle every background LLM call.
+          <strong className="text-foreground"> System</strong> powers background work — codegraph, RAG, knowledge extraction, planners, verifiers, memory.
+          <strong className="text-foreground"> Embeddings</strong> is the vector model used wherever vectors are needed (RAG, memory, semantic search).
+          {' '}Auto (the brain that talks to users) is configured in the <strong className="text-foreground">Orchestrator</strong> tab.
         </p>
       </div>
-
-      <LLMTierCard
-        category="orchestrator_llm"
-        title="Auto — The Brain"
-        description="The LLM that holds conversations with users and orchestrates agents."
-        icon={Brain}
-        settings={orchestratorSettings}
-        onSave={onSaveOrchestrator}
-        onReset={onResetOrchestrator}
-        saving={saving}
-      />
 
       <LLMTierCard
         category="system_llm"
