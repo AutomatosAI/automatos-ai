@@ -93,7 +93,7 @@ async def create_template(
         sample_data=body.sample_data,
         category=body.category,
         tags=body.tags,
-        created_by=str(ctx.user_id) if ctx.user_id else None,
+        created_by=str(ctx.user.id) if ctx.user and ctx.user.id else None,
     )
     return {
         "id": str(template.id),
@@ -284,7 +284,7 @@ async def upload_docx_template(
         template_file_path=file_path,
         data_schema=schema,
         category=category,
-        created_by=str(ctx.user_id) if ctx.user_id else None,
+        created_by=str(ctx.user.id) if ctx.user and ctx.user.id else None,
     )
 
     return {

@@ -130,7 +130,7 @@ async def invite_member(
             workspace_id=workspace_id,
             email=request.email,
             role=request.role,
-            invited_by=ctx.user_id,
+            invited_by=ctx.user.id if ctx.user else None,
         )
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -142,7 +142,7 @@ async def invite_member(
                 org_id=ctx.user.org_id,
                 email=request.email,
                 role=request.role,
-                inviter_user_id=ctx.user.clerk_user_id or str(ctx.user_id),
+                inviter_user_id=ctx.user.clerk_user_id or (str(ctx.user.id) if ctx.user.id else None),
             )
         except Exception as e:
             try:
@@ -154,7 +154,7 @@ async def invite_member(
     audit = AuditService(db)
     audit.log(
         workspace_id=workspace_id,
-        user_id=ctx.user_id,
+        user_id=ctx.user.id if ctx.user else None,
         action="member:invited",
         details={"email": request.email, "role": request.role, "clerk_id": clerk_invite_data.get("id")},
     )
@@ -205,7 +205,7 @@ async def update_member_role(
     audit = AuditService(db)
     audit.log(
         workspace_id=workspace_id,
-        user_id=ctx.user_id,
+        user_id=ctx.user.id if ctx.user else None,
         action="member:role_changed",
         resource_type="member",
         resource_id=str(member_id),
@@ -252,7 +252,7 @@ async def remove_member(
     audit = AuditService(db)
     audit.log(
         workspace_id=workspace_id,
-        user_id=ctx.user_id,
+        user_id=ctx.user.id if ctx.user else None,
         action="member:removed",
         resource_type="member",
         resource_id=str(member_id),

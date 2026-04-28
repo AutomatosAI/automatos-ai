@@ -1823,7 +1823,7 @@ async def resume_mission(
             run=run,
             new_state=RunState.RUNNING,
             actor_type=ActorType.USER,
-            actor_id=str(ctx.user_id) if ctx.user_id else None,
+            actor_id=str(ctx.user.id) if ctx.user and ctx.user.id else None,
             reason=f"Resumed from checkpoint {checkpoint.get('checkpoint_number')}",
         )
         db.commit()

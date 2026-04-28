@@ -753,7 +753,7 @@ async def add_training_example(
         tables_used=body.get("tables_used", []),
         is_verified=body.get("is_verified", False),
         verification_source="manual",
-        created_by=str(ctx.user_id) if ctx.user_id else None,
+        created_by=str(ctx.user.id) if ctx.user and ctx.user.id else None,
         metadata=body.get("metadata", {})
     )
 
@@ -857,7 +857,7 @@ async def import_training_examples(
                 tables_used=ex.get("tables_used", []),
                 is_verified=ex.get("is_verified", False),
                 verification_source="import",
-                created_by=str(ctx.user_id) if ctx.user_id else None,
+                created_by=str(ctx.user.id) if ctx.user and ctx.user.id else None,
             )
             imported += 1
         except Exception as e:
