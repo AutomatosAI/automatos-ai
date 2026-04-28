@@ -39,54 +39,35 @@ from core.database.database import SessionLocal
 logger = logging.getLogger(__name__)
 
 
-# Tables that hold a `workspace_id` column (FK or orphan). Order does not
-# matter — we issue DELETEs per table, then the workspaces row last. The DB
-# will silently accept no-op deletes (rows already gone via CASCADE).
+# Tables ignored even if they have a `workspace_id` column. Reserved for
+# audit / billing tables that should outlive a workspace deletion.
 #
-# Source of truth: `git grep -n "workspace_id = Column" orchestrator/core/models/`.
-# Update this list when a new workspace-scoped table is added.
-_WORKSPACE_SCOPED_TABLES = [
-    # Core domain
-    "agents",
-    "documents",
-    "chats",
-    "messages",
-    "recipes",
-    "recipe_templates",
-    "recipe_runs",
-    "blog_posts",
-    "credentials",
-    "personas",
-    "voice_profiles",
-    "business_profiles",
-    "blueprints",
-    "channels",
-    # Marketplace / plugins
-    "marketplace_plugins",
-    "workspace_enabled_plugins",
-    "workspace_enabled_skills",
-    # Composio / tools
-    "composio_cache",
-    "composio_workspace_state",
-    "tool_assignments",
-    "workspace_tool_configs",
-    # Knowledge / NL2SQL
-    "database_knowledge",
-    "nl2sql_examples",
-    # Routing / orchestration
-    "routing_rules",
-    "routing_decisions",
-    "routing_overrides",
-    "orchestration_runs",
-    "orchestration_archive",
-    # Cloud sync / widget / SDK
-    "cloud_sync_state",
-    "cloud_sync_objects",
-    "widget_installations",
-    "sdk_api_keys",
-    # Membership / access
-    "workspace_members",
-]
+# Currently empty — every other workspace-scoped table is purged. Add a
+# table name here only if you have a concrete reason (e.g. retain audit
+# logs for compliance after the workspace is gone).
+_PURGE_SKIP_TABLES: frozenset[str] = frozenset()
+
+
+def _discover_scoped_tables(db: Session) -> list[str]:
+    """Return every base table (not view) in `public` with a `workspace_id` column.
+
+    Self-maintaining: when a new workspace-scoped table is added to a
+    migration, it is purged automatically without code changes here.
+    """
+    rows = db.execute(text(
+        """
+        SELECT c.table_name
+          FROM information_schema.columns c
+          JOIN information_schema.tables  t
+            ON t.table_name   = c.table_name
+           AND t.table_schema = c.table_schema
+         WHERE c.column_name  = 'workspace_id'
+           AND c.table_schema = 'public'
+           AND t.table_type   = 'BASE TABLE'
+         ORDER BY c.table_name
+        """
+    )).fetchall()
+    return [r[0] for r in rows if r[0] not in _PURGE_SKIP_TABLES]
 
 
 @dataclass
@@ -184,25 +165,29 @@ async def _delete_clerk_user(clerk_user_id: str) -> bool:
 
 
 def _delete_rows(db: Session, workspace_id: UUID) -> Dict[str, int]:
-    """Delete from each workspace-scoped table; return per-table row counts.
+    """Delete from every workspace-scoped table; return per-table row counts.
 
-    Tables that don't exist in this deployment are silently skipped.
+    Tables are discovered dynamically from `information_schema` so new
+    workspace-scoped tables are purged automatically. Each table runs in
+    its own SAVEPOINT so a single failure doesn't abort the whole purge.
     """
     counts: Dict[str, int] = {}
-    for tbl in _WORKSPACE_SCOPED_TABLES:
+    tables = _discover_scoped_tables(db)
+    for tbl in tables:
+        sp = db.begin_nested()  # SAVEPOINT — isolates per-table failures
         try:
             result = db.execute(
-                text(f"DELETE FROM {tbl} WHERE workspace_id = :wid"),
+                text(f'DELETE FROM "{tbl}" WHERE workspace_id::text = :wid'),
                 {"wid": str(workspace_id)},
             )
-            counts[tbl] = result.rowcount or 0
+            sp.commit()
+            count = result.rowcount or 0
+            if count:
+                counts[tbl] = count
         except Exception as exc:  # noqa: BLE001
-            # Missing table = skip. Anything else, log and continue (admin can
-            # rerun; partial cleanup is better than no cleanup).
-            db.rollback()
+            sp.rollback()
             logger.warning("Skip purge of %s for ws=%s: %s", tbl, workspace_id, exc)
-            counts[tbl] = -1  # sentinel: errored
-            continue
+            counts[tbl] = -1  # sentinel: errored — kept in result for visibility
     return counts
 
 
@@ -238,7 +223,8 @@ def purge_workspace_sync(workspace_id: UUID) -> PurgeResult:
 
         # 1) S3
         s3 = _build_s3_client()
-        bucket = getattr(config, "S3_DOCUMENTS_BUCKET", None)
+        # Match the fallback used elsewhere (see modules/documents/generation_service.py)
+        bucket = getattr(config, "S3_DOCUMENTS_BUCKET", None) or "automatos-ai"
         if s3 and bucket:
             prefix = f"workspaces/{workspace_id}/"
             result.s3_objects_deleted, result.s3_errors = _purge_s3_prefix(s3, bucket, prefix)

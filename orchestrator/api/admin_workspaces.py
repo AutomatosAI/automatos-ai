@@ -391,6 +391,39 @@ async def delete_workspace(
     }
 
 
+@router.post("/{workspace_id}/purge")
+async def purge_workspace(
+    workspace_id: UUID,
+    background_tasks: BackgroundTasks,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Re-trigger hard-purge for an already-soft-deleted workspace.
+
+    Used to clean up workspaces that were soft-deleted before the purge
+    background task existed, or to retry a purge that previously errored.
+    The workspace MUST already have `deleted_at` set — refuses otherwise.
+    """
+    _assert_admin(ctx)
+
+    w = db.query(Workspace).filter(Workspace.id == workspace_id).first()
+    if not w:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    if not w.deleted_at:
+        raise HTTPException(
+            status_code=400,
+            detail="Workspace is not soft-deleted. Use DELETE first.",
+        )
+
+    logger.warning(
+        "Workspace purge re-triggered: id=%s name=%s by=%s",
+        workspace_id, w.name, getattr(ctx.user, "id", "?"),
+    )
+
+    background_tasks.add_task(purge_workspace_sync, workspace_id)
+    return {"success": True, "workspace_id": str(workspace_id), "purge_queued": True}
+
+
 @router.post("/{workspace_id}/restore")
 async def restore_workspace(
     workspace_id: UUID,
