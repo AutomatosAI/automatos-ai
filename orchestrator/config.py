@@ -190,41 +190,41 @@ class Config:
 
     @property
     def PLANNER_MODEL(self) -> str:
-        """Get planner model from system_settings → env var fallback only."""
+        """Planner model — resolves to System LLM tier (PRD-136)."""
         try:
             from core.llm.manager import get_system_setting
-            return get_system_setting("coordination", "model", os.getenv("PLANNER_MODEL"))
+            return get_system_setting("system_llm", "model", os.getenv("PLANNER_MODEL"))
         except Exception:
             return os.getenv("PLANNER_MODEL")
 
     @property
     def PLANNER_MAX_TOKENS(self) -> int:
-        """Get planner max_tokens from system_settings."""
+        """Planner max_tokens — canonical System LLM max_tokens (PRD-136)."""
         try:
             from core.llm.manager import get_system_setting
-            val = get_system_setting("coordination", "planner_max_tokens", "4000")
+            val = get_system_setting("system_llm", "max_tokens", "8000")
             return int(val)
         except Exception:
-            return 4000
+            return 8000
 
     @property
     def GRAPHIFY_MODEL(self) -> str:
-        """Get graphify/knowledge-graph extraction model from system_settings."""
+        """Knowledge-graph extraction model — System LLM tier (PRD-136)."""
         try:
             from core.llm.manager import get_system_setting
-            return get_system_setting("knowledge_graph", "model", os.getenv("GRAPHIFY_MODEL"))
+            return get_system_setting("system_llm", "model", os.getenv("GRAPHIFY_MODEL"))
         except Exception:
             return os.getenv("GRAPHIFY_MODEL")
 
     @property
     def COORDINATOR_TASK_MAX_TOKENS(self) -> int:
-        """Get mission task max_tokens from system_settings → env fallback."""
+        """Mission task max_tokens — canonical System LLM max_tokens (PRD-136)."""
         try:
             from core.llm.manager import get_system_setting
-            val = get_system_setting("coordination", "task_max_tokens", os.getenv("COORDINATOR_TASK_MAX_TOKENS", "4000"))
+            val = get_system_setting("system_llm", "max_tokens", os.getenv("COORDINATOR_TASK_MAX_TOKENS", "8000"))
             return int(val)
         except Exception:
-            return int(os.getenv("COORDINATOR_TASK_MAX_TOKENS", "4000"))
+            return int(os.getenv("COORDINATOR_TASK_MAX_TOKENS", "8000"))
     
     # =============================================================================
     # ENVIRONMENT
@@ -418,12 +418,13 @@ class Config:
     # COORDINATOR_TASK_MAX_TOKENS is now a @property above (reads from system_settings)
     # Maximum seconds a single task execution can take before being timed out
     COORDINATOR_TASK_EXECUTION_TIMEOUT: int = int(os.getenv("COORDINATOR_TASK_EXECUTION_TIMEOUT", "240"))
-    # Cross-task consistency verification — reads from system_settings
+    # Cross-task consistency verification — feature flag, lives in `general`
+    # (post PRD-136 collapse — no longer an LLM-tier setting).
     @property
     def COORDINATOR_CONSISTENCY_CHECK(self) -> bool:
         try:
             from core.llm.manager import get_system_setting
-            val = get_system_setting("coordination", "consistency_check_enabled", "true")
+            val = get_system_setting("general", "coordinator_consistency_check_enabled", "true")
             return str(val).lower() in ("true", "1", "yes")
         except Exception:
             return os.getenv("COORDINATOR_CONSISTENCY_CHECK", "true").lower() in ("true", "1", "yes")

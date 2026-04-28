@@ -65,7 +65,7 @@ async def get_model(
     Get detailed information about a specific model.
     
     Path Parameters:
-    - model_id: Unique model identifier (e.g., 'gpt-4', 'claude-3-opus-20240229')
+    - model_id: Unique model identifier (e.g., 'google/gemini-2.5-flash', 'openai/gpt-5.5')
     
     Returns:
     - Model object with full metadata
@@ -107,8 +107,8 @@ async def list_providers(ctx: RequestContext = Depends(get_request_context_hybri
                 "name": "openai",
                 "model_count": 3,
                 "models": [
-                    {"model_id": "gpt-4", "display_name": "GPT-4"},
-                    {"model_id": "gpt-3.5-turbo", "display_name": "GPT-3.5 Turbo"}
+                    {"model_id": "google/gemini-2.5-flash", "display_name": "Gemini 2.5 Flash"},
+                    {"model_id": "openai/gpt-5.5", "display_name": "GPT-5.5"}
                 ]
             }
         ]
@@ -206,7 +206,7 @@ async def estimate_cost(
     
     Request Body:
     {
-        "model_id": "gpt-4",
+        "model_id": "google/gemini-2.5-flash",
         "input_tokens": 1500,
         "output_tokens": 800
     }
@@ -217,7 +217,7 @@ async def estimate_cost(
     Example:
         POST /api/models/estimate-cost
         {
-            "model_id": "gpt-4",
+            "model_id": "google/gemini-2.5-flash",
             "input_tokens": 1500,
             "output_tokens": 800
         }

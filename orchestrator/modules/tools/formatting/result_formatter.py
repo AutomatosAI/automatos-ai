@@ -351,7 +351,9 @@ class ToolResultFormatter:
             
             # Extract content from various possible keys
             content = r.get('content') or r.get('text') or r.get('excerpt') or ''
-            useful_excerpt = ToolResultFormatter._extract_useful_content(content, max_chars=500)
+            # PRD-136: 4000 chars per doc gives Auto enough material to synthesize.
+            # The 500-char cap was a UI-preview bleed-through that crippled RAG.
+            useful_excerpt = ToolResultFormatter._extract_useful_content(content, max_chars=4000)
             
             # Extract similarity/relevance score
             similarity = (
@@ -735,7 +737,7 @@ class ToolResultFormatter:
         return frontend_data
     
     @staticmethod
-    def format_for_llm(result: Dict[str, Any], tool_name: str, max_chars: int = 4500) -> str:
+    def format_for_llm(result: Dict[str, Any], tool_name: str, max_chars: int = 20000) -> str:
         """
         Format tool result for LLM context (truncated summary).
 
@@ -781,16 +783,19 @@ class ToolResultFormatter:
         
         if tool_name in ['search_knowledge', 'search_documents', 'semantic_search']:
             summary_parts.append(
-                "IMPORTANT: You have been provided with FULL CONTENT excerpts below (up to 800 chars each). "
-                "Use this content to write a comprehensive, synthesized response. Do NOT just say 'I found documents' - "
-                "actually use the content to answer the question thoroughly. The UI will show document cards separately."
+                "Full document content for the top results is below. Synthesize an "
+                "answer using this material directly — do not just list the documents. "
+                "The UI renders source cards separately, so you do not need to repeat "
+                "filenames in your reply."
             )
             for i, doc in enumerate(results, start=1):
-                excerpt = (doc.get('excerpt', '') or '')[:600]
+                # PRD-136: read `content` (full body) — `excerpt` is a 500-char UI preview
+                # that crippled synthesis. Fall back to excerpt if no content.
+                body = doc.get('content') or doc.get('excerpt') or ''
                 score = float(doc.get('similarity', 0) or 0) * 100.0
                 # Avoid leaking filenames to the LLM (it tends to echo them back as a list)
                 summary_parts.append(f"\n[Source {i}] ({score:.1f}%)")
-                summary_parts.append(excerpt)
+                summary_parts.append(body)
         
         elif tool_name in ['search_codebase', 'search_code']:
             for code in results:
