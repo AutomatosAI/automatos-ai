@@ -82,14 +82,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
             if (response.status === 409) {
                 const body = await response.json().catch(() => ({}))
-                const code = body?.detail?.code || body?.code
-                if (code === 'pending_invitation') {
-                    const tokenParam =
+                const detail = body?.detail || body
+                if (detail?.code === 'pending_invitation') {
+                    const tokenFromServer = detail?.token as string | undefined
+                    const tokenFromUrl =
                         typeof window !== 'undefined'
                             ? new URL(window.location.href).searchParams.get('token')
                             : null
-                    const target = tokenParam
-                        ? `/accept-invitation?token=${encodeURIComponent(tokenParam)}`
+                    const token = tokenFromServer || tokenFromUrl
+                    const target = token
+                        ? `/accept-invitation?token=${encodeURIComponent(token)}`
                         : '/accept-invitation'
                     if (typeof window !== 'undefined') {
                         window.location.href = target

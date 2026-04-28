@@ -28,6 +28,7 @@ from unittest.mock import MagicMock, patch  # noqa: E402
 from uuid import uuid4  # noqa: E402
 
 from core.auth.hybrid import (  # noqa: E402
+    _get_pending_invitation_token,
     _has_pending_invitations,
     _resolve_workspace_for_clerk_user,
 )
@@ -61,13 +62,24 @@ def test_pending_invitations_false_when_email_missing():
 
 
 def test_pending_invitations_true_when_row_exists():
-    db = _exec_returning((1,))
+    db = _exec_returning(("tok_abc123",))
     assert _has_pending_invitations(db, "alice@example.com") is True
 
 
 def test_pending_invitations_false_when_no_row():
     db = _exec_returning(None)
     assert _has_pending_invitations(db, "alice@example.com") is False
+
+
+def test_get_pending_invitation_token_returns_token():
+    db = _exec_returning(("tok_abc123",))
+    assert _get_pending_invitation_token(db, "alice@example.com") == "tok_abc123"
+
+
+def test_get_pending_invitation_token_returns_none_when_missing():
+    assert _get_pending_invitation_token(MagicMock(), None) is None
+    db = _exec_returning(None)
+    assert _get_pending_invitation_token(db, "nobody@example.com") is None
 
 
 # ── _resolve_workspace_for_clerk_user ────────────────────────────────────
@@ -112,8 +124,8 @@ def test_resolver_returns_org_workspace_first():
 def test_resolver_skips_provision_when_pending_invitation(mock_provision):
     """The auto-provision race fix: pending invite blocks silent provisioning."""
     db = _exec_returning(
-        None,   # no membership
-        (1,),   # pending invitation row exists
+        None,                # no membership
+        ("tok_pending_xyz",),  # pending invitation row exists
     )
 
     resolved = _resolve_workspace_for_clerk_user(

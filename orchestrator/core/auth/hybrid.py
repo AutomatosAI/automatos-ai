@@ -169,19 +169,30 @@ def _has_pending_invitations(db, email: Optional[str]) -> bool:
     Gates auto-provisioning so an invitee never silently lands in a personal
     workspace before the explicit /accept-invitation flow can run.
     """
+    return _get_pending_invitation_token(db, email) is not None
+
+
+def _get_pending_invitation_token(db, email: Optional[str]) -> Optional[str]:
+    """Return the most recent pending invitation token for ``email``, or None.
+
+    Used both to gate auto-provisioning and to surface the token in the 409
+    response so the frontend can deep-link to /accept-invitation?token=… even
+    if Clerk's redirect chain stripped query params from the original link.
+    """
     if not email:
-        return False
+        return None
     row = db.execute(
         text(
-            "SELECT 1 FROM workspace_invitations "
+            "SELECT token FROM workspace_invitations "
             "WHERE LOWER(email) = LOWER(:email) "
             "AND accepted_at IS NULL "
             "AND expires_at > NOW() "
+            "ORDER BY created_at DESC "
             "LIMIT 1"
         ),
         {"email": email},
     ).fetchone()
-    return bool(row)
+    return row[0] if row else None
 
 
 # PRD-128: Default notification routing seeded on workspace provisioning.
@@ -568,12 +579,14 @@ async def get_request_context_hybrid(request: Request) -> RequestContext:
                     name=info.get("name"),
                 )
                 if not resolved:
-                    if _has_pending_invitations(db, info.get("email")):
+                    pending_token = _get_pending_invitation_token(db, info.get("email"))
+                    if pending_token:
                         raise HTTPException(
                             status_code=status.HTTP_409_CONFLICT,
                             detail={
                                 "code": "pending_invitation",
-                                "redirect": "/accept-invitation",
+                                "redirect": f"/accept-invitation?token={pending_token}",
+                                "token": pending_token,
                                 "message": "Accept your pending invitation before continuing.",
                             },
                         )
