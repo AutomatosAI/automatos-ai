@@ -731,6 +731,29 @@ async def _execute_recipe_inner(
             logger.error(f"[recipe_direct] Execution record not found: {recipe_execution_id}")
             return
 
+        # Disabled / deleted workspace gate — covers scheduled runs that
+        # bypass the request-context middleware. The HTTP entry point also
+        # checks this, but a scheduled job triggers execute_recipe_direct
+        # directly so we must guard here too.
+        from core.models.workspaces import Workspace as _Workspace
+        ws_state = db.query(_Workspace).filter(_Workspace.id == workspace_id).first()
+        if not ws_state or ws_state.deleted_at is not None:
+            await _fail_execution(
+                db, recipe_execution_id,
+                "Workspace not found or deleted",
+            )
+            return
+        if ws_state.paused_at is not None:
+            logger.warning(
+                "[recipe_direct] Refusing to run — workspace %s is disabled (reason=%s)",
+                workspace_id, ws_state.paused_reason,
+            )
+            await _fail_execution(
+                db, recipe_execution_id,
+                "Workspace is disabled. Contact an administrator.",
+            )
+            return
+
         # Mark as running
         execution.status = 'running'
         execution.current_step = 0
