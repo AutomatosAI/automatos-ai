@@ -341,7 +341,7 @@ async def set_platform_key(
             description=f"Platform API key for {provider}",
             is_active=True,
             test_status="not_tested",
-            created_by=str(ctx.user_id) if ctx.user_id else None,
+            created_by=str(ctx.user.id) if ctx.user and ctx.user.id else None,
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow(),
         )
