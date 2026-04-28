@@ -164,6 +164,72 @@ async def _delete_clerk_user(clerk_user_id: str) -> bool:
         return False
 
 
+def _pre_cascade_external_refs(db: Session, workspace_id: UUID) -> Dict[str, int]:
+    """Delete rows from non-workspace-scoped tables that reference
+    workspace-scoped tables via NO ACTION / RESTRICT FKs.
+
+    These are the rows that *permanently* block deletion of a workspace-scoped
+    parent: they don't carry `workspace_id` themselves (so the main loop's
+    discovery skips them), and their FK delete rule won't auto-clear them.
+    Examples in this DB: `agent_skills.agent_id`, `tasks.assigned_to`,
+    `workflow_agents.agent_id`, `learning_outcomes.agent_id`, …
+
+    Discovered dynamically from `information_schema`, so new dependents
+    added by future migrations are handled automatically — no hardcoded
+    table list. CASCADE / SET NULL FKs are intentionally excluded because
+    Postgres handles them on its own.
+    """
+    refs = db.execute(text(
+        """
+        WITH ws_tables AS (
+          SELECT DISTINCT table_name FROM information_schema.columns
+           WHERE column_name = 'workspace_id'
+             AND table_schema = 'public'
+        )
+        SELECT tc.table_name  AS dep_table,
+               kcu.column_name AS dep_column,
+               ccu.table_name  AS ref_table
+          FROM information_schema.table_constraints tc
+          JOIN information_schema.key_column_usage kcu
+            ON tc.constraint_name = kcu.constraint_name
+           AND tc.table_schema   = kcu.table_schema
+          JOIN information_schema.constraint_column_usage ccu
+            ON tc.constraint_name = ccu.constraint_name
+           AND tc.table_schema   = ccu.table_schema
+          JOIN information_schema.referential_constraints rc
+            ON tc.constraint_name = rc.constraint_name
+           AND tc.table_schema   = rc.constraint_schema
+         WHERE tc.constraint_type = 'FOREIGN KEY'
+           AND tc.table_schema    = 'public'
+           AND ccu.table_name IN (SELECT table_name FROM ws_tables)
+           AND tc.table_name  NOT IN (SELECT table_name FROM ws_tables)
+           AND rc.delete_rule IN ('NO ACTION', 'RESTRICT')
+        """
+    )).fetchall()
+
+    counts: Dict[str, int] = {}
+    for r in refs:
+        sp = db.begin_nested()  # SAVEPOINT — isolate per-FK failure
+        try:
+            sql = text(
+                f'DELETE FROM "{r.dep_table}" '
+                f'WHERE "{r.dep_column}" IN '
+                f'(SELECT id FROM "{r.ref_table}" WHERE workspace_id::text = :wid)'
+            )
+            result = db.execute(sql, {"wid": str(workspace_id)})
+            sp.commit()
+            n = result.rowcount or 0
+            if n:
+                counts[r.dep_table] = counts.get(r.dep_table, 0) + n
+        except Exception as exc:  # noqa: BLE001
+            sp.rollback()
+            logger.warning(
+                "Pre-cascade %s.%s -> %s failed for ws=%s: %s",
+                r.dep_table, r.dep_column, r.ref_table, workspace_id, exc,
+            )
+    return counts
+
+
 def _delete_rows(db: Session, workspace_id: UUID) -> Dict[str, int]:
     """Delete from every workspace-scoped table; return per-table row counts.
 
@@ -171,14 +237,17 @@ def _delete_rows(db: Session, workspace_id: UUID) -> Dict[str, int]:
     workspace-scoped tables are purged automatically. Each table runs in
     its own SAVEPOINT so a single failure doesn't abort the whole purge.
 
-    Multi-pass strategy: alphabetical order naturally violates FK dependencies
-    (e.g. `agents` is processed before `chats` even though chats.current_agent_id
-    references agents). Rather than hardcoding a topological order — which
-    breaks every time a new table is added — we retry failed tables across
-    multiple passes. Each pass removes more dependents, eventually unblocking
-    the rest. Bounded at 4 passes to fail loud rather than loop forever.
+    Two-stage strategy:
+      1. Pre-cascade: clear non-scoped dependents (NO ACTION FKs from tables
+         without `workspace_id`) — these would otherwise permanently block
+         their workspace-scoped parents.
+      2. Multi-pass scoped delete: alphabetical order naturally violates FK
+         dependencies between scoped tables (e.g. `agents` before `chats`
+         even though `chats.current_agent_id` references agents). Retry
+         failed tables across passes; each pass removes more dependents,
+         eventually unblocking the rest. Bounded at 4 passes.
     """
-    counts: Dict[str, int] = {}
+    counts: Dict[str, int] = _pre_cascade_external_refs(db, workspace_id)
     pending: set[str] = set(_discover_scoped_tables(db))
     last_errors: Dict[str, Exception] = {}
 
