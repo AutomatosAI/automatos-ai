@@ -170,24 +170,49 @@ def _delete_rows(db: Session, workspace_id: UUID) -> Dict[str, int]:
     Tables are discovered dynamically from `information_schema` so new
     workspace-scoped tables are purged automatically. Each table runs in
     its own SAVEPOINT so a single failure doesn't abort the whole purge.
+
+    Multi-pass strategy: alphabetical order naturally violates FK dependencies
+    (e.g. `agents` is processed before `chats` even though chats.current_agent_id
+    references agents). Rather than hardcoding a topological order — which
+    breaks every time a new table is added — we retry failed tables across
+    multiple passes. Each pass removes more dependents, eventually unblocking
+    the rest. Bounded at 4 passes to fail loud rather than loop forever.
     """
     counts: Dict[str, int] = {}
-    tables = _discover_scoped_tables(db)
-    for tbl in tables:
-        sp = db.begin_nested()  # SAVEPOINT — isolates per-table failures
-        try:
-            result = db.execute(
-                text(f'DELETE FROM "{tbl}" WHERE workspace_id::text = :wid'),
-                {"wid": str(workspace_id)},
-            )
-            sp.commit()
-            count = result.rowcount or 0
-            if count:
-                counts[tbl] = count
-        except Exception as exc:  # noqa: BLE001
-            sp.rollback()
-            logger.warning("Skip purge of %s for ws=%s: %s", tbl, workspace_id, exc)
-            counts[tbl] = -1  # sentinel: errored — kept in result for visibility
+    pending: set[str] = set(_discover_scoped_tables(db))
+    last_errors: Dict[str, Exception] = {}
+
+    for _ in range(4):
+        if not pending:
+            break
+        succeeded_this_pass: set[str] = set()
+        for tbl in sorted(pending):
+            sp = db.begin_nested()  # SAVEPOINT — isolates per-table failures
+            try:
+                result = db.execute(
+                    text(f'DELETE FROM "{tbl}" WHERE workspace_id::text = :wid'),
+                    {"wid": str(workspace_id)},
+                )
+                sp.commit()
+                count = result.rowcount or 0
+                if count:
+                    counts[tbl] = count
+                succeeded_this_pass.add(tbl)
+            except Exception as exc:  # noqa: BLE001
+                sp.rollback()
+                last_errors[tbl] = exc
+        if not succeeded_this_pass:
+            # No progress this pass — remaining tables have unresolvable
+            # blockers (likely a non-workspace-scoped referencer). Bail.
+            break
+        pending -= succeeded_this_pass
+
+    for tbl in pending:
+        logger.warning(
+            "Skip purge of %s for ws=%s: %s",
+            tbl, workspace_id, last_errors.get(tbl),
+        )
+        counts[tbl] = -1  # sentinel: errored — kept in result for visibility
     return counts
 
 
@@ -243,22 +268,22 @@ def purge_workspace_sync(workspace_id: UUID) -> PurgeResult:
         # 3) DB cascade — explicit per-table deletes
         result.rows_deleted = _delete_rows(db, workspace_id)
 
-        # 4) Owner user row (only if no other workspaces remain owned by them)
+        # 4) The workspace row itself — must come BEFORE the users row,
+        # because workspaces.owner_id has a FK to users.id with NO ACTION.
+        # Deleting users first violates that constraint.
+        wd = db.execute(text("DELETE FROM workspaces WHERE id = :id"), {"id": str(workspace_id)})
+        result.workspace_row_deleted = bool(wd.rowcount)
+
+        # 5) Owner user row (only if no other workspaces remain owned by them).
+        # Re-check after the workspace row is gone so the lookup is accurate.
         if owner_id:
             other = db.execute(
-                text(
-                    "SELECT 1 FROM workspaces "
-                    "WHERE owner_id = :oid AND id != :wid LIMIT 1"
-                ),
-                {"oid": owner_id, "wid": str(workspace_id)},
+                text("SELECT 1 FROM workspaces WHERE owner_id = :oid LIMIT 1"),
+                {"oid": owner_id},
             ).fetchone()
             if not other:
                 db.execute(text("DELETE FROM users WHERE id = :id"), {"id": owner_id})
                 result.rows_deleted["users"] = 1
-
-        # 5) Final: the workspace row itself
-        wd = db.execute(text("DELETE FROM workspaces WHERE id = :id"), {"id": str(workspace_id)})
-        result.workspace_row_deleted = bool(wd.rowcount)
 
         db.commit()
         logger.warning(
