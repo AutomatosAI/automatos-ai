@@ -19,6 +19,23 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/workspaces/{workspace_id}/team", tags=["team"])
 
+
+def _resolve_internal_user_id(db: Session, ctx: RequestContext) -> Optional[int]:
+    """Resolve internal users.id (integer) from RequestContext.
+
+    ctx.user.id is a Clerk string ID or email — both audit_logs.user_id and
+    workspace_invitations.invited_by are Integer FKs to users.id, so we must
+    look up the matching row before writing.
+    """
+    if not ctx.user:
+        return None
+    user = None
+    if ctx.user.clerk_user_id:
+        user = db.query(User).filter(User.clerk_user_id == ctx.user.clerk_user_id).first()
+    if not user and ctx.user.email:
+        user = db.query(User).filter(User.email == ctx.user.email).first()
+    return user.id if user else None
+
 class InviteMemberRequest(BaseModel):
     email: EmailStr
     role: str = "member"
@@ -120,6 +137,10 @@ async def invite_member(
     if request.role not in valid_roles:
         raise HTTPException(400, f"Invalid role: {request.role}. Must be one of {valid_roles}")
 
+    inviter_internal_id = _resolve_internal_user_id(db, ctx)
+    if not inviter_internal_id:
+        raise HTTPException(401, "Inviter user not found in database")
+
     invitation_service = InvitationService(db)
     invitation = None
     clerk_invite_data = {}
@@ -130,7 +151,7 @@ async def invite_member(
             workspace_id=workspace_id,
             email=request.email,
             role=request.role,
-            invited_by=ctx.user.id if ctx.user else None,
+            invited_by=inviter_internal_id,
         )
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -154,7 +175,7 @@ async def invite_member(
     audit = AuditService(db)
     audit.log(
         workspace_id=workspace_id,
-        user_id=ctx.user.id if ctx.user else None,
+        user_id=inviter_internal_id,
         action="member:invited",
         details={"email": request.email, "role": request.role, "clerk_id": clerk_invite_data.get("id")},
     )
@@ -199,13 +220,16 @@ async def update_member_role(
     old_role = member.role
     member.role = request.role
     db.commit()
-    
+
     # TODO: Update role in Clerk metadata via API if needed
-    
+
+    actor_internal_id = _resolve_internal_user_id(db, ctx)
+    if not actor_internal_id:
+        raise HTTPException(401, "Acting user not found in database")
     audit = AuditService(db)
     audit.log(
         workspace_id=workspace_id,
-        user_id=ctx.user.id if ctx.user else None,
+        user_id=actor_internal_id,
         action="member:role_changed",
         resource_type="member",
         resource_id=str(member_id),
@@ -248,11 +272,14 @@ async def remove_member(
 
     member.is_active = False
     db.commit()
-    
+
+    actor_internal_id = _resolve_internal_user_id(db, ctx)
+    if not actor_internal_id:
+        raise HTTPException(401, "Acting user not found in database")
     audit = AuditService(db)
     audit.log(
         workspace_id=workspace_id,
-        user_id=ctx.user.id if ctx.user else None,
+        user_id=actor_internal_id,
         action="member:removed",
         resource_type="member",
         resource_id=str(member_id),
