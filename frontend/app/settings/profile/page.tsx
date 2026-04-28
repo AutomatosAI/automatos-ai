@@ -25,6 +25,7 @@ export default function ProfilePage() {
     const [isSaving, setIsSaving] = useState(false)
     const [isUploadingAvatar, setIsUploadingAvatar] = useState(false)
     const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle')
+    const [saveError, setSaveError] = useState<string | null>(null)
     const fileInputRef = useRef<HTMLInputElement>(null)
     const [formData, setFormData] = useState({
         firstName: '',
@@ -87,37 +88,68 @@ export default function ProfilePage() {
     const handleSave = async () => {
         setIsSaving(true)
         setSaveStatus('idle')
+        setSaveError(null)
         try {
             // Only update fields that have changed
-            const updates: any = {}
+            const updates: { firstName?: string; lastName?: string; username?: string } = {}
 
-            if (formData.firstName && formData.firstName !== user.firstName) {
+            if (formData.firstName !== (user.firstName || '')) {
                 updates.firstName = formData.firstName
             }
-            if (formData.lastName && formData.lastName !== user.lastName) {
+            if (formData.lastName !== (user.lastName || '')) {
                 updates.lastName = formData.lastName
             }
-            if (formData.username && formData.username !== user.username) {
+            if (formData.username !== (user.username || '')) {
                 updates.username = formData.username
             }
 
-            console.log('Updating user with:', updates)
+            if (Object.keys(updates).length === 0) {
+                setIsEditing(false)
+                setSaveStatus('success')
+                setTimeout(() => setSaveStatus('idle'), 3000)
+                return
+            }
 
-            if (Object.keys(updates).length > 0) {
+            // Try the full update first. If Clerk rejects a single field
+            // (typically username — disabled or taken), retry without it
+            // so the other fields still save.
+            try {
                 await user.update(updates)
-                console.log('User updated successfully')
-            } else {
-                console.log('No changes to save')
+            } catch (err: any) {
+                const clerkErrors: Array<{ code?: string; meta?: { paramName?: string }; longMessage?: string; message?: string }> =
+                    err?.errors || []
+
+                // If username was the offender and other fields exist, retry without username
+                const usernameRejected = clerkErrors.some(
+                    (e) => e.meta?.paramName === 'username' || e.code === 'form_identifier_exists' || e.code === 'form_param_unknown'
+                )
+                const otherFieldsToSave = Object.keys(updates).filter((k) => k !== 'username')
+
+                if (usernameRejected && otherFieldsToSave.length > 0) {
+                    const { username: _omit, ...rest } = updates
+                    await user.update(rest)
+                    const detail = clerkErrors.find((e) => e.meta?.paramName === 'username')?.longMessage
+                        || 'Username could not be saved (already taken or disabled in Clerk). Other fields saved.'
+                    setSaveError(detail)
+                    setSaveStatus('error')
+                    setTimeout(() => { setSaveStatus('idle'); setSaveError(null) }, 5000)
+                    setIsEditing(false)
+                    return
+                }
+
+                throw err
             }
 
             setIsEditing(false)
             setSaveStatus('success')
             setTimeout(() => setSaveStatus('idle'), 3000)
         } catch (error: any) {
+            const clerkErrors = error?.errors as Array<{ longMessage?: string; message?: string }> | undefined
+            const detail = clerkErrors?.[0]?.longMessage || clerkErrors?.[0]?.message || error?.message
             console.error('Failed to update profile:', error)
-            console.error('Error details:', error.message, error.errors)
+            setSaveError(detail || null)
             setSaveStatus('error')
-            setTimeout(() => setSaveStatus('idle'), 3000)
+            setTimeout(() => { setSaveStatus('idle'); setSaveError(null) }, 5000)
         } finally {
             setIsSaving(false)
         }
@@ -158,7 +190,7 @@ export default function ProfilePage() {
                         <span>
                             {saveStatus === 'success'
                                 ? 'Profile updated successfully!'
-                                : 'Failed to update profile. Please try again.'}
+                                : saveError || 'Failed to update profile. Please try again.'}
                         </span>
                     </div>
                 )}
