@@ -195,9 +195,19 @@ class ClerkAuth:
                 # Cache the placeholder to avoid repeated warnings
                 self._email_cache[clerk_user_id] = email
         
-        # Admin role is determined exclusively from Clerk publicMetadata / session token.
-        # Domain-based auto-admin was removed for security (see PRD-43 US-025).
-        
+        # Defence-in-depth: Clerk publicMetadata is the source of truth, but a
+        # tenant user with stray admin metadata must NEVER be promoted to
+        # platform admin. Require an Automatos-staff email domain on top.
+        is_automatos_staff = bool(email) and email.lower().endswith("@automatos.ai")
+        if system_role == "admin" and not is_automatos_staff:
+            logger.warning(
+                "Refusing platform-admin role for non-Automatos email %s — "
+                "Clerk publicMetadata says admin but email domain is not @automatos.ai",
+                email,
+            )
+            system_role = "user"
+            role = system_role
+
         return {
             "clerk_user_id": claims.get("sub"),
             "email": email,

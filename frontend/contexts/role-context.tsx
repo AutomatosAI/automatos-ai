@@ -35,17 +35,21 @@ export function RoleProvider({ children }: { children: ReactNode }) {
     // The publicMetadata is set in Clerk Dashboard for each user
     // Session token is configured to include: { "metadata": "{{user.public_metadata}}" }
     let roleFromToken: string | undefined
+    let primaryEmail: string | undefined
 
     if (session?.user) {
-        // Access public metadata from the session user
         const publicMetadata = session.user.publicMetadata as { role?: string } | undefined
         roleFromToken = publicMetadata?.role
-        // PRD-70 FIX-02: Domain-based auto-admin removed. Admin role comes
-        // exclusively from Clerk publicMetadata (set in Clerk Dashboard).
+        primaryEmail = session.user.primaryEmailAddress?.emailAddress?.toLowerCase()
     }
 
-    // Default to 'user' if no role is set
-    const systemRole = (roleFromToken || 'user') as SystemRole
+    // Defence-in-depth: Clerk publicMetadata is the source of truth for system
+    // role, but a misconfigured tenant user must never be promoted to platform
+    // admin. Require an Automatos-staff email domain on top of the metadata.
+    const isAutomatosStaff = !!primaryEmail && primaryEmail.endsWith('@automatos.ai')
+    const effectiveRole = roleFromToken === 'admin' && !isAutomatosStaff ? 'user' : roleFromToken
+
+    const systemRole = (effectiveRole || 'user') as SystemRole
 
     return (
         <RoleContext.Provider value={{
