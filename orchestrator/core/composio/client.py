@@ -107,11 +107,16 @@ class ComposioClient:
         """Lazy-load Composio client."""
         if self._composio is None and self.api_key:
             Composio = _get_composio()
+            # Pin toolkit versions to "latest" so manual tools.execute() calls
+            # (e.g. bug-report Jira widget) don't error on the SDK's version check.
             # Note: Composio SDK sends telemetry to telemetry.composio.dev for usage tracking,
             # billing, and service monitoring. This is part of their service model.
-            self._composio = Composio(api_key=self.api_key)
+            self._composio = Composio(
+                api_key=self.api_key,
+                toolkit_versions={"default": "latest"},
+            )
         return self._composio
-    
+
     @property
     def toolset(self):
         """Lazy-load Composio with OpenAI Provider."""
@@ -122,7 +127,11 @@ class ComposioClient:
             # Note: Composio SDK sends telemetry to telemetry.composio.dev for usage tracking,
             # billing, and service monitoring. This is part of their service model.
             # Initialize Composio client with OpenAI provider
-            self._toolset = Composio(api_key=self.api_key, provider=OpenAIProvider())
+            self._toolset = Composio(
+                api_key=self.api_key,
+                provider=OpenAIProvider(),
+                toolkit_versions={"default": "latest"},
+            )
         return self._toolset
     
     def get_entity(self, entity_id: str):
@@ -634,7 +643,8 @@ class ComposioClient:
             return []
 
         url = f"{config.COMPOSIO_API_BASE_URL}/triggers_types"
-        params: Dict[str, Any] = {"toolkit_versions": "latest", "limit": 1000}
+        # v3.1 defaults toolkit_versions to "latest" — no explicit param needed.
+        params: Dict[str, Any] = {"limit": 1000}
         if toolkit_slugs:
             params["toolkit_slugs"] = toolkit_slugs
 
@@ -773,7 +783,8 @@ class ComposioClient:
 
         logger.info(f"Starting bulk actions fetch (limit={limit} per page)...")
         while True:
-            params: Dict[str, Any] = {"toolkit_versions": "latest", "limit": int(limit)}
+            # v3.1 defaults toolkit_versions to "latest" — no explicit param needed.
+            params: Dict[str, Any] = {"limit": int(limit)}
             if cursor:
                 params["cursor"] = cursor
 
@@ -1183,12 +1194,14 @@ class ComposioClient:
             raise ValueError("Composio client not initialized.")
         
         try:
-            # New API: composio.tools.execute(tool_name, user_id, arguments)
+            # New API: composio.tools.execute(tool_name, user_id, arguments).
+            # Toolkit version pinning is set on the Composio() constructor
+            # (toolkit_versions={"default": "latest"}) so manual execute calls
+            # don't fail with "Toolkit version not specified".
             result = self.composio.tools.execute(
                 slug=action,
                 user_id=entity_id,
                 arguments=params,
-                dangerously_skip_version_check=True
             )
 
             # Composio API may return errors in the response data without
