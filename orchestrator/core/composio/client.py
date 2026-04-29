@@ -1194,14 +1194,15 @@ class ComposioClient:
             raise ValueError("Composio client not initialized.")
         
         try:
-            # New API: composio.tools.execute(tool_name, user_id, arguments).
-            # Toolkit version pinning is set on the Composio() constructor
-            # (toolkit_versions={"default": "latest"}) so manual execute calls
-            # don't fail with "Toolkit version not specified".
+            # composio>=0.12 rejects manual tools.execute() with version="latest"
+            # ("'latest' is not supported in manual execution"). We track the
+            # latest schema at discovery, so skip the version check here — same
+            # pattern the SDK uses internally for agentic tool execution.
             result = self.composio.tools.execute(
                 slug=action,
                 user_id=entity_id,
                 arguments=params,
+                dangerously_skip_version_check=True,
             )
 
             # Composio API may return errors in the response data without
