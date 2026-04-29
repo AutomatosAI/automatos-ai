@@ -99,8 +99,11 @@ cryptography>=43.0.0
 slowapi>=0.1.9
 
 # PRD-36: Composio Integration (500+ tools, Tool Router, Triggers)
-# composio-core removed — deprecated, replaced by composio (pulled by composio-openai)
-composio-openai==0.11.1
+# Pin BOTH packages to matching versions — composio-openai's `composio` dep is
+# unpinned upstream, so leaving it implicit lets the resolver pick a newer core
+# that breaks 0.11.x interfaces (caused /api/v3/tools 401s on 2026-04-29).
+composio==0.12.0
+composio-openai==0.12.0
 
 # PRD-42: Cloud Document Sync with S3 Vectors
 boto3>=1.39.5
