@@ -96,7 +96,10 @@ def clone_agent_to_workspace(
 
     agent_name = f"{marketplace_agent.name}-copy" if name_exists else marketplace_agent.name
 
+    from uuid import uuid4 as _uuid4
+
     cloned = Agent(
+        public_id=_uuid4(),
         name=agent_name,
         description=marketplace_agent.description,
         agent_type=marketplace_agent.agent_type,
