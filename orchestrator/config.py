@@ -335,6 +335,14 @@ class Config:
     TASK_MAX_RETRY_BACKOFF_MS: int = int(os.getenv("TASK_MAX_RETRY_BACKOFF_MS", "300000"))  # 5 min cap
     TASK_RECONCILE_INTERVAL_SECONDS: int = int(os.getenv("TASK_RECONCILE_INTERVAL_SECONDS", "60"))
 
+    # Playbook (Recipe) execution timeouts — defaults used when a recipe's
+    # execution_config is empty; the MIN_* values floor whatever the recipe configures
+    # so an under-spec'd recipe (e.g. 120s) cannot kill itself prematurely.
+    PLAYBOOK_DEFAULT_STEP_TIMEOUT_SECONDS: int = int(os.getenv("PLAYBOOK_DEFAULT_STEP_TIMEOUT_SECONDS", "600"))   # 10 min
+    PLAYBOOK_DEFAULT_TOTAL_TIMEOUT_SECONDS: int = int(os.getenv("PLAYBOOK_DEFAULT_TOTAL_TIMEOUT_SECONDS", "1800"))  # 30 min
+    PLAYBOOK_MIN_STEP_TIMEOUT_SECONDS: int = int(os.getenv("PLAYBOOK_MIN_STEP_TIMEOUT_SECONDS", "300"))            # 5 min floor
+    PLAYBOOK_MIN_TOTAL_TIMEOUT_SECONDS: int = int(os.getenv("PLAYBOOK_MIN_TOTAL_TIMEOUT_SECONDS", "900"))          # 15 min floor
+
     # =============================================================================
     # RAILWAY API (Log retrieval for agents)
     # =============================================================================
