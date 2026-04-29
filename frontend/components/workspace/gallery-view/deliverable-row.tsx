@@ -12,14 +12,10 @@ import {
   Archive,
   Bot,
   File,
-  FileCode,
   FileText,
-  Image as ImageIcon,
   LucideIcon,
   MessageSquare,
   Music,
-  Presentation,
-  Sheet,
   Upload,
   Video,
   Workflow,
@@ -28,32 +24,30 @@ import {
 } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
+import {
+  DELIVERABLE_ACCENTS,
+  DeliverableIcon,
+  isDeliverableType,
+  type DeliverableType,
+} from '@/components/icons/deliverable-icon'
 import type { Deliverable } from '@/hooks/use-deliverables-api'
 
 // ============= STYLE MAPS =============
 
-const ARTIFACT_ICONS: Record<string, LucideIcon> = {
-  report: FileText,
-  document: FileText,
-  image: ImageIcon,
-  code: FileCode,
-  slide: Presentation,
-  spreadsheet: Sheet,
+// Non-canonical types (archive/audio/video) keep lucide fallbacks; the 7 canonical
+// deliverable types (report, image, document, code, slide, spreadsheet, blog_post)
+// render via DeliverableIcon for consistent design.
+
+const FALLBACK_ICONS: Record<string, LucideIcon> = {
   archive: Archive,
   audio: Music,
   video: Video,
 }
 
-const ARTIFACT_COLORS: Record<string, string> = {
-  report: 'text-blue-500',
-  document: 'text-slate-500',
-  image: 'text-purple-500',
-  code: 'text-emerald-500',
-  slide: 'text-orange-500',
-  spreadsheet: 'text-green-500',
-  archive: 'text-amber-500',
-  audio: 'text-pink-500',
-  video: 'text-red-500',
+const FALLBACK_COLORS: Record<string, string> = {
+  archive: 'text-amber-400',
+  audio: 'text-pink-400',
+  video: 'text-red-400',
 }
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -114,8 +108,12 @@ function DeliverableRowImpl({ deliverable, onClick, className }: DeliverableRowP
     file_size_bytes,
   } = deliverable
 
-  const ArtifactIcon = ARTIFACT_ICONS[artifact_type] ?? File
-  const iconColor = ARTIFACT_COLORS[artifact_type] ?? 'text-muted-foreground'
+  const isCanonical = isDeliverableType(artifact_type)
+  const canonicalType = isCanonical ? (artifact_type as DeliverableType) : null
+  const FallbackIcon = FALLBACK_ICONS[artifact_type] ?? File
+  const iconColor = canonicalType
+    ? DELIVERABLE_ACCENTS[canonicalType].tw
+    : FALLBACK_COLORS[artifact_type] ?? 'text-muted-foreground'
   const SourceIcon = SOURCE_ICONS[source_type] ?? Zap
   const sourceLabel = SOURCE_LABELS[source_type] ?? source_type
 
@@ -141,7 +139,11 @@ function DeliverableRowImpl({ deliverable, onClick, className }: DeliverableRowP
     >
       {/* Icon */}
       <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted/50', iconColor)}>
-        <ArtifactIcon className="h-5 w-5" strokeWidth={1.5} />
+        {canonicalType ? (
+          <DeliverableIcon type={canonicalType} size="row" />
+        ) : (
+          <FallbackIcon className="h-5 w-5" strokeWidth={1.5} />
+        )}
       </div>
 
       {/* Title + agent */}
