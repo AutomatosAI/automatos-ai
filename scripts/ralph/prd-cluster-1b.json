@@ -1,0 +1,148 @@
+{
+  "project": "Automatos AI Platform",
+  "branchName": "ralph/cluster-1b-plan-mode",
+  "description": "Cluster 1 Part B — Plan mode (the real new functionality) + thread switcher. Depends on Part A having shipped (Assignments page exists with +Plan card deep-linking to /chat?mode=plan; ChatModeBar Plan toggle UI exists today). User explicitly rejected auto-recommendation between Playbook/Mission — user picks. Source: docs/PRDS/AUTOMATOS-0.2/10-PRD-CLUSTER-1-WORK-LOOP.md US-019 onwards (renumbered).",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "PlanDraft type and in-memory store with API",
+      "description": "As a platform developer, I need a transient PlanDraft type to hold plan state during a Plan-mode chat session, so plans can be iterated without a database write until saved.",
+      "acceptanceCriteria": [
+        "Define PlanDraft TypeScript type in frontend/lib/types/plan.ts: { id (uuid), goal (string), steps (PlanStep[] — each has title, description, agent_id|agent_role, tool_refs, dependencies), agents (string[] — derived), tools (string[] — derived), schedule (CronExpr|null), estimatedCostUsd (number), status ('drafting'|'ready'|'saved') }",
+        "Define matching Pydantic model in orchestrator/api/schemas/plan.py",
+        "In-memory store keyed by session id — search for existing session/Redis utility first; reuse, do not introduce new dependency",
+        "TTL: 24 hours",
+        "Backend endpoints: POST /api/plan-drafts (create), GET /api/plan-drafts/:id (read), PATCH /api/plan-drafts/:id (update — partial), DELETE /api/plan-drafts/:id (clear)",
+        "All endpoints workspace-scoped via existing auth middleware",
+        "Typecheck + Pydantic validation passes",
+        "Unit test: create → patch → read returns updated state; TTL expires correctly"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "NO database table. Session-scoped only. Persist only on Save as Playbook / Launch as Mission."
+    },
+    {
+      "id": "US-002",
+      "title": "Wire mode=plan in Chat — ChatModeBar Plan toggle activates Plan mode",
+      "description": "As a user clicking +Plan from Assignments (which deep-links to /chat?mode=plan), I want the Chat page to enter Plan mode visually so the planning surface is clear.",
+      "acceptanceCriteria": [
+        "Chat page reads ?mode=plan&from=<source> query params on mount",
+        "When mode=plan, set isPlanMode=true on existing useMissionStore",
+        "ChatModeBar already shows Plan toggle as active when isPlanMode=true (verify, don't rebuild)",
+        "Chat header changes to 'Planning with Auto' subtitle when in plan mode",
+        "When from=assignments, render a 'Back to Assignments' link near the header",
+        "On entering plan mode, create a new PlanDraft via POST /api/plan-drafts and store its id in session state",
+        "Leaving plan mode (toggle off) clears the PlanDraft id (does not delete the draft — TTL handles it)",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "ChatModeBar exists. useMissionStore has isPlanMode. This story is wiring, not new UI."
+    },
+    {
+      "id": "US-003",
+      "title": "Plan panel UI — right-side panel with live plan state",
+      "description": "As a user in Plan mode, I want a structured plan panel beside the chat showing steps, agents, tools, schedule, and estimated cost, so I see the plan crystallise as I talk to Auto.",
+      "acceptanceCriteria": [
+        "New component frontend/components/chat/plan-panel.tsx",
+        "Renders fixed to right side of viewport when isPlanMode=true, ~380px wide, full-height below header",
+        "Hidden (or collapsed to a chevron strip) when isPlanMode=false",
+        "Sections: Goal (top, editable inline — patches PlanDraft on blur), Steps (numbered list with agent chip), Agents (chips, derived), Tools (chips, derived), Schedule (optional, edit affordance), Estimated cost (USD, monospace)",
+        "Empty state: 'Tell Auto what you want to achieve. The plan will appear here as you talk.'",
+        "Bottom bar: [Save as Playbook] [Launch as Mission] buttons — both visible, no auto-recommendation. User picks. Buttons disabled until status==='ready'.",
+        "Polls GET /api/plan-drafts/:id every 2s while drafting (or use existing chat websocket if available — search first)",
+        "Match existing slide-over/panel design-system styles — reuse, do not invent",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "NO detectShape logic. NO recommendation highlight. User decides Playbook vs Mission. Both buttons present and equal weight."
+    },
+    {
+      "id": "US-004",
+      "title": "Auto system-prompt switch for mode=plan + plan-write tools",
+      "description": "As a user in Plan mode, I want Auto to behave as a planner (ask clarifying questions, build a structured plan, don't execute state-changing tools) so the conversation produces a plan, not actions.",
+      "acceptanceCriteria": [
+        "Locate existing Auto system-prompt construction (orchestrator/core/auto/ or wherever the prompt is built)",
+        "When chat session has mode=plan, augment Auto's system prompt with a planning instruction set: (a) ask clarifying questions if goal is vague, (b) populate the PlanDraft via plan_* tools, (c) DO NOT call state-changing tools (no posts, no emails, no DB writes outside PlanDraft), (d) signal 'ready' when user accepts",
+        "Add three platform tools (follow existing 3-file pattern: platform_actions.py, platform_executor.py, auto.py keywords): platform_plan_add_step (params: title, description, agent_role, tool_refs, dependencies), platform_plan_set_schedule (params: cron_expression, timezone), platform_plan_finalize (no params — sets status='ready')",
+        "All three tools update the PlanDraft via the API endpoints from US-001",
+        "Existing chat behaviour unchanged when mode is not plan",
+        "Typecheck + lint passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "Search 'platform_*' tool patterns BEFORE adding new ones. The 3-file registration pattern is documented in user memory (prd71-tools.md)."
+    },
+    {
+      "id": "US-005",
+      "title": "Save as Playbook action — convert PlanDraft to workflow_recipes record",
+      "description": "As a user with a finished plan, I want to click [Save as Playbook] to convert the PlanDraft into a real Playbook record so I can run it from Assignments.",
+      "acceptanceCriteria": [
+        "Backend endpoint POST /api/plan-drafts/:id/save-as-playbook",
+        "Reads PlanDraft, constructs WorkflowTemplate record (existing workflow_recipes table — DO NOT modify schema)",
+        "Maps: PlanDraft.goal → name + description, PlanDraft.steps → steps JSONB array, PlanDraft.schedule → schedule_config, PlanDraft.tools → tool refs in steps",
+        "Persists via existing playbook service",
+        "Marks PlanDraft as status='saved' (still TTL'd in memory)",
+        "Returns the new playbook id and a redirect URL to /assignments?tab=playbooks&highlight=<id>",
+        "Frontend [Save as Playbook] button calls endpoint, shows toast 'Saved. Run it now or schedule it?', navigates to redirect URL",
+        "Highlighted playbook card on Assignments gets a brief visual flash",
+        "Typecheck + smoke test passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "DO NOT modify workflow_recipes schema. Map only into existing fields. If a PlanDraft field has no schema home, store it in any existing JSON metadata column on the row."
+    },
+    {
+      "id": "US-006",
+      "title": "Launch as Mission action — convert PlanDraft to orchestration_runs record + launch",
+      "description": "As a user with a finished complex plan, I want to click [Launch as Mission] to convert the PlanDraft into a real Mission record and start it so the work begins immediately.",
+      "acceptanceCriteria": [
+        "Backend endpoint POST /api/plan-drafts/:id/launch-as-mission",
+        "Reads PlanDraft, constructs OrchestrationRun record (existing orchestration_runs table — DO NOT modify schema)",
+        "Maps: PlanDraft.goal → goal, PlanDraft.steps → plan JSONB (matching the existing plan field structure used by MissionPlanner), PlanDraft.agents → reflected via plan tasks' agent_role",
+        "Triggers existing mission-start flow (whatever endpoint /api/missions/:id/start or auto-start-on-create exists today)",
+        "Marks PlanDraft as status='saved'",
+        "Returns the new mission id and a redirect URL to /command-center?tab=board&highlight=<mission_id>",
+        "Frontend [Launch as Mission] button calls endpoint, shows toast 'Mission launched.', navigates to Command Center → Board",
+        "Typecheck + smoke test passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "DO NOT modify orchestration_runs schema. PlanDraft.plan may bypass MissionPlanner entirely (user already planned with Auto). Verify whether the dispatcher requires planner output or accepts a pre-built plan field."
+    },
+    {
+      "id": "US-007",
+      "title": "Thread switcher dropdown in Chat header",
+      "description": "As a user with multiple agents working concurrently, I want a thread switcher dropdown in the Chat header so I can jump between conversations (e.g. Canvas making images, Comms triaging email).",
+      "acceptanceCriteria": [
+        "Add a dropdown button in the Chat page header labelled with current thread name (or 'New thread' if blank)",
+        "Dropdown lists active threads (last 24h activity) — reuse existing chat history data from AppSidebar / chat-bot/sidebar.tsx",
+        "Each row: thread name, last agent involved, last message preview (truncated 60 chars), last activity relative time",
+        "'New thread' option at top creates fresh thread (existing handleNewChat flow)",
+        "Selecting a thread loads it into the main chat view (existing thread-load flow)",
+        "Decision: replace AppSidebar OR augment? — KEEP AppSidebar for desktop (existing pattern works) AND add the dropdown for mobile + quick switching. Both surfaces show the same data.",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "Reuse existing chat history data hook. Decision on replace vs augment defaults to augment (keep both) — Gerard can make final call after seeing it."
+    },
+    {
+      "id": "US-008",
+      "title": "End-to-end smoke test: Plan → Playbook → Run → Deliverable → History",
+      "description": "As a tester, I want a documented manual smoke test confirming the full Cluster 1 work loop works end-to-end so we can sign off the PRD.",
+      "acceptanceCriteria": [
+        "Document at docs/PRDS/AUTOMATOS-0.2/cluster-1-smoke-test.md",
+        "Steps: 1) Open /assignments. 2) Click + Plan card. 3) Land on /chat?mode=plan. 4) Tell Auto a goal e.g. 'research weekly social posts and schedule them'. 5) Watch plan panel populate. 6) Iterate ('skip step 3', 'use Canva not Figma'). 7) Click Save as Playbook. 8) Verify playbook appears highlighted on Assignments → Playbooks tab. 9) Click Run. 10) Watch progress on Command Center → Board. 11) See deliverable on Deliverables → Created today after completion. 12) Open it via universal preview. 13) Verify run appears on Command Center → History.",
+        "ALSO test: 1) From Assignments + Plan card, plan a complex multi-agent goal. 2) Click Launch as Mission. 3) Watch on Command Center → Board live. 4) Mission completes. 5) See deliverable. 6) See run in History.",
+        "Each step has expected outcome documented",
+        "Manual run-through completes without exception",
+        "If any step fails, document the failure and link to the failing story; the PRD is not complete until all steps pass"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "This is the validation that ties Part A + Part B together. Both flows (Save as Playbook + Launch as Mission) must work."
+    }
+  ]
+}

@@ -4,7 +4,7 @@ import { MainLayout } from '@/components/layout/main-layout'
 import { ActivityPage as ActivityCommandCentre } from '@/components/activity/activity-page'
 import { usePageAPI } from '@/hooks/use-page-api'
 
-export default function ActivityRoute() {
+export default function CommandCenterPage() {
   usePageAPI('activity')
 
   return (

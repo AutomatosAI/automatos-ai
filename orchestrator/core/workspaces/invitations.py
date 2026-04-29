@@ -36,7 +36,10 @@ class WorkspaceInvitation(Base):
     expires_at = Column(DateTime, nullable=False)
     accepted_at = Column(DateTime, nullable=True)
     accepted_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    
+
+    # Clerk invitation ID — set when we send via Clerk so we can revoke both sides.
+    clerk_invitation_id = Column(String(255), nullable=True)
+
     created_at = Column(DateTime, server_default=func.now())
 
 class InvitationService:

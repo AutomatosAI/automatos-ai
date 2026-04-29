@@ -1,107 +1,53 @@
-# PRD-128: Unified Notification System — Implementation Plan
+# Cluster 1 Part A — Rehouse Plan
 
-## Overview
+**Branch:** `ralph/cluster-1a-rehouse`
+**Worktree:** `/Users/gkavanagh/Development/Automatos-AI-Platform/automatos-CLUSTER-1A`
+**Source PRD:** `docs/PRDS/AUTOMATOS-0.2/10-PRD-CLUSTER-1-WORK-LOOP.md`
+**Spec:** `scripts/ralph/prd.json` (= prd-cluster-1a.json)
 
-A single notification pipeline that captures completion events from every source (heartbeats, tasks, missions, playbooks, triggers, reports, agent errors), routes them via per-workspace preferences (in_app / telegram / slack / webhook / silent), and surfaces in-app notifications via a bell-icon dropdown. Reuses the existing `notification_service.py` fan-out and `channel_connections` table.
+This is **80% reuse, 20% rehousing**. NOT a new build. Read the user story `notes` field before touching anything — it tells you whether to verify existing code first.
 
-## Architecture
+Mark a task `- [x]` only when:
+1. Acceptance criteria pass
+2. `cd frontend && npx tsc --noEmit` passes (frontend stories)
+3. Commit landed on `ralph/cluster-1a-rehouse`
 
-```
-<event source>
-  └─ NotificationDispatcher(db, workspace_id).dispatch(event_type, ...)
-       ├─ read notification_preferences (workspace defaults + user overrides)
-       ├─ for each enabled pref:
-       │    ├─ silent   → skip
-       │    ├─ in_app   → INSERT notifications row (no commit; caller owns txn)
-       │    ├─ telegram/slack/webhook → notification_service.send_workspace_notification
-       │    └─ channel  → send to specific channel_connection_id
-       └─ return {dispatched_to: [...]}
+## Stories
 
-Frontend:
-  navbar <NotificationBell/>
-    ├─ poll /api/notifications/unread-count (30s)
-    ├─ open → GET /api/notifications?limit=20
-    └─ click row → POST /{id}/read + next/navigation router.push(linkFor(row))
+- [x] US-001 — Page renames: Workspace → Deliverables, Activity → Command Center
+- [x] US-002 — Deliverables: "Created today" hero section above tabs
+- [x] US-003 — Deliverables tabs scaffold (Created today / Explorer / Templates / Blog)
+- [x] US-004 — Move Blog tab from Activity → Deliverables (verify d9941e36d first)
+- [x] US-005 — Blog: SEO fields + Publish toggle on blog detail/edit view
+- [x] US-006 — Templates: move from Deliverables top-level into Deliverables → Templates tab
+- [x] US-007 — Explorer takes the full page area inside the Explorer tab
+- [x] US-008 — Command Center: add History tab (unified view of past Mission + Playbook runs)
+- [x] US-009 — Assignments page shell using Marketplace pattern (FeaturedBanner + tabs + grid)
+- [x] US-010 — Assignments hero cards: Mission (lead) + Playbook + Plan + Task
+- [x] US-011 — Contextual hero hint based on workspace state
+- [x] US-012 — Assignments: Playbooks tab grid (reuse existing playbook list data)
+- [x] US-013 — Assignments: Missions tab grid (reuse existing mission list data)
+- [x] US-014 — Quick Task modal (reuse existing CreateTaskDialog component)
+- [x] US-015 — Plan card deep-links to `/chat?mode=plan&from=assignments`
+- [x] US-016 — Recommended-for-you grid (read-only suggestions endpoint)
+- [x] US-017 — Cleanup: remove old Workspace/Activity entry points + dead surfaces we replaced
+- [x] US-018 — Legacy redirects: `/workspace → /deliverables`, `/activity → /command-center`
 
-Settings:
-  /settings/notifications → GET /api/notification-preferences / PUT bulk upsert
-```
+## Definition of done for the whole cluster
 
-## Key Files
+- All 18 boxes checked
+- `cd frontend && npx tsc --noEmit` passes on the worktree HEAD
+- No new DB tables, no new schema migrations
+- Commits follow `feat(cluster-1a): US-XXX — <description>` format
+- Final commit message contains `RALPH_COMPLETE` so the loop exits
 
-| Area | File | Purpose |
-|------|------|---------|
-| DB schema | `orchestrator/alembic/versions/prd128_notifications.py` | Tables + indexes (US-001) |
-| Provisioning | `orchestrator/core/auth/hybrid.py` | `_provision_new_user_workspace()` — seed 9 prefs (US-002) |
-| Service | `orchestrator/core/services/notification_dispatcher.py` | NEW dispatcher class (US-003) |
-| Fan-out reuse | `orchestrator/services/notification_service.py` | `send_workspace_notification` entry point |
-| API | `orchestrator/api/notifications.py` | NEW — notifications + preferences routers (US-004, US-005) |
-| Main | `orchestrator/main.py` | Include new routers |
-| Heartbeats | `orchestrator/services/heartbeat_service.py` | Replace `_deliver_notification` (US-006) |
-| Tasks | `orchestrator/api/tasks.py` | Dispatch task_complete (US-007) |
-| Missions | `orchestrator/services/coordinator_service.py` | mission_step_complete / mission_complete (US-007) |
-| Playbooks | `orchestrator/services/playbook_executor.py` | playbook_step_complete / playbook_complete (US-007) |
-| Reports | `orchestrator/services/report_service.py` | report_submitted (US-007) |
-| Bell UI | `frontend/components/notifications/notification-bell.tsx` | NEW popover (US-008) |
-| Navbar | `frontend/components/navbar.tsx` (or equivalent) | Mount bell component (US-008) |
-| Settings UI | `frontend/app/settings/notifications/page.tsx` | NEW settings page (US-009) |
-| Sidebar | `frontend/components/settings/*` | Add link (US-009) |
-| E2E | `tests/integration/test_notification_pipeline.py` | Smoke test (US-010) |
+## Reuse-first reminders (from project CLAUDE.md)
 
-## Event Types (9)
-
-| Event | Default | Description |
-|-------|---------|-------------|
-| `heartbeat_complete` | in_app | Heartbeat cycle finished |
-| `task_complete` | in_app | Board task marked complete |
-| `mission_step_complete` | silent | Per-step mission progress (noisy) |
-| `mission_complete` | in_app | Mission terminal state |
-| `playbook_step_complete` | silent | Per-step playbook progress (noisy) |
-| `playbook_complete` | in_app | Playbook finished |
-| `trigger_fired` | in_app | Composio trigger fired |
-| `report_submitted` | in_app | Agent submitted a report |
-| `agent_error` | in_app | Agent raised an error |
-
-## Tasks
-
-### Phase 1: Schema & Seed
-
-- [x] **US-001**: Alembic migration — `notification_preferences` + `notifications` tables + all indexes (file: `orchestrator/alembic/versions/prd128_notifications.py`, down_revision=`prd127_attachment_ids`)
-- [x] **US-002**: Seed 9 default prefs on workspace provisioning (idempotent)
-
-### Phase 2: Dispatcher & API
-
-- [x] **US-003**: `NotificationDispatcher` service with full fan-out + unit tests
-- [x] **US-004**: Notifications API — list, unread-count, read, read-all, dismiss
-- [x] **US-005**: Preferences API — GET merged list, PUT bulk upsert
-
-### Phase 3: Wire Sources
-
-- [x] **US-006**: Migrate `HeartbeatService` to dispatcher, delete `_deliver_notification`
-- [x] **US-007**: Wire tasks, missions (step+complete), playbooks (step+complete), reports
-
-### Phase 4: Frontend
-
-- [x] **US-008**: `NotificationBell` component + navbar mount
-- [x] **US-009**: `/settings/notifications` page + sidebar link
-
-### Phase 5: Verification
-
-- [x] **US-010**: End-to-end smoke test of notification pipeline
-
-## Constraints
-
-- **Dispatcher never commits** — caller owns the transaction so notification inserts roll back with the main work on failure.
-- **Multi-destination fan-out** — one event_type row may have multiple preference rows; all enabled rows fire (silent skips silently).
-- **User overrides workspace default** — when both exist for the same `(event_type, destination)`, user-specific wins.
-- **Non-blocking** — every new `dispatcher.dispatch` call is wrapped in try/except log-only so notification bugs never break the primary flow.
-- **workspace + user scoping** — all API queries enforce `workspace_id = ctx.workspace_id AND (user_id = ctx.user_id OR user_id IS NULL)`.
-- **react-query v4** — `isLoading` not `isPending`, `useRouter().push()` not `window.location.href`.
-
-## Quality Bar
-
-- Every DB query workspace-scoped
-- Dispatcher covered by unit tests: silent, in_app, multi-destination, user override, no-prefs default
-- Migration up/down clean against local postgres
-- Typecheck passes on every story
-- No silent failures — all exceptions logged with `exc_info=True`
+- ChatModeBar exists. useMissionStore.isPlanMode exists. Don't rebuild.
+- MarketplaceGrid + FeaturedBanner exist. Use them as the visual template for Assignments.
+- FilePreview (universal preview) exists. Reuse for Deliverables tabs.
+- WorkspaceExplorer exists. Just move it inside the Explorer tab; do not rewrite.
+- CreateTaskDialog exists. Reuse for Quick Task modal.
+- Playbook = `workflow_recipes` table. Mission = `orchestration_runs` table. Task = `BoardTask`. Don't confuse them.
+- NO new DB tables in Part A. NO `os.getenv()` outside `config.py`.
+- If you replace a surface, **delete** the old one. No backward-compat shims.

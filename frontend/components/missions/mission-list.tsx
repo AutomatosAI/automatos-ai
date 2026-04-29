@@ -25,7 +25,12 @@ const FILTERS: { value: FilterKey; label: string; states?: RunState[] }[] = [
 
 // ── Component ─────────────────────────────────────────────────
 
-export function MissionList() {
+interface MissionListProps {
+  /** Optional override for the empty-state action buttons (used by Assignments page). */
+  emptyAction?: React.ReactNode
+}
+
+export function MissionList({ emptyAction }: MissionListProps = {}) {
   const prefersReducedMotion = useReducedMotion()
   const [activeFilter, setActiveFilter] = useState<FilterKey>('all')
   const [search, setSearch] = useState('')
@@ -147,7 +152,7 @@ export function MissionList() {
             </p>
           </div>
 
-          {!search && activeFilter === 'all' && (
+          {!search && activeFilter === 'all' && (emptyAction ?? (
             <div className="flex items-center gap-3">
               <Button
                 variant="outline"
@@ -158,7 +163,7 @@ export function MissionList() {
                 New Mission
               </Button>
             </div>
-          )}
+          ))}
         </motion.div>
       )}
 

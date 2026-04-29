@@ -87,12 +87,40 @@ def _get_workspace_id_from_request(request: Request) -> Optional[UUID]:
 
 
 def _workspace_exists(db, workspace_id: UUID) -> bool:
-    """Return True if workspace exists (and is active)."""
+    """Return True if a non-deleted workspace row exists.
+
+    Note: a *disabled* workspace (paused_at IS NOT NULL) still "exists" — the
+    disabled-state gate is enforced separately via `_assert_workspace_usable`
+    so we can return a clear 403 instead of a generic 400, and so admins can
+    still load the workspace from the admin console.
+    """
     row = db.execute(
-        text("SELECT 1 FROM workspaces WHERE id = :id AND is_active = true LIMIT 1"),
+        text(
+            "SELECT 1 FROM workspaces "
+            "WHERE id = :id AND deleted_at IS NULL LIMIT 1"
+        ),
         {"id": str(workspace_id)},
     ).fetchone()
     return bool(row)
+
+
+def _assert_workspace_usable(db, workspace_id: UUID, *, is_admin: bool) -> None:
+    """Raise 403 if the workspace is disabled (paused) and the caller isn't admin.
+
+    Admins always pass — they need to manage disabled workspaces from the admin
+    console. Deleted workspaces are already filtered out by `_workspace_exists`.
+    """
+    if is_admin:
+        return
+    row = db.execute(
+        text("SELECT paused_at FROM workspaces WHERE id = :id"),
+        {"id": str(workspace_id)},
+    ).fetchone()
+    if row and row[0] is not None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Workspace is disabled. Contact an administrator.",
+        )
 
 
 def _user_is_workspace_member(db, workspace_id: UUID, clerk_user_id: Optional[str]) -> bool:
@@ -133,6 +161,38 @@ def _user_has_workspace_access(db, clerk_user_id: Optional[str], workspace_id: U
         {"cid": clerk_user_id, "ws_id": str(workspace_id)},
     ).fetchone()
     return bool(row)
+
+
+def _has_pending_invitations(db, email: Optional[str]) -> bool:
+    """Return True if the email has a pending (unaccepted, unexpired) invitation.
+
+    Gates auto-provisioning so an invitee never silently lands in a personal
+    workspace before the explicit /accept-invitation flow can run.
+    """
+    return _get_pending_invitation_token(db, email) is not None
+
+
+def _get_pending_invitation_token(db, email: Optional[str]) -> Optional[str]:
+    """Return the most recent pending invitation token for ``email``, or None.
+
+    Used both to gate auto-provisioning and to surface the token in the 409
+    response so the frontend can deep-link to /accept-invitation?token=… even
+    if Clerk's redirect chain stripped query params from the original link.
+    """
+    if not email:
+        return None
+    row = db.execute(
+        text(
+            "SELECT token FROM workspace_invitations "
+            "WHERE LOWER(email) = LOWER(:email) "
+            "AND accepted_at IS NULL "
+            "AND expires_at > NOW() "
+            "ORDER BY created_at DESC "
+            "LIMIT 1"
+        ),
+        {"email": email},
+    ).fetchone()
+    return row[0] if row else None
 
 
 # PRD-128: Default notification routing seeded on workspace provisioning.
@@ -337,15 +397,15 @@ def _resolve_workspace_for_clerk_user(
 
     Priority:
     1. Org workspace (workspaces.clerk_org_id == org_id)
-    2. Personal workspace owned by mapped user
-    3. Auto-provision a new personal workspace (new user signup)
+    2. Any workspace the user can access (owned OR active membership), owner-biased
+    3. Auto-provision a new personal workspace (only when no pending invitation)
     """
     # 1) Org workspace
     if org_id:
         row = db.execute(
             text(
                 "SELECT id FROM workspaces "
-                "WHERE clerk_org_id = :org_id AND is_active = true "
+                "WHERE clerk_org_id = :org_id AND is_active = true AND deleted_at IS NULL "
                 "ORDER BY updated_at DESC NULLS LAST "
                 "LIMIT 1"
             ),
@@ -354,28 +414,49 @@ def _resolve_workspace_for_clerk_user(
         if row and row[0]:
             return row[0]
 
-    # 2) Personal workspace via existing user record
+    # 2) Workspace via ownership OR active membership.
+    # Mirrors the LEFT JOIN access pattern in `_user_has_workspace_access` so
+    # invitees who joined a workspace as members (not owners) resolve correctly
+    # when no X-Workspace-ID header is present. Owner-bias keeps existing solo
+    # users on their personal workspace; recency tiebreaker favours the most
+    # recent join for users with multiple memberships.
     if clerk_user_id:
-        user_row = db.execute(
-            text("SELECT id FROM users WHERE clerk_user_id = :cid LIMIT 1"),
+        ws_row = db.execute(
+            text(
+                "SELECT w.id FROM users u "
+                "JOIN workspaces w "
+                "  ON w.owner_id = u.id "
+                "  OR EXISTS ("
+                "    SELECT 1 FROM workspace_members wm "
+                "    WHERE wm.workspace_id = w.id "
+                "      AND wm.user_id = u.id "
+                "      AND wm.is_active = true "
+                "  ) "
+                "LEFT JOIN workspace_members wm2 "
+                "  ON wm2.workspace_id = w.id AND wm2.user_id = u.id AND wm2.is_active = true "
+                "WHERE u.clerk_user_id = :cid "
+                "  AND w.is_active = true "
+                "  AND w.deleted_at IS NULL "
+                "ORDER BY "
+                "  CASE WHEN w.owner_id = u.id OR COALESCE(wm2.role, '') = 'owner' THEN 0 ELSE 1 END, "
+                "  wm2.joined_at DESC NULLS LAST, "
+                "  w.created_at DESC "
+                "LIMIT 1"
+            ),
             {"cid": clerk_user_id},
         ).fetchone()
-        if user_row and user_row[0]:
-            uid = user_row[0]
-            ws_row = db.execute(
-                text(
-                    "SELECT id FROM workspaces "
-                    "WHERE owner_id = :uid AND is_active = true "
-                    "ORDER BY is_personal DESC, updated_at DESC NULLS LAST "
-                    "LIMIT 1"
-                ),
-                {"uid": uid},
-            ).fetchone()
-            if ws_row and ws_row[0]:
-                return ws_row[0]
+        if ws_row and ws_row[0]:
+            return ws_row[0]
 
-    # 3) No workspace found -- auto-provision for authenticated Clerk users
+    # 3) No workspace found -- auto-provision for authenticated Clerk users,
+    # unless they have a pending invitation (which owns the consent UX).
     if clerk_user_id:
+        if _has_pending_invitations(db, email):
+            logger.info(
+                "Pending invitation for %s — refusing auto-provision; caller must surface 409",
+                email,
+            )
+            return None
         logger.info(
             "No workspace found for clerk_user_id=%s -- provisioning new personal workspace",
             clerk_user_id,
@@ -498,6 +579,17 @@ async def get_request_context_hybrid(request: Request) -> RequestContext:
                     name=info.get("name"),
                 )
                 if not resolved:
+                    pending_token = _get_pending_invitation_token(db, info.get("email"))
+                    if pending_token:
+                        raise HTTPException(
+                            status_code=status.HTTP_409_CONFLICT,
+                            detail={
+                                "code": "pending_invitation",
+                                "redirect": f"/accept-invitation?token={pending_token}",
+                                "token": pending_token,
+                                "message": "Accept your pending invitation before continuing.",
+                            },
+                        )
                     logger.warning("Auth failed: Workspace not resolved for user %s", info.get("email"))
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
@@ -506,6 +598,7 @@ async def get_request_context_hybrid(request: Request) -> RequestContext:
                 if not _workspace_exists(db, resolved):
                     logger.warning("Auth failed: Workspace %s does not exist", resolved)
                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid workspace_id")
+                _assert_workspace_usable(db, resolved, is_admin=is_admin)
 
                 user = UserContext(
                     id=info.get("clerk_user_id") or info.get("email"),
@@ -540,6 +633,8 @@ async def get_request_context_hybrid(request: Request) -> RequestContext:
                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace not resolved")
                 if not _workspace_exists(db, resolved):
                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid workspace_id")
+                # API keys are admin-equivalent (system_role="admin" above) — bypass disabled gate
+                _assert_workspace_usable(db, resolved, is_admin=True)
                 result = RequestContext(
                     workspace_id=resolved, user=user, auth_type="api_key", api_key_id="env"
                 )
@@ -567,6 +662,7 @@ async def get_request_context_hybrid(request: Request) -> RequestContext:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Workspace not resolved. Send X-Workspace-ID header or configure DEFAULT_WORKSPACE_ID.",
             )
+        _assert_workspace_usable(db, resolved, is_admin=False)
         result = RequestContext(workspace_id=resolved, user=UserContext(), auth_type="anonymous")
         _enrich_log_context(result)
         return result

@@ -125,7 +125,7 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
       <div className="p-4 md:p-6 border-b border-border space-y-4">
         {/* Back link */}
         <Link
-          href="/activity?tab=missions"
+          href="/assignments?tab=missions"
           className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
         >
           <ArrowLeft className="w-3.5 h-3.5" />

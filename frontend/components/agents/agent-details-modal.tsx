@@ -66,6 +66,7 @@ interface AgentDetailsModalProps {
 
 interface AgentDetails {
   id: number
+  public_id?: string | null
   name: string
   description?: string
   agent_type: string
@@ -393,7 +394,18 @@ export function AgentDetailsModal({
                         </div>
                         <div>
                           <p className="text-sm font-medium text-muted-foreground">Agent ID</p>
-                          <p className="font-semibold text-primary">#{agent?.id}</p>
+                          <p
+                            className="font-mono text-xs text-primary break-all cursor-pointer hover:underline"
+                            title="Click to copy"
+                            onClick={() => {
+                              const v = agent?.public_id || String(agent?.id ?? '')
+                              if (v && typeof navigator !== 'undefined' && navigator.clipboard) {
+                                navigator.clipboard.writeText(v).catch(() => {})
+                              }
+                            }}
+                          >
+                            {agent?.public_id || `#${agent?.id}`}
+                          </p>
                         </div>
                       </CardContent>
                     </Card>

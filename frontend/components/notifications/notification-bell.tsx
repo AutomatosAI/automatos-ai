@@ -45,17 +45,17 @@ function linkFor(row: NotificationRow): string | null {
 
   switch (link_type) {
     case 'task':
-      return '/activity?tab=dashboard'
+      return '/command-center?tab=board'
     case 'mission':
-      return link_id ? `/activity?tab=missions&mission=${link_id}` : '/activity?tab=missions'
+      return link_id ? `/assignments?tab=missions&mission=${link_id}` : '/assignments?tab=missions'
     case 'playbook':
-      return link_id ? `/activity?tab=recipes&execution=${link_id}` : '/activity?tab=recipes'
+      return link_id ? `/assignments?tab=playbooks&execution=${link_id}` : '/assignments?tab=playbooks'
     case 'heartbeat':
-      return '/activity?tab=feed'
+      return '/command-center?tab=feed'
     case 'report':
-      return link_id ? `/activity?tab=reports&report=${link_id}` : '/activity?tab=reports'
+      return link_id ? `/command-center?tab=feed&report=${link_id}` : '/command-center?tab=feed'
     case 'trigger':
-      return '/activity?tab=feed'
+      return '/command-center?tab=feed'
     case 'agent':
       return link_id ? `/agents?agent=${link_id}` : '/agents'
     default:

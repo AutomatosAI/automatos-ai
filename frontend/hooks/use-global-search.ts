@@ -13,17 +13,23 @@ export interface SearchResult {
 }
 
 const NAVIGATION_PAGES: SearchResult[] = [
-  { id: 'nav-activity', label: 'Activity', category: 'pages', path: '/activity' },
+  { id: 'nav-command-centre', label: 'Command Center', category: 'pages', path: '/command-center' },
+  { id: 'nav-assignments', label: 'Assignments', category: 'pages', path: '/assignments' },
+  { id: 'nav-deliverables', label: 'Deliverables', category: 'pages', path: '/deliverables' },
   { id: 'nav-agents', label: 'Agents', category: 'pages', path: '/agents' },
   { id: 'nav-chat', label: 'Chat', category: 'pages', path: '/chat' },
   { id: 'nav-analytics', label: 'Analytics', category: 'pages', path: '/analytics' },
   { id: 'nav-marketplace', label: 'Marketplace', category: 'pages', path: '/marketplace' },
   { id: 'nav-settings', label: 'Settings', category: 'pages', path: '/settings' },
-  { id: 'nav-command-centre', label: 'Command Centre', category: 'pages', path: '/activity?tab=summary' },
-  { id: 'nav-board', label: 'Board', category: 'pages', path: '/activity?tab=board' },
-  { id: 'nav-calendar', label: 'Calendar', category: 'pages', path: '/activity?tab=calendar' },
-  { id: 'nav-memory', label: 'Memory', category: 'pages', path: '/activity?tab=memory' },
-  { id: 'nav-projects', label: 'Projects', category: 'pages', path: '/activity?tab=projects' },
+  { id: 'nav-board', label: 'Board', category: 'pages', path: '/command-center?tab=board' },
+  { id: 'nav-calendar', label: 'Calendar', category: 'pages', path: '/command-center?tab=calendar' },
+  { id: 'nav-feed', label: 'Feed', category: 'pages', path: '/command-center?tab=feed' },
+  { id: 'nav-history', label: 'History', category: 'pages', path: '/command-center?tab=history' },
+  { id: 'nav-playbooks', label: 'Playbooks', category: 'pages', path: '/assignments?tab=playbooks' },
+  { id: 'nav-missions', label: 'Missions', category: 'pages', path: '/assignments?tab=missions' },
+  { id: 'nav-blogs', label: 'Blogs', category: 'pages', path: '/deliverables?tab=blogs' },
+  { id: 'nav-templates', label: 'Templates', category: 'pages', path: '/deliverables?tab=templates' },
+  { id: 'nav-explorer', label: 'Explorer', category: 'pages', path: '/deliverables/explorer' },
 ]
 
 function filterPages(query: string): SearchResult[] {
@@ -41,7 +47,7 @@ async function searchTasks(query: string): Promise<SearchResult[]> {
       label: t.name || t.title || 'Untitled Task',
       description: [t.status, t.agent_name].filter(Boolean).join(' · '),
       category: 'tasks' as const,
-      path: `/activity?tab=board&task_id=${t.id}`,
+      path: `/command-center?tab=board&task_id=${t.id}`,
     }))
   } catch {
     return []
@@ -75,7 +81,7 @@ async function searchMemories(query: string): Promise<SearchResult[]> {
         label: content.length > 80 ? content.slice(0, 80) + '...' : content,
         description: m.created_at ? new Date(m.created_at).toLocaleDateString() : undefined,
         category: 'memories' as const,
-        path: `/activity?tab=memory&memory_id=${m.id}`,
+        path: `/command-center?memory_id=${m.id}`,
       }
     })
   } catch {

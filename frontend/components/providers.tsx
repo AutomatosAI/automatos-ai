@@ -25,10 +25,8 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <ClerkProvider
-      afterSignInUrl="/"
-      afterSignUpUrl="/"
-      signInForceRedirectUrl="/"
-      signUpForceRedirectUrl="/"
+      signInFallbackRedirectUrl="/"
+      signUpFallbackRedirectUrl="/"
       appearance={{
         baseTheme: undefined,
         variables: {

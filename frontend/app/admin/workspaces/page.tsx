@@ -93,13 +93,13 @@ function stateBadge(w: WorkspaceRow) {
   if (w.paused_at) {
     return (
       <Badge className="bg-yellow-500/20 text-yellow-400 border-yellow-500/30">
-        Paused
+        Disabled
       </Badge>
     )
   }
   return (
     <Badge className="bg-green-500/20 text-green-400 border-green-500/30">
-      Active
+      Enabled
     </Badge>
   )
 }
@@ -252,7 +252,7 @@ export default function AdminWorkspacesPage() {
               Workspace Admin
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
-              Manage all workspaces — pause, delete, inspect usage.
+              Manage all workspaces — enable, disable, delete, inspect usage.
             </p>
           </div>
           <Button
@@ -288,7 +288,7 @@ export default function AdminWorkspacesPage() {
           </Card>
           <Card>
             <CardContent className="p-4">
-              <div className="text-xs text-muted-foreground">Paused / Deleted</div>
+              <div className="text-xs text-muted-foreground">Disabled / Deleted</div>
               <div className="text-2xl font-bold mt-1">
                 {pausedCount} / {deletedCount}
               </div>
@@ -356,27 +356,27 @@ export default function AdminWorkspacesPage() {
         <Card>
           <CardContent className="p-0">
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm table-fixed">
                 <thead className="bg-muted/40 text-xs uppercase text-muted-foreground">
                   <tr>
-                    <th className="text-left px-4 py-3">Workspace</th>
-                    <th className="text-left px-4 py-3">Owner</th>
-                    <th className="text-left px-4 py-3">Plan</th>
-                    <th className="text-left px-4 py-3">State</th>
-                    <th className="text-right px-4 py-3">
+                    <th className="text-left px-3 py-2.5 w-[260px]">Workspace</th>
+                    <th className="text-left px-3 py-2.5 w-[200px]">Owner</th>
+                    <th className="text-left px-3 py-2.5 w-[110px]">Plan</th>
+                    <th className="text-left px-3 py-2.5 w-[90px]">State</th>
+                    <th className="text-right px-2 py-2.5 w-[52px]">
                       <Users className="h-3.5 w-3.5 inline" />
                     </th>
-                    <th className="text-right px-4 py-3">
+                    <th className="text-right px-2 py-2.5 w-[52px]">
                       <FileText className="h-3.5 w-3.5 inline" />
                     </th>
-                    <th className="text-right px-4 py-3">
+                    <th className="text-right px-2 py-2.5 w-[68px]">
                       <HardDrive className="h-3.5 w-3.5 inline" />
                     </th>
-                    <th className="text-right px-4 py-3">
+                    <th className="text-right px-2 py-2.5 w-[52px]">
                       <MessageSquare className="h-3.5 w-3.5 inline" />
                     </th>
-                    <th className="text-left px-4 py-3">Created</th>
-                    <th className="text-right px-4 py-3">Actions</th>
+                    <th className="text-left px-3 py-2.5 w-[90px]">Created</th>
+                    <th className="text-right px-3 py-2.5 w-[100px]">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -399,15 +399,15 @@ export default function AdminWorkspacesPage() {
                       key={w.id}
                       className="border-t border-border hover:bg-muted/20"
                     >
-                      <td className="px-4 py-3">
-                        <div className="font-medium">{w.name}</div>
+                      <td className="px-3 py-2.5">
+                        <div className="font-medium truncate" title={w.name}>{w.name}</div>
                         <div className="flex items-center gap-1 mt-0.5">
-                          <code className="text-[10px] font-mono text-muted-foreground">
+                          <code className="text-[10px] font-mono text-muted-foreground truncate">
                             {w.id}
                           </code>
                           <button
                             onClick={() => copyWorkspaceId(w.id)}
-                            className="opacity-60 hover:opacity-100"
+                            className="opacity-60 hover:opacity-100 shrink-0"
                             title="Copy UUID"
                           >
                             {copiedId === w.id ? (
@@ -418,13 +418,18 @@ export default function AdminWorkspacesPage() {
                           </button>
                         </div>
                       </td>
-                      <td className="px-4 py-3">
-                        <div>{w.owner_name || '—'}</div>
-                        <div className="text-xs text-muted-foreground">
+                      <td className="px-3 py-2.5">
+                        <div className="truncate" title={w.owner_name || ''}>
+                          {w.owner_name || '—'}
+                        </div>
+                        <div
+                          className="text-xs text-muted-foreground truncate"
+                          title={w.owner_email || ''}
+                        >
                           {w.owner_email || '—'}
                         </div>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-3 py-2.5">
                         <Badge variant="outline" className="capitalize">
                           {w.plan || '—'}
                         </Badge>
@@ -434,23 +439,23 @@ export default function AdminWorkspacesPage() {
                           </Badge>
                         )}
                       </td>
-                      <td className="px-4 py-3">{stateBadge(w)}</td>
-                      <td className="px-4 py-3 text-right tabular-nums">
+                      <td className="px-3 py-2.5">{stateBadge(w)}</td>
+                      <td className="px-2 py-2.5 text-right tabular-nums">
                         {w.agents_count}
                       </td>
-                      <td className="px-4 py-3 text-right tabular-nums">
+                      <td className="px-2 py-2.5 text-right tabular-nums">
                         {w.documents_count}
                       </td>
-                      <td className="px-4 py-3 text-right tabular-nums">
+                      <td className="px-2 py-2.5 text-right tabular-nums whitespace-nowrap">
                         {formatBytes(w.storage_bytes)}
                       </td>
-                      <td className="px-4 py-3 text-right tabular-nums">
+                      <td className="px-2 py-2.5 text-right tabular-nums">
                         {w.chats_count}
                       </td>
-                      <td className="px-4 py-3 text-xs text-muted-foreground">
+                      <td className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap">
                         {formatDate(w.created_at)}
                       </td>
-                      <td className="px-4 py-3 text-right">
+                      <td className="px-3 py-2.5 text-right">
                         <div className="flex items-center justify-end gap-1">
                           {w.deleted_at ? (
                             <Button
@@ -470,7 +475,7 @@ export default function AdminWorkspacesPage() {
                                   variant="outline"
                                   onClick={() => handleResume(w.id)}
                                   disabled={actionId === w.id}
-                                  title="Resume"
+                                  title="Enable"
                                 >
                                   <Play className="h-3.5 w-3.5" />
                                 </Button>
@@ -483,7 +488,7 @@ export default function AdminWorkspacesPage() {
                                     setPauseReason('')
                                   }}
                                   disabled={actionId === w.id}
-                                  title="Pause"
+                                  title="Disable"
                                 >
                                   <Pause className="h-3.5 w-3.5" />
                                 </Button>
@@ -549,11 +554,12 @@ export default function AdminWorkspacesPage() {
             <Card className="max-w-md w-full" onClick={(e) => e.stopPropagation()}>
               <CardContent className="p-6 space-y-4">
                 <h2 className="text-lg font-semibold">
-                  Pause workspace "{pauseTarget.name}"?
+                  Disable workspace "{pauseTarget.name}"?
                 </h2>
                 <p className="text-sm text-muted-foreground">
-                  Users in this workspace will lose access until it is resumed.
-                  Enter a reason (visible only to admins).
+                  The owner will lose login and API access, and any scheduled
+                  playbooks will refuse to run until the workspace is enabled
+                  again. Enter a reason (visible only to admins).
                 </p>
                 <Textarea
                   placeholder="e.g. Non-payment, abuse review, security concern"
@@ -577,7 +583,7 @@ export default function AdminWorkspacesPage() {
                     {actionId === pauseTarget.id ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
                     ) : (
-                      'Pause Workspace'
+                      'Disable Workspace'
                     )}
                   </Button>
                 </div>
@@ -599,12 +605,14 @@ export default function AdminWorkspacesPage() {
                   <h2 className="text-lg font-semibold">Delete workspace?</h2>
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  This will soft-delete{' '}
+                  This permanently deletes{' '}
                   <span className="font-semibold text-foreground">
                     {deleteTarget.name}
                   </span>
-                  . S3 data is NOT deleted yet — a separate cleanup worker handles
-                  that. You can restore within the retention window.
+                  , wipes all S3 files under this workspace, removes the
+                  owner's Clerk account, and cascades every workspace-scoped
+                  database row. <span className="text-red-400 font-semibold">
+                  This cannot be undone.</span>
                 </p>
                 <div>
                   <p className="text-xs text-muted-foreground mb-2">

@@ -17,23 +17,30 @@ from .core import Base
 
 
 class SettingCategory(str, Enum):
-    """Categories for system settings"""
+    """Categories for system settings.
+
+    PRD-136: LLM configuration is collapsed to three tiers — Auto, System,
+    Embeddings. The legacy per-service categories (codegraph, chatbot,
+    complexity_assessor, coordination, knowledge_graph, memory_management)
+    have been merged into `system_llm`. Embeddings is lifted out of `general`
+    into its own tier.
+    """
     GENERAL = "general"
-    ORCHESTRATOR_LLM = "orchestrator_llm"
-    CODEGRAPH = "codegraph"
-    CHATBOT = "chatbot"
+
+    # LLM tiers (PRD-136)
+    ORCHESTRATOR_LLM = "orchestrator_llm"  # Auto — premium, user-facing
+    SYSTEM_LLM = "system_llm"              # System — cheap-fast internal
+    EMBEDDINGS = "embeddings"              # Embeddings — vectorization
+
+    # Non-LLM operational categories
     SYSTEM_LOGGING = "system_logging"
     API_RATE_LIMITING = "api_rate_limiting"
     BACKEND_API_KEYS = "backend_api_keys"
-    MEMORY_MANAGEMENT = "memory_management"
     PERFORMANCE = "performance"
     SECURITY = "security"
     NOTIFICATIONS = "notifications"
     BACKUPS = "backups"
     MONITORING = "monitoring"
-    COMPLEXITY_ASSESSOR = "complexity_assessor"  # PRD-68: routing LLM
-    COORDINATION = "coordination"  # Mission planner, verifier, reconciler
-    KNOWLEDGE_GRAPH = "knowledge_graph"  # Graph extraction LLM
     LLM_COST_AUDIT = "llm_cost_audit"  # Cost tracking, budget alerts
 
 

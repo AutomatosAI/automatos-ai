@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useCallback, useRef } from 'react'
+import { useRouter } from 'next/navigation'
 import { AnimatePresence } from 'framer-motion'
 import { toast } from 'react-hot-toast'
 import { Paperclip, X, FileText, Image } from 'lucide-react'
@@ -37,6 +38,7 @@ interface CreateTaskDialogProps {
 type Step = 'quick' | 'planning' | 'refined'
 
 export function CreateTaskDialog({ open, onOpenChange }: CreateTaskDialogProps) {
+  const router = useRouter()
   const [step, setStep] = useState<Step>('quick')
 
   // Form state
@@ -148,12 +150,38 @@ export function CreateTaskDialog({ open, onOpenChange }: CreateTaskDialogProps) 
     }
     try {
       await createTask.mutateAsync(payload)
-      toast.success('Task created')
+
+      // Build toast message with agent name when assigned
+      const assignedAgent = agentId && agentId !== 'none'
+        ? (agents as any[]).find((a) => String(a.id) === agentId)
+        : null
+      const msg = assignedAgent
+        ? `Task assigned to ${assignedAgent.name}.`
+        : 'Task created.'
+
+      toast(
+        (t) => (
+          <div className="flex flex-col gap-1.5">
+            <span className="text-sm font-medium">{msg}</span>
+            <button
+              type="button"
+              className="text-xs text-primary hover:underline text-left"
+              onClick={() => {
+                toast.dismiss(t.id)
+                router.push('/command-center?tab=board')
+              }}
+            >
+              View on Command Center &rarr; Board
+            </button>
+          </div>
+        ),
+        { duration: 5000, icon: '\u2705' },
+      )
       handleOpenChange(false)
     } catch {
       toast.error('Failed to create task')
     }
-  }, [buildPayload, createTask, handleOpenChange])
+  }, [buildPayload, createTask, handleOpenChange, agentId, agents, router])
 
   const handlePlan = useCallback(async () => {
     const prompt = description || title

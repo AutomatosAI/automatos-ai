@@ -24,7 +24,7 @@ export default function WizardPage() {
     // Only redirect to activity if the wizard wasn't completed
     // (completed = mission launched, shell handles its own redirect)
     if (!completed) {
-      setTimeout(() => router.push('/activity?tab=missions'), 250)
+      setTimeout(() => router.push('/assignments?tab=missions'), 250)
     }
   }
 

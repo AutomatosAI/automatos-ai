@@ -4,7 +4,6 @@ import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { X, Mail, ShieldAlert } from 'lucide-react'
 import { apiClient } from '@/lib/api-client'
-import { useUser } from '@clerk/nextjs'
 
 interface InviteModalProps {
     isOpen: boolean
@@ -14,7 +13,6 @@ interface InviteModalProps {
 }
 
 export function InviteModal({ isOpen, onClose, onInvite, workspaceId }: InviteModalProps) {
-    const { user } = useUser()
     const [email, setEmail] = useState('')
     const [role, setRole] = useState('editor')
     const [loading, setLoading] = useState(false)
@@ -23,18 +21,6 @@ export function InviteModal({ isOpen, onClose, onInvite, workspaceId }: InviteMo
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
         setError(null)
-
-        // Domain Check Logic
-        if (user?.primaryEmailAddress?.emailAddress) {
-            const myDomain = user.primaryEmailAddress.emailAddress.split('@')[1]
-            const inviteDomain = email.split('@')[1]
-
-            if (myDomain && inviteDomain && myDomain.toLowerCase() !== inviteDomain.toLowerCase()) {
-                setError(`Security Restriction: You can only invite users from your organization (${myDomain}).`)
-                return
-            }
-        }
-
         setLoading(true)
 
         try {
@@ -94,7 +80,7 @@ export function InviteModal({ isOpen, onClose, onInvite, workspaceId }: InviteMo
                                 />
                             </div>
                             <p className="text-xs text-muted-foreground">
-                                Only users with the same email domain are allowed.
+                                We&apos;ll send them an invite to join this workspace.
                             </p>
                         </div>
 

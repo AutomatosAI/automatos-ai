@@ -6,17 +6,18 @@ import { motion } from 'framer-motion'
 import {
   Users,
   Settings,
-  Activity,
   Bot,
   MessageCircle,
   Wrench,
   Database,
   Store,
   BarChart3,
-  HardDrive,
+  Package,
   X,
   BookOpen,
   ExternalLink,
+  Radar,
+  ClipboardList,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { PremiumIcon } from '@/components/shared'
@@ -37,17 +38,25 @@ const navigationItems = [
     description: 'Your AI workspace'
   },
   {
-    name: 'Workspace',
-    href: '/workspace',
-    icon: HardDrive,
+    name: 'Assignments',
+    href: '/assignments',
+    icon: ClipboardList,
+    iconColor: 'text-[hsl(var(--chart-4))]',
+    navIconKey: 'nav_assignments',
+    description: 'Plan, schedule & orchestrate work'
+  },
+  {
+    name: 'Deliverables',
+    href: '/deliverables',
+    icon: Package,
     iconColor: 'text-[hsl(var(--chart-3))]',
     navIconKey: 'nav_workspace',
     description: 'Files, code & agent output'
   },
   {
-    name: 'Activity',
-    href: '/activity',
-    icon: Activity,
+    name: 'Command Center',
+    href: '/command-center',
+    icon: Radar,
     iconColor: 'text-[hsl(var(--info))]',
     navIconKey: 'nav_activity',
     description: 'Your AI workforce at a glance'
@@ -91,7 +100,6 @@ const navigationItems = [
     iconColor: 'text-[hsl(var(--info))]',
     navIconKey: 'nav_team',
     description: 'Manage workspace members',
-    requiredRole: 'admin' as const,
   },
   {
     name: 'Analytics',

@@ -279,7 +279,7 @@ async def set_platform_key(
     credentials table so the CredentialResolver picks it up for all
     workspaces.
     """
-    from core.models.credentials import Credential
+    from core.models.credentials import Credential, CredentialType
     from sqlalchemy import and_
 
     provider = body.provider.lower()
@@ -289,71 +289,77 @@ async def set_platform_key(
     if not ctx.workspace_id:
         raise HTTPException(400, "Workspace context required")
 
-    encryption = get_encryption_service()
     cred_name = f"{provider}_api"
-    encrypted_data = encryption.encrypt_dict({"api_key": body.api_key})
 
-    # SECURITY: scope lookup to the caller's workspace (OWASP A01:2021 BOLA protection).
-    # Without workspace filtering, a user in workspace A could overwrite workspace B's key.
-    existing = (
-        db.query(Credential)
-        .filter(and_(
-            Credential.name == cred_name,
-            Credential.is_active == True,
-            Credential.workspace_id == ctx.workspace_id,
-        ))
-        .first()
-    )
+    try:
+        encryption = get_encryption_service()
+        encrypted_data = encryption.encrypt_dict({"api_key": body.api_key})
 
-    if existing:
-        existing.encrypted_data = encrypted_data
-        existing.test_status = "not_tested"
-        existing.updated_at = datetime.utcnow()
-        db.commit()
-        logger.info(f"Platform key updated for provider={provider}")
-        # Clear resolver cache so change takes effect immediately
-        try:
-            from core.credentials.resolver import get_credential_resolver
-            get_credential_resolver().clear_cache(cred_name)
-        except Exception:
-            pass
-        return {"status": "updated", "provider": provider}
-
-    # Resolve credential_type_id — prefer provider-specific type, fall back to generic_api
-    from core.models.credentials import CredentialType
-
-    cred_type = (
-        db.query(CredentialType)
-        .filter(CredentialType.name == cred_name)
-        .first()
-    )
-    if not cred_type:
-        cred_type = (
-            db.query(CredentialType)
-            .filter(CredentialType.name == "generic_api")
+        existing = (
+            db.query(Credential)
+            .filter(and_(
+                Credential.name == cred_name,
+                Credential.is_active == True,
+                Credential.workspace_id == ctx.workspace_id,
+            ))
             .first()
         )
-    if not cred_type:
-        raise HTTPException(500, "No suitable credential type found — run seed data")
 
-    new_cred = Credential(
-        name=cred_name,
-        credential_type_id=cred_type.id,
-        workspace_id=ctx.workspace_id,
-        encrypted_data=encrypted_data,
-        environment="development",
-        description=f"Platform API key for {provider}",
-        is_active=True,
-        test_status="not_tested",
-        created_by=str(ctx.user_id) if ctx.user_id else None,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
-    )
-    db.add(new_cred)
-    db.commit()
-    logger.info(f"Platform key created for provider={provider}")
+        if existing:
+            existing.encrypted_data = encrypted_data
+            existing.test_status = "not_tested"
+            existing.updated_at = datetime.utcnow()
+            db.commit()
+            logger.info(f"Platform key updated for provider={provider}")
+            try:
+                from core.credentials.resolver import get_credential_resolver
+                get_credential_resolver().clear_cache(cred_name)
+            except Exception:
+                pass
+            return {"status": "updated", "provider": provider}
 
-    return {"status": "created", "provider": provider}
+        cred_type = (
+            db.query(CredentialType)
+            .filter(CredentialType.name == cred_name)
+            .first()
+        )
+        if not cred_type:
+            cred_type = (
+                db.query(CredentialType)
+                .filter(CredentialType.name == "generic_api")
+                .first()
+            )
+        if not cred_type:
+            raise HTTPException(500, "No suitable credential type found — run seed data")
+
+        new_cred = Credential(
+            name=cred_name,
+            credential_type_id=cred_type.id,
+            workspace_id=ctx.workspace_id,
+            encrypted_data=encrypted_data,
+            environment="development",
+            description=f"Platform API key for {provider}",
+            is_active=True,
+            test_status="not_tested",
+            created_by=str(ctx.user.id) if ctx.user and ctx.user.id else None,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+        db.add(new_cred)
+        db.commit()
+        logger.info(f"Platform key created for provider={provider}")
+
+        return {"status": "created", "provider": provider}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.exception(f"Platform key save failed for provider={provider}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"{type(e).__name__}: {str(e)[:500]}",
+        )
 
 
 @router.delete("/platform/{provider}", status_code=200)

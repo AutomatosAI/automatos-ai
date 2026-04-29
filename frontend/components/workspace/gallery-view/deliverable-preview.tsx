@@ -179,7 +179,7 @@ export function DeliverablePreview({
   const handleOpenInCanvas = () => {
     if (!deliverable) return
     const path = encodeURIComponent(deliverable.file_path)
-    router.push(`/workspace?view=explorer&path=${path}`)
+    router.push(`/deliverables/explorer?path=${path}`)
     onOpenChange(false)
   }
 
