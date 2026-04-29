@@ -16,7 +16,7 @@ interface Workspace {
     name: string
     slug: string
     plan: 'starter' | 'business' | 'enterprise'
-    role: 'owner' | 'member'
+    role: 'owner' | 'admin' | 'editor' | 'viewer' | 'member'
     isNewWorkspace: boolean
     planLimits: {
         max_agents: number

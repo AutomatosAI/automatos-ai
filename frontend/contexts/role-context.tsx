@@ -46,7 +46,7 @@ export function RoleProvider({ children }: { children: ReactNode }) {
     // Defence-in-depth: Clerk publicMetadata is the source of truth for system
     // role, but a misconfigured tenant user must never be promoted to platform
     // admin. Require an Automatos-staff email domain on top of the metadata.
-    const isAutomatosStaff = !!primaryEmail && primaryEmail.endsWith('@automatos.ai')
+    const isAutomatosStaff = !!primaryEmail && primaryEmail.endsWith('@automatos.app')
     const effectiveRole = roleFromToken === 'admin' && !isAutomatosStaff ? 'user' : roleFromToken
 
     const systemRole = (effectiveRole || 'user') as SystemRole
