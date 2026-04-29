@@ -232,6 +232,35 @@ async def execute_workspace_action(
                 args=parameters.get("args", ""),
             )
 
+        elif tool_name == "workspace_html_to_png":
+            # Render an HTML page to a PNG inside the workspace. The resulting
+            # file is auto-registered as a deliverable below (artifact_type
+            # 'image' — inferred from .png).
+            url = parameters.get("url", "")
+            output_path = parameters.get("output_path", "")
+            viewport = parameters.get("viewport") or {}
+            if not url:
+                return {"success": False, "error": "url is required", "tool": tool_name}
+            if not output_path:
+                return {"success": False, "error": "output_path is required", "tool": tool_name}
+            try:
+                viewport_w = int(viewport.get("w", 0))
+                viewport_h = int(viewport.get("h", 0))
+            except (TypeError, ValueError):
+                return {
+                    "success": False,
+                    "error": "viewport.w and viewport.h must be integers",
+                    "tool": tool_name,
+                }
+            result = await client.html_to_png(
+                url=url,
+                viewport_w=viewport_w,
+                viewport_h=viewport_h,
+                output_path=output_path,
+                wait_for=parameters.get("wait_for", "[data-render-ready='true']"),
+                full_page=bool(parameters.get("full_page", False)),
+            )
+
         else:
             return {"success": False, "error": f"Unknown workspace tool: {tool_name}", "tool": tool_name}
 
@@ -261,6 +290,21 @@ async def execute_workspace_action(
                 caller_context=caller_context,
                 trace_id=trace_id,
             )
+
+        # workspace_html_to_png writes a PNG into the workspace; register it as
+        # a deliverable using the path the worker actually wrote (post-validation).
+        # Same contract as workspace_write_file — failure must not break the render.
+        if tool_name == "workspace_html_to_png" and workspace_id:
+            written_path = result.get("file_path")
+            if written_path:
+                _auto_register_deliverable(
+                    workspace_id=workspace_id,
+                    file_path=written_path,
+                    write_result=result,
+                    agent_id=agent_id,
+                    caller_context=caller_context,
+                    trace_id=trace_id,
+                )
 
         return result
 

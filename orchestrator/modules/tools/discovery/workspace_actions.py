@@ -200,6 +200,81 @@ def register_workspace_actions(registry: ActionRegistry) -> None:
     ))
 
     registry.register(ActionDefinition(
+        name="workspace_html_to_png",
+        description=(
+            "Render an HTML page to a PNG image inside the workspace using "
+            "headless Chromium. Use to turn templated HTML (e.g. social card "
+            "templates from a cloned repo) into shareable PNGs. The output file "
+            "is automatically registered as a deliverable and shows up in the "
+            "Deliverables Gallery, Workspace Explorer, and Mission Outputs."
+        ),
+        category="workspace_render",
+        parameters={
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": (
+                        "Absolute URL to render. Must be either: "
+                        "(a) a 'file://' URL pointing INSIDE this workspace "
+                        "(e.g. 'file:///workspaces/<id>/repos/automatos-social/render/index.html?template=definition&size=ig_post&...'), "
+                        "or (b) an 'http(s)://' URL. Other schemes are rejected."
+                    ),
+                },
+                "viewport": {
+                    "type": "object",
+                    "description": (
+                        "Browser viewport in pixels. Set to the exact final "
+                        "image dimensions — e.g. Instagram 4:5 = {w:1080,h:1350}, "
+                        "LinkedIn = {w:1200,h:628}, IG Story = {w:1080,h:1920}, "
+                        "Twitter/YouTube = {w:1600,h:900}."
+                    ),
+                    "properties": {
+                        "w": {"type": "integer", "description": "Width in px (max 4096)."},
+                        "h": {"type": "integer", "description": "Height in px (max 4096)."},
+                    },
+                    "required": ["w", "h"],
+                },
+                "output_path": {
+                    "type": "string",
+                    "description": (
+                        "Workspace-relative path for the PNG. Must end in '.png'. "
+                        "Convention: 'deliverables/social/{YYYY-MM-DD}/{template}_{size}.png' "
+                        "(e.g. 'deliverables/social/2026-04-29/definition_ig_post.png'). "
+                        "Parent directories are created automatically."
+                    ),
+                },
+                "wait_for": {
+                    "type": "string",
+                    "description": (
+                        "CSS selector to await before screenshotting. Default "
+                        "'[data-render-ready=\\'true\\']' matches the Automatos "
+                        "render protocol — pages set this attribute on body once "
+                        "fonts have loaded and layout has settled."
+                    ),
+                },
+                "full_page": {
+                    "type": "boolean",
+                    "description": (
+                        "When true, capture the full scrollable height. Default "
+                        "false — social cards are sized to the viewport, so a "
+                        "viewport screenshot is what you want."
+                    ),
+                },
+            },
+            "required": ["url", "viewport", "output_path"],
+        },
+        permission_level="write",
+        tags=["workspace", "render", "html", "png", "screenshot", "social"],
+        examples=[
+            "render the definition template for instagram",
+            "screenshot the html page to a png",
+            "generate a social card png from the template",
+            "produce a 1080x1350 instagram post from the html",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
         name="workspace_git",
         description=(
             "Execute a git operation in the workspace repository. Allowed operations: "

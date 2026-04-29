@@ -343,6 +343,13 @@ _PLATFORM_KEYWORDS = {
         "git log", "git pull", "check git", "commit changes",
         "push changes",
     ],
+    "workspace_html_to_png": [
+        "render html", "html to png", "html to image",
+        "screenshot the page", "screenshot template",
+        "render the template", "render social card",
+        "generate social post", "render social post",
+        "make a social card", "render to png", "html screenshot",
+    ],
     # PRD-76: Agent Reports
     "platform_submit_report": [
         "submit report", "file report", "create report",

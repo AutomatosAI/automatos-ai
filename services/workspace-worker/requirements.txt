@@ -17,3 +17,6 @@ psycopg2-binary>=2.9.0,<3.0.0
 
 # Observability
 prometheus_client>=0.20.0,<1.0.0
+
+# Headless browser rendering (workspace_html_to_png tool)
+playwright>=1.45.0,<2.0.0
