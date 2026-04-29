@@ -283,7 +283,11 @@ class Config:
     INTERNAL_FRONTEND_HOSTNAME: str = os.getenv("INTERNAL_FRONTEND_HOSTNAME", "automatos-ai-frontend.railway.internal")
     SKILLS_SH_API_URL: str = os.getenv("SKILLS_SH_API_URL", "https://api.skills.sh/v1")
     COMPOSIO_API_KEY: str = os.getenv("COMPOSIO_API_KEY") or os.getenv("COMPOSIO_KEY")
-    COMPOSIO_API_BASE_URL: str = os.getenv("COMPOSIO_API_BASE_URL", "https://backend.composio.dev/api/v3")
+    # v3.1 default: tool endpoints automatically serve the latest toolkit version
+    # (no `toolkit_versions=latest` param required). Only tool endpoints differ
+    # between v3 and v3.1 — auth_configs / connected_accounts / triggers / toolkits
+    # behave identically. Override via env if pinning to v3 becomes necessary.
+    COMPOSIO_API_BASE_URL: str = os.getenv("COMPOSIO_API_BASE_URL", "https://backend.composio.dev/api/v3.1")
 
     # =============================================================================
     # ROUTING (Universal Orchestrator Router)

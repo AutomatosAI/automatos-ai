@@ -518,11 +518,16 @@ async def save_orchestrator_settings(
             flag_modified(auto_agent, "model_config")
 
         # Soul / Personality → Auto agent custom_persona_prompt
+        # Defensive: only overwrite custom_persona_prompt when the caller
+        # explicitly sends a non-empty value. Partial payloads (API smoke
+        # tests, scripts that PATCH only the mode) must NOT wipe an existing
+        # persona — that bug cost us a 4k-char Irish CTO every night at 02:00 UTC.
         personality_mode = payload.get("personality_mode")
         if personality_mode:
             if personality_mode == "custom":
-                custom_soul = payload.get("custom_soul", "")
-                auto_agent.custom_persona_prompt = custom_soul
+                if "custom_soul" in payload and payload["custom_soul"]:
+                    auto_agent.custom_persona_prompt = payload["custom_soul"]
+                # else: leave existing prompt alone
             else:
                 auto_agent.custom_persona_prompt = _PERSONALITY_PRESETS.get(
                     personality_mode, _PERSONALITY_PRESETS["friendly"]

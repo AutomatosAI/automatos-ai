@@ -322,13 +322,46 @@ class ClerkAuth:
             "Authorization": f"Bearer {self.clerk_secret_key}",
             "Content-Type": "application/json",
         }
-        
+
         async with httpx.AsyncClient(timeout=5.0) as client:
             response = await client.delete(api_url, headers=headers)
             if response.status_code != 200:
                 logger.error(f"Failed to remove user from Clerk org: {response.text}")
-                # Don't raise error if they are arguably already gone, 
+                # Don't raise error if they are arguably already gone,
                 # but good to log.
+
+    async def delete_user(self, clerk_user_id: str) -> bool:
+        """Delete a Clerk user by ID.
+
+        Idempotent: returns True if the user was deleted OR was already gone (404).
+        Returns False on any other failure (caller decides whether to continue).
+
+        Used by admin workspace purge to fully remove a pilot/demo user.
+        """
+        if not self.clerk_secret_key:
+            raise ValueError("Clerk secret key not configured")
+        if not clerk_user_id:
+            return False
+
+        api_url = f"{self.clerk_api_base}/v1/users/{clerk_user_id}"
+        headers = {
+            "Authorization": f"Bearer {self.clerk_secret_key}",
+            "Content-Type": "application/json",
+        }
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.delete(api_url, headers=headers)
+            if response.status_code in (200, 204):
+                logger.info("Clerk user deleted: %s", clerk_user_id)
+                return True
+            if response.status_code == 404:
+                logger.info("Clerk user already gone: %s", clerk_user_id)
+                return True
+            logger.error(
+                "Failed to delete Clerk user %s: status=%s body=%s",
+                clerk_user_id, response.status_code, response.text,
+            )
+            return False
 
 
 

@@ -91,7 +91,6 @@ const navigationItems = [
     iconColor: 'text-[hsl(var(--info))]',
     navIconKey: 'nav_team',
     description: 'Manage workspace members',
-    requiredRole: 'admin' as const,
   },
   {
     name: 'Analytics',

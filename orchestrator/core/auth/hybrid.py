@@ -87,12 +87,40 @@ def _get_workspace_id_from_request(request: Request) -> Optional[UUID]:
 
 
 def _workspace_exists(db, workspace_id: UUID) -> bool:
-    """Return True if workspace exists (and is active)."""
+    """Return True if a non-deleted workspace row exists.
+
+    Note: a *disabled* workspace (paused_at IS NOT NULL) still "exists" — the
+    disabled-state gate is enforced separately via `_assert_workspace_usable`
+    so we can return a clear 403 instead of a generic 400, and so admins can
+    still load the workspace from the admin console.
+    """
     row = db.execute(
-        text("SELECT 1 FROM workspaces WHERE id = :id AND is_active = true LIMIT 1"),
+        text(
+            "SELECT 1 FROM workspaces "
+            "WHERE id = :id AND deleted_at IS NULL LIMIT 1"
+        ),
         {"id": str(workspace_id)},
     ).fetchone()
     return bool(row)
+
+
+def _assert_workspace_usable(db, workspace_id: UUID, *, is_admin: bool) -> None:
+    """Raise 403 if the workspace is disabled (paused) and the caller isn't admin.
+
+    Admins always pass — they need to manage disabled workspaces from the admin
+    console. Deleted workspaces are already filtered out by `_workspace_exists`.
+    """
+    if is_admin:
+        return
+    row = db.execute(
+        text("SELECT paused_at FROM workspaces WHERE id = :id"),
+        {"id": str(workspace_id)},
+    ).fetchone()
+    if row and row[0] is not None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Workspace is disabled. Contact an administrator.",
+        )
 
 
 def _user_is_workspace_member(db, workspace_id: UUID, clerk_user_id: Optional[str]) -> bool:
@@ -506,6 +534,7 @@ async def get_request_context_hybrid(request: Request) -> RequestContext:
                 if not _workspace_exists(db, resolved):
                     logger.warning("Auth failed: Workspace %s does not exist", resolved)
                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid workspace_id")
+                _assert_workspace_usable(db, resolved, is_admin=is_admin)
 
                 user = UserContext(
                     id=info.get("clerk_user_id") or info.get("email"),
@@ -540,6 +569,8 @@ async def get_request_context_hybrid(request: Request) -> RequestContext:
                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace not resolved")
                 if not _workspace_exists(db, resolved):
                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid workspace_id")
+                # API keys are admin-equivalent (system_role="admin" above) — bypass disabled gate
+                _assert_workspace_usable(db, resolved, is_admin=True)
                 result = RequestContext(
                     workspace_id=resolved, user=user, auth_type="api_key", api_key_id="env"
                 )
@@ -567,6 +598,7 @@ async def get_request_context_hybrid(request: Request) -> RequestContext:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Workspace not resolved. Send X-Workspace-ID header or configure DEFAULT_WORKSPACE_ID.",
             )
+        _assert_workspace_usable(db, resolved, is_admin=False)
         result = RequestContext(workspace_id=resolved, user=UserContext(), auth_type="anonymous")
         _enrich_log_context(result)
         return result
