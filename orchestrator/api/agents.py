@@ -919,11 +919,11 @@ async def delete_agent(agent_id: int, ctx: RequestContext = Depends(get_request_
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
 
-        # Block delete if any recipe references this agent in its steps JSON.
-        # Recipe steps store agent_id in opaque JSONB (no FK) — without this check,
-        # the recipe will crash with FK violation next time it runs.
+        # Block delete if any Playbook references this agent in its steps JSON.
+        # Playbook steps store agent_id in opaque JSONB (no FK) — without this check,
+        # the Playbook will crash with FK violation next time it runs.
         agent_ref = f'[{{"agent_id": {agent_id}}}]'
-        recipes_using_agent = db.execute(
+        playbooks_using_agent = db.execute(
             text(
                 "SELECT id, name FROM workflow_recipes "
                 "WHERE workspace_id = :workspace_id "
@@ -931,13 +931,13 @@ async def delete_agent(agent_id: int, ctx: RequestContext = Depends(get_request_
             ),
             {"workspace_id": ctx.workspace_id, "agent_ref": agent_ref},
         ).fetchall()
-        if recipes_using_agent:
-            names = [r.name for r in recipes_using_agent]
+        if playbooks_using_agent:
+            names = [r.name for r in playbooks_using_agent]
             raise HTTPException(
                 status_code=409,
                 detail={
-                    "message": f"Agent is used by {len(names)} recipe(s). Reassign or remove the recipe step(s) first.",
-                    "recipes": [{"id": r.id, "name": r.name} for r in recipes_using_agent],
+                    "message": f"Agent is used by {len(names)} Playbook(s). Reassign or remove the Playbook step(s) first.",
+                    "playbooks": [{"id": r.id, "name": r.name} for r in playbooks_using_agent],
                 },
             )
 
