@@ -798,6 +798,68 @@ class WorkspaceWorker:
             result = await executor.execute_command(command, timeout=120, cwd=cwd)
             return web.json_response(result)
 
+        async def html_to_png_handler(request):
+            """POST /workspaces/{workspace_id}/html-to-png — render HTML → PNG.
+
+            Body:
+                {
+                  "url": "file:///workspaces/{id}/repos/automatos-social/render/index.html?...",
+                  "viewport": {"w": 1080, "h": 1350},
+                  "output_path": "deliverables/social/2026-04-29/definition_ig_post.png",
+                  "wait_for": "[data-render-ready='true']",   # optional
+                  "full_page": false                            # optional
+                }
+
+            Response: see WorkspaceToolExecutor.html_to_png().
+            """
+            from executor import WorkspaceToolExecutor
+            from pathlib import Path as P
+
+            workspace_id = request.match_info["workspace_id"]
+            ws_dir = P(volume_path) / workspace_id
+            if not ws_dir.is_dir():
+                return web.json_response({"error": "Workspace not found"}, status=404)
+
+            try:
+                body = await request.json()
+            except Exception:
+                return web.json_response({"error": "Invalid JSON body"}, status=400)
+
+            url = (body.get("url") or "").strip()
+            output_path = (body.get("output_path") or "").strip()
+            viewport = body.get("viewport") or {}
+            wait_for = body.get("wait_for", "[data-render-ready='true']")
+            full_page = bool(body.get("full_page", False))
+
+            if not url:
+                return web.json_response({"error": "url is required"}, status=400)
+            if not output_path:
+                return web.json_response({"error": "output_path is required"}, status=400)
+
+            try:
+                viewport_w = int(viewport.get("w", 0))
+                viewport_h = int(viewport.get("h", 0))
+            except (TypeError, ValueError):
+                return web.json_response(
+                    {"error": "viewport.w and viewport.h must be integers"}, status=400,
+                )
+
+            ws_manager = WorkspaceManager(workspace_id, volume_path)
+            executor = WorkspaceToolExecutor(ws_manager)
+            result = await executor.html_to_png(
+                url=url,
+                viewport_w=viewport_w,
+                viewport_h=viewport_h,
+                output_path=output_path,
+                wait_for=wait_for,
+                full_page=full_page,
+            )
+            if not result.get("success"):
+                # Validation errors → 400. Render errors (timeout, browser
+                # crash) also → 400 since they're caller-fixable in practice.
+                return web.json_response(result, status=400)
+            return web.json_response(result)
+
         async def download_file_handler(request):
             """GET /workspaces/{workspace_id}/files/download — raw binary download."""
             from pathlib import Path as P
@@ -842,6 +904,7 @@ class WorkspaceWorker:
         app.router.add_get("/workspaces/{workspace_id}/files/grep", grep_handler)
         app.router.add_get("/workspaces/{workspace_id}/files/download", download_file_handler)
         app.router.add_post("/workspaces/{workspace_id}/git", git_handler)
+        app.router.add_post("/workspaces/{workspace_id}/html-to-png", html_to_png_handler)
 
         runner = web.AppRunner(app)
         await runner.setup()

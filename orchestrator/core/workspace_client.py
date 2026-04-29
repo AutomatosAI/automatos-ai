@@ -170,6 +170,47 @@ class WorkspaceClient:
         except (httpx.ConnectError, httpx.TimeoutException) as err:
             return _connection_error("exec_command", err)
 
+    # ── Headless rendering ────────────────────────────────────────
+
+    async def html_to_png(
+        self,
+        url: str,
+        viewport_w: int,
+        viewport_h: int,
+        output_path: str,
+        wait_for: str = "[data-render-ready='true']",
+        full_page: bool = False,
+    ) -> Dict[str, Any]:
+        """Render an HTML page to a PNG in the workspace via headless Chromium.
+
+        Args mirror ``WorkspaceToolExecutor.html_to_png``. ``output_path`` is
+        workspace-relative (e.g. ``deliverables/social/2026-04-29/foo.png``).
+        Returns the worker's response dict; success path includes
+        ``file_path``, ``file_size_bytes``, ``w``, ``h``, ``ms``.
+        """
+        client = _get_client()
+        url_endpoint = _worker_url(self.workspace_id, "/html-to-png")
+        body: Dict[str, Any] = {
+            "url": url,
+            "viewport": {"w": int(viewport_w), "h": int(viewport_h)},
+            "output_path": output_path,
+            "wait_for": wait_for,
+            "full_page": bool(full_page),
+        }
+        try:
+            resp = await client.post(url_endpoint, json=body)
+            if resp.status_code != 200:
+                return {
+                    "success": False,
+                    "error": _parse_error(resp),
+                    "status_code": resp.status_code,
+                }
+            data = resp.json()
+            data.setdefault("success", True)
+            return data
+        except (httpx.ConnectError, httpx.TimeoutException) as err:
+            return _connection_error("html_to_png", err)
+
     # ── Git ────────────────────────────────────────────────────────
 
     async def git(

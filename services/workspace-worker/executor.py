@@ -324,6 +324,201 @@ class WorkspaceToolExecutor:
             return {"error": f"Create directory error: {e}"}
 
     # =========================================================================
+    # Headless rendering — HTML → PNG
+    # =========================================================================
+    #
+    # Powers the `workspace_html_to_png` tool. Renders an arbitrary URL (file://
+    # or http(s)://) to a PNG inside the workspace, then returns the relative
+    # path. The orchestrator's exec_workspace layer auto-registers the resulting
+    # PNG as a deliverable (artifact_type='image') so it appears in the
+    # Deliverables Gallery, Workspace Explorer, and Mission Outputs view.
+    #
+    # Designed for the daily-social-post playbook: an agent writes
+    # `repos/automatos-social/render/index.html` parameters, calls this tool,
+    # and gets back a path it can hand to a Composio poster.
+
+    # Hard cap on render time. Pages with no animation should be done in <2s.
+    _RENDER_TIMEOUT_MS = 30_000
+    # Cap viewport so an agent can't request a 32k×32k canvas and OOM the worker.
+    _MAX_VIEWPORT_DIM = 4096
+
+    async def html_to_png(
+        self,
+        url: str,
+        viewport_w: int,
+        viewport_h: int,
+        output_path: str,
+        wait_for: str = "[data-render-ready='true']",
+        full_page: bool = False,
+    ) -> Dict[str, Any]:
+        """Render an HTML page to a PNG file inside the workspace.
+
+        Args:
+            url: Absolute URL to render. Either ``file://`` (must resolve to a
+                path inside this workspace) or ``http(s)://``. Anything else is
+                rejected.
+            viewport_w / viewport_h: Browser viewport in pixels. Capped at
+                ``_MAX_VIEWPORT_DIM`` per side.
+            output_path: Workspace-relative path for the PNG. Parents are
+                created. Must end in ``.png``.
+            wait_for: CSS selector to await before screenshotting. Default
+                matches the Automatos render protocol — pages set
+                ``document.body[data-render-ready="true"]`` once fonts load
+                and layout settles.
+            full_page: When True, capture the entire scroll height instead of
+                just the viewport. Default False — social cards are designed
+                to the viewport so a viewport screenshot is what we want.
+
+        Returns:
+            On success::
+
+                {
+                    "success": True,
+                    "file_path": "deliverables/social/2026-04-29/definition_ig_post.png",
+                    "file_size_bytes": 187432,
+                    "w": 1080, "h": 1350,
+                    "ms": 1842,
+                    "url": "<the input url>",
+                }
+
+            On failure, ``{"success": False, "error": "..."}`` — caller
+            (worker HTTP handler) translates to a 4xx response.
+        """
+        import time
+
+        # ── Validate output path ──────────────────────────────────────
+        if not output_path or not output_path.lower().endswith(".png"):
+            return {"success": False, "error": "output_path must end in .png"}
+
+        try:
+            safe_output = self.ws.resolve_safe_path(output_path)
+        except SecurityError as e:
+            return {"success": False, "error": f"Invalid output_path: {e}"}
+
+        # ── Validate viewport ─────────────────────────────────────────
+        if viewport_w <= 0 or viewport_h <= 0:
+            return {"success": False, "error": "viewport dimensions must be positive"}
+        if viewport_w > self._MAX_VIEWPORT_DIM or viewport_h > self._MAX_VIEWPORT_DIM:
+            return {
+                "success": False,
+                "error": (
+                    f"viewport exceeds max dimension {self._MAX_VIEWPORT_DIM}px "
+                    f"(got {viewport_w}×{viewport_h})"
+                ),
+            }
+
+        # ── Validate URL scheme ──────────────────────────────────────
+        # file:// must point inside this workspace. http(s):// is fine because
+        # the worker container has no inbound network path back to the
+        # orchestrator; outbound HTTPS to render templates from CDNs is OK.
+        if url.startswith("file://"):
+            file_path = url[len("file://"):]
+            # file:// URLs may have an empty host before the path; strip a
+            # leading slash if the path looks absolute.
+            try:
+                resolved_target = Path(file_path).resolve()
+                # Containment check: the target file must live inside this
+                # workspace's root (so an agent cannot screenshot, say,
+                # /etc/passwd via file:///etc/passwd).
+                ws_root = self.ws.root.resolve()
+                resolved_target.relative_to(ws_root)
+            except (ValueError, OSError) as e:
+                return {
+                    "success": False,
+                    "error": f"file:// URL must point inside the workspace: {e}",
+                }
+            if not resolved_target.exists():
+                return {
+                    "success": False,
+                    "error": f"file:// target does not exist: {file_path}",
+                }
+        elif not (url.startswith("http://") or url.startswith("https://")):
+            return {
+                "success": False,
+                "error": "url must be file://, http://, or https://",
+            }
+
+        # ── Render ────────────────────────────────────────────────────
+        try:
+            from playwright.async_api import async_playwright, TimeoutError as PWTimeout
+        except ImportError:
+            return {
+                "success": False,
+                "error": "playwright not installed in worker — check requirements.txt",
+            }
+
+        start = time.monotonic()
+        safe_output.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            async with async_playwright() as pw:
+                # `--no-sandbox` because the worker container runs as a non-root
+                # user without the kernel capabilities Chromium's sandbox needs.
+                # Acceptable here: we already validated URL containment, and
+                # the worker is itself the sandbox boundary.
+                browser = await pw.chromium.launch(
+                    args=["--no-sandbox", "--disable-dev-shm-usage"],
+                )
+                try:
+                    context = await browser.new_context(
+                        viewport={"width": int(viewport_w), "height": int(viewport_h)},
+                        device_scale_factor=1,
+                    )
+                    page = await context.new_page()
+                    try:
+                        await page.goto(url, wait_until="load", timeout=self._RENDER_TIMEOUT_MS)
+                        if wait_for:
+                            await page.wait_for_selector(
+                                wait_for, timeout=self._RENDER_TIMEOUT_MS
+                            )
+                        await page.screenshot(
+                            path=str(safe_output),
+                            type="png",
+                            full_page=bool(full_page),
+                            omit_background=False,
+                        )
+                    finally:
+                        await context.close()
+                finally:
+                    await browser.close()
+        except PWTimeout as e:
+            return {
+                "success": False,
+                "error": f"render timed out waiting for '{wait_for}': {e}",
+            }
+        except Exception as e:
+            logger.error(
+                "html_to_png failed in %s: %s", self.ws.workspace_id[:8], e,
+                exc_info=True,
+            )
+            return {"success": False, "error": f"render error: {e}"}
+
+        elapsed_ms = int((time.monotonic() - start) * 1000)
+
+        try:
+            file_size = safe_output.stat().st_size
+        except OSError:
+            file_size = 0
+
+        rel_path = str(safe_output.relative_to(self.ws.root))
+
+        logger.info(
+            "html_to_png ok ws=%s path=%s %dx%d %dms %dB",
+            self.ws.workspace_id[:8], rel_path,
+            viewport_w, viewport_h, elapsed_ms, file_size,
+        )
+
+        return {
+            "success": True,
+            "file_path": rel_path,
+            "file_size_bytes": file_size,
+            "w": int(viewport_w),
+            "h": int(viewport_h),
+            "ms": elapsed_ms,
+            "url": url,
+        }
+
+    # =========================================================================
     # High-level task steps (called by worker main)
     # =========================================================================
 
