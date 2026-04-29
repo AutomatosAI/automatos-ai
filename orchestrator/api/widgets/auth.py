@@ -129,13 +129,20 @@ async def widget_auth(
     """
 
     token = _extract_bearer_token(request)
+    origin_for_log = _extract_origin(request) or "?"
     if not token:
+        logger.warning(
+            "widget_auth: missing/invalid Authorization header (origin=%s, has_header=%s)",
+            origin_for_log,
+            bool(request.headers.get("Authorization")),
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing Authorization header",
         )
 
     workspace_header = request.headers.get("X-Workspace-ID")
+    token_preview = token[:11] + "…" if len(token) > 11 else "(short)"
 
     # ----- 1. Try JWT session token first --------------------------------
     jwt_payload = _try_jwt(token)
@@ -173,6 +180,11 @@ async def widget_auth(
     # ----- 2. Fall back to raw API key validation -------------------------
     api_key_record = ApiKeyService.validate_api_key(db, token)
     if api_key_record is None:
+        logger.warning(
+            "widget_auth: API key rejected (prefix=%s, origin=%s) — not found, revoked, or expired",
+            token_preview,
+            origin_for_log,
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired API key",
@@ -181,6 +193,11 @@ async def widget_auth(
     # ----- 3. Domain / origin check ---------------------------------------
     origin = _extract_origin(request)
     if origin and not ApiKeyService.check_domain(api_key_record, origin):
+        logger.warning(
+            "widget_auth: origin %s not in allowed_domains for key %s",
+            origin,
+            api_key_record.key_prefix,
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Origin not allowed for this API key",
