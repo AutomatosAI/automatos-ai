@@ -227,12 +227,12 @@ class AgentFactory:
         try:
             from core.llm.manager import get_system_setting
 
-            provider = get_system_setting("orchestrator_llm", "llm_provider")
+            provider = get_system_setting("orchestrator_llm", "provider")
             if not provider:
-                provider = get_system_setting("orchestrator_llm", "provider")
-            model = get_system_setting("orchestrator_llm", "llm_model")
+                provider = get_system_setting("orchestrator_llm", "llm_provider")
+            model = get_system_setting("orchestrator_llm", "model")
             if not model:
-                model = get_system_setting("orchestrator_llm", "model")
+                model = get_system_setting("orchestrator_llm", "llm_model")
             from core.llm.defaults import DEFAULT_LLM_PROVIDER, DEFAULT_LLM_MODEL
             if not provider:
                 provider = DEFAULT_LLM_PROVIDER
