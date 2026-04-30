@@ -833,6 +833,10 @@ class StreamingChatService:
         except Exception as _mem_err:
             logger.debug(f"[PRD-68] ATOM memory retrieval skipped: {_mem_err}")
 
+        _persona_block = ""
+        if agent_runtime.metadata.persona:
+            _persona_block = f"\n\n{agent_runtime.metadata.persona}\n"
+
         _atom_prompt = (
             f"You are {agent_runtime.metadata.name}, an AI assistant on the Automatos platform.\n\n"
             f"{_time_ctx}. Read the conversation and match the user's energy. "
@@ -841,6 +845,7 @@ class StreamingChatService:
             "If they're formal, match it. Never be artificially cheerful when someone is having a bad time. "
             "Never be robotic when someone is being warm.\n\n"
             "You adapt. That's what makes you good at this.\n"
+            f"{_persona_block}"
             f"{_memory_block}"
         )
         llm_messages = self.prompt_analyzer.convert_to_llm_messages(
@@ -1917,22 +1922,18 @@ class StreamingChatService:
             if _llm_config:
                 _model_id = getattr(_llm_config, 'model', None)
 
-            # Load agent context (persona, skills, etc.)
+            # Load agent context — persona is always loaded (it's who the agent IS)
             from consumers.chatbot.auto import Complexity
             _complexity = (
                 complexity_assessment.complexity
                 if complexity_assessment
                 else Complexity.MOLECULE
             )
-            agent_ctx = {}
+            agent_ctx = await self._load_agent_context(agent_runtime)
             all_tools = []
             if _complexity != Complexity.ATOM:
-                agent_ctx = await self._load_agent_context(agent_runtime)
                 all_tools = self._get_tools(agent_id, agent_ctx.get("skill_tools"))
             else:
-                # ATOM path skips full tool loading, but always include
-                # platform_execute so the agent can respond to platform
-                # queries even when the classifier under-estimates complexity.
                 try:
                     from modules.tools.discovery.action_registry import get_action_registry
                     _dispatcher = get_action_registry().to_dispatcher_schema(exclude_admin=True)

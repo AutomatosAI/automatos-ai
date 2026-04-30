@@ -107,6 +107,7 @@ class AgentMetadata:
     name: str
     agent_type: str
     description: Optional[str] = None
+    persona: Optional[str] = None
     skills: List[str] = field(default_factory=list)
     model_config: Optional[ModelConfiguration] = None
     # Deprecated — keep for backward compat
@@ -718,10 +719,17 @@ class AgentFactory:
                 is_byok=resolved.is_byok if resolved else False,
             )
 
+            persona_text = ""
+            if getattr(db_agent, "use_custom_persona", False) and getattr(db_agent, "custom_persona_prompt", None):
+                persona_text = db_agent.custom_persona_prompt
+            elif getattr(db_agent, "persona", None) and getattr(db_agent.persona, "system_prompt", None):
+                persona_text = db_agent.persona.system_prompt
+
             metadata = AgentMetadata(
                 name=db_agent.name,
                 agent_type=db_agent.agent_type,
                 description=db_agent.description,
+                persona=persona_text or None,
                 skills=agent_config.get("skills", []),
                 custom_metadata=agent_config.get("custom_metadata", {}),
             )
