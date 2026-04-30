@@ -12,21 +12,11 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { formatDistanceToNow } from 'date-fns'
 import {
-  Archive,
   Bot,
   ChevronLeft,
   ChevronRight,
-  File,
-  FileCode,
-  FileText,
-  Image as ImageIcon,
   Loader2,
-  type LucideIcon,
-  Music,
-  Presentation,
-  Sheet,
   Sparkles,
-  Video,
 } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
@@ -37,6 +27,7 @@ import {
   type FilterState,
 } from '@/hooks/use-deliverables-api'
 import { DeliverablePreview } from '@/components/workspace/gallery-view/deliverable-preview'
+import { DeliverableArtwork } from '@/components/deliverables/deliverable-artwork'
 
 // ============= CONSTANTS =============
 
@@ -46,18 +37,6 @@ const TODAY_FILTERS: FilterState = {
   agent_id: null,
   date_range: 'today',
   search: '',
-}
-
-const ARTIFACT_ICONS: Record<string, LucideIcon> = {
-  report: FileText,
-  document: FileText,
-  image: ImageIcon,
-  code: FileCode,
-  slide: Presentation,
-  spreadsheet: Sheet,
-  archive: Archive,
-  audio: Music,
-  video: Video,
 }
 
 // ============= HELPERS =============
@@ -93,7 +72,6 @@ function TodayCard({ deliverable, onClick }: TodayCardProps) {
     created_at,
   } = deliverable
 
-  const ArtifactIcon = ARTIFACT_ICONS[artifact_type] ?? File
   const isImage = artifact_type === 'image' && !!preview_url
 
   return (
@@ -106,7 +84,7 @@ function TodayCard({ deliverable, onClick }: TodayCardProps) {
       )}
     >
       {/* Thumbnail */}
-      <div className="relative flex h-28 items-center justify-center bg-muted/30">
+      <div className="relative flex h-28 items-center justify-center overflow-hidden bg-muted/30">
         {isImage ? (
           <img
             src={preview_url!}
@@ -115,7 +93,7 @@ function TodayCard({ deliverable, onClick }: TodayCardProps) {
             className="h-full w-full object-cover"
           />
         ) : (
-          <ArtifactIcon className="h-10 w-10 text-muted-foreground" strokeWidth={1.5} />
+          <DeliverableArtwork type={artifact_type} className="absolute inset-0" />
         )}
         <Badge
           variant="secondary"
