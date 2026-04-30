@@ -225,7 +225,60 @@ class Config:
             return int(val)
         except Exception:
             return int(os.getenv("COORDINATOR_TASK_MAX_TOKENS", "8000"))
-    
+
+    # =============================================================================
+    # TOOL-LOOP LIMITS (chatbot + recipe step execution)
+    # =============================================================================
+    # These are required settings — no env-var or hardcoded fallback. The seed
+    # in core/seeds/seed_system_settings.py creates the DB rows; these
+    # properties read them and raise loudly if a deployment skipped seeding.
+
+    def _required_int_setting(self, category: str, key: str) -> int:
+        from core.llm.manager import get_system_setting
+        val = get_system_setting(category, key, None)
+        if val is None or str(val).strip() == "":
+            raise RuntimeError(
+                f"Missing required system_setting {category}.{key}. "
+                f"Run `python -m core.seeds.seed_system_settings` to seed defaults, "
+                f"or set the value via the System Settings UI."
+            )
+        try:
+            return int(val)
+        except (ValueError, TypeError):
+            raise RuntimeError(
+                f"Invalid system_setting {category}.{key}={val!r}: must be an integer."
+            )
+
+    @property
+    def CHATBOT_MAX_TOOL_ITERATIONS(self) -> int:
+        """Max tool-call turns per chatbot user message (Auto's mid-convo budget)."""
+        return self._required_int_setting("chatbot", "max_tool_iterations")
+
+    @property
+    def CHATBOT_ACTION_RETRY_BUDGET(self) -> int:
+        """Retries when a tool returns 'action not mapped'."""
+        return self._required_int_setting("chatbot", "action_retry_budget")
+
+    @property
+    def CHATBOT_PARAM_RETRY_BUDGET(self) -> int:
+        """Retries when a tool returns 'invalid parameters'."""
+        return self._required_int_setting("chatbot", "param_retry_budget")
+
+    @property
+    def RECIPE_DEFAULT_MAX_ITERATIONS(self) -> int:
+        """Default max tool-call turns per recipe step."""
+        return self._required_int_setting("recipe", "default_max_iterations")
+
+    @property
+    def AGENT_HEARTBEAT_MAX_TOOL_ITERATIONS(self) -> int:
+        """Max tool-call turns per heartbeat tick."""
+        return self._required_int_setting("agent_heartbeat", "max_tool_iterations")
+
+    @property
+    def COORDINATOR_TASK_MAX_TOOL_ITERATIONS(self) -> int:
+        """Max tool-call turns per orchestrated mission task."""
+        return self._required_int_setting("coordinator", "task_max_tool_iterations")
+
     # =============================================================================
     # ENVIRONMENT
     # =============================================================================

@@ -559,6 +559,110 @@ def seed_system_settings(db: Session):
         },
     ])
 
+    # =========================================================================
+    # CHATBOT (conversational tool loop — Auto's mid-conversation budget)
+    # =========================================================================
+    settings_to_create.extend([
+        {
+            "category": SettingCategory.CHATBOT.value,
+            "key": "max_tool_iterations",
+            "default_value": "25",
+            "value_type": "number",
+            "description": (
+                "How many tool-call turns Auto gets per user message before it "
+                "is forced to wrap up. Higher = Auto can chain more steps in "
+                "one reply but bigger conversations cost more. Per-agent "
+                "override: set agent.configuration.max_iterations."
+            ),
+            "is_required": True,
+            "validation_rules": {"min": 5, "max": 100},
+        },
+        {
+            "category": SettingCategory.CHATBOT.value,
+            "key": "action_retry_budget",
+            "default_value": "1",
+            "value_type": "number",
+            "description": (
+                "How many times the chatbot retries a tool call that returned "
+                '"action not mapped" before giving up on that path. Low = fail '
+                "fast on bad routing; higher = patience for transient mapping "
+                "issues."
+            ),
+            "is_required": True,
+            "validation_rules": {"min": 0, "max": 5},
+        },
+        {
+            "category": SettingCategory.CHATBOT.value,
+            "key": "param_retry_budget",
+            "default_value": "1",
+            "value_type": "number",
+            "description": (
+                "How many times the chatbot retries a tool call that returned "
+                '"invalid parameters" before giving up. The LLM sees the error '
+                "and corrects the next attempt — usually 1 retry is enough."
+            ),
+            "is_required": True,
+            "validation_rules": {"min": 0, "max": 5},
+        },
+    ])
+
+    # =========================================================================
+    # RECIPE EXECUTOR (per-step tool-call budget for recipe agents)
+    # =========================================================================
+    settings_to_create.extend([
+        {
+            "category": SettingCategory.RECIPE.value,
+            "key": "default_max_iterations",
+            "default_value": "25",
+            "value_type": "number",
+            "description": (
+                "Default tool-call turns per recipe step. Recipe steps tend to "
+                "do more work than conversational replies, so this is higher "
+                "than the chatbot equivalent. Per-step override: "
+                "step.max_iterations; per-agent: agent.configuration.max_iterations."
+            ),
+            "is_required": True,
+            "validation_rules": {"min": 5, "max": 100},
+        },
+    ])
+
+    # =========================================================================
+    # AGENT HEARTBEAT (scheduled workspace health-check tick)
+    # =========================================================================
+    settings_to_create.extend([
+        {
+            "category": SettingCategory.AGENT_HEARTBEAT.value,
+            "key": "max_tool_iterations",
+            "default_value": "5",
+            "value_type": "number",
+            "description": (
+                "How many tool-call turns the heartbeat orchestrator agent gets "
+                "per scheduled tick. Heartbeats are short — 5 is usually enough."
+            ),
+            "is_required": True,
+            "validation_rules": {"min": 1, "max": 20},
+        },
+    ])
+
+    # =========================================================================
+    # MISSION COORDINATOR (per-task tool budget for orchestrated mission tasks)
+    # =========================================================================
+    settings_to_create.extend([
+        {
+            "category": SettingCategory.COORDINATOR.value,
+            "key": "task_max_tool_iterations",
+            "default_value": "10",
+            "value_type": "number",
+            "description": (
+                "Tool-call turns each mission task gets. The coordinator runs "
+                "tasks concurrently so this caps any single task — keep it "
+                "modest unless tasks routinely chain many tools."
+            ),
+            "is_required": True,
+            "validation_rules": {"min": 1, "max": 50},
+        },
+    ])
+
     # ── One-time cleanup: fix stale orchestrator_llm values ──────────
     # The env vars LLM_PROVIDER=openai / LLM_MODEL=openai/gpt-5.4 were
     # captured into system_settings before they were deleted from Railway.

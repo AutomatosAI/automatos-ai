@@ -26,7 +26,7 @@ from uuid import UUID
 from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
-from config import COMPLEXITY_TOKEN_BUDGET, Config
+from config import COMPLEXITY_TOKEN_BUDGET, Config, config
 from core.models.core import Agent
 from core.models.orchestration import (
     OrchestrationArchive,
@@ -1214,7 +1214,7 @@ class CoordinatorService:
                     agent=agent_id,
                     prompt=prompt,
                     max_retries=0,
-                    max_tool_iterations=10,
+                    max_tool_iterations=config.COORDINATOR_TASK_MAX_TOOL_ITERATIONS,
                     attachment_ids=attachment_ids,
                 ),
                 timeout=Config.COORDINATOR_TASK_EXECUTION_TIMEOUT,

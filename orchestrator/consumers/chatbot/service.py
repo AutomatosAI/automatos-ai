@@ -1119,14 +1119,14 @@ class StreamingChatService:
         """
         import asyncio
 
-        max_iterations = 10
+        max_iterations = config.CHATBOT_MAX_TOOL_ITERATIONS
         iteration = 0
         current_response = response
         tracker = ToolExecutionTracker()
 
         # Recovery budgets
-        action_not_mapped_retry_budget = 1
-        invalid_parameters_retry_budget = 1
+        action_not_mapped_retry_budget = config.CHATBOT_ACTION_RETRY_BUDGET
+        invalid_parameters_retry_budget = config.CHATBOT_PARAM_RETRY_BUDGET
 
         # Search spiral detection
         last_tool_name: Optional[str] = None
