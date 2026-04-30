@@ -431,6 +431,7 @@ export function AgentConfigurationModal({
       setFormData({
         name: (agent as any).name || '',
         description: (agent as any).description || '',
+        job_title: (agent as any).job_title || '',
         tags: Array.isArray((agent as any).tags) ? ((agent as any).tags as string[]).join(', ') : '',
         agent_type: categoryName,
         priority_level: (agentConfig as any).priority_level || 'medium',
@@ -660,6 +661,7 @@ export function AgentConfigurationModal({
       const updatePayload = {
         name: formData.name,
         description: formData.description,
+        job_title: (formData.job_title || '').trim(),
         agent_type: dbAgentType,
         marketplace_category: selectedCategory,
         tags,
@@ -855,6 +857,21 @@ export function AgentConfigurationModal({
                           placeholder="Enter agent description"
                           rows={3}
                         />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="job_title">Job Title</Label>
+                        <Input
+                          id="job_title"
+                          value={formData.job_title || ''}
+                          onChange={(e) => updateFormData('job_title', e.target.value)}
+                          placeholder="e.g. Lead Intelligence, Code Watchdog, Memory Keeper"
+                          maxLength={120}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Short role label shown under the agent&apos;s name on the roster card
+                          (e.g. &quot;Research &middot; Lead Intelligence&quot;).
+                        </p>
                       </div>
 
                       <div className="space-y-2">
