@@ -247,6 +247,7 @@ def _build_agent_response(agent: Agent, db: Session) -> AgentResponse:
         public_id=str(agent.public_id) if getattr(agent, 'public_id', None) else None,
         name=agent.name,
         description=agent.description,
+        job_title=getattr(agent, 'job_title', None),
         agent_type=agent.agent_type,
         status=agent.status,
         configuration=configuration,
@@ -422,6 +423,7 @@ async def create_agent(agent_data: AgentCreate, ctx: RequestContext = Depends(ge
             public_id=_uuid4(),
             name=agent_data.name,
             description=agent_data.description,
+            job_title=getattr(agent_data, 'job_title', None),
             agent_type=agent_data.agent_type,
             configuration=agent_data.configuration or {},
             marketplace_category=getattr(agent_data, 'marketplace_category', None),
@@ -824,7 +826,12 @@ async def update_agent(agent_id: int, agent_update: AgentUpdate, ctx: RequestCon
         
         if agent_update.description is not None:
             agent.description = agent_update.description
-        
+
+        if agent_update.job_title is not None:
+            # Empty string clears the job title; non-empty stores the trimmed value.
+            trimmed = agent_update.job_title.strip()
+            agent.job_title = trimmed if trimmed else None
+
         if agent_update.status is not None:
             agent.status = agent_update.status.value
 

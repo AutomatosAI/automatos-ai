@@ -52,7 +52,7 @@ import { AgentConfigurationModal } from './agent-configuration-modal'
 import { AgentStatusControlModal } from './agent-status-control-modal'
 import { AgentConfirmDeleteModal } from './agent-confirm-delete-modal'
 import { ToolLogo } from '@/components/ui/tool-logo'
-import { getAgentCategoryDisplay } from '@/lib/agent-constants'
+import { getAgentRoleLine } from '@/lib/agent-constants'
 
 // Agent type/category icons mapping - SIMPLE clean icons only!
 const getAgentIcon = (agentType: string, category?: string) => {
@@ -137,6 +137,7 @@ interface AgentWithPerformance {
   agent_type: string
   status: string
   description?: string
+  job_title?: string
   created_at?: string
   skills?: Array<{ id: string; name: string }>
   plugins?: Array<{ plugin_id: string; slug: string; name: string; skills_count: number; commands_count: number }>
@@ -329,7 +330,7 @@ export function AgentRoster({
                       </StatusBadge>
                     </div>
                     <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
-                      <span>{getAgentCategoryDisplay(agent)}</span>
+                      <span className="truncate">{getAgentRoleLine(agent)}</span>
                       <span>&middot;</span>
                       <span>{getModelDisplayName(agent.agent_model_config?.model_id)}</span>
                       <span>&middot;</span>
@@ -408,22 +409,22 @@ export function AgentRoster({
                 transition={{ duration: 0.5, delay: index * 0.1 }}
               >
                 {/* Header */}
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center space-x-3">
+                <div className="flex items-center justify-between mb-4 gap-2">
+                  <div className="flex items-center space-x-3 min-w-0 flex-1">
                     {premiumIconName ? (
                       <PremiumIcon name={premiumIconName} size={40} className={`shrink-0 ${iconColor}`} />
                     ) : (
                       <AgentIcon className={`w-10 h-10 ${iconColor} shrink-0`} />
                     )}
-                    <div>
-                      <h3 className="font-semibold">{agent.name || 'Unknown Agent'}</h3>
-                      <p className="text-xs text-muted-foreground">{getAgentCategoryDisplay(agent)}</p>
+                    <div className="min-w-0 flex-1">
+                      <h3 className="font-semibold truncate">{agent.name || 'Unknown Agent'}</h3>
+                      <p className="text-xs text-muted-foreground truncate">{getAgentRoleLine(agent)}</p>
                     </div>
                   </div>
 
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-8 w-8" data-tour="agent-card-menu">
+                      <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" data-tour="agent-card-menu">
                         <MoreVertical className="w-4 h-4" />
                       </Button>
                     </DropdownMenuTrigger>

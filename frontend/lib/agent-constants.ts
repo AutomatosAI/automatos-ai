@@ -128,3 +128,14 @@ export function getAgentCategoryDisplay(agent: any): string {
   )
   return known ? known.name : String(raw)
 }
+
+/**
+ * Compose the card subtitle as `{Category} · {Job Title}`.
+ * Falls back to just the category when no job title has been set, so the
+ * card always tells the user which team the agent belongs to.
+ */
+export function getAgentRoleLine(agent: any): string {
+  const category = getAgentCategoryDisplay(agent)
+  const jobTitle = (agent?.job_title || '').trim()
+  return jobTitle ? `${category} · ${jobTitle}` : category
+}
