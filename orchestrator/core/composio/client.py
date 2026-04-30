@@ -107,11 +107,16 @@ class ComposioClient:
         """Lazy-load Composio client."""
         if self._composio is None and self.api_key:
             Composio = _get_composio()
+            # Pin toolkit versions to "latest" so manual tools.execute() calls
+            # (e.g. bug-report Jira widget) don't error on the SDK's version check.
             # Note: Composio SDK sends telemetry to telemetry.composio.dev for usage tracking,
             # billing, and service monitoring. This is part of their service model.
-            self._composio = Composio(api_key=self.api_key)
+            self._composio = Composio(
+                api_key=self.api_key,
+                toolkit_versions={"default": "latest"},
+            )
         return self._composio
-    
+
     @property
     def toolset(self):
         """Lazy-load Composio with OpenAI Provider."""
@@ -122,7 +127,11 @@ class ComposioClient:
             # Note: Composio SDK sends telemetry to telemetry.composio.dev for usage tracking,
             # billing, and service monitoring. This is part of their service model.
             # Initialize Composio client with OpenAI provider
-            self._toolset = Composio(api_key=self.api_key, provider=OpenAIProvider())
+            self._toolset = Composio(
+                api_key=self.api_key,
+                provider=OpenAIProvider(),
+                toolkit_versions={"default": "latest"},
+            )
         return self._toolset
     
     def get_entity(self, entity_id: str):
@@ -1185,15 +1194,15 @@ class ComposioClient:
             raise ValueError("Composio client not initialized.")
         
         try:
-            # New API: composio.tools.execute(tool_name, user_id, arguments).
-            # `dangerously_skip_version_check` was needed pre-v3.1 to avoid
-            # version-mismatch failures between cached schemas and runtime
-            # versions; v3.1 always serves the latest toolkit, so the check
-            # is no longer a footgun and we let the SDK enforce it normally.
+            # composio>=0.12 rejects manual tools.execute() with version="latest"
+            # ("'latest' is not supported in manual execution"). We track the
+            # latest schema at discovery, so skip the version check here — same
+            # pattern the SDK uses internally for agentic tool execution.
             result = self.composio.tools.execute(
                 slug=action,
                 user_id=entity_id,
                 arguments=params,
+                dangerously_skip_version_check=True,
             )
 
             # Composio API may return errors in the response data without

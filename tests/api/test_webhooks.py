@@ -40,15 +40,8 @@ def test_orchestrator_settings(client):
     assert r.status_code == 200
 
 
-def test_update_orchestrator(client):
-    """PUT orchestrator — preserves existing personality_mode."""
-    r = client.get("/api/workspaces/current/orchestrator")
-    if r.status_code != 200:
-        pytest.skip("Cannot read orchestrator settings")
-    current = r.json()
-    mode = current.get("personality_mode", "professional")
-    r2 = client.put(
-        "/api/workspaces/current/orchestrator",
-        json={"personality_mode": mode},
-    )
-    assert r2.status_code == 200
+# NOTE: removed `test_update_orchestrator` — it PUT `{"personality_mode": mode}`
+# without a `custom_soul`, which wiped Auto's custom persona every nightly run
+# at 02:00 UTC. The endpoint is now hardened (workspaces.py: empty custom_soul
+# is ignored), but this test had no business mutating live workspace settings
+# in a smoke suite anyway. GET-only coverage above is sufficient.

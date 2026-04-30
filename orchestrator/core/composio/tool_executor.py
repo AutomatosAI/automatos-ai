@@ -229,13 +229,33 @@ class ComposioToolExecutor:
                     .first()
                 )
                 if not assigned:
-                    return {
-                        "success": False,
-                        "error": f"'{app_name}' is not assigned to agent {agent_id}. Assign it to this agent before using it.",
-                        "error_type": "composio_not_assigned",
-                        "data": None,
-                        "execution_time_ms": int((time.time() - start_time) * 1000),
-                    }
+                    # Inheritance fallback: agents with zero active assignments
+                    # inherit workspace-connected apps. Mirrors the contract used
+                    # by ComposioToolService, ComposioHintService and ToolRegistry
+                    # at discovery time so an agent that can SEE an app can also
+                    # EXECUTE it. The workspace connectivity check below still
+                    # gates on whether the app is actually wired up.
+                    has_any_assignment = (
+                        self.db.query(AgentAppAssignment.id)
+                        .filter(
+                            AgentAppAssignment.agent_id == agent_id,
+                            AgentAppAssignment.is_active == True,  # noqa: E712
+                        )
+                        .first()
+                    )
+                    if has_any_assignment:
+                        return {
+                            "success": False,
+                            "error": f"'{app_name}' is not assigned to agent {agent_id}. Assign it to this agent before using it.",
+                            "error_type": "composio_not_assigned",
+                            "data": None,
+                            "execution_time_ms": int((time.time() - start_time) * 1000),
+                        }
+                    logger.info(
+                        "[ComposioToolExecutor] Agent %s has no app assignments — "
+                        "inheriting workspace-connected apps for %s",
+                        agent_id, app_name,
+                    )
 
                 # Connected?
                 manager = EntityManager(self.db)
