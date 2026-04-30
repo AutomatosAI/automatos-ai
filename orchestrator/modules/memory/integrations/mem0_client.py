@@ -85,34 +85,22 @@ class Mem0Client:
         self.api_key = api_key or config.MEM0_API_KEY
         self.timeout = float(getattr(config, "MEM0_TIMEOUT_SECONDS", 3.0))
 
-        # PRD-137 Fix #6: gate on API key + URL presence.
-        # Without an API key, every request would fail authentication and
-        # the circuit breaker would only open AFTER 3 × timeout seconds of
-        # latency on every chat turn. Disable cleanly instead.
-        if not self.api_url or not self.api_key:
-            missing = []
-            if not self.api_url:
-                missing.append("MEM0_API_URL")
-            if not self.api_key:
-                missing.append("MEM0_API_KEY")
+        if not self.api_url:
             logger.info(
-                "[Mem0] Disabled — missing %s. Memory features will be skipped silently.",
-                ", ".join(missing),
+                "[Mem0] Disabled — missing MEM0_API_URL. Memory features will be skipped silently.",
             )
             self.api_url = ""
             self.headers = {}
             return
 
-        # Ensure URL has correct format
         if not self.api_url.startswith("http"):
             self.api_url = f"https://{self.api_url}"
 
         self.api_url = self.api_url.rstrip("/")
 
-        # OpenMemory API mounts routes under /api/v1 prefix
         if "/api/v1" not in self.api_url:
             self.api_url = f"{self.api_url}/api/v1"
-        self.headers = {"Authorization": f"Token {self.api_key}"}
+        self.headers = {"Authorization": f"Token {self.api_key}"} if self.api_key else {}
 
         logger.info(f"Initialized Mem0Client with URL: {self.api_url}")
 
