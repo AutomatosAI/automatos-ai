@@ -1770,6 +1770,7 @@ class StreamingChatService:
             tool_name in multi_step_tools
             or tool_name.startswith("composio_")
             or tool_name.startswith("workspace_")
+            or tool_name.startswith("platform_")
         )
         _attempts = tool_attempts.get(tool_name, 0)
 

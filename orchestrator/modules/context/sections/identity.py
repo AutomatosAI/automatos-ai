@@ -67,7 +67,7 @@ class IdentitySection(BaseSection):
 
     name: str = "identity"
     priority: int = 1
-    max_tokens: Optional[int] = 600
+    max_tokens: Optional[int] = None
 
     async def render(self, ctx: SectionContext) -> str:  # noqa: C901
         """Build the identity block for the system prompt."""
