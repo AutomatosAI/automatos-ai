@@ -12,7 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Loader2, Settings, Save, RotateCcw, AlertCircle, Shield, FileText, Palette, Rocket, BrainCircuit } from 'lucide-react'
+import { Loader2, Settings, Save, RotateCcw, AlertCircle, Shield, FileText, Palette, Rocket, BrainCircuit, Repeat } from 'lucide-react'
 import { toast } from 'sonner'
 
 import {
@@ -34,6 +34,7 @@ import { CredentialAuditTab } from './CredentialAuditTab'
 import { SystemPromptsTab } from './SystemPromptsTab'
 import { SystemIconsSettingsTab } from './SystemIconsSettingsTab'
 import { OnboardingAgentsTab } from './OnboardingAgentsTab'
+import ToolLoopsSettingsTab from './ToolLoopsSettingsTab'
 
 interface SystemSettingsTabProps {
   className?: string
@@ -198,6 +199,10 @@ export default function SystemSettingsTab({ className }: SystemSettingsTabProps)
           <TabsTrigger value="system_logging">Logging</TabsTrigger>
           <TabsTrigger value="api_rate_limiting">Rate Limiting</TabsTrigger>
           <TabsTrigger value="backend_api_keys">API Keys</TabsTrigger>
+          <TabsTrigger value="tool_loops">
+            <Repeat className="w-3.5 h-3.5 mr-1 shrink-0" />
+            Tool Loops
+          </TabsTrigger>
           <TabsTrigger value="audit_logs">
             <Shield className="w-3.5 h-3.5 mr-1 shrink-0" />
             Audit Logs
@@ -261,6 +266,24 @@ export default function SystemSettingsTab({ className }: SystemSettingsTabProps)
             onSave={(updates) => saveCategorySettings('backend_api_keys', updates)}
             saving={saving}
             onReset={() => resetToDefaults('backend_api_keys')}
+          />
+        </TabsContent>
+
+        <TabsContent value="tool_loops">
+          <ToolLoopsSettingsTab
+            chatbotSettings={settingsByCategory.find(cat => cat.category === 'chatbot')?.settings || []}
+            recipeSettings={settingsByCategory.find(cat => cat.category === 'recipe')?.settings || []}
+            heartbeatSettings={settingsByCategory.find(cat => cat.category === 'agent_heartbeat')?.settings || []}
+            coordinatorSettings={settingsByCategory.find(cat => cat.category === 'coordinator')?.settings || []}
+            onSaveChatbot={(updates) => saveCategorySettings('chatbot', updates)}
+            onSaveRecipe={(updates) => saveCategorySettings('recipe', updates)}
+            onSaveHeartbeat={(updates) => saveCategorySettings('agent_heartbeat', updates)}
+            onSaveCoordinator={(updates) => saveCategorySettings('coordinator', updates)}
+            onResetChatbot={() => resetToDefaults('chatbot')}
+            onResetRecipe={() => resetToDefaults('recipe')}
+            onResetHeartbeat={() => resetToDefaults('agent_heartbeat')}
+            onResetCoordinator={() => resetToDefaults('coordinator')}
+            saving={saving}
           />
         </TabsContent>
 
