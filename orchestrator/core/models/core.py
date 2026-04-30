@@ -180,6 +180,7 @@ class Agent(Base):
     public_id = Column(UUID(as_uuid=True), default=uuid4, unique=True, nullable=True, index=True)
     name = Column(String(255), nullable=False)
     description = Column(Text)
+    job_title = Column(String(120), nullable=True)  # Short role label shown on cards (e.g. "Lead Intelligence")
     agent_type = Column(String(100), nullable=False)  # 'custom', 'system', 'specialized'
     status = Column(String(50), default='active')  # 'active', 'inactive', 'training'
     configuration = Column(JSON)  # Agent-specific config
@@ -633,6 +634,7 @@ class ExecutionStatus(str, Enum):
 class AgentCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
+    job_title: Optional[str] = Field(None, max_length=120)
     agent_type: str  # Flexible agent type - no enum restriction
     configuration: Optional[Dict[str, Any]] = None
     skill_ids: Optional[List[int]] = []
@@ -643,6 +645,7 @@ class AgentCreate(BaseModel):
 class AgentUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+    job_title: Optional[str] = Field(None, max_length=120)
     agent_type: Optional[str] = None  # Allow updating agent type/category
     marketplace_category: Optional[str] = None  # UI category (Research, Marketing, etc.)
     status: Optional[AgentStatus] = None
@@ -657,6 +660,7 @@ class AgentResponse(BaseModel):
     public_id: Optional[str] = None  # UUID exposed externally (widgets, API); use this instead of id
     name: str
     description: Optional[str]
+    job_title: Optional[str] = None
     agent_type: str
     status: str
     configuration: Optional[Dict[str, Any]]
