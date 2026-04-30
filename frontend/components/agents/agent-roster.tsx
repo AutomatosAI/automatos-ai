@@ -52,6 +52,7 @@ import { AgentConfigurationModal } from './agent-configuration-modal'
 import { AgentStatusControlModal } from './agent-status-control-modal'
 import { AgentConfirmDeleteModal } from './agent-confirm-delete-modal'
 import { ToolLogo } from '@/components/ui/tool-logo'
+import { getAgentCategoryDisplay } from '@/lib/agent-constants'
 
 // Agent type/category icons mapping - SIMPLE clean icons only!
 const getAgentIcon = (agentType: string, category?: string) => {
@@ -328,7 +329,7 @@ export function AgentRoster({
                       </StatusBadge>
                     </div>
                     <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
-                      <span>{agent.agent_type ? agent.agent_type.replace('_', ' ') : 'Unknown'}</span>
+                      <span>{getAgentCategoryDisplay(agent)}</span>
                       <span>&middot;</span>
                       <span>{getModelDisplayName(agent.agent_model_config?.model_id)}</span>
                       <span>&middot;</span>
@@ -416,7 +417,7 @@ export function AgentRoster({
                     )}
                     <div>
                       <h3 className="font-semibold">{agent.name || 'Unknown Agent'}</h3>
-                      <p className="text-xs text-muted-foreground">{agent.agent_type ? agent.agent_type.replace('_', ' ') : 'Unknown Type'}</p>
+                      <p className="text-xs text-muted-foreground">{getAgentCategoryDisplay(agent)}</p>
                     </div>
                   </div>
 

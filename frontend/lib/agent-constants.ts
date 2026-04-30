@@ -102,3 +102,29 @@ export const DB_TO_CATEGORY_MAP: Record<string, string> = {
   'document generator': 'writing',
   custom: 'custom',
 }
+
+/**
+ * Resolve an agent's user-facing category/team name (e.g. "Research", "Sales").
+ *
+ * Mirrors the precedence used by the Agent Configuration modal so the roster
+ * card and the modal stay in sync:
+ *   1. marketplace_category — set when the agent was installed from a template
+ *   2. configuration.category — set when an admin picks a category in Configure
+ *   3. DB_TO_CATEGORY_MAP[agent_type] — fallback for legacy agents
+ *
+ * The result is normalized to the title-case display name from
+ * AGENT_CATEGORIES when the value matches a known category id.
+ */
+export function getAgentCategoryDisplay(agent: any): string {
+  const raw =
+    agent?.marketplace_category ||
+    agent?.configuration?.category ||
+    DB_TO_CATEGORY_MAP[agent?.agent_type || ''] ||
+    agent?.agent_type ||
+    'Custom'
+
+  const known = AGENT_CATEGORIES.find(
+    (c) => c.id === String(raw).toLowerCase(),
+  )
+  return known ? known.name : String(raw)
+}
