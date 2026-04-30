@@ -66,6 +66,7 @@ interface PlaybooksTabProps {
   onCreateModalClosed?: () => void
   onUseRecipe: (recipe: any) => void
   onExecuteRecipe?: (workflowId: number, recipeExecInfo?: PlaybookExecutionInfo) => void
+  emptyState?: React.ReactNode
 }
 
 // Generate a consistent color from agent_id
@@ -114,6 +115,7 @@ export function PlaybooksTab({
   onCreateModalClosed,
   onUseRecipe,
   onExecuteRecipe,
+  emptyState,
 }: PlaybooksTabProps) {
   const [viewModeLocal] = useViewMode('wf-recipes')
   const viewMode = viewModeProp || viewModeLocal
@@ -329,11 +331,13 @@ export function PlaybooksTab({
     <div className="space-y-6">
       {/* Playbooks Grid — 4 per row */}
       {playbooks.length === 0 ? (
-        <div className="text-center py-12">
-          <GitBranch className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-          <p className="text-muted-foreground">No playbooks found</p>
-          <p className="text-xs text-muted-foreground mt-1">Create your first playbook to get started</p>
-        </div>
+        emptyState || (
+          <div className="text-center py-12">
+            <GitBranch className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+            <p className="text-muted-foreground">No playbooks found</p>
+            <p className="text-xs text-muted-foreground mt-1">Create your first playbook to get started</p>
+          </div>
+        )
       ) : viewMode === 'list' ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {playbooks.map((playbook: any) => {

@@ -417,7 +417,9 @@ async def create_agent(agent_data: AgentCreate, ctx: RequestContext = Depends(ge
         tags = _normalize_tags(agent_data.tags if hasattr(agent_data, 'tags') else None)
         
         # Create agent with workspace
+        from uuid import uuid4 as _uuid4
         agent = Agent(
+            public_id=_uuid4(),
             name=agent_data.name,
             description=agent_data.description,
             agent_type=agent_data.agent_type,

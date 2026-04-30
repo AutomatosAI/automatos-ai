@@ -10,7 +10,7 @@
  * the BYOK surface.
  */
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
@@ -55,6 +55,7 @@ export function PlatformApiKeysCard() {
   const [provider, setProvider] = useState('')
   const [apiKey, setApiKey] = useState('')
   const [removeTarget, setRemoveTarget] = useState<string | null>(null)
+  const apiKeyInputRef = useRef<HTMLInputElement>(null)
 
   const { data: platformStatus } = useQuery<PlatformKeyStatus>({
     queryKey: ['platform-key-status'],
@@ -101,13 +102,13 @@ export function PlatformApiKeysCard() {
     return PROVIDERS.find((p) => p.value === value)?.label ?? value
   }
 
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    if (!provider || !apiKey) {
+  function handleSave() {
+    const value = (apiKeyInputRef.current?.value ?? apiKey).trim()
+    if (!provider || !value) {
       toast.error('API key is required')
       return
     }
-    setKeyMutation.mutate({ provider, api_key: apiKey })
+    setKeyMutation.mutate({ provider, api_key: value })
   }
 
   return (
@@ -188,7 +189,7 @@ export function PlatformApiKeysCard() {
         }}
       >
         <DialogContent className="sm:max-w-md">
-          <form onSubmit={handleSubmit}>
+          <div>
             <DialogHeader>
               <DialogTitle>
                 {platformKeys[provider]?.configured ? 'Update' : 'Configure'} Platform Key
@@ -204,11 +205,13 @@ export function PlatformApiKeysCard() {
               <div className="space-y-2">
                 <Label htmlFor="platform-api-key">API Key</Label>
                 <Input
+                  ref={apiKeyInputRef}
                   id="platform-api-key"
                   type="password"
                   placeholder="sk-..."
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
+                  onInput={(e) => setApiKey((e.target as HTMLInputElement).value)}
                   autoComplete="off"
                 />
                 <p className="text-xs text-muted-foreground">
@@ -225,14 +228,18 @@ export function PlatformApiKeysCard() {
               >
                 Cancel
               </Button>
-              <Button type="submit" disabled={setKeyMutation.isPending || !apiKey}>
+              <Button
+                type="button"
+                onClick={handleSave}
+                disabled={setKeyMutation.isPending}
+              >
                 {setKeyMutation.isPending && (
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                 )}
                 Save Platform Key
               </Button>
             </DialogFooter>
-          </form>
+          </div>
         </DialogContent>
       </Dialog>
 

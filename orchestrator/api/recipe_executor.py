@@ -820,15 +820,20 @@ async def _execute_recipe_inner(
         # Values like 1200 are valid seconds (20min), NOT milliseconds.
         exec_config = recipe.execution_config or {}
 
-        raw_step = exec_config.get('timeout_per_step') or exec_config.get('per_step_timeout') or 300
-        raw_total = exec_config.get('total_timeout') or 600
+        from config import config as app_config
+
+        raw_step = (
+            exec_config.get('timeout_per_step')
+            or exec_config.get('per_step_timeout')
+            or app_config.PLAYBOOK_DEFAULT_STEP_TIMEOUT_SECONDS
+        )
+        raw_total = exec_config.get('total_timeout') or app_config.PLAYBOOK_DEFAULT_TOTAL_TIMEOUT_SECONDS
 
         step_timeout_sec = raw_step / 1000 if raw_step >= 10000 else raw_step   # ms → s
         total_timeout_sec = raw_total / 1000 if raw_total >= 10000 else raw_total
 
-        # Clamp: at least 60s per step, at least 120s total
-        step_timeout_sec = max(step_timeout_sec, 60)
-        total_timeout_sec = max(total_timeout_sec, 120)
+        step_timeout_sec = max(step_timeout_sec, app_config.PLAYBOOK_MIN_STEP_TIMEOUT_SECONDS)
+        total_timeout_sec = max(total_timeout_sec, app_config.PLAYBOOK_MIN_TOTAL_TIMEOUT_SECONDS)
         logger.info(
             f"[recipe_direct] Timeouts: step={step_timeout_sec:.0f}s, "
             f"total={total_timeout_sec:.0f}s (raw: step={raw_step}, total={raw_total})"

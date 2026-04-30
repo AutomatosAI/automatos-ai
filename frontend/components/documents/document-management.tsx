@@ -21,7 +21,6 @@ import {
   Plus,
   History,
   Cloud,
-  Layout,
   ExternalLink,
   Brain,
   Network,
@@ -55,7 +54,6 @@ import { UploadProviderModal } from './upload-provider-modal'
 import { SemanticSearch } from './semantic-search'
 import { RAGContextBuilder } from '@/components/context/rag-context-builder'
 import type { SearchResult } from '@/hooks/use-semantic-search-api'
-import { TemplateManager } from './template-manager'
 import { DocumentProcessing } from './document-processing'
 // DocumentAnalytics removed — analytics consolidated into /analytics
 // Cloud Storage Components (PRD-42)
@@ -639,10 +637,6 @@ export function DocumentManagement() {
               <Database className="w-4 h-4" />
               <span>Database</span>
             </TabsTrigger>
-            <TabsTrigger value="templates" className="flex items-center space-x-2">
-              <Layout className="w-4 h-4" />
-              <span>Templates</span>
-            </TabsTrigger>
             <TabsTrigger value="codegraph" className="flex items-center space-x-2">
               <Database className="w-4 h-4" />
               <span>CodeGraph</span>
@@ -1095,10 +1089,6 @@ export function DocumentManagement() {
           </TabsContent>
 
           {/* Analytics tab removed — see /analytics */}
-
-          <TabsContent value="templates" className="space-y-6">
-            <TemplateManager />
-          </TabsContent>
 
           <TabsContent value="codegraph" className="space-y-6">
             <CodeGraphPanel />

@@ -297,22 +297,13 @@ async def list_available_models(
         }
     except Exception as e:
         logger.error(f"Error listing models: {e}")
-        # Return fallback with common models
+        # Fallback when ModelRegistry is unreachable — return platform defaults
+        # rather than a stale hardcoded list.
+        from core.llm.defaults import DEFAULT_LLM_PROVIDER, DEFAULT_LLM_MODEL
         return {
-            "providers": {
-                "openai": [
-                    {"model_id": "gpt-4", "display_name": "GPT-4", "supports_functions": True},
-                    {"model_id": "gpt-4-turbo", "display_name": "GPT-4 Turbo", "supports_functions": True},
-                    {"model_id": "gpt-3.5-turbo", "display_name": "GPT-3.5 Turbo", "supports_functions": True}
-                ],
-                "anthropic": [
-                    {"model_id": "claude-3-5-sonnet-20241022", "display_name": "Claude 3.5 Sonnet", "supports_functions": True},
-                    {"model_id": "claude-3-opus-20240229", "display_name": "Claude 3 Opus", "supports_functions": False},
-                    {"model_id": "claude-3-haiku-20240307", "display_name": "Claude 3 Haiku", "supports_functions": False}
-                ]
-            },
-            "default_provider": "openai",
-            "default_model": "gpt-4"
+            "providers": {},
+            "default_provider": DEFAULT_LLM_PROVIDER,
+            "default_model": DEFAULT_LLM_MODEL,
         }
 
 

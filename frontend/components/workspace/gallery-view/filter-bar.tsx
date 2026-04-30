@@ -27,6 +27,12 @@ import {
 } from '@/components/ui/select'
 import { ViewToggle, type ViewMode } from '@/components/shared/view-toggle'
 import {
+  DELIVERABLE_ACCENTS,
+  DeliverableIcon,
+  isDeliverableType,
+  type DeliverableType,
+} from '@/components/icons/deliverable-icon'
+import {
   DEFAULT_FILTERS,
   type DateRange,
   type FilterState,
@@ -51,6 +57,7 @@ const TYPE_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'code', label: 'Code' },
   { value: 'slide', label: 'Slides' },
   { value: 'spreadsheet', label: 'Spreadsheets' },
+  { value: 'blog_post', label: 'Blog Posts' },
 ]
 
 const SOURCE_OPTIONS: Array<{ value: string; label: string }> = [
@@ -154,18 +161,36 @@ export function FilterBar({ filters, onFiltersChange, total, viewMode, onViewMod
         value={filters.artifact_type ?? 'all'}
         onValueChange={handleTypeChange}
       >
-        <SelectTrigger className="w-[160px]" aria-label="Filter by type">
+        <SelectTrigger className="w-[170px]" aria-label="Filter by type">
           <div className="flex items-center gap-2">
-            <FileType className="h-4 w-4 text-muted-foreground" />
+            {filters.artifact_type && isDeliverableType(filters.artifact_type) ? (
+              <span className={DELIVERABLE_ACCENTS[filters.artifact_type as DeliverableType].tw}>
+                <DeliverableIcon type={filters.artifact_type as DeliverableType} size="badge" />
+              </span>
+            ) : (
+              <FileType className="h-4 w-4 text-muted-foreground" />
+            )}
             <SelectValue />
           </div>
         </SelectTrigger>
         <SelectContent>
-          {TYPE_OPTIONS.map((opt) => (
-            <SelectItem key={opt.value} value={opt.value}>
-              {opt.label}
-            </SelectItem>
-          ))}
+          {TYPE_OPTIONS.map((opt) => {
+            const typed = isDeliverableType(opt.value) ? (opt.value as DeliverableType) : null
+            return (
+              <SelectItem key={opt.value} value={opt.value}>
+                <div className="flex items-center gap-2">
+                  {typed ? (
+                    <span className={DELIVERABLE_ACCENTS[typed].tw}>
+                      <DeliverableIcon type={typed} size="badge" />
+                    </span>
+                  ) : (
+                    <FileType className="h-4 w-4 text-muted-foreground" />
+                  )}
+                  <span>{opt.label}</span>
+                </div>
+              </SelectItem>
+            )
+          })}
         </SelectContent>
       </Select>
 

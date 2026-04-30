@@ -80,10 +80,11 @@ class SmartMemoryManager:
 
     @staticmethod
     def _get_store_max_chars() -> int:
-        """Read store_max_chars from system_settings DB, fallback to 6000."""
+        """Memory store truncation length — non-LLM feature flag in `general`
+        (post PRD-136 collapse: memory_management category retired)."""
         try:
             from core.llm.manager import get_system_setting
-            val = get_system_setting("memory_management", "store_max_chars", "6000")
+            val = get_system_setting("general", "memory_store_max_chars", "6000")
             return int(val)
         except Exception:
             return 6000

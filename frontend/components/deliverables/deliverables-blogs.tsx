@@ -2,7 +2,6 @@
 
 import { useState, useCallback } from 'react'
 import {
-  FileText,
   Filter,
   Plus,
   Eye,
@@ -13,6 +12,7 @@ import {
   Clock,
   User,
 } from 'lucide-react'
+import { DeliverableIcon } from '@/components/icons/deliverable-icon'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -84,7 +84,9 @@ function BlogCardSkeleton() {
 function BlogEmptyState({ onCreatePost }: { onCreatePost: () => void }) {
   return (
     <div className="glass-card p-6 sm:p-8 text-center text-muted-foreground">
-      <FileText className="w-12 h-12 mx-auto mb-3 opacity-30" />
+      <div className="mx-auto mb-3 flex h-24 w-24 items-center justify-center overflow-hidden rounded-xl opacity-90">
+        <DeliverableIcon type="blog_post" size="hero" width={96} height={96} />
+      </div>
       <p className="font-medium">No blog posts yet</p>
       <p className="text-sm mt-1 max-w-xs mx-auto">
         Create posts manually or let your agents publish via the platform_publish_blog_post tool.
@@ -236,11 +238,7 @@ function BlogPostCard({
 
 // ─── Main Component ─────────────────────────────────────
 
-interface ActivityBlogProps {
-  period?: string
-}
-
-export function ActivityBlog({ period }: ActivityBlogProps) {
+export function DeliverablesBlog() {
   const [filters, setFilters] = useState<BlogFilters>({ per_page: 20 })
   const [isEditorOpen, setIsEditorOpen] = useState(false)
   const [editingPostId, setEditingPostId] = useState<string | null>(null)

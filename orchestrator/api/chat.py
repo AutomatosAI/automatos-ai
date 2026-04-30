@@ -197,7 +197,8 @@ class ChatRequest(BaseModel):
     message: ChatMessageRequest
     # Compatibility with AI SDK "messages" payloads
     messages: Optional[List[ChatMessageRequest]] = None
-    selectedChatModel: Optional[str] = "gpt-4"
+    # PRD-136: no hardcoded default — None means "resolve via Auto tier".
+    selectedChatModel: Optional[str] = None
     selectedVisibilityType: Optional[str] = "private"
     context: Optional[dict] = None
     # PRD: Unified Agent-Chat System

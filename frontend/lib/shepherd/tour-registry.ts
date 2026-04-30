@@ -53,9 +53,9 @@ const registry: Record<string, TourRegistryEntry> = {
       return createDocumentsTour(userId)
     },
   },
-  '/activity': {
-    id: 'activity',
-    label: 'Activity',
+  '/command-center': {
+    id: 'command-center',
+    label: 'Command Center',
     factory: async (userId) => {
       const { createActivityTour } = await import('./tours/activity-tour')
       return createActivityTour(userId)
@@ -77,9 +77,9 @@ const registry: Record<string, TourRegistryEntry> = {
       return createSettingsTour(userId)
     },
   },
-  '/workspace': {
-    id: 'workspace',
-    label: 'Workspace',
+  '/deliverables': {
+    id: 'deliverables',
+    label: 'Deliverables',
     factory: async (userId) => {
       const { createWorkspaceTour } = await import('./tours/workspace-tour')
       return createWorkspaceTour(userId)

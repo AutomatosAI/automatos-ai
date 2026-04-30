@@ -71,6 +71,7 @@ const PAGE_MOCK_CONFIG: Record<string, boolean> = {
   'tools': false,            // ✅ Use real APIs - tools endpoints working
   'credentials': false,      // ✅ Use real APIs - credentials system ready
   'marketplace': false,      // ✅ Use real APIs - marketplace/composio endpoints working
+  'assignments': false,      // ✅ Use real APIs - recommendations endpoint
   'admin': false,            // ✅ Use real APIs - admin plugin management
 
   // Testing/Development
@@ -908,7 +909,10 @@ class ApiClient {
         throw new Error(detail || `HTTP ${response.status}`)
       }
 
-      const data = await response.json()
+      // Handle empty bodies (204 No Content, or any successful response with no body)
+      // without throwing a JSON parse error.
+      const text = await response.text()
+      const data = text ? JSON.parse(text) : null
       if (process.env.NODE_ENV !== 'production') console.log('✅ API Success:', endpoint, 'Data type:', Array.isArray(data) ? `array[${data.length}]` : typeof data)
 
       return data
@@ -2624,6 +2628,12 @@ class ApiClient {
   // ===== EVALUATION ENDPOINTS (Working ✅) =====
   async getPerformanceMetrics() {
     return this.request('/api/evaluation/performance-metrics')
+  }
+
+  // ===== ASSIGNMENTS ENDPOINTS =====
+
+  async getRecommendedAssignments(limit: number = 8) {
+    return this.request(`/api/assignments/recommended?limit=${limit}`)
   }
 
   // ===== RAG CONFIGURATION ENDPOINTS =====

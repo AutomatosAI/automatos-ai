@@ -53,7 +53,7 @@ class GraphSection(BaseSection):
         from modules.knowledge.graph_service import get_graph_service, team_filtered_view
 
         service = get_graph_service()
-        graph = await service.load_graph(int(ctx.workspace_id))
+        graph = await service.load_graph(str(ctx.workspace_id))
         if graph is None or graph.number_of_nodes() == 0:
             return ""
 

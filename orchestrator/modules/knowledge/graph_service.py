@@ -676,7 +676,7 @@ class GraphifyService:
                     extraction = await extract_from_document(
                         doc_text=source["text"],
                         doc_path=source["path"],
-                        workspace_id=int(workspace_id) if workspace_id.isdigit() else 0,
+                        workspace_id=str(workspace_id),
                         team_access=source.get("team_access"),
                         llm=llm,
                     )

@@ -52,8 +52,8 @@ async def create_specialized_agent_endpoint(
         "type": "code_architect|data_analyst|security_expert|...",
         "skills": ["skill1", "skill2"],
         "model": {
-            "provider": "openai",
-            "name": "gpt-4",
+            "provider": "openrouter",
+            "name": "google/gemini-2.5-flash",
             "temperature": 0.7
         },
         "auto_verify": true
@@ -93,7 +93,7 @@ async def create_specialized_agent_endpoint(
         try:
             from modules.knowledge.graph_service import get_graph_service
             get_graph_service().schedule_incremental_update(
-                int(ctx.workspace_id),
+                str(ctx.workspace_id),
                 [{"type": "roster", "path": name, "id": agent_runtime.agent_id}],
             )
         except Exception:
@@ -618,14 +618,14 @@ async def update_agent_model_config(
     
     Request body:
     {
-        "provider": "openai",
-        "model_id": "gpt-4",
+        "provider": "openrouter",
+        "model_id": "google/gemini-2.5-flash",
         "temperature": 0.7,
-        "max_tokens": 2000,
+        "max_tokens": 8000,
         "top_p": 1.0,
         "frequency_penalty": 0.0,
         "presence_penalty": 0.0,
-        "fallback_model_id": "gpt-3.5-turbo"
+        "fallback_model_id": "google/gemini-2.5-flash"
     }
     
     Note: Agent must be recreated for changes to take effect in runtime.
@@ -669,7 +669,7 @@ async def update_agent_model_config(
         try:
             from modules.knowledge.graph_service import get_graph_service
             get_graph_service().schedule_incremental_update(
-                int(ctx.workspace_id),
+                str(ctx.workspace_id),
                 [{"type": "roster", "path": agent.name, "id": agent_id}],
             )
         except Exception:
@@ -758,9 +758,9 @@ async def switch_agent_model(
     
     Request body:
     {
-        "model_id": "claude-3-sonnet-20240229",
+        "model_id": "google/gemini-2.5-flash",
         "temperature": 0.7,  // Optional
-        "max_tokens": 2000   // Optional
+        "max_tokens": 8000   // Optional
     }
     
     This is a convenience endpoint that:

@@ -285,7 +285,7 @@ export function ExecutionDetail({ item, onClose }: ExecutionDetailProps) {
     if (onClose) {
       onClose()
     } else {
-      router.push('/activity')
+      router.push('/command-center')
     }
   }
 
@@ -306,7 +306,7 @@ export function ExecutionDetail({ item, onClose }: ExecutionDetailProps) {
 
   const handleEdit = () => {
     if (item.type === 'recipe' && item.source_id) {
-      router.push('/activity')
+      router.push('/assignments?tab=playbooks')
     } else if (item.type === 'routine' && item.agent?.id) {
       router.push(`/agents?agent=${item.agent.id}&tab=heartbeat`)
     }
@@ -497,7 +497,7 @@ export function ExecutionDetail({ item, onClose }: ExecutionDetailProps) {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => router.push(`/activity?tab=board&agent_id=${item.agent?.id}`)}
+              onClick={() => router.push(`/command-center?tab=board&agent_id=${item.agent?.id}`)}
               className="text-xs min-h-[44px] sm:min-h-0 justify-center"
             >
               <FileText className="w-3.5 h-3.5 mr-1.5" />

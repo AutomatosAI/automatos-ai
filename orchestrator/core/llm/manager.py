@@ -26,24 +26,30 @@ from .clients.openrouter_client import OpenRouterProvider
 
 logger = logging.getLogger(__name__)
 
-# Canonical mapping from service name to settings category
+# Canonical mapping from service name to LLM tier (PRD-136).
+# Three tiers only — Auto (orchestrator_llm), System (system_llm), Embeddings.
+# Service identity is preserved for cost-audit tagging; tier dictates which
+# settings block configures the LLM.
 SERVICE_CATEGORY_MAP = {
+    # Auto tier — the brain. User-facing reasoning, planning, chat orchestration.
     "orchestrator": "orchestrator_llm",
-    "codegraph": "codegraph",
-    "document_processing": "document_processing",
-    "chatbot": "chatbot",
-    "rag": "rag",
-    "embeddings": "embeddings",
-    "memory_integration": "memory_integration",
-    "nl2sql": "nl2sql",
     "heartbeat": "orchestrator_llm",
-    "complexity_assessor": "orchestrator_llm",  # PRD-68: uses orchestrator LLM settings
-    # Coordination services — read from 'coordination' system_settings category
-    "planner": "coordination",
-    "verifier": "coordination",
-    "consistency_verifier": "coordination",
-    # Knowledge graph extraction
-    "graph_extraction": "knowledge_graph",
+
+    # System tier — internal calls. Cheap-fast model, high volume.
+    "chatbot": "system_llm",
+    "codegraph": "system_llm",
+    "document_processing": "system_llm",
+    "rag": "system_llm",
+    "memory_integration": "system_llm",
+    "nl2sql": "system_llm",
+    "complexity_assessor": "system_llm",
+    "planner": "system_llm",
+    "verifier": "system_llm",
+    "consistency_verifier": "system_llm",
+    "graph_extraction": "system_llm",
+
+    # Embeddings tier — vectorization only.
+    "embeddings": "embeddings",
 }
 
 

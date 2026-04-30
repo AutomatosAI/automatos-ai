@@ -111,7 +111,7 @@ export function OrgChartTab() {
             The CTO agent will audit your roster, browse the marketplace, and build your team.
           </p>
           <a
-            href="/activity?tab=missions"
+            href="/assignments?tab=missions"
             className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-orange-500/20 text-orange-400 text-sm font-medium hover:bg-orange-500/30 transition-colors border border-orange-500/30"
           >
             <Rocket className="w-4 h-4" />

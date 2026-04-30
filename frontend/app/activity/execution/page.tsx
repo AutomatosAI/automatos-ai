@@ -25,7 +25,7 @@ export default function ExecutionPage() {
     <MainLayout>
       <ExecutionKitchen
         workflowId={0}
-        onBack={() => router.push('/activity')}
+        onBack={() => router.push('/command-center')}
         executionType="recipe"
         recipeExecutionId={executionId}
         recipeId={recipeId || undefined}
