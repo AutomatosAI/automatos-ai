@@ -100,7 +100,12 @@ class ToolExecutionTracker:
         'list_directory': 2,
         'read_file': 3,
         'write_file': 2,
-        'default': 3
+        # PRD-137 Fix #7: explicit caps for platform_* and workspace_* prefixes.
+        # Platform tools are mostly definitive DB lookups — 2 attempts is enough.
+        # Workspace tools (file/grep chains) may legitimately chain — allow 5.
+        'platform_default': 2,
+        'workspace_default': 5,
+        'default': 3,
     }
 
     def __init__(self):
@@ -111,17 +116,42 @@ class ToolExecutionTracker:
     def _hash_args(self, tool_args: Dict[str, Any]) -> str:
         return hashlib.md5(json.dumps(tool_args, sort_keys=True).encode()).hexdigest()
 
+    @staticmethod
+    def _counting_key(tool_name: str, tool_args: Dict[str, Any]) -> str:
+        """Return the key used for per-tool call counting.
+
+        For the ``platform_execute`` dispatcher, count by inner action so
+        that ``list_agents → get_settings → update_agent`` is three
+        distinct actions, not three calls to the same tool.
+        """
+        if tool_name == "platform_execute":
+            action = tool_args.get("action") or tool_args.get("name")
+            if action:
+                return f"platform_execute:{action}"
+        return tool_name
+
+    def _resolve_limit(self, counting_key: str) -> int:
+        """Resolve the retry limit for a counting key, honouring prefix-based defaults."""
+        if counting_key in self.TOOL_RETRY_LIMITS:
+            return self.TOOL_RETRY_LIMITS[counting_key]
+        if counting_key.startswith('platform_'):
+            return self.TOOL_RETRY_LIMITS.get('platform_default', self.TOOL_RETRY_LIMITS['default'])
+        if counting_key.startswith('workspace_'):
+            return self.TOOL_RETRY_LIMITS.get('workspace_default', self.TOOL_RETRY_LIMITS['default'])
+        return self.TOOL_RETRY_LIMITS['default']
+
     def should_skip_execution(
         self,
         tool_name: str,
         tool_args: Dict[str, Any]
     ) -> Tuple[bool, str]:
         """Check if a tool execution should be skipped. Returns (should_skip, reason)."""
-        current_count = self.tool_counts.get(tool_name, 0)
-        limit = self.TOOL_RETRY_LIMITS.get(tool_name, self.TOOL_RETRY_LIMITS['default'])
+        key = self._counting_key(tool_name, tool_args)
+        current_count = self.tool_counts.get(key, 0)
+        limit = self._resolve_limit(key)
 
         if current_count >= limit:
-            return True, f"Tool '{tool_name}' has reached its execution limit ({limit}) for this turn"
+            return True, f"Tool '{key}' has reached its execution limit ({limit}) for this turn"
 
         args_hash = self._hash_args(tool_args)
         exec_key = (tool_name, args_hash)
@@ -142,7 +172,8 @@ class ToolExecutionTracker:
         """Record that a tool was executed."""
         args_hash = self._hash_args(tool_args)
         self.exact_executions.add((tool_name, args_hash))
-        self.tool_counts[tool_name] = self.tool_counts.get(tool_name, 0) + 1
+        key = self._counting_key(tool_name, tool_args)
+        self.tool_counts[key] = self.tool_counts.get(key, 0) + 1
         if tool_name in self.SEARCH_TOOLS:
             query = _extract_query_from_args(tool_name, tool_args)
             if query:
@@ -578,8 +609,11 @@ class StreamingChatService:
         Load agent-specific context: persona, description for chatbot identity injection.
 
         PRD-81: System prompt cache removed from AgentRuntime — ContextService is
-        now the single prompt builder. This method only provides lightweight identity
-        context for the chatbot's _inject_agent_identity().
+        now the single prompt builder.
+
+        PRD-137 Fix #3: identity is now injected by IdentitySection (single owner).
+        This method still produces an agent_ctx dict for non-identity callers
+        (e.g. CTO override path that reads `extra_context`).
         """
         persona = ""
         try:
@@ -696,14 +730,15 @@ class StreamingChatService:
                 messages, use_tools, agent_runtime.agent_id,
             )
 
-        # Inject agent persona + description (skip for CTO — soul document already includes it)
-        if not is_cto_agent and orchestrated:
-            self._inject_agent_identity(llm_messages, agent_ctx)
+        # PRD-137 Fix #3: agent description + persona are injected by
+        # IdentitySection (modules/context/sections/identity.py) into the
+        # orchestrated system prompt, for both chatbot and non-chatbot modes.
+        # Do NOT inject again here — double injection causes the model to echo
+        # its intro twice (observed on Shopify widget).
 
         # Multi-step execution policy
-        insert_pos = 2 if (not is_cto_agent and agent_ctx.get("extra_context")) else 1
         llm_messages.insert(
-            insert_pos,
+            1,
             {
                 "role": "system",
                 "content": (
@@ -918,24 +953,9 @@ class StreamingChatService:
 
         logger.info(f"[CTO] System prompt replaced for CTO Agent (agent_id={agent_id})")
 
-    def _inject_agent_identity(
-        self,
-        llm_messages: List[Dict[str, Any]],
-        agent_ctx: dict,
-    ) -> None:
-        """Inject agent persona + description after orchestrator system prompt."""
-        agent_identity_parts = []
-        if agent_ctx.get("description"):
-            agent_identity_parts.append(agent_ctx["description"])
-        if agent_ctx.get("persona"):
-            agent_identity_parts.append(f"## Persona & Communication Style\n{agent_ctx['persona']}")
-        if agent_ctx.get("extra_context"):
-            agent_identity_parts.append(agent_ctx["extra_context"])
-        if agent_identity_parts:
-            llm_messages.insert(1, {
-                "role": "system",
-                "content": "\n\n".join(agent_identity_parts),
-            })
+    # PRD-137 Fix #3: removed _inject_agent_identity. IdentitySection now
+    # owns description+persona injection for both chatbot and non-chatbot
+    # modes — see modules/context/sections/identity.py.
 
     # ─────────────────────────────────────────────────────────────────────
     # Composio per-action tool injection
@@ -1806,7 +1826,7 @@ class StreamingChatService:
         messages: List[Dict[str, Any]],
         agent_id: int,
         user_id: int,
-        use_system_llm: bool = False,
+        use_orchestrator_llm: bool = False,
         skip_composio: bool = False,
         complexity_assessment: Optional[Any] = None,
         mission_mode: bool = False,
@@ -1817,6 +1837,10 @@ class StreamingChatService:
         """
         Stream a chat response produced by the specified agent.
         Yields AISDK-formatted chunks for frontend consumption.
+
+        PRD-137 Fix #2: parameter renamed from ``use_system_llm`` —
+        when True, the orchestrator-tier defaults are used; when
+        False, the agent's own model_config drives the LLM.
         """
         import asyncio
 
@@ -1832,7 +1856,9 @@ class StreamingChatService:
                 messages = [m for m in messages if m.get("role") == "user"][-1:]
 
             # Start agent activation (concurrent with chat-id emission)
-            agent_task = asyncio.create_task(self.agent_factory.activate_agent(agent_id, use_system_llm=use_system_llm))
+            agent_task = asyncio.create_task(
+                self.agent_factory.activate_agent(agent_id, use_orchestrator_llm=use_orchestrator_llm)
+            )
 
             # Send chat_id to frontend
             yield self.streaming_handler.format_aisdk_chat_id(chat_id)
@@ -2067,98 +2093,6 @@ class StreamingChatService:
         except Exception as e:
             logger.error(f"Error streaming response with agent: {e}", exc_info=True)
             yield self.streaming_handler.format_aisdk_error(str(e))
-
-    async def stream_response(
-        self,
-        chat_id: str,
-        messages: List[Dict[str, Any]],
-        tools: Optional[List[Any]] = None
-    ) -> AsyncGenerator[str, None]:
-        """Stream chat response using legacy SSE format."""
-        from core.llm import create_llm_manager
-
-        # Get tools from SINGLE SOURCE if not provided
-        if tools is None:
-            tools = get_tools_for_agent()
-
-        try:
-            llm_manager = create_llm_manager(service_name="chatbot", workspace_id=self.workspace_id, request_type="chat")
-            messages = self._resolve_file_parts(messages)
-            latest_text = self.prompt_analyzer.extract_latest_user_text(messages)
-            if self.prompt_analyzer.is_fresh_start_request(latest_text):
-                messages = [m for m in messages if m.get("role") == "user"][-1:]
-            llm_messages = self.prompt_analyzer.convert_to_llm_messages(
-                messages, available_tools=tools,
-            )
-            assistant_parts = []
-
-            if hasattr(llm_manager, 'generate_response_stream'):
-                async for chunk in llm_manager.generate_response_stream(messages=llm_messages, tools=tools):
-                    yield self.streaming_handler.format_sse_chunk(chunk)
-                    if chunk.get('type') == 'text':
-                        assistant_parts.append({'type': 'text', 'text': chunk.get('text', '')})
-            else:
-                latest_text = self.prompt_analyzer.extract_latest_user_text(messages)
-                is_simple = self.prompt_analyzer.is_simple_message(latest_text)
-                use_tools = None if is_simple else tools
-
-                response = await llm_manager.generate_response(messages=llm_messages, tools=use_tools)
-
-                if response.tool_calls:
-                    tool_data = {}
-                    tool_results = []
-
-                    for tool_call in response.tool_calls:
-                        tool_name = tool_call.get('function', {}).get('name')
-                        tool_args = json.loads(tool_call.get('function', {}).get('arguments', '') or '{}')
-                        tool_id = tool_call.get('id')
-
-                        result = await self.tool_router.execute_and_format(
-                            tool_name, tool_args,
-                            agent_id=1, workspace_id=self.workspace_id,
-                            original_intent=latest_text,
-                        )
-                        if result['success']:
-                            tool_data.update(result['frontend_data'])
-
-                        tool_results.append({
-                            "role": "tool",
-                            "tool_call_id": tool_id,
-                            "content": result['llm_context'],
-                        })
-
-                    if tool_data:
-                        yield self.streaming_handler.format_sse_tool_data(tool_data)
-
-                    llm_messages.append({
-                        "role": "assistant",
-                        "content": response.content or "",
-                        "tool_calls": response.tool_calls,
-                    })
-                    llm_messages.extend(tool_results)
-
-                    final_response = await llm_manager.generate_response(messages=llm_messages, tools=None)
-                    response_text = final_response.content or ""
-                else:
-                    response_text = response.content or ""
-
-                message_id = str(uuid.uuid4())
-                async for chunk in self.streaming_handler.stream_text_legacy(response_text, message_id):
-                    yield chunk
-
-                assistant_parts.append({'type': 'text', 'text': response_text})
-
-            if assistant_parts:
-                self.chat_service.save_message(
-                    chat_id=chat_id, role='assistant',
-                    parts=assistant_parts, workspace_id=self.workspace_id,
-                )
-
-            yield self.streaming_handler.format_sse_done()
-
-        except Exception as e:
-            logger.error(f"Error streaming response: {e}", exc_info=True)
-            yield self.streaming_handler.format_sse_error(str(e))
 
     async def _execute_pretriggered_tools(
         self,

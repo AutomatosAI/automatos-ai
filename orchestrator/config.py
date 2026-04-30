@@ -551,6 +551,12 @@ class Config:
     RECIPE_LOG_S3_BUCKET: str = os.getenv("RECIPE_LOG_S3_BUCKET", "automatos-ai")
     MEM0_API_URL: str = os.getenv("MEM0_API_URL", "http://automatos-mem0-server.railway.internal")
     MEM0_API_KEY: str = os.getenv("MEM0_API_KEY")
+    # PRD-137 Fix #6: timeout was 15s — too long for chat critical path.
+    MEM0_TIMEOUT_SECONDS: float = float(os.getenv("MEM0_TIMEOUT_SECONDS", "3.0"))
+    # Open circuit after this many consecutive failures.
+    MEM0_CIRCUIT_THRESHOLD: int = int(os.getenv("MEM0_CIRCUIT_THRESHOLD", "3"))
+    # Stay open for this many seconds before allowing a probe.
+    MEM0_CIRCUIT_COOLDOWN_SECONDS: int = int(os.getenv("MEM0_CIRCUIT_COOLDOWN_SECONDS", "300"))
 
     # =============================================================================
     # QDRANT — PRD-108 Memory Field (Shared Semantic Context)

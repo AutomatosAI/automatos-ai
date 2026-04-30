@@ -618,9 +618,16 @@ class AgentFactory:
         self,
         agent_id: int,
         workspace_dir: str = "/tmp/automatos_workspace",
-        use_system_llm: bool = False,
+        use_orchestrator_llm: bool = False,
     ) -> Optional[AgentRuntime]:
-        """Load an agent from database and activate it in runtime."""
+        """Load an agent from database and activate it in runtime.
+
+        PRD-137 Fix #2: parameter renamed from ``use_system_llm`` to
+        ``use_orchestrator_llm`` to match what the code actually does.
+        When True, the orchestrator-tier defaults from
+        ``system_settings.orchestrator_llm.*`` are used; when False, the
+        agent's own ``model_config`` row drives the LLM choice.
+        """
         try:
             if agent_id in self.active_agents:
                 self.logger.info(f"Agent {agent_id} already active in runtime")
@@ -633,14 +640,14 @@ class AgentFactory:
                 self.logger.error(f"Agent {agent_id} not found in database")
                 return None
 
-            # Resolve LLM config: agent's own model_config → system settings
+            # Resolve LLM config: agent's own model_config → orchestrator-tier defaults
             agent_model_config = db_agent.model_config or {}
             agent_config = db_agent.configuration or {}
             agent_llm_config = agent_config.get("llm_config") or {}
 
             agent_has_model = agent_model_config.get("model_id") and agent_model_config.get("provider")
 
-            if agent_has_model and not use_system_llm:
+            if agent_has_model and not use_orchestrator_llm:
                 llm_config_dict = {
                     "provider": agent_model_config["provider"],
                     "model": agent_model_config["model_id"],
@@ -649,13 +656,13 @@ class AgentFactory:
                 }
                 self.logger.info(f"Agent {agent_id} using LLM: {llm_config_dict['provider']}/{llm_config_dict['model']} (agent model_config)")
             else:
-                reason = "use_system_llm=True" if use_system_llm else "no agent model_config"
-                system_llm_config = self._get_default_llm_config_from_settings()
+                reason = "use_orchestrator_llm=True" if use_orchestrator_llm else "no agent model_config"
+                orchestrator_llm_config = self._get_default_llm_config_from_settings()
                 llm_config_dict = {
-                    "provider": system_llm_config.get("provider"),
-                    "model": system_llm_config.get("model"),
-                    "temperature": agent_llm_config.get("temperature", system_llm_config.get("temperature", 0.7)),
-                    "max_tokens": agent_llm_config.get("max_tokens", system_llm_config.get("max_tokens", 2000)),
+                    "provider": orchestrator_llm_config.get("provider"),
+                    "model": orchestrator_llm_config.get("model"),
+                    "temperature": agent_llm_config.get("temperature", orchestrator_llm_config.get("temperature", 0.7)),
+                    "max_tokens": agent_llm_config.get("max_tokens", orchestrator_llm_config.get("max_tokens", 2000)),
                 }
                 self.logger.info(f"Agent {agent_id} using LLM: {llm_config_dict.get('provider')}/{llm_config_dict.get('model')} ({reason})")
 
