@@ -3,21 +3,33 @@
 import { useEffect, useRef } from 'react'
 import { usePathname } from 'next/navigation'
 import { useUser } from '@clerk/nextjs'
+import { useWorkspace } from '@/components/workspace-provider'
 
 /**
  * Auto-starts the Shepherd tour for the current page on first visit.
- * Tours only fire once per page per user — completing or skipping
- * persists to localStorage so it won't trigger again.
+ *
+ * Gating:
+ *   - Only fires for NEW workspaces (workspace.isNewWorkspace === true).
+ *     Existing users never see auto-tours; they can still launch any tour
+ *     manually via the Guide button.
+ *   - Once a tour completes/skips, that page's tour never fires again
+ *     (per-user localStorage).
  *
  * Drop this hook into MainLayout — it handles everything.
  */
 export function useAutoTour() {
   const pathname = usePathname()
   const { user, isLoaded } = useUser()
+  const { workspace, isLoading: wsLoading } = useWorkspace()
   const startedRef = useRef<string | null>(null)
 
   useEffect(() => {
     if (!isLoaded || !user?.id || !pathname) return
+    if (wsLoading || !workspace) return
+
+    // Auto-tours are for new workspaces only. Existing users get nothing
+    // unless they manually open a tour from the Guide button.
+    if (!workspace.isNewWorkspace) return
 
     // No Shepherd tours on mobile — welcome modal only
     if (typeof window !== 'undefined' && window.innerWidth <= 640) return
@@ -32,15 +44,9 @@ export function useAutoTour() {
       const { hasSeenTour, hasCompletedOnboarding } = await import('@/lib/shepherd/tour-storage')
 
       // If the welcome modal is still pending (user hasn't dismissed it yet),
-      // don't fire page tours on top of it.  But for existing users who never
-      // got the welcome modal at all, don't block them — check whether there's
-      // a DOM element for the modal currently open.
+      // don't fire page tours on top of it.
       const welcomeSeen = hasSeenTour('welcome', user.id) || hasCompletedOnboarding(user.id)
-      if (!welcomeSeen) {
-        // The welcome modal might be about to appear — bail and let the
-        // modal's own handlers mark it seen, then next navigation triggers tours.
-        return
-      }
+      if (!welcomeSeen) return
 
       const entry = getTourForRoute(pathname)
       if (!entry) return
@@ -58,5 +64,5 @@ export function useAutoTour() {
       cancelled = true
       clearTimeout(timer)
     }
-  }, [pathname, user?.id, isLoaded])
+  }, [pathname, user?.id, isLoaded, workspace?.isNewWorkspace, wsLoading])
 }
