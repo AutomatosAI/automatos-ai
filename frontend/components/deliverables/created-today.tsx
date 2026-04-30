@@ -93,7 +93,9 @@ function TodayCard({ deliverable, onClick }: TodayCardProps) {
             className="h-full w-full object-cover"
           />
         ) : (
-          <DeliverableArtwork type={artifact_type} className="absolute inset-0" />
+          <div className="h-16 w-16 overflow-hidden rounded-md">
+            <DeliverableArtwork type={artifact_type} />
+          </div>
         )}
         <Badge
           variant="secondary"
