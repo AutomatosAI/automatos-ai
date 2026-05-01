@@ -131,13 +131,18 @@ class ToolExecutionTracker:
         return tool_name
 
     def _resolve_limit(self, counting_key: str) -> int:
-        """Resolve the retry limit for a counting key, honouring prefix-based defaults."""
+        """Resolve the retry limit for a counting key, honouring prefix-based defaults.
+
+        Handles dispatched actions like ``platform_execute:workspace_read_file``
+        — the inner action name determines the prefix, not the dispatcher.
+        """
         if counting_key in self.TOOL_RETRY_LIMITS:
             return self.TOOL_RETRY_LIMITS[counting_key]
-        if counting_key.startswith('platform_'):
-            return self.TOOL_RETRY_LIMITS.get('platform_default', self.TOOL_RETRY_LIMITS['default'])
-        if counting_key.startswith('workspace_'):
+        effective_key = counting_key.split(":", 1)[-1] if ":" in counting_key else counting_key
+        if effective_key.startswith('workspace_'):
             return self.TOOL_RETRY_LIMITS.get('workspace_default', self.TOOL_RETRY_LIMITS['default'])
+        if effective_key.startswith('platform_') or counting_key.startswith('platform_'):
+            return self.TOOL_RETRY_LIMITS.get('platform_default', self.TOOL_RETRY_LIMITS['default'])
         return self.TOOL_RETRY_LIMITS['default']
 
     def should_skip_execution(
@@ -837,6 +842,10 @@ class StreamingChatService:
         if agent_runtime.metadata.persona:
             _persona_block = f"\n\n{agent_runtime.metadata.persona}\n"
 
+        _description_block = ""
+        if agent_runtime.metadata.description and str(agent_runtime.metadata.description).strip():
+            _description_block = f"\n\n## Agent Description\n{str(agent_runtime.metadata.description).strip()}\n"
+
         _atom_prompt = (
             f"You are {agent_runtime.metadata.name}, an AI assistant on the Automatos platform.\n\n"
             f"{_time_ctx}. Read the conversation and match the user's energy. "
@@ -845,6 +854,7 @@ class StreamingChatService:
             "If they're formal, match it. Never be artificially cheerful when someone is having a bad time. "
             "Never be robotic when someone is being warm.\n\n"
             "You adapt. That's what makes you good at this.\n"
+            f"{_description_block}"
             f"{_persona_block}"
             f"{_memory_block}"
         )
