@@ -25,7 +25,6 @@ import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
 import { apiClient } from '@/lib/api-client'
-import { listSystemSettings } from '@/lib/api/system-settings'
 import {
   Tooltip,
   TooltipContent,
@@ -174,10 +173,10 @@ export function CreateMissionModal({ open, onOpenChange, initialGoal, initialDes
 
   useEffect(() => {
     if (open) {
-      listSystemSettings('orchestrator_llm')
-        .then((settings) => {
-          const modelSetting = settings.find((s) => s.key === 'model')
-          if (modelSetting?.value) setOrchestratorModel(modelSetting.value)
+      apiClient.request<{ llm?: { model_id?: string } }>('/api/workspaces/current/orchestrator')
+        .then((data) => {
+          const modelId = data?.llm?.model_id
+          if (modelId) setOrchestratorModel(modelId)
         })
         .catch(() => {})
     }
@@ -526,7 +525,7 @@ export function CreateMissionModal({ open, onOpenChange, initialGoal, initialDes
                     <div className="text-[10px] text-muted-foreground leading-tight">{mode.description}</div>
                     {showModel && (
                       <div className="text-[9px] text-primary/70 truncate w-full">
-                        All agents on {orchestratorModel}
+                        All agents on {orchestratorModel?.includes('/') ? orchestratorModel.split('/').pop() : orchestratorModel}
                       </div>
                     )}
                   </button>
