@@ -280,6 +280,50 @@ class AgentFactory:
                 "context_window": 8192,
             }
 
+    def _get_system_llm_config_from_settings(self) -> Dict[str, Any]:
+        """Get System LLM config — the cheap/fast tier for Light power mode."""
+        try:
+            from core.llm.manager import get_system_setting
+            from core.llm.defaults import DEFAULT_LLM_PROVIDER, DEFAULT_LLM_MODEL
+
+            provider = get_system_setting("system_llm", "provider") or get_system_setting("system_llm", "llm_provider")
+            model = get_system_setting("system_llm", "model") or get_system_setting("system_llm", "llm_model")
+
+            if not provider:
+                provider = DEFAULT_LLM_PROVIDER
+            if not model:
+                model = DEFAULT_LLM_MODEL
+
+            context_window = 8192
+            max_tokens = 2000
+            try:
+                from core.models import LLMModel
+                llm_model = self.db_session.query(LLMModel).filter_by(model_id=model).first()
+                if llm_model:
+                    context_window = llm_model.context_window
+                    max_tokens = llm_model.max_output_tokens
+            except Exception as e:
+                self.logger.warning(f"Could not get context window for system_llm: {e}")
+
+            self.logger.info(f"System LLM from settings: {model} (context: {context_window})")
+            return {
+                "provider": provider,
+                "model": model,
+                "temperature": 0.7,
+                "max_tokens": max_tokens,
+                "context_window": context_window,
+            }
+        except Exception as e:
+            from core.llm.defaults import DEFAULT_LLM_PROVIDER, DEFAULT_LLM_MODEL
+            self.logger.warning(f"Could not get system_llm config: {e}, using defaults")
+            return {
+                "provider": DEFAULT_LLM_PROVIDER,
+                "model": DEFAULT_LLM_MODEL,
+                "temperature": 0.7,
+                "max_tokens": 2000,
+                "context_window": 8192,
+            }
+
     def _resolve_provider_for_model(self, provider_str: str, model_id: str) -> tuple[str, str]:
         """Auto-detect and correct provider-model mismatches.
 
@@ -620,14 +664,17 @@ class AgentFactory:
         agent_id: int,
         workspace_dir: str = "/tmp/automatos_workspace",
         use_orchestrator_llm: bool = False,
+        force_llm_tier: Optional[str] = None,
     ) -> Optional[AgentRuntime]:
         """Load an agent from database and activate it in runtime.
 
         PRD-137 Fix #2: parameter renamed from ``use_system_llm`` to
         ``use_orchestrator_llm`` to match what the code actually does.
-        When True, the orchestrator-tier defaults from
-        ``system_settings.orchestrator_llm.*`` are used; when False, the
-        agent's own ``model_config`` row drives the LLM choice.
+
+        ``force_llm_tier``: when set to ``"orchestrator_llm"`` or
+        ``"system_llm"``, overrides the agent's own model with the
+        corresponding tier from system_settings. Used by mission
+        power modes (Light → system_llm, Max → orchestrator_llm).
         """
         try:
             if agent_id in self.active_agents:
@@ -648,16 +695,17 @@ class AgentFactory:
 
             agent_has_model = agent_model_config.get("model_id") and agent_model_config.get("provider")
 
-            if agent_has_model and not use_orchestrator_llm:
+            if force_llm_tier == "system_llm":
+                tier_config = self._get_system_llm_config_from_settings()
                 llm_config_dict = {
-                    "provider": agent_model_config["provider"],
-                    "model": agent_model_config["model_id"],
-                    "temperature": agent_model_config.get("temperature", 0.7),
-                    "max_tokens": agent_model_config.get("max_tokens", 2000),
+                    "provider": tier_config.get("provider"),
+                    "model": tier_config.get("model"),
+                    "temperature": agent_llm_config.get("temperature", tier_config.get("temperature", 0.7)),
+                    "max_tokens": tier_config.get("max_tokens", 2000),
                 }
-                self.logger.info(f"Agent {agent_id} using LLM: {llm_config_dict['provider']}/{llm_config_dict['model']} (agent model_config)")
-            else:
-                reason = "use_orchestrator_llm=True" if use_orchestrator_llm else "no agent model_config"
+                self.logger.info(f"Agent {agent_id} using LLM: {llm_config_dict.get('provider')}/{llm_config_dict.get('model')} (force_llm_tier=system_llm)")
+            elif force_llm_tier == "orchestrator_llm" or use_orchestrator_llm:
+                reason = f"force_llm_tier={force_llm_tier}" if force_llm_tier else "use_orchestrator_llm=True"
                 orchestrator_llm_config = self._get_default_llm_config_from_settings()
                 llm_config_dict = {
                     "provider": orchestrator_llm_config.get("provider"),
@@ -666,6 +714,23 @@ class AgentFactory:
                     "max_tokens": agent_llm_config.get("max_tokens", orchestrator_llm_config.get("max_tokens", 2000)),
                 }
                 self.logger.info(f"Agent {agent_id} using LLM: {llm_config_dict.get('provider')}/{llm_config_dict.get('model')} ({reason})")
+            elif agent_has_model:
+                llm_config_dict = {
+                    "provider": agent_model_config["provider"],
+                    "model": agent_model_config["model_id"],
+                    "temperature": agent_model_config.get("temperature", 0.7),
+                    "max_tokens": agent_model_config.get("max_tokens", 2000),
+                }
+                self.logger.info(f"Agent {agent_id} using LLM: {llm_config_dict['provider']}/{llm_config_dict['model']} (agent model_config)")
+            else:
+                orchestrator_llm_config = self._get_default_llm_config_from_settings()
+                llm_config_dict = {
+                    "provider": orchestrator_llm_config.get("provider"),
+                    "model": orchestrator_llm_config.get("model"),
+                    "temperature": agent_llm_config.get("temperature", orchestrator_llm_config.get("temperature", 0.7)),
+                    "max_tokens": agent_llm_config.get("max_tokens", orchestrator_llm_config.get("max_tokens", 2000)),
+                }
+                self.logger.info(f"Agent {agent_id} using LLM: {llm_config_dict.get('provider')}/{llm_config_dict.get('model')} (no agent model_config)")
 
             from core.llm.defaults import DEFAULT_LLM_PROVIDER, DEFAULT_LLM_MODEL
             provider_str = llm_config_dict.get("provider") or DEFAULT_LLM_PROVIDER

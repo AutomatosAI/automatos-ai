@@ -1,10 +1,11 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useDropzone } from 'react-dropzone'
 import {
   Target, Loader2, Upload, X, FileText, Paperclip,
   Pen, Search, BarChart3, Database, Briefcase, Sparkles,
+  Zap, Rocket, HelpCircle,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -24,6 +25,39 @@ import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
 import { apiClient } from '@/lib/api-client'
+import { listSystemSettings } from '@/lib/api/system-settings'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
+
+type PowerMode = 'light' | 'standard' | 'max'
+
+const POWER_MODES: { id: PowerMode; name: string; description: string; icon: typeof Target; tooltip: string }[] = [
+  {
+    id: 'light',
+    name: 'Light',
+    description: 'Quick & cheap',
+    icon: Zap,
+    tooltip: 'Uses the background model with 2K token cap and 5 tool iterations. Good for blog posts, quick research.',
+  },
+  {
+    id: 'standard',
+    name: 'Standard',
+    description: 'Balanced (default)',
+    icon: Target,
+    tooltip: 'Each agent uses its own model with 4K token cap and 10 tool iterations. Default behavior.',
+  },
+  {
+    id: 'max',
+    name: 'Max',
+    description: 'Full power',
+    icon: Rocket,
+    tooltip: 'All agents use your best model with 16K tokens and 50 tool iterations. Decomposition limited to 1-2 focused agents for deep output.',
+  },
+]
 
 // PRD-127: Ephemeral attachment metadata
 interface MissionAttachment {
@@ -135,6 +169,19 @@ export function CreateMissionModal({ open, onOpenChange, initialGoal, initialDes
   const [tags, setTags] = useState('')
   const [files, setFiles] = useState<UploadingFile[]>([])
   const [budgetPauseEnabled, setBudgetPauseEnabled] = useState(true)
+  const [powerMode, setPowerMode] = useState<PowerMode>('standard')
+  const [orchestratorModel, setOrchestratorModel] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (open) {
+      listSystemSettings('orchestrator_llm')
+        .then((settings) => {
+          const modelSetting = settings.find((s) => s.key === 'model')
+          if (modelSetting?.value) setOrchestratorModel(modelSetting.value)
+        })
+        .catch(() => {})
+    }
+  }, [open])
 
   // Business Plan template extra fields
   const [businessName, setBusinessName] = useState('')
@@ -253,6 +300,7 @@ export function CreateMissionModal({ open, onOpenChange, initialGoal, initialDes
       config.attachment_ids = attachments.map((a) => a.attachment_id)
     }
     if (!budgetPauseEnabled) config.budget_pause_disabled = true
+    if (powerMode !== 'standard') config.power_mode = powerMode
 
     // Add business plan fields to config for downstream agents
     if (isBusinessPlan) {
@@ -291,6 +339,7 @@ export function CreateMissionModal({ open, onOpenChange, initialGoal, initialDes
     setTags('')
     setFiles([])
     setBudgetPauseEnabled(true)
+    setPowerMode('standard')
     setBusinessName('')
     setBusinessType('')
     setIndustry('')
@@ -438,6 +487,52 @@ export function CreateMissionModal({ open, onOpenChange, initialGoal, initialDes
               onChange={(e) => setDescription(e.target.value)}
               rows={isBusinessPlan ? 2 : 4}
             />
+          </div>
+
+          {/* Power mode selector */}
+          <div className="space-y-2">
+            <Label>Power Mode</Label>
+            <div className="grid grid-cols-3 gap-2">
+              {POWER_MODES.map((mode) => {
+                const Icon = mode.icon
+                const isSelected = powerMode === mode.id
+                const showModel = mode.id === 'max' && orchestratorModel
+                return (
+                  <button
+                    key={mode.id}
+                    type="button"
+                    onClick={() => setPowerMode(mode.id)}
+                    className={cn(
+                      'relative flex flex-col items-start gap-1 rounded-lg border p-2.5 text-left transition-colors',
+                      isSelected
+                        ? 'border-primary bg-primary/5 ring-1 ring-primary/30'
+                        : 'border-border hover:border-muted-foreground/40',
+                    )}
+                  >
+                    <div className="flex items-center gap-1.5 w-full">
+                      <Icon className={cn('w-3.5 h-3.5 shrink-0', isSelected ? 'text-primary' : 'text-muted-foreground')} />
+                      <span className="text-xs font-medium">{mode.name}</span>
+                      <TooltipProvider delayDuration={200}>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <HelpCircle className="w-3 h-3 text-muted-foreground hover:text-foreground cursor-help ml-auto shrink-0" />
+                          </TooltipTrigger>
+                          <TooltipContent side="top" className="max-w-xs">
+                            <p className="text-xs">{mode.tooltip}</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </div>
+                    <div className="text-[10px] text-muted-foreground leading-tight">{mode.description}</div>
+                    {showModel && (
+                      <div className="text-[9px] text-primary/70 truncate w-full">
+                        All agents on {orchestratorModel}
+                      </div>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
           </div>
 
           {/* File upload zone */}
