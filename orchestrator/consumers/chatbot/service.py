@@ -91,21 +91,18 @@ class ToolExecutionTracker:
     }
 
     TOOL_RETRY_LIMITS = {
-        'composio_execute': 2,
-        'search_knowledge': 2,
-        'semantic_search': 2,
-        'search_codebase': 2,
-        'smart_query_database': 2,
-        'query_database': 2,
-        'list_directory': 2,
-        'read_file': 3,
-        'write_file': 2,
-        # PRD-137 Fix #7: explicit caps for platform_* and workspace_* prefixes.
-        # Platform tools are mostly definitive DB lookups — 2 attempts is enough.
-        # Workspace tools (file/grep chains) may legitimately chain — allow 5.
-        'platform_default': 2,
-        'workspace_default': 5,
-        'default': 3,
+        'composio_execute': 5,
+        'search_knowledge': 5,
+        'semantic_search': 5,
+        'search_codebase': 5,
+        'smart_query_database': 5,
+        'query_database': 5,
+        'list_directory': 5,
+        'read_file': 8,
+        'write_file': 5,
+        'platform_default': 5,
+        'workspace_default': 8,
+        'default': 5,
     }
 
     def __init__(self):
@@ -1399,27 +1396,6 @@ class StreamingChatService:
                         empty_same_tool_streak, result if not _is_composio_action else {"success": True},
                         agent_runtime, _MULTI_STEP_TOOLS,
                     )
-                    # Database tool: force synthesis after first success
-                    if (not _is_composio_action
-                            and tool_name in {"query_database", "smart_query_database"}
-                            and result.get("success")):
-                        llm_messages.append({
-                            "role": "system",
-                            "content": (
-                                "You now have the database result. Do NOT call the database tool again. "
-                                "Write the final answer using the tool output above."
-                            ),
-                        })
-                        # Append tool exchange before forcing synthesis
-                        llm_messages.append(self._build_assistant_tool_message(tool_calls_prepared))
-                        llm_messages.extend(tool_results)
-                        final = await agent_runtime.llm_manager.generate_response(messages=llm_messages, tools=None)
-                        yield {"_final_response": SimpleNamespace(
-                            content=final.content or "", tool_calls=None,
-                            usage=getattr(final, "usage", None),
-                        )}
-                        return
-
                 except Exception as e:
                     logger.error(f"Tool {tool_name} failed: {e}")
                     error_msg = f"Error executing {tool_name}: {str(e)}"
@@ -1786,8 +1762,8 @@ class StreamingChatService:
         multi_step_tools: set,
     ) -> None:
         """Inject system messages to prevent tool loops."""
-        # Search spiral: 2+ consecutive empty results from same tool
-        if empty_same_tool_streak >= 2 and (
+        # Search spiral: 4+ consecutive empty results from same tool
+        if empty_same_tool_streak >= 4 and (
             tool_name.startswith("search_") or tool_name in {"semantic_search"}
         ):
             llm_messages.append({
