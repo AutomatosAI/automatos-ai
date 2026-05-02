@@ -333,7 +333,7 @@ export function ToolDetailsModal({
                   )}
                 </div>
 
-              </CardContent>
+              </div>
 
         <div className="border-t border-border/40 pt-4">
           <div className="flex flex-col gap-3">

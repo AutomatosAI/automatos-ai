@@ -52,15 +52,9 @@ function StrengthBar({ strength, maxStrength }: { strength: number; maxStrength:
     <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
       <div
         className={cn(
-<<<<<<< HEAD
-          'h-full rounded-full transition-all duration-500',
+          'h-full rounded-full transition-all duration-300',
           strength > 0.7 ? 'bg-success' :
           strength > 0.3 ? 'bg-warning' :
-=======
-          'h-full rounded-full transition-all duration-300',
-          strength > 0.7 ? 'bg-emerald-500' :
-          strength > 0.3 ? 'bg-amber-500' :
->>>>>>> f2597574f (feat(design-system): DS5 — spacing, icons, transitions, empty states)
           strength > 0.05 ? 'bg-orange-500' :
           'bg-destructive/50'
         )}
