@@ -136,7 +136,7 @@ export function QuickActions() {
                 <Link href={action.href}>
                   <Button
                     variant="outline"
-                    className="w-full h-auto p-4 flex items-center space-x-3 hover:bg-secondary/50 hover:border-primary/30 transition-all duration-200 group"
+                    className="w-full h-auto p-4 flex items-center space-x-3 hover:bg-secondary/50 hover:border-primary/30 transition-all duration-220 group"
                   >
                     <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors flex-shrink-0">
                       <action.icon className="w-4 h-4 text-primary" />
@@ -150,7 +150,7 @@ export function QuickActions() {
               ) : (
                 <Button
                   variant="outline"
-                  className="w-full h-auto p-4 flex items-center space-x-3 hover:bg-secondary/50 hover:border-primary/30 transition-all duration-200 group"
+                  className="w-full h-auto p-4 flex items-center space-x-3 hover:bg-secondary/50 hover:border-primary/30 transition-all duration-220 group"
                   onClick={handleOpenSettings}
                 >
                   <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors flex-shrink-0">

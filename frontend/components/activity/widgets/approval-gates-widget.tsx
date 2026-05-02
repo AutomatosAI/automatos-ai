@@ -75,7 +75,7 @@ export function ApprovalGatesWidget({ period, className }: ApprovalGatesWidgetPr
 
             {/* Pending missions list */}
             {pendingMissions.length > 0 ? (
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
                   Waiting for approval
                 </p>

@@ -72,7 +72,7 @@ export function MessageActions({
   }
 
   return (
-    <div className="flex items-center space-x-1 opacity-0 group-hover/msg:opacity-100 transition-opacity duration-200">
+    <div className="flex items-center space-x-1 opacity-0 group-hover/msg:opacity-100 transition-opacity duration-220">
       <Button
         variant="ghost"
         size="sm"

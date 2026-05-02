@@ -307,7 +307,7 @@ export function LLMModelCard({
 
         {/* Capability bars */}
         {capEntries.length > 0 && (
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             {capEntries.map(([capName, rating]) => {
               const r = CAPABILITY_RATING[rating] || CAPABILITY_RATING.moderate
               return (

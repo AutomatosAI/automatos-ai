@@ -63,7 +63,7 @@ function OrgChartNodeInner({ data }: NodeProps<OrgChartNodeData>) {
     <div
       className={cn(
         'rounded-xl border-2 bg-zinc-900/90 backdrop-blur-sm px-4 py-3 w-[220px]',
-        'transition-all duration-200 hover:shadow-lg hover:shadow-orange-500/10',
+        'transition-all duration-220 hover:border-primary/20',
         teamBorder,
         data.isSystemAgent && 'ring-2 ring-orange-500/40 border-orange-500/60',
       )}

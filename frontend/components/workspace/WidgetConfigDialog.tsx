@@ -265,7 +265,7 @@ export function WidgetConfigDialog({
             </div>
 
             {draft.autoRefresh && (
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 <div className="flex items-center justify-between gap-4">
                   <Label htmlFor="wc-interval">Interval (seconds)</Label>
                   <Input
@@ -297,7 +297,7 @@ export function WidgetConfigDialog({
               </legend>
 
               {/* Rows per page */}
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 <div className="flex items-center justify-between gap-4">
                   <Label htmlFor="wc-rows">Rows per page</Label>
                   <Input
@@ -349,7 +349,7 @@ export function WidgetConfigDialog({
               </legend>
 
               {/* Font size */}
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 <div className="flex items-center justify-between gap-4">
                   <Label htmlFor="wc-fontsize">Font size (px)</Label>
                   <Input

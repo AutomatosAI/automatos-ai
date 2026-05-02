@@ -86,7 +86,7 @@ export function CloudStorageConnections({
         return (
           <motion.div
             key={conn.id}
-            className={`glass-card p-5 card-glow cursor-pointer transition-all duration-200 ${
+            className={`glass-card p-5 card-glow cursor-pointer transition-all duration-220 ${
               isSelected ? 'border-primary/40 ring-1 ring-primary/30' : 'hover:border-primary/20'
             }`}
             initial={{ opacity: 0, y: 12 }}

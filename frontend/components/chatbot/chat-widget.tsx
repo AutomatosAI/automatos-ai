@@ -372,7 +372,7 @@ export function AutoWidget({
             {/* Header */}
             <div className="flex items-center justify-between px-4 pt-3 pb-2">
               <div className="flex items-center gap-2">
-                <div className="w-7 h-7 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center">
+                <div className="w-8 h-8 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center">
                   <Bot className="w-4 h-4 text-primary" />
                 </div>
                 <div>
@@ -566,7 +566,7 @@ export function AutoWidget({
       >
         <Button
           onClick={() => setIsOpen((v) => !v)}
-          className="w-11 h-11 md:w-12 md:h-12 rounded-full bg-primary/90 hover:bg-primary shadow-lg hover:shadow-xl hover:shadow-primary/20 transition-all duration-300 group p-0"
+          className="w-12 h-12 rounded-full bg-primary/90 hover:bg-primary shadow-lg transition-all duration-300 group p-0"
           size="lg"
           title="Ask Auto"
         >

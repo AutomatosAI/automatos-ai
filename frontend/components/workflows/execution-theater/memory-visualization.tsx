@@ -241,7 +241,7 @@ function MemoryLevel({
       {capacity !== '∞' && (
         <div className="h-1 bg-secondary rounded-full overflow-hidden">
           <div 
-            className={`h-full ${colorClasses[color as keyof typeof colorClasses]} transition-all duration-500`}
+            className={`h-full ${colorClasses[color as keyof typeof colorClasses]} transition-all duration-300`}
             style={{ width: `${percentage}%` }}
           />
         </div>

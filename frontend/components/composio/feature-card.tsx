@@ -26,10 +26,10 @@ export function FeatureCard({ feature, onToggle, disabled }: FeatureCardProps) {
     return (
         <div
             className={cn(
-                "group relative p-4 rounded-xl border transition-all duration-200 cursor-pointer glass-card card-glow",
+                "group relative p-4 rounded-xl border transition-all duration-220 cursor-pointer",
                 "bg-slate-800/50 border-slate-700/50",
                 "hover:bg-slate-700/50 hover:border-slate-600/50",
-                feature.enabled && "border-info/50 bg-info/10",
+                feature.enabled && "border-blue-500/50 bg-blue-500/10",
                 disabled && "opacity-50 cursor-not-allowed"
             )}
             onClick={() => !disabled && onToggle(feature.name, !feature.enabled)}
@@ -57,7 +57,7 @@ export function FeatureCard({ feature, onToggle, disabled }: FeatureCardProps) {
             <div
                 className={cn(
                     "absolute left-0 top-0 bottom-0 w-1 rounded-l-xl transition-colors",
-                    feature.enabled ? "bg-info" : "bg-transparent"
+                    feature.enabled ? "bg-blue-500" : "bg-transparent"
                 )}
             />
         </div>

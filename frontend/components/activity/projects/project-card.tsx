@@ -81,7 +81,7 @@ export function ProjectCard({ project, index }: ProjectCardProps) {
         </div>
         <div className="h-1.5 bg-secondary/50 rounded-full overflow-hidden">
           <div
-            className="h-full rounded-full transition-all duration-500"
+            className="h-full rounded-full transition-all duration-300"
             style={{
               width: `${project.progress}%`,
               backgroundColor: statusConf.barColor,

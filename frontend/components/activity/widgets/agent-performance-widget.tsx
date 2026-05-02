@@ -38,7 +38,7 @@ export function AgentPerformanceWidget({ period, className }: AgentPerformanceWi
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 py-2 space-y-1.5">
+      <div className="flex-1 overflow-y-auto px-4 py-2 space-y-2">
         {isLoading ? (
           <div className="flex items-center justify-center h-full">
             <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />

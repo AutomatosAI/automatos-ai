@@ -22,7 +22,7 @@ function ProgressBar({ item }: { item: ActivityFeedItem }) {
     <div className="flex items-center gap-2">
       <div className="flex-1 h-1.5 bg-secondary/50 rounded-full overflow-hidden">
         <div
-          className="h-full bg-[hsl(var(--info))] rounded-full transition-all duration-500"
+          className="h-full bg-[hsl(var(--info))] rounded-full transition-all duration-300"
           style={{ width: `${pct}%` }}
         />
       </div>
@@ -81,7 +81,7 @@ export function ActiveNowWidget({ period, className }: ActiveNowWidgetProps) {
             <div
               key={item.id}
               onClick={() => handleClick(item)}
-              className="p-2.5 rounded-lg bg-secondary/30 hover:bg-secondary/50 cursor-pointer transition-colors space-y-1.5"
+              className="p-2.5 rounded-lg bg-secondary/30 hover:bg-secondary/50 cursor-pointer transition-colors space-y-2"
             >
               <div className="flex items-center gap-2">
                 <div className={cn(

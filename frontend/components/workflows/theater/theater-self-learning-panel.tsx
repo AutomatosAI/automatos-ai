@@ -588,7 +588,7 @@ function MemorySection({ data }: { data: MemoryData }) {
           count={memories.length}
           defaultOpen={false}
         >
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             {memories.map((entry, i) => (
               <div
                 key={i}
@@ -649,7 +649,7 @@ function MemorySection({ data }: { data: MemoryData }) {
 
       {/* Errors */}
       {errors && errors.length > 0 && (
-        <div className="space-y-1.5">
+        <div className="space-y-2">
           {errors.map((error, i) => (
             <div
               key={i}

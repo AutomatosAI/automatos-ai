@@ -116,7 +116,7 @@ export function JsonSchemaEditor({
   const isValid = error === null && value.trim().length > 0
 
   return (
-    <div className={cn('space-y-1.5', className)}>
+    <div className={cn('space-y-2', className)}>
       {label && (
         <div className="flex items-center justify-between">
           <span className="text-sm font-medium text-foreground">{label}</span>

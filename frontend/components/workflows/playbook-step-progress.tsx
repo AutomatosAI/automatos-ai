@@ -190,7 +190,7 @@ export function PlaybookStepProgress({
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: idx * 0.05 }}
                 className={cn(
-                  'rounded-xl border transition-all duration-200',
+                  'rounded-xl border transition-all duration-220',
                   step.status === 'running' && 'border-orange-400/30 bg-orange-400/5 ring-1 ring-orange-400/20',
                   step.status === 'success' && 'border-success/20 bg-success/5',
                   step.status === 'failed' && 'border-destructive/20 bg-destructive/5',

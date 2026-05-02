@@ -106,7 +106,7 @@ export function CostTrackerWidget({ period, className }: CostTrackerWidgetProps)
 
             {/* Top agents */}
             {topAgents.length > 0 && (
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Top spenders</p>
                 {topAgents.map((agent) => (
                   <div key={agent.name} className="flex items-center gap-2">

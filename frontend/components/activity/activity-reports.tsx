@@ -30,7 +30,7 @@ function ReportCardSkeleton() {
   return (
     <div className="glass-card border-l-[3px] border-l-secondary p-4 space-y-3">
       <div className="flex items-start justify-between gap-2">
-        <div className="space-y-1.5">
+        <div className="space-y-2">
           <Skeleton className="h-4 w-40" />
           <Skeleton className="h-5 w-56" />
         </div>

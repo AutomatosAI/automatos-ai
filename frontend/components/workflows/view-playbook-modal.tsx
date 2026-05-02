@@ -283,7 +283,7 @@ export function ViewPlaybookModal({
                           >
                             {/* Status icon */}
                             <div className={cn(
-                              'w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0',
+                              'w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0',
                               exec.status === 'completed' && 'bg-[hsl(var(--success))]/20',
                               exec.status === 'failed' && 'bg-destructive/20',
                               exec.status === 'running' && 'bg-primary/20',

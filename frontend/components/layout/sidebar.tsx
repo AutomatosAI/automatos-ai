@@ -156,7 +156,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
             exit={{ opacity: 0 }}
             className="flex items-center"
           >
-            <div className="w-9 h-9 rounded-xl bg-secondary/30 border border-primary/15 flex items-center justify-center shadow-[0_0_18px_hsla(var(--primary)/0.10)]">
+            <div className="w-8 h-8 rounded-xl bg-secondary/30 border border-primary/15 flex items-center justify-center shadow-[0_0_18px_hsla(var(--primary)/0.10)]">
               <MessageCircle className="w-5 h-5 text-primary" />
             </div>
           </motion.div>
@@ -193,7 +193,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
                 }
               }}
               className={cn(
-                'flex items-center gap-3 w-full px-3 py-2 rounded-xl transition-all duration-200 group relative',
+                'flex items-center gap-3 w-full px-3 py-2 rounded-xl transition-all duration-220 group relative',
                 'hover:bg-secondary/40'
               )}
               aria-label="Toggle chat history"
@@ -231,7 +231,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
                 onClick={() => onToggle(true)}
                 data-tour={`nav-${item.href.replace('/', '')}`}
                 className={cn(
-                  'flex items-center gap-3 w-full px-3 py-2 rounded-xl transition-all duration-200 group relative',
+                  'flex items-center gap-3 w-full px-3 py-2 rounded-xl transition-all duration-220 group relative',
                   isActive
                     ? 'bg-primary/10 border border-primary/20'
                     : 'hover:bg-secondary/40'
@@ -280,7 +280,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           target="_blank"
           rel="noopener noreferrer"
           className={cn(
-            'flex items-center gap-3 w-full px-3 py-2 rounded-xl transition-all duration-200 group relative',
+            'flex items-center gap-3 w-full px-3 py-2 rounded-xl transition-all duration-220 group relative',
             'hover:bg-secondary/40'
           )}
         >
@@ -305,7 +305,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           href="/settings"
           data-tour="nav-settings"
           className={cn(
-            'flex items-center gap-3 w-full px-3 py-2 rounded-xl transition-all duration-200 group relative',
+            'flex items-center gap-3 w-full px-3 py-2 rounded-xl transition-all duration-220 group relative',
             pathname === '/settings'
               ? 'bg-primary/10 border border-primary/20'
               : 'hover:bg-secondary/40'

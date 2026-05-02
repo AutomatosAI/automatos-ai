@@ -316,7 +316,7 @@ export function AgentRoster({
                   {premiumIconName ? (
                     <PremiumIcon name={premiumIconName} size={36} className={`shrink-0 ${iconColor}`} />
                   ) : (
-                    <AgentIcon className={`w-9 h-9 ${iconColor} shrink-0`} />
+                    <AgentIcon className={`w-8 h-8 ${iconColor} shrink-0`} />
                   )}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">

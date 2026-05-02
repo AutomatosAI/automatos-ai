@@ -223,7 +223,7 @@ export function AnalyticsLLMUsage() {
                     </div>
                     {/* Bar */}
                     <div
-                      className="w-full rounded-t bg-gradient-to-t from-green-500/80 to-green-400/60 hover:from-green-400 hover:to-green-300 transition-all duration-200 min-h-[2px]"
+                      className="w-full rounded-t bg-gradient-to-t from-green-500/80 to-green-400/60 hover:from-green-400 hover:to-green-300 transition-all duration-220 min-h-[2px]"
                       style={{ height: `${Math.max(heightPct, 1)}%` }}
                     />
                     {/* Date label */}

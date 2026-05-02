@@ -25,6 +25,7 @@ import {
   X,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { EmptyState } from '@/components/shared'
 
 // =====================================================================
 // Types
@@ -344,7 +345,7 @@ export function SystemPromptsTab() {
             <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
           </div>
         ) : prompts.length === 0 ? (
-          <div className="text-center py-12 text-muted-foreground">No prompts found</div>
+          <EmptyState icon={FileText} title="No prompts found" description="System prompts will appear here once created." />
         ) : (
           <div className="grid gap-3">
             {prompts.map((prompt) => (
@@ -637,7 +638,7 @@ export function SystemPromptsTab() {
 
                   {/* Safety results */}
                   {run.scores && run.run_type === 'safety' && (
-                    <div className="mt-2 space-y-1.5">
+                    <div className="mt-2 space-y-2">
                       {run.scores.safe != null && (
                         <div className="flex items-center gap-1.5 text-xs font-medium">
                           <span className={cn('inline-block w-2 h-2 rounded-full', run.scores.safe ? 'bg-success' : 'bg-destructive')} />

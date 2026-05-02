@@ -64,7 +64,7 @@ function AgentNode({ data }: { data: any }) {
           </div>
           <div className="h-1 bg-secondary rounded-full overflow-hidden">
             <div 
-              className="h-full bg-primary transition-all duration-500"
+              className="h-full bg-primary transition-all duration-300"
               style={{ width: `${data.progress}%` }}
             />
           </div>
@@ -96,7 +96,7 @@ function ResourceNode({ data }: { data: any }) {
   }
 
   return (
-    <div className={`px-4 py-3 rounded-lg border-2 ${getColor()} backdrop-blur min-w-[180px] cursor-pointer hover:scale-105 transition-transform`}>
+    <div className={`px-4 py-3 rounded-lg border-2 ${getColor()} backdrop-blur min-w-[180px] cursor-pointer hover:-translate-y-0.5 transition-all duration-220`}>
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center space-x-2">
           {getIcon()}

@@ -65,7 +65,7 @@ export function MissionBudgetBar({
   const isPaused = missionState === 'paused'
 
   return (
-    <div className={cn('space-y-1.5', styles.bg && `rounded-lg border p-3 ${styles.bg}`, className)}>
+    <div className={cn('space-y-2', styles.bg && `rounded-lg border p-3 ${styles.bg}`, className)}>
       {/* Label row */}
       <div className="flex items-center justify-between text-xs">
         <div className="flex items-center gap-1.5">
@@ -83,7 +83,7 @@ export function MissionBudgetBar({
       {/* Progress bar */}
       <div className="relative h-2 w-full overflow-hidden rounded-full bg-secondary">
         <div
-          className={cn('h-full rounded-full transition-all duration-500', styles.bar)}
+          className={cn('h-full rounded-full transition-all duration-300', styles.bar)}
           style={{ width: `${Math.min(percentage, 100)}%` }}
         />
       </div>

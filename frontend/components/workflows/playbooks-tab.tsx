@@ -30,7 +30,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Input } from '@/components/ui/input'
-import { PremiumIcon } from '@/components/shared'
+import { PremiumIcon, EmptyState } from '@/components/shared'
 import { ViewToggle } from '@/components/shared/view-toggle'
 import { useViewMode } from '@/hooks/use-view-mode'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
@@ -332,11 +332,11 @@ export function PlaybooksTab({
       {/* Playbooks Grid — 4 per row */}
       {playbooks.length === 0 ? (
         emptyState || (
-          <div className="text-center py-12">
-            <GitBranch className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-            <p className="text-muted-foreground">No playbooks found</p>
-            <p className="text-xs text-muted-foreground mt-1">Create your first playbook to get started</p>
-          </div>
+          <EmptyState
+            icon={GitBranch}
+            title="No playbooks found"
+            description="Create your first playbook to get started"
+          />
         )
       ) : viewMode === 'list' ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -355,7 +355,7 @@ export function PlaybooksTab({
               >
                 <CardContent className="p-3">
                   <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-primary/20 border border-primary/30 flex items-center justify-center shrink-0 text-lg">
+                    <div className="w-8 h-8 rounded-xl bg-primary/20 border border-primary/30 flex items-center justify-center shrink-0 text-lg">
                       {(() => {
                         const premiumIconName = iconMappings[playbook.marketplace_category] || iconMappings['global_recipe'] || null
                         return premiumIconName ? (
@@ -482,7 +482,7 @@ export function PlaybooksTab({
                         </div>
                         <div className="h-1.5 rounded-full bg-secondary/80 overflow-hidden">
                           <div
-                            className={`h-full rounded-full transition-all duration-500 ${
+                            className={`h-full rounded-full transition-all duration-300 ${
                               qualityPct >= 80 ? 'bg-gradient-to-r from-[hsl(var(--success))] to-[hsl(var(--success))]/80' :
                               qualityPct >= 50 ? 'bg-gradient-to-r from-primary to-[hsl(var(--warning))]/80' :
                               'bg-gradient-to-r from-[hsl(var(--destructive))] to-[hsl(var(--destructive))]/80'
@@ -529,7 +529,7 @@ export function PlaybooksTab({
                           return agentIconName ? (
                             <div
                               key={aid}
-                              className="w-7 h-7 flex items-center justify-center shrink-0"
+                              className="w-8 h-8 flex items-center justify-center shrink-0"
                               title={agentInfo?.name || `Agent ${aid}`}
                             >
                               <PremiumIcon name={agentIconName} size={24} />
@@ -537,7 +537,7 @@ export function PlaybooksTab({
                           ) : (
                             <div
                               key={aid}
-                              className={`w-7 h-7 rounded-lg bg-gradient-to-br ${agentColor(aid)} flex items-center justify-center border border-border/10`}
+                              className={`w-8 h-8 rounded-lg bg-gradient-to-br ${agentColor(aid)} flex items-center justify-center border border-border/10`}
                               title={agentInfo?.name || `Agent ${aid}`}
                             >
                               <Bot className="w-3.5 h-3.5 text-foreground" />
@@ -545,7 +545,7 @@ export function PlaybooksTab({
                           )
                         })}
                         {agentIds.length > 4 && (
-                          <div className="w-7 h-7 rounded-lg bg-secondary/80 border border-border/10 flex items-center justify-center text-[10px] text-muted-foreground font-medium">
+                          <div className="w-8 h-8 rounded-lg bg-secondary/80 border border-border/10 flex items-center justify-center text-[10px] text-muted-foreground font-medium">
                             +{agentIds.length - 4}
                           </div>
                         )}
@@ -556,7 +556,7 @@ export function PlaybooksTab({
                             {tools.slice(0, 3).map((tool: string, i: number) => (
                               <div
                                 key={i}
-                                className="w-7 h-7 rounded-lg bg-secondary/80 border border-border/10 flex items-center justify-center"
+                                className="w-8 h-8 rounded-lg bg-secondary/80 border border-border/10 flex items-center justify-center"
                                 title={tool}
                               >
                                 <Wrench className="w-3 h-3 text-muted-foreground" />

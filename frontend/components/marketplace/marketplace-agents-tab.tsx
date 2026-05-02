@@ -210,7 +210,7 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
                     {premiumIconName ? (
                       <PremiumIcon name={premiumIconName} size={36} className="shrink-0" />
                     ) : (
-                      <Bot className="w-9 h-9 text-primary shrink-0" />
+                      <Bot className="w-8 h-8 text-primary shrink-0" />
                     )}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">

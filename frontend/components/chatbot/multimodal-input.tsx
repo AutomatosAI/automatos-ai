@@ -388,7 +388,7 @@ export function MultimodalInput({
                     key={tool.id}
                     type="button"
                     onClick={() => onToolIconClick?.(tool.name)}
-                    className="relative hover:scale-110 transition-all duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-lg"
+                    className="relative hover:scale-110 transition-all duration-220 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-lg"
                     title={`Click for ${tool.name} suggestions`}
                     aria-label={`Show suggestions for ${tool.name}`}
                   >
@@ -402,7 +402,7 @@ export function MultimodalInput({
                   </button>
                 ))}
                 {activeAgent.tools.length > 4 && (
-                  <div className="w-7 h-7 rounded-lg bg-secondary/80 ring-1 ring-orange-500/30 flex items-center justify-center text-[10px] font-bold text-muted-foreground border border-orange-500/20 relative z-10">
+                  <div className="w-8 h-8 rounded-lg bg-secondary/80 ring-1 ring-orange-500/30 flex items-center justify-center text-[10px] font-bold text-muted-foreground border border-orange-500/20 relative z-10">
                     +{activeAgent.tools.length - 4}
                   </div>
                 )}

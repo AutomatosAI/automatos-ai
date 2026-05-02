@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { Users, UserPlus, Shield, Trash2, Mail, Search, RefreshCw, Clock, X } from 'lucide-react'
+import { Users, UserPlus, Shield, Trash2, Mail, Search, RefreshCw, Clock, X, UserX } from 'lucide-react'
 import { apiClient } from '@/lib/api-client'
 import { useWorkspace } from '@/hooks/use-workspace'
 import { InviteModal } from './invite-modal'
@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
+import { EmptyState } from '@/components/shared'
 
 interface TeamMember {
     id: number
@@ -200,8 +201,13 @@ export function TeamManagement() {
                         {pendingInvites.map((inv) => (
                             <div key={inv.id} className="flex items-center justify-between p-4 hover:bg-white/5 transition-colors group">
                                 <div className="flex items-center gap-3">
+<<<<<<< HEAD
                                     <div className="w-9 h-9 rounded-full bg-warning/10 border border-warning/30 flex items-center justify-center">
                                         <Mail className="w-4 h-4 text-warning" />
+=======
+                                    <div className="w-8 h-8 rounded-full bg-amber-400/10 border border-amber-400/30 flex items-center justify-center">
+                                        <Mail className="w-4 h-4 text-amber-400" />
+>>>>>>> f2597574f (feat(design-system): DS5 — spacing, icons, transitions, empty states)
                                     </div>
                                     <div>
                                         <div className="font-medium text-foreground">{inv.email}</div>
@@ -247,7 +253,7 @@ export function TeamManagement() {
                         Loading members...
                     </div>
                 ) : filteredMembers.length === 0 ? (
-                    <div className="p-12 text-center text-muted-foreground">No members found using that search.</div>
+                    <EmptyState icon={UserX} title="No members found" description="No members match that search." />
                 ) : (
                     <div className="divide-y divide-white/5">
                         {filteredMembers.map((member) => (

@@ -123,7 +123,7 @@ export function MissionCard({ mission, index }: MissionCardProps) {
           </div>
           <div className="h-1.5 bg-secondary/50 rounded-full overflow-hidden">
             <div
-              className="h-full bg-primary rounded-full transition-all duration-500"
+              className="h-full bg-primary rounded-full transition-all duration-300"
               style={{ width: `${Math.min(100, (mission.tokens_used / Math.max(mission.token_budget_estimate ?? 1, 1)) * 100)}%` }}
             />
           </div>

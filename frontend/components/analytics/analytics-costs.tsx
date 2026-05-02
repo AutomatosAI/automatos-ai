@@ -103,7 +103,7 @@ function PeriodToggle({ value, onChange }: { value: string; onChange: (v: string
         <button
           key={p.key}
           onClick={() => onChange(p.key)}
-          className={`px-3 py-1 text-xs font-medium rounded-md transition-all duration-200 ${
+          className={`px-3 py-1 text-xs font-medium rounded-md transition-all duration-220 ${
             value === p.key
               ? 'bg-primary text-primary-foreground shadow-sm'
               : 'text-muted-foreground hover:text-foreground'
@@ -122,7 +122,7 @@ function ModelCostTooltip({ active, payload, label }: any) {
   return (
     <div className="rounded-xl border border-border/50 bg-card/95 backdrop-blur-lg px-4 py-3 shadow-2xl">
       <p className="text-xs text-muted-foreground mb-2 font-medium">{label}</p>
-      <div className="space-y-1.5">
+      <div className="space-y-2">
         {payload
           .filter((p: any) => p.value > 0)
           .sort((a: any, b: any) => b.value - a.value)
@@ -547,7 +547,7 @@ export function AnalyticsCosts({ days }: Props) {
                         <div className="flex items-center gap-2">
                           <div className="h-1.5 flex-1 rounded-full bg-secondary/30 overflow-hidden">
                             <div
-                              className="h-full rounded-full transition-all duration-500"
+                              className="h-full rounded-full transition-all duration-300"
                               style={{
                                 width: `${(model.totalCost / maxModelCost) * 100}%`,
                                 background: MODEL_COLORS[idx % MODEL_COLORS.length],

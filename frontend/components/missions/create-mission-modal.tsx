@@ -565,7 +565,7 @@ export function CreateMissionModal({ open, onOpenChange, initialGoal, initialDes
 
             {/* File list */}
             {files.length > 0 && (
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 {files.map((f, i) => (
                   <div
                     key={i}

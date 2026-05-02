@@ -369,7 +369,7 @@ export function LLMModelDetailModal({
             </h3>
             <div className="rounded-lg border border-border/40 bg-secondary/20 p-4 space-y-4">
               <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   <label className="text-xs text-muted-foreground">
                     Input tokens (thousands / month)
                   </label>
@@ -383,7 +383,7 @@ export function LLMModelDetailModal({
                     onClick={(e) => e.stopPropagation()}
                   />
                 </div>
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   <label className="text-xs text-muted-foreground">
                     Output tokens (thousands / month)
                   </label>

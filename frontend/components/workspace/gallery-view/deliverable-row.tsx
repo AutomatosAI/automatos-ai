@@ -138,7 +138,7 @@ function DeliverableRowImpl({ deliverable, onClick, className }: DeliverableRowP
       )}
     >
       {/* Icon */}
-      <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted/50', iconColor)}>
+      <div className={cn('flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted/50', iconColor)}>
         {canonicalType ? (
           <DeliverableIcon type={canonicalType} size="row" />
         ) : (

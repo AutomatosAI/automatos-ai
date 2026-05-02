@@ -254,7 +254,11 @@ export function TemplatesTab({ onUseTemplate, onOpenCreateModal }: TemplatesTabP
 
         <Button 
           onClick={() => setShowCreateModal(true)}
+<<<<<<< HEAD
           className="bg-secondary border border-orange-400/50 hover:border-orange-400 hover:bg-secondary text-white transition-all duration-200"
+=======
+          className="bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-220"
+>>>>>>> f2597574f (feat(design-system): DS5 — spacing, icons, transitions, empty states)
         >
           <Plus className="w-4 h-4 mr-2" />
           Create Template
@@ -337,7 +341,11 @@ export function TemplatesTab({ onUseTemplate, onOpenCreateModal }: TemplatesTabP
                   {/* Action Buttons */}
                   <div className="flex gap-2">
                     <Button 
+<<<<<<< HEAD
                       className="flex-1 bg-secondary border border-orange-400/50 hover:border-orange-400 hover:bg-secondary text-white transition-all duration-200"
+=======
+                      className="flex-1 bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-220"
+>>>>>>> f2597574f (feat(design-system): DS5 — spacing, icons, transitions, empty states)
                       size="sm"
                       onClick={() => handleUseTemplate(template)}
                     >
@@ -543,7 +551,11 @@ export function TemplatesTab({ onUseTemplate, onOpenCreateModal }: TemplatesTabP
               {/* Action Buttons */}
               <div className="flex gap-3 pt-4 border-t border-secondary">
                 <Button 
+<<<<<<< HEAD
                   className="flex-1 bg-secondary border border-orange-400/50 hover:border-orange-400 hover:bg-secondary text-white transition-all duration-200"
+=======
+                  className="flex-1 bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-220"
+>>>>>>> f2597574f (feat(design-system): DS5 — spacing, icons, transitions, empty states)
                   onClick={() => {
                     setShowViewModal(false)
                     handleUseTemplate(selectedTemplate)
@@ -802,7 +814,11 @@ function TemplateForm({ form, onChange, onSubmit, onCancel, isLoading, submitLab
         <Button 
           onClick={onSubmit} 
           disabled={isLoading || !form.template_id || !form.name || !form.description}
+<<<<<<< HEAD
           className="bg-secondary border border-orange-400/50 hover:border-orange-400 hover:bg-secondary text-white transition-all duration-200"
+=======
+          className="bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-220"
+>>>>>>> f2597574f (feat(design-system): DS5 — spacing, icons, transitions, empty states)
         >
           {isLoading ? 'Saving...' : submitLabel}
         </Button>

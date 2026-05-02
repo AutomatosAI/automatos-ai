@@ -249,7 +249,7 @@ export function UploadProviderModal({
 
               {/* File Drop Zone */}
               <div
-                className={`border-2 border-dashed rounded-lg p-8 text-center transition-all duration-200 ${
+                className={`border-2 border-dashed rounded-lg p-8 text-center transition-all duration-220 ${
                   dragActive
                     ? 'border-primary bg-primary/5'
                     : 'border-border/50 hover:border-primary/50'

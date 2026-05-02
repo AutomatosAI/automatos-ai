@@ -296,7 +296,7 @@ export function MarketplaceHomepage() {
           <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
             <div>
               <h1 className="text-2xl md:text-3xl font-bold">
-                <Store className="inline-block h-7 w-7 mr-2 -mt-1 text-primary" />
+                <Store className="inline-block h-8 w-8 mr-2 -mt-1 text-primary" />
                 Community <span className="gradient-text">Marketplace</span>
               </h1>
               <p className="text-sm text-muted-foreground mt-1">

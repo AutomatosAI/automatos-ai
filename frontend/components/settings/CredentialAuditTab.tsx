@@ -4,9 +4,10 @@ import { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
-import { 
+import {
   CheckCircle, XCircle, AlertCircle, Clock, Filter
 } from 'lucide-react'
+import { EmptyState } from '@/components/shared'
 import {
   Select,
   SelectContent,
@@ -114,17 +115,11 @@ export function CredentialAuditTab() {
           <p className="text-muted-foreground">Loading audit logs...</p>
         </div>
       ) : filteredLogs.length === 0 ? (
-        <Card className="glass-card">
-          <CardContent className="pt-12 pb-12 text-center">
-            <AlertCircle className="w-12 h-12 mx-auto text-muted-foreground/50 mb-4" />
-            <h3 className="text-lg font-semibold mb-2">No Audit Logs</h3>
-            <p className="text-sm text-muted-foreground">
-              {searchTerm || actionFilter !== 'all'
-                ? 'No logs match your filters'
-                : 'Audit logs will appear here as credentials are used'}
-            </p>
-          </CardContent>
-        </Card>
+        <EmptyState
+          icon={AlertCircle}
+          title="No Audit Logs"
+          description={searchTerm || actionFilter !== 'all' ? 'No logs match your filters' : 'Audit logs will appear here as credentials are used'}
+        />
       ) : (
         <div className="space-y-2">
           {filteredLogs.map((log) => {

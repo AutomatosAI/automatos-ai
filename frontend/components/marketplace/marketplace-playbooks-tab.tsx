@@ -212,7 +212,7 @@ export function MarketplacePlaybooksTab({ searchQuery }: MarketplacePlaybooksTab
                     return premiumIconName ? (
                       <PremiumIcon name={premiumIconName} size={36} className="text-primary shrink-0" />
                     ) : (
-                      <ChefHat className="w-9 h-9 text-primary shrink-0" />
+                      <ChefHat className="w-8 h-8 text-primary shrink-0" />
                     )
                   })()}
                   <div className="flex-1 min-w-0">

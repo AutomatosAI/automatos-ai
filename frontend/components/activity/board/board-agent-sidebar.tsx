@@ -74,7 +74,7 @@ export function BoardAgentSidebar({ selectedAgentId, onSelectAgent, className }:
                     : 'hover:bg-secondary/20 border-l-2 border-l-transparent',
                 )}
               >
-                <div className="w-7 h-7 flex items-center justify-center shrink-0">
+                <div className="w-8 h-8 flex items-center justify-center shrink-0">
                   {agent.premium_icon ? (
                     <PremiumIcon name={agent.premium_icon} size={22} />
                   ) : (

@@ -99,7 +99,7 @@ function MetadataGrid({ task }: { task: BoardTask }) {
 
 function MetaItem({ icon, label, children }: { icon: React.ReactNode; label: string; children: React.ReactNode }) {
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-2">
       <div className="flex items-center gap-1.5 text-muted-foreground">
         {icon}
         <span className="text-[10px] font-medium uppercase tracking-wider">{label}</span>
@@ -166,7 +166,7 @@ function InProgressContent({ task }: { task: BoardTask }) {
           </div>
           <div className="h-2.5 bg-secondary/50 rounded-full overflow-hidden">
             <div
-              className="h-full bg-[hsl(var(--info))] rounded-full transition-all duration-500"
+              className="h-full bg-[hsl(var(--info))] rounded-full transition-all duration-300"
               style={{ width: `${(task.step_progress.current / task.step_progress.total) * 100}%` }}
             />
           </div>
@@ -454,7 +454,7 @@ export function BoardTaskViewer({ task: propTask, open, onOpenChange }: BoardTas
         {/* Header */}
         <div className="px-6 pt-5 pb-4 border-b border-border/30">
           <div className="flex items-start justify-between gap-4 pr-8">
-            <div className="space-y-1.5 min-w-0 flex-1">
+            <div className="space-y-2 min-w-0 flex-1">
               <DialogTitle className="text-lg font-semibold leading-tight">
                 {task.name}
               </DialogTitle>

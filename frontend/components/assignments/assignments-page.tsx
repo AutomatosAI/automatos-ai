@@ -127,7 +127,7 @@ function FeaturedHeroCards() {
             className="cursor-pointer overflow-hidden border-border/50 bg-card/60 backdrop-blur-sm hover:border-cyan-500/30 hover:bg-card/80 transition-all group focus:outline-none focus:ring-2 focus:ring-cyan-500/40"
           >
             <CardContent className="p-3 flex items-center gap-3">
-              <div className="w-9 h-9 rounded-lg bg-cyan-500/15 border border-cyan-500/20 flex items-center justify-center shrink-0 group-hover:bg-cyan-500/25 transition-colors">
+              <div className="w-8 h-8 rounded-lg bg-cyan-500/15 border border-cyan-500/20 flex items-center justify-center shrink-0 group-hover:bg-cyan-500/25 transition-colors">
                 <Zap className="h-4 w-4 text-cyan-400" />
               </div>
               <div className="flex-1 min-w-0">
@@ -238,7 +238,7 @@ function RecommendedCard({
         <CardContent className="p-3.5 flex-1 flex flex-col gap-2">
           <div className="flex items-start gap-2.5">
             <div
-              className={`w-9 h-9 rounded-lg border flex items-center justify-center shrink-0 transition-colors ${
+              className={`w-8 h-8 rounded-lg border flex items-center justify-center shrink-0 transition-colors ${
                 isMission
                   ? 'bg-primary/15 border-primary/25 group-hover:bg-primary/25'
                   : 'bg-primary/10 border-primary/20 group-hover:bg-primary/20'
@@ -385,7 +385,7 @@ export function AssignmentsPage() {
       >
         <div className="flex flex-col gap-1">
           <h1 className="text-2xl md:text-3xl font-bold">
-            <ClipboardList className="inline-block h-7 w-7 mr-2 -mt-1 text-primary" />
+            <ClipboardList className="inline-block h-8 w-8 mr-2 -mt-1 text-primary" />
             Assignments
           </h1>
           <p className="text-sm text-muted-foreground">

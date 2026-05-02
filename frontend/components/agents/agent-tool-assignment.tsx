@@ -126,7 +126,7 @@ export function AgentToolAssignment({
                         <div
                             key={tool.id}
                             className={`
-                group relative flex items-start space-x-3 p-3 rounded-lg border transition-all duration-200
+                group relative flex items-start space-x-3 p-3 rounded-lg border transition-all duration-220
                 ${isAssigned
                                     ? 'bg-primary/5 border-primary/30'
                                     : 'bg-background/50 border-border/50 hover:border-primary/20'}
