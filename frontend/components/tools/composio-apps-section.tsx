@@ -247,7 +247,7 @@ export function ComposioAppsSection() {
                                 transition={{ duration: 0.3, delay: index * 0.05 }}
                             >
                                 <Card
-                                    className={`glass-card hover:border-primary/20 transition-all duration-300 ${isConnected ? 'border-[hsl(var(--success))]/30' : ''
+                                    className={`glass-card card-glow hover:border-primary/20 transition-all duration-300 ${isConnected ? 'border-[hsl(var(--success))]/30' : ''
                                         }`}
                                 >
                                     <CardHeader className="pb-2">

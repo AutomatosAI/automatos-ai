@@ -56,7 +56,7 @@ export function MissionCard({ mission, index }: MissionCardProps) {
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, delay: index * 0.05 }}
       className={cn(
-        'glass-card rounded-xl p-4 flex flex-col gap-3 cursor-pointer',
+        'glass-card card-glow rounded-xl p-4 flex flex-col gap-3 cursor-pointer',
         'hover:border-primary/20 transition-colors',
         needsAction && 'ring-1 ring-[hsl(var(--warning))]/20',
       )}

@@ -202,7 +202,7 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
             return (
               <Card
                 key={agent.id}
-                className="glass-card hover:border-primary/20 transition-all cursor-pointer"
+                className="glass-card card-glow hover:border-primary/20 transition-all cursor-pointer"
                 onClick={() => handleAgentClick(agent)}
               >
                 <CardContent className="p-3">

@@ -617,7 +617,7 @@ export function ActiveWorkflowsPanel({ onWorkflowClick, onPlaybookRunClick: onRe
               return (
                 <motion.div
                   key={`recipe-${run.id}`}
-                  className="glass-card p-4 hover:border-primary/20 transition-all duration-300 cursor-pointer"
+                  className="glass-card card-glow p-4 hover:border-primary/20 transition-all duration-300 cursor-pointer"
                   initial={{ opacity: 0, x: -20 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ duration: 0.3, delay: index * 0.05 }}

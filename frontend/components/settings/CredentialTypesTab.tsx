@@ -167,7 +167,7 @@ export function CredentialTypesTab() {
               return (
                 <Card
                   key={type.id}
-                  className="glass-card hover:border-primary/50 transition-all cursor-pointer"
+                  className="glass-card card-glow hover:border-primary/50 transition-all cursor-pointer"
                   onClick={() => setSelectedType(type)}
                 >
                   <CardHeader>

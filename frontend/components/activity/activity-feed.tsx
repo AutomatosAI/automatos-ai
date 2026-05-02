@@ -389,7 +389,7 @@ function FeedRow({ item, index, isNew, onView }: FeedRowProps) {
 
   return (
     <motion.div
-      className="glass-card p-4 hover:border-primary/20 transition-all duration-300 cursor-pointer"
+      className="glass-card card-glow p-4 hover:border-primary/20 transition-all duration-300 cursor-pointer"
       initial={{ opacity: 0, x: isNew ? -20 : 0 }}
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: 20 }}

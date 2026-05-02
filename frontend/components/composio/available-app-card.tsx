@@ -25,7 +25,7 @@ interface AvailableAppCardProps {
 
 export function AvailableAppCard({ app, onConnected }: AvailableAppCardProps) {
     return (
-        <Card className="bg-slate-800/50 border-slate-700/50 hover:border-slate-600/50 transition-all">
+        <Card className="bg-slate-800/50 border-slate-700/50 hover:border-slate-600/50 transition-all card-glow">
             <CardContent className="p-4">
                 <div className="flex items-start gap-3">
                     {/* App Icon */}

@@ -209,7 +209,7 @@ export function SemanticSearch({
               transition={{ delay: index * 0.05 }}
             >
               <Card
-                className={`glass-card ${onResultSelect ? 'cursor-pointer hover:border-primary/20 transition-all duration-300' : ''}`}
+                className={`glass-card ${onResultSelect ? 'card-glow cursor-pointer hover:border-primary/20 transition-all duration-300' : ''}`}
                 onClick={() => onResultSelect && onResultSelect(result)}
               >
                 <CardContent className="p-6">

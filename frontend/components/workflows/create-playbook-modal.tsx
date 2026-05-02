@@ -1,11 +1,16 @@
 'use client'
 
 import * as React from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import { X, ChefHat, Settings, Cpu, Calendar, ChevronLeft, ChevronRight, Save, Loader2 } from 'lucide-react'
+import { ChefHat, Settings, Cpu, Calendar, ChevronLeft, ChevronRight, Save, Loader2 } from 'lucide-react'
+import { motion } from 'framer-motion'
 import { useForm, FormProvider } from 'react-hook-form'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -169,213 +174,186 @@ export function CreatePlaybookModal({ open, onClose, onSave, initialData, recipe
   const isLastStep = currentStep === STEPS.length - 1
 
   return (
-    <AnimatePresence>
-      {open && (
-        <>
-          {/* Backdrop */}
-          <motion.div
-            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={handleClose}
-          />
+    <Dialog open={open} onOpenChange={handleClose}>
+      <DialogContent size="xl">
+        <DialogHeader className="border-b border-border/30 pb-4 flex-shrink-0">
+          <DialogTitle className="flex items-center space-x-2">
+            <ChefHat className="w-6 h-6 text-primary" />
+            <span>{isEditMode ? 'Edit' : 'Create'} <span className="gradient-text">Playbook</span></span>
+          </DialogTitle>
+        </DialogHeader>
 
-          {/* Modal */}
-          <motion.div
-            className="fixed inset-0 z-50 flex items-center justify-center p-4"
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            transition={{ duration: 0.2 }}
-          >
-            <Card className="glass-card card-glow w-full max-w-6xl flex flex-col max-h-[90vh]">
-              <CardHeader className="flex flex-row items-center justify-between border-b border-border/30 pb-4 flex-shrink-0">
-                <CardTitle className="flex items-center space-x-2">
-                  <ChefHat className="w-6 h-6 text-primary" />
-                  <span>{isEditMode ? 'Edit' : 'Create'} <span className="gradient-text">Playbook</span></span>
-                </CardTitle>
-                <Button variant="ghost" size="icon" onClick={handleClose}>
-                  <X className="w-5 h-5" />
-                </Button>
-              </CardHeader>
+        <FormProvider {...methods}>
+          <div className="flex gap-6">
+            {/* Left: Form Content */}
+            <div className="flex-1 min-w-0">
+              {/* Step Tabs */}
+              <Tabs value={currentStepId} className="space-y-6">
+                <TabsList className="grid w-full grid-cols-4 bg-secondary/50">
+                  {STEPS.map((step, index) => {
+                    const Icon = step.icon
+                    return (
+                      <TabsTrigger
+                        key={step.id}
+                        value={step.id}
+                        disabled={index > currentStep}
+                        onClick={() => {
+                          if (index <= currentStep) {
+                            setCurrentStep(index)
+                          }
+                        }}
+                        className="text-xs sm:text-sm gap-1.5"
+                      >
+                        <Icon className="w-3.5 h-3.5 hidden sm:block" />
+                        <span className="hidden md:inline">{step.label}</span>
+                        <span className="md:hidden">{index + 1}. {step.id === 'basic' ? 'Basic' : step.id === 'steps' ? 'Steps' : step.id === 'execution' ? 'Config' : 'Schedule'}</span>
+                      </TabsTrigger>
+                    )
+                  })}
+                </TabsList>
 
-              <CardContent className="overflow-y-auto pt-6 flex-1 min-h-0">
-                <FormProvider {...methods}>
-                  <div className="flex gap-6">
-                    {/* Left: Form Content */}
-                    <div className="flex-1 min-w-0">
-                      {/* Step Tabs */}
-                      <Tabs value={currentStepId} className="space-y-6">
-                        <TabsList className="grid w-full grid-cols-4 bg-secondary/50">
-                          {STEPS.map((step, index) => {
-                            const Icon = step.icon
-                            return (
-                              <TabsTrigger
-                                key={step.id}
-                                value={step.id}
-                                disabled={index > currentStep}
-                                onClick={() => {
-                                  if (index <= currentStep) {
-                                    setCurrentStep(index)
-                                  }
-                                }}
-                                className="text-xs sm:text-sm gap-1.5"
-                              >
-                                <Icon className="w-3.5 h-3.5 hidden sm:block" />
-                                <span className="hidden md:inline">{step.label}</span>
-                                <span className="md:hidden">{index + 1}. {step.id === 'basic' ? 'Basic' : step.id === 'steps' ? 'Steps' : step.id === 'execution' ? 'Config' : 'Schedule'}</span>
-                              </TabsTrigger>
-                            )
-                          })}
-                        </TabsList>
-
-                        {/* Step 1: Basic Configuration */}
-                        <TabsContent value="basic">
-                          <motion.div
-                            initial={{ opacity: 0, y: 20 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ duration: 0.3 }}
-                            className="space-y-4"
-                          >
-                            <div className="glass-card rounded-2xl p-6 space-y-4">
-                              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Basic Information</h3>
-                              <div>
-                                <Label htmlFor="playbook-name">
-                                  Playbook Name <span className="text-destructive">*</span>
-                                </Label>
-                                <Input
-                                  id="playbook-name"
-                                  {...methods.register('name', { required: true, minLength: 3 })}
-                                  placeholder="My Workflow Playbook"
-                                  className="bg-secondary/50 rounded-2xl"
-                                />
-                                {watchedName.length > 0 && watchedName.length < 3 && (
-                                  <p className="text-xs text-[hsl(var(--destructive))] mt-1">Name must be at least 3 characters</p>
-                                )}
-                              </div>
-                              <div>
-                                <Label htmlFor="playbook-description">Description</Label>
-                                <Textarea
-                                  id="playbook-description"
-                                  {...methods.register('description')}
-                                  placeholder="Describe what this recipe does..."
-                                  className="bg-secondary/50 rounded-2xl min-h-[80px]"
-                                />
-                              </div>
-                            </div>
-
-                            <div className="glass-card rounded-2xl p-6 space-y-4">
-                              <PlaybookInputBuilder
-                                value={watchedInputs}
-                                onChange={(val) => methods.setValue('inputs', val)}
-                                onValidation={(valid) => setInputsValid(valid)}
-                                hasTrigger={hasTrigger}
-                              />
-                            </div>
-                          </motion.div>
-                        </TabsContent>
-
-                        {/* Step 2: Workflow Steps & Agents */}
-                        <TabsContent value="steps">
-                          <motion.div
-                            initial={{ opacity: 0, y: 20 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ duration: 0.3 }}
-                            className="space-y-4"
-                          >
-                            <div className="glass-card rounded-2xl p-6">
-                              <PlaybookStepBuilder />
-                            </div>
-                          </motion.div>
-                        </TabsContent>
-
-                        {/* Step 3: Execution Settings */}
-                        <TabsContent value="execution">
-                          <motion.div
-                            initial={{ opacity: 0, y: 20 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ duration: 0.3 }}
-                            className="space-y-4"
-                          >
-                            <PlaybookExecutionConfig />
-                          </motion.div>
-                        </TabsContent>
-
-                        {/* Step 4: Scheduling & Triggers */}
-                        <TabsContent value="schedule">
-                          <motion.div
-                            initial={{ opacity: 0, y: 20 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ duration: 0.3 }}
-                            className="space-y-4"
-                          >
-                            <PlaybookScheduleConfig webhookId={lastSavedWebhookId || (initialData?.schedule_config?.webhook_id as string | undefined)} />
-                          </motion.div>
-                        </TabsContent>
-                      </Tabs>
-
-                      {/* Navigation Footer */}
-                      <div className="flex justify-between items-center mt-8 pt-6 border-t border-border/30">
-                        <Button variant="outline" onClick={handleClose}>
-                          Cancel
-                        </Button>
-
-                        <div className="text-sm text-muted-foreground">
-                          Step {currentStep + 1} of {STEPS.length}
-                        </div>
-
-                        <div className="flex gap-2">
-                          {currentStep > 0 && (
-                            <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
-                              <Button variant="outline" onClick={handleBack}>
-                                <ChevronLeft className="w-4 h-4 mr-1" />
-                                Back
-                              </Button>
-                            </motion.div>
-                          )}
-
-                          {!isLastStep ? (
-                            <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
-                              <Button
-                                variant="outline"
-                                onClick={handleNext}
-                                disabled={!canGoNext}
-                              >
-                                Next
-                                <ChevronRight className="w-4 h-4 ml-1" />
-                              </Button>
-                            </motion.div>
-                          ) : (
-                            <motion.div whileHover={{ scale: isSubmitting ? 1 : 1.05 }} whileTap={{ scale: isSubmitting ? 1 : 0.95 }}>
-                              <Button
-                                onClick={handleSave}
-                                disabled={isSubmitting}
-                              >
-                                {isSubmitting ? (
-                                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                                ) : (
-                                  <Save className="w-4 h-4 mr-2" />
-                                )}
-                                {isSubmitting ? (isEditMode ? 'Updating...' : 'Saving...') : (isEditMode ? 'Update Playbook' : 'Save Playbook')}
-                              </Button>
-                            </motion.div>
-                          )}
-                        </div>
+                {/* Step 1: Basic Configuration */}
+                <TabsContent value="basic">
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.3 }}
+                    className="space-y-4"
+                  >
+                    <div className="glass-card rounded-2xl p-6 space-y-4">
+                      <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Basic Information</h3>
+                      <div>
+                        <Label htmlFor="playbook-name">
+                          Playbook Name <span className="text-red-400">*</span>
+                        </Label>
+                        <Input
+                          id="playbook-name"
+                          {...methods.register('name', { required: true, minLength: 3 })}
+                          placeholder="My Workflow Playbook"
+                          className="bg-secondary/50 rounded-2xl"
+                        />
+                        {watchedName.length > 0 && watchedName.length < 3 && (
+                          <p className="text-xs text-[hsl(var(--destructive))] mt-1">Name must be at least 3 characters</p>
+                        )}
+                      </div>
+                      <div>
+                        <Label htmlFor="playbook-description">Description</Label>
+                        <Textarea
+                          id="playbook-description"
+                          {...methods.register('description')}
+                          placeholder="Describe what this recipe does..."
+                          className="bg-secondary/50 rounded-2xl min-h-[80px]"
+                        />
                       </div>
                     </div>
 
-                    {/* Right: Preview Panel */}
-                    <div className="hidden lg:block w-72 flex-shrink-0 border-l border-border/20 pl-6 overflow-y-auto max-h-[calc(90vh-8rem)]">
-                      <PlaybookPreviewPanel />
+                    <div className="glass-card rounded-2xl p-6 space-y-4">
+                      <PlaybookInputBuilder
+                        value={watchedInputs}
+                        onChange={(val) => methods.setValue('inputs', val)}
+                        onValidation={(valid) => setInputsValid(valid)}
+                        hasTrigger={hasTrigger}
+                      />
                     </div>
-                  </div>
-                </FormProvider>
-              </CardContent>
-            </Card>
-          </motion.div>
-        </>
-      )}
-    </AnimatePresence>
+                  </motion.div>
+                </TabsContent>
+
+                {/* Step 2: Workflow Steps & Agents */}
+                <TabsContent value="steps">
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.3 }}
+                    className="space-y-4"
+                  >
+                    <div className="glass-card rounded-2xl p-6">
+                      <PlaybookStepBuilder />
+                    </div>
+                  </motion.div>
+                </TabsContent>
+
+                {/* Step 3: Execution Settings */}
+                <TabsContent value="execution">
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.3 }}
+                    className="space-y-4"
+                  >
+                    <PlaybookExecutionConfig />
+                  </motion.div>
+                </TabsContent>
+
+                {/* Step 4: Scheduling & Triggers */}
+                <TabsContent value="schedule">
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.3 }}
+                    className="space-y-4"
+                  >
+                    <PlaybookScheduleConfig webhookId={lastSavedWebhookId || (initialData?.schedule_config?.webhook_id as string | undefined)} />
+                  </motion.div>
+                </TabsContent>
+              </Tabs>
+
+              {/* Navigation Footer */}
+              <div className="flex justify-between items-center mt-8 pt-6 border-t border-border/30">
+                <Button variant="outline" onClick={handleClose}>
+                  Cancel
+                </Button>
+
+                <div className="text-sm text-muted-foreground">
+                  Step {currentStep + 1} of {STEPS.length}
+                </div>
+
+                <div className="flex gap-2">
+                  {currentStep > 0 && (
+                    <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                      <Button variant="outline" onClick={handleBack}>
+                        <ChevronLeft className="w-4 h-4 mr-1" />
+                        Back
+                      </Button>
+                    </motion.div>
+                  )}
+
+                  {!isLastStep ? (
+                    <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                      <Button
+                        variant="outline"
+                        onClick={handleNext}
+                        disabled={!canGoNext}
+                      >
+                        Next
+                        <ChevronRight className="w-4 h-4 ml-1" />
+                      </Button>
+                    </motion.div>
+                  ) : (
+                    <motion.div whileHover={{ scale: isSubmitting ? 1 : 1.05 }} whileTap={{ scale: isSubmitting ? 1 : 0.95 }}>
+                      <Button
+                        onClick={handleSave}
+                        disabled={isSubmitting}
+                      >
+                        {isSubmitting ? (
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        ) : (
+                          <Save className="w-4 h-4 mr-2" />
+                        )}
+                        {isSubmitting ? (isEditMode ? 'Updating...' : 'Saving...') : (isEditMode ? 'Update Playbook' : 'Save Playbook')}
+                      </Button>
+                    </motion.div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Right: Preview Panel */}
+            <div className="hidden lg:block w-72 flex-shrink-0 border-l border-border/20 pl-6 overflow-y-auto max-h-[calc(90vh-8rem)]">
+              <PlaybookPreviewPanel />
+            </div>
+          </div>
+        </FormProvider>
+      </DialogContent>
+    </Dialog>
   )
 }

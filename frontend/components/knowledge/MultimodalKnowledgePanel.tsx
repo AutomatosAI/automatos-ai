@@ -440,7 +440,7 @@ export function MultimodalKnowledgePanel() {
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.3, delay: index * 0.05 }}
                   >
-                    <Card className="glass-card hover:border-primary/50 transition-all cursor-pointer">
+                    <Card className="glass-card card-glow hover:border-primary/50 transition-all cursor-pointer">
                       <CardHeader className="pb-3">
                         <div className="flex items-start justify-between">
                           <div className="flex items-center space-x-3">

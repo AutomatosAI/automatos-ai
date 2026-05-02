@@ -7,17 +7,21 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion } from 'framer-motion'
 import {
   Zap,
   Key,
   Info,
-  X,
   AlertTriangle
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { DynamicCredentialForm } from '@/components/settings/DynamicCredentialForm'
 import { ToolLogo } from '@/components/ui/tool-logo'
@@ -328,36 +332,16 @@ export function ToolConfigModal({ open, onClose, tool }: ToolConfigModalProps) {
   }
 
   return (
-    <AnimatePresence>
-      {open && (
-        <>
-          <motion.div
-            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={handleClose}
-          />
+    <Dialog open={open} onOpenChange={handleClose}>
+      <DialogContent size="lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center space-x-2">
+            <Zap className="w-6 h-6 text-brand-primary" />
+            <span>Tool: <span className="gradient-text">{currentTool.name}</span></span>
+          </DialogTitle>
+        </DialogHeader>
 
-          <motion.div
-            className="fixed inset-0 z-50 flex items-center justify-center p-4"
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            transition={{ duration: 0.2 }}
-          >
-            <Card className="glass-card card-glow w-full max-w-5xl max-h-[90vh] overflow-hidden">
-              <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle className="flex items-center space-x-2">
-                  <Zap className="w-6 h-6 text-brand-primary" />
-                  <span>Tool: <span className="gradient-text">{currentTool.name}</span></span>
-                </CardTitle>
-                <Button variant="ghost" size="icon" onClick={handleClose}>
-                  <X className="w-5 h-5" />
-                </Button>
-              </CardHeader>
-
-              <CardContent className="pr-2">
+        <div className="pr-2">
                 <Tabs value={activeTab} onValueChange={setActiveTab}>
                   <TabsList className={`grid w-full ${isComposioApp ? 'grid-cols-3' : 'grid-cols-2'} bg-secondary/50`}>
                     <TabsTrigger value="credentials">1. Credentials</TabsTrigger>
@@ -617,12 +601,9 @@ export function ToolConfigModal({ open, onClose, tool }: ToolConfigModalProps) {
                     </TabsContent>
                   )}
                 </Tabs>
-              </CardContent>
-            </Card>
-          </motion.div>
-        </>
-      )}
-    </AnimatePresence>
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 

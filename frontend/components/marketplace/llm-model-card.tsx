@@ -157,7 +157,7 @@ export function LLMModelCard({
   if (viewMode === 'list') {
     return (
       <Card
-        className="glass-card hover:border-primary/20 transition-all cursor-pointer"
+        className="glass-card card-glow hover:border-primary/20 transition-all cursor-pointer"
         onClick={onClick}
       >
         <CardContent className="p-3">

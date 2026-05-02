@@ -202,7 +202,7 @@ export function MarketplacePlaybooksTab({ searchQuery }: MarketplacePlaybooksTab
           {recipes.map((recipe: any) => (
             <Card
               key={recipe.id}
-              className="glass-card hover:border-primary/20 transition-all cursor-pointer"
+              className="glass-card card-glow hover:border-primary/20 transition-all cursor-pointer"
               onClick={() => handleViewPlaybook(recipe)}
             >
               <CardContent className="p-3">

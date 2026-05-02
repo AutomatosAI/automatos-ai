@@ -3,17 +3,15 @@
 
 import * as React from 'react'
 import { useState, useEffect } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import { 
-  X, 
-  FileText, 
-  Calendar, 
-  Database, 
-  HardDrive, 
-  Clock, 
-  CheckCircle, 
-  AlertTriangle, 
-  Info, 
+import {
+  FileText,
+  Calendar,
+  Database,
+  HardDrive,
+  Clock,
+  CheckCircle,
+  AlertTriangle,
+  Info,
   Download,
   Eye,
   Trash2,
@@ -22,6 +20,12 @@ import {
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Separator } from '@/components/ui/separator'
 import { Progress } from '@/components/ui/progress'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -75,11 +79,11 @@ interface DocumentDetails {
 }
 
 const statusStyles: Record<string, string> = {
-  completed: 'bg-success/10 text-success border-success/20',
-  processed: 'bg-success/10 text-success border-success/20',
-  processing: 'bg-warning/10 text-warning border-warning/20',
-  failed: 'bg-destructive/10 text-destructive border-destructive/20',
-  pending: 'bg-secondary/50 text-muted-foreground border-border/30'
+  completed: 'bg-green-500/10 text-green-400 border-green-500/20',
+  processed: 'bg-green-500/10 text-green-400 border-green-500/20',
+  processing: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
+  failed: 'bg-red-500/10 text-red-400 border-red-500/20',
+  pending: 'bg-gray-500/10 text-gray-400 border-gray-500/20'
 }
 
 const stageStatusIcons = {
@@ -90,10 +94,10 @@ const stageStatusIcons = {
 }
 
 const stageStatusColors = {
-  completed: 'text-success',
-  processing: 'text-warning',
-  failed: 'text-destructive',
-  pending: 'text-muted-foreground'
+  completed: 'text-green-400',
+  processing: 'text-yellow-400',
+  failed: 'text-red-400',
+  pending: 'text-gray-400'
 }
 
 export function DocumentDetailsModal({ 
@@ -159,56 +163,40 @@ export function DocumentDetailsModal({
   if (!open || !documentId) return null
 
   return (
-    <AnimatePresence>
-      <motion.div
-        className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        onClick={onClose}
-      />
-      <motion.div 
-        className="fixed inset-0 z-50 flex items-center justify-center p-4" 
-        initial={{ opacity: 0, scale: 0.95 }} 
-        animate={{ opacity: 1, scale: 1 }} 
-        exit={{ opacity: 0, scale: 0.95 }}
-      >
-        <Card className="glass-card card-glow w-full max-w-4xl max-h-[90vh] overflow-hidden">
-          <CardHeader className="flex flex-row items-center justify-between border-b border-border/30">
-            <CardTitle className="flex items-center space-x-2">
-              <FileText className="w-6 h-6 text-orange-400" />
-              <span>Document Details</span>
-            </CardTitle>
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent size="lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center justify-between">
             <div className="flex items-center space-x-2">
-              {document && (
-                <>
-                  <Button 
-                    variant="outline" 
-                    size="sm"
-                    onClick={handleDownload}
-                    className="hover:border-info/50"
-                  >
-                    <Download className="w-4 h-4 mr-2" />
-                    Download
-                  </Button>
-                  <Button 
-                    variant="outline" 
-                    size="sm"
-                    onClick={handleDelete}
-                    className="hover:border-destructive/50 text-destructive"
-                  >
-                    <Trash2 className="w-4 h-4 mr-2" />
-                    Delete
-                  </Button>
-                </>
-              )}
-              <Button variant="ghost" size="icon" onClick={onClose}>
-                <X className="w-5 h-5" />
-              </Button>
+              <FileText className="w-6 h-6 text-primary" />
+              <span>Document Details</span>
             </div>
-          </CardHeader>
-          
-          <CardContent className="overflow-y-auto p-0">
+            {document && (
+              <div className="flex items-center space-x-2 mr-8">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleDownload}
+                  className="hover:border-blue-500/50"
+                >
+                  <Download className="w-4 h-4 mr-2" />
+                  Download
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleDelete}
+                  className="hover:border-red-500/50 text-red-400"
+                >
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  Delete
+                </Button>
+              </div>
+            )}
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="overflow-y-auto">
             {loading && (
               <div className="flex items-center justify-center py-12">
                 <div className="text-center">
@@ -221,8 +209,8 @@ export function DocumentDetailsModal({
             {error && (
               <div className="flex items-center justify-center py-12">
                 <div className="text-center">
-                  <AlertTriangle className="h-8 w-8 text-destructive mx-auto mb-4" />
-                  <p className="text-destructive mb-4">Error: {error}</p>
+                  <AlertTriangle className="h-8 w-8 text-red-400 mx-auto mb-4" />
+                  <p className="text-red-400 mb-4">Error: {error}</p>
                   <Button onClick={loadDocumentDetails} variant="outline">
                     Try Again
                   </Button>
@@ -360,7 +348,7 @@ export function DocumentDetailsModal({
                         <div className="space-y-4">
                           {document?.processing_stages?.map((stage, index) => {
                             const StatusIcon = stageStatusIcons[stage?.status] || Clock
-                            const statusColor = stageStatusColors[stage?.status] || 'text-muted-foreground'
+                            const statusColor = stageStatusColors[stage?.status] || 'text-gray-400'
                             
                             return (
                               <div key={index} className="flex items-center justify-between p-3 bg-background/50 rounded-lg">
@@ -394,15 +382,15 @@ export function DocumentDetailsModal({
                       <CardContent>
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                           <div className="text-center p-3 bg-background/50 rounded-lg">
-                            <p className="text-2xl font-bold text-success">{document?.processing_info?.embeddings_created}</p>
+                            <p className="text-2xl font-bold text-green-400">{document?.processing_info?.embeddings_created}</p>
                             <p className="text-sm text-muted-foreground">Embeddings</p>
                           </div>
                           <div className="text-center p-3 bg-background/50 rounded-lg">
-                            <p className="text-2xl font-bold text-info">{document?.processing_info?.total_tokens?.toLocaleString()}</p>
+                            <p className="text-2xl font-bold text-blue-400">{document?.processing_info?.total_tokens?.toLocaleString()}</p>
                             <p className="text-sm text-muted-foreground">Tokens</p>
                           </div>
                           <div className="text-center p-3 bg-background/50 rounded-lg">
-                            <p className="text-2xl font-bold text-agent">{document?.processing_info?.processing_time}</p>
+                            <p className="text-2xl font-bold text-purple-400">{document?.processing_info?.processing_time}</p>
                             <p className="text-sm text-muted-foreground">Process Time</p>
                           </div>
                           <div className="text-center p-3 bg-background/50 rounded-lg">
@@ -425,11 +413,11 @@ export function DocumentDetailsModal({
                       <CardContent>
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                           <div className="text-center p-4 bg-background/50 rounded-lg">
-                            <p className="text-2xl font-bold text-info">{document?.access_info?.view_count || 0}</p>
+                            <p className="text-2xl font-bold text-blue-400">{document?.access_info?.view_count || 0}</p>
                             <p className="text-sm text-muted-foreground">Total Views</p>
                           </div>
                           <div className="text-center p-4 bg-background/50 rounded-lg">
-                            <p className="text-2xl font-bold text-success">{document?.access_info?.download_count || 0}</p>
+                            <p className="text-2xl font-bold text-green-400">{document?.access_info?.download_count || 0}</p>
                             <p className="text-sm text-muted-foreground">Downloads</p>
                           </div>
                           <div className="text-center p-4 bg-background/50 rounded-lg">
@@ -473,9 +461,8 @@ export function DocumentDetailsModal({
                 </TabsContent>
               </Tabs>
             )}
-          </CardContent>
-        </Card>
-      </motion.div>
-    </AnimatePresence>
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }

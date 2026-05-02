@@ -2,12 +2,10 @@
 
 import * as React from 'react'
 import { useState, useEffect } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import { 
-  X, 
-  Download, 
-  CheckCircle, 
-  AlertTriangle, 
+import {
+  Download,
+  CheckCircle,
+  AlertTriangle,
   Loader2,
   FileDown,
   Pause,
@@ -15,7 +13,12 @@ import {
   StopCircle
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Progress } from '@/components/ui/progress'
 import { Badge } from '@/components/ui/badge'
 
@@ -167,36 +170,19 @@ export function DownloadProgressModal({
 
   const statusInfo = getStatusInfo()
   const StatusIcon = statusInfo.icon
+  const canClose = status === 'completed' || status === 'error' || status === 'cancelled'
 
   return (
-    <AnimatePresence>
-      <motion.div
-        className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        onClick={status === 'completed' || status === 'error' || status === 'cancelled' ? handleClose : undefined}
-      />
-      <motion.div 
-        className="fixed inset-0 z-50 flex items-center justify-center p-4" 
-        initial={{ opacity: 0, scale: 0.95 }} 
-        animate={{ opacity: 1, scale: 1 }} 
-        exit={{ opacity: 0, scale: 0.95 }}
-      >
-        <Card className="glass-card card-glow w-full max-w-md">
-          <CardHeader className="flex flex-row items-center justify-between border-b border-border/30">
-            <CardTitle className="flex items-center space-x-2">
-              <FileDown className="w-5 h-5 text-orange-400" />
-              <span className="text-lg">Download Progress</span>
-            </CardTitle>
-            {(status === 'completed' || status === 'error' || status === 'cancelled') && (
-              <Button variant="ghost" size="icon" onClick={handleClose}>
-                <X className="w-4 h-4" />
-              </Button>
-            )}
-          </CardHeader>
-          
-          <CardContent className="pt-6 space-y-6">
+    <Dialog open={open} onOpenChange={canClose ? handleClose : undefined}>
+      <DialogContent size="sm">
+        <DialogHeader>
+          <DialogTitle className="flex items-center space-x-2">
+            <FileDown className="w-5 h-5 text-primary" />
+            <span>Download Progress</span>
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="pt-2 space-y-6">
             {/* File Info */}
             <div className="text-center">
               <h3 className="font-semibold text-lg mb-2 truncate">{filename}</h3>
@@ -278,9 +264,8 @@ export function DownloadProgressModal({
                 </p>
               </div>
             )}
-          </CardContent>
-        </Card>
-      </motion.div>
-    </AnimatePresence>
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }

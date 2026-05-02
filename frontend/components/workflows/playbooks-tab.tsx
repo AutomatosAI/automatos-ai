@@ -350,7 +350,7 @@ export function PlaybooksTab({
               <Card
                 key={playbook.id}
                 data-testid="workflow-card"
-                className="glass-card hover:border-primary/20 transition-all cursor-pointer"
+                className="glass-card card-glow hover:border-primary/20 transition-all cursor-pointer"
                 onClick={() => handleViewClick(playbook)}
               >
                 <CardContent className="p-3">

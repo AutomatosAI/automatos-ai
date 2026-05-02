@@ -57,7 +57,7 @@ export function ProjectCard({ project, index }: ProjectCardProps) {
       initial={prefersReducedMotion ? false : { opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, delay: index * 0.05 }}
-      className="glass-card p-4 space-y-3 cursor-pointer hover:bg-secondary/20 transition-colors"
+      className="glass-card card-glow p-4 space-y-3 cursor-pointer hover:bg-secondary/20 transition-colors"
     >
       {/* Header: title + status */}
       <div className="flex items-start justify-between gap-2">

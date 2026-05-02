@@ -87,7 +87,7 @@ export function ProviderCards({ providers, onProviderClick }: ProviderCardsProps
               className="h-full"
             >
               <Card
-                className="glass-card hover:border-primary/20 transition-all duration-300 cursor-pointer group h-full min-h-[280px] flex flex-col"
+                className="card-glow hover:border-primary/20 transition-all duration-300 cursor-pointer group h-full min-h-[280px] flex flex-col"
                 onClick={() => onProviderClick(provider)}
               >
                 <CardContent className="p-6 flex flex-col h-full">

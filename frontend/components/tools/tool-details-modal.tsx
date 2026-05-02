@@ -1,10 +1,14 @@
 'use client'
 
 import React from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { ToolLogo } from '@/components/ui/tool-logo'
 import {
   ExternalLink,
@@ -138,76 +142,57 @@ export function ToolDetailsModal({
   })
 
   return (
-    <AnimatePresence>
-      {open && (
-        <>
-          <motion.div
-            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={onClose}
-          />
-
-          <motion.div
-            className="fixed inset-0 z-50 flex items-center justify-center p-4"
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            transition={{ duration: 0.2 }}
-          >
-            <Card className="glass-card card-glow w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="flex items-center gap-3 text-xl">
-                  <ToolLogo
-                    logo={tool.logo}
-                    name={tool.name}
-                    size={48}
-                    fallbackIcon={tool.icon}
-                    showBackground={true}
-                  />
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="gradient-text">{tool.name}</span>
-                      <Badge variant="outline" className="text-xs">
-                        {tool.category}
-                      </Badge>
-                    </div>
-                    <p className="text-sm text-muted-foreground font-normal">
-                      {tool.provider} • v{tool.version}
-                    </p>
-                  </div>
-                </CardTitle>
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent size="md">
+        <DialogHeader>
+          <div className="flex items-center justify-between">
+            <DialogTitle className="flex items-center gap-3 text-xl">
+              <ToolLogo
+                logo={tool.logo}
+                name={tool.name}
+                size={48}
+                fallbackIcon={tool.icon}
+                showBackground={true}
+              />
+              <div>
                 <div className="flex items-center gap-2">
-                  {/* Save button - only show if connected and on features tab */}
-                  {tool.isInstalled && activeTab === 'features' && (
-                    <Button
-                      size="sm"
-                      onClick={async () => {
-                        try {
-                          const enabledList = actions.filter(a => a.enabled).map(a => a.name)
-                          await (apiClient as any).post(`/api/tools/${tool.name}/actions`, {
-                            actions: enabledList
-                          })
-                          toast({ title: "Settings Saved", description: `${enabledList.length} features enabled.` })
-                          onClose() // Close modal after successful save
-                        } catch (e: any) {
-                          console.error("Save failed:", e)
-                          toast({ title: "Error", description: `Failed to save: ${e.message || "Unknown error"}`, variant: "destructive" })
-                        }
-                      }}
-                      variant="outline"
-                    >
-                      Save Changes
-                    </Button>
-                  )}
-                  <Button variant="ghost" size="icon" onClick={onClose}>
-                    <X className="w-5 h-5" />
-                  </Button>
+                  <span className="gradient-text">{tool.name}</span>
+                  <Badge variant="outline" className="text-xs">
+                    {tool.category}
+                  </Badge>
                 </div>
-              </CardHeader>
+                <p className="text-sm text-muted-foreground font-normal">
+                  {tool.provider} • v{tool.version}
+                </p>
+              </div>
+            </DialogTitle>
+            {/* Save button - only show if connected and on features tab */}
+            {tool.isInstalled && activeTab === 'features' && (
+              <Button
+                size="sm"
+                onClick={async () => {
+                  try {
+                    const enabledList = actions.filter(a => a.enabled).map(a => a.name)
+                    await (apiClient as any).post(`/api/tools/${tool.name}/actions`, {
+                      actions: enabledList
+                    })
+                    toast({ title: "Settings Saved", description: `${enabledList.length} features enabled.` })
+                    onClose()
+                  } catch (e: any) {
+                    console.error("Save failed:", e)
+                    toast({ title: "Error", description: `Failed to save: ${e.message || "Unknown error"}`, variant: "destructive" })
+                  }
+                }}
+                variant="outline"
+                className="mr-8"
+              >
+                Save Changes
+              </Button>
+            )}
+          </div>
+        </DialogHeader>
 
-              <CardContent className="flex-1 overflow-y-auto pt-4 space-y-6">
+        <div className="flex-1 overflow-y-auto pt-4 space-y-6">
 
                 <div className="space-y-6">
                   <div className="space-y-3">
@@ -350,57 +335,54 @@ export function ToolDetailsModal({
 
               </CardContent>
 
-              <div className="p-6 border-t border-border/40 bg-background/50 backdrop-blur z-20 relative">
-                <div className="flex flex-col gap-3">
-                  <div className="flex gap-3">
-                    {tool.isInstalled ? (
-                      <>
-                        {/* Disconnect OAuth button - only for connected apps */}
-                        <Button
-                          variant="outline"
-                          onClick={async () => {
-                            if (onUninstall) {
-                              await onUninstall()
-                              onClose() // Close modal after disconnect
-                            }
-                          }}
-                          className="flex-1 hover:border-destructive/50 text-destructive"
-                          disabled={loading}
-                        >
-                          Disconnect OAuth
-                        </Button>
-                      </>
-                    ) : (
-                      <Button
-                        variant="outline"
-                        onClick={onInstall}
-                        disabled={loading}
-                        className="flex-1"
-                      >
-                        <ExternalLink className="w-4 h-4 mr-2" />
-                        Connect with Composio
-                      </Button>
-                    )}
-                  </div>
+        <div className="border-t border-border/40 pt-4">
+          <div className="flex flex-col gap-3">
+            <div className="flex gap-3">
+              {tool.isInstalled ? (
+                <>
+                  {/* Disconnect OAuth button - only for connected apps */}
+                  <Button
+                    variant="outline"
+                    onClick={async () => {
+                      if (onUninstall) {
+                        await onUninstall()
+                        onClose()
+                      }
+                    }}
+                    className="flex-1 hover:border-destructive/50 text-destructive"
+                    disabled={loading}
+                  >
+                    Disconnect OAuth
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  variant="outline"
+                  onClick={onInstall}
+                  disabled={loading}
+                  className="flex-1"
+                >
+                  <ExternalLink className="w-4 h-4 mr-2" />
+                  Connect with Composio
+                </Button>
+              )}
+            </div>
 
-                  {/* Remove from Workspace - show for ALL workspace apps (connected or not) */}
-                  {onRemoveFromWorkspace && (
-                    <Button
-                      variant="outline"
-                      onClick={onRemoveFromWorkspace}
-                      className="w-full hover:border-destructive/50 text-destructive"
-                      disabled={loading}
-                    >
-                      <Trash2 className="w-4 h-4 mr-2" />
-                      Remove from Workspace
-                    </Button>
-                  )}
-                </div>
-              </div>
-            </Card>
-          </motion.div>
-        </>
-      )}
-    </AnimatePresence>
+            {/* Remove from Workspace - show for ALL workspace apps (connected or not) */}
+            {onRemoveFromWorkspace && (
+              <Button
+                variant="outline"
+                onClick={onRemoveFromWorkspace}
+                className="w-full hover:border-destructive/50 text-destructive"
+                disabled={loading}
+              >
+                <Trash2 className="w-4 h-4 mr-2" />
+                Remove from Workspace
+              </Button>
+            )}
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }

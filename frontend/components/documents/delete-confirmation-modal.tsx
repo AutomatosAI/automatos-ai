@@ -3,11 +3,9 @@
 
 import * as React from 'react'
 import { useState, useEffect, useMemo } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import { 
-  X, 
-  Trash2, 
-  AlertTriangle, 
+import {
+  Trash2,
+  AlertTriangle,
   FileText,
   Database,
   Link,
@@ -15,7 +13,13 @@ import {
   CheckCircle
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog'
 import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
@@ -132,13 +136,13 @@ export function DeleteConfirmationModal({
   const getImpactColor = (impact: 'high' | 'medium' | 'low') => {
     switch (impact) {
       case 'high':
-        return 'bg-destructive/10 text-destructive border-destructive/20'
+        return 'bg-red-500/10 text-red-400 border-red-500/20'
       case 'medium':
         return 'bg-orange-500/10 text-orange-400 border-orange-500/20'
       case 'low':
-        return 'bg-warning/10 text-warning border-warning/20'
+        return 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20'
       default:
-        return 'bg-secondary/50 text-muted-foreground border-border/30'
+        return 'bg-gray-500/10 text-gray-400 border-gray-500/20'
     }
   }
 
@@ -158,43 +162,22 @@ export function DeleteConfirmationModal({
   if (!open || !documentId) return null
 
   return (
-    <AnimatePresence>
-      <motion.div
-        className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-      />
-      <motion.div 
-        className="fixed inset-0 z-50 flex items-center justify-center p-4" 
-        initial={{ opacity: 0, scale: 0.95 }} 
-        animate={{ opacity: 1, scale: 1 }} 
-        exit={{ opacity: 0, scale: 0.95 }}
-      >
-        <Card className="glass-card card-glow w-full max-w-2xl max-h-[90vh] overflow-hidden">
-          <CardHeader className="bg-destructive/5 border-b border-destructive/20">
-            <CardTitle className="flex items-center space-x-2 text-destructive">
-              <AlertTriangle className="w-6 h-6" />
-              <span>Confirm Document Deletion</span>
-            </CardTitle>
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="absolute right-4 top-4"
-              onClick={onClose}
-              disabled={deleting}
-            >
-              <X className="w-4 h-4" />
-            </Button>
-          </CardHeader>
-          
-          <CardContent className="overflow-y-auto p-6 space-y-6">
+    <Dialog open={open} onOpenChange={deleting ? undefined : onClose}>
+      <DialogContent size="sm">
+        <DialogHeader>
+          <DialogTitle className="flex items-center space-x-2 text-destructive">
+            <AlertTriangle className="w-6 h-6" />
+            <span>Confirm Document Deletion</span>
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="overflow-y-auto space-y-6">
             {/* Warning Message */}
-            <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4">
+            <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4">
               <div className="flex items-start space-x-3">
-                <AlertTriangle className="w-5 h-5 text-destructive mt-0.5 flex-shrink-0" />
+                <AlertTriangle className="w-5 h-5 text-red-400 mt-0.5 flex-shrink-0" />
                 <div>
-                  <h3 className="font-semibold text-destructive mb-1">
+                  <h3 className="font-semibold text-red-400 mb-1">
                     You are about to permanently delete this document
                   </h3>
                   <p className="text-sm text-muted-foreground">
@@ -207,8 +190,8 @@ export function DeleteConfirmationModal({
             {/* Document Info */}
             <div className="bg-secondary/30 rounded-lg p-4">
               <div className="flex items-center space-x-3">
-                <div className="w-12 h-12 rounded-lg bg-destructive/20 flex items-center justify-center">
-                  <FileText className="w-6 h-6 text-destructive" />
+                <div className="w-12 h-12 rounded-lg bg-red-500/20 flex items-center justify-center">
+                  <FileText className="w-6 h-6 text-red-400" />
                 </div>
                 <div>
                   <h3 className="font-semibold text-lg">{filename}</h3>
@@ -241,15 +224,15 @@ export function DeleteConfirmationModal({
                     <p className="text-xs text-muted-foreground">Vector Chunks</p>
                   </div>
                   <div className="bg-secondary/30 rounded-lg p-3 text-center">
-                    <p className="text-2xl font-bold text-agent">{impact.embeddings}</p>
+                    <p className="text-2xl font-bold text-purple-400">{impact.embeddings}</p>
                     <p className="text-xs text-muted-foreground">Embeddings</p>
                   </div>
                   <div className="bg-secondary/30 rounded-lg p-3 text-center">
-                    <p className="text-2xl font-bold text-info">{impact.references}</p>
+                    <p className="text-2xl font-bold text-blue-400">{impact.references}</p>
                     <p className="text-xs text-muted-foreground">References</p>
                   </div>
                   <div className="bg-secondary/30 rounded-lg p-3 text-center">
-                    <p className="text-2xl font-bold text-success">{impact.storage_freed}</p>
+                    <p className="text-2xl font-bold text-green-400">{impact.storage_freed}</p>
                     <p className="text-xs text-muted-foreground">Storage Freed</p>
                   </div>
                 </div>
@@ -301,7 +284,7 @@ export function DeleteConfirmationModal({
 
             {/* Confirmation Requirements */}
             <div className="space-y-4 border-t border-border/30 pt-6">
-              <h4 className="font-semibold text-destructive">Confirmation Required</h4>
+              <h4 className="font-semibold text-red-400">Confirmation Required</h4>
               
               {/* Type filename confirmation */}
               <div className="space-y-2">
@@ -348,42 +331,41 @@ export function DeleteConfirmationModal({
 
             {/* Error Message */}
             {error && (
-              <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-3">
-                <p className="text-destructive text-sm">{error}</p>
+              <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3">
+                <p className="text-red-400 text-sm">{error}</p>
               </div>
             )}
 
-            {/* Action Buttons */}
-            <div className="flex justify-end space-x-3 border-t border-border/30 pt-6">
-              <Button 
-                variant="outline" 
-                onClick={onClose}
-                disabled={deleting}
-              >
-                Cancel
-              </Button>
-              <Button 
-                variant="destructive"
-                onClick={handleConfirm}
-                disabled={!canConfirm || deleting}
-                className="bg-destructive hover:bg-destructive/80"
-              >
-                {deleting ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Deleting...
-                  </>
-                ) : (
-                  <>
-                    <Trash2 className="w-4 h-4 mr-2" />
-                    Delete Document
-                  </>
-                )}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </motion.div>
-    </AnimatePresence>
+        </div>
+
+        <DialogFooter className="border-t border-border/30 pt-4">
+          <Button
+            variant="outline"
+            onClick={onClose}
+            disabled={deleting}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            onClick={handleConfirm}
+            disabled={!canConfirm || deleting}
+            className="bg-red-600 hover:bg-red-700"
+          >
+            {deleting ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Deleting...
+              </>
+            ) : (
+              <>
+                <Trash2 className="w-4 h-4 mr-2" />
+                Delete Document
+              </>
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }

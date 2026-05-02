@@ -564,7 +564,7 @@ export function MarketplacePluginsTab({ searchQuery, workspaceId }: MarketplaceP
             return (
               <Card
                 key={plugin.id}
-                className="glass-card hover:border-primary/20 transition-all cursor-pointer"
+                className="glass-card card-glow hover:border-primary/20 transition-all cursor-pointer"
                 onClick={() => setSelectedPluginId(plugin.id)}
               >
                 <CardContent className="p-3">

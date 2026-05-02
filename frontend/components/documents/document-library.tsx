@@ -329,7 +329,7 @@ export function DocumentLibrary({
               >
                 <Card
                   data-testid="doc-card"
-                  className={`glass-card cursor-pointer transition-all duration-300 hover:border-primary/20 ${
+                  className={`glass-card card-glow cursor-pointer transition-all duration-300 hover:border-primary/20 ${
                     selectedDocumentId === document.id ? 'border-primary' : ''
                   }`}
                 >
@@ -490,7 +490,7 @@ export function DocumentLibrary({
               >
                 <Card
                   data-testid="doc-card"
-                  className={`glass-card cursor-pointer transition-all duration-300 hover:border-primary/20 ${
+                  className={`glass-card card-glow cursor-pointer transition-all duration-300 hover:border-primary/20 ${
                     selectedDocumentId === document.id ? 'border-primary' : ''
                   }`}
                   onClick={() => onDocumentSelect(document.id)}

@@ -70,7 +70,7 @@ export function BoardCard({ task, index, onOpen, onDelete }: BoardCardProps) {
           {...provided.draggableProps}
           {...provided.dragHandleProps}
           className={cn(
-            'group glass-card rounded-lg p-3 mb-2 cursor-grab active:cursor-grabbing transition-shadow',
+            'group glass-card card-glow rounded-lg p-3 mb-2 cursor-grab active:cursor-grabbing transition-shadow',
             'border-l-2',
             snapshot.isDragging && 'shadow-lg shadow-primary/10 ring-1 ring-primary/20',
             isBlocked && 'border-l-destructive bg-destructive/5',

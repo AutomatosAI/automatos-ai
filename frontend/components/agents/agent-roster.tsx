@@ -309,7 +309,7 @@ export function AgentRoster({
               <div
                 key={agent.id}
                 data-testid="agent-card"
-                className="glass-card p-3 hover:border-primary/20 transition-all cursor-pointer"
+                className="glass-card card-glow p-3 hover:border-primary/20 transition-all cursor-pointer"
                 onClick={() => onViewDetails(agent.id.toString())}
               >
                 <div className="flex items-center gap-3">

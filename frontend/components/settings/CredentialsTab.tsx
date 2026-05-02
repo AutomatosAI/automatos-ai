@@ -273,7 +273,7 @@ export function CredentialsTab() {
             const credType = credentialTypes.get(credential.credential_type_id)
 
             return (
-              <Card key={credential.id} className="glass-card hover:border-primary/50 transition-all">
+              <Card key={credential.id} className="glass-card card-glow hover:border-primary/50 transition-all">
                 <CardHeader>
                   <div className="flex items-start justify-between">
                     <div className="flex items-center gap-3 flex-1">
