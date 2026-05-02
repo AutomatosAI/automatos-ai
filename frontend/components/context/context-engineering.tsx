@@ -3,10 +3,10 @@
 import { useState, useMemo } from 'react'
 import { motion } from 'framer-motion'
 import { useInView } from 'react-intersection-observer'
-import { 
-  Brain, 
-  Search, 
-  Database, 
+import {
+  Brain,
+  Search,
+  Database,
   Network,
   Eye,
   Settings,
@@ -24,10 +24,11 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { TabsContent } from '@/components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, BarChart as RechartsBarChart, Bar, PieChart, Pie, Cell } from 'recharts'
+import { PageHeader, FilterTabs } from '@/components/shared'
 
 // Import all the context hooks
 import {
@@ -62,6 +63,7 @@ export function ContextEngineering() {
   const [searchTerm, setSearchTerm] = useState('')
   const [configureModalOpen, setConfigureModalOpen] = useState(false)
   const [selectedPattern, setSelectedPattern] = useState<any>(null)
+  const [activeTab, setActiveTab] = useState('performance')
   const [ref, inView] = useInView({
     triggerOnce: true,
     threshold: 0.1,
@@ -200,35 +202,26 @@ export function ContextEngineering() {
   return (
     <div className="space-y-8">
       {/* Header */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.8 }}
-        className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3"
-      >
-        <div>
-          <h1 className="text-2xl md:text-3xl font-bold mb-1 md:mb-2">
-            Context <span className="gradient-text">Engineering</span>
-          </h1>
-          <p className="text-muted-foreground text-sm md:text-lg">
-            Monitor RAG system performance and context retrieval patterns
-          </p>
-        </div>
-
-        <div className="flex space-x-2 shrink-0">
-          <Button variant="outline" onClick={handleRefresh} disabled={loading}>
-            <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
-          </Button>
-          <Button 
-            className="gradient-accent hover:opacity-90"
-            onClick={() => setConfigureModalOpen(true)}
-          >
-            <Settings className="w-4 h-4 mr-2" />
-            Configure RAG
-          </Button>
-        </div>
-      </motion.div>
+      <PageHeader
+        title="Context"
+        titleAccent="Engineering"
+        subtitle="Monitor RAG system performance and context retrieval patterns"
+        actions={
+          <>
+            <Button variant="outline" onClick={handleRefresh} disabled={loading}>
+              <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+            <Button
+              className="gradient-accent hover:opacity-90"
+              onClick={() => setConfigureModalOpen(true)}
+            >
+              <Settings className="w-4 h-4 mr-2" />
+              Configure RAG
+            </Button>
+          </>
+        }
+      />
 
       {/* Stats Overview */}
       <motion.div
@@ -270,33 +263,18 @@ export function ContextEngineering() {
         animate={inView ? { opacity: 1, y: 0 } : {}}
         transition={{ duration: 0.8, delay: 0.4 }}
       >
-        <Tabs defaultValue="performance" className="space-y-6">
-          <TabsList className="w-full lg:w-auto justify-start gap-1 bg-secondary/50">
-            <TabsTrigger value="performance" className="flex items-center space-x-2">
-              <BarChart className="w-4 h-4" />
-              <span className="hidden sm:inline">Performance</span>
-            </TabsTrigger>
-            <TabsTrigger value="queries" className="flex items-center space-x-2">
-              <Search className="w-4 h-4" />
-              <span className="hidden sm:inline">Query Analysis</span>
-            </TabsTrigger>
-            <TabsTrigger value="database" className="flex items-center space-x-2">
-              <Database className="w-4 h-4" />
-              <span className="hidden sm:inline">Database Analytics</span>
-            </TabsTrigger>
-            <TabsTrigger value="patterns" className="flex items-center space-x-2">
-              <Network className="w-4 h-4" />
-              <span className="hidden sm:inline">Patterns</span>
-            </TabsTrigger>
-            <TabsTrigger value="optimization" className="flex items-center space-x-2">
-              <Brain className="w-4 h-4" />
-              <span className="hidden sm:inline">Optimization</span>
-            </TabsTrigger>
-            <TabsTrigger value="rag" className="flex items-center space-x-2">
-              <Zap className="w-4 h-4" />
-              <span className="hidden sm:inline">RAG Context</span>
-            </TabsTrigger>
-          </TabsList>
+        <FilterTabs
+          tabs={[
+            { value: 'performance', label: 'Performance', icon: BarChart },
+            { value: 'queries', label: 'Query Analysis', icon: Search },
+            { value: 'database', label: 'Database Analytics', icon: Database },
+            { value: 'patterns', label: 'Patterns', icon: Network },
+            { value: 'optimization', label: 'Optimization', icon: Brain },
+            { value: 'rag', label: 'RAG Context', icon: Zap },
+          ]}
+          value={activeTab}
+          onValueChange={setActiveTab}
+        >
 
           <TabsContent value="performance" className="space-y-6">
             {/* Performance Charts */}
@@ -771,7 +749,7 @@ export function ContextEngineering() {
           <TabsContent value="rag" className="space-y-6">
             <RAGContextBuilder />
           </TabsContent>
-        </Tabs>
+        </FilterTabs>
       </motion.div>
 
       {/* Configure RAG Modal */}

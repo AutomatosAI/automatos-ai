@@ -6,6 +6,7 @@ import { useUser } from '@clerk/nextjs'
 import { User, Mail, Shield, Trash2, Upload, Save, X, CheckCircle, AlertCircle, Loader2, ArrowLeft, Briefcase, Copy, Check } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useWorkspace } from '@/hooks/use-workspace'
+import { PageHeader } from '@/components/shared'
 
 /**
  * Custom Profile Page
@@ -159,21 +160,23 @@ export default function ProfilePage() {
         <div className="min-h-screen py-8 px-4">
             <div className="max-w-4xl mx-auto">
                 {/* Page Header */}
-                <div className="mb-8 flex items-center space-x-4">
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => router.back()}
-                        className="text-slate-400 hover:text-white hover:bg-slate-800"
-                    >
-                        <ArrowLeft className="w-5 h-5" />
-                    </Button>
-                    <div>
-                        <h1 className="text-3xl font-bold text-white mb-2">Profile Settings</h1>
-                        <p className="text-slate-400">
-                            Manage your account information and preferences
-                        </p>
-                    </div>
+                <div className="mb-8">
+                    <PageHeader
+                        title="Profile"
+                        titleAccent="Settings"
+                        subtitle="Manage your account information and preferences"
+                        actions={
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => router.back()}
+                                className="text-slate-400 hover:text-white hover:bg-slate-800"
+                            >
+                                <ArrowLeft className="w-4 h-4 mr-1" />
+                                Back
+                            </Button>
+                        }
+                    />
                 </div>
 
                 {/* Success/Error Message */}

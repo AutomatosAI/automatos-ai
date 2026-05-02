@@ -13,10 +13,10 @@ import {
   Download,
   Play,
 } from 'lucide-react'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { PageHeader, FilterTabs, TabsContent } from '@/components/shared'
 import { CreateMissionModal } from '@/components/missions/create-mission-modal'
 import { CreatePlaybookModal } from '@/components/workflows/create-playbook-modal'
 import { CreateTaskDialog } from '@/components/activity/board/create-task-dialog'
@@ -127,7 +127,7 @@ function FeaturedHeroCards() {
             className="cursor-pointer overflow-hidden border-border/50 bg-card/60 backdrop-blur-sm hover:border-cyan-500/30 hover:bg-card/80 transition-all group focus:outline-none focus:ring-2 focus:ring-cyan-500/40"
           >
             <CardContent className="p-3 flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-cyan-500/15 border border-cyan-500/20 flex items-center justify-center shrink-0 group-hover:bg-cyan-500/25 transition-colors">
+              <div className="w-9 h-9 rounded-lg bg-cyan-500/15 border border-cyan-500/20 flex items-center justify-center shrink-0 group-hover:bg-cyan-500/25 transition-colors">
                 <Zap className="h-4 w-4 text-cyan-400" />
               </div>
               <div className="flex-1 min-w-0">
@@ -238,7 +238,7 @@ function RecommendedCard({
         <CardContent className="p-3.5 flex-1 flex flex-col gap-2">
           <div className="flex items-start gap-2.5">
             <div
-              className={`w-8 h-8 rounded-lg border flex items-center justify-center shrink-0 transition-colors ${
+              className={`w-9 h-9 rounded-lg border flex items-center justify-center shrink-0 transition-colors ${
                 isMission
                   ? 'bg-primary/15 border-primary/25 group-hover:bg-primary/25'
                   : 'bg-primary/10 border-primary/20 group-hover:bg-primary/20'
@@ -256,7 +256,7 @@ function RecommendedCard({
                     FEATURED
                   </span>
                 ) : isNew ? (
-                  <span className="font-mono text-[9px] tracking-wider px-1.5 py-px rounded bg-success/15 text-success border border-success/30 shrink-0">
+                  <span className="font-mono text-[9px] tracking-wider px-1.5 py-px rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shrink-0">
                     NEW
                   </span>
                 ) : null}
@@ -378,21 +378,11 @@ export function AssignmentsPage() {
   return (
     <div className="space-y-6">
       {/* ── Page Header ──────────────────────────────────────── */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-      >
-        <div className="flex flex-col gap-1">
-          <h1 className="text-2xl md:text-3xl font-bold">
-            <ClipboardList className="inline-block h-8 w-8 mr-2 -mt-1 text-primary" />
-            Assignments
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Plan, schedule, and orchestrate work for your crew
-          </p>
-        </div>
-      </motion.div>
+      <PageHeader
+        title="My"
+        titleAccent="Assignments"
+        subtitle="Plan, schedule, and orchestrate work for your crew"
+      />
 
       {/* ── Featured Hero Area (US-010) ──────────────────────── */}
       <FeaturedHeroCards />
@@ -404,30 +394,20 @@ export function AssignmentsPage() {
       <RecommendedGrid />
 
       {/* ── Category Tabs ────────────────────────────────────── */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.2 }}
+      <FilterTabs
+        tabs={TAB_CONFIG}
+        value={activeTab}
+        onValueChange={handleTabChange}
+        dataTour="assignments-tabs"
       >
-        <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
-          <TabsList data-tour="assignments-tabs" className="bg-secondary/50">
-            {TAB_CONFIG.map((tab) => (
-              <TabsTrigger key={tab.value} value={tab.value} className="flex items-center gap-1.5">
-                <tab.icon className="h-4 w-4" />
-                {tab.label}
-              </TabsTrigger>
-            ))}
-          </TabsList>
+        <TabsContent value="playbooks" className="mt-0">
+          <AssignmentsPlaybooksGrid />
+        </TabsContent>
 
-          <TabsContent value="playbooks" className="mt-0">
-            <AssignmentsPlaybooksGrid />
-          </TabsContent>
-
-          <TabsContent value="missions" className="mt-0">
-            <AssignmentsMissionsGrid />
-          </TabsContent>
-        </Tabs>
-      </motion.div>
+        <TabsContent value="missions" className="mt-0">
+          <AssignmentsMissionsGrid />
+        </TabsContent>
+      </FilterTabs>
     </div>
   )
 }

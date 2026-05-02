@@ -5,10 +5,10 @@ import Link from 'next/link'
 import { motion } from 'framer-motion'
 import { Search, ExternalLink, CheckCircle, AlertTriangle, Clock, Settings, Store } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { useConnectedApps, type ComposioApp } from '@/hooks/use-composio-api'
+import { PageHeader, SearchInput } from '@/components/shared'
 
 export function MyToolsDashboard() {
   const [searchQuery, setSearchQuery] = useState('')
@@ -58,20 +58,19 @@ export function MyToolsDashboard() {
     <div className="flex flex-col h-full">
       {/* Page Header */}
       <div className="mb-6">
-        <div className="flex items-center justify-between mb-2">
-          <h1 className="text-3xl font-bold">
-            My <span className="gradient-text">Tools</span>
-          </h1>
-          <Link href="/marketplace?tab=tools">
-            <Button variant="outline">
-              <Store className="h-4 w-4 mr-2" />
-              Browse Marketplace
-            </Button>
-          </Link>
-        </div>
-        <p className="text-muted-foreground">
-          Manage your connected tools and integrations
-        </p>
+        <PageHeader
+          title="My"
+          titleAccent="Tools"
+          subtitle="Manage your connected tools and integrations"
+          actions={
+            <Link href="/marketplace?tab=tools">
+              <Button variant="outline">
+                <Store className="h-4 w-4 mr-2" />
+                Browse Marketplace
+              </Button>
+            </Link>
+          }
+        />
       </div>
 
       {/* Stats Cards */}
@@ -115,16 +114,11 @@ export function MyToolsDashboard() {
 
       {/* Search */}
       <div className="mb-6">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
-          <Input
-            type="text"
-            placeholder="Search connected tools..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-10 bg-secondary border-border text-foreground placeholder:text-muted-foreground"
-          />
-        </div>
+        <SearchInput
+          value={searchQuery}
+          onChange={setSearchQuery}
+          placeholder="Search connected tools..."
+        />
       </div>
 
       {/* Connected Tools List */}

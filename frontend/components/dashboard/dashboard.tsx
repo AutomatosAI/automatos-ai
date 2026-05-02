@@ -7,10 +7,10 @@ import { logger } from '../../lib/logger'
 import { useQuery } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import { useInView } from 'react-intersection-observer'
-import { 
-  Bot, 
-  FileText, 
-  GitBranch, 
+import {
+  Bot,
+  FileText,
+  GitBranch,
   Activity,
   TrendingUp,
   Clock,
@@ -28,6 +28,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../ui/card'
 import { Badge } from '../ui/badge'
 import { Progress } from '../ui/progress'
 import { Separator } from '../ui/separator'
+import { PageHeader } from '@/components/shared'
 import { 
   useSystemHealth,
   useSystemMetrics,
@@ -88,19 +89,12 @@ export function Dashboard() {
   return (
     <div ref={ref} className="space-y-6 p-4 container mx-auto max-w-[1300px]">
       {/* Header */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={inView ? { opacity: 1, y: 0 } : {}}
-        transition={{ duration: 0.5 }}
-      >
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-          <div>
-            <h1 className="text-2xl md:text-3xl font-bold gradient-text">Dashboard</h1>
-            <p className="text-sm md:text-base text-muted-foreground mt-1">
-              Monitor your multi-agent orchestration platform in real-time
-            </p>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
+      <PageHeader
+        title="System"
+        titleAccent="Dashboard"
+        subtitle="Monitor your multi-agent orchestration platform in real-time"
+        actions={
+          <>
             <Badge variant="outline" className="text-brand-primary border-brand-primary/30">
               <div className="w-2 h-2 bg-success rounded-full animate-pulse mr-2" />
               System Online
@@ -108,9 +102,9 @@ export function Dashboard() {
             <Badge variant="secondary">
               Last Updated: <TimeDisplay />
             </Badge>
-          </div>
-        </div>
-      </motion.div>
+          </>
+        }
+      />
 
       {/* System Status Cards */}
       <motion.div

@@ -11,6 +11,11 @@ import {
   ArrowDownToLine,
   Clock,
   User,
+  LayoutGrid,
+  FileText,
+  CheckCircle,
+  Archive,
+  CalendarClock,
 } from 'lucide-react'
 import { DeliverableIcon } from '@/components/icons/deliverable-icon'
 import { Badge } from '@/components/ui/badge'
@@ -23,6 +28,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { PageHeader, FilterTabs, TabsContent } from '@/components/shared'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -242,6 +248,7 @@ export function DeliverablesBlog() {
   const [filters, setFilters] = useState<BlogFilters>({ per_page: 20 })
   const [isEditorOpen, setIsEditorOpen] = useState(false)
   const [editingPostId, setEditingPostId] = useState<string | null>(null)
+  const [activeStatusTab, setActiveStatusTab] = useState('all')
 
   const { data, isLoading, refetch } = useBlogPosts(filters)
   const posts = data?.posts || []
@@ -285,70 +292,70 @@ export function DeliverablesBlog() {
     }))
   }, [])
 
+  const handleStatusTabChange = useCallback((value: string) => {
+    setActiveStatusTab(value)
+    handleFilterChange('status', value === 'all' ? undefined : value)
+  }, [handleFilterChange])
+
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex flex-wrap items-center gap-2">
-          <Filter className="w-4 h-4 text-muted-foreground" />
-
-          <Select
-            value={filters.status || 'all'}
-            onValueChange={(v) => handleFilterChange('status', v)}
-          >
-            <SelectTrigger className="w-28 h-8 text-xs bg-secondary/40">
-              <SelectValue placeholder="All Status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Status</SelectItem>
-              <SelectItem value="draft">Draft</SelectItem>
-              <SelectItem value="published">Published</SelectItem>
-              <SelectItem value="archived">Archived</SelectItem>
-            </SelectContent>
-          </Select>
-
-          <span className="text-xs text-muted-foreground ml-2">
-            {total} post{total !== 1 ? 's' : ''}
-          </span>
-        </div>
-
-        <Button size="sm" onClick={handleCreatePost}>
-          <Plus className="w-4 h-4 mr-1" /> Create Post
-        </Button>
-      </div>
-
-      {/* Post list */}
-      {isLoading ? (
-        <div className="space-y-3">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <BlogCardSkeleton key={i} />
-          ))}
-        </div>
-      ) : posts.length === 0 ? (
-        <BlogEmptyState onCreatePost={handleCreatePost} />
-      ) : (
-        <div className="space-y-3">
-          {posts.map((post) => (
-            <BlogPostCard
-              key={post.id}
-              post={post}
-              onEdit={handleEdit}
-              onPublish={(p) => publishMutation.mutate(p.id)}
-              onUnpublish={(p) => unpublishMutation.mutate(p.id)}
-              onDelete={(p) => deleteMutation.mutate(p.id)}
-            />
-          ))}
-        </div>
-      )}
-
-      {/* Load more */}
-      {posts.length < total && (
-        <div className="text-center">
-          <Button variant="outline" size="sm" onClick={handleLoadMore}>
-            Load More ({total - posts.length} remaining)
+      <PageHeader
+        title="Blog"
+        titleAccent="Posts"
+        subtitle="Manage published and draft blog content"
+        actions={
+          <Button size="sm" onClick={handleCreatePost}>
+            <Plus className="w-4 h-4 mr-1" /> Create Post
           </Button>
-        </div>
-      )}
+        }
+      />
+
+      <FilterTabs
+        tabs={[
+          { value: 'all', label: 'All', icon: LayoutGrid, count: total },
+          { value: 'draft', label: 'Draft', icon: FileText },
+          { value: 'published', label: 'Published', icon: CheckCircle },
+          { value: 'archived', label: 'Archived', icon: Archive },
+        ]}
+        value={activeStatusTab}
+        onValueChange={handleStatusTabChange}
+      >
+        <TabsContent value={activeStatusTab}>
+          {/* Post list */}
+          {isLoading ? (
+            <div className="space-y-3">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <BlogCardSkeleton key={i} />
+              ))}
+            </div>
+          ) : posts.length === 0 ? (
+            <BlogEmptyState onCreatePost={handleCreatePost} />
+          ) : (
+            <div className="space-y-3">
+              {posts.map((post) => (
+                <BlogPostCard
+                  key={post.id}
+                  post={post}
+                  onEdit={handleEdit}
+                  onPublish={(p) => publishMutation.mutate(p.id)}
+                  onUnpublish={(p) => unpublishMutation.mutate(p.id)}
+                  onDelete={(p) => deleteMutation.mutate(p.id)}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* Load more */}
+          {posts.length < total && (
+            <div className="text-center mt-4">
+              <Button variant="outline" size="sm" onClick={handleLoadMore}>
+                Load More ({total - posts.length} remaining)
+              </Button>
+            </div>
+          )}
+        </TabsContent>
+      </FilterTabs>
 
       {/* Blog editor */}
       {isEditorOpen && (

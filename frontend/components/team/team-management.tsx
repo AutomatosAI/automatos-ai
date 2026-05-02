@@ -2,16 +2,15 @@
 
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { Users, UserPlus, Shield, Trash2, Mail, Search, RefreshCw, Clock, X, UserX } from 'lucide-react'
+import { Users, UserPlus, Shield, Trash2, Mail, Search, RefreshCw, Clock, X } from 'lucide-react'
 import { apiClient } from '@/lib/api-client'
 import { useWorkspace } from '@/hooks/use-workspace'
 import { InviteModal } from './invite-modal'
 import { useAuth } from '@clerk/nextjs'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
-import { EmptyState } from '@/components/shared'
+import { PageHeader, SearchInput } from '@/components/shared'
 
 interface TeamMember {
     id: number
@@ -115,10 +114,10 @@ export function TeamManagement() {
 
     const getRoleBadgeColor = (role: string) => {
         switch (role) {
-            case 'owner': return 'text-agent border-agent/30 bg-agent/10'
-            case 'admin': return 'text-warning border-warning/30 bg-warning/10'
-            case 'editor': return 'text-info border-info/30 bg-info/10'
-            case 'viewer': return 'text-success border-success/30 bg-success/10'
+            case 'owner': return 'text-purple-400 border-purple-400/30 bg-purple-400/10'
+            case 'admin': return 'text-orange-400 border-orange-400/30 bg-orange-400/10'
+            case 'editor': return 'text-blue-400 border-blue-400/30 bg-blue-400/10'
+            case 'viewer': return 'text-green-400 border-green-400/30 bg-green-400/10'
             default: return 'text-muted-foreground border-border bg-secondary/50'
         }
     }
@@ -126,64 +125,44 @@ export function TeamManagement() {
     return (
         <div className="space-y-6">
             {/* Header */}
-            <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5 }}
-                className="flex flex-col sm:flex-row justify-between items-start gap-3"
-            >
-                <div>
-                    <h1 className="text-2xl md:text-3xl font-bold mb-1 md:mb-2">
-                        Team <span className="gradient-text">Management</span>
-                    </h1>
-                    <p className="text-sm md:text-base text-muted-foreground mt-1">
-                        Manage your workspace members, roles, and invitations.
-                    </p>
-                </div>
+            <PageHeader
+                title="Team"
+                titleAccent="Management"
+                subtitle="Manage your workspace members, roles, and invitations."
+                actions={
+                    <>
+                        <Badge variant="outline" className="text-brand-primary border-brand-primary/30">
+                            <Users className="w-3 h-3 mr-1" />
+                            {members.length} Members
+                        </Badge>
 
-                <div className="flex items-center gap-2 md:gap-3 flex-wrap shrink-0">
-                    <Badge variant="outline" className="text-brand-primary border-brand-primary/30">
-                        <Users className="w-3 h-3 mr-1" />
-                        {members.length} Members
-                    </Badge>
+                        <Button
+                            onClick={fetchMembers}
+                            variant="outline"
+                            size="sm"
+                            disabled={loading}
+                        >
+                            <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+                            Refresh
+                        </Button>
 
-                    <Button
-                        onClick={fetchMembers}
-                        variant="outline"
-                        size="sm"
-                        disabled={loading}
-                    >
-                        <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-                        Refresh
-                    </Button>
-
-                    <Button
-                        onClick={() => setIsInviteOpen(true)}
-                        className="bg-brand-primary hover:bg-brand-primary/90"
-                    >
-                        <UserPlus className="w-4 h-4 mr-2" />
-                        Invite Member
-                    </Button>
-                </div>
-            </motion.div>
+                        <Button
+                            onClick={() => setIsInviteOpen(true)}
+                            className="bg-brand-primary hover:bg-brand-primary/90"
+                        >
+                            <UserPlus className="w-4 h-4 mr-2" />
+                            Invite Member
+                        </Button>
+                    </>
+                }
+            />
 
             {/* Search Bar */}
-            <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.6, delay: 0.1 }}
-                className="flex gap-4"
-            >
-                <div className="relative flex-1">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
-                    <Input
-                        placeholder="Search members by name or email..."
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        className="pl-10"
-                    />
-                </div>
-            </motion.div>
+            <SearchInput
+                value={searchTerm}
+                onChange={setSearchTerm}
+                placeholder="Search members by name or email..."
+            />
 
             {/* Pending invitations */}
             {pendingInvites.length > 0 && (
@@ -194,20 +173,15 @@ export function TeamManagement() {
                     className="glass-card rounded-xl border border-border/30 overflow-hidden"
                 >
                     <div className="p-4 border-b border-border/30 bg-white/5 flex items-center gap-2">
-                        <Clock className="w-4 h-4 text-warning" />
+                        <Clock className="w-4 h-4 text-amber-400" />
                         <h3 className="font-medium text-sm">Pending invitations ({pendingInvites.length})</h3>
                     </div>
                     <div className="divide-y divide-white/5">
                         {pendingInvites.map((inv) => (
                             <div key={inv.id} className="flex items-center justify-between p-4 hover:bg-white/5 transition-colors group">
                                 <div className="flex items-center gap-3">
-<<<<<<< HEAD
-                                    <div className="w-9 h-9 rounded-full bg-warning/10 border border-warning/30 flex items-center justify-center">
-                                        <Mail className="w-4 h-4 text-warning" />
-=======
-                                    <div className="w-8 h-8 rounded-full bg-amber-400/10 border border-amber-400/30 flex items-center justify-center">
+                                    <div className="w-9 h-9 rounded-full bg-amber-400/10 border border-amber-400/30 flex items-center justify-center">
                                         <Mail className="w-4 h-4 text-amber-400" />
->>>>>>> f2597574f (feat(design-system): DS5 — spacing, icons, transitions, empty states)
                                     </div>
                                     <div>
                                         <div className="font-medium text-foreground">{inv.email}</div>
@@ -221,7 +195,7 @@ export function TeamManagement() {
                                     variant="ghost"
                                     size="sm"
                                     onClick={() => handleRevokeInvite(inv.id)}
-                                    className="text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                                    className="text-muted-foreground hover:text-red-400 hover:bg-red-400/10"
                                     title="Revoke invitation"
                                 >
                                     <X className="w-4 h-4 mr-1" />
@@ -253,7 +227,7 @@ export function TeamManagement() {
                         Loading members...
                     </div>
                 ) : filteredMembers.length === 0 ? (
-                    <EmptyState icon={UserX} title="No members found" description="No members match that search." />
+                    <div className="p-12 text-center text-muted-foreground">No members found using that search.</div>
                 ) : (
                     <div className="divide-y divide-white/5">
                         {filteredMembers.map((member) => (
@@ -285,10 +259,10 @@ export function TeamManagement() {
                                             onChange={(e) => handleRoleChange(member.id, e.target.value)}
                                             className={`appearance-none pl-3 pr-8 py-1.5 text-xs font-semibold rounded-full border bg-transparent focus:outline-none focus:ring-1 focus:ring-offset-0 cursor-pointer ${getRoleBadgeColor(member.role)}`}
                                         >
-                                            <option value="owner" className="bg-[#1a1a1a] text-agent">Owner</option>
+                                            <option value="owner" className="bg-[#1a1a1a] text-purple-400">Owner</option>
                                             <option value="admin" className="bg-[#1a1a1a] text-orange-400">Admin</option>
-                                            <option value="editor" className="bg-[#1a1a1a] text-info">Editor</option>
-                                            <option value="viewer" className="bg-[#1a1a1a] text-success">Viewer</option>
+                                            <option value="editor" className="bg-[#1a1a1a] text-blue-400">Editor</option>
+                                            <option value="viewer" className="bg-[#1a1a1a] text-green-400">Viewer</option>
                                         </select>
                                         {/* Tiny custom arrow since we removed appearance */}
                                         <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-current opacity-50">
@@ -308,7 +282,7 @@ export function TeamManagement() {
                                             variant="ghost"
                                             size="icon"
                                             onClick={() => handleRemoveMember(member.id)}
-                                            className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all"
+                                            className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-red-400 hover:bg-red-400/10 transition-all"
                                             title="Remove member"
                                         >
                                             <Trash2 className="w-4 h-4" />

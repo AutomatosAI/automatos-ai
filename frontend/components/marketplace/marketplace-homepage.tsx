@@ -18,7 +18,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { SearchInput } from '@/components/shared/search-input'
+import { PageHeader, SearchInput } from '@/components/shared'
 import { MarketplaceToolsTab } from './marketplace-tools-tab'
 import { MarketplaceAgentsTab } from './marketplace-agents-tab'
 import { MarketplaceLlmsTab } from './marketplace-llms-tab'
@@ -287,49 +287,35 @@ export function MarketplaceHomepage() {
   return (
     <div className="space-y-6">
       {/* ── Storefront Header ───────────────────────────────── */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-      >
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
-            <div>
-              <h1 className="text-2xl md:text-3xl font-bold">
-                <Store className="inline-block h-8 w-8 mr-2 -mt-1 text-primary" />
-                Community <span className="gradient-text">Marketplace</span>
-              </h1>
-              <p className="text-sm text-muted-foreground mt-1">
-                Discover tools, agents, and playbooks to supercharge your AI workspace
-              </p>
-            </div>
+      <PageHeader
+        title="Community"
+        titleAccent="Marketplace"
+        subtitle="Discover tools, agents, and playbooks to supercharge your AI workspace"
+        actions={
+          <>
+            {isAdmin && (
+              <AdminWorkspaceSwitcher onWorkspaceChange={handleAdminWorkspaceChange} />
+            )}
+            <Badge variant="outline" className="text-xs px-2.5 py-1 border-border">
+              {stats.totalItems} items
+            </Badge>
+            <Badge variant="outline" className="text-xs px-2.5 py-1 border-border">
+              <Download className="h-3 w-3 mr-1" />
+              {stats.totalInstalls >= 1000
+                ? `${(stats.totalInstalls / 1000).toFixed(1)}k`
+                : stats.totalInstalls} installs
+            </Badge>
+          </>
+        }
+      />
 
-            {/* Stat pills + admin workspace switcher + search */}
-            <div className="flex items-center gap-3 shrink-0">
-              {isAdmin && (
-                <AdminWorkspaceSwitcher onWorkspaceChange={handleAdminWorkspaceChange} />
-              )}
-              <Badge variant="outline" className="text-xs px-2.5 py-1 border-border">
-                {stats.totalItems} items
-              </Badge>
-              <Badge variant="outline" className="text-xs px-2.5 py-1 border-border">
-                <Download className="h-3 w-3 mr-1" />
-                {stats.totalInstalls >= 1000
-                  ? `${(stats.totalInstalls / 1000).toFixed(1)}k`
-                  : stats.totalInstalls} installs
-              </Badge>
-            </div>
-          </div>
-
-          <div data-tour="marketplace-search" className="max-w-lg">
-            <SearchInput
-              value={searchQuery}
-              onChange={setSearchQuery}
-              placeholder="Search the marketplace..."
-            />
-          </div>
-        </div>
-      </motion.div>
+      <div data-tour="marketplace-search" className="max-w-lg">
+        <SearchInput
+          value={searchQuery}
+          onChange={setSearchQuery}
+          placeholder="Search the marketplace..."
+        />
+      </div>
 
       {/* ── Featured Banner ─────────────────────────────────── */}
       {!featuredLoading && (featuredItems as MarketplaceItem[] | undefined)?.length ? (

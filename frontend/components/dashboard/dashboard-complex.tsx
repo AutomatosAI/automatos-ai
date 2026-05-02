@@ -4,10 +4,10 @@ import React from "react"
 import { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { useInView } from 'react-intersection-observer'
-import { 
-  Bot, 
-  FileText, 
-  GitBranch, 
+import {
+  Bot,
+  FileText,
+  GitBranch,
   Activity,
   TrendingUp,
   Clock,
@@ -27,6 +27,7 @@ import {
 
 // Import API hooks
 import { useSystemHealth, useSystemMetrics, useAgents, useDocuments, useWorkflows } from '@/hooks/use-api'
+import { PageHeader } from '@/components/shared'
 
 // Import PRD06 widgets
 import { ContextOptimizationPanel } from './widgets/context-optimization-panel'
@@ -247,29 +248,24 @@ export function Dashboard() {
     <div className="min-h-screen gradient-bg">
       <div className="max-w-7xl mx-auto p-8 space-y-8">
         {/* Header */}
-        <motion.div
-          ref={ref}
-          initial={{ opacity: 0, y: 20 }}
-          animate={inView ? { opacity: 1, y: 0 } : {}}
-          transition={{ duration: 0.8 }}
-          className="text-center"
-        >
-          <h1 className="text-4xl font-bold text-foreground mb-2">
-            🚀 Automatos AI Dashboard
-          </h1>
-          <p className="text-muted-foreground text-lg">
-            Real-time monitoring and analytics for your multi-agent platform
-          </p>
-          <div className="flex items-center justify-center gap-4 mt-4">
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 bg-success rounded-full animate-pulse"></div>
-              <span className="text-success text-sm font-medium">System Online</span>
-            </div>
-            <div className="text-muted-foreground text-sm">
-              Last updated: {data?.timestamp ? new Date(data.timestamp).toLocaleTimeString() : 'Unknown'}
-            </div>
-          </div>
-        </motion.div>
+        <div ref={ref}>
+          <PageHeader
+            title="Automatos AI"
+            titleAccent="Dashboard"
+            subtitle="Real-time monitoring and analytics for your multi-agent platform"
+            actions={
+              <>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 bg-green-400 rounded-full animate-pulse"></div>
+                  <span className="text-green-400 text-sm font-medium">System Online</span>
+                </div>
+                <div className="text-muted-foreground text-sm">
+                  Last updated: {data?.timestamp ? new Date(data.timestamp).toLocaleTimeString() : 'Unknown'}
+                </div>
+              </>
+            }
+          />
+        </div>
 
         {/* Main Metrics Grid */}
         <motion.div
@@ -281,11 +277,11 @@ export function Dashboard() {
           {/* Active Agents */}
           <div className="metric-card">
             <div className="flex items-center justify-between mb-4">
-              <Bot className="w-8 h-8 text-info" />
-              <TrendingUp className="w-5 h-5 text-success" />
+              <Bot className="w-8 h-8 text-blue-400" />
+              <TrendingUp className="w-5 h-5 text-green-400" />
             </div>
             <h3 className="text-lg font-semibold text-card-foreground mb-2">Active Agents</h3>
-            <p className="text-3xl font-bold text-info">
+            <p className="text-3xl font-bold text-blue-400">
               {data?.agentMetrics?.activeAgents || 0}
             </p>
             <p className="text-sm text-muted-foreground mt-1">
@@ -296,11 +292,11 @@ export function Dashboard() {
           {/* Success Rate */}
           <div className="metric-card">
             <div className="flex items-center justify-between mb-4">
-              <CheckCircle className="w-8 h-8 text-success" />
-              <TrendingUp className="w-5 h-5 text-success" />
+              <CheckCircle className="w-8 h-8 text-green-400" />
+              <TrendingUp className="w-5 h-5 text-green-400" />
             </div>
             <h3 className="text-lg font-semibold text-card-foreground mb-2">Success Rate</h3>
-            <p className="text-3xl font-bold text-success">
+            <p className="text-3xl font-bold text-green-400">
               {data?.agentMetrics?.successRate?.toFixed(1) || 0}%
             </p>
             <p className="text-sm text-muted-foreground mt-1">
@@ -311,11 +307,11 @@ export function Dashboard() {
           {/* Token Usage */}
           <div className="metric-card">
             <div className="flex items-center justify-between mb-4">
-              <FileText className="w-8 h-8 text-agent" />
-              <Activity className="w-5 h-5 text-agent" />
+              <FileText className="w-8 h-8 text-purple-400" />
+              <Activity className="w-5 h-5 text-purple-400" />
             </div>
             <h3 className="text-lg font-semibold text-card-foreground mb-2">Token Usage</h3>
-            <p className="text-3xl font-bold text-agent">
+            <p className="text-3xl font-bold text-purple-400">
               {data?.agentMetrics?.totalTokensUsed ? 
                 (data.agentMetrics.totalTokensUsed > 1000000 ? 
                   `${(data.agentMetrics.totalTokensUsed / 1000000).toFixed(1)}M` :
@@ -375,7 +371,7 @@ export function Dashboard() {
               className="glass-card p-6"
             >
               <h2 className="text-2xl font-bold text-card-foreground mb-6 flex items-center gap-2">
-                <Users className="w-6 h-6 text-info" />
+                <Users className="w-6 h-6 text-blue-400" />
                 Agent Status
               </h2>
               <AgentStatusGrid agentMetrics={data?.agentMetrics || {}} agents={agents || []} />
@@ -392,7 +388,7 @@ export function Dashboard() {
               className="glass-card p-6"
             >
               <h2 className="text-2xl font-bold text-card-foreground mb-6 flex items-center gap-2">
-                <Brain className="w-6 h-6 text-success" />
+                <Brain className="w-6 h-6 text-green-400" />
                 Learning Progress
               </h2>
               <LearningProgressChart learningData={data?.learningMetrics || {}} overview={systemMetrics || {}} />
@@ -406,7 +402,7 @@ export function Dashboard() {
               className="glass-card p-6"
             >
               <h2 className="text-2xl font-bold text-card-foreground mb-6 flex items-center gap-2">
-                <Target className="w-6 h-6 text-agent" />
+                <Target className="w-6 h-6 text-purple-400" />
                 Task Timeline
               </h2>
               <TaskExecutionTimeline tasks={[]} workflows={data?.workflowMetrics || {}} />
@@ -436,52 +432,52 @@ export function Dashboard() {
           className="glass-card p-6"
         >
           <h2 className="text-2xl font-bold text-card-foreground mb-6 flex items-center gap-2">
-            <Activity className="w-6 h-6 text-success" />
+            <Activity className="w-6 h-6 text-green-400" />
             System Health
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-6">
             <div className="text-center">
               <div className="flex items-center justify-center mb-2">
-                <Cpu className="w-8 h-8 text-info" />
+                <Cpu className="w-8 h-8 text-blue-400" />
               </div>
               <h4 className="text-lg font-semibold text-card-foreground">CPU Usage</h4>
-              <p className="text-info font-medium">
+              <p className="text-blue-400 font-medium">
                 {data?.systemHealth?.cpuUsage || 0}%
               </p>
             </div>
             <div className="text-center">
               <div className="flex items-center justify-center mb-2">
-                <MemoryStick className="w-8 h-8 text-success" />
+                <MemoryStick className="w-8 h-8 text-green-400" />
               </div>
               <h4 className="text-lg font-semibold text-card-foreground">Memory</h4>
-              <p className="text-success font-medium">
+              <p className="text-green-400 font-medium">
                 {data?.systemHealth?.memoryUsage || 0}%
               </p>
             </div>
             <div className="text-center">
               <div className="flex items-center justify-center mb-2">
-                <HardDrive className="w-8 h-8 text-warning" />
+                <HardDrive className="w-8 h-8 text-yellow-400" />
               </div>
               <h4 className="text-lg font-semibold text-card-foreground">Disk Usage</h4>
-              <p className="text-warning font-medium">
+              <p className="text-yellow-400 font-medium">
                 {data?.systemHealth?.diskUsage || 0}%
               </p>
             </div>
             <div className="text-center">
               <div className="flex items-center justify-center mb-2">
-                <Database className="w-8 h-8 text-agent" />
+                <Database className="w-8 h-8 text-purple-400" />
               </div>
               <h4 className="text-lg font-semibold text-card-foreground">Database</h4>
-              <p className="text-success font-medium">
+              <p className="text-green-400 font-medium">
                 {data?.systemHealth?.databaseStatus || 'Unknown'}
               </p>
             </div>
             <div className="text-center">
               <div className="flex items-center justify-center mb-2">
-                <Clock className="w-8 h-8 text-info" />
+                <Clock className="w-8 h-8 text-blue-400" />
               </div>
               <h4 className="text-lg font-semibold text-card-foreground">Uptime</h4>
-              <p className="text-info font-medium">
+              <p className="text-blue-400 font-medium">
                 {data?.systemHealth?.uptime || 'Unknown'}
               </p>
             </div>
