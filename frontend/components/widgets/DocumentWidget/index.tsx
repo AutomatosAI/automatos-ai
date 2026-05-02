@@ -272,9 +272,9 @@ export function DocumentWidget({
               variant="secondary"
               className={cn(
                 'text-xs',
-                relevancePercent >= 80 && 'bg-green-500/10 text-green-600',
-                relevancePercent >= 50 && relevancePercent < 80 && 'bg-yellow-500/10 text-yellow-600',
-                relevancePercent < 50 && 'bg-red-500/10 text-red-600'
+                relevancePercent >= 80 && 'bg-success/10 text-success',
+                relevancePercent >= 50 && relevancePercent < 80 && 'bg-warning/10 text-warning',
+                relevancePercent < 50 && 'bg-destructive/10 text-destructive'
               )}
             >
               {relevancePercent}% match
@@ -286,7 +286,7 @@ export function DocumentWidget({
             </Badge>
           )}
           {data.filename && (
-            <span className="text-xs text-gray-400 font-mono truncate max-w-[200px]">
+            <span className="text-xs text-muted-foreground font-mono truncate max-w-[200px]">
               {data.filename}
             </span>
           )}
@@ -300,11 +300,11 @@ export function DocumentWidget({
             className="flex flex-col flex-1 min-h-0"
           >
             <TabsList className="mx-3 mt-2 h-8 bg-[#252525] border border-[#3a3a3a]">
-              <TabsTrigger value="content" className="text-xs h-7 px-3 data-[state=active]:bg-[#1e1e1e] data-[state=active]:text-gray-100 text-gray-400">
+              <TabsTrigger value="content" className="text-xs h-7 px-3 data-[state=active]:bg-[#1e1e1e] data-[state=active]:text-gray-100 text-muted-foreground">
                 <FileText className="h-3 w-3 mr-1.5" />
                 Content
               </TabsTrigger>
-              <TabsTrigger value="chunks" className="text-xs h-7 px-3 data-[state=active]:bg-[#1e1e1e] data-[state=active]:text-gray-100 text-gray-400">
+              <TabsTrigger value="chunks" className="text-xs h-7 px-3 data-[state=active]:bg-[#1e1e1e] data-[state=active]:text-gray-100 text-muted-foreground">
                 <List className="h-3 w-3 mr-1.5" />
                 Chunks ({data.chunks.length})
               </TabsTrigger>
@@ -400,16 +400,16 @@ function ChunkItem({ index, chunk, onCopy, onViewInDocument, isCopied }: ChunkIt
     <div className="p-3 hover:bg-[#2a2a2a] transition-colors">
       <div className="flex items-start justify-between gap-2 mb-2">
         <div className="flex items-center gap-2">
-          <Badge variant="outline" className="text-xs font-mono bg-[#2d2d2d] border-[#3a3a3a] text-gray-300">
+          <Badge variant="outline" className="text-xs font-mono bg-[#2d2d2d] border-[#3a3a3a] text-foreground/90">
             #{index + 1}
           </Badge>
           {chunk.similarity !== undefined && (
-            <span className="text-xs text-gray-500">
+            <span className="text-xs text-muted-foreground">
               {Math.round(chunk.similarity * 100)}% relevant
             </span>
           )}
           {chunk.page !== undefined && (
-            <span className="text-xs text-gray-500">
+            <span className="text-xs text-muted-foreground">
               Page {chunk.page}
             </span>
           )}
@@ -419,7 +419,7 @@ function ChunkItem({ index, chunk, onCopy, onViewInDocument, isCopied }: ChunkIt
             <Button
               variant="ghost"
               size="sm"
-              className="h-6 px-2 text-xs text-blue-400 hover:text-blue-300 hover:bg-[#3a3a3a]"
+              className="h-6 px-2 text-xs text-info hover:text-info/80 hover:bg-[#3a3a3a]"
               onClick={() => onViewInDocument(index)}
               title="View in Document"
             >
@@ -429,11 +429,11 @@ function ChunkItem({ index, chunk, onCopy, onViewInDocument, isCopied }: ChunkIt
           <Button
             variant="ghost"
             size="sm"
-            className="h-6 px-2 text-xs text-gray-400 hover:text-gray-200 hover:bg-[#3a3a3a]"
+            className="h-6 px-2 text-xs text-muted-foreground hover:text-gray-200 hover:bg-[#3a3a3a]"
             onClick={onCopy}
           >
             {isCopied ? (
-              <Check className="h-3 w-3 text-green-500" />
+              <Check className="h-3 w-3 text-success" />
             ) : (
               <Copy className="h-3 w-3" />
             )}
@@ -441,7 +441,7 @@ function ChunkItem({ index, chunk, onCopy, onViewInDocument, isCopied }: ChunkIt
         </div>
       </div>
 
-      <div className="text-sm text-gray-300">
+      <div className="text-sm text-foreground/90">
         {isExpanded || !isLong ? (
           <p className="whitespace-pre-wrap">{chunk.content}</p>
         ) : (
@@ -453,7 +453,7 @@ function ChunkItem({ index, chunk, onCopy, onViewInDocument, isCopied }: ChunkIt
         <Button
           variant="ghost"
           size="sm"
-          className="h-6 px-2 text-xs mt-2 text-gray-400 hover:text-gray-200 hover:bg-[#3a3a3a]"
+          className="h-6 px-2 text-xs mt-2 text-muted-foreground hover:text-gray-200 hover:bg-[#3a3a3a]"
           onClick={() => setIsExpanded(!isExpanded)}
         >
           {isExpanded ? (

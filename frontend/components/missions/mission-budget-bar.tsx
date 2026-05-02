@@ -25,24 +25,24 @@ function getBudgetStatus(percentage: number): BudgetStatus {
 
 const STATUS_STYLES: Record<BudgetStatus, { bar: string; text: string; bg: string }> = {
   healthy: {
-    bar: 'bg-green-500',
-    text: 'text-green-400',
+    bar: 'bg-success',
+    text: 'text-success',
     bg: '',
   },
   warning: {
-    bar: 'bg-amber-500',
-    text: 'text-amber-400',
+    bar: 'bg-warning',
+    text: 'text-warning',
     bg: '',
   },
   critical: {
-    bar: 'bg-red-500',
-    text: 'text-red-400',
+    bar: 'bg-destructive',
+    text: 'text-destructive',
     bg: '',
   },
   exceeded: {
-    bar: 'bg-red-500 animate-pulse',
-    text: 'text-red-400',
-    bg: 'border-red-500/30 bg-red-500/5',
+    bar: 'bg-destructive animate-pulse',
+    text: 'text-destructive',
+    bg: 'border-destructive/30 bg-destructive/5',
   },
 }
 
@@ -109,7 +109,7 @@ export function MissionBudgetBar({
               variant="outline"
               onClick={onResume}
               disabled={isResuming}
-              className="h-6 px-2.5 text-[11px] gap-1 border-amber-500/40 text-amber-400 hover:bg-amber-500/10"
+              className="h-6 px-2.5 text-[11px] gap-1 border-warning/40 text-warning hover:bg-warning/10"
             >
               <Play className="w-3 h-3" />
               {isResuming ? 'Resuming...' : 'Resume'}

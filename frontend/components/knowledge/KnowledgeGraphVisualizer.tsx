@@ -342,15 +342,15 @@ const KnowledgeGraphVisualizer: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col h-full bg-gray-900 rounded-lg shadow-lg">
+    <div className="flex flex-col h-full bg-background rounded-lg shadow-lg">
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-gray-700">
+      <div className="flex items-center justify-between p-4 border-b border-border">
         <h2 className="text-xl font-semibold text-white">Knowledge Graph Explorer</h2>
         
         {/* Search */}
         <div className="flex items-center gap-4 flex-1 max-w-md ml-4">
           <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={18} />
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground" size={18} />
             <input
               type="text"
               placeholder="Search entities..."
@@ -371,7 +371,7 @@ const KnowledgeGraphVisualizer: React.FC = () => {
                   }
                 }
               }}
-              className="w-full pl-10 pr-4 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-gray-500 focus:outline-none focus:border-gray-500"
+              className="w-full pl-10 pr-4 py-2 bg-secondary border border-border rounded-lg text-white placeholder-muted-foreground focus:ring-2 focus:ring-ring focus:outline-none focus:border-border"
               autoFocus
               tabIndex={0}
             />
@@ -383,23 +383,23 @@ const KnowledgeGraphVisualizer: React.FC = () => {
           <select
             value={depth}
             onChange={(e) => setDepth(Number(e.target.value))}
-            className="px-3 py-2 bg-gray-800 border border-gray-600 rounded-lg text-sm text-white"
+            className="px-3 py-2 bg-secondary border border-border rounded-lg text-sm text-white"
           >
             <option value={1}>1 hop</option>
             <option value={2}>2 hops</option>
             <option value={3}>3 hops</option>
           </select>
           
-          <button onClick={handleZoomIn} className="p-2 hover:bg-gray-700 rounded text-gray-300 hover:text-white" title="Zoom in">
+          <button onClick={handleZoomIn} className="p-2 hover:bg-secondary rounded text-foreground/90 hover:text-white" title="Zoom in">
             <ZoomIn size={18} />
           </button>
-          <button onClick={handleZoomOut} className="p-2 hover:bg-gray-700 rounded text-gray-300 hover:text-white" title="Zoom out">
+          <button onClick={handleZoomOut} className="p-2 hover:bg-secondary rounded text-foreground/90 hover:text-white" title="Zoom out">
             <ZoomOut size={18} />
           </button>
-          <button onClick={handleReset} className="p-2 hover:bg-gray-700 rounded text-gray-300 hover:text-white" title="Reset view">
+          <button onClick={handleReset} className="p-2 hover:bg-secondary rounded text-foreground/90 hover:text-white" title="Reset view">
             <Maximize2 size={18} />
           </button>
-          <button onClick={handleExport} className="p-2 hover:bg-gray-700 rounded text-gray-300 hover:text-white" title="Export as PNG">
+          <button onClick={handleExport} className="p-2 hover:bg-secondary rounded text-foreground/90 hover:text-white" title="Export as PNG">
             <Download size={18} />
           </button>
         </div>
@@ -407,7 +407,7 @@ const KnowledgeGraphVisualizer: React.FC = () => {
 
       {/* Search Results Dropdown */}
       {searchResults.length > 0 && (
-        <div className="absolute top-16 right-4 w-96 bg-gray-800 border border-gray-600 rounded-lg shadow-xl z-10 max-h-96 overflow-y-auto">
+        <div className="absolute top-16 right-4 w-96 bg-secondary border border-border rounded-lg shadow-xl z-10 max-h-96 overflow-y-auto">
           {searchResults.map((entity) => (
             <div
               key={entity.id}
@@ -416,16 +416,16 @@ const KnowledgeGraphVisualizer: React.FC = () => {
                 setSearchResults([]);
                 setSearchQuery('');
               }}
-              className="p-3 hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0"
+              className="p-3 hover:bg-secondary cursor-pointer border-b border-border last:border-b-0"
             >
               <div className="flex items-center justify-between">
                 <div>
                   <div className="font-medium text-white">{entity.entity_name}</div>
-                  <div className="text-sm text-gray-400 capitalize">{entity.entity_type}</div>
+                  <div className="text-sm text-muted-foreground capitalize">{entity.entity_type}</div>
                 </div>
                 <div className="text-right">
-                  <div className="text-xs text-gray-400">{entity.mention_count} mentions</div>
-                  <div className="text-xs text-gray-400">Score: {entity.importance_score.toFixed(2)}</div>
+                  <div className="text-xs text-muted-foreground">{entity.mention_count} mentions</div>
+                  <div className="text-xs text-muted-foreground">Score: {entity.importance_score.toFixed(2)}</div>
                 </div>
               </div>
             </div>
@@ -436,19 +436,19 @@ const KnowledgeGraphVisualizer: React.FC = () => {
       {/* Graph Canvas */}
       <div className="flex-1 relative">
         {loading && (
-          <div className="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-75 z-10">
+          <div className="absolute inset-0 flex items-center justify-center bg-background bg-opacity-75 z-10">
             <div className="text-center">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-500 mx-auto"></div>
-              <p className="mt-4 text-gray-300">Loading knowledge graph...</p>
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-border mx-auto"></div>
+              <p className="mt-4 text-foreground/90">Loading knowledge graph...</p>
             </div>
           </div>
         )}
 
         {!graphData && !loading && (
           <div className="absolute inset-0 flex items-center justify-center">
-            <div className="text-center text-gray-400">
+            <div className="text-center text-muted-foreground">
               <Info size={48} className="mx-auto mb-4" />
-              <p className="text-lg mb-2 text-gray-300">Search for an entity to explore the knowledge graph</p>
+              <p className="text-lg mb-2 text-foreground/90">Search for an entity to explore the knowledge graph</p>
               <p className="text-sm">Try searching for technologies, concepts, or organizations</p>
             </div>
           </div>
@@ -456,30 +456,30 @@ const KnowledgeGraphVisualizer: React.FC = () => {
 
         <svg
           ref={svgRef}
-          className="w-full h-full bg-gray-900"
+          className="w-full h-full bg-background"
           style={{ minHeight: '600px', backgroundColor: '#111827' }}
         />
       </div>
 
       {/* Legend */}
       {graphData && (
-        <div className="p-4 border-t border-gray-700 bg-gray-800">
+        <div className="p-4 border-t border-border bg-secondary">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-6">
-              <div className="text-sm font-medium text-gray-300">Legend:</div>
+              <div className="text-sm font-medium text-foreground/90">Legend:</div>
               {Object.entries(typeColors).map(([type, color]) => (
                 <div key={type} className="flex items-center gap-2">
                   <div 
                     className="w-4 h-4 rounded-full" 
                     style={{ backgroundColor: color }}
                   ></div>
-                  <span className="text-sm text-gray-400 capitalize">{type}</span>
+                  <span className="text-sm text-muted-foreground capitalize">{type}</span>
                 </div>
               ))}
             </div>
 
             {graphData.metadata && (
-              <div className="text-sm text-gray-400">
+              <div className="text-sm text-muted-foreground">
                 <span className="font-medium">{graphData.metadata.total_nodes}</span> nodes · 
                 <span className="font-medium ml-1">{graphData.metadata.total_edges}</span> relationships · 
                 <span className="font-medium ml-1">{graphData.metadata.depth}</span> hops

@@ -20,13 +20,13 @@ import {
 } from '@/lib/api/credentials'
 
 const ACTION_COLORS: Record<string, string> = {
-  created: 'bg-green-500/20 text-green-400',
-  updated: 'bg-blue-500/20 text-blue-400',
-  deleted: 'bg-red-500/20 text-red-400',
-  accessed: 'bg-purple-500/20 text-purple-400',
-  tested: 'bg-yellow-500/20 text-yellow-400',
-  access_denied: 'bg-red-500/20 text-red-400',
-  access_failed: 'bg-red-500/20 text-red-400'
+  created: 'bg-success/20 text-success',
+  updated: 'bg-info/20 text-info',
+  deleted: 'bg-destructive/20 text-destructive',
+  accessed: 'bg-agent/20 text-agent',
+  tested: 'bg-warning/20 text-warning',
+  access_denied: 'bg-destructive/20 text-destructive',
+  access_failed: 'bg-destructive/20 text-destructive'
 }
 
 export function CredentialAuditTab() {
@@ -66,8 +66,8 @@ export function CredentialAuditTab() {
   }
 
   const getSuccessColor = (success: boolean | null) => {
-    if (success === null) return 'text-gray-400'
-    return success ? 'text-green-400' : 'text-red-400'
+    if (success === null) return 'text-muted-foreground'
+    return success ? 'text-success' : 'text-destructive'
   }
 
   return (
@@ -140,7 +140,7 @@ export function CredentialAuditTab() {
                       
                       <div className="flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <Badge className={ACTION_COLORS[log.action] || 'bg-gray-500/20'}>
+                          <Badge className={ACTION_COLORS[log.action] || 'bg-secondary/50'}>
                             {log.action.toUpperCase()}
                           </Badge>
                           <span className="font-semibold">Credential #{log.credential_id}</span>
@@ -154,7 +154,7 @@ export function CredentialAuditTab() {
                             <p>IP: {log.ip_address}</p>
                           )}
                           {log.error_message && (
-                            <p className="text-red-400">Error: {log.error_message}</p>
+                            <p className="text-destructive">Error: {log.error_message}</p>
                           )}
                         </div>
 

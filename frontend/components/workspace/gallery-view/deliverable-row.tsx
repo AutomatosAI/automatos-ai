@@ -45,9 +45,9 @@ const FALLBACK_ICONS: Record<string, LucideIcon> = {
 }
 
 const FALLBACK_COLORS: Record<string, string> = {
-  archive: 'text-amber-400',
+  archive: 'text-warning',
   audio: 'text-pink-400',
-  video: 'text-red-400',
+  video: 'text-destructive',
 }
 
 const SOURCE_LABELS: Record<string, string> = {

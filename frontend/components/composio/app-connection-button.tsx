@@ -93,7 +93,7 @@ export function AppConnectionButton({
                 variant="outline"
                 size="sm"
                 disabled
-                className="text-green-400 border-green-500/50 bg-green-500/10"
+                className="text-success border-success/50 bg-success/10"
             >
                 <Check className="h-4 w-4 mr-1.5" />
                 Connected

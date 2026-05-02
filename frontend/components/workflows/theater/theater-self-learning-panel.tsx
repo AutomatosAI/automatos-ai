@@ -107,26 +107,26 @@ const formatDuration = (ms?: number) => {
 const getSeverityColor = (severity?: string) => {
   switch (severity) {
     case 'high':
-      return 'text-red-400 border-red-400/30 bg-red-400/10'
+      return 'text-destructive border-destructive/30 bg-destructive/10'
     case 'medium':
-      return 'text-amber-400 border-amber-400/30 bg-amber-400/10'
+      return 'text-warning border-warning/30 bg-warning/10'
     case 'low':
-      return 'text-blue-400 border-blue-400/30 bg-blue-400/10'
+      return 'text-info border-info/30 bg-info/10'
     default:
-      return 'text-gray-400 border-gray-400/30 bg-gray-400/10'
+      return 'text-muted-foreground border-border/30 bg-secondary/50'
   }
 }
 
 const getPriorityColor = (priority?: string) => {
   switch (priority) {
     case 'high':
-      return 'text-red-400 border-red-400/40'
+      return 'text-destructive border-destructive/40'
     case 'medium':
-      return 'text-amber-400 border-amber-400/40'
+      return 'text-warning border-warning/40'
     case 'low':
-      return 'text-emerald-400 border-emerald-400/40'
+      return 'text-success border-success/40'
     default:
-      return 'text-gray-400 border-gray-400/40'
+      return 'text-muted-foreground border-border/40'
   }
 }
 
@@ -159,30 +159,30 @@ const getSuggestionLabel = (type: LearningSuggestion['type']) => {
 const getGradeColor = (grade: string) => {
   switch (grade) {
     case 'A':
-      return 'text-emerald-400 bg-emerald-400/20 border-emerald-400/40'
+      return 'text-success bg-success/20 border-success/40'
     case 'B':
-      return 'text-blue-400 bg-blue-400/20 border-blue-400/40'
+      return 'text-info bg-info/20 border-info/40'
     case 'C':
-      return 'text-amber-400 bg-amber-400/20 border-amber-400/40'
+      return 'text-warning bg-warning/20 border-warning/40'
     case 'D':
       return 'text-orange-400 bg-orange-400/20 border-orange-400/40'
     case 'F':
-      return 'text-red-400 bg-red-400/20 border-red-400/40'
+      return 'text-destructive bg-destructive/20 border-destructive/40'
     default:
-      return 'text-gray-400 bg-gray-400/20 border-gray-400/40'
+      return 'text-muted-foreground bg-secondary/50 border-border/40'
   }
 }
 
 const getBottleneckIcon = (type: QualityBottleneck['type']) => {
   switch (type) {
     case 'slow_step':
-      return <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+      return <AlertTriangle className="w-3.5 h-3.5 text-warning" />
     case 'failed_step':
-      return <XCircle className="w-3.5 h-3.5 text-red-400" />
+      return <XCircle className="w-3.5 h-3.5 text-destructive" />
     case 'high_retry_step':
       return <TrendingUp className="w-3.5 h-3.5 text-orange-400" />
     default:
-      return <AlertTriangle className="w-3.5 h-3.5 text-gray-400" />
+      return <AlertTriangle className="w-3.5 h-3.5 text-muted-foreground" />
   }
 }
 
@@ -256,7 +256,7 @@ function QualityBar({
         <span className="text-muted-foreground">{label}</span>
         <span className="font-medium">{percentage}%</span>
       </div>
-      <div className="h-2 bg-gray-800 rounded-full overflow-hidden">
+      <div className="h-2 bg-secondary rounded-full overflow-hidden">
         <motion.div
           className="h-full rounded-full"
           style={{ backgroundColor: color }}
@@ -448,7 +448,7 @@ function QualitySection({ data }: { data: QualityData }) {
               stroke="currentColor"
               strokeWidth="4"
               fill="none"
-              className="text-gray-800"
+              className="text-foreground/80"
             />
             <motion.circle
               cx="32"
@@ -479,7 +479,7 @@ function QualitySection({ data }: { data: QualityData }) {
               {grade}
             </Badge>
           </div>
-          <div className="h-2 bg-gray-800 rounded-full overflow-hidden">
+          <div className="h-2 bg-secondary rounded-full overflow-hidden">
             <motion.div
               className="h-full rounded-full"
               style={{
@@ -568,7 +568,7 @@ function MemorySection({ data }: { data: MemoryData }) {
             Memories Stored
           </div>
           <div className="text-sm font-medium flex items-center gap-1">
-            <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
+            <CheckCircle className="w-3.5 h-3.5 text-success" />
             {stored_memories}
           </div>
         </div>
@@ -597,7 +597,7 @@ function MemorySection({ data }: { data: MemoryData }) {
                 {entry.type === 'recipe_execution' ? (
                   <Target className="w-3.5 h-3.5 text-orange-400 flex-shrink-0" />
                 ) : (
-                  <Brain className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />
+                  <Brain className="w-3.5 h-3.5 text-agent flex-shrink-0" />
                 )}
                 <div className="min-w-0 flex-1">
                   <Badge
@@ -653,7 +653,7 @@ function MemorySection({ data }: { data: MemoryData }) {
           {errors.map((error, i) => (
             <div
               key={i}
-              className="flex items-start gap-2 rounded-lg border border-red-400/30 bg-red-400/10 p-2.5 text-xs text-red-300"
+              className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-2.5 text-xs text-destructive/80"
             >
               <XCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
               <span className="break-words">{error}</span>
@@ -722,12 +722,12 @@ export function TheaterSelfLearningPanel({
             </Badge>
           )}
           {learningData && learningData.suggestions.length > 0 && (
-            <Badge variant="outline" className="text-[10px] h-5 text-amber-400 border-amber-400/30">
+            <Badge variant="outline" className="text-[10px] h-5 text-warning border-warning/30">
               {learningData.suggestions.length} suggestions
             </Badge>
           )}
           {memoryData && memoryData.stored_memories > 0 && (
-            <Badge variant="outline" className="text-[10px] h-5 text-purple-400 border-purple-400/30">
+            <Badge variant="outline" className="text-[10px] h-5 text-agent border-agent/30">
               {memoryData.stored_memories} memories
             </Badge>
           )}

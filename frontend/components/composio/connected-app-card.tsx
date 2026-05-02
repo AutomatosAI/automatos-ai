@@ -59,8 +59,8 @@ export function ConnectedAppCard({ app, onManage, onDisconnect }: ConnectedAppCa
                                 className={cn(
                                     "text-xs",
                                     isActive
-                                        ? "border-green-500/50 text-green-400 bg-green-500/10"
-                                        : "border-yellow-500/50 text-yellow-400 bg-yellow-500/10"
+                                        ? "border-success/50 text-success bg-success/10"
+                                        : "border-warning/50 text-warning bg-warning/10"
                                 )}
                             >
                                 {isActive ? 'Connected' : app.status}
@@ -79,7 +79,7 @@ export function ConnectedAppCard({ app, onManage, onDisconnect }: ConnectedAppCa
                             variant="ghost"
                             size="icon"
                             onClick={onManage}
-                            className="h-8 w-8 text-slate-400 hover:text-blue-400 hover:bg-blue-500/10"
+                            className="h-8 w-8 text-slate-400 hover:text-info hover:bg-info/10"
                             title="Manage features"
                         >
                             <Settings className="h-4 w-4" />
@@ -88,7 +88,7 @@ export function ConnectedAppCard({ app, onManage, onDisconnect }: ConnectedAppCa
                             variant="ghost"
                             size="icon"
                             onClick={onDisconnect}
-                            className="h-8 w-8 text-slate-400 hover:text-red-400 hover:bg-red-500/10"
+                            className="h-8 w-8 text-slate-400 hover:text-destructive hover:bg-destructive/10"
                             title="Disconnect"
                         >
                             <Unplug className="h-4 w-4" />

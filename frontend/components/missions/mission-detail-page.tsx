@@ -417,7 +417,7 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
                   <span>Parallel groups: <span className="font-medium text-foreground">{mission.parallel_groups.join(', ')}</span></span>
                 )}
                 {mission.has_synthesis_tasks && (
-                  <span className="text-purple-400">Has synthesis tasks</span>
+                  <span className="text-agent">Has synthesis tasks</span>
                 )}
               </div>
             </div>
@@ -450,7 +450,7 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
               </Button>
               <Button
                 size="sm"
-                className="bg-green-600 hover:bg-green-700 text-white"
+                className="bg-success hover:bg-success/80 text-white"
                 disabled={approveMutation.isLoading}
                 onClick={() => {
                   const hasModifications =

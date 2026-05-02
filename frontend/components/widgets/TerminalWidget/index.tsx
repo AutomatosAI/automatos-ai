@@ -83,7 +83,7 @@ export function TerminalWidget({
         {
           label: copied ? 'Copied!' : 'Copy Output',
           icon: copied ? (
-            <Check className="h-4 w-4 mr-2 text-green-500" />
+            <Check className="h-4 w-4 mr-2 text-success" />
           ) : (
             <Copy className="h-4 w-4 mr-2" />
           ),
@@ -102,7 +102,7 @@ export function TerminalWidget({
           className="h-full"
         />
       ) : (
-        <div className="flex flex-col h-full bg-gray-900 rounded-b-lg overflow-hidden">
+        <div className="flex flex-col h-full bg-background rounded-b-lg overflow-hidden">
           <TerminalHeader
             command={data.command}
             workingDirectory={data.workingDirectory}
@@ -115,7 +115,7 @@ export function TerminalWidget({
             isStreaming={data.isStreaming}
             className="flex-1"
           />
-          <div className="flex items-center justify-between px-3 py-1.5 border-t border-gray-700 bg-gray-800 text-xs text-gray-400">
+          <div className="flex items-center justify-between px-3 py-1.5 border-t border-border bg-secondary text-xs text-muted-foreground">
             <span>{lineCount} lines</span>
             <span className="font-mono">Ctrl+F to search</span>
           </div>

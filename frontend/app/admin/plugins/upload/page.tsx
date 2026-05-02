@@ -117,28 +117,28 @@ function verdictBadge(verdict: string | null) {
   switch (verdict) {
     case 'safe':
       return (
-        <Badge className="bg-green-500/20 text-green-400 border-green-500/30">
+        <Badge className="bg-success/10 text-success border-success/20">
           <ShieldCheck className="h-3 w-3 mr-1" />
           Safe
         </Badge>
       )
     case 'review_required':
       return (
-        <Badge className="bg-yellow-500/20 text-yellow-400 border-yellow-500/30">
+        <Badge className="bg-warning/10 text-warning border-warning/20">
           <ShieldAlert className="h-3 w-3 mr-1" />
           Review Required
         </Badge>
       )
     case 'blocked':
       return (
-        <Badge className="bg-red-500/20 text-red-400 border-red-500/30">
+        <Badge className="bg-destructive/20 text-destructive border-destructive/30">
           <ShieldX className="h-3 w-3 mr-1" />
           Blocked
         </Badge>
       )
     default:
       return (
-        <Badge className="bg-gray-500/20 text-gray-400 border-gray-500/30">
+        <Badge className="bg-secondary/50 text-muted-foreground border-border/30">
           <Shield className="h-3 w-3 mr-1" />
           Pending
         </Badge>
@@ -149,15 +149,15 @@ function verdictBadge(verdict: string | null) {
 function severityColor(severity: string) {
   switch (severity) {
     case 'critical':
-      return 'text-red-400'
+      return 'text-destructive'
     case 'high':
       return 'text-orange-400'
     case 'medium':
-      return 'text-yellow-400'
+      return 'text-warning'
     case 'low':
-      return 'text-blue-400'
+      return 'text-info'
     default:
-      return 'text-gray-400'
+      return 'text-muted-foreground'
   }
 }
 
@@ -409,20 +409,20 @@ export default function AdminPluginUploadPage() {
                         isDragActive
                           ? 'border-orange-500 bg-orange-500/5'
                           : selectedFile
-                          ? 'border-green-500/50 bg-green-500/5'
-                          : 'border-gray-600 hover:border-orange-500/50'
+                          ? 'border-success/50 bg-success/5'
+                          : 'border-border hover:border-orange-500/50'
                       } ${isScanning ? 'opacity-50 pointer-events-none' : ''}`}
                     >
                       <input {...getInputProps()} />
                       {selectedFile ? (
                         <div className="space-y-2">
-                          <FileArchive className="h-10 w-10 mx-auto text-green-400" />
+                          <FileArchive className="h-10 w-10 mx-auto text-success" />
                           <p className="font-medium text-white">{selectedFile.name}</p>
-                          <p className="text-sm text-gray-400">
+                          <p className="text-sm text-muted-foreground">
                             {formatFileSize(selectedFile.size)}
                           </p>
                           {!isScanning && (
-                            <p className="text-xs text-gray-500">
+                            <p className="text-xs text-muted-foreground">
                               Drop a new file to replace
                             </p>
                           )}
@@ -516,10 +516,10 @@ export default function AdminPluginUploadPage() {
                             isActive
                               ? 'text-orange-400'
                               : isDone
-                              ? 'text-green-400'
+                              ? 'text-success'
                               : isError && isActive
-                              ? 'text-red-400'
-                              : 'text-gray-600'
+                              ? 'text-destructive'
+                              : 'text-muted-foreground'
                           }`}
                         >
                           {isDone ? (
@@ -536,7 +536,7 @@ export default function AdminPluginUploadPage() {
                   </div>
 
                   {errorMessage && (
-                    <div className="flex items-start gap-2 p-3 rounded-md bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
+                    <div className="flex items-start gap-2 p-3 rounded-md bg-destructive/10 border border-destructive/30 text-destructive text-sm">
                       <XCircle className="h-4 w-4 mt-0.5 shrink-0" />
                       <span>{errorMessage}</span>
                     </div>
@@ -560,21 +560,21 @@ export default function AdminPluginUploadPage() {
                 <CardContent className="space-y-3">
                   <div className="grid grid-cols-2 gap-3 text-sm">
                     <div>
-                      <span className="text-gray-400">Name</span>
+                      <span className="text-muted-foreground">Name</span>
                       <p className="text-white font-medium">{uploadResult.name}</p>
                     </div>
                     <div>
-                      <span className="text-gray-400">Version</span>
+                      <span className="text-muted-foreground">Version</span>
                       <p className="text-white font-medium">{uploadResult.version}</p>
                     </div>
                     <div>
-                      <span className="text-gray-400">Slug</span>
+                      <span className="text-muted-foreground">Slug</span>
                       <p className="text-white font-medium font-mono text-xs">
                         {uploadResult.slug}
                       </p>
                     </div>
                     <div>
-                      <span className="text-gray-400">Security Status</span>
+                      <span className="text-muted-foreground">Security Status</span>
                       <p className="text-white font-medium capitalize">
                         {uploadResult.security_status}
                       </p>
@@ -597,14 +597,14 @@ export default function AdminPluginUploadPage() {
                     {scanResult.llm_risk_score !== null && (
                       <div>
                         <div className="flex items-center justify-between mb-1">
-                          <span className="text-sm text-gray-400">Risk Score</span>
+                          <span className="text-sm text-muted-foreground">Risk Score</span>
                           <span
                             className={`text-2xl font-bold ${
                               scanResult.llm_risk_score < 20
-                                ? 'text-green-400'
+                                ? 'text-success'
                                 : scanResult.llm_risk_score < 70
-                                ? 'text-yellow-400'
-                                : 'text-red-400'
+                                ? 'text-warning'
+                                : 'text-destructive'
                             }`}
                           >
                             {scanResult.llm_risk_score}/100
@@ -626,10 +626,10 @@ export default function AdminPluginUploadPage() {
                     {/* LLM Summary */}
                     {scanResult.llm_summary && (
                       <div>
-                        <span className="text-sm text-gray-400">LLM Analysis Summary</span>
+                        <span className="text-sm text-muted-foreground">LLM Analysis Summary</span>
                         <p className="text-sm text-white mt-1">{scanResult.llm_summary}</p>
                         {scanResult.llm_model_used && (
-                          <p className="text-xs text-gray-500 mt-1">
+                          <p className="text-xs text-muted-foreground mt-1">
                             Model: {scanResult.llm_model_used}
                             {scanResult.llm_tokens_used
                               ? ` | Tokens: ${scanResult.llm_tokens_used}`
@@ -642,7 +642,7 @@ export default function AdminPluginUploadPage() {
                     {/* Static Scan Summary */}
                     <div className="flex items-center justify-between">
                       <div>
-                        <span className="text-sm text-gray-400">Static Analysis</span>
+                        <span className="text-sm text-muted-foreground">Static Analysis</span>
                         <p className="text-sm text-white capitalize">
                           {scanResult.static_scan_status || 'N/A'}
                         </p>
@@ -651,8 +651,8 @@ export default function AdminPluginUploadPage() {
                         variant="outline"
                         className={`${
                           scanResult.static_scan_status === 'passed'
-                            ? 'border-green-500/30 text-green-400'
-                            : 'border-yellow-500/30 text-yellow-400'
+                            ? 'border-success/30 text-success'
+                            : 'border-warning/30 text-warning'
                         }`}
                       >
                         {scanResult.static_findings?.length || 0} findings
@@ -673,9 +673,9 @@ export default function AdminPluginUploadPage() {
                           Static Findings ({scanResult.static_findings.length})
                         </CardTitle>
                         {showStaticFindings ? (
-                          <ChevronUp className="h-5 w-5 text-gray-400" />
+                          <ChevronUp className="h-5 w-5 text-muted-foreground" />
                         ) : (
-                          <ChevronDown className="h-5 w-5 text-gray-400" />
+                          <ChevronDown className="h-5 w-5 text-muted-foreground" />
                         )}
                       </button>
                     </CardHeader>
@@ -693,18 +693,18 @@ export default function AdminPluginUploadPage() {
                               <span className={`font-medium ${severityColor(finding.severity)}`}>
                                 {finding.severity}
                               </span>
-                              <span className="text-gray-400">|</span>
-                              <span className="text-gray-300">{finding.type || finding.category}</span>
+                              <span className="text-muted-foreground">|</span>
+                              <span className="text-foreground/90">{finding.type || finding.category}</span>
                             </div>
-                            <p className="text-gray-300">{finding.description}</p>
+                            <p className="text-foreground/90">{finding.description}</p>
                             {finding.file && (
-                              <p className="text-xs text-gray-500 mt-1 font-mono">
+                              <p className="text-xs text-muted-foreground mt-1 font-mono">
                                 {finding.file}
                                 {finding.line ? `:${finding.line}` : ''}
                               </p>
                             )}
                             {finding.matched_text && (
-                              <p className="text-xs text-gray-500 mt-1 font-mono truncate">
+                              <p className="text-xs text-muted-foreground mt-1 font-mono truncate">
                                 Match: {finding.matched_text}
                               </p>
                             )}
@@ -727,9 +727,9 @@ export default function AdminPluginUploadPage() {
                           LLM Findings ({scanResult.llm_findings.length})
                         </CardTitle>
                         {showLlmFindings ? (
-                          <ChevronUp className="h-5 w-5 text-gray-400" />
+                          <ChevronUp className="h-5 w-5 text-muted-foreground" />
                         ) : (
-                          <ChevronDown className="h-5 w-5 text-gray-400" />
+                          <ChevronDown className="h-5 w-5 text-muted-foreground" />
                         )}
                       </button>
                     </CardHeader>
@@ -747,19 +747,19 @@ export default function AdminPluginUploadPage() {
                               <span className={`font-medium ${severityColor(finding.severity)}`}>
                                 {finding.severity}
                               </span>
-                              <span className="text-gray-400">|</span>
-                              <span className="text-gray-300">
+                              <span className="text-muted-foreground">|</span>
+                              <span className="text-foreground/90">
                                 {finding.category || finding.type}
                               </span>
                             </div>
-                            <p className="text-gray-300">{finding.description}</p>
+                            <p className="text-foreground/90">{finding.description}</p>
                             {finding.file && (
-                              <p className="text-xs text-gray-500 mt-1 font-mono">
+                              <p className="text-xs text-muted-foreground mt-1 font-mono">
                                 {finding.file}
                               </p>
                             )}
                             {finding.evidence && (
-                              <p className="text-xs text-gray-500 mt-1 font-mono truncate">
+                              <p className="text-xs text-muted-foreground mt-1 font-mono truncate">
                                 Evidence: {finding.evidence}
                               </p>
                             )}
@@ -778,7 +778,7 @@ export default function AdminPluginUploadPage() {
                 <CardContent className="p-4">
                   <div className="flex gap-3">
                     <Button
-                      className="flex-1 bg-green-600 hover:bg-green-700 text-white"
+                      className="flex-1 bg-success hover:bg-success/80 text-white"
                       onClick={handleApprove}
                       disabled={actionLoading}
                     >
@@ -813,7 +813,7 @@ export default function AdminPluginUploadPage() {
                 <CardContent className="p-4">
                   <div
                     className={`flex items-center gap-2 ${
-                      actionDone === 'approved' ? 'text-green-400' : 'text-red-400'
+                      actionDone === 'approved' ? 'text-success' : 'text-destructive'
                     }`}
                   >
                     {actionDone === 'approved' ? (

@@ -73,9 +73,9 @@ export function TheaterStageProgress({ currentStage, onStageClick }: TheaterStag
                 <div
                   className={cn(
                     'mb-1 transition-colors',
-                    isCompleted && 'text-emerald-400',
+                    isCompleted && 'text-success',
                     isActive && 'text-primary',
-                    isPending && 'text-gray-500'
+                    isPending && 'text-muted-foreground'
                   )}
                   style={{ color: isActive ? stage.color : undefined }}
                 >
@@ -86,9 +86,9 @@ export function TheaterStageProgress({ currentStage, onStageClick }: TheaterStag
                 <span
                   className={cn(
                     'text-xs font-medium',
-                    isCompleted && 'text-emerald-300',
+                    isCompleted && 'text-success/80',
                     isActive && 'text-white',
-                    isPending && 'text-gray-500'
+                    isPending && 'text-muted-foreground'
                   )}
                 >
                   {stage.shortName}
@@ -98,9 +98,9 @@ export function TheaterStageProgress({ currentStage, onStageClick }: TheaterStag
                 <div
                   className={cn(
                     'absolute -top-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold',
-                    isCompleted && 'bg-emerald-500 text-white',
+                    isCompleted && 'bg-success text-white',
                     isActive && 'bg-primary text-white',
-                    isPending && 'bg-gray-700 text-gray-400'
+                    isPending && 'bg-secondary text-muted-foreground'
                   )}
                 >
                   {stage.id}
@@ -139,7 +139,7 @@ export function TheaterStageProgress({ currentStage, onStageClick }: TheaterStag
       </div>
 
       {/* Progress bar */}
-      <div className="mt-4 h-1.5 bg-gray-800 rounded-full overflow-hidden">
+      <div className="mt-4 h-1.5 bg-secondary rounded-full overflow-hidden">
         <motion.div
           className="h-full bg-gradient-to-r from-emerald-500 via-primary to-orange-600 relative"
           initial={{ width: 0 }}

@@ -179,8 +179,8 @@ export default function ProfilePage() {
                 {/* Success/Error Message */}
                 {saveStatus !== 'idle' && (
                     <div className={`mb-6 p-4 rounded-lg border flex items-center space-x-3 ${saveStatus === 'success'
-                        ? 'bg-green-500/10 border-green-500/30 text-green-400'
-                        : 'bg-red-500/10 border-red-500/30 text-red-400'
+                        ? 'bg-success/10 border-success/30 text-success'
+                        : 'bg-destructive/10 border-destructive/30 text-destructive'
                         }`}>
                         {saveStatus === 'success' ? (
                             <CheckCircle className="w-5 h-5" />
@@ -402,7 +402,7 @@ export default function ProfilePage() {
                                     >
                                         {copiedWorkspaceId ? (
                                             <>
-                                                <Check className="w-4 h-4 mr-2 text-green-400" />
+                                                <Check className="w-4 h-4 mr-2 text-success" />
                                                 Copied
                                             </>
                                         ) : (
@@ -443,13 +443,13 @@ export default function ProfilePage() {
 
                         {/* Danger Zone */}
                         <div className="pt-6 border-t border-red-900/30">
-                            <h3 className="text-lg font-semibold text-red-400 mb-4 flex items-center">
+                            <h3 className="text-lg font-semibold text-destructive mb-4 flex items-center">
                                 <Trash2 className="w-5 h-5 mr-2" />
                                 Danger Zone
                             </h3>
                             <Button
                                 variant="outline"
-                                className="border-red-500/30 text-red-400 hover:bg-red-500/10 hover:text-red-300 hover:border-red-500/50"
+                                className="border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive/80 hover:border-destructive/50"
                             >
                                 <Trash2 className="w-4 h-4 mr-2" />
                                 Delete Account

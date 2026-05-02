@@ -76,17 +76,17 @@ export function HumanInteractionChat({ workflowId, isExecuting }: HumanInteracti
 
   const getPriorityColor = (priority?: string) => {
     switch (priority) {
-      case 'urgent': return 'text-red-400 border-red-400/50'
+      case 'urgent': return 'text-destructive border-destructive/50'
       case 'high': return 'text-orange-400 border-orange-400/50'
-      case 'medium': return 'text-yellow-400 border-yellow-400/50'
-      default: return 'text-blue-400 border-blue-400/50'
+      case 'medium': return 'text-warning border-warning/50'
+      default: return 'text-info border-blue-400/50'
     }
   }
 
   const getStatusIcon = (status?: string) => {
     switch (status) {
-      case 'answered': return <CheckCircle className="w-3 h-3 text-green-400" />
-      case 'pending': return <AlertCircle className="w-3 h-3 text-yellow-400 animate-pulse" />
+      case 'answered': return <CheckCircle className="w-3 h-3 text-success" />
+      case 'pending': return <AlertCircle className="w-3 h-3 text-warning animate-pulse" />
       default: return null
     }
   }
@@ -133,16 +133,16 @@ export function HumanInteractionChat({ workflowId, isExecuting }: HumanInteracti
                       msg.from === 'human'
                         ? 'bg-primary text-primary-foreground'
                         : msg.type === 'blocker'
-                        ? 'bg-red-500/20 border-2 border-red-500/50'
+                        ? 'bg-destructive/20 border-2 border-destructive/50'
                         : msg.type === 'question'
-                        ? 'bg-blue-500/20 border border-blue-500/50'
+                        ? 'bg-info/20 border border-info/50'
                         : 'bg-background/50 border border-border/50'
                     }`}
                   >
                     {/* Header */}
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center space-x-2">
-                        {msg.from === 'agent' && <Bot className="w-4 h-4 text-blue-400" />}
+                        {msg.from === 'agent' && <Bot className="w-4 h-4 text-info" />}
                         {msg.from === 'human' && <User className="w-4 h-4" />}
                         <span className="text-xs font-medium">
                           {msg.from === 'agent' ? msg.agentName : msg.from === 'human' ? 'You' : 'Orchestrator'}
@@ -201,7 +201,7 @@ export function HumanInteractionChat({ workflowId, isExecuting }: HumanInteracti
           </Button>
         </div>
         {messages.filter(m => m.status === 'pending').length > 0 && (
-          <p className="text-xs text-yellow-400 mt-2 flex items-center">
+          <p className="text-xs text-warning mt-2 flex items-center">
             <AlertCircle className="w-3 h-3 mr-1" />
             {messages.filter(m => m.status === 'pending').length} agent(s) waiting for response
           </p>

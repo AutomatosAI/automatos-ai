@@ -494,7 +494,7 @@ export function AutoWidget({
                     </div>
 
                     {errorMessage && formState === 'form' && (
-                      <p className="text-xs text-red-400">{errorMessage}</p>
+                      <p className="text-xs text-destructive">{errorMessage}</p>
                     )}
 
                     <Button
@@ -518,7 +518,7 @@ export function AutoWidget({
                   </form>
                 ) : formState === 'success' ? (
                   <div className="flex flex-col items-center py-6 space-y-3">
-                    <CheckCircle2 className="w-12 h-12 text-green-500" />
+                    <CheckCircle2 className="w-12 h-12 text-success" />
                     <p className="font-medium text-foreground">Bug report created!</p>
                     {successKey && (
                       successUrl ? (
@@ -540,7 +540,7 @@ export function AutoWidget({
                   </div>
                 ) : (
                   <div className="flex flex-col items-center py-6 space-y-3">
-                    <AlertCircle className="w-12 h-12 text-red-500" />
+                    <AlertCircle className="w-12 h-12 text-destructive" />
                     <p className="font-medium text-foreground">Something went wrong</p>
                     <p className="text-xs text-muted-foreground text-center">{errorMessage}</p>
                     <Button

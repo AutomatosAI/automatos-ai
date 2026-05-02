@@ -137,7 +137,7 @@ export function PlatformApiKeysCard() {
                   <div className="flex items-center gap-2">
                     {configured ? (
                       <>
-                        <Badge className="bg-green-500/15 text-green-400 border-green-500/30 text-xs">
+                        <Badge className="bg-success/15 text-success border-success/30 text-xs">
                           <CheckCircle className="h-3 w-3 mr-1" />
                           Configured
                         </Badge>

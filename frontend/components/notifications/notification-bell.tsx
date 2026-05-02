@@ -70,9 +70,9 @@ function linkFor(row: NotificationRow): string | null {
 function statusDotClass(status: string): string {
   switch (status) {
     case 'error':
-      return 'bg-red-500'
+      return 'bg-destructive'
     case 'warning':
-      return 'bg-yellow-500'
+      return 'bg-warning'
     case 'ok':
     default:
       return 'bg-orange-500'

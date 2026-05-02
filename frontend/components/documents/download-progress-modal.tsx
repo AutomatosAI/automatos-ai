@@ -115,9 +115,9 @@ export function DownloadProgressModal({
       case 'preparing':
         return {
           icon: Loader2,
-          color: 'text-blue-400',
-          bgColor: 'bg-blue-500/10',
-          borderColor: 'border-blue-500/20',
+          color: 'text-info',
+          bgColor: 'bg-info/10',
+          borderColor: 'border-info/20',
           message: 'Preparing download...'
         }
       case 'downloading':
@@ -131,33 +131,33 @@ export function DownloadProgressModal({
       case 'completed':
         return {
           icon: CheckCircle,
-          color: 'text-green-400',
-          bgColor: 'bg-green-500/10',
-          borderColor: 'border-green-500/20',
+          color: 'text-success',
+          bgColor: 'bg-success/10',
+          borderColor: 'border-success/20',
           message: 'Download completed successfully!'
         }
       case 'error':
         return {
           icon: AlertTriangle,
-          color: 'text-red-400',
-          bgColor: 'bg-red-500/10',
-          borderColor: 'border-red-500/20',
+          color: 'text-destructive',
+          bgColor: 'bg-destructive/10',
+          borderColor: 'border-destructive/20',
           message: 'Download failed'
         }
       case 'cancelled':
         return {
           icon: StopCircle,
-          color: 'text-gray-400',
-          bgColor: 'bg-gray-500/10',
-          borderColor: 'border-gray-500/20',
+          color: 'text-muted-foreground',
+          bgColor: 'bg-secondary/50',
+          borderColor: 'border-border/30',
           message: 'Download cancelled'
         }
       default:
         return {
           icon: Loader2,
-          color: 'text-gray-400',
-          bgColor: 'bg-gray-500/10',
-          borderColor: 'border-gray-500/20',
+          color: 'text-muted-foreground',
+          bgColor: 'bg-secondary/50',
+          borderColor: 'border-border/30',
           message: 'Initializing...'
         }
     }
@@ -225,13 +225,13 @@ export function DownloadProgressModal({
               <div className="grid grid-cols-2 gap-4 text-center">
                 {speed && (
                   <div className="bg-secondary/30 rounded-lg p-3">
-                    <p className="text-lg font-bold text-blue-400">{speed}</p>
+                    <p className="text-lg font-bold text-info">{speed}</p>
                     <p className="text-xs text-muted-foreground">Download Speed</p>
                   </div>
                 )}
                 {timeRemaining && (
                   <div className="bg-secondary/30 rounded-lg p-3">
-                    <p className="text-lg font-bold text-green-400">{timeRemaining}</p>
+                    <p className="text-lg font-bold text-success">{timeRemaining}</p>
                     <p className="text-xs text-muted-foreground">Time Remaining</p>
                   </div>
                 )}
@@ -240,8 +240,8 @@ export function DownloadProgressModal({
 
             {/* Error Message */}
             {error && (
-              <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3">
-                <p className="text-red-400 text-sm">{error}</p>
+              <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-3">
+                <p className="text-destructive text-sm">{error}</p>
               </div>
             )}
 
@@ -270,9 +270,9 @@ export function DownloadProgressModal({
 
             {/* Completed Success Message */}
             {status === 'completed' && (
-              <div className="text-center bg-green-500/10 border border-green-500/20 rounded-lg p-4">
-                <CheckCircle className="w-8 h-8 text-green-400 mx-auto mb-2" />
-                <p className="text-green-400 font-medium">Download Complete!</p>
+              <div className="text-center bg-success/10 border border-success/20 rounded-lg p-4">
+                <CheckCircle className="w-8 h-8 text-success mx-auto mb-2" />
+                <p className="text-success font-medium">Download Complete!</p>
                 <p className="text-sm text-muted-foreground mt-1">
                   The file has been saved to your Downloads folder.
                 </p>

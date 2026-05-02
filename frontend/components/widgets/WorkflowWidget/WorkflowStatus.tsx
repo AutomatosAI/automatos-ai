@@ -45,14 +45,14 @@ function getStatusConfig(status: WorkflowStatusType) {
         icon: Clock,
         label: 'Pending',
         variant: 'secondary' as const,
-        className: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
+        className: 'bg-gray-100 text-foreground/70 dark:bg-secondary dark:text-foreground/90',
       }
     case 'running':
       return {
         icon: Loader2,
         label: 'Running',
         variant: 'default' as const,
-        className: 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300',
+        className: 'bg-blue-100 text-info dark:bg-blue-900 dark:text-info/80',
         iconClassName: 'animate-spin',
       }
     case 'paused':
@@ -74,7 +74,7 @@ function getStatusConfig(status: WorkflowStatusType) {
         icon: X,
         label: 'Failed',
         variant: 'destructive' as const,
-        className: 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300',
+        className: 'bg-destructive/10 text-destructive dark:bg-destructive/20 dark:text-destructive/80',
       }
     case 'cancelled':
       return {

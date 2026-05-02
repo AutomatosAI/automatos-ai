@@ -54,16 +54,16 @@ export function AgentReadinessBadge({ agentId, className }: AgentReadinessBadgeP
 
   // Determine icon and color
   let Icon = ShieldCheck
-  let colorClass = 'text-emerald-400'
+  let colorClass = 'text-success'
   let label = 'Ready'
 
   if (!passed) {
     Icon = ShieldX
-    colorClass = 'text-red-400'
+    colorClass = 'text-destructive'
     label = 'Not Ready'
   } else if (hasWarnings) {
     Icon = ShieldAlert
-    colorClass = 'text-amber-400'
+    colorClass = 'text-warning'
     label = 'Warnings'
   }
 
@@ -75,13 +75,13 @@ export function AgentReadinessBadge({ agentId, className }: AgentReadinessBadgeP
       <TooltipContent side="top" className="text-xs max-w-[260px] space-y-1">
         <p className="font-medium">{label} — {data.blueprint_name}</p>
         {failures.map((f, i) => (
-          <p key={i} className="text-red-400">✗ {f}</p>
+          <p key={i} className="text-destructive">✗ {f}</p>
         ))}
         {warnings.map((w, i) => (
-          <p key={i} className="text-amber-400">⚠ {w}</p>
+          <p key={i} className="text-warning">⚠ {w}</p>
         ))}
         {passed && !hasWarnings && (
-          <p className="text-emerald-400">All checks passed</p>
+          <p className="text-success">All checks passed</p>
         )}
       </TooltipContent>
     </Tooltip>

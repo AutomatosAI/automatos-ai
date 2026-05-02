@@ -7,10 +7,10 @@ import { cn } from '@/lib/utils'
 
 // Same color hash as week grid for consistency
 const AGENT_COLORS = [
-  'text-blue-400',
-  'text-purple-400',
-  'text-emerald-400',
-  'text-amber-400',
+  'text-info',
+  'text-agent',
+  'text-success',
+  'text-warning',
   'text-rose-400',
   'text-cyan-400',
   'text-orange-400',

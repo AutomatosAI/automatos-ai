@@ -128,11 +128,11 @@ export function WorkflowSteps({ steps, className }: WorkflowStepsProps) {
                     <StatusIcon
                       className={cn(
                         'h-4 w-4 flex-shrink-0',
-                        isPending && 'text-gray-400',
-                        isRunning && 'text-blue-500 animate-spin',
-                        isCompleted && 'text-green-500',
-                        isFailed && 'text-red-500',
-                        isSkipped && 'text-gray-400'
+                        isPending && 'text-muted-foreground',
+                        isRunning && 'text-info animate-spin',
+                        isCompleted && 'text-success',
+                        isFailed && 'text-destructive',
+                        isSkipped && 'text-muted-foreground'
                       )}
                     />
                   </div>
@@ -144,7 +144,7 @@ export function WorkflowSteps({ steps, className }: WorkflowStepsProps) {
                         className={cn(
                           'text-sm',
                           isCompleted && 'text-muted-foreground',
-                          isFailed && 'text-red-600 dark:text-red-400'
+                          isFailed && 'text-destructive dark:text-destructive'
                         )}
                       >
                         {step.name}
@@ -157,7 +157,7 @@ export function WorkflowSteps({ steps, className }: WorkflowStepsProps) {
 
                       {/* Running indicator */}
                       {isRunning && (
-                        <span className="text-xs text-blue-600 dark:text-blue-400">
+                        <span className="text-xs text-blue-600 dark:text-info">
                           ← Currently running
                         </span>
                       )}
@@ -165,7 +165,7 @@ export function WorkflowSteps({ steps, className }: WorkflowStepsProps) {
 
                     {/* Error preview */}
                     {step.error && (
-                      <p className="text-xs text-red-500 truncate mt-0.5">
+                      <p className="text-xs text-destructive truncate mt-0.5">
                         {step.error}
                       </p>
                     )}

@@ -52,10 +52,10 @@ const PROVIDER_COLORS = [
 ]
 
 const PLAN_COLORS: Record<string, string> = {
-  starter: 'text-gray-400 border-gray-400/30 bg-gray-400/5',
-  pilot: 'text-blue-400 border-blue-400/30 bg-blue-400/5',
-  pro: 'text-purple-400 border-purple-400/30 bg-purple-400/5',
-  enterprise: 'text-amber-400 border-amber-400/30 bg-amber-400/5',
+  starter: 'text-muted-foreground border-border/30 bg-secondary/30',
+  pilot: 'text-info border-info/30 bg-info/5',
+  pro: 'text-agent border-agent/30 bg-agent/5',
+  enterprise: 'text-warning border-warning/30 bg-warning/5',
 }
 
 const PLAN_DONUT_COLORS: Record<string, string> = {

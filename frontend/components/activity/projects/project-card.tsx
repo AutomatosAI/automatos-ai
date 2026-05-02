@@ -34,10 +34,10 @@ const STATUS_CONFIG: Record<Project['status'], { label: string; className: strin
 }
 
 const PRIORITY_DOT: Record<Project['priority'], string> = {
-  urgent: 'bg-red-500',
+  urgent: 'bg-destructive',
   high: 'bg-orange-500',
-  medium: 'bg-yellow-500',
-  low: 'bg-green-500',
+  medium: 'bg-warning',
+  low: 'bg-success',
 }
 
 // ─── Component ──────────────────────────────────────────

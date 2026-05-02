@@ -84,11 +84,11 @@ export function CreateWorkflowModal({ open, onClose }: { open: boolean; onClose:
                   </TabsList>
                   <TabsContent value="step-1" className="space-y-4">
                     <div>
-                      <Label>Name <span className="text-red-400">*</span></Label>
+                      <Label>Name <span className="text-destructive">*</span></Label>
                       <Input value={name} onChange={e=>setName(e.target.value)} placeholder="Workflow name" className="bg-secondary/50" />
                     </div>
                     <div>
-                      <Label>Description <span className="text-red-400">*</span></Label>
+                      <Label>Description <span className="text-destructive">*</span></Label>
                       <Textarea rows={3} value={description} onChange={e=>setDescription(e.target.value)} placeholder="Describe what this workflow should accomplish..." className="bg-secondary/50" />
                     </div>
                     

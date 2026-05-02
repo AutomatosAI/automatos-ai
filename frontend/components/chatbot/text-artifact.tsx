@@ -55,12 +55,12 @@ export function TextArtifact({ content, metadata }: TextArtifactProps) {
           )
         },
         code: ({ children }) => (
-          <code className="rounded bg-secondary/40 px-1.5 py-0.5 text-xs text-foreground dark:bg-gray-900/60 dark:text-gray-100">
+          <code className="rounded bg-secondary/40 px-1.5 py-0.5 text-xs text-foreground dark:bg-background/60 dark:text-gray-100">
             {children}
           </code>
         ),
         pre: ({ children }) => (
-          <pre className="rounded-lg bg-muted/40 p-4 text-xs overflow-x-auto border border-border/60 text-foreground dark:bg-gray-900/70 dark:border-gray-800/60 dark:text-gray-100">
+          <pre className="rounded-lg bg-muted/40 p-4 text-xs overflow-x-auto border border-border/60 text-foreground dark:bg-background/70 dark:border-gray-800/60 dark:text-gray-100">
             {children}
           </pre>
         ),
@@ -72,14 +72,14 @@ export function TextArtifact({ content, metadata }: TextArtifactProps) {
         ),
         li: ({ children }) => <li className="leading-relaxed">{children}</li>,
         table: ({ children }) => (
-          <div className="overflow-x-auto rounded-xl border border-border/60 bg-card/50 dark:border-gray-800/60 dark:bg-gray-900/40">
+          <div className="overflow-x-auto rounded-xl border border-border/60 bg-card/50 dark:border-gray-800/60 dark:bg-background/40">
             <table className="min-w-full divide-y divide-border/60 text-sm text-foreground dark:divide-gray-800/70 dark:text-gray-100">
               {children}
             </table>
           </div>
         ),
         thead: ({ children }) => (
-          <thead className="bg-secondary/40 text-xs uppercase tracking-wide text-muted-foreground dark:bg-gray-900/60 dark:text-gray-400">
+          <thead className="bg-secondary/40 text-xs uppercase tracking-wide text-muted-foreground dark:bg-background/60 dark:text-muted-foreground">
             {children}
           </thead>
         ),
@@ -87,10 +87,10 @@ export function TextArtifact({ content, metadata }: TextArtifactProps) {
           <tbody className="divide-y divide-border/50 dark:divide-gray-800/70">{children}</tbody>
         ),
         tr: ({ children }) => (
-          <tr className="hover:bg-secondary/40 transition-colors dark:hover:bg-gray-900/60">{children}</tr>
+          <tr className="hover:bg-secondary/40 transition-colors dark:hover:bg-background/60">{children}</tr>
         ),
         th: ({ children }) => (
-          <th className="px-4 py-3 text-left font-semibold text-foreground/80 dark:text-gray-300">
+          <th className="px-4 py-3 text-left font-semibold text-foreground/80 dark:text-foreground/90">
             {children}
           </th>
         ),
@@ -114,7 +114,7 @@ export function TextArtifact({ content, metadata }: TextArtifactProps) {
               </span>
             )}
             {metadata.model && (
-              <span className="inline-flex items-center rounded-full border border-blue-500/40 bg-blue-500/10 px-3 py-1 text-xs font-semibold uppercase text-blue-700 dark:text-blue-200">
+              <span className="inline-flex items-center rounded-full border border-info/40 bg-info/10 px-3 py-1 text-xs font-semibold uppercase text-info dark:text-info/70">
                 {metadata.model}
               </span>
             )}
@@ -123,7 +123,7 @@ export function TextArtifact({ content, metadata }: TextArtifactProps) {
                 href={downloadUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center gap-1 rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-xs font-semibold uppercase text-blue-200 hover:bg-blue-500/20"
+                className="inline-flex items-center gap-1 rounded-full border border-info/30 bg-info/10 px-3 py-1 text-xs font-semibold uppercase text-info/70 hover:bg-info/20"
               >
                 <ExternalLink className="h-3.5 w-3.5" />
                 Download
@@ -133,25 +133,25 @@ export function TextArtifact({ content, metadata }: TextArtifactProps) {
 
           <div className="grid grid-cols-1 gap-3 text-sm text-muted-foreground md:grid-cols-2">
             {metadata.row_count !== undefined && (
-              <div className="rounded-xl border border-border/60 bg-card/50 p-3 dark:border-gray-800/60 dark:bg-gray-900/40">
+              <div className="rounded-xl border border-border/60 bg-card/50 p-3 dark:border-gray-800/60 dark:bg-background/40">
                 <div className="text-xs uppercase tracking-wide text-muted-foreground">Rows</div>
                 <div className="text-lg font-semibold text-foreground dark:text-gray-100">{metadata.row_count}</div>
               </div>
             )}
             {metadata.execution_time_ms !== undefined && (
-              <div className="rounded-xl border border-border/60 bg-card/50 p-3 dark:border-gray-800/60 dark:bg-gray-900/40">
+              <div className="rounded-xl border border-border/60 bg-card/50 p-3 dark:border-gray-800/60 dark:bg-background/40">
                 <div className="text-xs uppercase tracking-wide text-muted-foreground">Execution Time</div>
                 <div className="text-lg font-semibold text-foreground dark:text-gray-100">{Number(metadata.execution_time_ms).toFixed(0)} ms</div>
               </div>
             )}
             {metadata.similarity !== undefined && (
-              <div className="rounded-xl border border-border/60 bg-card/50 p-3 dark:border-gray-800/60 dark:bg-gray-900/40">
+              <div className="rounded-xl border border-border/60 bg-card/50 p-3 dark:border-gray-800/60 dark:bg-background/40">
                 <div className="text-xs uppercase tracking-wide text-muted-foreground">Similarity</div>
                 <div className="text-lg font-semibold text-foreground dark:text-gray-100">{(metadata.similarity * 100).toFixed(1)}%</div>
               </div>
             )}
             {metadata.document_id && (
-              <div className="rounded-xl border border-border/60 bg-card/50 p-3 dark:border-gray-800/60 dark:bg-gray-900/40">
+              <div className="rounded-xl border border-border/60 bg-card/50 p-3 dark:border-gray-800/60 dark:bg-background/40">
                 <div className="text-xs uppercase tracking-wide text-muted-foreground">Document</div>
                 <div className="text-base font-semibold text-foreground dark:text-gray-100">{metadata.document_id}</div>
               </div>
@@ -163,14 +163,14 @@ export function TextArtifact({ content, metadata }: TextArtifactProps) {
       {/* RAG chunk inspector (when provided) */}
       {chunks && chunks.length > 0 && (
         <div className="space-y-3">
-          <h4 className="text-sm font-semibold text-foreground/80 dark:text-gray-300 uppercase tracking-wide">
+          <h4 className="text-sm font-semibold text-foreground/80 dark:text-foreground/90 uppercase tracking-wide">
             Relevant Chunks ({chunks.length})
           </h4>
           <div className="space-y-2">
             {chunks.map((chunk, idx) => (
               <details
                 key={idx}
-                className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-4"
+                className="rounded-xl border border-info/20 bg-info/5 p-4"
               >
                 <summary className="cursor-pointer text-sm font-medium text-foreground dark:text-gray-200">
                   Chunk {idx + 1}: {chunk.excerpt ? chunk.excerpt.slice(0, 120) : 'Open'}
@@ -198,7 +198,7 @@ export function TextArtifact({ content, metadata }: TextArtifactProps) {
                       Copy chunk
                     </button>
                   </div>
-                  <pre className="rounded-lg bg-muted/40 p-4 text-xs overflow-x-auto border border-border/60 whitespace-pre-wrap text-foreground dark:bg-gray-900/70 dark:border-gray-800/60 dark:text-gray-100">
+                  <pre className="rounded-lg bg-muted/40 p-4 text-xs overflow-x-auto border border-border/60 whitespace-pre-wrap text-foreground dark:bg-background/70 dark:border-gray-800/60 dark:text-gray-100">
                     {chunk.content}
                   </pre>
                 </div>
@@ -212,25 +212,25 @@ export function TextArtifact({ content, metadata }: TextArtifactProps) {
 
       {pandasAI?.charts && pandasAI.charts.length > 0 && (
         <div className="space-y-4">
-          <h4 className="text-sm font-semibold text-gray-300 uppercase tracking-wide">
+          <h4 className="text-sm font-semibold text-foreground/90 uppercase tracking-wide">
             PandasAI Charts
           </h4>
           <div className="grid gap-4 md:grid-cols-2">
             {pandasAI.charts.map((chart, idx) => (
               <div
                 key={`${chart.filename}-${idx}`}
-                className="rounded-lg border border-gray-800/60 bg-gray-900/40 p-4 flex flex-col items-center gap-3"
+                className="rounded-lg border border-gray-800/60 bg-background/40 p-4 flex flex-col items-center gap-3"
               >
                 <img
                   src={`data:${chart.mime_type};base64,${chart.base64}`}
                   alt={chart.filename}
                   className="rounded-md border border-gray-800/40 max-h-72 w-full object-contain"
                 />
-                <div className="flex w-full items-center justify-between text-xs text-gray-500">
+                <div className="flex w-full items-center justify-between text-xs text-muted-foreground">
                   <span className="truncate">{chart.filename}</span>
                   <div className="flex items-center gap-2">
                     <button
-                      className="rounded border border-gray-700/60 px-2 py-1 text-[11px] uppercase tracking-wide text-gray-300 hover:border-orange-400/60 hover:text-orange-300"
+                      className="rounded border border-border/60 px-2 py-1 text-[11px] uppercase tracking-wide text-foreground/90 hover:border-orange-400/60 hover:text-orange-300"
                       onClick={() => {
                         const link = document.createElement('a')
                         link.href = `data:${chart.mime_type};base64,${chart.base64}`
@@ -243,7 +243,7 @@ export function TextArtifact({ content, metadata }: TextArtifactProps) {
                       Download
                     </button>
                     <button
-                      className="rounded border border-gray-700/60 px-2 py-1 text-[11px] uppercase tracking-wide text-gray-300 hover:border-orange-400/60 hover:text-orange-300"
+                      className="rounded border border-border/60 px-2 py-1 text-[11px] uppercase tracking-wide text-foreground/90 hover:border-orange-400/60 hover:text-orange-300"
                       onClick={async () => {
                         if (!navigator.clipboard) {
                           toast.error('Clipboard API is not available')
@@ -268,7 +268,7 @@ export function TextArtifact({ content, metadata }: TextArtifactProps) {
       )}
 
       {pandasAI?.error && (
-        <div className="text-sm text-red-400">
+        <div className="text-sm text-destructive">
           PandasAI warning: {pandasAI.error}
         </div>
       )}

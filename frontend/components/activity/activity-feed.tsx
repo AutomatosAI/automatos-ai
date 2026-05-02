@@ -71,39 +71,39 @@ const PAGE_SIZE = 20
 function getStatusIcon(status: string) {
   switch (status) {
     case 'completed':
-      return <CheckCircle className="w-5 h-5 text-green-400" />
+      return <CheckCircle className="w-5 h-5 text-success" />
     case 'failed':
-      return <AlertTriangle className="w-5 h-5 text-red-400" />
+      return <AlertTriangle className="w-5 h-5 text-destructive" />
     case 'running':
-      return <Activity className="w-5 h-5 text-blue-400 animate-pulse" />
+      return <Activity className="w-5 h-5 text-info animate-pulse" />
     default:
-      return <Clock className="w-5 h-5 text-gray-400" />
+      return <Clock className="w-5 h-5 text-muted-foreground" />
   }
 }
 
 function getStatusBg(status: string) {
   switch (status) {
     case 'completed':
-      return 'bg-green-500/20'
+      return 'bg-success/20'
     case 'failed':
-      return 'bg-red-500/20'
+      return 'bg-destructive/20'
     case 'running':
-      return 'bg-blue-500/20'
+      return 'bg-info/20'
     default:
-      return 'bg-gray-500/20'
+      return 'bg-secondary/50'
   }
 }
 
 function getStatusBadge(status: string) {
   switch (status) {
     case 'completed':
-      return { label: 'cooked', className: 'bg-green-500/20 text-green-400 border-green-500/30' }
+      return { label: 'cooked', className: 'bg-success/20 text-success border-success/30' }
     case 'failed':
-      return { label: 'burnt', className: 'bg-red-500/20 text-red-400 border-red-500/30' }
+      return { label: 'burnt', className: 'bg-destructive/20 text-destructive border-destructive/30' }
     case 'running':
-      return { label: 'cooking', className: 'bg-blue-500/20 text-blue-400 border-blue-500/30' }
+      return { label: 'cooking', className: 'bg-info/20 text-info border-info/30' }
     default:
-      return { label: status, className: 'bg-gray-500/20 text-gray-400 border-gray-500/30' }
+      return { label: status, className: 'bg-secondary/50 text-muted-foreground border-border/30' }
   }
 }
 
@@ -408,13 +408,13 @@ function FeedRow({ item, index, isNew, onView }: FeedRowProps) {
           <div className="flex items-center gap-2 mb-1 flex-wrap">
             <h4 className="font-semibold text-sm sm:text-base truncate">{item.name}</h4>
             {item.type === 'chat' && (
-              <Badge className="text-xs bg-blue-500/20 text-blue-300 border-blue-500/30 shrink-0">
+              <Badge className="text-xs bg-info/20 text-info/80 border-info/30 shrink-0">
                 <MessageCircle className="w-3 h-3 mr-1" />
                 Chat
               </Badge>
             )}
             {isRoutine && (
-              <Badge className="text-xs bg-purple-500/20 text-purple-300 border-purple-500/30 shrink-0">
+              <Badge className="text-xs bg-agent/20 text-agent/80 border-agent/30 shrink-0">
                 <RefreshCw className="w-3 h-3 mr-1" />
                 Routine
               </Badge>
@@ -442,7 +442,7 @@ function FeedRow({ item, index, isNew, onView }: FeedRowProps) {
               <>
                 <span>Step {item.step_progress.current} of {item.step_progress.total}</span>
                 {item.error_message && (
-                  <span className="text-red-400 truncate max-w-[200px]">{item.error_message}</span>
+                  <span className="text-destructive truncate max-w-[200px]">{item.error_message}</span>
                 )}
               </>
             ) : (
@@ -459,12 +459,12 @@ function FeedRow({ item, index, isNew, onView }: FeedRowProps) {
                   className={cn(
                     'flex items-center gap-1 text-xs px-2 py-0.5 rounded-md',
                     item.status === 'completed'
-                      ? 'bg-green-500/10 text-green-400'
+                      ? 'bg-success/10 text-success'
                       : item.status === 'failed'
-                        ? 'bg-red-500/10 text-red-400'
+                        ? 'bg-destructive/10 text-destructive'
                         : item.status === 'running'
-                          ? 'bg-blue-500/10 text-blue-400'
-                          : 'bg-gray-500/10 text-gray-400'
+                          ? 'bg-info/10 text-info'
+                          : 'bg-secondary/50 text-muted-foreground'
                   )}
                 >
                   {item.status === 'completed' ? (
@@ -494,12 +494,12 @@ function FeedRow({ item, index, isNew, onView }: FeedRowProps) {
                   className={cn(
                     'flex items-center gap-1 text-xs px-2 py-0.5 rounded-md',
                     step.status === 'completed'
-                      ? 'bg-green-500/10 text-green-400'
+                      ? 'bg-success/10 text-success'
                       : step.status === 'failed'
-                        ? 'bg-red-500/10 text-red-400'
+                        ? 'bg-destructive/10 text-destructive'
                         : step.status === 'running'
-                          ? 'bg-blue-500/10 text-blue-400'
-                          : 'bg-gray-500/10 text-gray-400'
+                          ? 'bg-info/10 text-info'
+                          : 'bg-secondary/50 text-muted-foreground'
                   )}
                 >
                   {step.status === 'completed' ? (

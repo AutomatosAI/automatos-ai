@@ -142,8 +142,8 @@ export function AnalyticsTab() {
     return (
       <div className="flex items-center justify-center py-12">
         <div className="text-center">
-          <AlertCircle className="h-8 w-8 text-red-400 mx-auto mb-4" />
-          <p className="text-red-400 mb-4">Error: {error.message}</p>
+          <AlertCircle className="h-8 w-8 text-destructive mx-auto mb-4" />
+          <p className="text-destructive mb-4">Error: {error.message}</p>
         </div>
       </div>
     )
@@ -168,8 +168,8 @@ export function AnalyticsTab() {
   const getInsightColor = (type: string) => {
     switch (type) {
       case 'warning': return 'text-orange-400'
-      case 'success': return 'text-green-400'
-      default: return 'text-blue-400'
+      case 'success': return 'text-success'
+      default: return 'text-info'
     }
   }
 
@@ -229,13 +229,13 @@ export function AnalyticsTab() {
             >
               <div className="flex items-center justify-between mb-4">
                 <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-                  <FileText className="w-5 h-5 text-blue-400" />
+                  <FileText className="w-5 h-5 text-info" />
                 </div>
               </div>
               <div className="space-y-1">
                 <h3 className="text-2xl font-bold">{analyticsData.overview.total_documents}</h3>
                 <p className="text-muted-foreground text-sm">Total Documents</p>
-                <p className="text-xs text-blue-400">
+                <p className="text-xs text-info">
                   {analyticsData.overview.total_size_mb.toFixed(1)}MB total size
                 </p>
               </div>
@@ -249,13 +249,13 @@ export function AnalyticsTab() {
             >
               <div className="flex items-center justify-between mb-4">
                 <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-                  <Database className="w-5 h-5 text-green-400" />
+                  <Database className="w-5 h-5 text-success" />
                 </div>
               </div>
               <div className="space-y-1">
                 <h3 className="text-2xl font-bold">{analyticsData.overview.total_chunks}</h3>
                 <p className="text-muted-foreground text-sm">Vector Chunks</p>
-                <p className="text-xs text-green-400">
+                <p className="text-xs text-success">
                   {analyticsData.overview.avg_chunks_per_doc} avg per doc
                 </p>
               </div>
@@ -269,13 +269,13 @@ export function AnalyticsTab() {
             >
               <div className="flex items-center justify-between mb-4">
                 <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-                  <Zap className="w-5 h-5 text-purple-400" />
+                  <Zap className="w-5 h-5 text-agent" />
                 </div>
               </div>
               <div className="space-y-1">
                 <h3 className="text-2xl font-bold">{analyticsData.overview.embedding_count}</h3>
                 <p className="text-muted-foreground text-sm">Embeddings</p>
-                <p className="text-xs text-purple-400">
+                <p className="text-xs text-agent">
                   {analyticsData.overview.unique_sources} unique sources
                 </p>
               </div>
@@ -404,7 +404,7 @@ export function AnalyticsTab() {
               </div>
               <div>
                 <h4 className="font-medium mb-2">Most Active Day</h4>
-                <Badge className="bg-green-500/10 text-green-400 border-green-500/20">
+                <Badge className="bg-success/10 text-success border-success/20">
                   {searchPatterns.usage_patterns.most_active_day}
                 </Badge>
               </div>

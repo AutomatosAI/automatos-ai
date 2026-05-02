@@ -39,37 +39,37 @@ function getStepStatusConfig(status: WorkflowStep['status']) {
     case 'pending':
       return {
         icon: Clock,
-        className: 'text-gray-400',
+        className: 'text-muted-foreground',
         label: 'Pending',
       }
     case 'running':
       return {
         icon: Loader2,
-        className: 'text-blue-500 animate-spin',
+        className: 'text-info animate-spin',
         label: 'Running',
       }
     case 'completed':
       return {
         icon: Check,
-        className: 'text-green-500',
+        className: 'text-success',
         label: 'Completed',
       }
     case 'failed':
       return {
         icon: X,
-        className: 'text-red-500',
+        className: 'text-destructive',
         label: 'Failed',
       }
     case 'skipped':
       return {
         icon: SkipForward,
-        className: 'text-gray-400',
+        className: 'text-muted-foreground',
         label: 'Skipped',
       }
     default:
       return {
         icon: Clock,
-        className: 'text-gray-400',
+        className: 'text-muted-foreground',
         label: 'Unknown',
       }
   }
@@ -120,8 +120,8 @@ export function StepDetail({ step, open, onOpenChange }: StepDetailProps) {
             <Badge variant="outline">{step.type}</Badge>
             <Badge variant="secondary" className={cn(
               step.status === 'completed' && 'bg-green-100 text-green-700',
-              step.status === 'failed' && 'bg-red-100 text-red-700',
-              step.status === 'running' && 'bg-blue-100 text-blue-700'
+              step.status === 'failed' && 'bg-destructive/10 text-destructive',
+              step.status === 'running' && 'bg-blue-100 text-info'
             )}>
               {config.label}
             </Badge>
@@ -153,11 +153,11 @@ export function StepDetail({ step, open, onOpenChange }: StepDetailProps) {
 
           {/* Error message */}
           {step.error && (
-            <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md">
-              <h4 className="text-sm font-medium text-red-800 dark:text-red-200 mb-1">
+            <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-md">
+              <h4 className="text-sm font-medium text-destructive dark:text-destructive/70 mb-1">
                 Error
               </h4>
-              <pre className="text-xs text-red-700 dark:text-red-300 whitespace-pre-wrap overflow-auto max-h-32">
+              <pre className="text-xs text-destructive dark:text-destructive/80 whitespace-pre-wrap overflow-auto max-h-32">
                 {step.error}
               </pre>
             </div>

@@ -91,8 +91,8 @@ export function TerminalOutput({
       <div
         className={cn(
           'flex items-center justify-center h-full',
-          'text-gray-500 text-sm font-mono',
-          'bg-gray-900',
+          'text-muted-foreground text-sm font-mono',
+          'bg-background',
           className
         )}
       >
@@ -102,11 +102,11 @@ export function TerminalOutput({
   }
 
   return (
-    <div className={cn('flex flex-col h-full bg-gray-900', className)}>
+    <div className={cn('flex flex-col h-full bg-background', className)}>
       {/* Search bar */}
       {showSearch && (
-        <div className="flex items-center gap-2 px-3 py-2 bg-gray-800 border-b border-gray-700">
-          <Search className="h-4 w-4 text-gray-400" />
+        <div className="flex items-center gap-2 px-3 py-2 bg-secondary border-b border-border">
+          <Search className="h-4 w-4 text-muted-foreground" />
           <Input
             type="text"
             placeholder="Search output..."
@@ -115,12 +115,12 @@ export function TerminalOutput({
               setSearchQuery(e.target.value)
               setSearchIndex(0)
             }}
-            className="h-7 bg-gray-900 border-gray-700 text-sm font-mono"
+            className="h-7 bg-background border-border text-sm font-mono"
             autoFocus
           />
           {searchQuery && searchMatches.length > 0 && (
             <>
-              <span className="text-xs text-gray-400">
+              <span className="text-xs text-muted-foreground">
                 {searchIndex + 1}/{searchMatches.length}
               </span>
               <Button

@@ -46,12 +46,12 @@ const STATE_LABELS: Record<VoiceStreamState, string> = {
 
 const STATE_COLORS: Record<VoiceStreamState, string> = {
   disconnected: 'text-muted-foreground',
-  connecting: 'text-yellow-400',
-  connected: 'text-green-400',
-  speaking: 'text-blue-400',
+  connecting: 'text-warning',
+  connected: 'text-success',
+  speaking: 'text-info',
   processing: 'text-orange-400',
-  responding: 'text-purple-400',
-  error: 'text-red-400',
+  responding: 'text-agent',
+  error: 'text-destructive',
 }
 
 function formatDuration(seconds: number): string {
@@ -125,11 +125,11 @@ export function VoiceCallPanel({
               <div
                 className={[
                   'h-3 w-3 rounded-full',
-                  isActive ? 'bg-green-500' : state === 'error' ? 'bg-red-500' : 'bg-muted',
+                  isActive ? 'bg-success' : state === 'error' ? 'bg-destructive' : 'bg-muted',
                 ].join(' ')}
               />
               {(state === 'speaking' || state === 'responding') && (
-                <div className="absolute inset-0 h-3 w-3 animate-ping rounded-full bg-green-500/50" />
+                <div className="absolute inset-0 h-3 w-3 animate-ping rounded-full bg-success/50" />
               )}
             </div>
             <div>
@@ -154,7 +154,7 @@ export function VoiceCallPanel({
                 key={`${entry.timestamp}-${i}`}
                 className={`text-xs ${
                   entry.role === 'user'
-                    ? 'text-blue-300'
+                    ? 'text-info/80'
                     : 'text-orange-300'
                 }`}
               >
@@ -191,7 +191,7 @@ export function VoiceCallPanel({
                 {[...Array(5)].map((_, i) => (
                   <motion.div
                     key={i}
-                    className="w-1.5 bg-blue-400 rounded-full"
+                    className="w-1.5 bg-info rounded-full"
                     animate={{ height: [8, 24, 8] }}
                     transition={{
                       repeat: Infinity,
@@ -251,7 +251,7 @@ export function VoiceCallPanel({
 
         {/* Error message */}
         {error && (
-          <p className="text-center text-xs text-red-400 pb-2 px-4">
+          <p className="text-center text-xs text-destructive pb-2 px-4">
             {error}
           </p>
         )}
@@ -266,7 +266,7 @@ export function VoiceCallPanel({
               onClick={() => setMuted(!muted)}
             >
               {muted ? (
-                <MicOff className="w-5 h-5 text-red-400" />
+                <MicOff className="w-5 h-5 text-destructive" />
               ) : (
                 <Mic className="w-5 h-5" />
               )}
@@ -279,7 +279,7 @@ export function VoiceCallPanel({
             className={[
               'h-16 w-16 rounded-full shadow-lg transition-all',
               isActive
-                ? 'bg-red-600 hover:bg-red-700 shadow-red-500/25'
+                ? 'bg-destructive hover:bg-destructive/80 shadow-destructive/25'
                 : 'bg-gradient-to-br from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 shadow-green-500/25',
             ].join(' ')}
             onClick={handleToggleCall}

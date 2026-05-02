@@ -75,11 +75,11 @@ interface DocumentDetails {
 }
 
 const statusStyles: Record<string, string> = {
-  completed: 'bg-green-500/10 text-green-400 border-green-500/20',
-  processed: 'bg-green-500/10 text-green-400 border-green-500/20',
-  processing: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
-  failed: 'bg-red-500/10 text-red-400 border-red-500/20',
-  pending: 'bg-gray-500/10 text-gray-400 border-gray-500/20'
+  completed: 'bg-success/10 text-success border-success/20',
+  processed: 'bg-success/10 text-success border-success/20',
+  processing: 'bg-warning/10 text-warning border-warning/20',
+  failed: 'bg-destructive/10 text-destructive border-destructive/20',
+  pending: 'bg-secondary/50 text-muted-foreground border-border/30'
 }
 
 const stageStatusIcons = {
@@ -90,10 +90,10 @@ const stageStatusIcons = {
 }
 
 const stageStatusColors = {
-  completed: 'text-green-400',
-  processing: 'text-yellow-400',
-  failed: 'text-red-400',
-  pending: 'text-gray-400'
+  completed: 'text-success',
+  processing: 'text-warning',
+  failed: 'text-destructive',
+  pending: 'text-muted-foreground'
 }
 
 export function DocumentDetailsModal({ 
@@ -186,7 +186,7 @@ export function DocumentDetailsModal({
                     variant="outline" 
                     size="sm"
                     onClick={handleDownload}
-                    className="hover:border-blue-500/50"
+                    className="hover:border-info/50"
                   >
                     <Download className="w-4 h-4 mr-2" />
                     Download
@@ -195,7 +195,7 @@ export function DocumentDetailsModal({
                     variant="outline" 
                     size="sm"
                     onClick={handleDelete}
-                    className="hover:border-red-500/50 text-red-400"
+                    className="hover:border-destructive/50 text-destructive"
                   >
                     <Trash2 className="w-4 h-4 mr-2" />
                     Delete
@@ -221,8 +221,8 @@ export function DocumentDetailsModal({
             {error && (
               <div className="flex items-center justify-center py-12">
                 <div className="text-center">
-                  <AlertTriangle className="h-8 w-8 text-red-400 mx-auto mb-4" />
-                  <p className="text-red-400 mb-4">Error: {error}</p>
+                  <AlertTriangle className="h-8 w-8 text-destructive mx-auto mb-4" />
+                  <p className="text-destructive mb-4">Error: {error}</p>
                   <Button onClick={loadDocumentDetails} variant="outline">
                     Try Again
                   </Button>
@@ -360,7 +360,7 @@ export function DocumentDetailsModal({
                         <div className="space-y-4">
                           {document?.processing_stages?.map((stage, index) => {
                             const StatusIcon = stageStatusIcons[stage?.status] || Clock
-                            const statusColor = stageStatusColors[stage?.status] || 'text-gray-400'
+                            const statusColor = stageStatusColors[stage?.status] || 'text-muted-foreground'
                             
                             return (
                               <div key={index} className="flex items-center justify-between p-3 bg-background/50 rounded-lg">
@@ -394,15 +394,15 @@ export function DocumentDetailsModal({
                       <CardContent>
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                           <div className="text-center p-3 bg-background/50 rounded-lg">
-                            <p className="text-2xl font-bold text-green-400">{document?.processing_info?.embeddings_created}</p>
+                            <p className="text-2xl font-bold text-success">{document?.processing_info?.embeddings_created}</p>
                             <p className="text-sm text-muted-foreground">Embeddings</p>
                           </div>
                           <div className="text-center p-3 bg-background/50 rounded-lg">
-                            <p className="text-2xl font-bold text-blue-400">{document?.processing_info?.total_tokens?.toLocaleString()}</p>
+                            <p className="text-2xl font-bold text-info">{document?.processing_info?.total_tokens?.toLocaleString()}</p>
                             <p className="text-sm text-muted-foreground">Tokens</p>
                           </div>
                           <div className="text-center p-3 bg-background/50 rounded-lg">
-                            <p className="text-2xl font-bold text-purple-400">{document?.processing_info?.processing_time}</p>
+                            <p className="text-2xl font-bold text-agent">{document?.processing_info?.processing_time}</p>
                             <p className="text-sm text-muted-foreground">Process Time</p>
                           </div>
                           <div className="text-center p-3 bg-background/50 rounded-lg">
@@ -425,11 +425,11 @@ export function DocumentDetailsModal({
                       <CardContent>
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                           <div className="text-center p-4 bg-background/50 rounded-lg">
-                            <p className="text-2xl font-bold text-blue-400">{document?.access_info?.view_count || 0}</p>
+                            <p className="text-2xl font-bold text-info">{document?.access_info?.view_count || 0}</p>
                             <p className="text-sm text-muted-foreground">Total Views</p>
                           </div>
                           <div className="text-center p-4 bg-background/50 rounded-lg">
-                            <p className="text-2xl font-bold text-green-400">{document?.access_info?.download_count || 0}</p>
+                            <p className="text-2xl font-bold text-success">{document?.access_info?.download_count || 0}</p>
                             <p className="text-sm text-muted-foreground">Downloads</p>
                           </div>
                           <div className="text-center p-4 bg-background/50 rounded-lg">

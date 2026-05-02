@@ -288,7 +288,7 @@ export function AnalyticsAgents({ days }: Props) {
                           </div>
                         </td>
                         <td className="p-4 hidden md:table-cell">
-                          <Badge variant="outline" className={agent.status === 'active' ? 'text-[hsl(var(--success))] border-[hsl(var(--success))]/30' : 'text-gray-400'}>
+                          <Badge variant="outline" className={agent.status === 'active' ? 'text-[hsl(var(--success))] border-[hsl(var(--success))]/30' : 'text-muted-foreground'}>
                             {agent.status}
                           </Badge>
                         </td>

@@ -77,9 +77,9 @@ export function MessageActions({
         variant="ghost"
         size="sm"
         onClick={handleCopy}
-        className="text-gray-500 hover:text-gray-300 p-1 h-auto"
+        className="text-muted-foreground hover:text-foreground/90 p-1 h-auto"
       >
-        {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+        {copied ? <Check className="w-3 h-3 text-success" /> : <Copy className="w-3 h-3" />}
       </Button>
 
       {role === 'assistant' && !isReadonly && (
@@ -89,7 +89,7 @@ export function MessageActions({
             size="sm"
             onClick={() => handleVote(true)}
             className={`p-1 h-auto ${
-              isUpvoted === true ? 'text-green-400' : 'text-gray-500 hover:text-green-400'
+              isUpvoted === true ? 'text-success' : 'text-muted-foreground hover:text-success'
             }`}
           >
             <ThumbsUp className="w-3 h-3" />
@@ -99,7 +99,7 @@ export function MessageActions({
             size="sm"
             onClick={() => handleVote(false)}
             className={`p-1 h-auto ${
-              isUpvoted === false ? 'text-red-400' : 'text-gray-500 hover:text-red-400'
+              isUpvoted === false ? 'text-destructive' : 'text-muted-foreground hover:text-destructive'
             }`}
           >
             <ThumbsDown className="w-3 h-3" />
@@ -108,7 +108,7 @@ export function MessageActions({
             variant="ghost"
             size="sm"
             onClick={regenerate}
-            className="text-gray-500 hover:text-gray-300 p-1 h-auto"
+            className="text-muted-foreground hover:text-foreground/90 p-1 h-auto"
           >
             <RotateCw className="w-3 h-3" />
           </Button>
@@ -127,7 +127,7 @@ export function MessageActions({
       )}
 
       {timeLabel && (
-        <span className="text-[11px] text-gray-500 pl-1">{timeLabel}</span>
+        <span className="text-[11px] text-muted-foreground pl-1">{timeLabel}</span>
       )}
     </div>
   )

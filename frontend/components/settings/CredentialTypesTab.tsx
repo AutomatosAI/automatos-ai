@@ -190,7 +190,7 @@ export function CredentialTypesTab() {
                         </div>
                       </div>
                       {type.is_system && (
-                        <Badge className="bg-blue-500/20 text-blue-400 text-xs">
+                        <Badge className="bg-info/20 text-info text-xs">
                           System
                         </Badge>
                       )}
@@ -301,7 +301,7 @@ export function CredentialTypesTab() {
                         <div>
                           <p className="font-semibold">
                             {field.displayName}
-                            {field.required && <span className="text-red-500 ml-1">*</span>}
+                            {field.required && <span className="text-destructive ml-1">*</span>}
                           </p>
                           <p className="text-xs text-muted-foreground">
                             Field: <code className="text-xs">{field.name}</code>

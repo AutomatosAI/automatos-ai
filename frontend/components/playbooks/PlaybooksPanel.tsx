@@ -51,7 +51,7 @@ export function PlaybooksPanel() {
             <Button onClick={load} variant="outline" disabled={loading}>{loading ? 'Loading…' : 'Refresh'}</Button>
             <Button onClick={mine} disabled={loading}>Mine</Button>
           </div>
-          {error && <div className="text-sm text-red-500">{error}</div>}
+          {error && <div className="text-sm text-destructive">{error}</div>}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {items.map((p) => (
               <div key={p.id} className="p-4 rounded border border-border/50 bg-secondary/20">

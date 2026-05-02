@@ -114,10 +114,10 @@ export function TeamManagement() {
 
     const getRoleBadgeColor = (role: string) => {
         switch (role) {
-            case 'owner': return 'text-purple-400 border-purple-400/30 bg-purple-400/10'
-            case 'admin': return 'text-orange-400 border-orange-400/30 bg-orange-400/10'
-            case 'editor': return 'text-blue-400 border-blue-400/30 bg-blue-400/10'
-            case 'viewer': return 'text-green-400 border-green-400/30 bg-green-400/10'
+            case 'owner': return 'text-agent border-agent/30 bg-agent/10'
+            case 'admin': return 'text-warning border-warning/30 bg-warning/10'
+            case 'editor': return 'text-info border-info/30 bg-info/10'
+            case 'viewer': return 'text-success border-success/30 bg-success/10'
             default: return 'text-muted-foreground border-border bg-secondary/50'
         }
     }
@@ -193,15 +193,15 @@ export function TeamManagement() {
                     className="glass-card rounded-xl border border-border/30 overflow-hidden"
                 >
                     <div className="p-4 border-b border-border/30 bg-white/5 flex items-center gap-2">
-                        <Clock className="w-4 h-4 text-amber-400" />
+                        <Clock className="w-4 h-4 text-warning" />
                         <h3 className="font-medium text-sm">Pending invitations ({pendingInvites.length})</h3>
                     </div>
                     <div className="divide-y divide-white/5">
                         {pendingInvites.map((inv) => (
                             <div key={inv.id} className="flex items-center justify-between p-4 hover:bg-white/5 transition-colors group">
                                 <div className="flex items-center gap-3">
-                                    <div className="w-9 h-9 rounded-full bg-amber-400/10 border border-amber-400/30 flex items-center justify-center">
-                                        <Mail className="w-4 h-4 text-amber-400" />
+                                    <div className="w-9 h-9 rounded-full bg-warning/10 border border-warning/30 flex items-center justify-center">
+                                        <Mail className="w-4 h-4 text-warning" />
                                     </div>
                                     <div>
                                         <div className="font-medium text-foreground">{inv.email}</div>
@@ -215,7 +215,7 @@ export function TeamManagement() {
                                     variant="ghost"
                                     size="sm"
                                     onClick={() => handleRevokeInvite(inv.id)}
-                                    className="text-muted-foreground hover:text-red-400 hover:bg-red-400/10"
+                                    className="text-muted-foreground hover:text-destructive hover:bg-destructive/10"
                                     title="Revoke invitation"
                                 >
                                     <X className="w-4 h-4 mr-1" />
@@ -279,10 +279,10 @@ export function TeamManagement() {
                                             onChange={(e) => handleRoleChange(member.id, e.target.value)}
                                             className={`appearance-none pl-3 pr-8 py-1.5 text-xs font-semibold rounded-full border bg-transparent focus:outline-none focus:ring-1 focus:ring-offset-0 cursor-pointer ${getRoleBadgeColor(member.role)}`}
                                         >
-                                            <option value="owner" className="bg-[#1a1a1a] text-purple-400">Owner</option>
+                                            <option value="owner" className="bg-[#1a1a1a] text-agent">Owner</option>
                                             <option value="admin" className="bg-[#1a1a1a] text-orange-400">Admin</option>
-                                            <option value="editor" className="bg-[#1a1a1a] text-blue-400">Editor</option>
-                                            <option value="viewer" className="bg-[#1a1a1a] text-green-400">Viewer</option>
+                                            <option value="editor" className="bg-[#1a1a1a] text-info">Editor</option>
+                                            <option value="viewer" className="bg-[#1a1a1a] text-success">Viewer</option>
                                         </select>
                                         {/* Tiny custom arrow since we removed appearance */}
                                         <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-current opacity-50">
@@ -302,7 +302,7 @@ export function TeamManagement() {
                                             variant="ghost"
                                             size="icon"
                                             onClick={() => handleRemoveMember(member.id)}
-                                            className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-red-400 hover:bg-red-400/10 transition-all"
+                                            className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all"
                                             title="Remove member"
                                         >
                                             <Trash2 className="w-4 h-4" />

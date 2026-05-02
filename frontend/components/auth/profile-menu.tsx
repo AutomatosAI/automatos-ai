@@ -158,7 +158,7 @@ export function ProfileMenu() {
                     <DropdownMenu.Separator className="h-px bg-slate-700/50 my-2" />
 
                     <DropdownMenu.Item
-                        className="flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm text-red-400 hover:text-red-300 hover:bg-red-500/10 cursor-pointer outline-none transition-colors"
+                        className="flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm text-destructive hover:text-destructive/80 hover:bg-destructive/10 cursor-pointer outline-none transition-colors"
                         onSelect={handleSignOut}
                     >
                         <LogOut className="w-4 h-4" />

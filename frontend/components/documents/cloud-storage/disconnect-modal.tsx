@@ -57,7 +57,7 @@ export function DisconnectModal({
           >
             {/* Header */}
             <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2 text-red-400">
+              <div className="flex items-center gap-2 text-destructive">
                 <AlertTriangle className="w-5 h-5" />
                 <h3 className="text-lg font-semibold">Disconnect {appName}</h3>
               </div>
@@ -85,7 +85,7 @@ export function DisconnectModal({
                   onClick={() => setDeleteVectors(false)}
                 >
                   <div className="flex items-center gap-2 font-medium mb-1">
-                    <Database className="w-4 h-4 text-green-400" />
+                    <Database className="w-4 h-4 text-success" />
                     Keep vector embeddings
                   </div>
                   <div className="text-xs text-muted-foreground">
@@ -96,12 +96,12 @@ export function DisconnectModal({
                 <button
                   className={`w-full p-3 rounded-lg border text-left transition-colors text-sm ${
                     deleteVectors
-                      ? 'border-red-500/40 bg-red-500/5'
-                      : 'border-border hover:border-red-500/20'
+                      ? 'border-destructive/40 bg-destructive/5'
+                      : 'border-border hover:border-destructive/20'
                   }`}
                   onClick={() => setDeleteVectors(true)}
                 >
-                  <div className="flex items-center gap-2 font-medium mb-1 text-red-400">
+                  <div className="flex items-center gap-2 font-medium mb-1 text-destructive">
                     <Trash2 className="w-4 h-4" />
                     Delete all vectors
                   </div>

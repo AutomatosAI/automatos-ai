@@ -108,7 +108,7 @@ function highlightJson(value: unknown): string {
 
 function StatusBadge({ status }: { status: StepExecutionData['status'] }) {
   const config = {
-    pending: { label: 'Pending', className: 'text-gray-400 border-gray-400/40', icon: null },
+    pending: { label: 'Pending', className: 'text-muted-foreground border-border/40', icon: null },
     running: {
       label: 'Running',
       className: 'text-orange-400 border-orange-400/40',
@@ -116,12 +116,12 @@ function StatusBadge({ status }: { status: StepExecutionData['status'] }) {
     },
     success: {
       label: 'Success',
-      className: 'text-emerald-400 border-emerald-400/40',
+      className: 'text-success border-success/40',
       icon: <CheckCircle className="w-3 h-3" />,
     },
     failed: {
       label: 'Failed',
-      className: 'text-red-400 border-red-400/40',
+      className: 'text-destructive border-destructive/40',
       icon: <AlertCircle className="w-3 h-3" />,
     },
   }[status]
@@ -189,15 +189,15 @@ function LLMMessagesSection({ messages }: { messages: LLMMessage[] }) {
   const getRoleStyle = (role: LLMMessage['role']) => {
     switch (role) {
       case 'system':
-        return 'text-purple-400 bg-purple-400/10 border-purple-400/20'
+        return 'text-agent bg-agent/10 border-agent/20'
       case 'user':
-        return 'text-blue-400 bg-blue-400/10 border-blue-400/20'
+        return 'text-info bg-info/10 border-info/20'
       case 'assistant':
-        return 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20'
+        return 'text-success bg-success/10 border-success/20'
       case 'tool':
         return 'text-orange-400 bg-orange-400/10 border-orange-400/20'
       default:
-        return 'text-gray-400 bg-gray-400/10 border-gray-400/20'
+        return 'text-muted-foreground bg-secondary/50 border-border/20'
     }
   }
 
@@ -237,13 +237,13 @@ function ToolCallsSection({ toolCalls }: { toolCalls: ToolCall[] }) {
   const getToolStatusIcon = (status?: ToolCall['status']) => {
     switch (status) {
       case 'success':
-        return <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
+        return <CheckCircle className="w-3.5 h-3.5 text-success" />
       case 'error':
-        return <AlertCircle className="w-3.5 h-3.5 text-red-400" />
+        return <AlertCircle className="w-3.5 h-3.5 text-destructive" />
       case 'pending':
         return <Loader2 className="w-3.5 h-3.5 text-orange-400 animate-spin" />
       default:
-        return <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
+        return <CheckCircle className="w-3.5 h-3.5 text-success" />
     }
   }
 
@@ -343,7 +343,7 @@ function StepResultSection({ result }: { result: unknown }) {
         title="Copy result"
       >
         {copied ? (
-          <Check className="w-3.5 h-3.5 text-emerald-400" />
+          <Check className="w-3.5 h-3.5 text-success" />
         ) : (
           <Copy className="w-3.5 h-3.5 text-muted-foreground" />
         )}
@@ -367,7 +367,7 @@ export function TheaterStepExecution({ step, index }: TheaterStepExecutionProps)
       className={cn(
         'glass-card rounded-2xl p-4 transition-all',
         step.status === 'running' && 'ring-1 ring-orange-400/30',
-        step.status === 'failed' && 'ring-1 ring-red-400/30'
+        step.status === 'failed' && 'ring-1 ring-destructive/30'
       )}
     >
       {/* Header: Step name, agent, status */}
@@ -414,12 +414,12 @@ export function TheaterStepExecution({ step, index }: TheaterStepExecutionProps)
           )}
           {step.duration_ms !== undefined && step.duration_ms > 0 && (
             <span className="flex items-center gap-1">
-              <Clock className="w-3 h-3 text-emerald-400" />
+              <Clock className="w-3 h-3 text-success" />
               {formatDuration(step.duration_ms)}
             </span>
           )}
           {step.retries !== undefined && step.retries > 0 && (
-            <Badge variant="outline" className="text-[10px] text-amber-400 border-amber-400/30">
+            <Badge variant="outline" className="text-[10px] text-warning border-warning/30">
               {step.retries} retries
             </Badge>
           )}
@@ -436,10 +436,10 @@ export function TheaterStepExecution({ step, index }: TheaterStepExecutionProps)
 
       {/* Error message */}
       {step.error && (
-        <div className="mt-3 p-3 rounded-xl border border-red-400/30 bg-red-400/10 text-red-200 text-sm flex items-start gap-2">
+        <div className="mt-3 p-3 rounded-xl border border-destructive/30 bg-destructive/10 text-destructive/70 text-sm flex items-start gap-2">
           <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
           <div>
-            <div className="font-semibold text-red-300">Error</div>
+            <div className="font-semibold text-destructive/80">Error</div>
             <p className="mt-0.5 break-words">{step.error}</p>
           </div>
         </div>

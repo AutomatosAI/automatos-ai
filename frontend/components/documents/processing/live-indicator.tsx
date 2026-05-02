@@ -15,8 +15,8 @@ export function LiveIndicator({ isConnected, lastUpdate }: LiveIndicatorProps) {
       variant="outline" 
       className={`flex items-center space-x-2 ${
         isConnected 
-          ? 'text-green-400 border-green-500/20 bg-green-500/10' 
-          : 'text-gray-400 border-gray-500/20 bg-gray-500/10'
+          ? 'text-success border-success/20 bg-success/10' 
+          : 'text-muted-foreground border-border/30 bg-secondary/50'
       }`}
     >
       {isConnected ? (

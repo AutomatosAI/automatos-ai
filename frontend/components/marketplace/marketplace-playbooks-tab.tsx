@@ -219,7 +219,7 @@ export function MarketplacePlaybooksTab({ searchQuery }: MarketplacePlaybooksTab
                     <div className="flex items-center gap-2">
                       <span className="font-semibold text-sm truncate">{recipe.name}</span>
                       {isAdmin && !recipe.is_approved && (
-                        <Badge variant="outline" className="text-[10px] border-yellow-500/30 text-yellow-400 shrink-0">
+                        <Badge variant="outline" className="text-[10px] border-warning/30 text-warning shrink-0">
                           Pending
                         </Badge>
                       )}
@@ -272,7 +272,7 @@ export function MarketplacePlaybooksTab({ searchQuery }: MarketplacePlaybooksTab
                           {recipe.name}
                         </h3>
                         {isAdmin && !recipe.is_approved && (
-                          <Badge variant="outline" className="text-xs border-yellow-500/30 text-yellow-400">
+                          <Badge variant="outline" className="text-xs border-warning/30 text-warning">
                             Pending
                           </Badge>
                         )}

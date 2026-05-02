@@ -256,7 +256,7 @@ function RecommendedCard({
                     FEATURED
                   </span>
                 ) : isNew ? (
-                  <span className="font-mono text-[9px] tracking-wider px-1.5 py-px rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shrink-0">
+                  <span className="font-mono text-[9px] tracking-wider px-1.5 py-px rounded bg-success/15 text-success border border-success/30 shrink-0">
                     NEW
                   </span>
                 ) : null}

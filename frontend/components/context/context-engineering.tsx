@@ -46,9 +46,9 @@ import { PatternDetailsModal } from './pattern-details-modal'
 import { DatabaseQueryAnalytics } from './DatabaseQueryAnalytics'
 
 const confidenceColors = {
-  high: 'text-green-400',
-  medium: 'text-yellow-400',
-  low: 'text-red-400'
+  high: 'text-success',
+  medium: 'text-warning',
+  low: 'text-destructive'
 }
 
 const getConfidenceLevel = (confidence: number) => {
@@ -89,14 +89,14 @@ export function ContextEngineering() {
       value: (contextStats as any)?.contextQueries?.toString() || '0',
       change: (contextStats as any)?.lastQueryTime ? `Last: ${new Date((contextStats as any).lastQueryTime).toLocaleTimeString()}` : 'No activity',
       icon: Search,
-      color: 'text-blue-400'
+      color: 'text-info'
     },
     {
       label: 'Retrieval Success',
       value: `${((contextStats as any)?.retrievalSuccess || 0).toFixed(1)}%`,
       change: (contextStats as any)?.systemStatus === 'operational' ? 'System operational' : 'No RAG activity',
       icon: Target,
-      color: 'text-green-400'
+      color: 'text-success'
     },
     {
       label: 'Avg Response Time',
@@ -110,7 +110,7 @@ export function ContextEngineering() {
       value: (contextStats as any)?.vectorEmbeddings?.toString() || '0',
       change: `${(contextStats as any)?.vectorEmbeddings || 0} total chunks`,
       icon: Database,
-      color: 'text-purple-400'
+      color: 'text-agent'
     }
   ], [contextStats])
 
@@ -256,7 +256,7 @@ export function ContextEngineering() {
                   <div className="text-sm text-muted-foreground truncate">{stat.label}</div>
                 </div>
               </div>
-              <div className="shrink-0 text-right text-xs text-green-400">
+              <div className="shrink-0 text-right text-xs text-success">
                 {loading ? 'Loading…' : stat.change}
               </div>
             </div>
@@ -665,14 +665,14 @@ export function ContextEngineering() {
                     <div className="flex items-center justify-between p-4 bg-secondary/30 rounded-lg">
                       <div className="flex items-center gap-3">
                         <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                          (optimizationData as any).system_health === 'healthy' ? 'bg-green-500/20' :
-                          (optimizationData as any).system_health === 'needs_attention' ? 'bg-yellow-500/20' :
-                          'bg-red-500/20'
+                          (optimizationData as any).system_health === 'healthy' ? 'bg-success/20' :
+                          (optimizationData as any).system_health === 'needs_attention' ? 'bg-warning/20' :
+                          'bg-destructive/20'
                         }`}>
                           <Activity className={`w-5 h-5 ${
-                            (optimizationData as any).system_health === 'healthy' ? 'text-green-500' :
-                            (optimizationData as any).system_health === 'needs_attention' ? 'text-yellow-500' :
-                            'text-red-500'
+                            (optimizationData as any).system_health === 'healthy' ? 'text-success' :
+                            (optimizationData as any).system_health === 'needs_attention' ? 'text-warning' :
+                            'text-destructive'
                           }`} />
                         </div>
                         <div>
@@ -709,18 +709,18 @@ export function ContextEngineering() {
                           animate={{ opacity: 1, x: 0 }}
                           transition={{ delay: index * 0.1 }}
                           className={`p-4 border rounded-lg ${
-                            rec.type === 'error' ? 'border-red-500/20 bg-red-500/5' :
-                            rec.type === 'warning' ? 'border-yellow-500/20 bg-yellow-500/5' :
-                            rec.type === 'success' ? 'border-green-500/20 bg-green-500/5' :
-                            'border-blue-500/20 bg-blue-500/5'
+                            rec.type === 'error' ? 'border-destructive/20 bg-destructive/5' :
+                            rec.type === 'warning' ? 'border-warning/20 bg-warning/5' :
+                            rec.type === 'success' ? 'border-success/20 bg-success/5' :
+                            'border-info/20 bg-info/5'
                           }`}
                         >
                           <div className="flex items-start gap-3">
                             <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
-                              rec.type === 'error' ? 'bg-red-500/20' :
-                              rec.type === 'warning' ? 'bg-yellow-500/20' :
-                              rec.type === 'success' ? 'bg-green-500/20' :
-                              'bg-blue-500/20'
+                              rec.type === 'error' ? 'bg-destructive/20' :
+                              rec.type === 'warning' ? 'bg-warning/20' :
+                              rec.type === 'success' ? 'bg-success/20' :
+                              'bg-info/20'
                             }`}>
                               {rec.type === 'error' ? '✗' :
                                rec.type === 'warning' ? '⚠' :

@@ -44,7 +44,7 @@ export function SystemHealth() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex items-center gap-2 text-red-400">
+          <div className="flex items-center gap-2 text-destructive">
             <AlertCircle className="w-5 h-5" />
             <span>Error loading health data</span>
           </div>
@@ -74,9 +74,9 @@ export function SystemHealth() {
           {/* Overall Status */}
           <div className="flex items-center space-x-3 pb-3 border-b border-border/50">
             {isHealthy ? (
-              <CheckCircle className="w-6 h-6 text-green-500" />
+              <CheckCircle className="w-6 h-6 text-success" />
             ) : (
-              <AlertCircle className="w-6 h-6 text-red-500" />
+              <AlertCircle className="w-6 h-6 text-destructive" />
             )}
             <div className="flex-1">
               <div className="font-medium text-base">
@@ -97,7 +97,7 @@ export function SystemHealth() {
               <div key={service} className="flex items-center justify-between py-1">
                 <div className="flex items-center gap-2">
                   <div className={`w-2 h-2 rounded-full ${
-                    status === 'healthy' ? 'bg-green-500' : 'bg-red-500'
+                    status === 'healthy' ? 'bg-success' : 'bg-destructive'
                   }`} />
                   <span className="text-sm capitalize">{service.replace('_', ' ')}</span>
                 </div>

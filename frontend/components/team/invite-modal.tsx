@@ -60,7 +60,7 @@ export function InviteModal({ isOpen, onClose, onInvite, workspaceId }: InviteMo
 
                     <form onSubmit={handleSubmit} className="p-6 space-y-4">
                         {error && (
-                            <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg flex items-start gap-3 text-red-400 text-sm">
+                            <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-lg flex items-start gap-3 text-destructive text-sm">
                                 <ShieldAlert className="w-5 h-5 flex-shrink-0" />
                                 <span>{error}</span>
                             </div>

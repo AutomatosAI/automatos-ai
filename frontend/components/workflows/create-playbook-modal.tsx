@@ -242,7 +242,7 @@ export function CreatePlaybookModal({ open, onClose, onSave, initialData, recipe
                               <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Basic Information</h3>
                               <div>
                                 <Label htmlFor="playbook-name">
-                                  Playbook Name <span className="text-red-400">*</span>
+                                  Playbook Name <span className="text-destructive">*</span>
                                 </Label>
                                 <Input
                                   id="playbook-name"

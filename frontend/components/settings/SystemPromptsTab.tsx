@@ -82,14 +82,14 @@ interface Category {
 
 const CATEGORY_COLORS: Record<string, string> = {
   personality: 'bg-violet-500/15 text-violet-400 border-violet-500/30',
-  orchestrator: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
-  specialized: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
-  persona: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
+  orchestrator: 'bg-info/15 text-info border-info/30',
+  specialized: 'bg-warning/15 text-warning border-warning/30',
+  persona: 'bg-success/15 text-success border-success/30',
 }
 
 const STATUS_COLORS: Record<string, string> = {
-  active: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
-  draft: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30',
+  active: 'bg-success/15 text-success border-success/30',
+  draft: 'bg-warning/15 text-warning border-warning/30',
   archived: 'bg-zinc-500/15 text-zinc-400 border-zinc-500/30',
 }
 
@@ -390,7 +390,7 @@ export function SystemPromptsTab() {
         <Button variant="ghost" size="icon" onClick={() => setSelectedPrompt(null)}>
           <ArrowLeft className="w-4 h-4" />
         </Button>
-        <FileText className="w-5 h-5 text-amber-400" />
+        <FileText className="w-5 h-5 text-warning" />
         <h2 className="text-base font-semibold">{selectedPrompt.display_name}</h2>
         <Badge variant="outline" className={CATEGORY_COLORS[selectedPrompt.category] || ''}>
           {selectedPrompt.category}
@@ -497,7 +497,7 @@ export function SystemPromptsTab() {
                           <div
                             className={cn(
                               'h-full rounded-full transition-all',
-                              pct != null && pct >= 70 ? 'bg-emerald-500' : pct != null && pct >= 40 ? 'bg-yellow-500' : 'bg-red-500'
+                              pct != null && pct >= 70 ? 'bg-success' : pct != null && pct >= 40 ? 'bg-warning' : 'bg-destructive'
                             )}
                             style={{ width: `${pct ?? 0}%` }}
                           />
@@ -561,7 +561,7 @@ export function SystemPromptsTab() {
               onClick={toggleFutureAGI}
               className={cn(
                 'relative inline-flex h-6 w-11 items-center rounded-full transition-colors',
-                selectedPrompt?.futureagi_eval_enabled ? 'bg-emerald-500' : 'bg-zinc-600'
+                selectedPrompt?.futureagi_eval_enabled ? 'bg-success' : 'bg-zinc-600'
               )}
             >
               <span className={cn(
@@ -599,9 +599,9 @@ export function SystemPromptsTab() {
                         variant="outline"
                         className={cn(
                           'text-[10px]',
-                          run.status === 'completed' ? 'bg-emerald-500/15 text-emerald-400' :
-                          run.status === 'running' ? 'bg-blue-500/15 text-blue-400' :
-                          run.status === 'failed' ? 'bg-red-500/15 text-red-400' :
+                          run.status === 'completed' ? 'bg-success/15 text-success' :
+                          run.status === 'running' ? 'bg-info/15 text-info' :
+                          run.status === 'failed' ? 'bg-destructive/15 text-destructive' :
                           'bg-zinc-500/15 text-zinc-400'
                         )}
                       >
@@ -624,7 +624,7 @@ export function SystemPromptsTab() {
                         return (
                           <div key={key} className="text-xs">
                             <div className="flex items-center gap-1.5 mb-0.5">
-                              <span className={cn('inline-block w-1.5 h-1.5 rounded-full', passed ? 'bg-emerald-400' : passed === false ? 'bg-amber-400' : 'bg-zinc-400')} />
+                              <span className={cn('inline-block w-1.5 h-1.5 rounded-full', passed ? 'bg-success' : passed === false ? 'bg-warning' : 'bg-zinc-400')} />
                               <span className="font-medium">{key.replace(/_/g, ' ')}</span>
                               {pct != null && <span className="text-muted-foreground">({pct}%)</span>}
                             </div>
@@ -640,7 +640,7 @@ export function SystemPromptsTab() {
                     <div className="mt-2 space-y-1.5">
                       {run.scores.safe != null && (
                         <div className="flex items-center gap-1.5 text-xs font-medium">
-                          <span className={cn('inline-block w-2 h-2 rounded-full', run.scores.safe ? 'bg-emerald-400' : 'bg-red-400')} />
+                          <span className={cn('inline-block w-2 h-2 rounded-full', run.scores.safe ? 'bg-success' : 'bg-destructive')} />
                           {run.scores.safe ? 'All checks passed' : 'Issues detected'}
                         </div>
                       )}
@@ -649,12 +649,12 @@ export function SystemPromptsTab() {
                         return (
                           <div key={key} className="text-xs">
                             <div className="flex items-center gap-1.5">
-                              <span className={cn('inline-block w-1.5 h-1.5 rounded-full', v?.safe ? 'bg-emerald-400' : v?.safe === false ? 'bg-red-400' : 'bg-zinc-400')} />
+                              <span className={cn('inline-block w-1.5 h-1.5 rounded-full', v?.safe ? 'bg-success' : v?.safe === false ? 'bg-destructive' : 'bg-zinc-400')} />
                               <span className="font-medium">{key.replace(/_/g, ' ')}</span>
                               {v?.safe != null && <span className="text-muted-foreground">({v.safe ? 'safe' : 'flagged'})</span>}
                             </div>
                             {v?.reason && <p className="text-muted-foreground ml-3 line-clamp-2">{v.reason}</p>}
-                            {v?.error && <p className="text-amber-400 ml-3">{v.error}</p>}
+                            {v?.error && <p className="text-warning ml-3">{v.error}</p>}
                           </div>
                         )
                       })}
@@ -665,7 +665,7 @@ export function SystemPromptsTab() {
                   {run.scores && run.run_type === 'optimize' && (
                     <div className="mt-2 text-xs space-y-2">
                       {run.scores.error && (
-                        <p className="text-red-400">{run.scores.error}</p>
+                        <p className="text-destructive">{run.scores.error}</p>
                       )}
                       {run.scores.status === 'completed' && run.scores.optimized_prompt && (
                         <div>
@@ -673,7 +673,7 @@ export function SystemPromptsTab() {
                             <div className="flex items-center gap-2">
                               {run.scores.best_score != null && run.scores.best_score >= 0 ? (
                                 <>
-                                  <span className="font-medium text-emerald-400">Optimized prompt ready</span>
+                                  <span className="font-medium text-success">Optimized prompt ready</span>
                                   <span className="text-muted-foreground">
                                     Score: {(run.scores.best_score * 100).toFixed(0)}%
                                     {run.scores.initial_score != null && run.scores.initial_score >= 0 && (
@@ -682,7 +682,7 @@ export function SystemPromptsTab() {
                                   </span>
                                 </>
                               ) : (
-                                <span className="font-medium text-amber-400">Optimization completed (scoring failed — template variables may have interfered)</span>
+                                <span className="font-medium text-warning">Optimization completed (scoring failed — template variables may have interfered)</span>
                               )}
                             </div>
                             <Button
@@ -708,7 +708,7 @@ export function SystemPromptsTab() {
                       )}
                       {run.scores.status === 'submitted' && (
                         <div>
-                          <p className="text-blue-400">{run.scores.message || 'Optimization submitted to FutureAGI'}</p>
+                          <p className="text-info">{run.scores.message || 'Optimization submitted to FutureAGI'}</p>
                           {run.scores.improve_id && (
                             <p className="text-muted-foreground">Job ID: {run.scores.improve_id}</p>
                           )}

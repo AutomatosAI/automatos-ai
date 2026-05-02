@@ -356,7 +356,7 @@ export function BusinessGraphPanel() {
         </div>
 
         {importError && (
-          <p className="text-sm text-red-400 text-center">{importError}</p>
+          <p className="text-sm text-destructive text-center">{importError}</p>
         )}
       </div>
     )
@@ -385,15 +385,15 @@ export function BusinessGraphPanel() {
       {/* Stats Bar */}
       <div className="glass-card bg-white/5 backdrop-blur-sm border border-white/10 rounded-lg px-4 py-3 flex flex-wrap items-center gap-x-6 gap-y-1 text-sm">
         <span className="flex items-center gap-1.5">
-          <span className="font-semibold text-blue-400">{nodeCount.toLocaleString()}</span>
+          <span className="font-semibold text-info">{nodeCount.toLocaleString()}</span>
           <span className="text-muted-foreground">nodes</span>
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="font-semibold text-green-400">{edgeCount.toLocaleString()}</span>
+          <span className="font-semibold text-success">{edgeCount.toLocaleString()}</span>
           <span className="text-muted-foreground">edges</span>
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="font-semibold text-purple-400">{communityCount}</span>
+          <span className="font-semibold text-agent">{communityCount}</span>
           <span className="text-muted-foreground">clusters</span>
         </span>
         <span className="flex items-center gap-2 ml-auto">
@@ -433,7 +433,7 @@ export function BusinessGraphPanel() {
           </Button>
         </span>
         {importError && (
-          <span className="text-xs text-red-400 w-full">{importError}</span>
+          <span className="text-xs text-destructive w-full">{importError}</span>
         )}
       </div>
 

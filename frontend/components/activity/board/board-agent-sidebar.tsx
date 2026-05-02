@@ -12,9 +12,9 @@ interface BoardAgentSidebarProps {
 }
 
 const BADGE_COLORS: Record<string, string> = {
-  lead: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
-  int: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-  spc: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
+  lead: 'bg-warning/20 text-warning border-warning/30',
+  int: 'bg-info/20 text-info border-info/30',
+  spc: 'bg-agent/20 text-agent border-agent/30',
 }
 
 function getRoleBadge(role: string | undefined): { label: string; color: string } | null {

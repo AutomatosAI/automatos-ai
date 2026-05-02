@@ -19,14 +19,14 @@ export interface OrgChartNodeData {
 }
 
 const STATUS_COLORS: Record<string, string> = {
-  active: 'bg-emerald-500',
+  active: 'bg-success',
   inactive: 'bg-zinc-500',
-  training: 'bg-amber-500',
+  training: 'bg-warning',
 }
 
 const TEAM_COLORS: Record<string, string> = {
-  engineering: 'border-blue-500/60',
-  marketing: 'border-purple-500/60',
+  engineering: 'border-info/60',
+  marketing: 'border-agent/60',
   sales: 'border-green-500/60',
   content: 'border-orange-500/60',
   finance: 'border-yellow-500/60',

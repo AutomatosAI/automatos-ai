@@ -27,21 +27,21 @@ interface WorkflowCanvasProps {
 function AgentNode({ data }: { data: any }) {
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'executing': return 'border-blue-500 bg-blue-500/10'
-      case 'completed': return 'border-green-500 bg-green-500/10'
-      case 'waiting': return 'border-yellow-500 bg-yellow-500/10'
-      case 'error': return 'border-red-500 bg-red-500/10'
-      default: return 'border-gray-500 bg-gray-500/10'
+      case 'executing': return 'border-info bg-info/10'
+      case 'completed': return 'border-success bg-success/10'
+      case 'waiting': return 'border-warning bg-warning/10'
+      case 'error': return 'border-destructive bg-destructive/10'
+      default: return 'border-border bg-secondary/50'
     }
   }
 
   const getStatusIcon = () => {
     switch (data.status) {
-      case 'executing': return <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-      case 'completed': return <div className="w-2 h-2 rounded-full bg-green-500" />
-      case 'waiting': return <div className="w-2 h-2 rounded-full bg-yellow-500 animate-pulse" />
-      case 'error': return <div className="w-2 h-2 rounded-full bg-red-500" />
-      default: return <div className="w-2 h-2 rounded-full bg-gray-500" />
+      case 'executing': return <div className="w-2 h-2 rounded-full bg-info animate-pulse" />
+      case 'completed': return <div className="w-2 h-2 rounded-full bg-success" />
+      case 'waiting': return <div className="w-2 h-2 rounded-full bg-warning animate-pulse" />
+      case 'error': return <div className="w-2 h-2 rounded-full bg-destructive" />
+      default: return <div className="w-2 h-2 rounded-full bg-muted-foreground" />
     }
   }
 
@@ -62,7 +62,7 @@ function AgentNode({ data }: { data: any }) {
             <span>Progress</span>
             <span>{Math.round(data.progress)}%</span>
           </div>
-          <div className="h-1 bg-gray-700 rounded-full overflow-hidden">
+          <div className="h-1 bg-secondary rounded-full overflow-hidden">
             <div 
               className="h-full bg-primary transition-all duration-500"
               style={{ width: `${data.progress}%` }}
@@ -78,19 +78,19 @@ function AgentNode({ data }: { data: any }) {
 function ResourceNode({ data }: { data: any }) {
   const getIcon = () => {
     switch (data.resourceType) {
-      case 'memory': return <Brain className="w-5 h-5 text-purple-400" />
-      case 'database': return <Database className="w-5 h-5 text-blue-400" />
-      case 'document': return <FileText className="w-5 h-5 text-green-400" />
-      case 'tool': return <Zap className="w-5 h-5 text-yellow-400" />
-      default: return <Database className="w-5 h-5 text-gray-400" />
+      case 'memory': return <Brain className="w-5 h-5 text-agent" />
+      case 'database': return <Database className="w-5 h-5 text-info" />
+      case 'document': return <FileText className="w-5 h-5 text-success" />
+      case 'tool': return <Zap className="w-5 h-5 text-warning" />
+      default: return <Database className="w-5 h-5 text-muted-foreground" />
     }
   }
 
   const getColor = () => {
     switch (data.resourceType) {
-      case 'memory': return 'border-purple-500/50 bg-purple-500/10'
-      case 'document': return 'border-green-500/50 bg-green-500/10'
-      case 'tool': return 'border-yellow-500/50 bg-yellow-500/10'
+      case 'memory': return 'border-agent/50 bg-agent/10'
+      case 'document': return 'border-success/50 bg-success/10'
+      case 'tool': return 'border-warning/50 bg-warning/10'
       default: return 'border-border/50 bg-background/50'
     }
   }
@@ -103,7 +103,7 @@ function ResourceNode({ data }: { data: any }) {
           <span className="text-sm font-semibold">{data.label}</span>
         </div>
         {data.activeConnections > 0 && (
-          <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+          <div className="w-2 h-2 rounded-full bg-info animate-pulse" />
         )}
       </div>
       <div className="space-y-1">
@@ -113,7 +113,7 @@ function ResourceNode({ data }: { data: any }) {
           </div>
         )}
         {data.activeConnections > 0 && (
-          <div className="text-xs text-blue-400 font-medium">
+          <div className="text-xs text-info font-medium">
             {data.activeConnections} active {data.activeConnections === 1 ? 'connection' : 'connections'}
           </div>
         )}
@@ -455,9 +455,9 @@ export function WorkflowCanvas({
         <div className="absolute top-4 right-4 w-96 bg-background/95 backdrop-blur border border-border rounded-lg shadow-2xl z-50 max-h-[80%] overflow-hidden flex flex-col">
           <div className="p-4 border-b border-border flex items-center justify-between">
             <div className="flex items-center gap-2">
-              {selectedResource.resourceType === 'memory' && <Brain className="w-5 h-5 text-purple-400" />}
-              {selectedResource.resourceType === 'document' && <FileText className="w-5 h-5 text-green-400" />}
-              {selectedResource.resourceType === 'tool' && <Zap className="w-5 h-5 text-yellow-400" />}
+              {selectedResource.resourceType === 'memory' && <Brain className="w-5 h-5 text-agent" />}
+              {selectedResource.resourceType === 'document' && <FileText className="w-5 h-5 text-success" />}
+              {selectedResource.resourceType === 'tool' && <Zap className="w-5 h-5 text-warning" />}
               <h3 className="font-semibold text-lg">{selectedResource.label}</h3>
             </div>
             <button
@@ -471,12 +471,12 @@ export function WorkflowCanvas({
           <div className="p-4 overflow-y-auto flex-1">
             <div className="space-y-3">
               {selectedResource.id === 'memory-pool' && selectedResource.details.items.map((item: any) => (
-                <div key={item.id} className="p-3 bg-purple-500/10 border border-purple-500/30 rounded-lg">
+                <div key={item.id} className="p-3 bg-agent/10 border border-agent/30 rounded-lg">
                   <div className="flex items-center justify-between mb-2">
                     <Badge variant="outline" className="text-xs">
                       {item.agent}
                     </Badge>
-                    <span className={`text-xs font-bold ${item.action === 'WRITE' ? 'text-green-400' : 'text-blue-400'}`}>
+                    <span className={`text-xs font-bold ${item.action === 'WRITE' ? 'text-success' : 'text-info'}`}>
                       {item.action}
                     </span>
                   </div>
@@ -486,12 +486,12 @@ export function WorkflowCanvas({
               ))}
               
               {selectedResource.id === 'document-rag' && selectedResource.details.items.map((item: any) => (
-                <div key={item.id} className="p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
+                <div key={item.id} className="p-3 bg-success/10 border border-success/30 rounded-lg">
                   <div className="flex items-center justify-between mb-2">
                     <Badge variant="outline" className="text-xs">
                       {item.agent}
                     </Badge>
-                    <span className="text-xs text-green-400 font-mono">{item.results} results</span>
+                    <span className="text-xs text-success font-mono">{item.results} results</span>
                   </div>
                   <p className="text-sm font-medium mb-1">Query:</p>
                   <p className="text-sm text-muted-foreground italic">"{item.query}"</p>
@@ -500,12 +500,12 @@ export function WorkflowCanvas({
               ))}
               
               {selectedResource.id === 'tools' && selectedResource.details.items.map((item: any) => (
-                <div key={item.id} className="p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
+                <div key={item.id} className="p-3 bg-warning/10 border border-warning/30 rounded-lg">
                   <div className="flex items-center justify-between mb-2">
                     <Badge variant="outline" className="text-xs">
                       {item.agent}
                     </Badge>
-                    <span className="text-xs text-yellow-400 font-mono">{item.tool}</span>
+                    <span className="text-xs text-warning font-mono">{item.tool}</span>
                   </div>
                   <p className="text-sm">{item.result}</p>
                   <p className="text-xs text-muted-foreground mt-2 font-mono">{item.timestamp}</p>

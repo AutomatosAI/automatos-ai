@@ -173,12 +173,12 @@ export function InteractiveTerminal({ workspaceId, className }: InteractiveTermi
       onClick={handleContainerClick}
     >
       {/* Terminal toolbar */}
-      <div className="flex items-center justify-between px-3 py-1 border-b border-[#333] bg-[#252526] text-xs text-gray-400 shrink-0">
+      <div className="flex items-center justify-between px-3 py-1 border-b border-[#333] bg-[#252526] text-xs text-muted-foreground shrink-0">
         <span>Terminal</span>
         <Button
           variant="ghost"
           size="icon"
-          className="h-5 w-5 text-gray-400 hover:text-gray-200"
+          className="h-5 w-5 text-muted-foreground hover:text-gray-200"
           onClick={handleClear}
           title="Clear terminal"
         >
@@ -189,7 +189,7 @@ export function InteractiveTerminal({ workspaceId, className }: InteractiveTermi
       {/* Scrollable output area */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto overflow-x-auto p-2 min-h-0">
         {history.length === 0 && !isRunning && (
-          <div className="text-gray-500 text-xs py-1">
+          <div className="text-muted-foreground text-xs py-1">
             Type a command and press Enter
           </div>
         )}
@@ -198,13 +198,13 @@ export function InteractiveTerminal({ workspaceId, className }: InteractiveTermi
           <div key={i} className="mb-2">
             {/* Command prompt line */}
             <div className="flex items-center gap-1.5">
-              <span className="text-green-400 select-none">$</span>
+              <span className="text-success select-none">$</span>
               <span className="text-gray-200">{entry.command}</span>
               {entry.exitCode !== 0 && (
-                <span className="text-red-400 text-xs ml-auto">[{entry.exitCode}]</span>
+                <span className="text-destructive text-xs ml-auto">[{entry.exitCode}]</span>
               )}
               {entry.duration !== undefined && (
-                <span className="text-gray-500 text-xs ml-1">
+                <span className="text-muted-foreground text-xs ml-1">
                   {entry.duration < 1000 ? `${entry.duration}ms` : `${(entry.duration / 1000).toFixed(1)}s`}
                 </span>
               )}
@@ -220,7 +220,7 @@ export function InteractiveTerminal({ workspaceId, className }: InteractiveTermi
 
         {/* Running indicator */}
         {isRunning && (
-          <div className="flex items-center gap-2 text-yellow-400 text-xs py-1">
+          <div className="flex items-center gap-2 text-warning text-xs py-1">
             <Loader2 className="h-3 w-3 animate-spin" />
             <span>Running...</span>
           </div>
@@ -229,8 +229,8 @@ export function InteractiveTerminal({ workspaceId, className }: InteractiveTermi
 
       {/* Input area */}
       <div className="flex items-center gap-1.5 px-2 py-1.5 border-t border-[#333] bg-[#1e1e1e] shrink-0">
-        <span className="text-gray-500 text-xs select-none">{displayCwd}</span>
-        <span className="text-green-400 select-none">$</span>
+        <span className="text-muted-foreground text-xs select-none">{displayCwd}</span>
+        <span className="text-success select-none">$</span>
         <input
           ref={inputRef}
           type="text"
@@ -239,7 +239,7 @@ export function InteractiveTerminal({ workspaceId, className }: InteractiveTermi
           onKeyDown={handleKeyDown}
           disabled={isRunning}
           placeholder={isRunning ? 'Running...' : 'Enter command...'}
-          className="flex-1 bg-transparent border-none outline-none text-gray-100 placeholder:text-gray-600 text-sm font-mono disabled:opacity-50"
+          className="flex-1 bg-transparent border-none outline-none text-gray-100 placeholder:text-muted-foreground text-sm font-mono disabled:opacity-50"
           autoComplete="off"
           spellCheck={false}
         />

@@ -203,8 +203,8 @@ export function TemplatesTab({ onUseTemplate, onOpenCreateModal }: TemplatesTabP
     return (
       <div className="flex items-center justify-center py-12">
         <div className="text-center">
-          <AlertTriangle className="h-8 w-8 text-red-400 mx-auto mb-4" />
-          <p className="text-red-400">Error loading templates</p>
+          <AlertTriangle className="h-8 w-8 text-destructive mx-auto mb-4" />
+          <p className="text-destructive">Error loading templates</p>
         </div>
       </div>
     )
@@ -254,7 +254,7 @@ export function TemplatesTab({ onUseTemplate, onOpenCreateModal }: TemplatesTabP
 
         <Button 
           onClick={() => setShowCreateModal(true)}
-          className="bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200"
+          className="bg-secondary border border-orange-400/50 hover:border-orange-400 hover:bg-secondary text-white transition-all duration-200"
         >
           <Plus className="w-4 h-4 mr-2" />
           Create Template
@@ -295,7 +295,7 @@ export function TemplatesTab({ onUseTemplate, onOpenCreateModal }: TemplatesTabP
                           {template.difficulty}
                         </Badge>
                         {template.is_system && (
-                          <Badge variant="outline" className="text-xs bg-blue-500/10 text-blue-400 border-blue-500/20">
+                          <Badge variant="outline" className="text-xs bg-info/10 text-info border-info/20">
                             System
                           </Badge>
                         )}
@@ -337,7 +337,7 @@ export function TemplatesTab({ onUseTemplate, onOpenCreateModal }: TemplatesTabP
                   {/* Action Buttons */}
                   <div className="flex gap-2">
                     <Button 
-                      className="flex-1 bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200"
+                      className="flex-1 bg-secondary border border-orange-400/50 hover:border-orange-400 hover:bg-secondary text-white transition-all duration-200"
                       size="sm"
                       onClick={() => handleUseTemplate(template)}
                     >
@@ -364,7 +364,7 @@ export function TemplatesTab({ onUseTemplate, onOpenCreateModal }: TemplatesTabP
                           variant="outline" 
                           size="sm"
                           onClick={() => handleDeleteClick(template)}
-                          className="text-red-400 hover:text-red-300"
+                          className="text-destructive hover:text-destructive/80"
                         >
                           <Trash2 className="w-3 h-3" />
                         </Button>
@@ -437,12 +437,12 @@ export function TemplatesTab({ onUseTemplate, onOpenCreateModal }: TemplatesTabP
                 <Badge variant="outline" className="text-xs">{selectedTemplate.category}</Badge>
                 <Badge variant="outline" className="text-xs capitalize">{selectedTemplate.difficulty}</Badge>
                 {selectedTemplate.is_system && (
-                  <Badge variant="outline" className="text-xs bg-blue-500/10 text-blue-400 border-blue-500/20">
+                  <Badge variant="outline" className="text-xs bg-info/10 text-info border-info/20">
                     System Template
                   </Badge>
                 )}
                 {selectedTemplate.is_featured && (
-                  <Badge variant="outline" className="text-xs bg-yellow-500/10 text-yellow-400 border-yellow-500/20">
+                  <Badge variant="outline" className="text-xs bg-warning/10 text-warning border-warning/20">
                     <Star className="w-3 h-3 mr-1" />
                     Featured
                   </Badge>
@@ -543,7 +543,7 @@ export function TemplatesTab({ onUseTemplate, onOpenCreateModal }: TemplatesTabP
               {/* Action Buttons */}
               <div className="flex gap-3 pt-4 border-t border-secondary">
                 <Button 
-                  className="flex-1 bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200"
+                  className="flex-1 bg-secondary border border-orange-400/50 hover:border-orange-400 hover:bg-secondary text-white transition-all duration-200"
                   onClick={() => {
                     setShowViewModal(false)
                     handleUseTemplate(selectedTemplate)
@@ -802,7 +802,7 @@ function TemplateForm({ form, onChange, onSubmit, onCancel, isLoading, submitLab
         <Button 
           onClick={onSubmit} 
           disabled={isLoading || !form.template_id || !form.name || !form.description}
-          className="bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200"
+          className="bg-secondary border border-orange-400/50 hover:border-orange-400 hover:bg-secondary text-white transition-all duration-200"
         >
           {isLoading ? 'Saving...' : submitLabel}
         </Button>

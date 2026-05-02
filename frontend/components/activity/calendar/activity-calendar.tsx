@@ -107,7 +107,7 @@ export function ActivityCalendar({ className }: ActivityCalendarProps) {
 
       {/* Error indicator (non-destructive — calendar still shows cached data) */}
       {isError && items.length > 0 && (
-        <div className="flex items-center gap-2 text-xs text-amber-400/80 px-1">
+        <div className="flex items-center gap-2 text-xs text-warning/80 px-1">
           <AlertCircle className="h-3.5 w-3.5" />
           <span>Showing cached schedule — refresh to retry</span>
         </div>
