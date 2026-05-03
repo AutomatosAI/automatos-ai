@@ -448,6 +448,7 @@ class Config:
     COORDINATOR_ARCHIVE_BATCH_SIZE: int = int(os.getenv("COORDINATOR_ARCHIVE_BATCH_SIZE", "50"))
     CHANNELS_ENABLED: bool = os.getenv("CHANNELS_ENABLED", "true").lower() == "true"
     SEMANTIC_TOOL_ROUTING: bool = os.getenv("SEMANTIC_TOOL_ROUTING", "true").lower() == "true"
+    SEMANTIC_TOOL_ROUTING_TOP_K: int = int(os.getenv("SEMANTIC_TOOL_ROUTING_TOP_K", "15"))
 
     # =============================================================================
     # AWS S3 VECTORS (PRD-42: Cloud Document Sync)
