@@ -1,0 +1,5 @@
+# Scratch results — ignored. Promote to benchmarks/ to commit.
+results/
+
+# Embedding cache — large, rebuildable.
+.embedding_cache.json

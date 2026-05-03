@@ -100,8 +100,16 @@ class ActionSemanticIndex:
         exclude_promoted: bool = True,
     ) -> List[Tuple[str, float]]:
         await self.ensure_indexed(exclude_admin=exclude_admin, exclude_promoted=exclude_promoted)
-        eligible = {a.name for a in self._eligible_actions(exclude_admin, exclude_promoted)}
-        candidate_names = [n for n in self._action_embeddings.keys() if n in eligible][:50]
+        # Pre-filter eligibility (admin/promoted), then score every remaining
+        # action and let cosine similarity decide ranking. Earlier revisions
+        # truncated `candidate_names` at 50 in registration order BEFORE
+        # scoring, which silently dropped any action registered after the 50th
+        # spot from ever being surfaced — the parity check against the
+        # PRD-138 Appendix A baselines (US-005) caught this. The PRD allows
+        # a wider-candidate-set heuristic only AFTER ranking; we keep things
+        # simple by ranking the full eligible set (≤ ~110 actions, sub-ms).
+        eligible_names = [a.name for a in self._eligible_actions(exclude_admin, exclude_promoted)]
+        candidate_names = [n for n in eligible_names if n in self._action_embeddings]
         if not candidate_names:
             return []
         query_vec = np.asarray(await self._embedding_manager.generate_embedding(query), dtype=float)
