@@ -49,6 +49,15 @@ class ActionSemanticIndex:
         )
 
     def _cache_model_key(self) -> str:
+        # Force provider init before reading provider info — otherwise
+        # get_provider_info() returns {"provider": "none", "status": "not_initialized"}
+        # and the key collapses to "none:None:{dim}". Multiple runs writing under
+        # that broken key produce vector mixes (real qwen + deterministic
+        # fallback) that destroy ranking quality. Discovered post-PRD-138 build
+        # when filtered in-set rate dropped from 97.9% → 57.4% across all models.
+        ensure = getattr(self._embedding_manager, "_ensure_provider", None)
+        if callable(ensure):
+            ensure()
         info = self._embedding_manager.get_provider_info()
         provider = info.get("provider") or self._embedding_manager.__class__.__name__
         model = info.get("model")
