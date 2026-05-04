@@ -1,0 +1,292 @@
+# Hand-curated seed eval set for PRD-138 tool routing.
+#
+# Each entry maps a natural-language query to one or more correct platform
+# actions. The runner asks the LLM to pick an action via `platform_execute`
+# given either the full action catalog (~107 actions) or the semantic-filtered
+# top-K. A choice is correct if it matches any name in `correct_actions`.
+#
+# Categories are loose groupings for analysis, not for routing.
+# Difficulty:
+#   - easy: keyword-router gets it today (regex match leads to the right tool)
+#   - ambiguous: keyword precedence picks the wrong tool
+#   - paraphrase: same intent, no obvious keyword match
+#   - cross: legit answer spans multiple action categories
+#
+# Add more freely. Re-run `python seed_eval_set.py` after edits to validate
+# action names against the live ActionRegistry and emit eval_set.jsonl.
+
+queries:
+  # ──────────────────────────────────────────────────────────────────
+  # Agents — list / inspect
+  # ──────────────────────────────────────────────────────────────────
+  - q: "list my agents"
+    correct_actions: [platform_list_agents]
+    category: agents
+    difficulty: easy
+
+  - q: "what agents do I have?"
+    correct_actions: [platform_list_agents]
+    category: agents
+    difficulty: easy
+
+  - q: "show me the agents that are running"
+    correct_actions: [platform_list_agents]
+    category: agents
+    difficulty: easy
+
+  - q: "who's on my roster?"
+    correct_actions: [platform_list_agents]
+    category: agents
+    difficulty: paraphrase
+
+  - q: "tell me about the SENTINEL agent"
+    correct_actions: [platform_get_agent, platform_list_agents]
+    category: agents
+    difficulty: easy
+
+  - q: "set up a new research agent"
+    correct_actions: [platform_create_agent]
+    category: agents
+    difficulty: easy
+
+  - q: "make me a marketing agent that writes blog posts"
+    correct_actions: [platform_create_agent]
+    category: agents
+    difficulty: easy
+
+  # ──────────────────────────────────────────────────────────────────
+  # Playbooks / Recipes
+  # ──────────────────────────────────────────────────────────────────
+  - q: "list my playbooks"
+    correct_actions: [platform_list_playbooks]
+    category: playbooks
+    difficulty: easy
+
+  - q: "what playbooks do I have set up?"
+    correct_actions: [platform_list_playbooks]
+    category: playbooks
+    difficulty: easy
+
+  - q: "create a daily blog post playbook"
+    correct_actions: [platform_create_playbook]
+    category: playbooks
+    difficulty: easy
+
+  - q: "run my morning briefing playbook"
+    correct_actions: [platform_execute_playbook]
+    category: playbooks
+    difficulty: easy
+
+  # ──────────────────────────────────────────────────────────────────
+  # Analytics / cost — the headline ambiguous case from the PRD
+  # ──────────────────────────────────────────────────────────────────
+  - q: "how much have I spent on tokens this week?"
+    correct_actions: [platform_get_llm_usage, platform_get_cost_breakdown]
+    category: analytics
+    difficulty: easy
+
+  - q: "what's my LLM bill looking like?"
+    correct_actions: [platform_get_llm_usage, platform_get_cost_breakdown]
+    category: analytics
+    difficulty: paraphrase
+
+  - q: "break down my costs by model"
+    correct_actions: [platform_get_cost_breakdown, platform_get_llm_usage]
+    category: analytics
+    difficulty: easy
+
+  - q: "how am I doing this week?"
+    correct_actions: [platform_workspace_stats, platform_get_success_rate, platform_get_activity_feed]
+    category: analytics
+    difficulty: ambiguous
+    notes: "Generic enough that keyword routing maps to SEARCH first. Multiple summary actions are acceptable."
+
+  - q: "what's my agent success rate?"
+    correct_actions: [platform_get_success_rate, platform_get_efficiency_score]
+    category: analytics
+    difficulty: easy
+
+  - q: "show me workspace stats"
+    correct_actions: [platform_workspace_stats]
+    category: analytics
+    difficulty: easy
+
+  # ──────────────────────────────────────────────────────────────────
+  # Documents / knowledge
+  # ──────────────────────────────────────────────────────────────────
+  - q: "what documents have I uploaded?"
+    correct_actions: [platform_list_documents]
+    category: documents
+    difficulty: easy
+
+  - q: "show me my knowledge base"
+    correct_actions: [platform_list_documents]
+    category: documents
+    difficulty: paraphrase
+
+  - q: "find the contract from Acme in the docs"
+    correct_actions: [search_knowledge, platform_list_documents]
+    category: documents
+    difficulty: easy
+
+  # ──────────────────────────────────────────────────────────────────
+  # Workspace / connected apps
+  # ──────────────────────────────────────────────────────────────────
+  - q: "what integrations am I connected to?"
+    correct_actions: [platform_list_connected_apps, platform_get_workspace_info]
+    category: workspace
+    difficulty: easy
+
+  - q: "is gmail hooked up?"
+    correct_actions: [platform_list_connected_apps]
+    category: workspace
+    difficulty: paraphrase
+
+  - q: "show me my workspace settings"
+    correct_actions: [platform_get_workspace_info]
+    category: workspace
+    difficulty: easy
+
+  # ──────────────────────────────────────────────────────────────────
+  # Marketplace
+  # ──────────────────────────────────────────────────────────────────
+  - q: "browse the marketplace for skills"
+    correct_actions: [platform_browse_marketplace_skills]
+    category: marketplace
+    difficulty: easy
+
+  - q: "install the SEO skill from the marketplace"
+    correct_actions: [platform_install_skill]
+    category: marketplace
+    difficulty: easy
+
+  - q: "what plugins are available?"
+    correct_actions: [platform_browse_marketplace_plugins]
+    category: marketplace
+    difficulty: paraphrase
+
+  - q: "show me marketplace agents I can install"
+    correct_actions: [platform_browse_marketplace_agents]
+    category: marketplace
+    difficulty: easy
+
+  # ──────────────────────────────────────────────────────────────────
+  # Memory
+  # ──────────────────────────────────────────────────────────────────
+  - q: "how much memory have you stored about me?"
+    correct_actions: [platform_get_memory_stats]
+    category: memory
+    difficulty: easy
+
+  - q: "what's in your long-term memory for this workspace?"
+    correct_actions: [platform_get_memory_stats, platform_search_memory]
+    category: memory
+    difficulty: paraphrase
+
+  - q: "search your memory for what we discussed about pricing"
+    correct_actions: [platform_search_memory]
+    category: memory
+    difficulty: easy
+
+  # ──────────────────────────────────────────────────────────────────
+  # Missions
+  # ──────────────────────────────────────────────────────────────────
+  - q: "list my running missions"
+    correct_actions: [platform_list_missions]
+    category: missions
+    difficulty: easy
+
+  - q: "kick off a mission to write a competitive analysis"
+    correct_actions: [platform_create_mission]
+    category: missions
+    difficulty: easy
+
+  - q: "how's mission 42 going?"
+    correct_actions: [platform_get_mission]
+    category: missions
+    difficulty: easy
+
+  # ──────────────────────────────────────────────────────────────────
+  # External actions (Composio)
+  # ──────────────────────────────────────────────────────────────────
+  - q: "send an email to john@acme.com about the demo"
+    correct_actions: [composio_execute]
+    category: external
+    difficulty: easy
+
+  - q: "post a slack message to #general"
+    correct_actions: [composio_execute]
+    category: external
+    difficulty: easy
+
+  - q: "open a github issue in the platform repo"
+    correct_actions: [composio_execute]
+    category: external
+    difficulty: easy
+
+  # ──────────────────────────────────────────────────────────────────
+  # Workspace code tools
+  # ──────────────────────────────────────────────────────────────────
+  - q: "read main.py from the repo"
+    correct_actions: [workspace_read_file]
+    category: workspace_code
+    difficulty: easy
+
+  - q: "grep for TODO comments across the codebase"
+    correct_actions: [workspace_grep]
+    category: workspace_code
+    difficulty: easy
+
+  - q: "run the test suite"
+    correct_actions: [workspace_exec]
+    category: workspace_code
+    difficulty: easy
+
+  - q: "what's the git status?"
+    correct_actions: [workspace_git]
+    category: workspace_code
+    difficulty: easy
+
+  # ──────────────────────────────────────────────────────────────────
+  # Reports / deliverables
+  # ──────────────────────────────────────────────────────────────────
+  - q: "submit a status report on what I just did"
+    correct_actions: [platform_submit_report]
+    category: reports
+    difficulty: easy
+
+  - q: "show me the latest report from SCOUT"
+    correct_actions: [platform_get_latest_report]
+    category: reports
+    difficulty: easy
+
+  # ──────────────────────────────────────────────────────────────────
+  # Cross-cutting / paraphrase / adversarial
+  # ──────────────────────────────────────────────────────────────────
+  - q: "give me a quick health check on everything"
+    correct_actions: [platform_get_system_health, platform_workspace_stats, platform_list_agents]
+    category: cross
+    difficulty: ambiguous
+    notes: "No single right answer; surfacing any of these is acceptable."
+
+  - q: "what's working and what's broken?"
+    correct_actions: [platform_get_error_rates, platform_get_success_rate, platform_get_alerts, platform_list_missions]
+    category: cross
+    difficulty: ambiguous
+
+  - q: "wie viele Agenten habe ich?"
+    correct_actions: [platform_list_agents]
+    category: agents
+    difficulty: paraphrase
+    notes: "German for 'how many agents do I have?' — tests cross-lingual robustness."
+
+  - q: "résumé de la semaine"
+    correct_actions: [platform_workspace_stats, platform_get_llm_usage, platform_get_activity_feed]
+    category: analytics
+    difficulty: paraphrase
+    notes: "French for 'summary of the week' — tests cross-lingual robustness."
+
+  - q: "I want to see what's been happening on the platform"
+    correct_actions: [platform_get_activity_feed, platform_workspace_stats, platform_list_missions]
+    category: cross
+    difficulty: ambiguous

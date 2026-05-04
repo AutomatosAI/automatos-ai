@@ -205,8 +205,59 @@ class ActionRegistry:
                 since they have their own first-class schemas.
         """
         self._ensure_initialized()
+        return self._format_actions_summary(
+            list(self._actions.values()),
+            exclude_admin=exclude_admin,
+            exclude_promoted=exclude_promoted,
+        )
+
+    def build_filtered_prompt_summary(
+        self,
+        action_names: List[str],
+        exclude_admin: bool = False,
+        exclude_promoted: bool = True,
+    ) -> str:
+        """
+        Build a markdown summary of only the named subset of platform actions,
+        in the same format as build_prompt_summary().
+
+        Intended for callers that have narrowed the action list via semantic
+        ranking (PRD-138) and want to inject only the top-K into the prompt.
+
+        Args:
+            action_names: Names of actions to include. Names not in the
+                registry are silently skipped (no error). An empty list
+                yields a summary header with no action lines (does NOT
+                fall back to all actions).
+            exclude_admin: If True, admin_only actions are skipped.
+            exclude_promoted: If True (default), promoted actions are skipped
+                since they have their own first-class schemas.
+        """
+        self._ensure_initialized()
+        # Preserve registry-membership filtering; unknown names silently skipped.
+        # Use a set for O(1) lookup but iterate registry to keep deterministic
+        # ordering inside the shared formatter (which sorts by category/name).
+        wanted = set(action_names)
+        filtered = [a for a in self._actions.values() if a.name in wanted]
+        return self._format_actions_summary(
+            filtered,
+            exclude_admin=exclude_admin,
+            exclude_promoted=exclude_promoted,
+        )
+
+    @staticmethod
+    def _format_actions_summary(
+        actions: List[ActionDefinition],
+        exclude_admin: bool,
+        exclude_promoted: bool,
+    ) -> str:
+        """
+        Render a list of ActionDefinitions as the canonical markdown summary
+        used in agent system prompts.  Shared between build_prompt_summary
+        and build_filtered_prompt_summary so output format stays identical.
+        """
         by_category: Dict[str, List[ActionDefinition]] = {}
-        for action in self._actions.values():
+        for action in actions:
             if exclude_admin and action.admin_only:
                 continue
             if exclude_promoted and action.promoted:
