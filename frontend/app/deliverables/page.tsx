@@ -3,7 +3,6 @@
 import { useCallback, useRef } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import {
-  Package,
   Loader2,
   LayoutGrid,
   FileText,
@@ -12,13 +11,13 @@ import {
 } from 'lucide-react'
 
 import { MainLayout } from '@/components/layout/main-layout'
+import { PageHeader, FilterTabs, TabsContent } from '@/components/shared'
 import { CreatedToday } from '@/components/deliverables/created-today'
 import { DeliverablesBlog } from '@/components/deliverables/deliverables-blogs'
 import { TemplateManager } from '@/components/documents/template-manager'
 import { GalleryView } from '@/components/workspace/gallery-view'
 import { useWorkspace } from '@/components/workspace-provider'
 import { usePageAPI } from '@/hooks/use-page-api'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 type DeliverableTab = 'outputs' | 'blogs' | 'templates'
 
@@ -60,67 +59,44 @@ export default function DeliverablesPage() {
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
         </div>
       ) : (
-        <div className="h-[calc(100vh-4rem)] flex flex-col">
-          <div className="flex items-center gap-3 px-4 py-2 border-b border-border/30">
-            <Package className="h-4 w-4 text-muted-foreground" />
-            <span className="text-sm font-medium">Deliverables</span>
-            <span className="text-xs text-muted-foreground">
-              Files, reports & agent output
-            </span>
-          </div>
-          <Tabs
+        <div className="space-y-6">
+          <PageHeader
+            title="Deliver"
+            titleAccent="ables"
+            subtitle="Files, reports & agent output"
+          />
+          <FilterTabs
+            tabs={[
+              { value: 'outputs', label: 'Outputs', icon: LayoutGrid },
+              { value: 'blogs', label: 'Blogs', icon: FileText },
+              { value: 'templates', label: 'Templates', icon: BookOpen },
+              { value: 'explorer', label: 'Explorer', icon: FolderTree },
+            ]}
             value={activeTab}
             onValueChange={handleTabChange}
-            className="flex-1 flex flex-col min-h-0"
+            dataTour="deliverables-tabs"
           >
-            <div className="px-4 pt-2">
-              <TabsList data-tour="deliverables-tabs" className="bg-secondary/50">
-                <TabsTrigger value="outputs" className="flex items-center gap-1.5">
-                  <LayoutGrid className="h-4 w-4" />
-                  Outputs
-                </TabsTrigger>
-                <TabsTrigger value="blogs" className="flex items-center gap-1.5">
-                  <FileText className="h-4 w-4" />
-                  Blogs
-                </TabsTrigger>
-                <TabsTrigger value="templates" className="flex items-center gap-1.5">
-                  <BookOpen className="h-4 w-4" />
-                  Templates
-                </TabsTrigger>
-                <TabsTrigger value="explorer" className="flex items-center gap-1.5">
-                  <FolderTree className="h-4 w-4" />
-                  Explorer
-                </TabsTrigger>
-              </TabsList>
-            </div>
-
-            <TabsContent value="outputs" className="flex-1 min-h-0 mt-0">
-              <div className="h-full overflow-y-auto p-4">
-                <div className="mx-auto max-w-[1600px] space-y-6">
-                  <CreatedToday onBrowseRecent={handleBrowseRecent} />
-                  <div ref={galleryRef}>
-                    <GalleryView workspaceId={workspace.id} />
-                  </div>
+            <TabsContent value="outputs">
+              <div className="mx-auto max-w-[1600px] space-y-6">
+                <CreatedToday onBrowseRecent={handleBrowseRecent} />
+                <div ref={galleryRef}>
+                  <GalleryView workspaceId={workspace.id} />
                 </div>
               </div>
             </TabsContent>
 
-            <TabsContent value="blogs" className="flex-1 min-h-0 mt-0">
-              <div className="h-full overflow-y-auto p-4">
-                <div className="mx-auto max-w-[1600px]">
-                  <DeliverablesBlog />
-                </div>
+            <TabsContent value="blogs">
+              <div className="mx-auto max-w-[1600px]">
+                <DeliverablesBlog />
               </div>
             </TabsContent>
 
-            <TabsContent value="templates" className="flex-1 min-h-0 mt-0">
-              <div className="h-full overflow-y-auto p-4">
-                <div className="mx-auto max-w-[1600px]">
-                  <TemplateManager />
-                </div>
+            <TabsContent value="templates">
+              <div className="mx-auto max-w-[1600px]">
+                <TemplateManager />
               </div>
             </TabsContent>
-          </Tabs>
+          </FilterTabs>
         </div>
       )}
     </MainLayout>
