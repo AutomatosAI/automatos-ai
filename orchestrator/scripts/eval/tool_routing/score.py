@@ -261,12 +261,15 @@ def _render_main_table(summary: List[Dict[str, Any]], tiers: Dict[str, str]) -> 
     sep = ["---"] * len(headers)
 
     tier_order = {"frontier": 0, "mid": 1, "small": 2, "unknown": 3}
+    # Order modes left-to-right by narrowing intensity so the diff reads naturally:
+    # full (no narrowing) → filtered (prompt only) → filtered_schema (prompt + schema).
+    mode_order = {"full": 0, "filtered": 1, "filtered_schema": 2}
     summary_sorted = sorted(
         summary,
         key=lambda s: (
             tier_order.get(tiers.get(s["model"], "unknown"), 9),
             s["model"],
-            0 if s["mode"] == "full" else 1,  # full first to make the diff easy to read
+            mode_order.get(s["mode"], 99),
         ),
     )
 
@@ -329,15 +332,30 @@ def _render_category_table(
 
 
 def _render_pair_diff(summary: List[Dict[str, Any]], tiers: Dict[str, str]) -> str:
-    """Per-model: show full vs filtered side by side with deltas."""
+    """Per-model: pairwise deltas across whichever modes are present.
+
+    Always emits one row per (model, pair) where both sides have data. The
+    pair order is canonical: filtered−full, filtered_schema−full,
+    filtered_schema−filtered. Pairs missing one side are skipped silently.
+    This keeps the table readable when only a subset of modes is present
+    (e.g. a single-mode run) without crashing on KeyError.
+    """
     by_model: Dict[str, Dict[str, Dict[str, Any]]] = defaultdict(dict)
     for s in summary:
         by_model[s["model"]][s["mode"]] = s
 
+    pairs: List[Tuple[str, str]] = [
+        ("filtered", "full"),
+        ("filtered_schema", "full"),
+        ("filtered_schema", "filtered"),
+    ]
+
     headers = [
         "model",
         "tier",
+        "comparison",
         "Δ accuracy",
+        "Δ in-set",
         "Δ prompt tok",
         "Δ $/correct",
         "Δ p50 ms",
@@ -351,30 +369,34 @@ def _render_pair_diff(summary: List[Dict[str, Any]], tiers: Dict[str, str]) -> s
     for model in sorted(
         by_model.keys(), key=lambda m: (tier_order.get(tiers.get(m, "unknown"), 9), m)
     ):
-        full = by_model[model].get("full")
-        filt = by_model[model].get("filtered")
-        if not full or not filt:
-            continue
+        for new_mode, base_mode in pairs:
+            new_s = by_model[model].get(new_mode)
+            base_s = by_model[model].get(base_mode)
+            if not new_s or not base_s:
+                continue
 
-        d_acc = (filt["accuracy"] - full["accuracy"]) * 100
-        d_prompt = (filt["prompt_tokens_mean"] or 0) - (full["prompt_tokens_mean"] or 0)
-        d_ppc = (filt["cost_per_correct_usd"] - full["cost_per_correct_usd"])
-        d_lat = (filt["latency_p50_ms"] or 0) - (full["latency_p50_ms"] or 0)
+            d_acc = (new_s["accuracy"] - base_s["accuracy"]) * 100
+            d_inset = (new_s["in_set_rate"] - base_s["in_set_rate"]) * 100
+            d_prompt = (new_s["prompt_tokens_mean"] or 0) - (base_s["prompt_tokens_mean"] or 0)
+            d_ppc = (new_s["cost_per_correct_usd"] - base_s["cost_per_correct_usd"])
+            d_lat = (new_s["latency_p50_ms"] or 0) - (base_s["latency_p50_ms"] or 0)
 
-        lines.append(
-            "| "
-            + " | ".join(
-                [
-                    f"`{model}`",
-                    tiers.get(model, "—"),
-                    f"{d_acc:+.1f}pp",
-                    f"{d_prompt:+.0f}",
-                    f"{d_ppc:+.4f}" if math.isfinite(d_ppc) else "—",
-                    f"{d_lat:+.0f}",
-                ]
+            lines.append(
+                "| "
+                + " | ".join(
+                    [
+                        f"`{model}`",
+                        tiers.get(model, "—"),
+                        f"{new_mode} − {base_mode}",
+                        f"{d_acc:+.1f}pp",
+                        f"{d_inset:+.1f}pp",
+                        f"{d_prompt:+.0f}",
+                        f"{d_ppc:+.4f}" if math.isfinite(d_ppc) else "—",
+                        f"{d_lat:+.0f}",
+                    ]
+                )
+                + " |"
             )
-            + " |"
-        )
     return "\n".join(lines)
 
 
@@ -449,9 +471,11 @@ def main() -> int:
             "",
             main_table,
             "",
-            "## Δ filtered − full (per model)",
+            "## Δ pairwise (per model)",
             "",
-            "Positive Δ accuracy = filtered helps. Negative Δ tokens = filtered cheaper.",
+            "Positive Δ accuracy = the narrowed mode helps. Negative Δ tokens = "
+            "narrowing is cheaper. Rows skipped where one side of the comparison "
+            "is missing (e.g. single-mode run).",
             "",
             pair_table,
             "",

@@ -229,6 +229,20 @@ def _now_iso() -> str:
     return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _platform_execute_enum_size(tools: List[Dict[str, Any]]) -> str:
+    """Return the size of platform_execute.action.enum as a string ('open' if unset)."""
+    for tool in tools:
+        fn = tool.get("function") or {}
+        if fn.get("name") != "platform_execute":
+            continue
+        action = ((fn.get("parameters") or {}).get("properties") or {}).get("action") or {}
+        enum = action.get("enum")
+        if enum is None:
+            return "open"
+        return str(len(enum))
+    return "—"
+
+
 def _call_model(
     client: Any,
     model: str,
@@ -338,9 +352,15 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--mode",
-        choices=["full", "filtered", "both"],
-        default="both",
-        help="Which prompt mode(s) to run. Default: both.",
+        choices=["full", "filtered", "filtered_schema", "all"],
+        default="all",
+        help=(
+            "Which prompt mode(s) to run. "
+            "'full' = no narrowing. "
+            "'filtered' = prompt-only narrowing (Phase 1 baseline). "
+            "'filtered_schema' = prompt + schema enum narrowing (Phase 1b). "
+            "'all' = run all three. Default: all."
+        ),
     )
     parser.add_argument(
         "--models",
@@ -383,8 +403,8 @@ def main() -> int:
         return 2
 
     modes: List[str]
-    if args.mode == "both":
-        modes = ["full", "filtered"]
+    if args.mode == "all":
+        modes = ["full", "filtered", "filtered_schema"]
     else:
         modes = [args.mode]
 
@@ -406,11 +426,12 @@ def main() -> int:
     actions = registry.get_all()
     logger.info(f"Loaded {len(actions)} actions from live registry")
 
-    if "filtered" in modes and not api_key and not args.dry_run:
+    needs_embedding = any(m in {"filtered", "filtered_schema"} for m in modes)
+    if needs_embedding and not api_key and not args.dry_run:
         # The production ActionSemanticIndex routes embeddings through
         # EmbeddingManager, which (per .env: EMBEDDING_PROVIDER=openrouter)
         # also requires OPENROUTER_API_KEY at request time.
-        print("filtered mode needs OPENROUTER_API_KEY", file=sys.stderr)
+        print("filtered / filtered_schema mode needs OPENROUTER_API_KEY", file=sys.stderr)
         return 2
 
     builder = PromptBuilder(actions=actions)
@@ -430,8 +451,12 @@ def main() -> int:
     if done:
         logger.info(f"Skipping {len(done)} cells already in results.jsonl")
 
-    # Cache prompts per mode/query so we don't rebuild N_models times.
+    # Cache prompts and tools per mode/query so we don't rebuild N_models times.
+    # tools: full mode → TOP_LEVEL_TOOLS unchanged. filtered → unchanged (prompt
+    # narrows, schema does not). filtered_schema → deep-copied with platform_execute
+    # action.enum set to the same surfaced list used in the prompt.
     prompt_cache: Dict[Tuple[str, str], Tuple[str, List[str]]] = {}
+    tools_cache: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
 
     def get_prompt(mode: str, query: str) -> Tuple[str, List[str]]:
         key = (mode, query)
@@ -441,6 +466,20 @@ def main() -> int:
         prompt = SYSTEM_PROMPT_PREAMBLE + catalog
         prompt_cache[key] = (prompt, surfaced)
         return prompt_cache[key]
+
+    def get_tools(mode: str, query: str, surfaced: List[str]) -> List[Dict[str, Any]]:
+        key = (mode, query)
+        if key in tools_cache:
+            return tools_cache[key]
+        tools = builder.build_tools(
+            TOP_LEVEL_TOOLS,
+            query,
+            mode=mode,
+            top_k=top_k,
+            ranked_names=surfaced if mode == "filtered_schema" else None,
+        )
+        tools_cache[key] = tools
+        return tools
 
     cells_run = 0
     for model_cfg in models_cfg:
@@ -454,11 +493,14 @@ def main() -> int:
                     continue
 
                 prompt, surfaced = get_prompt(mode, q["query"])
+                tools = get_tools(mode, q["query"], surfaced)
 
                 if args.dry_run:
+                    pe_enum = _platform_execute_enum_size(tools)
                     logger.info(
                         f"[dry-run] {model_id} | {mode} | {q['query_id']} | "
-                        f"prompt={len(prompt)} chars, surfaced={len(surfaced)}"
+                        f"prompt={len(prompt)} chars, surfaced={len(surfaced)}, "
+                        f"platform_execute.enum={pe_enum}"
                     )
                     cells_run += 1
                     continue
@@ -472,7 +514,7 @@ def main() -> int:
                     temperature=temperature,
                     max_tokens=max_tokens,
                     request_timeout=request_timeout,
-                    tools=TOP_LEVEL_TOOLS,
+                    tools=tools,
                 )
                 row = {
                     "ts": _now_iso(),
