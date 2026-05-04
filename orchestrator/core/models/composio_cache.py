@@ -207,25 +207,24 @@ class ToolExecutionLog(Base):
     Logs every tool execution for analytics and debugging.
     """
     __tablename__ = "tool_execution_logs"
-    __table_args__ = {"extend_existing": True}
-    
+
     id = Column(Integer, primary_key=True)
-    agent_id = Column(Integer, ForeignKey("agents.id", ondelete="CASCADE"), nullable=False)
+    agent_id = Column(Integer, ForeignKey("agents.id", ondelete="SET NULL"), nullable=True)
     app_name = Column(String(100), nullable=False)
     action_name = Column(String(255), nullable=False)
     user_id = Column(Integer)
     workspace_id = Column(PGUUID(as_uuid=True))
-    
+
     # Request
     input_parameters = Column(JSONB)
     user_query = Column(Text)
-    
+
     # Response
     output_result = Column(JSONB)
     status = Column(String(50), nullable=False)  # 'success', 'error', 'timeout'
     error_message = Column(Text)
     error_code = Column(String(100))
-    
+
     # Performance
     execution_time_ms = Column(Integer)
     token_usage = Column(JSONB)  # {"input": 100, "output": 50, "total": 150}
@@ -236,6 +235,11 @@ class ToolExecutionLog(Base):
     # Note: execution_ms column exists in DB (migration prd123_cost_tracking) but is
     # intentionally unmapped — use execution_time_ms instead to avoid ambiguity.
 
+    # PRD-139: Tool routing telemetry columns
+    intent_cluster_id = Column(Integer, ForeignKey("intent_classification_cache.id", ondelete="SET NULL"), nullable=True)
+    routing_source = Column(String(20), nullable=True)  # 'llm', 'graph', 'keyword', 'cache'
+    telemetry_source = Column(String(20), nullable=True, server_default="production")  # 'production', 'eval', 'replay'
+
     # Metadata
     router_decision = Column(JSONB)  # How the tool was selected
     cache_hit = Column(Boolean, default=False)
@@ -245,6 +249,7 @@ class ToolExecutionLog(Base):
         Index("idx_tool_logs_agent", "agent_id"),
         Index("idx_tool_logs_status", "status"),
         Index("idx_tool_logs_executed", "executed_at"),
+        {"extend_existing": True},
     )
     
     def to_dict(self) -> Dict[str, Any]:
