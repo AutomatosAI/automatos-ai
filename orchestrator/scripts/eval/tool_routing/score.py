@@ -122,17 +122,24 @@ def _load_results() -> List[Dict[str, Any]]:
         print(f"missing {RESULTS_JSONL}", file=sys.stderr)
         sys.exit(2)
     rows: List[Dict[str, Any]] = []
-    for line in RESULTS_JSONL.read_text().splitlines():
+    for lineno, line in enumerate(RESULTS_JSONL.read_text().splitlines(), 1):
         if not line.strip():
             continue
         try:
             rows.append(json.loads(line))
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as exc:
+            print(
+                f"[score] dropped malformed row {RESULTS_JSONL}:{lineno}: {exc}",
+                file=sys.stderr,
+            )
             continue
     return rows
 
 
 def _load_model_costs() -> Tuple[Dict[str, Tuple[float, float]], Dict[str, str]]:
+    if not MODELS_YAML.exists():
+        print(f"missing {MODELS_YAML}", file=sys.stderr)
+        sys.exit(2)
     cfg = yaml.safe_load(MODELS_YAML.read_text())
     costs: Dict[str, Tuple[float, float]] = {}
     tiers: Dict[str, str] = {}
@@ -362,7 +369,7 @@ def _render_pair_diff(summary: List[Dict[str, Any]], tiers: Dict[str, str]) -> s
                     tiers.get(model, "—"),
                     f"{d_acc:+.1f}pp",
                     f"{d_prompt:+.0f}",
-                    f"{d_ppc:+.4f}" if d_ppc != math.inf and not math.isinf(d_ppc) else "—",
+                    f"{d_ppc:+.4f}" if math.isfinite(d_ppc) else "—",
                     f"{d_lat:+.0f}",
                 ]
             )

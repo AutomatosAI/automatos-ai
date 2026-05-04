@@ -155,7 +155,7 @@ In `models.yaml`:
 
 * `top_k` (default 15) — how many actions filtered mode shows
 * `temperature` (default 0.0) — 0 for reproducibility
-* `max_tokens` (default 256) — only need a tool call, not prose
+* `max_tokens` (default 2048) — reasoning models (GPT-5, GPT-5-mini) burn tokens on chain-of-thought before the tool call; 256 starves them. Non-reasoning models stop early on their own.
 * `request_timeout` (default 60s)
 
 In `prompt_builder.py`:

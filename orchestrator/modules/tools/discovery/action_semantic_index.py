@@ -91,6 +91,11 @@ class ActionSemanticIndex:
             if misses_by_text:
                 miss_texts = list(misses_by_text.keys())
                 vectors = await self._embedding_manager.generate_embeddings_batch(miss_texts)
+                if len(vectors) != len(miss_texts):
+                    raise RuntimeError(
+                        f"Embedding manager returned {len(vectors)} vectors for "
+                        f"{len(miss_texts)} texts; index would silently drop entries"
+                    )
                 new_embeddings = dict(zip(miss_texts, vectors))
                 self._cache.set_embeddings_batch(new_embeddings, model=model_key)
             for name, text in text_by_name.items():
