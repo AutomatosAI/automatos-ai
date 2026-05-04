@@ -133,35 +133,69 @@ class ActionRegistry:
             promoted = [a for a in promoted if not a.admin_only]
         return [a.to_openai_schema() for a in promoted]
 
-    def to_dispatcher_schema(self, exclude_admin: bool = False, exclude_promoted: bool = True) -> Dict[str, Any]:
+    def to_dispatcher_schema(
+        self,
+        exclude_admin: bool = False,
+        exclude_promoted: bool = True,
+        allowed_names: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
         """
         Return a SINGLE OpenAI tool schema (platform_execute) that wraps
         all platform actions behind one dispatcher.
-
-        The LLM learns available actions from the system prompt (markdown),
-        not from the schema.  This keeps the tool payload small.
 
         Args:
             exclude_admin: If True, admin_only actions are excluded from the
                 dispatcher (non-admin callers won't see them).
             exclude_promoted: If True (default), promoted actions are excluded
                 from the dispatcher since they have first-class schemas.
+            allowed_names: Optional whitelist applied AFTER admin/promoted
+                filters. When None, the enum exposes every eligible action
+                (legacy behavior). When a non-empty list, the enum is the
+                intersection of (admin/promoted-filtered actions) and
+                ``allowed_names``. When an empty list, falls back to the full
+                enum and logs a WARNING — empty list is treated as "ranker
+                returned nothing", not "block everything", so the LLM is
+                never left with zero callable actions.
         """
         self._ensure_initialized()
 
-        # Build enum of valid action names for the dispatcher
+        # Build enum of valid action names AFTER admin/promoted filters.
         valid_actions = sorted(
             a.name for a in self._actions.values()
             if (not exclude_promoted or not a.promoted)
             and (not exclude_admin or not a.admin_only)
         )
 
+        # PRD-138 US-008: optional allow-list narrows the enum so the LLM only
+        # sees the ranker's top-K. Permission filters above always run first.
+        if allowed_names is None:
+            narrowed_actions = valid_actions
+        elif len(allowed_names) == 0:
+            logger.warning(
+                "[ActionRegistry] to_dispatcher_schema(allowed_names=[]) — "
+                "empty allow-list, falling back to full enum"
+            )
+            narrowed_actions = valid_actions
+        else:
+            allow_set = set(allowed_names)
+            narrowed_actions = [n for n in valid_actions if n in allow_set]
+            # Defensive: if the intersection is empty (e.g. ranker returned
+            # only admin actions for a non-admin caller), fall back to the
+            # full eligible set rather than ship a schema with zero options.
+            if not narrowed_actions:
+                logger.warning(
+                    "[ActionRegistry] to_dispatcher_schema: allowed_names "
+                    "intersection is empty after permission filters, "
+                    "falling back to full enum"
+                )
+                narrowed_actions = valid_actions
+
         action_property: Dict[str, Any] = {
             "type": "string",
             "description": "The exact platform action name (e.g. 'platform_configure_agent_heartbeat')",
         }
-        if valid_actions:
-            action_property["enum"] = valid_actions
+        if narrowed_actions:
+            action_property["enum"] = narrowed_actions
 
         return {
             "type": "function",
