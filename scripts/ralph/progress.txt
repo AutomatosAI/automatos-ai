@@ -28,3 +28,34 @@ Branch: worktree-agent-af63a813 (for merge into ralph/prd-139-tool-routing-graph
 - AC-11: low confidence excluded, all below floor returns singles only
 - Singleton: returns same instance
 - DB error: falls back to single-action chains without error
+
+---
+
+## US-005 — PlatformActionsSection graph integration (PRD-139)
+
+Commit: 03f879e9c
+Branch: worktree-agent-aa483ee7 (for merge into ralph/prd-139-tool-routing-graph)
+
+### Files modified
+- orchestrator/modules/context/sections/platform_actions.py (+75 lines)
+- orchestrator/config.py (+3 lines)
+
+### Files created
+- orchestrator/tests/test_platform_actions_section_graph.py (8 tests)
+
+### Implementation summary
+- Added _graph_routing_enabled() helper (reads config.TOOL_ROUTING_GRAPH)
+- Added _build_graph_filtered(query, ctx): calls GraphRouter.rank_chains(), collects action names, builds chain hints + filtered summary
+- Added _build_chain_hints(chains): renders hint block for multi-action sequences only
+- Modified render(): graph path gated by flag, exceptions fall back to embedding
+- 3 config vars: TOOL_ROUTING_GRAPH, TOOL_ROUTING_GRAPH_MIN_CONFIDENCE, TOOL_ROUTING_GRAPH_AGENT_SAMPLE_FLOOR
+- Existing PRD-138 test suite (10 tests) passes unchanged
+
+### Test results (8 passed)
+- graph path called when flag on + chains populated
+- agent_id passed from ctx.kwargs, None when absent
+- single-action chains skip hint block
+- graph raises -> embedding fallback
+- graph empty -> embedding fallback
+- flag off -> graph never called
+- semantic routing off -> neither called
