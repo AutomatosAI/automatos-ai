@@ -1,5 +1,8 @@
-# Scratch results — ignored. Promote to benchmarks/ to commit.
+# Eval run artifacts — kept out of the repo. Live under
+# scripts/eval/tool_routing/{results,benchmarks}/ on disk; preserve
+# locally if you want them, do not commit.
 results/
+benchmarks/
 
 # Embedding cache — large, rebuildable.
 .embedding_cache.json
