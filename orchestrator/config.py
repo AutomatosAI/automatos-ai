@@ -502,6 +502,9 @@ class Config:
     CHANNELS_ENABLED: bool = os.getenv("CHANNELS_ENABLED", "true").lower() == "true"
     SEMANTIC_TOOL_ROUTING: bool = os.getenv("SEMANTIC_TOOL_ROUTING", "true").lower() == "true"
     SEMANTIC_TOOL_ROUTING_TOP_K: int = int(os.getenv("SEMANTIC_TOOL_ROUTING_TOP_K", "15"))
+    TOOL_ROUTING_GRAPH: bool = os.getenv("TOOL_ROUTING_GRAPH", "false").lower() == "true"
+    TOOL_ROUTING_GRAPH_MIN_CONFIDENCE: float = float(os.getenv("TOOL_ROUTING_GRAPH_MIN_CONFIDENCE", "0.6"))
+    TOOL_ROUTING_GRAPH_AGENT_SAMPLE_FLOOR: int = int(os.getenv("TOOL_ROUTING_GRAPH_AGENT_SAMPLE_FLOOR", "50"))
 
     # =============================================================================
     # AWS S3 VECTORS (PRD-42: Cloud Document Sync)

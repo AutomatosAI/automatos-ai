@@ -47,6 +47,7 @@ class PlatformActionsSection(BaseSection):
 
         - SEMANTIC_TOOL_ROUTING flag off → full ``_build()`` dump
         - flag on but no/empty query → full ``_build()`` dump
+        - flag on + TOOL_ROUTING_GRAPH on → try graph routing, fall back to embedding
         - flag on + query present → try ``_build_filtered(query)`` and
           fall back to full ``_build()`` if it returns ``None``
         """
@@ -58,6 +59,18 @@ class PlatformActionsSection(BaseSection):
                     query = raw.strip()
 
             if query and self._semantic_routing_enabled():
+                # Graph path (flag-gated, additive over embedding path)
+                if self._graph_routing_enabled():
+                    try:
+                        graph_result = await self._build_graph_filtered(query, ctx)
+                        if graph_result:
+                            return graph_result
+                    except Exception as e:
+                        logger.warning(
+                            "Graph routing failed, falling back to embedding: %s", e
+                        )
+                        # Fall through to existing embedding path
+
                 filtered = await self._build_filtered(query)
                 if filtered:
                     return filtered
@@ -95,6 +108,82 @@ class PlatformActionsSection(BaseSection):
             return int(getattr(config, "SEMANTIC_TOOL_ROUTING_TOP_K", 15))
         except (TypeError, ValueError):
             return 15
+
+    def _graph_routing_enabled(self) -> bool:
+        """Read the graph routing feature flag from canonical config."""
+        from config import config
+
+        return bool(getattr(config, "TOOL_ROUTING_GRAPH", False))
+
+    async def _build_graph_filtered(
+        self, query: str, ctx: SectionContext
+    ) -> Optional[str]:
+        """Render actions via graph-based chain ranking.
+
+        Returns the filtered markdown string with chain hints on success,
+        or ``None`` if the graph returns no results (caller falls back to
+        embedding path). Never raises — exceptions propagate to the caller's
+        try/except in ``render()``.
+        """
+        from modules.tools.discovery.graph_router import get_graph_router
+        from modules.tools.discovery.action_registry import get_action_registry
+
+        agent_id = ctx.kwargs.get("agent_id") if ctx.kwargs else None
+        router = get_graph_router()
+        top_k = self._top_k()
+        chains = await router.rank_chains(query, agent_id=agent_id, top_k=top_k)
+
+        if not chains:
+            return None
+
+        # Collect unique action names from all chains (preserving rank order)
+        action_names = list(dict.fromkeys(
+            name for _, _, chain in chains for name in chain
+        ))
+
+        # Build chain hints for multi-action sequences
+        hints = self._build_chain_hints(chains)
+
+        # Build filtered summary from registry
+        registry = get_action_registry()
+        catalog = registry.build_filtered_prompt_summary(
+            action_names, exclude_admin=True, exclude_promoted=True
+        )
+
+        if not catalog:
+            return None
+
+        parts = []
+        if hints:
+            parts.append(hints)
+        parts.append(self._PREAMBLE + catalog)
+        content = "\n\n".join(parts)
+
+        if self.max_tokens:
+            content = self.truncate(content, self.max_tokens)
+        return content
+
+    def _build_chain_hints(
+        self, chains: list
+    ) -> str:
+        """Render chain hint block for multi-action sequences.
+
+        Only includes chains with length > 1. Returns empty string if all
+        chains are single-action.
+        """
+        multi_chains = [
+            (primary, score, actions)
+            for primary, score, actions in chains
+            if len(actions) > 1
+        ]
+        if not multi_chains:
+            return ""
+
+        lines = ["## Likely Platform Action Chains"]
+        for _primary, _score, actions in multi_chains:
+            sequence = " then ".join(f"`{a}`" for a in actions)
+            lines.append(f"- call {sequence}")
+        return "\n".join(lines)
 
     def _build(self) -> str:
         from modules.tools.discovery.action_registry import get_action_registry
