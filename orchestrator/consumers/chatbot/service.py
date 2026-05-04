@@ -36,7 +36,12 @@ from consumers.chatbot.streaming import get_streaming_handler
 from consumers.chatbot.tool_router import get_tool_router
 
 # Import from modules — SINGLE SOURCE for tool schemas
-from modules.tools.tool_router import get_tools_for_agent
+from modules.tools.tool_router import (
+    _rank_actions_for_dispatcher,
+    _semantic_routing_enabled,
+    _semantic_routing_top_k,
+    get_tools_for_agent,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -614,17 +619,24 @@ class StreamingChatService:
         self,
         agent_id: int,
         skill_tools: Optional[List[Dict[str, Any]]] = None,
+        query: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         Get all tools for an agent from the SINGLE source: modules.tools.tool_router.
 
         Returns full OpenAI-format tool schemas (ToolRegistry + ActionRegistry + Composio).
         Appends any skill-specific tool schemas from the agent runtime.
+
+        Args:
+            query: Latest user turn — when set and SEMANTIC_TOOL_ROUTING is on,
+                the platform_execute dispatcher's action.enum is narrowed to
+                top-K relevant actions (PRD-138 US-009).
         """
         all_tools = get_tools_for_agent(
             agent_id=agent_id,
             db_session=self.db,
             workspace_id=self.workspace_id,
+            query=query,
         )
         if skill_tools:
             all_tools = (all_tools or []) + skill_tools
@@ -1901,14 +1913,33 @@ class StreamingChatService:
             all_tools = []
             if _complexity != Complexity.ATOM:
                 agent_ctx = await self._load_agent_context(agent_runtime)
-                all_tools = self._get_tools(agent_id, agent_ctx.get("skill_tools"))
+                all_tools = self._get_tools(
+                    agent_id,
+                    agent_ctx.get("skill_tools"),
+                    query=latest_text,
+                )
             else:
                 # ATOM path skips full tool loading, but always include
                 # platform_execute so the agent can respond to platform
                 # queries even when the classifier under-estimates complexity.
+                # PRD-138 US-009: ATOM path also narrows the dispatcher's
+                # action enum when SEMANTIC_TOOL_ROUTING is on, so a model
+                # in the lightweight ATOM lane sees the same focused
+                # surface as the full path.
                 try:
                     from modules.tools.discovery.action_registry import get_action_registry
-                    _dispatcher = get_action_registry().to_dispatcher_schema(exclude_admin=True)
+                    _allowed = None
+                    if _semantic_routing_enabled() and latest_text:
+                        _allowed = _rank_actions_for_dispatcher(
+                            query=latest_text,
+                            top_k=_semantic_routing_top_k(),
+                            exclude_admin=True,
+                            exclude_promoted=True,
+                        )
+                    _dispatcher = get_action_registry().to_dispatcher_schema(
+                        exclude_admin=True,
+                        allowed_names=_allowed,
+                    )
                     all_tools = [_dispatcher]
                 except Exception:
                     logger.debug("[chat] Could not load platform_execute for ATOM path")
@@ -2076,9 +2107,12 @@ class StreamingChatService:
         """Stream chat response using legacy SSE format."""
         from core.llm import create_llm_manager
 
-        # Get tools from SINGLE SOURCE if not provided
+        # Get tools from SINGLE SOURCE if not provided.
+        # PRD-138 US-009: extract latest user turn first so the dispatcher
+        # enum can be narrowed to relevant actions for this query.
         if tools is None:
-            tools = get_tools_for_agent()
+            _query = self.prompt_analyzer.extract_latest_user_text(messages)
+            tools = get_tools_for_agent(query=_query)
 
         try:
             llm_manager = create_llm_manager(service_name="chatbot", workspace_id=self.workspace_id, request_type="chat")
