@@ -14,6 +14,7 @@ from .context_policy import *
 from .tools import *  # Import last - may extend models from core.py
 from .tool_assignments import *  # PRD-35: Tool catalog and assignments
 from .composio_cache import *  # Redesign: Composio metadata cache
+from .tool_routing import *  # PRD-139: Tool Routing Graph (edges, affinities, intent clusters)
 from .routing import *  # PRD-50: Universal Orchestrator Router
 from .channels import *  # PRD-55: Channel Connections (US-019)
 from .marketplace_plugins import *  # PRD-42: Plugin Marketplace
