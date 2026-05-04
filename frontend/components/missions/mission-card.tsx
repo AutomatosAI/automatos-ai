@@ -56,7 +56,7 @@ export function MissionCard({ mission, index }: MissionCardProps) {
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, delay: index * 0.05 }}
       className={cn(
-        'glass-card rounded-xl p-4 flex flex-col gap-3 cursor-pointer',
+        'glass-card card-glow rounded-xl p-4 flex flex-col gap-3 cursor-pointer',
         'hover:border-primary/20 transition-colors',
         needsAction && 'ring-1 ring-[hsl(var(--warning))]/20',
       )}
@@ -123,7 +123,7 @@ export function MissionCard({ mission, index }: MissionCardProps) {
           </div>
           <div className="h-1.5 bg-secondary/50 rounded-full overflow-hidden">
             <div
-              className="h-full bg-primary rounded-full transition-all duration-500"
+              className="h-full bg-primary rounded-full transition-all duration-300"
               style={{ width: `${Math.min(100, (mission.tokens_used / Math.max(mission.token_budget_estimate ?? 1, 1)) * 100)}%` }}
             />
           </div>

@@ -212,13 +212,13 @@ export function WorkflowStreamViewer({
     const getLogLevelStyle = (level: string) => {
         switch (level?.toUpperCase()) {
             case 'ERROR':
-                return 'text-red-400 border-red-400/30 bg-red-400/10';
+                return 'text-destructive border-destructive/30 bg-destructive/10';
             case 'WARNING':
-                return 'text-amber-400 border-amber-400/30 bg-amber-400/10';
+                return 'text-warning border-warning/30 bg-warning/10';
             case 'DEBUG':
-                return 'text-blue-400 border-blue-400/30 bg-blue-400/10';
+                return 'text-info border-info/30 bg-info/10';
             default:
-                return 'text-emerald-400 border-emerald-400/30 bg-emerald-400/10';
+                return 'text-success border-success/30 bg-success/10';
         }
     };
 
@@ -250,7 +250,7 @@ export function WorkflowStreamViewer({
                     )}
 
                     {isComplete && (
-                        <Badge variant="default" className="bg-emerald-500/20 text-emerald-400 border-emerald-400/30">
+                        <Badge variant="default" className="bg-success/20 text-success border-success/30">
                             <CheckCircle className="h-3 w-3 mr-1" />
                             Complete
                         </Badge>
@@ -264,7 +264,7 @@ export function WorkflowStreamViewer({
                         onClick={() => setAutoScroll(!autoScroll)}
                         className={cn(
                             'text-xs',
-                            autoScroll ? 'text-emerald-400' : 'text-muted-foreground'
+                            autoScroll ? 'text-success' : 'text-muted-foreground'
                         )}
                     >
                         {autoScroll ? '⬇ Auto-scroll ON' : '⬇ Auto-scroll OFF'}
@@ -275,7 +275,7 @@ export function WorkflowStreamViewer({
             <CardContent className="flex-1 p-0 overflow-hidden">
                 <ScrollArea className="h-full p-4" ref={scrollRef}>
                     {error && (
-                        <div className="text-red-400 text-sm mb-4 p-3 bg-red-500/10 border border-red-400/30 rounded-lg flex items-start gap-2">
+                        <div className="text-destructive text-sm mb-4 p-3 bg-destructive/10 border border-destructive/30 rounded-lg flex items-start gap-2">
                             <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
                             <div>
                                 <div className="font-semibold">Stream Error</div>
@@ -339,7 +339,7 @@ export function WorkflowStreamViewer({
                                 const subtaskData = d.data || {};
                                 const status = subtaskData.status || 'running';
                                 const statusIcon = status === 'completed' ? '✓' : status === 'failed' ? '✗' : '⋯';
-                                const statusColor = status === 'completed' ? 'text-emerald-400' : status === 'failed' ? 'text-red-400' : 'text-blue-400';
+                                const statusColor = status === 'completed' ? 'text-success' : status === 'failed' ? 'text-destructive' : 'text-info';
 
                                 return (
                                     <div

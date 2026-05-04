@@ -288,21 +288,21 @@ export function ActiveWorkflowsPanel({ onWorkflowClick, onPlaybookRunClick: onRe
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'running': return 'text-blue-400'
-      case 'completed': return 'text-green-400'
-      case 'failed': return 'text-red-400'
-      case 'idle': return 'text-gray-400'
-      default: return 'text-gray-400'
+      case 'running': return 'text-info'
+      case 'completed': return 'text-success'
+      case 'failed': return 'text-destructive'
+      case 'idle': return 'text-muted-foreground'
+      default: return 'text-muted-foreground'
     }
   }
 
   const getStatusBadgeStyle = (status: string) => {
     switch (status) {
-      case 'running': return 'bg-blue-500/10 text-blue-400 border-blue-500/20'
-      case 'completed': return 'bg-green-500/10 text-green-400 border-green-500/20'
-      case 'failed': return 'bg-red-500/10 text-red-400 border-red-500/20'
-      case 'idle': return 'bg-gray-500/10 text-gray-400 border-gray-500/20'
-      default: return 'bg-gray-500/10 text-gray-400 border-gray-500/20'
+      case 'running': return 'bg-info/10 text-info border-info/20'
+      case 'completed': return 'bg-success/10 text-success border-success/20'
+      case 'failed': return 'bg-destructive/10 text-destructive border-destructive/20'
+      case 'idle': return 'bg-secondary/50 text-muted-foreground border-border/30'
+      default: return 'bg-secondary/50 text-muted-foreground border-border/30'
     }
   }
 
@@ -321,8 +321,8 @@ export function ActiveWorkflowsPanel({ onWorkflowClick, onPlaybookRunClick: onRe
     return (
       <div className="flex items-center justify-center py-12">
         <div className="text-center">
-          <AlertTriangle className="h-8 w-8 text-red-400 mx-auto mb-4" />
-          <p className="text-red-400 mb-4">Error loading workflows</p>
+          <AlertTriangle className="h-8 w-8 text-destructive mx-auto mb-4" />
+          <p className="text-destructive mb-4">Error loading workflows</p>
           <Button onClick={() => refetch()} variant="outline">
             Try Again
           </Button>
@@ -361,7 +361,7 @@ export function ActiveWorkflowsPanel({ onWorkflowClick, onPlaybookRunClick: onRe
             variant="outline"
             size="sm"
             onClick={() => setShowCleanupDialog(true)}
-            className="bg-red-500/10 border-red-500/20 hover:bg-red-500/20"
+            className="bg-destructive/10 border-destructive/20 hover:bg-destructive/20"
           >
             <Trash2 className="w-4 h-4 mr-2" />
             Cleanup Old Workflows
@@ -371,7 +371,7 @@ export function ActiveWorkflowsPanel({ onWorkflowClick, onPlaybookRunClick: onRe
             variant="outline"
             size="sm"
             onClick={() => setAutoRefresh(!autoRefresh)}
-            className={autoRefresh ? 'bg-green-500/10 border-green-500/20' : ''}
+            className={autoRefresh ? 'bg-success/10 border-success/20' : ''}
           >
             <RefreshCw className={`w-4 h-4 mr-2 ${autoRefresh ? 'animate-spin' : ''}`} />
             Auto Refresh
@@ -473,10 +473,10 @@ export function ActiveWorkflowsPanel({ onWorkflowClick, onPlaybookRunClick: onRe
                         workflow.current_execution.status === 'running'
                           ? 'bg-orange-500/20 text-orange-400 border-orange-500/30'
                           : workflow.current_execution.status === 'failed'
-                            ? 'bg-red-500/20 text-red-400 border-red-500/30'
+                            ? 'bg-destructive/20 text-destructive border-destructive/30'
                             : workflow.metrics.last_execution
-                              ? 'bg-green-500/20 text-green-400 border-green-500/30'
-                              : 'bg-red-500/20 text-red-400 border-red-500/30'
+                              ? 'bg-success/20 text-success border-success/30'
+                              : 'bg-destructive/20 text-destructive border-destructive/30'
                       }`}>
                         {workflow.current_execution.status === 'running'
                           ? 'cooking'
@@ -521,7 +521,7 @@ export function ActiveWorkflowsPanel({ onWorkflowClick, onPlaybookRunClick: onRe
                       <p className="text-muted-foreground text-xs">
                         {workflow.metrics.success_rate === 100 || workflow.metrics.total_executions === 0 ? 'Success' : 'Failed'}
                       </p>
-                      <p className={`font-medium ${workflow.metrics.success_rate === 100 || workflow.metrics.total_executions === 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      <p className={`font-medium ${workflow.metrics.success_rate === 100 || workflow.metrics.total_executions === 0 ? 'text-success' : 'text-destructive'}`}>
                         {workflow.metrics.success_rate === 100 || workflow.metrics.total_executions === 0
                           ? `${workflow.metrics.success_rate}%`
                           : `${100 - workflow.metrics.success_rate}%`
@@ -581,7 +581,7 @@ export function ActiveWorkflowsPanel({ onWorkflowClick, onPlaybookRunClick: onRe
                             e.stopPropagation()
                             setWorkflowToDelete({ id: workflow.id, name: workflow.name })
                           }}
-                          className="text-red-400 focus:text-red-400 focus:bg-red-500/10"
+                          className="text-destructive focus:text-destructive focus:bg-destructive/10"
                         >
                           <Trash2 className="w-4 h-4 mr-2" />
                           Delete
@@ -617,7 +617,7 @@ export function ActiveWorkflowsPanel({ onWorkflowClick, onPlaybookRunClick: onRe
               return (
                 <motion.div
                   key={`recipe-${run.id}`}
-                  className="glass-card p-4 hover:border-primary/20 transition-all duration-300 cursor-pointer"
+                  className="glass-card card-glow p-4 hover:border-primary/20 transition-all duration-300 cursor-pointer"
                   initial={{ opacity: 0, x: -20 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ duration: 0.3, delay: index * 0.05 }}
@@ -626,16 +626,16 @@ export function ActiveWorkflowsPanel({ onWorkflowClick, onPlaybookRunClick: onRe
                   <div className="flex items-center gap-4">
                     {/* Status Indicator */}
                     <div className={`flex items-center justify-center w-10 h-10 rounded-lg ${
-                      isRunning ? 'bg-blue-500/20' : isFailed ? 'bg-red-500/20' : isCompleted ? 'bg-green-500/20' : 'bg-gray-500/20'
+                      isRunning ? 'bg-info/20' : isFailed ? 'bg-destructive/20' : isCompleted ? 'bg-success/20' : 'bg-secondary/50'
                     }`}>
                       {isRunning ? (
-                        <Activity className="w-5 h-5 text-blue-400 animate-pulse" />
+                        <Activity className="w-5 h-5 text-info animate-pulse" />
                       ) : isFailed ? (
-                        <AlertTriangle className="w-5 h-5 text-red-400" />
+                        <AlertTriangle className="w-5 h-5 text-destructive" />
                       ) : isCompleted ? (
-                        <CheckCircle className="w-5 h-5 text-green-400" />
+                        <CheckCircle className="w-5 h-5 text-success" />
                       ) : (
-                        <Clock className="w-5 h-5 text-gray-400" />
+                        <Clock className="w-5 h-5 text-muted-foreground" />
                       )}
                     </div>
 
@@ -649,12 +649,12 @@ export function ActiveWorkflowsPanel({ onWorkflowClick, onPlaybookRunClick: onRe
                         </Badge>
                         <Badge className={`text-xs ${
                           isRunning
-                            ? 'bg-blue-500/20 text-blue-400 border-blue-500/30'
+                            ? 'bg-info/20 text-info border-info/30'
                             : isFailed
-                              ? 'bg-red-500/20 text-red-400 border-red-500/30'
+                              ? 'bg-destructive/20 text-destructive border-destructive/30'
                               : isCompleted
-                                ? 'bg-green-500/20 text-green-400 border-green-500/30'
-                                : 'bg-gray-500/20 text-gray-400 border-gray-500/30'
+                                ? 'bg-success/20 text-success border-success/30'
+                                : 'bg-secondary/50 text-muted-foreground border-border/30'
                         }`}>
                           {isRunning ? 'cooking' : isFailed ? 'burnt' : isCompleted ? 'cooked' : run.status}
                         </Badge>
@@ -663,7 +663,7 @@ export function ActiveWorkflowsPanel({ onWorkflowClick, onPlaybookRunClick: onRe
                       <div className="flex items-center gap-2 text-xs text-muted-foreground">
                         <span>Step {run.current_step} of {run.total_steps}</span>
                         {run.error_message && (
-                          <span className="text-red-400 truncate max-w-[200px]">{run.error_message}</span>
+                          <span className="text-destructive truncate max-w-[200px]">{run.error_message}</span>
                         )}
                       </div>
                     </div>
@@ -719,12 +719,12 @@ export function ActiveWorkflowsPanel({ onWorkflowClick, onPlaybookRunClick: onRe
                             key={stepIdx}
                             className={`flex items-center gap-1 text-xs px-2 py-1 rounded-md ${
                               step.status === 'success'
-                                ? 'bg-green-500/10 text-green-400'
+                                ? 'bg-success/10 text-success'
                                 : step.status === 'failed'
-                                  ? 'bg-red-500/10 text-red-400'
+                                  ? 'bg-destructive/10 text-destructive'
                                   : step.status === 'running'
-                                    ? 'bg-blue-500/10 text-blue-400'
-                                    : 'bg-gray-500/10 text-gray-400'
+                                    ? 'bg-info/10 text-info'
+                                    : 'bg-secondary/50 text-muted-foreground'
                             }`}
                           >
                             {step.status === 'success' ? (
@@ -767,7 +767,7 @@ export function ActiveWorkflowsPanel({ onWorkflowClick, onPlaybookRunClick: onRe
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <AlertCircle className="w-5 h-5 text-red-400" />
+              <AlertCircle className="w-5 h-5 text-destructive" />
               Remove from Kitchen
             </DialogTitle>
             <DialogDescription>
@@ -788,7 +788,7 @@ export function ActiveWorkflowsPanel({ onWorkflowClick, onPlaybookRunClick: onRe
               variant="destructive"
               onClick={handleDeleteWorkflow}
               disabled={isDeleting}
-              className="bg-red-600 hover:bg-red-700"
+              className="bg-destructive hover:bg-destructive/80"
             >
               {isDeleting ? 'Removing...' : 'Remove from Kitchen'}
             </Button>
@@ -826,10 +826,10 @@ export function ActiveWorkflowsPanel({ onWorkflowClick, onPlaybookRunClick: onRe
                 </SelectContent>
               </Select>
             </div>
-            <div className="rounded-md bg-yellow-500/10 border border-yellow-500/20 p-3">
+            <div className="rounded-md bg-warning/10 border border-warning/20 p-3">
               <div className="flex items-start gap-2">
-                <AlertCircle className="w-4 h-4 text-yellow-400 mt-0.5 flex-shrink-0" />
-                <p className="text-sm text-yellow-200">
+                <AlertCircle className="w-4 h-4 text-warning mt-0.5 flex-shrink-0" />
+                <p className="text-sm text-warning/70">
                   This action cannot be undone. All workflows created before {new Date(Date.now() - parseInt(cleanupDays) * 24 * 60 * 60 * 1000).toLocaleDateString()} will be permanently deleted.
                 </p>
               </div>
@@ -847,7 +847,7 @@ export function ActiveWorkflowsPanel({ onWorkflowClick, onPlaybookRunClick: onRe
               variant="destructive"
               onClick={handleCleanupWorkflows}
               disabled={isDeleting}
-              className="bg-red-600 hover:bg-red-700"
+              className="bg-destructive hover:bg-destructive/80"
             >
               {isDeleting ? 'Cleaning...' : 'Cleanup Workflows'}
             </Button>

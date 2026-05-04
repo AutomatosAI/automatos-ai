@@ -49,7 +49,7 @@ function RatingStars({ average, count }: { average: number; count: number }) {
             key={star}
             className={`h-3.5 w-3.5 ${
               star <= Math.round(average)
-                ? 'fill-yellow-400 text-yellow-400'
+                ? 'fill-warning text-warning'
                 : 'text-muted-foreground/40'
             }`}
           />

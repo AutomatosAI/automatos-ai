@@ -64,12 +64,12 @@ export interface LLMModelCardProps {
 // ---------------------------------------------------------------------------
 
 const PROVIDER_COLORS: Record<string, string> = {
-  openai: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
+  openai: 'bg-success/15 text-success border-success/30',
   anthropic: 'bg-orange-500/15 text-orange-400 border-orange-500/30',
-  google: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
-  openrouter: 'bg-purple-500/15 text-purple-400 border-purple-500/30',
+  google: 'bg-info/15 text-info border-info/30',
+  openrouter: 'bg-agent/15 text-agent border-agent/30',
   meta: 'bg-sky-500/15 text-sky-400 border-sky-500/30',
-  mistral: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+  mistral: 'bg-warning/15 text-warning border-warning/30',
   cohere: 'bg-pink-500/15 text-pink-400 border-pink-500/30',
 }
 
@@ -157,7 +157,7 @@ export function LLMModelCard({
   if (viewMode === 'list') {
     return (
       <Card
-        className="glass-card hover:border-primary/20 transition-all cursor-pointer"
+        className="glass-card card-glow hover:border-primary/20 transition-all cursor-pointer"
         onClick={onClick}
       >
         <CardContent className="p-3">
@@ -307,7 +307,7 @@ export function LLMModelCard({
 
         {/* Capability bars */}
         {capEntries.length > 0 && (
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             {capEntries.map(([capName, rating]) => {
               const r = CAPABILITY_RATING[rating] || CAPABILITY_RATING.moderate
               return (

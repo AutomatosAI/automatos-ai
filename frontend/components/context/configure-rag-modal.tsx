@@ -198,17 +198,17 @@ export function ConfigureRAGModal({ isOpen, onClose, onConfigCreated }: Configur
         <div className="p-6 space-y-6">
           {/* Error Display */}
           {error && (
-            <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-lg flex items-center space-x-2">
-              <AlertCircle className="w-4 h-4 text-red-500" />
-              <span className="text-red-500 text-sm">{error}</span>
+            <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg flex items-center space-x-2">
+              <AlertCircle className="w-4 h-4 text-destructive" />
+              <span className="text-destructive text-sm">{error}</span>
             </div>
           )}
 
           {/* Success Display */}
           {createdConfig && (
-            <div className="p-4 bg-green-500/10 border border-green-500/20 rounded-lg flex items-center space-x-2">
-              <CheckCircle className="w-4 h-4 text-green-500" />
-              <span className="text-green-500 text-sm">
+            <div className="p-4 bg-success/10 border border-success/20 rounded-lg flex items-center space-x-2">
+              <CheckCircle className="w-4 h-4 text-success" />
+              <span className="text-success text-sm">
                 RAG configuration "{createdConfig.name}" created successfully!
               </span>
             </div>
@@ -513,7 +513,7 @@ export function ConfigureRAGModal({ isOpen, onClose, onConfigCreated }: Configur
                     {testResults && (
                       <div className="mt-4 p-4 bg-secondary/30 rounded-lg">
                         {testResults.error ? (
-                          <div className="text-red-500 text-sm">
+                          <div className="text-destructive text-sm">
                             <AlertCircle className="w-4 h-4 inline mr-2" />
                             {testResults.error}
                           </div>

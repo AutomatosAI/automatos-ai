@@ -119,7 +119,7 @@ function AcceptInvitationInner() {
         return (
             <Shell>
                 <div className="flex flex-col items-center text-center gap-4">
-                    <CheckCircle2 className="w-12 h-12 text-green-500" />
+                    <CheckCircle2 className="w-12 h-12 text-success" />
                     <h1 className="text-2xl font-semibold">You're in!</h1>
                     <p className="text-muted-foreground">
                         Joined <span className="text-foreground font-medium">{accepted.workspace_name}</span> as{' '}
@@ -174,11 +174,11 @@ function AcceptInvitationInner() {
         return (
             <Shell>
                 <div className="flex flex-col items-center text-center gap-4">
-                    <AlertCircle className="w-12 h-12 text-red-500" />
+                    <AlertCircle className="w-12 h-12 text-destructive" />
                     <h1 className="text-2xl font-semibold">Could not accept invitation</h1>
                     <p className="text-muted-foreground text-sm">{acceptError}</p>
                     {isMismatch && user?.primaryEmailAddress?.emailAddress && (
-                        <p className="text-xs text-amber-400">
+                        <p className="text-xs text-warning">
                             You're signed in as <span className="font-medium">{user.primaryEmailAddress.emailAddress}</span>,
                             but the invite was sent to <span className="font-medium">{info.email}</span>. Sign out and use the invited address.
                         </p>
@@ -220,7 +220,7 @@ function ErrorState({ title, detail, cta }: { title: string; detail: string; cta
     return (
         <Shell>
             <div className="flex flex-col items-center text-center gap-4">
-                <AlertCircle className="w-12 h-12 text-red-500" />
+                <AlertCircle className="w-12 h-12 text-destructive" />
                 <h1 className="text-2xl font-semibold">{title}</h1>
                 <p className="text-muted-foreground text-sm">{detail}</p>
                 <Link

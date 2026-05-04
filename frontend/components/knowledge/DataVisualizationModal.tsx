@@ -89,7 +89,7 @@ export function DataVisualizationModal({ isOpen, onClose, data, suggestedChartTy
           <DialogHeader>
             <DialogTitle>Visualization Error</DialogTitle>
           </DialogHeader>
-          <div className="text-red-500 p-4">
+          <div className="text-destructive p-4">
             <p>Failed to prepare data: {error instanceof Error ? error.message : 'Unknown error'}</p>
           </div>
           <Button onClick={onClose}>Close</Button>
@@ -156,7 +156,7 @@ export function DataVisualizationModal({ isOpen, onClose, data, suggestedChartTy
 
         {/* Chart Rendering */}
         {numericColumns.length === 0 ? (
-          <div className="text-center text-yellow-500 py-8">
+          <div className="text-center text-warning py-8">
             No numeric columns found in the data. Charts require at least one numeric column.
           </div>
         ) : (

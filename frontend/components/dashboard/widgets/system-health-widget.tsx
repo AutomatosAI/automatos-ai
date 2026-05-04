@@ -82,7 +82,7 @@ export function SystemHealthWidget({ data }: SystemHealthWidgetProps) {
       case 'critical':
         return 'text-[hsl(var(--destructive))]'
       default:
-        return 'text-gray-500'
+        return 'text-muted-foreground'
     }
   }
 

@@ -112,7 +112,7 @@ function getSenderInitials(from: EmailAddress): string {
  */
 function getAvatarColor(email: string): string {
   const colors = [
-    'bg-blue-500', 'bg-green-500', 'bg-purple-500',
+    'bg-blue-500', 'bg-green-500', 'bg-agent',
     'bg-orange-500', 'bg-pink-500', 'bg-teal-500',
     'bg-indigo-500', 'bg-rose-500', 'bg-cyan-500'
   ]
@@ -239,7 +239,7 @@ export function EmailViewer({
           <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/30 border border-border/40">
             {/* Avatar */}
             <div className={cn(
-              "flex-shrink-0 w-11 h-11 rounded-full flex items-center justify-center text-white text-sm font-medium",
+              "flex-shrink-0 w-12 h-12 rounded-full flex items-center justify-center text-white text-sm font-medium",
               getAvatarColor(email.from.email)
             )}>
               {getSenderInitials(email.from)}

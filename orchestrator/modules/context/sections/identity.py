@@ -67,7 +67,7 @@ class IdentitySection(BaseSection):
 
     name: str = "identity"
     priority: int = 1
-    max_tokens: Optional[int] = 600
+    max_tokens: Optional[int] = None
 
     async def render(self, ctx: SectionContext) -> str:  # noqa: C901
         """Build the identity block for the system prompt."""
@@ -126,6 +126,12 @@ class IdentitySection(BaseSection):
         chatbot path.  Includes base identity, platform skill, tool
         guidance, action response style, and self-learning — but NOT
         memory (``MemorySection`` handles that separately).
+
+        PRD-137 Fix #3: also appends the agent's own description and
+        persona, so non-Auto agents (e.g. Shopify widget) carry their
+        identity in the prompt without needing a second injection in
+        ``StreamingChatService``. This makes ``IdentitySection`` the
+        single owner of identity content for all modes.
         """
         from consumers.chatbot.personality import (
             AutomatosPersonality,
@@ -160,6 +166,16 @@ class IdentitySection(BaseSection):
             AutomatosPersonality.get_anti_patterns(),
             AutomatosPersonality.get_self_learning_instruction(),
         ]
+
+        # PRD-137 Fix #3: append agent's own description + persona text.
+        agent = ctx.agent
+        description = getattr(agent, "description", None) if agent else None
+        if description and str(description).strip():
+            parts.append(f"\n## Agent Description\n{str(description).strip()}")
+
+        persona_text = self._get_persona_text(agent)
+        if persona_text:
+            parts.append(f"\n## Persona & Communication Style\n{persona_text}")
 
         # No max_tokens truncation — the full chatbot personality is essential
         return "\n".join(parts)

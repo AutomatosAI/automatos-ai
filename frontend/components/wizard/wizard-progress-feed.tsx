@@ -39,10 +39,10 @@ const STAGE_META: Record<WizardStage, { label: string; icon: typeof FileText; ac
   scrape: { label: 'Scrape', icon: FileText, accent: 'text-violet-400' },
   ingest: { label: 'Ingest', icon: Activity, accent: 'text-cyan-400' },
   graphify: { label: 'Graphify', icon: Sparkles, accent: 'text-fuchsia-400' },
-  profile: { label: 'Profile', icon: CheckCircle2, accent: 'text-emerald-400' },
-  plan: { label: 'Plan', icon: Sparkles, accent: 'text-amber-400' },
-  complete: { label: 'Complete', icon: CheckCircle2, accent: 'text-emerald-400' },
-  failed: { label: 'Failed', icon: XCircle, accent: 'text-red-400' },
+  profile: { label: 'Profile', icon: CheckCircle2, accent: 'text-success' },
+  plan: { label: 'Plan', icon: Sparkles, accent: 'text-warning' },
+  complete: { label: 'Complete', icon: CheckCircle2, accent: 'text-success' },
+  failed: { label: 'Failed', icon: XCircle, accent: 'text-destructive' },
 }
 
 const STAGE_ORDER: WizardStage[] = [
@@ -92,7 +92,7 @@ export function WizardProgressFeed({
                 active
                   ? 'border-primary bg-primary/10 text-primary'
                   : done
-                  ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+                  ? 'border-success/40 bg-success/10 text-success/80'
                   : reached
                   ? 'border-border bg-secondary/50 text-foreground'
                   : 'border-border/40 bg-secondary/20 text-muted-foreground',
@@ -101,7 +101,7 @@ export function WizardProgressFeed({
               {active ? (
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
               ) : (
-                <Icon className={`w-3.5 h-3.5 ${done ? 'text-emerald-400' : meta.accent}`} />
+                <Icon className={`w-3.5 h-3.5 ${done ? 'text-success' : meta.accent}`} />
               )}
               <span>{meta.label}</span>
             </div>
@@ -114,9 +114,9 @@ export function WizardProgressFeed({
         <div className="flex items-center justify-between px-3 py-2 border-b border-border/40 bg-black/40">
           <div className="flex items-center gap-2">
             <div className="flex gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-full bg-red-500/70" />
-              <div className="w-2.5 h-2.5 rounded-full bg-amber-500/70" />
-              <div className="w-2.5 h-2.5 rounded-full bg-emerald-500/70" />
+              <div className="w-2.5 h-2.5 rounded-full bg-destructive/70" />
+              <div className="w-2.5 h-2.5 rounded-full bg-warning/70" />
+              <div className="w-2.5 h-2.5 rounded-full bg-success/70" />
             </div>
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">
               automatos ~ wizard intake ({pageCount} pages)
@@ -149,7 +149,7 @@ function EventLine({ event }: { event: WizardProgressEvent }) {
   const meta = STAGE_META[event.stage]
   const colour =
     event.level === 'error'
-      ? 'text-red-400'
+      ? 'text-destructive'
       : event.level === 'warn'
       ? 'text-amber-300'
       : meta?.accent || 'text-foreground'
@@ -170,7 +170,7 @@ function EventLine({ event }: { event: WizardProgressEvent }) {
       <span
         className={[
           'break-all',
-          event.level === 'error' && 'text-red-300',
+          event.level === 'error' && 'text-destructive/80',
           event.level === 'warn' && 'text-amber-200',
           event.level === 'info' && 'text-foreground/90',
         ]
@@ -194,7 +194,7 @@ function StateBadge({ state }: { state: WizardProgressState }) {
   }
   if (state === 'complete') {
     return (
-      <div className="flex items-center gap-1.5 text-[10px] font-mono text-emerald-400">
+      <div className="flex items-center gap-1.5 text-[10px] font-mono text-success">
         <CheckCircle2 className="w-3 h-3" />
         COMPLETE
       </div>
@@ -202,7 +202,7 @@ function StateBadge({ state }: { state: WizardProgressState }) {
   }
   if (state === 'failed' || state === 'error') {
     return (
-      <div className="flex items-center gap-1.5 text-[10px] font-mono text-red-400">
+      <div className="flex items-center gap-1.5 text-[10px] font-mono text-destructive">
         <AlertTriangle className="w-3 h-3" />
         {state === 'failed' ? 'FAILED' : 'STREAM ERROR'}
       </div>

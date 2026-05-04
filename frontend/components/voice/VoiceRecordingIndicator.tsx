@@ -34,8 +34,8 @@ export function VoiceRecordingIndicator({
       <div className="flex items-center gap-3">
         {/* Pulsing red dot */}
         <div className="relative flex items-center justify-center">
-          <span className="absolute inline-flex h-3 w-3 rounded-full bg-red-500 opacity-75 animate-ping" />
-          <span className="relative inline-flex h-3 w-3 rounded-full bg-red-500" />
+          <span className="absolute inline-flex h-3 w-3 rounded-full bg-destructive opacity-75 animate-ping" />
+          <span className="relative inline-flex h-3 w-3 rounded-full bg-destructive" />
         </div>
 
         <span className="text-sm font-medium text-foreground">

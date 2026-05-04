@@ -46,11 +46,11 @@ export function RealtimeMetricCard({
   const getTrendIcon = () => {
     switch (trend) {
       case 'up':
-        return <TrendingUp className="w-4 h-4 text-green-500" />
+        return <TrendingUp className="w-4 h-4 text-success" />
       case 'down':
-        return <TrendingDown className="w-4 h-4 text-red-500" />
+        return <TrendingDown className="w-4 h-4 text-destructive" />
       default:
-        return <Minus className="w-4 h-4 text-gray-500" />
+        return <Minus className="w-4 h-4 text-muted-foreground" />
     }
   }
 

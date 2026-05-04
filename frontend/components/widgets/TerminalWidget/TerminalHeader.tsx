@@ -38,17 +38,17 @@ export function TerminalHeader({
   }
 
   return (
-    <div className="flex flex-col gap-1 px-3 py-2 bg-gray-900 border-b border-gray-700 text-sm">
+    <div className="flex flex-col gap-1 px-3 py-2 bg-background border-b border-border text-sm">
       {/* Command line */}
       <div className="flex items-center gap-2">
-        <span className="text-green-400 font-mono">$</span>
+        <span className="text-success font-mono">$</span>
         <code className="text-gray-200 font-mono flex-1 truncate">
           {command}
         </code>
       </div>
 
       {/* Info row */}
-      <div className="flex items-center gap-4 text-xs text-gray-400">
+      <div className="flex items-center gap-4 text-xs text-muted-foreground">
         {/* Working directory */}
         {workingDirectory && (
           <div className="flex items-center gap-1">
@@ -65,7 +65,7 @@ export function TerminalHeader({
             className={cn(
               'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium',
               isSuccess && 'bg-green-900/60 text-green-300',
-              isError && 'bg-red-900/60 text-red-300'
+              isError && 'bg-destructive/60 text-destructive/80'
             )}
           >
             {isSuccess ? (
@@ -79,8 +79,8 @@ export function TerminalHeader({
 
         {/* Streaming indicator */}
         {isStreaming && (
-          <div className="flex items-center gap-1 text-yellow-400">
-            <div className="w-2 h-2 rounded-full bg-yellow-400 animate-pulse" />
+          <div className="flex items-center gap-1 text-warning">
+            <div className="w-2 h-2 rounded-full bg-warning animate-pulse" />
             <span>Running...</span>
           </div>
         )}

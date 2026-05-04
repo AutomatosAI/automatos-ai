@@ -14,13 +14,13 @@ import { Button } from '@/components/ui/button'
 import { useWorkflowExecutions } from '@/hooks/use-workflow-api'
 
 const statusStyles: Record<string, string> = {
-  draft: 'bg-gray-500/10 text-gray-400 border-gray-500/20',
-  active: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-  running: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-  completed: 'bg-green-500/10 text-green-400 border-green-500/20',
-  paused: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
-  failed: 'bg-red-500/10 text-red-400 border-red-500/20',
-  queued: 'bg-gray-500/10 text-gray-400 border-gray-500/20'
+  draft: 'bg-secondary/50 text-muted-foreground border-border/30',
+  active: 'bg-info/10 text-info border-info/20',
+  running: 'bg-info/10 text-info border-info/20',
+  completed: 'bg-success/10 text-success border-success/20',
+  paused: 'bg-warning/10 text-warning border-warning/20',
+  failed: 'bg-destructive/10 text-destructive border-destructive/20',
+  queued: 'bg-secondary/50 text-muted-foreground border-border/30'
 }
 
 export function HistoryTab() {
@@ -41,8 +41,8 @@ export function HistoryTab() {
     return (
       <div className="flex items-center justify-center py-12">
         <div className="text-center">
-          <AlertTriangle className="h-8 w-8 text-red-400 mx-auto mb-4" />
-          <p className="text-red-400">Error loading history</p>
+          <AlertTriangle className="h-8 w-8 text-destructive mx-auto mb-4" />
+          <p className="text-destructive">Error loading history</p>
         </div>
       </div>
     )
@@ -75,9 +75,9 @@ export function HistoryTab() {
           const StatusIcon = execution.status === 'completed' ? CheckCircle : 
                             execution.status === 'failed' ? AlertTriangle :
                             execution.status === 'running' ? Activity : Clock
-          const statusColor = execution.status === 'completed' ? 'text-green-400' :
-                             execution.status === 'failed' ? 'text-red-400' :
-                             execution.status === 'running' ? 'text-blue-400' : 'text-gray-400'
+          const statusColor = execution.status === 'completed' ? 'text-success' :
+                             execution.status === 'failed' ? 'text-destructive' :
+                             execution.status === 'running' ? 'text-info' : 'text-muted-foreground'
 
           return (
             <motion.div

@@ -27,7 +27,7 @@ export function CodeArtifact({ content, language, metadata }: CodeArtifactProps)
   return (
     <div className="space-y-4">
       {metadata && (metadata.file_path || metadata.line_number) && (
-        <div className="text-sm text-gray-400">
+        <div className="text-sm text-muted-foreground">
           {metadata.file_path && (
             <div className="font-mono">{metadata.file_path}</div>
           )}
@@ -35,7 +35,7 @@ export function CodeArtifact({ content, language, metadata }: CodeArtifactProps)
             <div>Line {metadata.line_number}</div>
           )}
           {metadata.explanation && (
-            <div className="mt-2 text-gray-300 italic">{metadata.explanation}</div>
+            <div className="mt-2 text-foreground/90 italic">{metadata.explanation}</div>
           )}
         </div>
       )}

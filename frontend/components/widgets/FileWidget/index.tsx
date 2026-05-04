@@ -110,7 +110,7 @@ export function FileWidget({
         {
           label: copied ? 'Copied!' : 'Copy Path',
           icon: copied ? (
-            <Check className="h-4 w-4 mr-2 text-green-500" />
+            <Check className="h-4 w-4 mr-2 text-success" />
           ) : (
             <Copy className="h-4 w-4 mr-2" />
           ),

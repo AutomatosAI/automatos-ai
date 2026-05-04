@@ -38,11 +38,11 @@ export function ApprovalGatesWidget({ period, className }: ApprovalGatesWidgetPr
     <div className={cn('h-full flex flex-col', className)}>
       <div className="flex items-center justify-between px-4 py-3 border-b border-border/50">
         <div className="flex items-center gap-2">
-          <ShieldCheck className="w-4 h-4 text-amber-400" />
+          <ShieldCheck className="w-4 h-4 text-warning" />
           <h3 className="text-sm font-semibold">Approval Gates</h3>
         </div>
         {!isLoading && pendingCount > 0 && (
-          <span className="text-xs bg-amber-500/15 text-amber-400 px-1.5 py-0.5 rounded-full font-medium">
+          <span className="text-xs bg-warning/15 text-warning px-1.5 py-0.5 rounded-full font-medium">
             {pendingCount} pending
           </span>
         )}
@@ -60,7 +60,7 @@ export function ApprovalGatesWidget({ period, className }: ApprovalGatesWidgetPr
               <div className="text-center flex-1">
                 <span className={cn(
                   'text-2xl font-bold',
-                  pendingCount > 0 ? 'text-amber-400' : 'text-emerald-400'
+                  pendingCount > 0 ? 'text-warning' : 'text-success'
                 )}>
                   {pendingCount}
                 </span>
@@ -75,17 +75,17 @@ export function ApprovalGatesWidget({ period, className }: ApprovalGatesWidgetPr
 
             {/* Pending missions list */}
             {pendingMissions.length > 0 ? (
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
                   Waiting for approval
                 </p>
                 {pendingMissions.map((mission) => (
                   <div
                     key={mission.id}
-                    className="p-2 rounded-lg bg-amber-500/5 border border-amber-500/10 space-y-1"
+                    className="p-2 rounded-lg bg-warning/5 border border-warning/10 space-y-1"
                   >
                     <div className="flex items-start gap-2">
-                      <AlertCircle className="w-3 h-3 text-amber-400 mt-0.5 shrink-0" />
+                      <AlertCircle className="w-3 h-3 text-warning mt-0.5 shrink-0" />
                       <span className="text-xs leading-snug line-clamp-2">{mission.goal}</span>
                     </div>
                     {mission.waiting_since && (

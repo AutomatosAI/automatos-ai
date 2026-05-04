@@ -9,6 +9,7 @@ import { WorkspaceExplorer } from '@/components/workspace/WorkspaceExplorer'
 import { useWorkspace } from '@/components/workspace-provider'
 import { usePageAPI } from '@/hooks/use-page-api'
 import { Button } from '@/components/ui/button'
+import { PageHeader } from '@/components/shared'
 
 /**
  * /deliverables/explorer — Full-page workspace file browser.
@@ -48,19 +49,23 @@ export default function ExplorerPage() {
       ) : (
         <div className="h-[calc(100vh-4rem)] flex flex-col">
           {/* Header — Back button + title */}
-          <div className="flex items-center gap-2 px-4 py-2 border-b border-border/30">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="gap-1.5 text-muted-foreground hover:text-foreground"
-              onClick={() => router.push('/deliverables?tab=outputs')}
-            >
-              <ArrowLeft className="h-3.5 w-3.5" />
-              Back to Deliverables
-            </Button>
-            <div className="h-4 w-px bg-border/50" />
-            <FolderTree className="h-4 w-4 text-muted-foreground" />
-            <span className="text-sm font-medium">Explorer</span>
+          <div className="px-4 py-2 border-b border-border/30">
+            <PageHeader
+              title="Workspace"
+              titleAccent="Explorer"
+              subtitle="Browse and edit workspace files"
+              actions={
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="gap-1.5 text-muted-foreground hover:text-foreground"
+                  onClick={() => router.push('/deliverables?tab=outputs')}
+                >
+                  <ArrowLeft className="h-3.5 w-3.5" />
+                  Back to Deliverables
+                </Button>
+              }
+            />
           </div>
 
           {/* WorkspaceExplorer fills remaining space */}

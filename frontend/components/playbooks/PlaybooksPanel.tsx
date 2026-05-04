@@ -6,6 +6,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 
 import { apiClient } from "@/lib/api-client"
+import { PageHeader, SearchInput } from '@/components/shared'
+
 export function PlaybooksPanel() {
   const [tenantId, setTenantId] = useState<string>('')
   const [items, setItems] = useState<any[]>([])
@@ -14,6 +16,7 @@ export function PlaybooksPanel() {
   const [topK, setTopK] = useState<number>(20)
   const [prefix, setPrefix] = useState<string>('auto')
   const [error, setError] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState<string>('')
 
   const load = async () => {
     try {
@@ -35,36 +38,53 @@ export function PlaybooksPanel() {
 
   useEffect(() => { load() }, [])
 
+  const filteredItems = items.filter((p) =>
+    !searchQuery.trim() || p.name?.toLowerCase().includes(searchQuery.toLowerCase())
+  )
+
   return (
-    <Card className="glass-card">
-      <CardHeader>
-        <CardTitle>Playbooks</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-            <Input type="number" placeholder="Min support" value={minSupport} onChange={(e)=>setMinSupport(Number(e.target.value||0))} />
-            <Input type="number" placeholder="Top K" value={topK} onChange={(e)=>setTopK(Number(e.target.value||0))} />
-            <Input placeholder="Name prefix" value={prefix} onChange={(e)=>setPrefix(e.target.value)} />
-          </div>
-          <div className="flex gap-2">
+    <div className="space-y-6">
+      <PageHeader
+        title="My"
+        titleAccent="Playbooks"
+        subtitle="Browse and manage your workflow playbooks"
+        actions={
+          <>
             <Button onClick={load} variant="outline" disabled={loading}>{loading ? 'Loading…' : 'Refresh'}</Button>
             <Button onClick={mine} disabled={loading}>Mine</Button>
+          </>
+        }
+      />
+
+      <SearchInput
+        value={searchQuery}
+        onChange={setSearchQuery}
+        placeholder="Search playbooks..."
+      />
+
+      <Card className="glass-card">
+        <CardContent className="pt-4">
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+              <Input type="number" placeholder="Min support" value={minSupport} onChange={(e)=>setMinSupport(Number(e.target.value||0))} />
+              <Input type="number" placeholder="Top K" value={topK} onChange={(e)=>setTopK(Number(e.target.value||0))} />
+              <Input placeholder="Name prefix" value={prefix} onChange={(e)=>setPrefix(e.target.value)} />
+            </div>
+            {error && <div className="text-sm text-red-500">{error}</div>}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {filteredItems.map((p) => (
+                <div key={p.id} className="p-4 rounded border border-border/50 bg-secondary/20">
+                  <div className="font-medium">{p.name}</div>
+                  <div className="text-xs text-muted-foreground">Support: {p.support}</div>
+                  <div className="text-xs text-muted-foreground">Tenant: {p.tenant_id || '—'}</div>
+                  <div className="text-xs text-muted-foreground">Created: {p.created_at}</div>
+                </div>
+              ))}
+            </div>
           </div>
-          {error && <div className="text-sm text-red-500">{error}</div>}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {items.map((p) => (
-              <div key={p.id} className="p-4 rounded border border-border/50 bg-secondary/20">
-                <div className="font-medium">{p.name}</div>
-                <div className="text-xs text-muted-foreground">Support: {p.support}</div>
-                <div className="text-xs text-muted-foreground">Tenant: {p.tenant_id || '—'}</div>
-                <div className="text-xs text-muted-foreground">Created: {p.created_at}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+    </div>
   )
 }
 

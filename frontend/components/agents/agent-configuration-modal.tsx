@@ -1896,7 +1896,7 @@ export function AgentConfigurationModal({
                           <Label className="text-xs">Last Heartbeat Result</Label>
                           <div className="p-3 rounded-lg bg-secondary/30 text-sm">
                             <div className="flex items-center gap-2 mb-2">
-                              <span className={`h-2 w-2 rounded-full ${lastHeartbeatResult.status === 'success' ? 'bg-green-500' : 'bg-red-500'}`} />
+                              <span className={`h-2 w-2 rounded-full ${lastHeartbeatResult.status === 'success' ? 'bg-success' : 'bg-destructive'}`} />
                               <span className="text-xs text-muted-foreground">
                                 {lastHeartbeatResult.created_at ? new Date(lastHeartbeatResult.created_at).toLocaleString() : 'Unknown time'}
                               </span>

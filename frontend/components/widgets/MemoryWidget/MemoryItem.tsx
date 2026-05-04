@@ -36,13 +36,13 @@ function getTypeConfig(type: MemoryType) {
       return {
         icon: Info,
         label: 'fact',
-        className: 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300',
+        className: 'bg-blue-100 text-info dark:bg-blue-900 dark:text-info/80',
       }
     case 'preference':
       return {
         icon: Lightbulb,
         label: 'preference',
-        className: 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300',
+        className: 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-agent/80',
       }
     case 'context':
       return {
@@ -60,7 +60,7 @@ function getTypeConfig(type: MemoryType) {
       return {
         icon: Info,
         label: type,
-        className: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
+        className: 'bg-gray-100 text-foreground/70 dark:bg-secondary dark:text-foreground/90',
       }
   }
 }

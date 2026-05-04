@@ -129,12 +129,12 @@ function SyncProgressModal({
               <RefreshCw className="w-8 h-8 text-primary animate-spin" />
             </div>
           ) : isCompleted ? (
-            <div className="w-16 h-16 rounded-full bg-green-500/10 flex items-center justify-center">
-              <CheckCircle2 className="w-8 h-8 text-green-400" />
+            <div className="w-16 h-16 rounded-full bg-success/10 flex items-center justify-center">
+              <CheckCircle2 className="w-8 h-8 text-success" />
             </div>
           ) : (
-            <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center">
-              <XCircle className="w-8 h-8 text-red-400" />
+            <div className="w-16 h-16 rounded-full bg-destructive/10 flex items-center justify-center">
+              <XCircle className="w-8 h-8 text-destructive" />
             </div>
           )}
         </div>
@@ -150,21 +150,21 @@ function SyncProgressModal({
         {job && (
           <div className="grid grid-cols-3 gap-3 mb-4">
             <div className="text-center p-2 rounded-lg bg-secondary/30">
-              <div className="flex items-center justify-center gap-1 text-green-400 mb-1">
+              <div className="flex items-center justify-center gap-1 text-success mb-1">
                 <FileText className="w-3.5 h-3.5" />
               </div>
               <div className="text-lg font-bold">{job.files_synced}</div>
               <div className="text-xs text-muted-foreground">Synced</div>
             </div>
             <div className="text-center p-2 rounded-lg bg-secondary/30">
-              <div className="flex items-center justify-center gap-1 text-yellow-400 mb-1">
+              <div className="flex items-center justify-center gap-1 text-warning mb-1">
                 <SkipForward className="w-3.5 h-3.5" />
               </div>
               <div className="text-lg font-bold">{job.files_skipped}</div>
               <div className="text-xs text-muted-foreground">Skipped</div>
             </div>
             <div className="text-center p-2 rounded-lg bg-secondary/30">
-              <div className="flex items-center justify-center gap-1 text-red-400 mb-1">
+              <div className="flex items-center justify-center gap-1 text-destructive mb-1">
                 <AlertTriangle className="w-3.5 h-3.5" />
               </div>
               <div className="text-lg font-bold">{job.files_errored}</div>
@@ -182,7 +182,7 @@ function SyncProgressModal({
 
         {/* Error message */}
         {isFailed && job?.error_message && (
-          <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-sm text-red-400 mb-4">
+          <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-sm text-destructive mb-4">
             {job.error_message}
           </div>
         )}

@@ -589,10 +589,10 @@ export function DocumentUpload({ onUploadSuccess, categories }: DocumentUploadPr
                       
                       <div className="flex items-center gap-2">
                         {fileUpload.status === 'success' && (
-                          <CheckCircle className="w-5 h-5 text-green-500" />
+                          <CheckCircle className="w-5 h-5 text-success" />
                         )}
                         {fileUpload.status === 'error' && (
-                          <AlertCircle className="w-5 h-5 text-red-500" />
+                          <AlertCircle className="w-5 h-5 text-destructive" />
                         )}
                         {fileUpload.status === 'uploading' && (
                           <Loader2 className="w-5 h-5 animate-spin text-primary" />

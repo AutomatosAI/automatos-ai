@@ -439,7 +439,7 @@ export function MarketplaceToolsTab({ searchQuery }: MarketplaceToolsTabProps) {
                         return (
                             <Card
                                 key={app.name}
-                                className="glass-card hover:border-primary/20 transition-all cursor-pointer"
+                                className="glass-card card-glow hover:border-primary/20 transition-all cursor-pointer"
                                 onClick={() => handleOpenDetails(app)}
                             >
                                 <CardContent className="p-3">

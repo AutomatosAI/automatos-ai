@@ -132,7 +132,7 @@ export function UploadProviderModal({
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-[600px] glass-card card-glow">
+      <DialogContent size="md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Upload className="w-5 h-5" />
@@ -181,7 +181,7 @@ export function UploadProviderModal({
                               </p>
                             </div>
                             {provider.connected && (
-                              <Badge variant="outline" className="text-xs bg-green-500/10 text-green-400 border-green-500/20">
+                              <Badge variant="outline" className="text-xs bg-success/10 text-success border-success/20">
                                 <CheckCircle className="w-3 h-3 mr-1" />
                                 Connected
                               </Badge>
@@ -249,7 +249,7 @@ export function UploadProviderModal({
 
               {/* File Drop Zone */}
               <div
-                className={`border-2 border-dashed rounded-lg p-8 text-center transition-all duration-200 ${
+                className={`border-2 border-dashed rounded-lg p-8 text-center transition-all duration-220 ${
                   dragActive
                     ? 'border-primary bg-primary/5'
                     : 'border-border/50 hover:border-primary/50'
@@ -320,7 +320,7 @@ export function UploadProviderModal({
                 animate={{ scale: 1 }}
                 transition={{ type: 'spring', duration: 0.5 }}
               >
-                <CheckCircle className="w-16 h-16 mx-auto text-green-400" />
+                <CheckCircle className="w-16 h-16 mx-auto text-success" />
               </motion.div>
 
               <h3 className="text-xl font-semibold">Upload Complete!</h3>

@@ -48,7 +48,7 @@ export function QuickCreateForm(props: QuickCreateFormProps) {
       exit={{ opacity: 0, x: -10 }}
       className="space-y-3"
     >
-      <div className="space-y-1.5">
+      <div className="space-y-2">
         <Label htmlFor="task-title" className="text-xs">Title</Label>
         <Input
           id="task-title"
@@ -59,7 +59,7 @@ export function QuickCreateForm(props: QuickCreateFormProps) {
         />
       </div>
 
-      <div className="space-y-1.5">
+      <div className="space-y-2">
         <Label htmlFor="task-desc" className="text-xs">Description</Label>
         <Textarea
           id="task-desc"
@@ -71,7 +71,7 @@ export function QuickCreateForm(props: QuickCreateFormProps) {
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-1.5">
+        <div className="space-y-2">
           <Label className="text-xs">Priority</Label>
           <Select value={props.priority} onValueChange={(v) => props.onPriorityChange(v as TaskPriority)}>
             <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
@@ -84,7 +84,7 @@ export function QuickCreateForm(props: QuickCreateFormProps) {
           </Select>
         </div>
 
-        <div className="space-y-1.5">
+        <div className="space-y-2">
           <Label className="text-xs">Assign Agent</Label>
           <Select value={props.agentId} onValueChange={props.onAgentIdChange}>
             <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Unassigned" /></SelectTrigger>
@@ -104,7 +104,7 @@ export function QuickCreateForm(props: QuickCreateFormProps) {
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-1.5">
+        <div className="space-y-2">
           <Label htmlFor="task-tags" className="text-xs">Tags (comma-separated)</Label>
           <Input
             id="task-tags"
@@ -115,7 +115,7 @@ export function QuickCreateForm(props: QuickCreateFormProps) {
           />
         </div>
 
-        <div className="space-y-1.5">
+        <div className="space-y-2">
           <Label className="text-xs">Review Mode</Label>
           <Select value={props.reviewMode} onValueChange={(v) => props.onReviewModeChange(v as ReviewMode)}>
             <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>

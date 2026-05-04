@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
+import { PageHeader } from '@/components/shared'
 import {
   Dialog,
   DialogContent,
@@ -25,7 +26,6 @@ import {
   ResizablePanelGroup,
 } from '@/components/ui/resizable'
 // StatsBar removed — stats visible in budget bar + task nodes
-import { MissionStatusBadge } from './mission-status-badge'
 import { MissionBudgetBar } from './mission-budget-bar'
 import { MissionDAGCanvas } from './mission-dag-canvas'
 import { MissionActivityFeed } from './mission-activity-feed'
@@ -133,26 +133,20 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
         </Link>
 
         {/* Title row */}
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex-1 min-w-0">
-            <h1 className="text-lg font-semibold leading-tight line-clamp-2">
-              {(mission.config as Record<string, unknown>)?.name as string || mission.goal.split(':')[0]}
-            </h1>
-            <div className="flex items-center gap-3 mt-2">
-              <MissionStatusBadge state={mission.state} />
-              <span className="text-xs text-muted-foreground">
-                {stats?.tasksDone}/{stats?.taskCount} tasks
-              </span>
-              {stats && stats.elapsedMs > 0 && (
-                <span className="text-xs text-muted-foreground">
-                  {formatElapsed(stats.elapsedMs)} elapsed
-                </span>
-              )}
-            </div>
-          </div>
-
-          {/* Action buttons */}
-          <div className="flex items-center gap-2 shrink-0">
+        <PageHeader
+          title="Mission"
+          titleAccent={(mission.config as Record<string, unknown>)?.name as string || mission.goal.split(':')[0]}
+          subtitle={
+            [
+              mission.state,
+              stats ? `${stats.tasksDone}/${stats.taskCount} tasks` : null,
+              stats && stats.elapsedMs > 0 ? `${formatElapsed(stats.elapsedMs)} elapsed` : null,
+            ]
+              .filter(Boolean)
+              .join(' · ')
+          }
+          actions={
+            <div className="flex items-center gap-2 shrink-0">
             {mission.state === 'running' && (
               <Button
                 variant="outline"
@@ -376,8 +370,9 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
                 {rerunMutation.isLoading ? 'Creating...' : 'Re-run'}
               </Button>
             )}
-          </div>
-        </div>
+            </div>
+          }
+        />
 
         {/* Stats are shown inline on the budget bar and task nodes */}
 
@@ -417,7 +412,7 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
                   <span>Parallel groups: <span className="font-medium text-foreground">{mission.parallel_groups.join(', ')}</span></span>
                 )}
                 {mission.has_synthesis_tasks && (
-                  <span className="text-purple-400">Has synthesis tasks</span>
+                  <span className="text-agent">Has synthesis tasks</span>
                 )}
               </div>
             </div>
@@ -450,7 +445,7 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
               </Button>
               <Button
                 size="sm"
-                className="bg-green-600 hover:bg-green-700 text-white"
+                className="bg-success hover:bg-success/80 text-white"
                 disabled={approveMutation.isLoading}
                 onClick={() => {
                   const hasModifications =

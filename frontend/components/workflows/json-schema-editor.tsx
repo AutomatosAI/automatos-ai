@@ -116,7 +116,7 @@ export function JsonSchemaEditor({
   const isValid = error === null && value.trim().length > 0
 
   return (
-    <div className={cn('space-y-1.5', className)}>
+    <div className={cn('space-y-2', className)}>
       {label && (
         <div className="flex items-center justify-between">
           <span className="text-sm font-medium text-foreground">{label}</span>
@@ -125,7 +125,7 @@ export function JsonSchemaEditor({
               <span
                 className={cn(
                   'flex items-center gap-1 text-xs',
-                  isValid ? 'text-green-400' : error ? 'text-red-400' : 'text-muted-foreground'
+                  isValid ? 'text-success' : error ? 'text-destructive' : 'text-muted-foreground'
                 )}
               >
                 {isValid ? (
@@ -163,7 +163,7 @@ export function JsonSchemaEditor({
           isFocused
             ? 'border-orange-400/50 ring-1 ring-orange-400/20'
             : error
-              ? 'border-red-400/50'
+              ? 'border-destructive/50'
               : 'border-input',
           'bg-[#1e1e2e]'
         )}
@@ -191,7 +191,7 @@ export function JsonSchemaEditor({
           spellCheck={false}
           className={cn(
             'relative w-full p-3 m-0 bg-transparent font-mono text-xs leading-relaxed resize-y',
-            'text-transparent caret-orange-400 placeholder:text-gray-500',
+            'text-transparent caret-orange-400 placeholder:text-muted-foreground',
             'outline-none border-none ring-0',
             'selection:bg-orange-400/20'
           )}
@@ -200,7 +200,7 @@ export function JsonSchemaEditor({
       </div>
 
       {error && (
-        <p className="flex items-center gap-1 text-xs text-red-400">
+        <p className="flex items-center gap-1 text-xs text-destructive">
           <AlertCircle className="w-3 h-3 flex-shrink-0" />
           {error}
         </p>

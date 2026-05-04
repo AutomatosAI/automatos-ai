@@ -82,28 +82,28 @@ function verdictBadge(verdict: string | null) {
   switch (verdict) {
     case 'safe':
       return (
-        <Badge className="bg-green-500/20 text-green-400 border-green-500/30">
+        <Badge className="bg-success/10 text-success border-success/20">
           <ShieldCheck className="h-3 w-3 mr-1" />
           Safe
         </Badge>
       )
     case 'review_required':
       return (
-        <Badge className="bg-yellow-500/20 text-yellow-400 border-yellow-500/30">
+        <Badge className="bg-warning/10 text-warning border-warning/20">
           <ShieldAlert className="h-3 w-3 mr-1" />
           Review Required
         </Badge>
       )
     case 'blocked':
       return (
-        <Badge className="bg-red-500/20 text-red-400 border-red-500/30">
+        <Badge className="bg-destructive/20 text-destructive border-destructive/30">
           <ShieldX className="h-3 w-3 mr-1" />
           Blocked
         </Badge>
       )
     default:
       return (
-        <Badge className="bg-gray-500/20 text-gray-400 border-gray-500/30">
+        <Badge className="bg-secondary/50 text-muted-foreground border-border/30">
           <Shield className="h-3 w-3 mr-1" />
           Pending
         </Badge>
@@ -114,23 +114,23 @@ function verdictBadge(verdict: string | null) {
 function severityColor(severity: string) {
   switch (severity) {
     case 'critical':
-      return 'text-red-400'
+      return 'text-destructive'
     case 'high':
       return 'text-orange-400'
     case 'medium':
-      return 'text-yellow-400'
+      return 'text-warning'
     case 'low':
-      return 'text-blue-400'
+      return 'text-info'
     default:
-      return 'text-gray-400'
+      return 'text-muted-foreground'
   }
 }
 
 function riskScoreColor(score: number | null) {
-  if (score === null) return 'text-gray-400'
-  if (score < 20) return 'text-green-400'
-  if (score < 70) return 'text-yellow-400'
-  return 'text-red-400'
+  if (score === null) return 'text-muted-foreground'
+  if (score < 20) return 'text-success'
+  if (score < 70) return 'text-warning'
+  return 'text-destructive'
 }
 
 function formatDate(dateStr: string | null) {
@@ -384,8 +384,8 @@ export default function AdminPluginsPendingPage() {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <Card className="glass-card">
             <CardContent className="p-4 flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-yellow-500/10">
-                <Clock className="h-5 w-5 text-yellow-400" />
+              <div className="p-2 rounded-lg bg-warning/10">
+                <Clock className="h-5 w-5 text-warning" />
               </div>
               <div>
                 <p className="text-2xl font-bold text-white">{total}</p>
@@ -395,8 +395,8 @@ export default function AdminPluginsPendingPage() {
           </Card>
           <Card className="glass-card">
             <CardContent className="p-4 flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-blue-500/10">
-                <Package className="h-5 w-5 text-blue-400" />
+              <div className="p-2 rounded-lg bg-info/10">
+                <Package className="h-5 w-5 text-info" />
               </div>
               <div>
                 <p className="text-2xl font-bold text-white">{selectedIds.size}</p>
@@ -424,13 +424,13 @@ export default function AdminPluginsPendingPage() {
           <Card className="glass-card border-orange-500/30">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-300">
+                <span className="text-sm text-foreground/90">
                   {selectedIds.size} plugin{selectedIds.size !== 1 ? 's' : ''} selected
                 </span>
                 <div className="flex gap-2">
                   <Button
                     size="sm"
-                    className="bg-green-600 hover:bg-green-700 text-white"
+                    className="bg-success hover:bg-success/80 text-white"
                     onClick={handleBatchApprove}
                     disabled={batchActionLoading}
                   >
@@ -470,10 +470,10 @@ export default function AdminPluginsPendingPage() {
 
         {/* Error */}
         {error && (
-          <div className="flex items-start gap-2 p-3 rounded-md bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
+          <div className="flex items-start gap-2 p-3 rounded-md bg-destructive/10 border border-destructive/30 text-destructive text-sm">
             <XCircle className="h-4 w-4 mt-0.5 shrink-0" />
             <span>{error}</span>
-            <button className="ml-auto text-red-300 hover:text-red-200" onClick={() => setError(null)}>
+            <button className="ml-auto text-destructive/80 hover:text-destructive/70" onClick={() => setError(null)}>
               Dismiss
             </button>
           </div>
@@ -490,7 +490,7 @@ export default function AdminPluginsPendingPage() {
         {!loading && plugins.length === 0 && (
           <Card className="glass-card">
             <CardContent className="p-12 text-center">
-              <CheckCircle2 className="h-12 w-12 mx-auto text-green-400 mb-4" />
+              <CheckCircle2 className="h-12 w-12 mx-auto text-success mb-4" />
               <h3 className="text-lg font-medium text-white mb-2">All caught up!</h3>
               <p className="text-muted-foreground">
                 No plugins pending review. Upload a new plugin to get started.
@@ -532,7 +532,7 @@ export default function AdminPluginsPendingPage() {
                   className={`glass-card transition-all duration-200 ${
                     selectedIds.has(plugin.id)
                       ? 'border-orange-500/50 shadow-lg shadow-orange-500/5'
-                      : 'hover:border-gray-600'
+                      : 'hover:border-border'
                   }`}
                 >
                   <CardContent className="p-5">
@@ -552,7 +552,7 @@ export default function AdminPluginsPendingPage() {
                           <h3 className="text-lg font-semibold text-white truncate">
                             {plugin.name}
                           </h3>
-                          <Badge variant="outline" className="border-gray-700 text-gray-400 shrink-0">
+                          <Badge variant="outline" className="border-border text-muted-foreground shrink-0">
                             v{plugin.version}
                           </Badge>
                           {verdictBadge(
@@ -566,7 +566,7 @@ export default function AdminPluginsPendingPage() {
                           )}
                         </div>
 
-                        <p className="text-sm text-gray-400 font-mono mb-2">
+                        <p className="text-sm text-muted-foreground font-mono mb-2">
                           {plugin.slug}
                         </p>
 
@@ -577,14 +577,14 @@ export default function AdminPluginsPendingPage() {
                         )}
 
                         {/* Meta Row */}
-                        <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500">
+                        <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
                           <span className="flex items-center gap-1">
                             <Clock className="h-3 w-3" />
                             {formatDate(plugin.created_at)}
                           </span>
                           {plugin.source_type && (
                             <span>
-                              Source: <span className="text-gray-400">{plugin.source_type}</span>
+                              Source: <span className="text-muted-foreground">{plugin.source_type}</span>
                             </span>
                           )}
                           <span>
@@ -592,8 +592,8 @@ export default function AdminPluginsPendingPage() {
                             <span
                               className={
                                 plugin.static_findings_count > 0
-                                  ? 'text-yellow-400'
-                                  : 'text-green-400'
+                                  ? 'text-warning'
+                                  : 'text-success'
                               }
                             >
                               {plugin.static_findings_count}
@@ -611,8 +611,8 @@ export default function AdminPluginsPendingPage() {
 
                         {/* LLM Summary */}
                         {plugin.llm_summary && (
-                          <div className="mt-3 p-2 rounded bg-secondary/50 border border-secondary text-sm text-gray-300">
-                            <span className="text-xs text-gray-500 block mb-1">LLM Summary</span>
+                          <div className="mt-3 p-2 rounded bg-secondary/50 border border-secondary text-sm text-foreground/90">
+                            <span className="text-xs text-muted-foreground block mb-1">LLM Summary</span>
                             {plugin.llm_summary}
                           </div>
                         )}
@@ -622,7 +622,7 @@ export default function AdminPluginsPendingPage() {
                       <div className="flex flex-col gap-2 shrink-0">
                         <Button
                           size="sm"
-                          className="bg-green-600 hover:bg-green-700 text-white"
+                          className="bg-success hover:bg-success/80 text-white"
                           onClick={() => handleApprove(plugin.id)}
                           disabled={isActionLoading || batchActionLoading}
                         >
@@ -712,7 +712,7 @@ export default function AdminPluginsPendingPage() {
                         {scan.llm_risk_score !== null && (
                           <div className="p-3 rounded bg-secondary/30 border border-secondary">
                             <div className="flex items-center justify-between mb-2">
-                              <span className="text-sm text-gray-400">Risk Score</span>
+                              <span className="text-sm text-muted-foreground">Risk Score</span>
                               <span
                                 className={`text-xl font-bold ${riskScoreColor(
                                   scan.llm_risk_score
@@ -738,19 +738,19 @@ export default function AdminPluginsPendingPage() {
 
                         {/* Overall Verdict */}
                         <div className="flex items-center gap-3">
-                          <span className="text-sm text-gray-400">Overall Verdict:</span>
+                          <span className="text-sm text-muted-foreground">Overall Verdict:</span>
                           {verdictBadge(scan.overall_verdict)}
                         </div>
 
                         {/* LLM Summary */}
                         {scan.llm_summary && (
                           <div className="p-3 rounded bg-secondary/30 border border-secondary">
-                            <span className="text-xs text-gray-500 block mb-1">
+                            <span className="text-xs text-muted-foreground block mb-1">
                               LLM Analysis Summary
                             </span>
-                            <p className="text-sm text-gray-300">{scan.llm_summary}</p>
+                            <p className="text-sm text-foreground/90">{scan.llm_summary}</p>
                             {scan.llm_model_used && (
-                              <p className="text-xs text-gray-500 mt-2">
+                              <p className="text-xs text-muted-foreground mt-2">
                                 Model: {scan.llm_model_used}
                                 {scan.llm_tokens_used
                                   ? ` | Tokens: ${scan.llm_tokens_used}`
@@ -763,7 +763,7 @@ export default function AdminPluginsPendingPage() {
                         {/* Static Findings */}
                         {scan.static_findings && scan.static_findings.length > 0 && (
                           <div>
-                            <h4 className="text-sm font-medium text-gray-300 mb-2">
+                            <h4 className="text-sm font-medium text-foreground/90 mb-2">
                               Static Findings ({scan.static_findings.length})
                             </h4>
                             <div className="space-y-2 max-h-48 overflow-y-auto">
@@ -781,20 +781,20 @@ export default function AdminPluginsPendingPage() {
                                     >
                                       {finding.severity}
                                     </span>
-                                    <span className="text-gray-400">|</span>
-                                    <span className="text-gray-300">
+                                    <span className="text-muted-foreground">|</span>
+                                    <span className="text-foreground/90">
                                       {finding.type || finding.category}
                                     </span>
                                   </div>
-                                  <p className="text-gray-300">{finding.description}</p>
+                                  <p className="text-foreground/90">{finding.description}</p>
                                   {finding.file && (
-                                    <p className="text-xs text-gray-500 mt-1 font-mono">
+                                    <p className="text-xs text-muted-foreground mt-1 font-mono">
                                       {finding.file}
                                       {finding.line ? `:${finding.line}` : ''}
                                     </p>
                                   )}
                                   {finding.matched_text && (
-                                    <p className="text-xs text-gray-500 mt-1 font-mono truncate">
+                                    <p className="text-xs text-muted-foreground mt-1 font-mono truncate">
                                       Match: {finding.matched_text}
                                     </p>
                                   )}
@@ -807,7 +807,7 @@ export default function AdminPluginsPendingPage() {
                         {/* LLM Findings */}
                         {scan.llm_findings && scan.llm_findings.length > 0 && (
                           <div>
-                            <h4 className="text-sm font-medium text-gray-300 mb-2">
+                            <h4 className="text-sm font-medium text-foreground/90 mb-2">
                               LLM Findings ({scan.llm_findings.length})
                             </h4>
                             <div className="space-y-2 max-h-48 overflow-y-auto">
@@ -825,19 +825,19 @@ export default function AdminPluginsPendingPage() {
                                     >
                                       {finding.severity}
                                     </span>
-                                    <span className="text-gray-400">|</span>
-                                    <span className="text-gray-300">
+                                    <span className="text-muted-foreground">|</span>
+                                    <span className="text-foreground/90">
                                       {finding.category || finding.type}
                                     </span>
                                   </div>
-                                  <p className="text-gray-300">{finding.description}</p>
+                                  <p className="text-foreground/90">{finding.description}</p>
                                   {finding.file && (
-                                    <p className="text-xs text-gray-500 mt-1 font-mono">
+                                    <p className="text-xs text-muted-foreground mt-1 font-mono">
                                       {finding.file}
                                     </p>
                                   )}
                                   {finding.evidence && (
-                                    <p className="text-xs text-gray-500 mt-1 font-mono truncate">
+                                    <p className="text-xs text-muted-foreground mt-1 font-mono truncate">
                                       Evidence: {finding.evidence}
                                     </p>
                                   )}
@@ -850,8 +850,8 @@ export default function AdminPluginsPendingPage() {
                         {/* No findings */}
                         {(!scan.static_findings || scan.static_findings.length === 0) &&
                           (!scan.llm_findings || scan.llm_findings.length === 0) && (
-                            <div className="text-sm text-gray-400 flex items-center gap-2">
-                              <ShieldCheck className="h-4 w-4 text-green-400" />
+                            <div className="text-sm text-muted-foreground flex items-center gap-2">
+                              <ShieldCheck className="h-4 w-4 text-success" />
                               No security findings detected
                             </div>
                           )}

@@ -113,7 +113,7 @@ export function WidgetBase({
   return (
     <Card
       className={cn(
-        'flex flex-col h-full overflow-hidden transition-all duration-200',
+        'flex flex-col h-full overflow-hidden transition-all duration-220',
         'border-border/50 bg-card/95 backdrop-blur-sm',
         'shadow-sm hover:shadow-md',
         isActive && 'ring-2 ring-primary/50 shadow-lg',

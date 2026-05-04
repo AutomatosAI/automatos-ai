@@ -26,7 +26,7 @@ export function FeatureCard({ feature, onToggle, disabled }: FeatureCardProps) {
     return (
         <div
             className={cn(
-                "group relative p-4 rounded-xl border transition-all duration-200 cursor-pointer",
+                "group relative p-4 rounded-xl border transition-all duration-220 cursor-pointer",
                 "bg-slate-800/50 border-slate-700/50",
                 "hover:bg-slate-700/50 hover:border-slate-600/50",
                 feature.enabled && "border-blue-500/50 bg-blue-500/10",

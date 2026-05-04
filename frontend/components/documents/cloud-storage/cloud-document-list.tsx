@@ -29,10 +29,10 @@ import {
 } from '@/hooks/use-cloud-documents-api'
 
 const STATUS_STYLES: Record<string, string> = {
-  synced: 'bg-green-500/10 text-green-400 border-green-500/20',
-  pending: 'bg-gray-500/10 text-gray-400 border-gray-500/20',
-  error: 'bg-red-500/10 text-red-400 border-red-500/20',
-  processing: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
+  synced: 'bg-success/10 text-success border-success/20',
+  pending: 'bg-secondary/50 text-muted-foreground border-border/30',
+  error: 'bg-destructive/10 text-destructive border-destructive/20',
+  processing: 'bg-warning/10 text-warning border-warning/20',
 }
 
 const STATUS_ICONS: Record<string, React.ElementType> = {
@@ -81,11 +81,11 @@ export function CloudDocumentList({ connectionId, rootPath, appName }: Props) {
           transition={{ duration: 0.4 }}
         >
           {[
-            { label: 'Total', value: syncStatus.total_documents, color: 'text-blue-400' },
-            { label: 'Synced', value: syncStatus.synced, color: 'text-green-400' },
-            { label: 'Pending', value: syncStatus.pending, color: 'text-gray-400' },
-            { label: 'Errors', value: syncStatus.errors, color: 'text-red-400' },
-            { label: 'Chunks', value: syncStatus.total_chunks, color: 'text-purple-400' },
+            { label: 'Total', value: syncStatus.total_documents, color: 'text-info' },
+            { label: 'Synced', value: syncStatus.synced, color: 'text-success' },
+            { label: 'Pending', value: syncStatus.pending, color: 'text-muted-foreground' },
+            { label: 'Errors', value: syncStatus.errors, color: 'text-destructive' },
+            { label: 'Chunks', value: syncStatus.total_chunks, color: 'text-agent' },
           ].map((stat) => (
             <div key={stat.label} className="text-center p-2 rounded-lg bg-secondary/30">
               <div className={`text-lg font-bold ${stat.color}`}>{stat.value}</div>
@@ -181,7 +181,7 @@ export function CloudDocumentList({ connectionId, rootPath, appName }: Props) {
                 <div className="col-span-2 text-right">
                   {file.chunk_count > 0 ? (
                     <span className="flex items-center justify-end gap-1 text-xs">
-                      <Database className="w-3 h-3 text-purple-400" />
+                      <Database className="w-3 h-3 text-agent" />
                       {file.chunk_count}
                     </span>
                   ) : (

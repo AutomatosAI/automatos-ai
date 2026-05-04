@@ -564,7 +564,7 @@ export function MarketplacePluginsTab({ searchQuery, workspaceId }: MarketplaceP
             return (
               <Card
                 key={plugin.id}
-                className="glass-card hover:border-primary/20 transition-all cursor-pointer"
+                className="glass-card card-glow hover:border-primary/20 transition-all cursor-pointer"
                 onClick={() => setSelectedPluginId(plugin.id)}
               >
                 <CardContent className="p-3">
@@ -572,7 +572,7 @@ export function MarketplacePluginsTab({ searchQuery, workspaceId }: MarketplaceP
                     {globalPluginIcon ? (
                       <PremiumIcon name={globalPluginIcon} size={36} className="shrink-0" />
                     ) : (
-                      <Sparkles className="w-9 h-9 text-primary shrink-0" />
+                      <Sparkles className="w-8 h-8 text-primary shrink-0" />
                     )}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">

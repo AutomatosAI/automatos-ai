@@ -70,7 +70,7 @@ export function LiveProgressBar({ progress, step, eta_seconds }: LiveProgressBar
       {/* Current Step */}
       {step && (
         <div className="text-xs text-muted-foreground">
-          Current step: <span className="text-blue-400">{step}</span>
+          Current step: <span className="text-info">{step}</span>
         </div>
       )}
     </div>

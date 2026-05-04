@@ -56,7 +56,7 @@ export function FeatureGrid({ features, onToggle, loading }: FeatureGridProps) {
                     />
                 </div>
                 <div className="text-sm text-slate-400 whitespace-nowrap">
-                    <span className="text-blue-400 font-medium">{enabledCount}</span>
+                    <span className="text-info font-medium">{enabledCount}</span>
                     <span className="mx-1">/</span>
                     <span>{features.length}</span>
                     <span className="ml-1">enabled</span>

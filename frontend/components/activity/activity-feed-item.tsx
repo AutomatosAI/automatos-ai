@@ -266,7 +266,7 @@ export function ActivityFeedItemCard({ item, animationDelay = 0, isNew = false, 
         {/* Row 1: Type + Name + Time */}
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
-            <div className={`w-7 h-7 rounded-md ${typeConfig.iconBg} flex items-center justify-center shrink-0`}>
+            <div className={`w-8 h-8 rounded-md ${typeConfig.iconBg} flex items-center justify-center shrink-0`}>
               <TypeIcon className={`w-3.5 h-3.5 ${typeConfig.iconColor}`} />
             </div>
             <span className="text-xs font-medium text-muted-foreground shrink-0">
@@ -362,7 +362,7 @@ export function ActivityFeedItemSkeleton() {
     <div className="glass-card border-l-[3px] border-border/30 p-4 space-y-2">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-md bg-secondary/50 animate-pulse" />
+          <div className="w-8 h-8 rounded-md bg-secondary/50 animate-pulse" />
           <div className="h-3 w-14 bg-secondary/50 rounded animate-pulse" />
           <div className="h-4 w-32 bg-secondary/50 rounded animate-pulse" />
         </div>

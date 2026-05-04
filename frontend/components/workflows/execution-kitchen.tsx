@@ -119,14 +119,14 @@ function StreamingLog({ logs, selectedStage, onClearFilter }: { logs: LogEntry[]
   const getLogIcon = (type: LogEntry['type']) => {
     switch (type) {
       case 'stage_start': return <Zap className="w-4 h-4 text-primary" />
-      case 'stage_complete': return <CheckCircle className="w-4 h-4 text-emerald-400" />
+      case 'stage_complete': return <CheckCircle className="w-4 h-4 text-success" />
       case 'agent_spawn': return <Bot className="w-4 h-4 text-cyan-400" />
-      case 'task_progress': return <Activity className="w-4 h-4 text-blue-400" />
-      case 'task_complete': return <CheckCircle className="w-4 h-4 text-emerald-400" />
-      case 'task_error': return <AlertCircle className="w-4 h-4 text-red-400" />
+      case 'task_progress': return <Activity className="w-4 h-4 text-info" />
+      case 'task_complete': return <CheckCircle className="w-4 h-4 text-success" />
+      case 'task_error': return <AlertCircle className="w-4 h-4 text-destructive" />
       case 'inter_agent': return <MessageSquare className="w-4 h-4 text-pink-400" />
       case 'memory_write': return <Brain className="w-4 h-4 text-orange-400" />
-      default: return <Clock className="w-4 h-4 text-gray-400" />
+      default: return <Clock className="w-4 h-4 text-muted-foreground" />
     }
   }
 
@@ -153,7 +153,7 @@ function StreamingLog({ logs, selectedStage, onClearFilter }: { logs: LogEntry[]
         <div className="flex items-center gap-2">
           <Button variant="ghost" size="sm" onClick={() => setExpandedLogs(new Set(filteredLogs.map(l => l.id)))} className="text-xs text-muted-foreground hover:text-foreground">Expand All</Button>
           <Button variant="ghost" size="sm" onClick={() => setExpandedLogs(new Set())} className="text-xs text-muted-foreground hover:text-foreground">Collapse All</Button>
-          <Button variant="ghost" size="sm" onClick={() => setAutoScroll(!autoScroll)} className={cn("text-xs", autoScroll ? "text-emerald-400" : "text-muted-foreground")}>{autoScroll ? '⬇ Auto-scroll ON' : '⬇ Auto-scroll OFF'}</Button>
+          <Button variant="ghost" size="sm" onClick={() => setAutoScroll(!autoScroll)} className={cn("text-xs", autoScroll ? "text-success" : "text-muted-foreground")}>{autoScroll ? '⬇ Auto-scroll ON' : '⬇ Auto-scroll OFF'}</Button>
         </div>
       </div>
       <ScrollArea className="flex-1 theater-scrollbar">
@@ -241,7 +241,7 @@ function StreamingLog({ logs, selectedStage, onClearFilter }: { logs: LogEntry[]
                       {((log.tokens && log.tokens > 0) || (log.duration && log.duration > 0)) && (
                         <div className="flex items-center gap-4 mt-3 pt-2 border-t border-border/30 text-xs text-muted-foreground">
                           {log.tokens && log.tokens > 0 && <span className="flex items-center gap-1"><Sparkles className="w-3 h-3 text-primary" />{log.tokens.toLocaleString()} tokens</span>}
-                          {log.duration && log.duration > 0 && <span className="flex items-center gap-1"><Clock className="w-3 h-3 text-emerald-400" />{(log.duration / 1000).toFixed(2)}s</span>}
+                          {log.duration && log.duration > 0 && <span className="flex items-center gap-1"><Clock className="w-3 h-3 text-success" />{(log.duration / 1000).toFixed(2)}s</span>}
                         </div>
                       )}
                     </div>
@@ -301,7 +301,7 @@ function MetricsSidebar({ currentStage, executionData, isExecuting }: { currentS
           </div>
         </div>
         <div className="mt-3 text-sm text-center">
-          <span className="text-emerald-400 font-medium">{completedTasks}</span>
+          <span className="text-success font-medium">{completedTasks}</span>
           <span className="text-muted-foreground"> / {subtasks.length} tasks</span>
         </div>
       </div>
@@ -320,7 +320,7 @@ function MetricsSidebar({ currentStage, executionData, isExecuting }: { currentS
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium truncate">{agent.agent_name || 'Agent'}</div>
                   <div className="flex items-center gap-2">
-                    <div className={cn("w-1.5 h-1.5 rounded-full", status === 'completed' ? "bg-emerald-400" : isRunning ? "bg-primary animate-pulse" : "bg-gray-500")} />
+                    <div className={cn("w-1.5 h-1.5 rounded-full", status === 'completed' ? "bg-success" : isRunning ? "bg-primary animate-pulse" : "bg-gray-500")} />
                     <span className="text-xs text-muted-foreground">{status === 'completed' ? 'Done' : isRunning ? 'Running' : 'Pending'}</span>
                   </div>
                 </div>
@@ -1083,8 +1083,8 @@ export function ExecutionKitchen({
               <h1 className="text-lg font-semibold"><span className="gradient-text">{executionData.name}</span></h1>
               <p className="text-xs text-muted-foreground line-clamp-1">{executionData.description}</p>
             </div>
-            <Badge variant="outline" className={cn("text-xs", aisdkConnected ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30" : "bg-gray-500/10 text-gray-400 border-gray-500/30")}>
-              <div className={cn("w-2 h-2 rounded-full mr-2", aisdkConnected ? "bg-emerald-400 animate-pulse" : "bg-gray-400")} />
+            <Badge variant="outline" className={cn("text-xs", aisdkConnected ? "bg-success/10 text-success border-success/30" : "bg-secondary/50 text-muted-foreground border-border/30")}>
+              <div className={cn("w-2 h-2 rounded-full mr-2", aisdkConnected ? "bg-success animate-pulse" : "bg-gray-400")} />
               {aisdkConnected ? 'Live' : 'Offline'}
             </Badge>
           </div>
@@ -1104,7 +1104,7 @@ export function ExecutionKitchen({
               ) : (
                 <>
                   <Button variant="outline" size="sm" onClick={handlePauseExecution}><Pause className="w-4 h-4 mr-2" />Pause</Button>
-                  <Button variant="outline" size="sm" className="text-red-400 hover:text-red-300" onClick={handleStopExecution}><Square className="w-4 h-4 mr-2" />Stop</Button>
+                  <Button variant="outline" size="sm" className="text-destructive hover:text-destructive/80" onClick={handleStopExecution}><Square className="w-4 h-4 mr-2" />Stop</Button>
                 </>
               )
             )}
@@ -1233,8 +1233,8 @@ export function ExecutionKitchen({
               {recipeExecData?.status === 'completed' && recipeExecData?.output_data?.final_output ? (
                 <div className="space-y-3">
                   <div className="flex items-center gap-2 mb-2">
-                    <CheckCircle className="w-4 h-4 text-emerald-400" />
-                    <h3 className="text-sm font-semibold text-emerald-400">Execution Complete</h3>
+                    <CheckCircle className="w-4 h-4 text-success" />
+                    <h3 className="text-sm font-semibold text-success">Execution Complete</h3>
                     {recipeExecData?.output_data?.total_duration_ms && (
                       <span className="text-xs text-muted-foreground ml-auto">
                         {(recipeExecData.output_data.total_duration_ms / 1000).toFixed(1)}s total
@@ -1248,10 +1248,10 @@ export function ExecutionKitchen({
               ) : recipeExecData?.status === 'failed' ? (
                 <div className="space-y-3">
                   <div className="flex items-center gap-2 mb-2">
-                    <AlertCircle className="w-4 h-4 text-red-400" />
-                    <h3 className="text-sm font-semibold text-red-400">Execution Failed</h3>
+                    <AlertCircle className="w-4 h-4 text-destructive" />
+                    <h3 className="text-sm font-semibold text-destructive">Execution Failed</h3>
                   </div>
-                  <p className="text-sm text-red-400/80">{recipeExecData.error_message || 'Unknown error'}</p>
+                  <p className="text-sm text-destructive/80">{recipeExecData.error_message || 'Unknown error'}</p>
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center h-full text-center">

@@ -39,21 +39,21 @@ export function CostTrackerWidget({ period, className }: CostTrackerWidgetProps)
     <div className={cn('h-full flex flex-col', className)}>
       <div className="flex items-center justify-between px-4 py-3 border-b border-border/50">
         <div className="flex items-center gap-2">
-          <DollarSign className="w-4 h-4 text-emerald-400" />
+          <DollarSign className="w-4 h-4 text-success" />
           <h3 className="text-sm font-semibold">Cost Tracker</h3>
         </div>
         {!isLoading && (
           <div className="flex items-center gap-1 text-xs">
             {changePct !== 0 && (
               changePct > 0 ? (
-                <TrendingUp className="w-3 h-3 text-red-400" />
+                <TrendingUp className="w-3 h-3 text-destructive" />
               ) : (
-                <TrendingDown className="w-3 h-3 text-emerald-400" />
+                <TrendingDown className="w-3 h-3 text-success" />
               )
             )}
             <span className={cn(
               'font-medium',
-              changePct > 0 ? 'text-red-400' : changePct < 0 ? 'text-emerald-400' : 'text-muted-foreground'
+              changePct > 0 ? 'text-destructive' : changePct < 0 ? 'text-success' : 'text-muted-foreground'
             )}>
               {changePct > 0 ? '+' : ''}{changePct}%
             </span>
@@ -106,14 +106,14 @@ export function CostTrackerWidget({ period, className }: CostTrackerWidgetProps)
 
             {/* Top agents */}
             {topAgents.length > 0 && (
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Top spenders</p>
                 {topAgents.map((agent) => (
                   <div key={agent.name} className="flex items-center gap-2">
                     <span className="text-xs truncate flex-1 min-w-0">{agent.name}</span>
                     <div className="w-24 h-1.5 bg-secondary/50 rounded-full overflow-hidden">
                       <div
-                        className="h-full bg-emerald-400/60 rounded-full"
+                        className="h-full bg-success/60 rounded-full"
                         style={{ width: `${(agent.cost / maxAgentCost) * 100}%` }}
                       />
                     </div>

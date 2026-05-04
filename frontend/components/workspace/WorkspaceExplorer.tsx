@@ -335,7 +335,7 @@ export function WorkspaceExplorer({
                       disabled={isSaving}
                       title="Save (Ctrl+S)"
                     >
-                      <Save className={`h-3.5 w-3.5 ${isSaving ? 'animate-pulse text-muted-foreground' : 'text-amber-500'}`} />
+                      <Save className={`h-3.5 w-3.5 ${isSaving ? 'animate-pulse text-muted-foreground' : 'text-warning'}`} />
                     </Button>
                   )}
                   <Button

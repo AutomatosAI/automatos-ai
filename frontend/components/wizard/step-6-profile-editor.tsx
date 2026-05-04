@@ -148,7 +148,7 @@ export function Step6ProfileEditor({
         <Card className="bg-secondary/30 border-border/30">
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-amber-400" />
+              <AlertTriangle className="w-4 h-4 text-warning" />
               Quality findings
             </CardTitle>
           </CardHeader>

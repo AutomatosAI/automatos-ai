@@ -169,9 +169,11 @@ export function AnalyticsDocuments({ days }: Props) {
             <tbody>
               {sortedDocs.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="p-12 text-center text-muted-foreground">
-                    <FileText className="w-10 h-10 mx-auto mb-3 opacity-50" />
-                    <p>No documents found</p>
+                  <td colSpan={6}>
+                    <div className="flex flex-col items-center justify-center py-12 gap-2 text-muted-foreground">
+                      <FileText className="w-8 h-8 opacity-50" />
+                      <p className="text-sm">No documents found</p>
+                    </div>
                   </td>
                 </tr>
               ) : (

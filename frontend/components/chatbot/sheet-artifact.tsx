@@ -94,7 +94,7 @@ export function SheetArtifact({ content, metadata }: SheetArtifactProps) {
             {clarifications.map((q, idx) => (
               <button
                 key={idx}
-                className="w-full rounded-xl border border-border/60 bg-card/50 px-3 py-2 text-left text-sm text-foreground hover:border-orange-400/40 hover:bg-orange-500/5 dark:border-gray-800/60 dark:bg-gray-900/40 dark:text-gray-200"
+                className="w-full rounded-xl border border-border/60 bg-card/50 px-3 py-2 text-left text-sm text-foreground hover:border-orange-400/40 hover:bg-orange-500/5 dark:border-gray-800/60 dark:bg-background/40 dark:text-gray-200"
                 onClick={async () => {
                   if (!navigator.clipboard) {
                     toast.error('Clipboard API is not available')
@@ -130,7 +130,7 @@ export function SheetArtifact({ content, metadata }: SheetArtifactProps) {
       )}
 
       {/* Controls */}
-      <div className="flex flex-col gap-3 rounded-xl border border-border/60 bg-card/50 p-4 md:flex-row md:items-center md:justify-between dark:border-gray-800/60 dark:bg-gray-900/30">
+      <div className="flex flex-col gap-3 rounded-xl border border-border/60 bg-card/50 p-4 md:flex-row md:items-center md:justify-between dark:border-gray-800/60 dark:bg-background/30">
         <div className="flex items-center gap-2">
           <div className="relative w-full md:w-80">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -149,7 +149,7 @@ export function SheetArtifact({ content, metadata }: SheetArtifactProps) {
         <div className="flex items-center gap-2">
           <Button
             variant="outline"
-            className="border-emerald-500/30 bg-emerald-500/5 hover:bg-emerald-500/10"
+            className="border-success/30 bg-success/5 hover:bg-success/10"
             onClick={() => {
               if (!columns.length || !rawRows.length) {
                 toast.error('No rows available to export')
@@ -173,10 +173,10 @@ export function SheetArtifact({ content, metadata }: SheetArtifactProps) {
       </div>
 
       {/* Table */}
-      <div className="rounded-xl border border-border/60 bg-card/50 overflow-hidden dark:border-gray-800/60 dark:bg-gray-900/40">
+      <div className="rounded-xl border border-border/60 bg-card/50 overflow-hidden dark:border-gray-800/60 dark:bg-background/40">
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-border/60 text-sm text-foreground dark:divide-gray-800/70 dark:text-gray-100">
-            <thead className="bg-secondary/40 text-xs uppercase tracking-wide text-muted-foreground dark:bg-gray-900/60 dark:text-gray-400">
+            <thead className="bg-secondary/40 text-xs uppercase tracking-wide text-muted-foreground dark:bg-background/60 dark:text-muted-foreground">
               <tr>
                 {columns.map((col) => (
                   <th key={col} className="px-4 py-3 text-left font-semibold">
@@ -194,7 +194,7 @@ export function SheetArtifact({ content, metadata }: SheetArtifactProps) {
                 </tr>
               ) : (
                 pageRows.map((row, idx) => (
-                  <tr key={idx} className="hover:bg-secondary/40 transition-colors dark:hover:bg-gray-900/60">
+                  <tr key={idx} className="hover:bg-secondary/40 transition-colors dark:hover:bg-background/60">
                     {columns.map((col) => {
                       const value = row?.[col]
                       const display = value === null || value === undefined ? '—' : String(value)
@@ -214,7 +214,7 @@ export function SheetArtifact({ content, metadata }: SheetArtifactProps) {
         </div>
 
         {/* Pagination */}
-        <div className="flex flex-col gap-2 border-t border-border/60 bg-card/50 px-4 py-3 md:flex-row md:items-center md:justify-between dark:border-gray-800/60 dark:bg-gray-900/30">
+        <div className="flex flex-col gap-2 border-t border-border/60 bg-card/50 px-4 py-3 md:flex-row md:items-center md:justify-between dark:border-gray-800/60 dark:bg-background/30">
           <div className="text-xs text-muted-foreground">
             Showing {(page - 1) * pageSize + 1}-{Math.min(page * pageSize, filteredRows.length)} of {filteredRows.length} rows
           </div>
@@ -227,7 +227,7 @@ export function SheetArtifact({ content, metadata }: SheetArtifactProps) {
             >
               Prev
             </Button>
-            <span className="text-xs text-foreground/80 dark:text-gray-300 font-mono">
+            <span className="text-xs text-foreground/80 dark:text-foreground/90 font-mono">
               {page}/{totalPages}
             </span>
             <Button
@@ -244,11 +244,11 @@ export function SheetArtifact({ content, metadata }: SheetArtifactProps) {
 
       {/* SQL */}
       {sql && (
-        <details className="rounded-xl border border-border/60 bg-card/50 p-4 dark:border-gray-800/60 dark:bg-gray-900/30">
+        <details className="rounded-xl border border-border/60 bg-card/50 p-4 dark:border-gray-800/60 dark:bg-background/30">
           <summary className="cursor-pointer text-sm font-semibold text-foreground dark:text-gray-200">
             View SQL
           </summary>
-          <pre className="mt-3 overflow-x-auto rounded-lg border border-border/60 bg-muted/40 p-3 text-xs text-foreground dark:border-gray-800/60 dark:bg-gray-900/60 dark:text-gray-200">
+          <pre className="mt-3 overflow-x-auto rounded-lg border border-border/60 bg-muted/40 p-3 text-xs text-foreground dark:border-gray-800/60 dark:bg-background/60 dark:text-gray-200">
             {sql}
           </pre>
         </details>
@@ -257,24 +257,24 @@ export function SheetArtifact({ content, metadata }: SheetArtifactProps) {
       {/* PandasAI charts */}
       {pandasAI?.charts && pandasAI.charts.length > 0 && (
         <div className="space-y-4">
-          <h4 className="text-sm font-semibold text-gray-300 uppercase tracking-wide">
+          <h4 className="text-sm font-semibold text-foreground/90 uppercase tracking-wide">
             Charts
           </h4>
           <div className="grid gap-4 md:grid-cols-2">
             {pandasAI.charts.map((chart, idx) => (
               <div
                 key={`${chart.filename}-${idx}`}
-                className="rounded-lg border border-gray-800/60 bg-gray-900/40 p-4 flex flex-col items-center gap-3"
+                className="rounded-lg border border-gray-800/60 bg-background/40 p-4 flex flex-col items-center gap-3"
               >
                 <img
                   src={`data:${chart.mime_type};base64,${chart.base64}`}
                   alt={chart.filename}
                   className="rounded-md border border-gray-800/40 max-h-72 w-full object-contain"
                 />
-                <div className="flex w-full items-center justify-between text-xs text-gray-500">
+                <div className="flex w-full items-center justify-between text-xs text-muted-foreground">
                   <span className="truncate">{chart.filename}</span>
                   <button
-                    className="rounded border border-gray-700/60 px-2 py-1 text-[11px] uppercase tracking-wide text-gray-300 hover:border-orange-400/60 hover:text-orange-300"
+                    className="rounded border border-border/60 px-2 py-1 text-[11px] uppercase tracking-wide text-foreground/90 hover:border-orange-400/60 hover:text-orange-300"
                     onClick={() => {
                       const link = document.createElement('a')
                       link.href = `data:${chart.mime_type};base64,${chart.base64}`
@@ -294,7 +294,7 @@ export function SheetArtifact({ content, metadata }: SheetArtifactProps) {
       )}
 
       {pandasAI?.error && (
-        <div className="text-sm text-red-400">PandasAI warning: {pandasAI.error}</div>
+        <div className="text-sm text-destructive">PandasAI warning: {pandasAI.error}</div>
       )}
     </div>
   )

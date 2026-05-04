@@ -230,7 +230,7 @@ export function ProviderBrowser({
         </Card>
         <Card className="glass-card">
           <CardContent className="p-4">
-            <div className="text-2xl font-bold text-green-400">{syncStats.synced}</div>
+            <div className="text-2xl font-bold text-success">{syncStats.synced}</div>
             <div className="text-xs text-muted-foreground">Synced</div>
           </CardContent>
         </Card>
@@ -242,7 +242,7 @@ export function ProviderBrowser({
         </Card>
         <Card className="glass-card">
           <CardContent className="p-4">
-            <div className="text-2xl font-bold text-purple-400">{syncStats.chunks.toLocaleString()}</div>
+            <div className="text-2xl font-bold text-agent">{syncStats.chunks.toLocaleString()}</div>
             <div className="text-xs text-muted-foreground">Chunks</div>
           </CardContent>
         </Card>
@@ -299,15 +299,15 @@ export function ProviderBrowser({
           </CardContent>
         </Card>
       ) : (
-        <Card className="glass-card border-green-500/30 bg-green-500/5">
+        <Card className="glass-card border-success/30 bg-success/5">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div className="flex items-start gap-3 flex-1">
-                <div className="w-10 h-10 rounded-full bg-green-500/10 flex items-center justify-center shrink-0">
-                  <CheckCircle className="w-5 h-5 text-green-400" />
+                <div className="w-10 h-10 rounded-full bg-success/10 flex items-center justify-center shrink-0">
+                  <CheckCircle className="w-5 h-5 text-success" />
                 </div>
                 <div className="flex-1">
-                  <h4 className="font-semibold text-green-400 mb-1">Root Folder Selected</h4>
+                  <h4 className="font-semibold text-success mb-1">Root Folder Selected</h4>
                   <div className="flex items-center gap-2 mb-2">
                     <Folder className="w-4 h-4 text-muted-foreground" />
                     <span className="text-xs text-muted-foreground">Path:</span>
@@ -330,7 +330,7 @@ export function ProviderBrowser({
                       ))}
                     </div>
                   </div>
-                  <div className="flex items-center gap-2 text-sm text-green-400">
+                  <div className="flex items-center gap-2 text-sm text-success">
                     <CheckCircle className="w-4 h-4" />
                     <span>Will sync all files from this folder and its subfolders</span>
                   </div>
@@ -387,7 +387,7 @@ export function ProviderBrowser({
         <Card className="glass-card">
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
-              <Folder className="w-5 h-5 text-blue-400" />
+              <Folder className="w-5 h-5 text-info" />
               Folders
             </CardTitle>
           </CardHeader>
@@ -403,7 +403,7 @@ export function ProviderBrowser({
                   onClick={() => handleFolderClick(folder)}
                 >
                   <div className="flex items-center gap-3">
-                    <Folder className="w-5 h-5 text-blue-400" />
+                    <Folder className="w-5 h-5 text-info" />
                     <span className="font-medium">{folder.name}</span>
                   </div>
                   <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
@@ -465,7 +465,7 @@ export function ProviderBrowser({
                     <div className="flex items-center gap-3">
                       {file.is_synced ? (
                         <>
-                          <Badge variant="outline" className="text-xs bg-green-500/10 text-green-400 border-green-500/20">
+                          <Badge variant="outline" className="text-xs bg-success/10 text-success border-success/20">
                             <CheckCircle className="w-3 h-3 mr-1" />
                             {file.chunk_count} chunks
                           </Badge>

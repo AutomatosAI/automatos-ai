@@ -223,7 +223,7 @@ export function SemanticLayerBuilder({
                 <p className="text-sm text-muted-foreground">Featured</p>
                 <p className="text-2xl font-bold">{featuredMetrics.length}</p>
               </div>
-              <Star className="w-8 h-8 text-yellow-500/50" />
+              <Star className="w-8 h-8 text-warning/50" />
             </div>
           </CardContent>
         </Card>
@@ -234,7 +234,7 @@ export function SemanticLayerBuilder({
                 <p className="text-sm text-muted-foreground">Certified</p>
                 <p className="text-2xl font-bold">{certifiedMetrics.length}</p>
               </div>
-              <CheckCircle className="w-8 h-8 text-green-500/50" />
+              <CheckCircle className="w-8 h-8 text-success/50" />
             </div>
           </CardContent>
         </Card>
@@ -263,7 +263,7 @@ export function SemanticLayerBuilder({
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <Star className="w-5 h-5 text-yellow-500" />
+                  <Star className="w-5 h-5 text-warning" />
                   Featured Metrics
                 </CardTitle>
                 <CardDescription>
@@ -273,7 +273,7 @@ export function SemanticLayerBuilder({
               <CardContent>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {featuredMetrics.map((metric) => (
-                    <Card key={metric.id} className="border-2 border-yellow-500/20">
+                    <Card key={metric.id} className="border-2 border-warning/20">
                       <CardContent className="pt-4">
                         <div className="flex items-start justify-between">
                           <div>
@@ -285,7 +285,7 @@ export function SemanticLayerBuilder({
                               <Badge variant="secondary">{metric.aggregation}</Badge>
                               <Badge variant="outline">{metric.format}</Badge>
                               {metric.is_certified && (
-                                <CheckCircle className="w-4 h-4 text-green-500" />
+                                <CheckCircle className="w-4 h-4 text-success" />
                               )}
                             </div>
                           </div>
@@ -389,8 +389,8 @@ export function SemanticLayerBuilder({
                     <div className="flex items-start justify-between">
                       <h4 className="font-semibold">{metric.display_name}</h4>
                       <div className="flex items-center gap-1">
-                        {metric.is_featured && <Star className="w-4 h-4 text-yellow-500" />}
-                        {metric.is_certified && <CheckCircle className="w-4 h-4 text-green-500" />}
+                        {metric.is_featured && <Star className="w-4 h-4 text-warning" />}
+                        {metric.is_certified && <CheckCircle className="w-4 h-4 text-success" />}
                         <Button
                           size="sm"
                           variant="ghost"
@@ -438,7 +438,7 @@ export function SemanticLayerBuilder({
                     <div className="flex items-start justify-between">
                       <h4 className="font-semibold">{dimension.display_name}</h4>
                       <div className="flex items-center gap-1">
-                        {dimension.is_featured && <Star className="w-4 h-4 text-yellow-500" />}
+                        {dimension.is_featured && <Star className="w-4 h-4 text-warning" />}
                         <Button
                           size="sm"
                           variant="ghost"
@@ -664,7 +664,7 @@ function MetricDialog({
                 onChange={(e) => setFormData({ ...formData, is_featured: e.target.checked })}
               />
               <span className="text-sm flex items-center gap-1">
-                <Star className="w-4 h-4 text-yellow-500" />
+                <Star className="w-4 h-4 text-warning" />
                 Featured
               </span>
             </label>
@@ -676,7 +676,7 @@ function MetricDialog({
                 onChange={(e) => setFormData({ ...formData, is_certified: e.target.checked })}
               />
               <span className="text-sm flex items-center gap-1">
-                <CheckCircle className="w-4 h-4 text-green-500" />
+                <CheckCircle className="w-4 h-4 text-success" />
                 Certified
               </span>
             </label>
@@ -829,7 +829,7 @@ function DimensionDialog({
                 onChange={(e) => setFormData({ ...formData, is_featured: e.target.checked })}
               />
               <span className="text-sm flex items-center gap-1">
-                <Star className="w-4 h-4 text-yellow-500" />
+                <Star className="w-4 h-4 text-warning" />
                 Featured
               </span>
             </label>

@@ -125,8 +125,8 @@ export function AgentSelector({ selectedAgentId, onAgentChange, onAgentData }: A
             <>
               {selectedAgent?.slug === 'auto-cto' ? (
                 <>
-                  <Bot className="w-3 h-3 text-emerald-400" />
-                  <span className="truncate max-w-[120px] font-medium text-emerald-400">
+                  <Bot className="w-3 h-3 text-success" />
+                  <span className="truncate max-w-[120px] font-medium text-success">
                     Auto CTO
                   </span>
                 </>
@@ -180,13 +180,13 @@ export function AgentSelector({ selectedAgentId, onAgentChange, onAgentData }: A
             </DropdownMenuLabel>
             <DropdownMenuItem
               onClick={() => onAgentChange(ctoAgent.id)}
-              className="text-foreground hover:bg-emerald-500/10 cursor-pointer rounded-lg py-2"
+              className="text-foreground hover:bg-success/10 cursor-pointer rounded-lg py-2"
             >
               <div className="flex items-start justify-between w-full">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <div className="font-medium text-sm text-emerald-400">{ctoAgent.name}</div>
-                    <span className="text-[10px] text-emerald-400/80 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                    <div className="font-medium text-sm text-success">{ctoAgent.name}</div>
+                    <span className="text-[10px] text-success/80 bg-success/10 px-1.5 py-0.5 rounded border border-success/20">
                       CTO
                     </span>
                   </div>
@@ -195,7 +195,7 @@ export function AgentSelector({ selectedAgentId, onAgentChange, onAgentData }: A
                   </div>
                 </div>
                 {selectedAgentId === ctoAgent.id && (
-                  <Check className="w-4 h-4 text-emerald-400 ml-2 flex-shrink-0" />
+                  <Check className="w-4 h-4 text-success ml-2 flex-shrink-0" />
                 )}
               </div>
             </DropdownMenuItem>

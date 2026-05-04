@@ -10,7 +10,7 @@
  *
  * Usage:
  *   <DeliverableIcon type="report" size="row" />
- *   <span className="text-blue-400"><DeliverableIcon type="report" size="row" /></span>
+ *   <span className="text-info"><DeliverableIcon type="report" size="row" /></span>
  *   <DeliverableIcon type="slide" size="hero" />
  */
 
@@ -19,12 +19,12 @@ import * as React from 'react'
 // ── Accent palette — drives Hero glow + canonical text-{x} class for Row/Badge
 
 export const DELIVERABLE_ACCENTS = {
-  report:      { hex: '#60a5fa', tw: 'text-blue-400',    label: 'Reports'      },
-  image:       { hex: '#c084fc', tw: 'text-purple-400',  label: 'Images'       },
+  report:      { hex: '#60a5fa', tw: 'text-info',    label: 'Reports'      },
+  image:       { hex: '#c084fc', tw: 'text-agent',  label: 'Images'       },
   document:    { hex: '#cbd5e1', tw: 'text-slate-300',   label: 'Documents'    },
-  code:        { hex: '#34d399', tw: 'text-emerald-400', label: 'Code'         },
+  code:        { hex: '#34d399', tw: 'text-success', label: 'Code'         },
   slide:       { hex: '#fb923c', tw: 'text-orange-400',  label: 'Slides'       },
-  spreadsheet: { hex: '#4ade80', tw: 'text-green-400',   label: 'Spreadsheets' },
+  spreadsheet: { hex: '#4ade80', tw: 'text-success',   label: 'Spreadsheets' },
   blog_post:   { hex: '#22d3ee', tw: 'text-cyan-400',    label: 'Blog Posts'   },
 } as const
 

@@ -42,7 +42,7 @@ export function AppTabList({ apps, selectedApp, onSelectApp }: AppTabListProps) 
                         "flex items-center gap-2 px-4 py-2 rounded-lg transition-all shrink-0",
                         "border text-sm font-medium",
                         selectedApp === app.name
-                            ? "bg-blue-500/20 border-blue-500/50 text-blue-300"
+                            ? "bg-info/20 border-info/50 text-info/80"
                             : "bg-slate-800/50 border-slate-700/50 text-slate-300 hover:bg-slate-700/50 hover:border-slate-600/50"
                     )}
                 >

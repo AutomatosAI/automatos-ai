@@ -7,10 +7,10 @@ import { logger } from '../../lib/logger'
 import { useQuery } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import { useInView } from 'react-intersection-observer'
-import { 
-  Bot, 
-  FileText, 
-  GitBranch, 
+import {
+  Bot,
+  FileText,
+  GitBranch,
   Activity,
   TrendingUp,
   Clock,
@@ -28,6 +28,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../ui/card'
 import { Badge } from '../ui/badge'
 import { Progress } from '../ui/progress'
 import { Separator } from '../ui/separator'
+import { PageHeader } from '@/components/shared'
 import { 
   useSystemHealth,
   useSystemMetrics,
@@ -88,29 +89,22 @@ export function Dashboard() {
   return (
     <div ref={ref} className="space-y-6 p-4 container mx-auto max-w-[1300px]">
       {/* Header */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={inView ? { opacity: 1, y: 0 } : {}}
-        transition={{ duration: 0.5 }}
-      >
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-          <div>
-            <h1 className="text-2xl md:text-3xl font-bold gradient-text">Dashboard</h1>
-            <p className="text-sm md:text-base text-muted-foreground mt-1">
-              Monitor your multi-agent orchestration platform in real-time
-            </p>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
+      <PageHeader
+        title="System"
+        titleAccent="Dashboard"
+        subtitle="Monitor your multi-agent orchestration platform in real-time"
+        actions={
+          <>
             <Badge variant="outline" className="text-brand-primary border-brand-primary/30">
-              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse mr-2" />
+              <div className="w-2 h-2 bg-success rounded-full animate-pulse mr-2" />
               System Online
             </Badge>
             <Badge variant="secondary">
               Last Updated: <TimeDisplay />
             </Badge>
-          </div>
-        </div>
-      </motion.div>
+          </>
+        }
+      />
 
       {/* System Status Cards */}
       <motion.div
@@ -173,13 +167,13 @@ export function Dashboard() {
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-medium">Idle Agents</span>
-                      <span className="text-sm font-mono text-yellow-500">
+                      <span className="text-sm font-mono text-warning">
                         {(agents || []).filter((a: any) => a.status === 'idle').length || 0}
                       </span>
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-medium">Failed Agents</span>
-                      <span className="text-sm font-mono text-red-500">
+                      <span className="text-sm font-mono text-destructive">
                         {(agents || []).filter((a: any) => a.status === 'failed').length || 0}
                       </span>
                     </div>
@@ -269,13 +263,13 @@ export function Dashboard() {
                     {/* Network Transfer */}
                     <div>
                       <div className="flex items-center gap-2 mb-2">
-                        <Wifi className="w-4 h-4 text-purple-500" />
+                        <Wifi className="w-4 h-4 text-agent" />
                         <span className="text-sm font-medium">Network Transfer</span>
                       </div>
                       <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-1">
                           <div className="text-xs text-muted-foreground">↑ Sent</div>
-                          <div className="text-sm font-mono font-semibold text-green-500">
+                          <div className="text-sm font-mono font-semibold text-success">
                             {systemMetrics?.network?.bytes_sent ? 
                               `${(systemMetrics.network.bytes_sent / (1024**3)).toFixed(2)} GB` : 
                               '0 GB'}
@@ -283,7 +277,7 @@ export function Dashboard() {
                         </div>
                         <div className="space-y-1">
                           <div className="text-xs text-muted-foreground">↓ Received</div>
-                          <div className="text-sm font-mono font-semibold text-blue-500">
+                          <div className="text-sm font-mono font-semibold text-info">
                             {systemMetrics?.network?.bytes_recv ? 
                               `${(systemMetrics.network.bytes_recv / (1024**3)).toFixed(2)} GB` : 
                               '0 GB'}
@@ -325,7 +319,7 @@ export function Dashboard() {
                     {/* CPU Cores Info */}
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <Cpu className="w-4 h-4 text-blue-500" />
+                        <Cpu className="w-4 h-4 text-info" />
                         <span className="text-sm font-medium">CPU Cores</span>
                       </div>
                       <span className="text-sm font-mono font-semibold">
@@ -387,8 +381,8 @@ export function Dashboard() {
                       <div key={i} className="flex items-center justify-between py-1">
                         <div className="flex items-center gap-2 flex-1 min-w-0">
                           <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                            endpoint.health === 'healthy' ? 'bg-green-500' : 
-                            endpoint.health === 'degraded' ? 'bg-yellow-500' : 'bg-red-500'
+                            endpoint.health === 'healthy' ? 'bg-success' :
+                            endpoint.health === 'degraded' ? 'bg-warning' : 'bg-destructive'
                           }`} />
                           <span className="text-xs font-mono truncate" title={endpoint.endpoint}>
                             {endpoint.endpoint.replace('GET ', '').replace('POST ', '').replace('PUT ', '').replace('DELETE ', '')}

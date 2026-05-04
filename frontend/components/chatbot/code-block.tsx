@@ -90,13 +90,13 @@ export function CodeBlock({ code, language = '' }: CodeBlockProps) {
         </span>
         <button
           onClick={handleCopy}
-          className="flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors"
+          className="flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:text-gray-200 hover:bg-white/5 transition-colors"
           title="Copy code"
         >
           {copied ? (
             <>
-              <Check className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="text-emerald-400">Copied</span>
+              <Check className="w-3.5 h-3.5 text-success" />
+              <span className="text-success">Copied</span>
             </>
           ) : (
             <>

@@ -89,9 +89,9 @@ export function AgentPlugins({ agents, selectedAgentId, onAgentSelect }: AgentPl
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
         </div>
       ) : error ? (
-        <Card className="glass-card border-red-500/20">
+        <Card className="glass-card border-destructive/20">
           <CardContent className="p-12 text-center">
-            <AlertCircle className="w-16 h-16 mx-auto text-red-400 mb-4" />
+            <AlertCircle className="w-16 h-16 mx-auto text-destructive mb-4" />
             <h3 className="text-lg font-semibold mb-2">Failed to Load Capabilities</h3>
             <p className="text-muted-foreground mb-4">{error}</p>
             <Button
@@ -132,7 +132,7 @@ export function AgentPlugins({ agents, selectedAgentId, onAgentSelect }: AgentPl
                   </span>
                 </div>
                 {plugin.security_status === 'safe' && (
-                  <Badge variant="secondary" className="text-xs text-green-400 border-green-500/30">
+                  <Badge variant="secondary" className="text-xs text-success border-success/30">
                     <Shield className="w-3 h-3 mr-1" />
                     Verified
                   </Badge>

@@ -47,10 +47,10 @@ export function ActivityHeatmap({ activityData = {}, agents = [] }: ActivityHeat
   const hours = Array.from({ length: 24 }, (_, i) => i)
 
   const getIntensity = (value: number, max: number) => {
-    if (!max || value === 0) return 'bg-gray-100 dark:bg-gray-800'
+    if (!max || value === 0) return 'bg-gray-100 dark:bg-secondary'
     const ratio = value / max
     if (ratio > 0.8) return 'bg-green-500'
-    if (ratio > 0.6) return 'bg-green-400'
+    if (ratio > 0.6) return 'bg-success'
     if (ratio > 0.4) return 'bg-green-300'
     if (ratio > 0.2) return 'bg-green-200'
     return 'bg-green-100'
@@ -98,7 +98,7 @@ export function ActivityHeatmap({ activityData = {}, agents = [] }: ActivityHeat
             <div className="flex items-center justify-between text-xs text-muted-foreground">
               <span>Less</span>
               <div className="flex gap-1">
-                {['bg-gray-100', 'bg-green-100', 'bg-green-200', 'bg-green-300', 'bg-green-400', 'bg-green-500'].map(color => (
+                {['bg-gray-100', 'bg-green-100', 'bg-green-200', 'bg-green-300', 'bg-success', 'bg-green-500'].map(color => (
                   <div key={color} className={`w-3 h-3 rounded-sm ${color}`} />
                 ))}
               </div>

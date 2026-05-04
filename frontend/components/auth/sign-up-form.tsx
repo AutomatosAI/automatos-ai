@@ -135,7 +135,7 @@ export function SignUpForm() {
                 </CardHeader>
                 <CardContent className="space-y-6">
                     {error && (
-                        <Alert variant="destructive" className="bg-red-500/10 border-red-500/20 text-red-200">
+                        <Alert variant="destructive" className="bg-destructive/10 border-destructive/20 text-destructive/70">
                             <AlertCircle className="h-4 w-4" />
                             <AlertDescription>{error}</AlertDescription>
                         </Alert>
@@ -172,7 +172,7 @@ export function SignUpForm() {
                                 <div className="grid grid-cols-2 gap-4">
                                     <Button
                                         variant="outline"
-                                        className="bg-secondary/20 border-border/40 hover:bg-secondary/40 hover:text-white transition-all duration-200"
+                                        className="bg-secondary/20 border-border/40 hover:bg-secondary/40 hover:text-white transition-all duration-220"
                                         onClick={() => signUpWith('oauth_github')}
                                         type="button"
                                     >
@@ -186,7 +186,7 @@ export function SignUpForm() {
                                     </Button>
                                     <Button
                                         variant="outline"
-                                        className="bg-secondary/20 border-border/40 hover:bg-secondary/40 hover:text-white transition-all duration-200"
+                                        className="bg-secondary/20 border-border/40 hover:bg-secondary/40 hover:text-white transition-all duration-220"
                                         onClick={() => signUpWith('oauth_google')}
                                         type="button"
                                     >

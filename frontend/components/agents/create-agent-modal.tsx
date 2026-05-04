@@ -964,7 +964,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                                     </div>
                                     <div className="flex items-center gap-2 shrink-0">
                                       {plugin.security_status === 'safe' && (
-                                        <Badge variant="secondary" className="text-xs text-green-400 border-green-500/30">
+                                        <Badge variant="secondary" className="text-xs text-success border-success/30">
                                           <Shield className="w-3 h-3 mr-1" />
                                           Verified
                                         </Badge>

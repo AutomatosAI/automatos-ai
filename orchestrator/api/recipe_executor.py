@@ -117,7 +117,7 @@ async def _execute_step(
     input_data: Optional[dict] = None,
     recipe_memories: Optional[dict] = None,
     prompt_for_hints: Optional[str] = None,
-    max_iterations: int = 25,
+    max_iterations: Optional[int] = None,
     recipe_name: str = "",
     total_steps: int = 1,
 ) -> dict:
@@ -138,11 +138,15 @@ async def _execute_step(
         max_iterations: Max LLM tool-call turns for this step. Higher values
             let the agent do more work (e.g. bug fixer needs ~15-20 turns).
             Configurable per step via step.max_iterations, per agent via
-            agent.configuration.max_iterations, or falls back to 25.
+            agent.configuration.max_iterations. If None, falls back to
+            system_settings recipe.default_max_iterations.
 
     Returns:
         Dict with status, result, and execution metadata.
     """
+    if max_iterations is None:
+        from config import config as _app_config
+        max_iterations = _app_config.RECIPE_DEFAULT_MAX_ITERATIONS
     # Lazy imports to avoid circular deps
     from modules.tools.tool_router import get_tool_router
     from modules.tools.services.composio_hint_service import ComposioHintService
@@ -864,7 +868,10 @@ async def _execute_recipe_inner(
             agent_name = agent.name if agent else f"Agent {agent_id}"
 
             agent_cfg = getattr(agent, 'configuration', None) or {}
-            step_max_iter = step.get("max_iterations", agent_cfg.get("max_iterations", 25))
+            step_max_iter = step.get(
+                "max_iterations",
+                agent_cfg.get("max_iterations", app_config.RECIPE_DEFAULT_MAX_ITERATIONS),
+            )
             logger.info(f"[recipe_direct] Step {step_order}/{total_steps}: {agent_name} (max_turns={step_max_iter}) — {prompt_template[:200]}")
 
             # Update execution progress

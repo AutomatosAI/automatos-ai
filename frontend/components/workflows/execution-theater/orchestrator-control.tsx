@@ -72,7 +72,7 @@ export function OrchestratorControl({ workflow, isExecuting }: OrchestratorContr
       {/* Right Side: System Status */}
       <div className="flex items-center gap-8 text-sm">
         <div className="flex items-center gap-2">
-          <Activity className="w-4 h-4 text-blue-400" />
+          <Activity className="w-4 h-4 text-info" />
           <span className="text-muted-foreground">Agents:</span>
           <span className="font-medium">{completedSteps} / {totalSteps}</span>
         </div>
@@ -84,13 +84,13 @@ export function OrchestratorControl({ workflow, isExecuting }: OrchestratorContr
         </div>
 
         <div className="flex items-center gap-2">
-          <DollarSign className="w-4 h-4 text-green-400" />
+          <DollarSign className="w-4 h-4 text-success" />
           <span className="text-muted-foreground">Cost:</span>
-          <span className="font-medium text-green-400">${costEstimate.toFixed(4)}</span>
+          <span className="font-medium text-success">${costEstimate.toFixed(4)}</span>
         </div>
 
         <div className="flex items-center gap-2">
-          <Database className="w-4 h-4 text-purple-400" />
+          <Database className="w-4 h-4 text-agent" />
           <span className="text-muted-foreground">Memory:</span>
           <span className="font-medium">{liveProgress.memory_usage || '0 MB'}</span>
         </div>

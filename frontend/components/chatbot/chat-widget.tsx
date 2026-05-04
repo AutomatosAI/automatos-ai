@@ -372,7 +372,7 @@ export function AutoWidget({
             {/* Header */}
             <div className="flex items-center justify-between px-4 pt-3 pb-2">
               <div className="flex items-center gap-2">
-                <div className="w-7 h-7 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center">
+                <div className="w-8 h-8 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center">
                   <Bot className="w-4 h-4 text-primary" />
                 </div>
                 <div>
@@ -494,7 +494,7 @@ export function AutoWidget({
                     </div>
 
                     {errorMessage && formState === 'form' && (
-                      <p className="text-xs text-red-400">{errorMessage}</p>
+                      <p className="text-xs text-destructive">{errorMessage}</p>
                     )}
 
                     <Button
@@ -518,7 +518,7 @@ export function AutoWidget({
                   </form>
                 ) : formState === 'success' ? (
                   <div className="flex flex-col items-center py-6 space-y-3">
-                    <CheckCircle2 className="w-12 h-12 text-green-500" />
+                    <CheckCircle2 className="w-12 h-12 text-success" />
                     <p className="font-medium text-foreground">Bug report created!</p>
                     {successKey && (
                       successUrl ? (
@@ -540,7 +540,7 @@ export function AutoWidget({
                   </div>
                 ) : (
                   <div className="flex flex-col items-center py-6 space-y-3">
-                    <AlertCircle className="w-12 h-12 text-red-500" />
+                    <AlertCircle className="w-12 h-12 text-destructive" />
                     <p className="font-medium text-foreground">Something went wrong</p>
                     <p className="text-xs text-muted-foreground text-center">{errorMessage}</p>
                     <Button
@@ -566,7 +566,7 @@ export function AutoWidget({
       >
         <Button
           onClick={() => setIsOpen((v) => !v)}
-          className="w-11 h-11 md:w-12 md:h-12 rounded-full bg-primary/90 hover:bg-primary shadow-lg hover:shadow-xl hover:shadow-primary/20 transition-all duration-300 group p-0"
+          className="w-12 h-12 rounded-full bg-primary/90 hover:bg-primary shadow-lg transition-all duration-300 group p-0"
           size="lg"
           title="Ask Auto"
         >

@@ -247,7 +247,7 @@ export function DatabaseQueryExplorer({ selectedSource, sources, onSourceDeleted
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Sparkles className="h-5 w-5 text-purple-500" />
+            <Sparkles className="h-5 w-5 text-agent" />
             Natural Language SQL Explorer
           </CardTitle>
           <CardDescription>
@@ -360,10 +360,10 @@ export function DatabaseQueryExplorer({ selectedSource, sources, onSourceDeleted
                     variant="outline"
                     className={
                       confidence.level === 'high'
-                        ? 'bg-green-500/10 text-green-500 border-green-500/30'
+                        ? 'bg-success/10 text-success border-success/30'
                         : confidence.level === 'medium'
-                        ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/30'
-                        : 'bg-red-500/10 text-red-500 border-red-500/30'
+                        ? 'bg-warning/10 text-warning border-warning/30'
+                        : 'bg-destructive/10 text-destructive border-destructive/30'
                     }
                     title={`Score: ${confidence.score}/100 | ${confidence.recommendation || ''}`}
                   >
@@ -395,15 +395,15 @@ export function DatabaseQueryExplorer({ selectedSource, sources, onSourceDeleted
             {validationResult && (
               <div className="mt-4 space-y-2">
                 <div className="flex items-center gap-2">
-                  <CheckCircle className="h-4 w-4 text-green-500" />
+                  <CheckCircle className="h-4 w-4 text-success" />
                   <span className="text-sm">Syntax validation passed</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <CheckCircle className="h-4 w-4 text-green-500" />
+                  <CheckCircle className="h-4 w-4 text-success" />
                   <span className="text-sm">Security validation passed (SELECT-only)</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <CheckCircle className="h-4 w-4 text-green-500" />
+                  <CheckCircle className="h-4 w-4 text-success" />
                   <span className="text-sm">Semantic validation passed</span>
                 </div>
               </div>

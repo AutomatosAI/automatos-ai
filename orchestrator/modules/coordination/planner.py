@@ -459,9 +459,20 @@ class MissionPlanner:
             goal[:80],
         )
 
+        # --- Power mode (mission modes) ---
+        power_mode = (config or {}).get("power_mode", "standard")
+        if power_mode == "max":
+            min_tasks_bound = 1
+            max_tasks_bound = 3
+            logger.info("MissionPlanner: Max power mode — task bounds [%d, %d]", min_tasks_bound, max_tasks_bound)
+        else:
+            min_tasks_bound = MIN_TASKS
+            max_tasks_bound = MAX_TASKS
+
         # --- Template matching (82B US-002) — try before LLM ---
+        # Max power mode skips templates — go straight to LLM for focused decomposition.
         # If config provides a template_id hint, use it directly (PRD-120 US-011)
-        template_id_hint = (config or {}).get("template_id")
+        template_id_hint = (config or {}).get("template_id") if power_mode != "max" else None
         template = None
         if template_id_hint:
             from modules.coordination.templates import TEMPLATE_REGISTRY
@@ -490,7 +501,7 @@ class MissionPlanner:
             tasks, deps = _parse_plan({"tasks": raw_tasks}, parse_errors)
             if not parse_errors:
                 tasks, deps = _ensure_synthesis_tasks(tasks, deps)
-                validation_errors = _validate_plan(tasks, deps, agents)
+                validation_errors = _validate_plan(tasks, deps, agents, min_tasks=min_tasks_bound, max_tasks=max_tasks_bound)
                 if not validation_errors:
                     token_estimate = _estimate_token_budget(tasks)
                     logger.info(
@@ -559,6 +570,7 @@ class MissionPlanner:
                 validation_errors=last_errors if attempt > 1 else None,
                 attachment_contents=attachment_contents,
                 chat_context=chat_context,
+                power_mode=power_mode,
             )
 
             messages = [
@@ -605,7 +617,7 @@ class MissionPlanner:
             tasks, deps = _ensure_synthesis_tasks(tasks, deps)
 
             # Structural validation
-            validation_errors = _validate_plan(tasks, deps, agents)
+            validation_errors = _validate_plan(tasks, deps, agents, min_tasks=min_tasks_bound, max_tasks=max_tasks_bound)
             if validation_errors:
                 last_errors = validation_errors
                 logger.warning(
@@ -670,6 +682,7 @@ def _build_decomposition_prompt(
     validation_errors: Optional[List[str]] = None,
     attachment_contents: Optional[List[Dict[str, str]]] = None,
     chat_context: Optional[List[Dict[str, str]]] = None,
+    power_mode: str = "standard",
 ) -> str:
     """Build the user prompt for goal decomposition."""
     parts = [
@@ -710,6 +723,26 @@ def _build_decomposition_prompt(
             )
 
     parts.append(f"## Available Agents\n{agent_roster}\n")
+
+    if power_mode == "max":
+        parts.append(
+            "## Power Mode: MAX\n"
+            "The user selected Max power mode for deep, thorough output.\n"
+            "- Create at most 2 worker tasks plus 1 synthesis task (3 total max).\n"
+            "- Each task gets a very large token budget (16K tokens) and 50 tool iterations.\n"
+            "- Focus on DEPTH and QUALITY over breadth. Do NOT split into many parallel tasks.\n"
+            "- Prefer assigning the most capable agent available.\n"
+            "- Total task count must be between 1 and 3 inclusive.\n"
+        )
+    elif power_mode == "light":
+        parts.append(
+            "## Power Mode: LIGHT\n"
+            "The user selected Light mode for quick, low-cost execution.\n"
+            "- Keep the plan efficient — prefer fewer, simpler tasks.\n"
+            "- Each task gets a small token budget (2K tokens) and 5 tool iterations.\n"
+            "- Avoid deep research chains or complex multi-step work.\n"
+        )
+
     parts.append(_OUTPUT_SCHEMA_INSTRUCTIONS)
 
     if validation_errors:
@@ -1225,6 +1258,8 @@ def _validate_plan(
     tasks: List[PlannedTask],
     deps: List[PlannedDependency],
     agents: Sequence[Agent],
+    min_tasks: int = MIN_TASKS,
+    max_tasks: int = MAX_TASKS,
 ) -> List[str]:
     """
     Structural validation of the decomposition plan.
@@ -1232,7 +1267,7 @@ def _validate_plan(
     Returns a list of error strings (empty = valid).
 
     Checks:
-      1. Task count within [MIN_TASKS, MAX_TASKS]
+      1. Task count within [min_tasks, max_tasks]
       2. All dependency references are valid temp_ids
       3. DAG is acyclic (via DependencyResolver)
       4. All agent_roles match at least one active agent
@@ -1241,13 +1276,13 @@ def _validate_plan(
     errors: List[str] = []
 
     # 1. Task count
-    if len(tasks) < MIN_TASKS:
+    if len(tasks) < min_tasks:
         errors.append(
-            f"Plan has {len(tasks)} tasks — minimum is {MIN_TASKS}"
+            f"Plan has {len(tasks)} tasks — minimum is {min_tasks}"
         )
-    elif len(tasks) > MAX_TASKS:
+    elif len(tasks) > max_tasks:
         errors.append(
-            f"Plan has {len(tasks)} tasks — maximum is {MAX_TASKS}"
+            f"Plan has {len(tasks)} tasks — maximum is {max_tasks}"
         )
 
     task_ids = {t.temp_id for t in tasks}

@@ -19,10 +19,10 @@ interface MissionFieldPanelProps {
 
 // Agent colors for visual differentiation
 const AGENT_COLORS = [
-  'bg-blue-500/20 border-blue-500/40 text-blue-400',
-  'bg-emerald-500/20 border-emerald-500/40 text-emerald-400',
-  'bg-purple-500/20 border-purple-500/40 text-purple-400',
-  'bg-amber-500/20 border-amber-500/40 text-amber-400',
+  'bg-info/20 border-info/40 text-info',
+  'bg-success/20 border-success/40 text-success',
+  'bg-agent/20 border-agent/40 text-agent',
+  'bg-warning/20 border-warning/40 text-warning',
   'bg-rose-500/20 border-rose-500/40 text-rose-400',
   'bg-cyan-500/20 border-cyan-500/40 text-cyan-400',
   'bg-orange-500/20 border-orange-500/40 text-orange-400',
@@ -30,9 +30,9 @@ const AGENT_COLORS = [
 
 const AGENT_DOT_COLORS = [
   'bg-blue-500',
-  'bg-emerald-500',
-  'bg-purple-500',
-  'bg-amber-500',
+  'bg-success',
+  'bg-agent',
+  'bg-warning',
   'bg-rose-500',
   'bg-cyan-500',
   'bg-orange-500',
@@ -52,11 +52,11 @@ function StrengthBar({ strength, maxStrength }: { strength: number; maxStrength:
     <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
       <div
         className={cn(
-          'h-full rounded-full transition-all duration-500',
-          strength > 0.7 ? 'bg-emerald-500' :
-          strength > 0.3 ? 'bg-amber-500' :
+          'h-full rounded-full transition-all duration-300',
+          strength > 0.7 ? 'bg-success' :
+          strength > 0.3 ? 'bg-warning' :
           strength > 0.05 ? 'bg-orange-500' :
-          'bg-red-500/50'
+          'bg-destructive/50'
         )}
         style={{ width: `${Math.max(pct, 2)}%` }}
       />

@@ -132,7 +132,7 @@ export function AnalyticsOpenRouterCredits() {
             <div className="space-y-1">
               <div className="h-3 rounded-full bg-secondary overflow-hidden">
                 <div
-                  className={`h-full rounded-full transition-all duration-500 ${getUsageColor(usagePercent)}`}
+                  className={`h-full rounded-full transition-all duration-300 ${getUsageColor(usagePercent)}`}
                   style={{ width: `${usagePercent}%` }}
                 />
               </div>

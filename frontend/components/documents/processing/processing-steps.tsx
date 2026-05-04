@@ -48,21 +48,21 @@ export function ProcessingSteps({ steps, currentStep }: ProcessingStepsProps) {
                 className="relative"
               >
                 {status === 'completed' && (
-                  <CheckCircle className="w-6 h-6 text-green-400" />
+                  <CheckCircle className="w-6 h-6 text-success" />
                 )}
                 {status === 'active' && (
-                  <Loader2 className="w-6 h-6 text-blue-400 animate-spin" />
+                  <Loader2 className="w-6 h-6 text-info animate-spin" />
                 )}
                 {status === 'pending' && (
-                  <Circle className="w-6 h-6 text-gray-500" />
+                  <Circle className="w-6 h-6 text-muted-foreground" />
                 )}
               </motion.div>
               
               {/* Step Label */}
               <span className={`text-xs mt-1 text-center max-w-[80px] ${
-                status === 'completed' ? 'text-green-400' :
-                status === 'active' ? 'text-blue-400' :
-                'text-gray-500'
+                status === 'completed' ? 'text-success' :
+                status === 'active' ? 'text-info' :
+                'text-muted-foreground'
               }`}>
                 {step}
               </span>
@@ -71,13 +71,13 @@ export function ProcessingSteps({ steps, currentStep }: ProcessingStepsProps) {
             {/* Connector Line */}
             {index < steps.length - 1 && (
               <div className="flex-1 h-[2px] mx-2 relative">
-                <div className="absolute inset-0 bg-gray-700" />
+                <div className="absolute inset-0 bg-secondary" />
                 {status === 'completed' && (
                   <motion.div
                     initial={{ width: '0%' }}
                     animate={{ width: '100%' }}
                     transition={{ duration: 0.5 }}
-                    className="absolute inset-0 bg-green-400"
+                    className="absolute inset-0 bg-success"
                   />
                 )}
               </div>

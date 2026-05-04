@@ -49,10 +49,10 @@ const CATEGORY_ICONS: Record<string, any> = {
 }
 
 const TEST_STATUS_BADGES = {
-  passed: { color: 'bg-green-500/20 text-green-400', icon: CheckCircle2 },
-  failed: { color: 'bg-red-500/20 text-red-400', icon: XCircle },
-  pending: { color: 'bg-yellow-500/20 text-yellow-400', icon: Clock },
-  not_tested: { color: 'bg-gray-500/20 text-gray-400', icon: AlertCircle }
+  passed: { color: 'bg-success/20 text-success', icon: CheckCircle2 },
+  failed: { color: 'bg-destructive/20 text-destructive', icon: XCircle },
+  pending: { color: 'bg-warning/20 text-warning', icon: Clock },
+  not_tested: { color: 'bg-secondary/50 text-muted-foreground', icon: AlertCircle }
 }
 
 export function CredentialsTab() {
@@ -273,7 +273,7 @@ export function CredentialsTab() {
             const credType = credentialTypes.get(credential.credential_type_id)
 
             return (
-              <Card key={credential.id} className="glass-card hover:border-primary/50 transition-all">
+              <Card key={credential.id} className="glass-card card-glow hover:border-primary/50 transition-all">
                 <CardHeader>
                   <div className="flex items-start justify-between">
                     <div className="flex items-center gap-3 flex-1">
@@ -368,7 +368,7 @@ export function CredentialsTab() {
 
                   {/* Expiry Warning */}
                   {credential.expires_at && (
-                    <div className="text-xs text-yellow-500 flex items-center gap-1">
+                    <div className="text-xs text-warning flex items-center gap-1">
                       <AlertCircle className="w-3 h-3" />
                       Expires {new Date(credential.expires_at).toLocaleDateString()}
                     </div>

@@ -50,7 +50,7 @@ export function WelcomeModal({ open, onOpenChange, userId }: WelcomeModalProps) 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg sm:max-w-xl">
+      <DialogContent size="md">
         <DialogHeader>
           <div className="flex items-center gap-3 mb-1">
             <Image
@@ -65,7 +65,7 @@ export function WelcomeModal({ open, onOpenChange, userId }: WelcomeModalProps) 
                 Welcome to <span className="text-white">Automatos</span>{' '}
                 <span className="gradient-text">AI</span>
               </DialogTitle>
-              <DialogDescription className="text-gray-400 text-sm">
+              <DialogDescription className="text-muted-foreground text-sm">
                 Your intelligent automation platform
               </DialogDescription>
             </div>
@@ -74,40 +74,40 @@ export function WelcomeModal({ open, onOpenChange, userId }: WelcomeModalProps) 
 
         <div className="space-y-4 py-2">
           {/* Friendly overview */}
-          <p className="text-sm text-gray-300 leading-relaxed">
+          <p className="text-sm text-foreground/80 leading-relaxed">
             Quick 60-second orientation — we&apos;ll show you where everything lives.
           </p>
 
           <div className="grid grid-cols-2 gap-2">
-            <div className="p-3 rounded-lg bg-gray-800/50 border border-gray-700">
-              <div className="font-medium text-sm text-gray-300 mb-0.5">
+            <div className="p-3 rounded-lg bg-secondary/50 border border-border">
+              <div className="font-medium text-sm text-foreground/80 mb-0.5">
                 AI Agents
               </div>
-              <div className="text-xs text-gray-400">
+              <div className="text-xs text-muted-foreground">
                 Autonomous workers for email, data, research &amp; more
               </div>
             </div>
-            <div className="p-3 rounded-lg bg-gray-800/50 border border-gray-700">
-              <div className="font-medium text-sm text-gray-300 mb-0.5">
+            <div className="p-3 rounded-lg bg-secondary/50 border border-border">
+              <div className="font-medium text-sm text-foreground/80 mb-0.5">
                 1,000+ Integrations
               </div>
-              <div className="text-xs text-gray-400">
+              <div className="text-xs text-muted-foreground">
                 Gmail, Slack, Jira, GitHub and all your tools
               </div>
             </div>
-            <div className="p-3 rounded-lg bg-gray-800/50 border border-gray-700">
-              <div className="font-medium text-sm text-gray-300 mb-0.5">
+            <div className="p-3 rounded-lg bg-secondary/50 border border-border">
+              <div className="font-medium text-sm text-foreground/80 mb-0.5">
                 Playbooks
               </div>
-              <div className="text-xs text-gray-400">
+              <div className="text-xs text-muted-foreground">
                 Multi-agent workflows with no-code builder
               </div>
             </div>
-            <div className="p-3 rounded-lg bg-gray-800/50 border border-gray-700">
-              <div className="font-medium text-sm text-gray-300 mb-0.5">
+            <div className="p-3 rounded-lg bg-secondary/50 border border-border">
+              <div className="font-medium text-sm text-foreground/80 mb-0.5">
                 AI Chat
               </div>
-              <div className="text-xs text-gray-400">
+              <div className="text-xs text-muted-foreground">
                 Get help anytime from Auto, your assistant
               </div>
             </div>
@@ -142,17 +142,17 @@ export function WelcomeModal({ open, onOpenChange, userId }: WelcomeModalProps) 
           {/* Tour CTA — desktop only */}
           {!isMobile && (
             <div
-              className="p-3 rounded-lg bg-orange-500/10 border border-orange-500/30 cursor-pointer hover:bg-orange-500/20 transition-colors"
+              className="p-3 rounded-lg bg-primary/10 border border-primary/30 cursor-pointer hover:bg-primary/20 transition-colors"
               onClick={handleStartTour}
             >
               <div className="flex items-center gap-3">
-                <Sparkles className="w-5 h-5 text-orange-400 flex-shrink-0" />
+                <Sparkles className="w-5 h-5 text-primary flex-shrink-0" />
                 <div className="flex-1">
-                  <div className="font-medium text-sm text-gray-200">
+                  <div className="font-medium text-sm text-foreground/90">
                     Take a quick tour
                   </div>
-                  <div className="text-xs text-gray-400">
-                    Step by step — press <kbd className="px-1 py-0.5 text-xs bg-gray-700 rounded">ESC</kbd> to exit anytime
+                  <div className="text-xs text-muted-foreground">
+                    Step by step — press <kbd className="px-1 py-0.5 text-xs bg-secondary rounded">ESC</kbd> to exit anytime
                   </div>
                 </div>
               </div>
@@ -165,7 +165,7 @@ export function WelcomeModal({ open, onOpenChange, userId }: WelcomeModalProps) 
               variant="ghost"
               size="sm"
               onClick={handleSkip}
-              className="text-gray-400 hover:text-gray-200 text-sm"
+              className="text-muted-foreground hover:text-foreground text-sm"
             >
               {isMobile ? 'Close' : "Skip, I'll explore on my own"}
             </Button>

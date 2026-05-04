@@ -217,7 +217,7 @@ export function LocalStorageBrowser({
                           variant={status === 'completed' ? 'outline' : 'secondary'}
                           className={`text-xs ${
                             status === 'completed'
-                              ? 'bg-green-500/10 text-green-400 border-green-500/20'
+                              ? 'bg-success/10 text-success border-success/20'
                               : ''
                           }`}
                         >
@@ -245,7 +245,7 @@ export function LocalStorageBrowser({
                               Download
                             </DropdownMenuItem>
                             <DropdownMenuItem
-                              className="text-red-400"
+                              className="text-destructive"
                               onClick={() => onDelete(doc.id, doc.filename)}
                             >
                               <Trash2 className="w-4 h-4 mr-2" />
@@ -295,7 +295,7 @@ export function LocalStorageBrowser({
                               Download
                             </DropdownMenuItem>
                             <DropdownMenuItem
-                              className="text-red-400"
+                              className="text-destructive"
                               onClick={() => onDelete(doc.id, doc.filename)}
                             >
                               <Trash2 className="w-4 h-4 mr-2" />
@@ -328,7 +328,7 @@ export function LocalStorageBrowser({
                           variant={status === 'completed' ? 'outline' : 'secondary'}
                           className={`text-[10px] ${
                             status === 'completed'
-                              ? 'bg-green-500/10 text-green-400 border-green-500/20'
+                              ? 'bg-success/10 text-success border-success/20'
                               : ''
                           }`}
                         >

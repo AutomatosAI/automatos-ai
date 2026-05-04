@@ -53,11 +53,11 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
         <div className="flex-1 min-w-0">
           <h3 className="text-lg font-semibold text-foreground dark:text-white truncate">{artifact.title}</h3>
           <div className="flex items-center space-x-2 mt-1">
-            <Badge variant="outline" className="bg-purple-500/10 border-purple-500/20 text-purple-400 text-xs">
+            <Badge variant="outline" className="bg-agent/10 border-agent/20 text-agent text-xs">
               {artifact.kind}
             </Badge>
             {artifact.language && (
-              <Badge variant="outline" className="bg-blue-500/10 border-blue-500/20 text-blue-400 text-xs">
+              <Badge variant="outline" className="bg-info/10 border-info/20 text-info text-xs">
                 {artifact.language}
               </Badge>
             )}
@@ -69,7 +69,7 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
             variant="ghost"
             size="sm"
             onClick={handleCopy}
-            className="text-muted-foreground hover:text-foreground dark:text-gray-400 dark:hover:text-white"
+            className="text-muted-foreground hover:text-foreground dark:text-muted-foreground dark:hover:text-white"
           >
             <Copy className="w-4 h-4" />
           </Button>
@@ -77,7 +77,7 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
             variant="ghost"
             size="sm"
             onClick={handleDownload}
-            className="text-muted-foreground hover:text-foreground dark:text-gray-400 dark:hover:text-white"
+            className="text-muted-foreground hover:text-foreground dark:text-muted-foreground dark:hover:text-white"
           >
             <Download className="w-4 h-4" />
           </Button>
@@ -85,7 +85,7 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
             variant="ghost"
             size="sm"
             onClick={() => setIsFullscreen(!isFullscreen)}
-            className="text-muted-foreground hover:text-foreground dark:text-gray-400 dark:hover:text-white"
+            className="text-muted-foreground hover:text-foreground dark:text-muted-foreground dark:hover:text-white"
           >
             <Maximize2 className="w-4 h-4" />
           </Button>
@@ -93,7 +93,7 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
             variant="ghost"
             size="sm"
             onClick={onClose}
-            className="text-muted-foreground hover:text-foreground dark:text-gray-400 dark:hover:text-white"
+            className="text-muted-foreground hover:text-foreground dark:text-muted-foreground dark:hover:text-white"
           >
             <X className="w-4 h-4" />
           </Button>
@@ -178,7 +178,7 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
             <Button
               variant="ghost"
               size="sm"
-              className="text-muted-foreground hover:text-foreground dark:text-gray-400 dark:hover:text-white"
+              className="text-muted-foreground hover:text-foreground dark:text-muted-foreground dark:hover:text-white"
               onClick={() => setShowMetadata((prev) => !prev)}
             >
               {showMetadata ? (
@@ -199,7 +199,7 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
               {Object.entries(cleanedMetadata).map(([key, value]) => (
                 <div key={key} className="flex justify-between gap-4">
                   <span className="capitalize">{key.replace(/_/g, ' ')}:</span>
-                  <span className="text-foreground dark:text-gray-300 text-right">{String(value)}</span>
+                  <span className="text-foreground dark:text-foreground/90 text-right">{String(value)}</span>
                 </div>
               ))}
             </div>
