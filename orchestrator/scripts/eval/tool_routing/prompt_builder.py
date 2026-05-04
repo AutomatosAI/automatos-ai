@@ -116,6 +116,13 @@ class PromptBuilder:
         """
         Delegate ranking to the production ActionSemanticIndex (US-003) and
         rendering to ActionRegistry.build_filtered_prompt_summary (US-002).
+
+        Calls the index with exclude_admin=False, exclude_promoted=False so
+        the eval's tool surface stays identical to the 2026-05-03 baseline
+        (prototype ranker over all 107 actions). The PRD's parity check is
+        about ranker quality of the new index — not about reproducing the
+        production caller's filter, which is a separate concern verified
+        elsewhere (US-004 unit tests for PlatformActionsSection).
         """
         # Imported lazily so the bootstrap stubs in `_registry_bootstrap` are
         # already in place before we touch the production modules.
@@ -129,8 +136,8 @@ class PromptBuilder:
             index.rank_actions(
                 query=query,
                 top_k=top_k,
-                exclude_admin=True,
-                exclude_promoted=True,
+                exclude_admin=False,
+                exclude_promoted=False,
             )
         )
         top_names = [name for name, _score in ranked]
@@ -138,8 +145,8 @@ class PromptBuilder:
         registry = get_action_registry()
         catalog = registry.build_filtered_prompt_summary(
             top_names,
-            exclude_admin=True,
-            exclude_promoted=True,
+            exclude_admin=False,
+            exclude_promoted=False,
         )
 
         return _PREAMBLE + catalog, top_names

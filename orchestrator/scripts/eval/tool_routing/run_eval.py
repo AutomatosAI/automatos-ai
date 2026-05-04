@@ -238,6 +238,7 @@ def _call_model(
     temperature: float,
     max_tokens: int,
     request_timeout: int,
+    tools: List[Dict[str, Any]],
 ) -> Tuple[Dict[str, Any], Optional[str]]:
     """
     Call OpenRouter once. Returns (parsed_result, error).
@@ -251,7 +252,7 @@ def _call_model(
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_query},
             ],
-            tools=TOP_LEVEL_TOOLS,
+            tools=tools,
             tool_choice="required",  # force a tool call so we always get a chosen action
             temperature=temperature,
             max_tokens=max_tokens,
@@ -471,6 +472,7 @@ def main() -> int:
                     temperature=temperature,
                     max_tokens=max_tokens,
                     request_timeout=request_timeout,
+                    tools=TOP_LEVEL_TOOLS,
                 )
                 row = {
                     "ts": _now_iso(),
