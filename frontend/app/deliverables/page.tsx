@@ -61,8 +61,8 @@ export default function DeliverablesPage() {
       ) : (
         <div className="space-y-6">
           <PageHeader
-            title="Deliver"
-            titleAccent="ables"
+            title=""
+            titleAccent="Deliverables"
             subtitle="Files, reports & agent output"
           />
           <FilterTabs
