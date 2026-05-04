@@ -161,4 +161,4 @@ class TestIdentitySectionAttributes:
         assert identity.priority == 1
 
     def test_max_tokens(self, identity):
-        assert identity.max_tokens == 600
+        assert identity.max_tokens is None

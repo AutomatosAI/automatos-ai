@@ -275,7 +275,7 @@ export default function DeveloperDashboardPage() {
           <StatCard
             label="Total Reviews"
             value={formatCount(analytics?.total_reviews ?? 0)}
-            icon={<MessageSquare className="h-4 w-4 text-blue-400" />}
+            icon={<MessageSquare className="h-4 w-4 text-info" />}
             loading={loadingAnalytics}
           />
         </div>

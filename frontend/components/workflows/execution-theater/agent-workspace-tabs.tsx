@@ -113,7 +113,7 @@ export function AgentWorkspaceTabs({
                 <Bot className="w-4 h-4 mr-2" />
                 {agent.name}
                 {progress?.status === 'executing' && (
-                  <div className="absolute top-1 right-1 w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
+                  <div className="absolute top-1 right-1 w-2 h-2 bg-info rounded-full animate-pulse" />
                 )}
               </TabsTrigger>
             )
@@ -161,11 +161,11 @@ function AgentWorkspace({
 }) {
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'executing': return 'text-blue-400'
-      case 'completed': return 'text-green-400'
-      case 'waiting': return 'text-yellow-400'
-      case 'error': return 'text-red-400'
-      default: return 'text-gray-400'
+      case 'executing': return 'text-info'
+      case 'completed': return 'text-success'
+      case 'waiting': return 'text-warning'
+      case 'error': return 'text-destructive'
+      default: return 'text-muted-foreground'
     }
   }
 
@@ -174,9 +174,9 @@ function AgentWorkspace({
       <div className="space-y-4">
         {/* LLM Call Status */}
         {isExecuting && progress?.status === 'executing' && (
-          <Card className="glass-card border-blue-500/20">
+          <Card className="glass-card border-info/20">
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm flex items-center text-blue-400">
+              <CardTitle className="text-sm flex items-center text-info">
                 <Brain className="w-4 h-4 mr-2 animate-pulse" />
                 LLM Call in Progress
               </CardTitle>
@@ -196,7 +196,7 @@ function AgentWorkspace({
                 <span className="text-muted-foreground">Elapsed:</span>
                 <span className="font-medium">{progress.elapsed_time || '0'}s</span>
               </div>
-              <div className="h-1 bg-blue-500/50 rounded-full animate-pulse" />
+              <div className="h-1 bg-info/50 rounded-full animate-pulse" />
             </CardContent>
           </Card>
         )}
@@ -278,7 +278,7 @@ function AgentWorkspace({
                 </div>
                 <div className="flex justify-between text-xs">
                   <span className="text-muted-foreground">Info Density:</span>
-                  <span className="text-green-400">
+                  <span className="text-success">
                     {progress.prompt_construction.info_density || 0.85}
                   </span>
                 </div>
@@ -366,8 +366,8 @@ function AgentWorkspace({
                   
                   return logs.map((log, index) => (
                     <div key={index} className={`${
-                      log.type === 'error' ? 'text-red-400' : 
-                      log.type === 'success' ? 'text-green-400' : 
+                      log.type === 'error' ? 'text-destructive' : 
+                      log.type === 'success' ? 'text-success' : 
                       'text-muted-foreground'
                     }`}>
                       <span className="text-xs opacity-50">{log.timestamp}</span>{' '}

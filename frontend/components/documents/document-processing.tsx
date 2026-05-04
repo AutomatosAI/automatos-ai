@@ -119,7 +119,7 @@ export function DocumentProcessing({ documents, onDocumentSelect }: DocumentProc
                 <p className="text-2xl font-bold">{processingStats.total_processed_today}</p>
               </div>
               <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-                <CheckCircle className="w-5 h-5 text-green-400" />
+                <CheckCircle className="w-5 h-5 text-success" />
               </div>
             </div>
           </CardContent>
@@ -133,7 +133,7 @@ export function DocumentProcessing({ documents, onDocumentSelect }: DocumentProc
                 <p className="text-2xl font-bold">{liveProcessingDocuments.length || processingDocuments.length}</p>
               </div>
               <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-                <Zap className="w-5 h-5 text-blue-400" />
+                <Zap className="w-5 h-5 text-info" />
               </div>
             </div>
           </CardContent>
@@ -147,7 +147,7 @@ export function DocumentProcessing({ documents, onDocumentSelect }: DocumentProc
                 <p className="text-2xl font-bold">{processingStats.average_processing_time}s</p>
               </div>
               <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-                <Clock className="w-5 h-5 text-purple-400" />
+                <Clock className="w-5 h-5 text-agent" />
               </div>
             </div>
           </CardContent>
@@ -175,7 +175,7 @@ export function DocumentProcessing({ documents, onDocumentSelect }: DocumentProc
                 <p className="text-2xl font-bold">{queueStatus?.multimodal_items_extracted || 0}</p>
               </div>
               <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-                <Brain className="w-5 h-5 text-purple-400" />
+                <Brain className="w-5 h-5 text-agent" />
               </div>
             </div>
           </CardContent>
@@ -204,7 +204,7 @@ export function DocumentProcessing({ documents, onDocumentSelect }: DocumentProc
               <CardContent className="p-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <FileText className="w-8 h-8 text-blue-500" />
+                    <FileText className="w-8 h-8 text-info" />
                     <div>
                       <h4 className="font-medium">{doc.name}</h4>
                       <p className="text-sm text-muted-foreground">
@@ -260,7 +260,7 @@ export function DocumentProcessing({ documents, onDocumentSelect }: DocumentProc
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
                         <div className="relative">
-                          <Zap className="w-8 h-8 text-blue-500 animate-pulse" />
+                          <Zap className="w-8 h-8 text-info animate-pulse" />
                         </div>
                         <div>
                           <h4 className="font-medium">{doc.filename || doc.name}</h4>
@@ -291,16 +291,16 @@ export function DocumentProcessing({ documents, onDocumentSelect }: DocumentProc
                     {(doc.current_step === 'multimodal_extraction' || doc.multimodal_status) && (
                       <div className="space-y-3">
                         <div className="flex items-center gap-2">
-                          <Brain className="w-4 h-4 text-purple-400" />
+                          <Brain className="w-4 h-4 text-agent" />
                           <span className="text-sm font-medium">Multimodal Extraction</span>
                         </div>
                         <div className="grid grid-cols-3 gap-3">
                           <div className="flex items-center gap-2 p-2 rounded-lg bg-secondary/30">
-                            <Table className="w-4 h-4 text-blue-400" />
+                            <Table className="w-4 h-4 text-info" />
                             <span className="text-xs">Tables: {doc.extracted_tables || 0}</span>
                           </div>
                           <div className="flex items-center gap-2 p-2 rounded-lg bg-secondary/30">
-                            <Calculator className="w-4 h-4 text-green-400" />
+                            <Calculator className="w-4 h-4 text-success" />
                             <span className="text-xs">Formulas: {doc.extracted_formulas || 0}</span>
                           </div>
                           <div className="flex items-center gap-2 p-2 rounded-lg bg-secondary/30">
@@ -333,11 +333,11 @@ export function DocumentProcessing({ documents, onDocumentSelect }: DocumentProc
           <h3 className="text-lg font-semibold">Recently Completed ({completedDocuments.length})</h3>
 
           {completedDocuments.slice(0, 10).map(doc => (
-            <Card key={doc.id} className="glass-card cursor-pointer hover:border-primary/20 transition-all duration-300" onClick={() => onDocumentSelect(doc.id)}>
+            <Card key={doc.id} className="glass-card card-glow cursor-pointer hover:border-primary/20 transition-all duration-300" onClick={() => onDocumentSelect(doc.id)}>
               <CardContent className="p-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <CheckCircle className="w-8 h-8 text-green-500" />
+                    <CheckCircle className="w-8 h-8 text-success" />
                     <div>
                       <h4 className="font-medium">{doc.name}</h4>
                       <p className="text-sm text-muted-foreground">
@@ -346,7 +346,7 @@ export function DocumentProcessing({ documents, onDocumentSelect }: DocumentProc
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Badge variant="outline" className="text-green-600 border-green-600">
+                    <Badge variant="outline" className="text-success border-success">
                       Completed
                     </Badge>
                     <Badge variant="secondary">
@@ -380,10 +380,10 @@ export function DocumentProcessing({ documents, onDocumentSelect }: DocumentProc
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                      <XCircle className="w-8 h-8 text-red-500" />
+                      <XCircle className="w-8 h-8 text-destructive" />
                       <div>
                         <h4 className="font-medium">{doc.name}</h4>
-                        <p className="text-sm text-red-600">
+                        <p className="text-sm text-destructive">
                           {doc.processing_error || 'Processing failed'}
                         </p>
                       </div>
@@ -412,7 +412,7 @@ export function DocumentProcessing({ documents, onDocumentSelect }: DocumentProc
           {failedDocuments.length === 0 && (
             <Card className="glass-card">
               <CardContent className="p-12 text-center">
-                <CheckCircle className="w-16 h-16 mx-auto text-green-500 mb-4" />
+                <CheckCircle className="w-16 h-16 mx-auto text-success mb-4" />
                 <h3 className="text-lg font-semibold mb-2">No failed processing</h3>
                 <p className="text-muted-foreground">
                   All document processing has been successful

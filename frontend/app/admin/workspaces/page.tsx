@@ -85,20 +85,20 @@ function formatDate(iso: string | null): string {
 function stateBadge(w: WorkspaceRow) {
   if (w.deleted_at) {
     return (
-      <Badge className="bg-red-500/20 text-red-400 border-red-500/30">
+      <Badge className="bg-destructive/20 text-destructive border-destructive/30">
         Deleted
       </Badge>
     )
   }
   if (w.paused_at) {
     return (
-      <Badge className="bg-yellow-500/20 text-yellow-400 border-yellow-500/30">
+      <Badge className="bg-warning/10 text-warning border-warning/20">
         Disabled
       </Badge>
     )
   }
   return (
-    <Badge className="bg-green-500/20 text-green-400 border-green-500/30">
+    <Badge className="bg-success/10 text-success border-success/20">
       Enabled
     </Badge>
   )
@@ -344,8 +344,8 @@ export default function AdminWorkspacesPage() {
         </Card>
 
         {error && (
-          <Card className="border-red-500/30 bg-red-500/5">
-            <CardContent className="p-4 flex items-center gap-2 text-red-400">
+          <Card className="border-destructive/30 bg-destructive/5">
+            <CardContent className="p-4 flex items-center gap-2 text-destructive">
               <AlertTriangle className="h-4 w-4" />
               {error}
             </CardContent>
@@ -411,7 +411,7 @@ export default function AdminWorkspacesPage() {
                             title="Copy UUID"
                           >
                             {copiedId === w.id ? (
-                              <Check className="h-3 w-3 text-green-400" />
+                              <Check className="h-3 w-3 text-success" />
                             ) : (
                               <Copy className="h-3 w-3" />
                             )}
@@ -501,7 +501,7 @@ export default function AdminWorkspacesPage() {
                                   setDeleteConfirm('')
                                 }}
                                 disabled={actionId === w.id}
-                                className="text-red-400 hover:text-red-300"
+                                className="text-destructive hover:text-destructive/80"
                                 title="Delete"
                               >
                                 <Trash2 className="h-3.5 w-3.5" />
@@ -578,7 +578,7 @@ export default function AdminWorkspacesPage() {
                   <Button
                     onClick={handlePause}
                     disabled={!pauseReason.trim() || actionId === pauseTarget.id}
-                    className="bg-yellow-600 hover:bg-yellow-700 text-white"
+                    className="bg-warning hover:bg-warning/80 text-white"
                   >
                     {actionId === pauseTarget.id ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
@@ -600,7 +600,7 @@ export default function AdminWorkspacesPage() {
           >
             <Card className="max-w-md w-full" onClick={(e) => e.stopPropagation()}>
               <CardContent className="p-6 space-y-4">
-                <div className="flex items-center gap-2 text-red-400">
+                <div className="flex items-center gap-2 text-destructive">
                   <AlertTriangle className="h-5 w-5" />
                   <h2 className="text-lg font-semibold">Delete workspace?</h2>
                 </div>
@@ -611,7 +611,7 @@ export default function AdminWorkspacesPage() {
                   </span>
                   , wipes all S3 files under this workspace, removes the
                   owner's Clerk account, and cascades every workspace-scoped
-                  database row. <span className="text-red-400 font-semibold">
+                  database row. <span className="text-destructive font-semibold">
                   This cannot be undone.</span>
                 </p>
                 <div>
@@ -638,7 +638,7 @@ export default function AdminWorkspacesPage() {
                       deleteConfirm !== deleteTarget.name ||
                       actionId === deleteTarget.id
                     }
-                    className="bg-red-600 hover:bg-red-700 text-white"
+                    className="bg-destructive hover:bg-destructive/80 text-white"
                   >
                     {actionId === deleteTarget.id ? (
                       <Loader2 className="h-4 w-4 animate-spin" />

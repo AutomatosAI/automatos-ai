@@ -8,10 +8,14 @@
  */
 
 import React from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { ToolLogo } from '@/components/ui/tool-logo'
 import {
   ExternalLink,
@@ -126,60 +130,40 @@ export function MarketplaceAppDetailsModal({
   const authSchemes = Array.isArray(app.auth_schemes) ? app.auth_schemes : []
 
   return (
-    <AnimatePresence>
-      {open && (
-        <>
-          <motion.div
-            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={onClose}
-          />
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent size="lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-3 text-xl">
+            <ToolLogo
+              logo={app.logo_url}
+              name={app.display_name}
+              size={48}
+              fallbackIcon={undefined}
+              showBackground={true}
+            />
+            <div>
+              <div className="flex items-center gap-2">
+                {app.display_name}
+                {app.categories?.[0] && (
+                  <Badge variant="outline" className="text-xs">
+                    {app.categories[0]}
+                  </Badge>
+                )}
+              </div>
+              <p className="text-sm text-muted-foreground font-normal">
+                Composio
+                {isConnected && (
+                  <>
+                    {' • '}
+                    <span className="text-[hsl(var(--success))]">Connected</span>
+                  </>
+                )}
+              </p>
+            </div>
+          </DialogTitle>
+        </DialogHeader>
 
-          <motion.div
-            className="fixed inset-0 z-50 flex items-center justify-center p-4"
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            transition={{ duration: 0.2 }}
-          >
-            <Card className="glass-card card-glow w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="flex items-center gap-3 text-xl">
-                  <ToolLogo
-                    logo={app.logo_url}
-                    name={app.display_name}
-                    size={48}
-                    fallbackIcon={undefined}
-                    showBackground={true}
-                  />
-                  <div>
-                    <div className="flex items-center gap-2">
-                      {app.display_name}
-                      {app.categories?.[0] && (
-                        <Badge variant="outline" className="text-xs">
-                          {app.categories[0]}
-                        </Badge>
-                      )}
-                    </div>
-                    <p className="text-sm text-muted-foreground font-normal">
-                      Composio
-                      {isConnected && (
-                        <>
-                          {' • '}
-                          <span className="text-[hsl(var(--success))]">Connected</span>
-                        </>
-                      )}
-                    </p>
-                  </div>
-                </CardTitle>
-                <Button variant="ghost" size="icon" onClick={onClose}>
-                  <X className="w-5 h-5" />
-                </Button>
-              </CardHeader>
-
-              <CardContent className="flex-1 overflow-y-auto pt-4 space-y-6">
+        <div className="flex-1 overflow-y-auto pt-4 space-y-6">
                 <div className="space-y-6">
                   {/* Description */}
                   <div className="space-y-3">
@@ -352,26 +336,23 @@ export function MarketplaceAppDetailsModal({
                     )}
                   </div>
                 </div>
-              </CardContent>
+        </div>
 
-              {/* Action Footer - Add to Workspace button */}
-              <div className="p-6 border-t border-border/40 bg-background/50 backdrop-blur z-20 relative">
-                <div className="flex gap-3">
-                  <Button
-                    onClick={onConnect}
-                    disabled={loading}
-                    variant="outline"
-                    className="flex-1"
-                  >
-                    <ExternalLink className="w-4 h-4 mr-2" />
-                    {loading ? 'Adding...' : 'Add to Workspace'}
-                  </Button>
-                </div>
-              </div>
-            </Card>
-          </motion.div>
-        </>
-      )}
-    </AnimatePresence>
+        {/* Action Footer - Add to Workspace button */}
+        <div className="border-t border-border/40 pt-4">
+          <div className="flex gap-3">
+            <Button
+              onClick={onConnect}
+              disabled={loading}
+              variant="outline"
+              className="flex-1"
+            >
+              <ExternalLink className="w-4 h-4 mr-2" />
+              {loading ? 'Adding...' : 'Add to Workspace'}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }

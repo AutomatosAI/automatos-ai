@@ -278,9 +278,9 @@ export function CreateTaskDialog({ open, onOpenChange }: CreateTaskDialogProps) 
                     className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/30 px-2.5 py-0.5 text-xs"
                   >
                     {att.media_type === 'image' ? (
-                      <Image className="w-3 h-3 text-blue-400" />
+                      <Image className="w-3 h-3 text-info" />
                     ) : (
-                      <FileText className="w-3 h-3 text-amber-400" />
+                      <FileText className="w-3 h-3 text-warning" />
                     )}
                     <span className="max-w-[120px] truncate">{att.filename}</span>
                     <button

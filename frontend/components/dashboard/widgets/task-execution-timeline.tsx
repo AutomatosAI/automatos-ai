@@ -47,10 +47,10 @@ export function TaskExecutionTimeline({ tasks = [], workflows = {} }: TaskExecut
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'completed': return 'text-green-500'
-      case 'failed': return 'text-red-500'
-      case 'pending': return 'text-yellow-500'
-      default: return 'text-gray-500'
+      case 'completed': return 'text-success'
+      case 'failed': return 'text-destructive'
+      case 'pending': return 'text-warning'
+      default: return 'text-muted-foreground'
     }
   }
 
@@ -78,19 +78,19 @@ export function TaskExecutionTimeline({ tasks = [], workflows = {} }: TaskExecut
 
         {/* Task Breakdown */}
         <div className="grid grid-cols-3 gap-2">
-          <div className="text-center p-3 rounded-lg bg-green-500/10">
-            <CheckCircle className="w-5 h-5 text-green-500 mx-auto mb-1" />
-            <p className="text-2xl font-bold text-green-500">{data.completed_tasks}</p>
+          <div className="text-center p-3 rounded-lg bg-success/10">
+            <CheckCircle className="w-5 h-5 text-success mx-auto mb-1" />
+            <p className="text-2xl font-bold text-success">{data.completed_tasks}</p>
             <p className="text-xs text-muted-foreground">Completed</p>
           </div>
-          <div className="text-center p-3 rounded-lg bg-yellow-500/10">
-            <Loader2 className="w-5 h-5 text-yellow-500 mx-auto mb-1" />
-            <p className="text-2xl font-bold text-yellow-500">{data.pending_tasks}</p>
+          <div className="text-center p-3 rounded-lg bg-warning/10">
+            <Loader2 className="w-5 h-5 text-warning mx-auto mb-1" />
+            <p className="text-2xl font-bold text-warning">{data.pending_tasks}</p>
             <p className="text-xs text-muted-foreground">In Progress</p>
           </div>
-          <div className="text-center p-3 rounded-lg bg-red-500/10">
-            <XCircle className="w-5 h-5 text-red-500 mx-auto mb-1" />
-            <p className="text-2xl font-bold text-red-500">{data.failed_tasks}</p>
+          <div className="text-center p-3 rounded-lg bg-destructive/10">
+            <XCircle className="w-5 h-5 text-destructive mx-auto mb-1" />
+            <p className="text-2xl font-bold text-destructive">{data.failed_tasks}</p>
             <p className="text-xs text-muted-foreground">Failed</p>
           </div>
         </div>

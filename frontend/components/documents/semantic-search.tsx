@@ -86,8 +86,8 @@ export function SemanticSearch({
   }
 
   const getSimilarityColor = (similarity: number) => {
-    if (similarity >= 0.8) return 'text-green-400 bg-green-500/10 border-green-500/20'
-    if (similarity >= 0.6) return 'text-yellow-400 bg-yellow-500/10 border-yellow-500/20'
+    if (similarity >= 0.8) return 'text-success bg-success/10 border-success/20'
+    if (similarity >= 0.6) return 'text-warning bg-warning/10 border-warning/20'
     return 'text-orange-400 bg-orange-500/10 border-orange-500/20'
   }
 
@@ -120,7 +120,7 @@ export function SemanticSearch({
               <CardTitle>{getContextTitle()}</CardTitle>
             </div>
             {data && (
-              <Badge variant="outline" className="text-blue-400">
+              <Badge variant="outline" className="text-info">
                 {data.total_results} results in {data.execution_time_ms}ms
               </Badge>
             )}
@@ -194,9 +194,9 @@ export function SemanticSearch({
           ))}
         </div>
       ) : error ? (
-        <Card className="glass-card border-red-500/20">
+        <Card className="glass-card border-destructive/20">
           <CardContent className="p-6 text-center">
-            <p className="text-red-400">Error: {(error as Error).message}</p>
+            <p className="text-destructive">Error: {(error as Error).message}</p>
           </CardContent>
         </Card>
       ) : data && data.results && data.results.length > 0 ? (
@@ -209,14 +209,14 @@ export function SemanticSearch({
               transition={{ delay: index * 0.05 }}
             >
               <Card
-                className={`glass-card ${onResultSelect ? 'cursor-pointer hover:border-primary/20 transition-all duration-300' : ''}`}
+                className={`glass-card ${onResultSelect ? 'card-glow cursor-pointer hover:border-primary/20 transition-all duration-300' : ''}`}
                 onClick={() => onResultSelect && onResultSelect(result)}
               >
                 <CardContent className="p-6">
                   {/* Document Header */}
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex items-center space-x-3">
-                      <FileText className="w-5 h-5 text-blue-400" />
+                      <FileText className="w-5 h-5 text-info" />
                       <div>
                         <h3 className="font-medium text-foreground">
                           {result.source?.filename || 'Document'}
@@ -262,7 +262,7 @@ export function SemanticSearch({
                       {result.full_content_available && (
                         <>
                           <span>•</span>
-                          <span className="text-blue-400">Full content available</span>
+                          <span className="text-info">Full content available</span>
                         </>
                       )}
                     </div>
@@ -299,7 +299,7 @@ export function SemanticSearch({
       ) : (
         <Card className="glass-card">
           <CardContent className="p-12 text-center">
-            <Sparkles className="w-16 h-16 mx-auto text-blue-400 mb-4" />
+            <Sparkles className="w-16 h-16 mx-auto text-info mb-4" />
             <h3 className="text-lg font-semibold mb-2">Semantic Search Ready</h3>
             <p className="text-muted-foreground">
               Search by meaning, not just keywords. Try asking questions or describing concepts.

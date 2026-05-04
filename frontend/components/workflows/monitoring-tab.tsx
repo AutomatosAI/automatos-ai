@@ -112,21 +112,21 @@ export function MonitoringTab() {
       value: stats?.overview?.total_workflows || 0,
       ...getChangeIndicator(stats?.overview?.total_workflows || 0),
       icon: Layers,
-      color: 'text-blue-400'
+      color: 'text-info'
     },
     {
       title: 'Active Executions',
       value: stats?.overview?.running_executions || 0,
       ...getChangeIndicator(stats?.overview?.running_executions || 0),
       icon: Activity,
-      color: 'text-green-400'
+      color: 'text-success'
     },
     {
       title: 'Success Rate',
       value: `${stats?.today?.success_rate_today?.toFixed(1) || 0}%`,
       ...getChangeIndicator(stats?.today?.success_rate_today || 0),
       icon: TrendingUp,
-      color: 'text-green-400'
+      color: 'text-success'
     },
     {
       title: 'Avg Duration',
@@ -159,7 +159,7 @@ export function MonitoringTab() {
                     <div className={`w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center`}>
                       <Icon className={`w-5 h-5 ${metric.color}`} />
                     </div>
-                    <div className={`flex items-center text-xs ${metric.trend === 'up' ? 'text-green-400' : 'text-orange-400'}`}>
+                    <div className={`flex items-center text-xs ${metric.trend === 'up' ? 'text-success' : 'text-orange-400'}`}>
                       <TrendIcon className="w-3 h-3 mr-1" />
                       {metric.change}
                     </div>
@@ -186,7 +186,7 @@ export function MonitoringTab() {
             <CardHeader>
               <div className="flex items-center justify-between">
                 <CardTitle className="flex items-center">
-                  <BarChart3 className="w-5 h-5 mr-2 text-blue-400" />
+                  <BarChart3 className="w-5 h-5 mr-2 text-info" />
                   System-Wide Analytics
                 </CardTitle>
                 <TabsList className="grid w-[400px] grid-cols-3">
@@ -224,10 +224,10 @@ export function MonitoringTab() {
                     {/* Top Section: Health Score & Quick Metrics */}
                     <div className="col-span-12 grid grid-cols-4 gap-3">
                       {/* Total Memories */}
-                      <div className="col-span-1 bg-gradient-to-br from-purple-500/20 to-pink-500/20 border border-purple-500/30 rounded-lg p-3">
+                      <div className="col-span-1 bg-gradient-to-br from-purple-500/20 to-pink-500/20 border border-agent/30 rounded-lg p-3">
                         <div className="flex items-center justify-between mb-2">
-                          <Brain className="w-5 h-5 text-purple-400" />
-                          <Badge className="bg-green-500/20 text-green-400 border-green-500/30">Active</Badge>
+                          <Brain className="w-5 h-5 text-agent" />
+                          <Badge className="bg-success/20 text-success border-success/30">Active</Badge>
                         </div>
                         <div className="text-3xl font-bold text-white mb-1">
                           {memoryStats?.system_stats?.total_memories || 0}
@@ -236,15 +236,15 @@ export function MonitoringTab() {
                       </div>
 
                       {/* Hit Rate */}
-                      <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3">
+                      <div className="bg-info/10 border border-info/30 rounded-lg p-3">
                         <div className="flex items-center justify-between mb-2">
-                          <TrendingUp className="w-4 h-4 text-blue-400" />
+                          <TrendingUp className="w-4 h-4 text-info" />
                           {memoryStats?.is_real_data && <Badge variant="outline" className="text-xs">Real</Badge>}
                         </div>
                         <div className="text-2xl font-bold text-white mb-1">
                           {memoryStats?.access_metrics?.hit_rate ? (memoryStats.access_metrics.hit_rate * 100).toFixed(1) : '0.0'}%
                         </div>
-                        <div className="text-xs text-green-400">Cache Hit Rate</div>
+                        <div className="text-xs text-success">Cache Hit Rate</div>
                       </div>
 
                       {/* Total Accesses */}
@@ -256,26 +256,26 @@ export function MonitoringTab() {
                         <div className="text-2xl font-bold text-white mb-1">
                           {memoryStats?.access_metrics?.total_accesses || 0}
                         </div>
-                        <div className="text-xs text-green-400">Total Accesses</div>
+                        <div className="text-xs text-success">Total Accesses</div>
                       </div>
 
                       {/* Avg Importance */}
-                      <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-3">
+                      <div className="bg-success/10 border border-success/30 rounded-lg p-3">
                         <div className="flex items-center justify-between mb-2">
-                          <Clock className="w-4 h-4 text-green-400" />
-                          <span className="text-xs text-green-400">Score</span>
+                          <Clock className="w-4 h-4 text-success" />
+                          <span className="text-xs text-success">Score</span>
                         </div>
                         <div className="text-2xl font-bold text-white mb-1">
                           {memoryStats?.access_metrics?.avg_importance ? (memoryStats.access_metrics.avg_importance * 100).toFixed(0) : '0'}
                         </div>
-                        <div className="text-xs text-green-400">Avg Importance</div>
+                        <div className="text-xs text-success">Avg Importance</div>
                       </div>
                     </div>
 
                     {/* Middle Section: Charts Side by Side */}
                     <div className="col-span-6 bg-background/50 border border-border/30 rounded-lg p-3">
                       <h4 className="text-sm font-semibold mb-3 flex items-center gap-2">
-                        <Layers className="w-4 h-4 text-purple-400" />
+                        <Layers className="w-4 h-4 text-agent" />
                         Memory Hierarchy Distribution
                       </h4>
                       <ResponsiveContainer width="100%" height={180}>
@@ -329,7 +329,7 @@ export function MonitoringTab() {
 
                     <div className="col-span-6 bg-background/50 border border-border/30 rounded-lg p-3">
                       <h4 className="text-sm font-semibold mb-3 flex items-center gap-2">
-                        <TrendingUp className="w-4 h-4 text-blue-400" />
+                        <TrendingUp className="w-4 h-4 text-info" />
                         Access Patterns (24h)
                         {accessPatternsData.length > 0 && <Badge variant="outline" className="ml-2 text-xs">Real Data</Badge>}
                       </h4>
@@ -367,7 +367,7 @@ export function MonitoringTab() {
                     {/* Bottom Section: Consolidation Stats */}
                     <div className="col-span-12 bg-background/50 border border-border/30 rounded-lg p-3">
                       <h4 className="text-sm font-semibold mb-3 flex items-center gap-2">
-                        <Activity className="w-4 h-4 text-green-400" />
+                        <Activity className="w-4 h-4 text-success" />
                         Consolidation & Performance Trends
                         {consolidationData.length > 0 && <Badge variant="outline" className="ml-2 text-xs">Real Data</Badge>}
                       </h4>
@@ -426,50 +426,50 @@ export function MonitoringTab() {
                   <div className="grid grid-cols-12 gap-3">
                     {/* Top Metrics - REAL DATA */}
                     <div className="col-span-12 grid grid-cols-3 gap-3">
-                      <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3">
+                      <div className="bg-info/10 border border-info/30 rounded-lg p-3">
                         <div className="flex items-center justify-between mb-2">
-                          <Database className="w-4 h-4 text-blue-400" />
-                          <Badge className="bg-green-500/20 text-green-400 border-green-500/30 text-xs">
+                          <Database className="w-4 h-4 text-info" />
+                          <Badge className="bg-success/20 text-success border-success/30 text-xs">
                             {ragStats?.systemStatus || 'Unknown'}
                           </Badge>
                         </div>
                         <div className="text-2xl font-bold text-white mb-1">
                           {ragStats?.contextQueries?.toLocaleString() || '0'}
                         </div>
-                        <div className="text-xs text-green-400">Total Queries</div>
+                        <div className="text-xs text-success">Total Queries</div>
                       </div>
 
-                      <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-3">
+                      <div className="bg-success/10 border border-success/30 rounded-lg p-3">
                         <div className="flex items-center justify-between mb-2">
-                          <CheckCircle className="w-4 h-4 text-green-400" />
-                          <span className="text-xs text-green-400">
+                          <CheckCircle className="w-4 h-4 text-success" />
+                          <span className="text-xs text-success">
                             {ragStats?.retrievalSuccess > 0 ? 'Active' : 'Idle'}
                           </span>
                         </div>
                         <div className="text-2xl font-bold text-white mb-1">
                           {ragStats?.retrievalSuccess?.toFixed(1) || '0.0'}%
                         </div>
-                        <div className="text-xs text-green-400">Success Rate</div>
+                        <div className="text-xs text-success">Success Rate</div>
                       </div>
 
-                      <div className="bg-purple-500/10 border border-purple-500/30 rounded-lg p-3">
+                      <div className="bg-agent/10 border border-agent/30 rounded-lg p-3">
                         <div className="flex items-center justify-between mb-2">
-                          <Clock className="w-4 h-4 text-purple-400" />
-                          <span className="text-xs text-purple-400">
+                          <Clock className="w-4 h-4 text-agent" />
+                          <span className="text-xs text-agent">
                             {ragStats?.avgResponseTime && ragStats.avgResponseTime !== '0s' ? 'Fast' : 'N/A'}
                           </span>
                         </div>
                         <div className="text-2xl font-bold text-white mb-1">
                           {ragStats?.avgResponseTime || '0s'}
                         </div>
-                        <div className="text-xs text-green-400">Avg Latency</div>
+                        <div className="text-xs text-success">Avg Latency</div>
                       </div>
                     </div>
 
                   {/* Recent Queries - REAL DATA */}
                   <div className="col-span-12 bg-background/50 border border-border/30 rounded-lg p-3">
                     <h4 className="text-sm font-semibold mb-3 flex items-center gap-2">
-                      <Activity className="w-4 h-4 text-blue-400" />
+                      <Activity className="w-4 h-4 text-info" />
                       Recent RAG Queries
                     </h4>
                     {ragQueries.length === 0 ? (
@@ -486,9 +486,9 @@ export function MonitoringTab() {
                               <p className="text-xs text-muted-foreground">{item.category} • {item.agent}</p>
                             </div>
                             <div className="flex items-center gap-3 text-xs">
-                              <span className="text-blue-400">{item.sources} sources</span>
-                              <span className="text-purple-400">{item.responseTime}</span>
-                              <Badge className="bg-green-500/20 text-green-400 border-green-500/30 text-xs">
+                              <span className="text-info">{item.sources} sources</span>
+                              <span className="text-agent">{item.responseTime}</span>
+                              <Badge className="bg-success/20 text-success border-success/30 text-xs">
                                 {(item.confidence * 100).toFixed(0)}%
                               </Badge>
                             </div>
@@ -501,7 +501,7 @@ export function MonitoringTab() {
                   {/* Context Sources Distribution - REAL DATA */}
                   <div className="col-span-12 bg-background/50 border border-border/30 rounded-lg p-3">
                     <h4 className="text-sm font-semibold mb-3 flex items-center gap-2">
-                      <TrendingUp className="w-4 h-4 text-purple-400" />
+                      <TrendingUp className="w-4 h-4 text-agent" />
                       Context Sources Distribution
                     </h4>
                     {ragSources.length === 0 ? (
@@ -512,13 +512,13 @@ export function MonitoringTab() {
                       <div className={`grid grid-cols-${Math.min(ragSources.length, 4)} gap-4`}>
                         {ragSources.map((source, i) => {
                           const colorMap: { [key: string]: string } = {
-                            '#60B5FF': 'text-blue-400',
-                            '#A78BFA': 'text-purple-400',
-                            '#72BF78': 'text-green-400',
+                            '#60B5FF': 'text-info',
+                            '#A78BFA': 'text-agent',
+                            '#72BF78': 'text-success',
                             '#F97316': 'text-orange-400',
-                            '#EF4444': 'text-red-400'
+                            '#EF4444': 'text-destructive'
                           }
-                          const textColor = colorMap[source.color] || 'text-blue-400'
+                          const textColor = colorMap[source.color] || 'text-info'
                           
                           return (
                             <div key={i} className="text-center">
@@ -548,27 +548,27 @@ export function MonitoringTab() {
                       Tool tracking will be implemented in future workflow executions.
                     </p>
                     <div className="bg-background/50 border border-border/30 rounded-lg p-4 text-left space-y-2">
-                      <p className="text-xs font-semibold text-purple-400">Planned Metrics:</p>
+                      <p className="text-xs font-semibold text-agent">Planned Metrics:</p>
                       <ul className="text-xs text-muted-foreground space-y-1">
                         <li className="flex items-center gap-2">
-                          <CheckCircle className="w-3 h-3 text-green-400" />
+                          <CheckCircle className="w-3 h-3 text-success" />
                           Tool calls per execution
                         </li>
                         <li className="flex items-center gap-2">
-                          <CheckCircle className="w-3 h-3 text-green-400" />
+                          <CheckCircle className="w-3 h-3 text-success" />
                           Tool success rates
                         </li>
                         <li className="flex items-center gap-2">
-                          <CheckCircle className="w-3 h-3 text-green-400" />
+                          <CheckCircle className="w-3 h-3 text-success" />
                           Most used tools
                         </li>
                         <li className="flex items-center gap-2">
-                          <CheckCircle className="w-3 h-3 text-green-400" />
+                          <CheckCircle className="w-3 h-3 text-success" />
                           Tool execution times
                         </li>
                       </ul>
                     </div>
-                    <Badge className="bg-blue-500/20 text-blue-400 border-blue-500/30">
+                    <Badge className="bg-info/20 text-info border-info/30">
                       Coming Soon
                     </Badge>
                   </div>

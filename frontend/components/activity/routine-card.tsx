@@ -126,7 +126,7 @@ export function RoutineCard({ heartbeat, animationDelay = 0 }: RoutineCardProps)
             className="text-xs text-muted-foreground min-h-[44px] sm:min-h-0 justify-center"
           >
             <ChevronDown
-              className={`w-3.5 h-3.5 mr-1 transition-transform duration-200 ${
+              className={`w-3.5 h-3.5 mr-1 transition-transform duration-220 ${
                 expanded ? 'rotate-180' : ''
               }`}
             />
@@ -175,7 +175,7 @@ export function RoutineCard({ heartbeat, animationDelay = 0 }: RoutineCardProps)
             transition={{ duration: prefersReducedMotion ? 0 : 0.2 }}
             className="overflow-hidden"
           >
-            <div className="pt-2 space-y-1.5">
+            <div className="pt-2 space-y-2">
               <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
                 Execution History
               </div>
@@ -284,7 +284,7 @@ function ExecutionLogEntry({ execution }: { execution: HeartbeatExecution }) {
 
 function ExecutionHistorySkeleton() {
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-2">
       {[0, 1, 2].map((i) => (
         <div key={i} className="log-entry px-3 py-2">
           <div className="flex items-center gap-2">

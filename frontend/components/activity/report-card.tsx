@@ -63,7 +63,7 @@ export function ReportCard({ report, onView, onDownload }: ReportCardProps) {
   return (
     <div
       className={cn(
-        'glass-card border-l-[3px] p-4 space-y-3 cursor-pointer hover:bg-secondary/20 transition-colors',
+        'glass-card card-glow border-l-[3px] p-4 space-y-3 cursor-pointer hover:bg-secondary/20 transition-colors',
         statusBorder
       )}
       onClick={() => onView(report)}

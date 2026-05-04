@@ -49,7 +49,7 @@ export function PlaybookExecutionConfig() {
             <button
               type="button"
               onClick={() => updateConfig('mode', 'sequential')}
-              className={`p-3 rounded-xl border text-left text-sm transition-all duration-200 ${
+              className={`p-3 rounded-xl border text-left text-sm transition-all duration-220 ${
                 config.mode === 'sequential'
                   ? 'border-primary bg-primary/10 text-foreground'
                   : 'border-border/30 bg-secondary/50 text-muted-foreground hover:border-border/60'
@@ -61,7 +61,7 @@ export function PlaybookExecutionConfig() {
             <button
               type="button"
               onClick={() => updateConfig('mode', 'parallel')}
-              className={`p-3 rounded-xl border text-left text-sm transition-all duration-200 ${
+              className={`p-3 rounded-xl border text-left text-sm transition-all duration-220 ${
                 config.mode === 'parallel'
                   ? 'border-primary bg-primary/10 text-foreground'
                   : 'border-border/30 bg-secondary/50 text-muted-foreground hover:border-border/60'
@@ -156,12 +156,12 @@ export function PlaybookExecutionConfig() {
           <button
             type="button"
             onClick={() => updateConfig('auto_learning', !config.auto_learning)}
-            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 ${
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-220 ${
               config.auto_learning ? 'bg-primary' : 'bg-secondary'
             }`}
           >
             <span
-              className={`inline-block h-4 w-4 rounded-full bg-white transition-transform duration-200 ${
+              className={`inline-block h-4 w-4 rounded-full bg-white transition-transform duration-220 ${
                 config.auto_learning ? 'translate-x-6' : 'translate-x-1'
               }`}
             />
@@ -224,7 +224,7 @@ function AdvancedSection({
                   key={opt.value}
                   type="button"
                   onClick={() => updateConfig('memory_isolation', opt.value)}
-                  className={`p-3 rounded-xl border text-left text-sm transition-all duration-200 ${
+                  className={`p-3 rounded-xl border text-left text-sm transition-all duration-220 ${
                     config.memory_isolation === opt.value
                       ? 'border-primary bg-primary/10 text-foreground'
                       : 'border-border/30 bg-secondary/50 text-muted-foreground hover:border-border/60'

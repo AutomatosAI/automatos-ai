@@ -19,14 +19,14 @@ export interface OrgChartNodeData {
 }
 
 const STATUS_COLORS: Record<string, string> = {
-  active: 'bg-emerald-500',
+  active: 'bg-success',
   inactive: 'bg-zinc-500',
-  training: 'bg-amber-500',
+  training: 'bg-warning',
 }
 
 const TEAM_COLORS: Record<string, string> = {
-  engineering: 'border-blue-500/60',
-  marketing: 'border-purple-500/60',
+  engineering: 'border-info/60',
+  marketing: 'border-agent/60',
   sales: 'border-green-500/60',
   content: 'border-orange-500/60',
   finance: 'border-yellow-500/60',
@@ -63,7 +63,7 @@ function OrgChartNodeInner({ data }: NodeProps<OrgChartNodeData>) {
     <div
       className={cn(
         'rounded-xl border-2 bg-zinc-900/90 backdrop-blur-sm px-4 py-3 w-[220px]',
-        'transition-all duration-200 hover:shadow-lg hover:shadow-orange-500/10',
+        'transition-all duration-220 hover:border-primary/20',
         teamBorder,
         data.isSystemAgent && 'ring-2 ring-orange-500/40 border-orange-500/60',
       )}

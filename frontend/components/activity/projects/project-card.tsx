@@ -34,10 +34,10 @@ const STATUS_CONFIG: Record<Project['status'], { label: string; className: strin
 }
 
 const PRIORITY_DOT: Record<Project['priority'], string> = {
-  urgent: 'bg-red-500',
+  urgent: 'bg-destructive',
   high: 'bg-orange-500',
-  medium: 'bg-yellow-500',
-  low: 'bg-green-500',
+  medium: 'bg-warning',
+  low: 'bg-success',
 }
 
 // ─── Component ──────────────────────────────────────────
@@ -57,7 +57,7 @@ export function ProjectCard({ project, index }: ProjectCardProps) {
       initial={prefersReducedMotion ? false : { opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, delay: index * 0.05 }}
-      className="glass-card p-4 space-y-3 cursor-pointer hover:bg-secondary/20 transition-colors"
+      className="glass-card card-glow p-4 space-y-3 cursor-pointer hover:bg-secondary/20 transition-colors"
     >
       {/* Header: title + status */}
       <div className="flex items-start justify-between gap-2">
@@ -81,7 +81,7 @@ export function ProjectCard({ project, index }: ProjectCardProps) {
         </div>
         <div className="h-1.5 bg-secondary/50 rounded-full overflow-hidden">
           <div
-            className="h-full rounded-full transition-all duration-500"
+            className="h-full rounded-full transition-all duration-300"
             style={{
               width: `${project.progress}%`,
               backgroundColor: statusConf.barColor,

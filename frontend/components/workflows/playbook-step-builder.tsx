@@ -245,7 +245,7 @@ export function PlaybookStepBuilder() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <GripVertical className="w-4 h-4 text-muted-foreground/30" />
-                <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-primary/10 text-primary text-xs font-bold">
+                <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary/10 text-primary text-xs font-bold">
                   {step.order}
                 </div>
                 <span className="text-sm font-medium text-foreground/80">
@@ -415,7 +415,7 @@ export function PlaybookStepBuilder() {
           type="button"
           onClick={addStep}
           variant="outline"
-          className="w-full transition-all duration-200 rounded-2xl h-11"
+          className="w-full transition-all duration-220 rounded-2xl h-11"
         >
           <Plus className="w-4 h-4 mr-2" />
           Add Step

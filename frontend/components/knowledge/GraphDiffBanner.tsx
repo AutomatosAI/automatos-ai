@@ -54,21 +54,21 @@ export function GraphDiffBanner() {
   if (removedCount > 0) parts.push(`${removedCount} removed`)
 
   return (
-    <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3 flex items-center justify-between">
+    <div className="bg-info/10 border border-info/20 rounded-lg p-3 flex items-center justify-between">
       <div className="flex items-center gap-2 text-sm">
-        <AlertCircle className="w-4 h-4 text-blue-400 shrink-0" />
-        <span className="text-blue-300">
+        <AlertCircle className="w-4 h-4 text-info shrink-0" />
+        <span className="text-info/80">
           {parts.join(', ')} since last build
         </span>
         {diff.built_at && (
-          <span className="text-blue-400/60 text-xs">
+          <span className="text-info/60 text-xs">
             ({new Date(diff.built_at).toLocaleDateString()})
           </span>
         )}
       </div>
       {diff.build_report_path && (
         <button
-          className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1 transition-colors"
+          className="text-xs text-info hover:text-info/80 flex items-center gap-1 transition-colors"
           onClick={() => {
             // Could open report viewer — for now just log
             console.log('View build report:', diff.build_report_path)

@@ -213,8 +213,8 @@ export function ModernFileManager({
       <div className="bg-white border-b border-gray-200">
         <div className="max-w-[1440px] mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-sm text-gray-500">
-              <span className="text-gray-900 font-medium cursor-pointer hover:text-gray-600 transition-colors">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <span className="text-gray-900 font-medium cursor-pointer hover:text-muted-foreground transition-colors">
                 Home
               </span>
               <ChevronRight className="w-4 h-4" />
@@ -230,7 +230,7 @@ export function ModernFileManager({
           <h1 className="text-2xl font-bold text-gray-900">Automatos Storage</h1>
           <div className="flex items-center gap-3">
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input
                 placeholder="Search..."
                 value={searchTerm}
@@ -240,7 +240,7 @@ export function ModernFileManager({
             </div>
             <Button
               onClick={onUpload}
-              className="bg-blue-600 hover:bg-blue-700 text-white transition-colors"
+              className="bg-info hover:bg-info/80 text-white transition-colors"
             >
               <Upload className="w-4 h-4 mr-2" />
               Upload File
@@ -257,7 +257,7 @@ export function ModernFileManager({
               <CardContent className="p-6">
                 <div className="flex items-center justify-between mb-6">
                   <h2 className="text-lg font-bold text-gray-900">All Folders</h2>
-                  <button className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700 transition-colors font-medium">
+                  <button className="flex items-center gap-1 text-sm text-blue-600 hover:text-info transition-colors font-medium">
                     View All
                     <ChevronRight className="w-4 h-4" />
                   </button>
@@ -276,15 +276,15 @@ export function ModernFileManager({
                         </div>
                         <div>
                           <p className="text-sm font-semibold text-gray-900">{folder.name}</p>
-                          <p className="text-xs text-gray-500">{folder.fileCount} Files</p>
+                          <p className="text-xs text-muted-foreground">{folder.fileCount} Files</p>
                         </div>
                       </div>
                       <div className="flex items-center gap-3">
-                        <span className="text-sm font-medium text-gray-700">{folder.size}</span>
+                        <span className="text-sm font-medium text-foreground/70">{folder.size}</span>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <button className="p-1 hover:bg-gray-200 rounded transition-colors">
-                              <MoreVertical className="w-4 h-4 text-gray-600" />
+                              <MoreVertical className="w-4 h-4 text-muted-foreground" />
                             </button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
@@ -292,7 +292,7 @@ export function ModernFileManager({
                               <Eye className="w-4 h-4 mr-2" />
                               View
                             </DropdownMenuItem>
-                            <DropdownMenuItem className="text-red-600">
+                            <DropdownMenuItem className="text-destructive">
                               <Trash2 className="w-4 h-4 mr-2" />
                               Delete
                             </DropdownMenuItem>
@@ -310,7 +310,7 @@ export function ModernFileManager({
               <CardContent className="p-6">
                 <div className="flex items-center justify-between mb-6">
                   <h2 className="text-lg font-bold text-gray-900">Recent Files</h2>
-                  <button className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700 transition-colors font-medium">
+                  <button className="flex items-center gap-1 text-sm text-blue-600 hover:text-info transition-colors font-medium">
                     View All
                     <ChevronRight className="w-4 h-4" />
                   </button>
@@ -320,19 +320,19 @@ export function ModernFileManager({
                   <table className="w-full">
                     <thead>
                       <tr className="border-b border-gray-200">
-                        <th className="text-left py-3 px-2 text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                        <th className="text-left py-3 px-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                           File Name
                         </th>
-                        <th className="text-left py-3 px-2 text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                        <th className="text-left py-3 px-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                           Category
                         </th>
-                        <th className="text-left py-3 px-2 text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                        <th className="text-left py-3 px-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                           Size
                         </th>
-                        <th className="text-left py-3 px-2 text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                        <th className="text-left py-3 px-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                           Date Modified
                         </th>
-                        <th className="text-right py-3 px-2 text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                        <th className="text-right py-3 px-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                           Action
                         </th>
                       </tr>
@@ -347,18 +347,18 @@ export function ModernFileManager({
                           >
                             <td className="py-4 px-2">
                               <div className="flex items-center gap-3">
-                                <Icon className="w-5 h-5 text-gray-600" />
+                                <Icon className="w-5 h-5 text-muted-foreground" />
                                 <span className="text-sm font-medium text-gray-900">{file.name}</span>
                               </div>
                             </td>
                             <td className="py-4 px-2">
-                              <span className="text-sm text-gray-600">{file.category}</span>
+                              <span className="text-sm text-muted-foreground">{file.category}</span>
                             </td>
                             <td className="py-4 px-2">
-                              <span className="text-sm text-gray-600">{file.size}</span>
+                              <span className="text-sm text-muted-foreground">{file.size}</span>
                             </td>
                             <td className="py-4 px-2">
-                              <span className="text-sm text-gray-600">{file.dateModified}</span>
+                              <span className="text-sm text-muted-foreground">{file.dateModified}</span>
                             </td>
                             <td className="py-4 px-2">
                               <div className="flex items-center justify-end gap-2">
@@ -366,13 +366,13 @@ export function ModernFileManager({
                                   onClick={() => onFileAction?.(file.id, 'view')}
                                   className="p-1.5 hover:bg-gray-200 rounded transition-colors"
                                 >
-                                  <Eye className="w-4 h-4 text-gray-600" />
+                                  <Eye className="w-4 h-4 text-muted-foreground" />
                                 </button>
                                 <button
                                   onClick={() => onFileAction?.(file.id, 'delete')}
                                   className="p-1.5 hover:bg-gray-200 rounded transition-colors"
                                 >
-                                  <Trash2 className="w-4 h-4 text-gray-600" />
+                                  <Trash2 className="w-4 h-4 text-muted-foreground" />
                                 </button>
                               </div>
                             </td>
@@ -391,7 +391,7 @@ export function ModernFileManager({
             <Card className="bg-white border border-gray-200 sticky top-6">
               <CardContent className="p-6">
                 <h2 className="text-lg font-bold text-gray-900 mb-4">Storage Details</h2>
-                <p className="text-sm text-gray-600 mb-6">{freeStorage} Free space left</p>
+                <p className="text-sm text-muted-foreground mb-6">{freeStorage} Free space left</p>
 
                 {/* Donut Chart */}
                 <div className="relative w-full aspect-square max-w-[240px] mx-auto mb-6">
@@ -421,7 +421,7 @@ export function ModernFileManager({
                   </svg>
                   <div className="absolute inset-0 flex flex-col items-center justify-center">
                     <div className="text-2xl font-bold text-gray-900">Total {totalStorage}</div>
-                    <div className="text-sm text-gray-600">{usedStorage}</div>
+                    <div className="text-sm text-muted-foreground">{usedStorage}</div>
                   </div>
                 </div>
 
@@ -434,7 +434,7 @@ export function ModernFileManager({
                           className="w-3 h-3 rounded-full"
                           style={{ backgroundColor: item.color }}
                         />
-                        <span className="text-sm text-gray-700">{item.category}</span>
+                        <span className="text-sm text-foreground/70">{item.category}</span>
                       </div>
                       <span className="text-sm font-medium text-gray-900">{item.percentage}%</span>
                     </div>

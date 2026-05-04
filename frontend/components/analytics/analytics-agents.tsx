@@ -71,7 +71,7 @@ function AgentExpandedPanel({ agent }: { agent: any }) {
               <Progress value={agent.avgImportance * 100} className="h-1.5" />
             </div>
             {Object.keys(memoryTypes).length > 0 && (
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 <span className="text-xs text-muted-foreground uppercase tracking-wider">Types</span>
                 <div className="flex flex-wrap gap-1.5">
                   {Object.entries(memoryTypes).map(([type, count]) => (
@@ -83,7 +83,7 @@ function AgentExpandedPanel({ agent }: { agent: any }) {
               </div>
             )}
             {Object.keys(memoryLevels).length > 0 && (
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 <span className="text-xs text-muted-foreground uppercase tracking-wider">Levels</span>
                 <div className="flex flex-wrap gap-1.5">
                   {Object.entries(memoryLevels).map(([level, count]) => (
@@ -265,9 +265,11 @@ export function AnalyticsAgents({ days }: Props) {
             <tbody>
               {sortedAgents.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="p-12 text-center text-muted-foreground">
-                    <Bot className="w-10 h-10 mx-auto mb-3 opacity-50" />
-                    <p>No agents found</p>
+                  <td colSpan={8}>
+                    <div className="flex flex-col items-center justify-center py-12 gap-2 text-muted-foreground">
+                      <Bot className="w-8 h-8 opacity-50" />
+                      <p className="text-sm">No agents found</p>
+                    </div>
                   </td>
                 </tr>
               ) : (
@@ -288,7 +290,7 @@ export function AnalyticsAgents({ days }: Props) {
                           </div>
                         </td>
                         <td className="p-4 hidden md:table-cell">
-                          <Badge variant="outline" className={agent.status === 'active' ? 'text-[hsl(var(--success))] border-[hsl(var(--success))]/30' : 'text-gray-400'}>
+                          <Badge variant="outline" className={agent.status === 'active' ? 'text-[hsl(var(--success))] border-[hsl(var(--success))]/30' : 'text-muted-foreground'}>
                             {agent.status}
                           </Badge>
                         </td>

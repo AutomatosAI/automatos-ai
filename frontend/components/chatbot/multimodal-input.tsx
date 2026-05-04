@@ -253,8 +253,8 @@ export function MultimodalInput({
               key={att.attachment_id}
               className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs ${
                 att.media_type === 'image'
-                  ? 'border-blue-500/20 bg-blue-500/10 text-blue-200'
-                  : 'border-amber-500/20 bg-amber-500/10 text-amber-200'
+                  ? 'border-info/20 bg-info/10 text-info/70'
+                  : 'border-warning/20 bg-warning/10 text-amber-200'
               }`}
             >
               <span className="truncate max-w-[240px]">{att.filename}</span>
@@ -286,7 +286,7 @@ export function MultimodalInput({
         className={[
           'relative w-full rounded-3xl border-2',
           voiceRecorder.state === 'recording'
-            ? 'border-red-500/30 ring-2 ring-red-500/15'
+            ? 'border-destructive/30 ring-2 ring-destructive/15'
             : 'border-orange-500/20 focus-within:border-orange-500/40 focus-within:ring-2 focus-within:ring-orange-500/15',
           'transition-all shadow-[0_0_60px_rgba(249,115,22,0.08)]',
         ].join(' ')}
@@ -353,7 +353,7 @@ export function MultimodalInput({
                 className={[
                   'h-8 w-8 p-0',
                   showCallPanel
-                    ? 'text-green-500 hover:text-green-400'
+                    ? 'text-success hover:text-success'
                     : 'text-muted-foreground hover:text-foreground',
                 ].join(' ')}
                 disabled={isStreaming || voiceRecorder.state !== 'idle'}
@@ -388,7 +388,7 @@ export function MultimodalInput({
                     key={tool.id}
                     type="button"
                     onClick={() => onToolIconClick?.(tool.name)}
-                    className="relative hover:scale-110 transition-all duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-lg"
+                    className="relative hover:scale-110 transition-all duration-220 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-lg"
                     title={`Click for ${tool.name} suggestions`}
                     aria-label={`Show suggestions for ${tool.name}`}
                   >
@@ -402,7 +402,7 @@ export function MultimodalInput({
                   </button>
                 ))}
                 {activeAgent.tools.length > 4 && (
-                  <div className="w-7 h-7 rounded-lg bg-secondary/80 ring-1 ring-orange-500/30 flex items-center justify-center text-[10px] font-bold text-muted-foreground border border-orange-500/20 relative z-10">
+                  <div className="w-8 h-8 rounded-lg bg-secondary/80 ring-1 ring-orange-500/30 flex items-center justify-center text-[10px] font-bold text-muted-foreground border border-orange-500/20 relative z-10">
                     +{activeAgent.tools.length - 4}
                   </div>
                 )}
@@ -415,7 +415,7 @@ export function MultimodalInput({
                 type="button"
                 onClick={stop}
                 size="icon"
-                className="bg-red-600 hover:bg-red-700 h-9 w-9 rounded-xl shadow-sm"
+                className="bg-destructive hover:bg-destructive/80 h-9 w-9 rounded-xl shadow-sm"
               >
                 <StopCircle className="w-4 h-4" />
               </Button>
@@ -435,7 +435,7 @@ export function MultimodalInput({
 
       {/* Usage Info */}
       {usage && usage.totalTokens && (
-        <div className="flex items-center justify-between text-xs text-gray-500">
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
           <span>Tokens: {usage.totalTokens.toLocaleString()}</span>
           {usage.cost && <span>Cost: ${usage.cost.toFixed(4)}</span>}
         </div>

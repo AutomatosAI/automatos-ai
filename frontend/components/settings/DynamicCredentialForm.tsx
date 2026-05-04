@@ -231,7 +231,7 @@ export function DynamicCredentialForm({
           <div key={field.name} className="space-y-2">
             <Label htmlFor={field.name}>
               {field.displayName}
-              {field.required && <span className="text-red-500 ml-1">*</span>}
+              {field.required && <span className="text-destructive ml-1">*</span>}
             </Label>
             {field.description && (
               <p className="text-xs text-muted-foreground">{field.description}</p>
@@ -252,7 +252,7 @@ export function DynamicCredentialForm({
           <div key={field.name} className="space-y-2">
             <Label htmlFor={field.name}>
               {field.displayName}
-              {field.required && <span className="text-red-500 ml-1">*</span>}
+              {field.required && <span className="text-destructive ml-1">*</span>}
             </Label>
             {field.description && (
               <p className="text-xs text-muted-foreground">{field.description}</p>
@@ -293,7 +293,7 @@ export function DynamicCredentialForm({
           <div key={field.name} className="space-y-2">
             <Label htmlFor={field.name}>
               {field.displayName}
-              {field.required && <span className="text-red-500 ml-1">*</span>}
+              {field.required && <span className="text-destructive ml-1">*</span>}
             </Label>
             {field.description && (
               <p className="text-xs text-muted-foreground">{field.description}</p>
@@ -325,7 +325,7 @@ export function DynamicCredentialForm({
             <div key={field.name} className="space-y-2">
               <Label htmlFor={field.name}>
                 {field.displayName}
-                {field.required && <span className="text-red-500 ml-1">*</span>}
+                {field.required && <span className="text-destructive ml-1">*</span>}
               </Label>
               {field.description && (
                 <p className="text-xs text-muted-foreground">{field.description}</p>
@@ -346,7 +346,7 @@ export function DynamicCredentialForm({
           <div key={field.name} className="space-y-2">
             <Label htmlFor={field.name}>
               {field.displayName}
-              {field.required && <span className="text-red-500 ml-1">*</span>}
+              {field.required && <span className="text-destructive ml-1">*</span>}
             </Label>
             {field.description && (
               <p className="text-xs text-muted-foreground">{field.description}</p>
@@ -378,7 +378,7 @@ export function DynamicCredentialForm({
           {!credentialId && !lockCredentialTypeId && (
             <div className="space-y-2">
               <Label htmlFor="credential_type">
-                Credential Type <span className="text-red-500">*</span>
+                Credential Type <span className="text-destructive">*</span>
               </Label>
               <Select
                 value={selectedTypeId?.toString()}
@@ -401,7 +401,7 @@ export function DynamicCredentialForm({
 
           <div className="space-y-2">
             <Label htmlFor="name">
-              Name <span className="text-red-500">*</span>
+              Name <span className="text-destructive">*</span>
             </Label>
             <Input
               id="name"
@@ -461,7 +461,7 @@ export function DynamicCredentialForm({
           )}
           
           {credentialId && !hideMetadataSection && (
-            <div className="text-sm text-yellow-600 bg-yellow-500/10 p-3 rounded">
+            <div className="text-sm text-warning bg-warning/10 p-3 rounded">
               ⚠️ For security reasons, existing values are not shown. Re-enter values to update.
             </div>
           )}

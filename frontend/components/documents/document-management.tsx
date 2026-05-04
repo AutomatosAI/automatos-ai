@@ -82,11 +82,11 @@ interface BackendDocument {
 // Stats will be calculated dynamically from real data
 
 const statusStyles: Record<string, string> = {
-  completed: 'bg-green-500/10 text-green-400 border-green-500/20',
-  processed: 'bg-green-500/10 text-green-400 border-green-500/20',
-  processing: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
-  failed: 'bg-red-500/10 text-red-400 border-red-500/20',
-  pending: 'bg-gray-500/10 text-gray-400 border-gray-500/20'
+  completed: 'bg-success/10 text-success border-success/20',
+  processed: 'bg-success/10 text-success border-success/20',
+  processing: 'bg-warning/10 text-warning border-warning/20',
+  failed: 'bg-destructive/10 text-destructive border-destructive/20',
+  pending: 'bg-secondary/50 text-muted-foreground border-border/30'
 }
 
 const typeIcons: Record<string, any> = {
@@ -142,7 +142,7 @@ function SchemaBrowser({ sourceId, getSchemaMetadata }: { sourceId?: number; get
   if (error) {
     return (
       <Card className="glass-card">
-        <CardContent className="p-8 text-center text-red-400">
+        <CardContent className="p-8 text-center text-destructive">
           <p>{error}</p>
         </CardContent>
       </Card>
@@ -197,8 +197,8 @@ function SchemaBrowser({ sourceId, getSchemaMetadata }: { sourceId?: number; get
                             <td className="p-2 text-muted-foreground">{col.type || col.data_type}</td>
                             <td className="p-2 text-muted-foreground">{col.nullable ? 'Yes' : 'No'}</td>
                             <td className="p-2">
-                              {col.is_primary_key && <Badge className="text-[10px] bg-yellow-500/20 text-yellow-400 border-yellow-500/30">PK</Badge>}
-                              {col.is_foreign_key && <Badge className="text-[10px] bg-blue-500/20 text-blue-400 border-blue-500/30 ml-1">FK</Badge>}
+                              {col.is_primary_key && <Badge className="text-[10px] bg-warning/20 text-warning border-warning/30">PK</Badge>}
+                              {col.is_foreign_key && <Badge className="text-[10px] bg-info/20 text-info border-info/30 ml-1">FK</Badge>}
                             </td>
                           </tr>
                         ))}
@@ -258,7 +258,7 @@ function AuditHistory({ sourceId }: { sourceId?: number }) {
   if (error) {
     return (
       <Card className="glass-card">
-        <CardContent className="p-8 text-center text-red-400">
+        <CardContent className="p-8 text-center text-destructive">
           <p>{error}</p>
         </CardContent>
       </Card>
@@ -291,8 +291,8 @@ function AuditHistory({ sourceId }: { sourceId?: number }) {
                     <Badge
                       variant="outline"
                       className={entry.success
-                        ? 'bg-green-500/10 text-green-400 border-green-500/20 text-xs'
-                        : 'bg-red-500/10 text-red-400 border-red-500/20 text-xs'}
+                        ? 'bg-success/10 text-success border-success/20 text-xs'
+                        : 'bg-destructive/10 text-destructive border-destructive/20 text-xs'}
                     >
                       {entry.success ? 'Success' : 'Failed'}
                     </Badge>
@@ -309,7 +309,7 @@ function AuditHistory({ sourceId }: { sourceId?: number }) {
                   {entry.created_at && <span>{new Date(entry.created_at).toLocaleString()}</span>}
                 </div>
                 {entry.error_message && (
-                  <p className="text-xs text-red-400 mt-1">{entry.error_message}</p>
+                  <p className="text-xs text-destructive mt-1">{entry.error_message}</p>
                 )}
               </div>
             ))}
@@ -725,13 +725,13 @@ export function DocumentManagement() {
                     </Card>
                   )}
                   {cloudConnectionsError && (
-                    <Card className="glass-card p-4 border-red-500/20">
-                      <p className="text-sm text-red-500">Error loading connections: {cloudConnectionsError instanceof Error ? cloudConnectionsError.message : String(cloudConnectionsError)}</p>
+                    <Card className="glass-card p-4 border-destructive/20">
+                      <p className="text-sm text-destructive">Error loading connections: {cloudConnectionsError instanceof Error ? cloudConnectionsError.message : String(cloudConnectionsError)}</p>
                     </Card>
                   )}
                   {!cloudConnectionsLoading && cloudConnections.length === 0 && (
-                    <Card className="glass-card p-4 border-yellow-500/20">
-                      <p className="text-sm text-yellow-600">
+                    <Card className="glass-card p-4 border-warning/20">
+                      <p className="text-sm text-warning">
                         No cloud connections found. Connect Google Drive or Dropbox in{' '}
                         <a href="/tools" className="underline font-medium">Tools</a> to see them here.
                       </p>
@@ -746,7 +746,7 @@ export function DocumentManagement() {
                         name: 'Automatos Storage',
                         type: 'manual',
                         icon: Upload,
-                        color: 'text-blue-400',
+                        color: 'text-info',
                         connected: true,
                         stats: {
                           documentCount: typedDocuments.length,
@@ -759,7 +759,7 @@ export function DocumentManagement() {
                         name: conn.app_name,
                         type: conn.app_name.toLowerCase(),
                         icon: Cloud,
-                        color: 'text-green-400',
+                        color: 'text-success',
                         connected: true,
                         connectionId: conn.id,
                         rootFolder: conn.root_folder_path,
@@ -814,13 +814,13 @@ export function DocumentManagement() {
                         <Card className="glass-card sticky top-6">
                           <CardHeader>
                             <div className="flex items-center gap-2">
-                              <FileText className="w-5 h-5 text-blue-400" />
+                              <FileText className="w-5 h-5 text-info" />
                               <CardTitle className="text-base truncate">
                                 {selectedSearchResult.source?.filename || 'Document'}
                               </CardTitle>
                             </div>
                             <div className="flex items-center gap-2 mt-2">
-                              <Badge className="text-green-400 bg-green-500/10 border-green-500/20">
+                              <Badge className="text-success bg-success/10 border-success/20">
                                 {(selectedSearchResult.similarity * 100).toFixed(0)}% Match
                               </Badge>
                               {selectedSearchResult.source?.file_type && (
@@ -889,7 +889,7 @@ export function DocumentManagement() {
                     </CardHeader>
                     <CardContent>
                       <div
-                        className={`border-2 border-dashed rounded-lg p-8 text-center transition-all duration-200 ${
+                        className={`border-2 border-dashed rounded-lg p-8 text-center transition-all duration-220 ${
                           dragActive
                             ? 'border-primary bg-primary/5'
                             : 'border-border/50 hover:border-primary/50'
@@ -945,7 +945,7 @@ export function DocumentManagement() {
               <CardHeader>
                 <CardTitle className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <Database className="w-5 h-5 text-blue-400" />
+                    <Database className="w-5 h-5 text-info" />
                     Database Knowledge Sources
                   </div>
                   <Button 
@@ -983,7 +983,7 @@ export function DocumentManagement() {
                       <div key={source.id} className="p-4 border rounded-lg">
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-2">
-                            <Database className="w-5 h-5 text-green-500" />
+                            <Database className="w-5 h-5 text-success" />
                             <span className="font-medium">{source.name}</span>
                           </div>
                           <Badge variant="outline">{source.dialect}</Badge>
@@ -1002,7 +1002,7 @@ export function DocumentManagement() {
                           <Button 
                             variant="outline" 
                             size="sm"
-                            className="text-red-500 hover:text-red-600 hover:bg-red-50"
+                            className="text-destructive hover:text-destructive hover:bg-destructive/10"
                             onClick={() => {
                               if (window.confirm(`Delete database source "${source.name}"? This cannot be undone.`)) {
                                 deleteSource(source.id)
@@ -1151,7 +1151,7 @@ export function DocumentManagement() {
             name: 'Automatos Storage',
             type: 'manual',
             icon: Upload,
-            color: 'text-blue-400',
+            color: 'text-info',
             connected: true,
           },
           // Cloud providers from connections
@@ -1160,7 +1160,7 @@ export function DocumentManagement() {
             name: conn.app_name,
             type: conn.app_name.toLowerCase() as any,
             icon: Cloud,
-            color: 'text-green-400',
+            color: 'text-success',
             connected: true,
             connectionId: conn.id,
           }))

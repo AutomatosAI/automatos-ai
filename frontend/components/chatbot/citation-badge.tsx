@@ -22,14 +22,14 @@ export function CitationBadge({ index, title, similarity, onClick }: CitationBad
         <TooltipTrigger asChild>
           <button
             onClick={onClick}
-            className="inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold bg-blue-500/20 text-blue-400 border border-blue-500/30 hover:bg-blue-500/30 hover:border-blue-400/50 transition-all cursor-pointer align-super ml-0.5"
+            className="inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold bg-info/20 text-info border border-info/30 hover:bg-info/30 hover:border-info/50 transition-all cursor-pointer align-super ml-0.5"
           >
             {index}
           </button>
         </TooltipTrigger>
         <TooltipContent side="top" className="max-w-xs">
           <div className="flex items-center gap-2">
-            <FileText className="w-3 h-3 text-blue-400 flex-shrink-0" />
+            <FileText className="w-3 h-3 text-info flex-shrink-0" />
             <span className="text-xs font-medium truncate">{title}</span>
             {similarity != null && (
               <span className="text-xs text-muted-foreground ml-1">

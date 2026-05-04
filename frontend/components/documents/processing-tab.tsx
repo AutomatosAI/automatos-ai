@@ -107,8 +107,8 @@ export function ProcessingTab() {
     return (
       <div className="flex items-center justify-center py-12">
         <div className="text-center">
-          <AlertTriangle className="h-8 w-8 text-red-400 mx-auto mb-4" />
-          <p className="text-red-400 mb-4">Error: {queueError.message}</p>
+          <AlertTriangle className="h-8 w-8 text-destructive mx-auto mb-4" />
+          <p className="text-destructive mb-4">Error: {queueError.message}</p>
         </div>
       </div>
     )
@@ -122,7 +122,7 @@ export function ProcessingTab() {
     )
   }
 
-  const statusColor = pipelineData.pipeline_status === 'active' ? 'text-green-400' : 'text-gray-400'
+  const statusColor = pipelineData.pipeline_status === 'active' ? 'text-success' : 'text-muted-foreground'
   const statusIcon = pipelineData.pipeline_status === 'active' ? Activity : Clock
 
   return (
@@ -141,7 +141,7 @@ export function ProcessingTab() {
             variant="outline"
             size="sm"
             onClick={() => setAutoRefresh(!autoRefresh)}
-            className={autoRefresh ? 'bg-green-500/10 border-green-500/20' : ''}
+            className={autoRefresh ? 'bg-success/10 border-success/20' : ''}
           >
             <RefreshCw className={`w-4 h-4 mr-2 ${autoRefresh ? 'animate-spin' : ''}`} />
             Auto Refresh
@@ -171,14 +171,14 @@ export function ProcessingTab() {
             <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
               {React.createElement(statusIcon, { className: `w-5 h-5 ${statusColor}` })}
             </div>
-            <Badge className={pipelineData.pipeline_status === 'active' ? 'bg-green-500/10 text-green-400 border-green-500/20' : 'bg-gray-500/10 text-gray-400 border-gray-500/20'}>
+            <Badge className={pipelineData.pipeline_status === 'active' ? 'bg-success/10 text-success border-success/20' : 'bg-secondary/50 text-muted-foreground border-border/30'}>
               {pipelineData.pipeline_status}
             </Badge>
           </div>
           <div className="space-y-1">
             <h3 className="text-2xl font-bold">{pipelineData.total_documents}</h3>
             <p className="text-muted-foreground text-sm">Total Documents</p>
-            <p className="text-xs text-green-400">
+            <p className="text-xs text-success">
               {pipelineData.success_rate.toFixed(1)}% success rate
             </p>
           </div>
@@ -212,13 +212,13 @@ export function ProcessingTab() {
         >
           <div className="flex items-center justify-between mb-4">
             <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-              <CheckCircle className="w-5 h-5 text-green-400" />
+              <CheckCircle className="w-5 h-5 text-success" />
             </div>
           </div>
           <div className="space-y-1">
             <h3 className="text-2xl font-bold">{pipelineData.completed_documents}</h3>
             <p className="text-muted-foreground text-sm">Completed</p>
-            <p className="text-xs text-green-400">
+            <p className="text-xs text-success">
               Avg: {pipelineData.avg_processing_time}
             </p>
           </div>
@@ -232,13 +232,13 @@ export function ProcessingTab() {
         >
           <div className="flex items-center justify-between mb-4">
             <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-              <Users className="w-5 h-5 text-blue-400" />
+              <Users className="w-5 h-5 text-info" />
             </div>
           </div>
           <div className="space-y-1">
             <h3 className="text-2xl font-bold">{pipelineData.queue_status.active_workers}</h3>
             <p className="text-muted-foreground text-sm">Active Workers</p>
-            <p className="text-xs text-blue-400">
+            <p className="text-xs text-info">
               {pipelineData.queue_status.pending} in queue
             </p>
           </div>
@@ -258,8 +258,8 @@ export function ProcessingTab() {
             <div key={stage.stage} className="flex items-center justify-between p-4 bg-secondary/30 rounded-lg">
               <div className="flex items-center space-x-4">
                 <div className={`w-3 h-3 rounded-full ${
-                  stage.status === 'active' ? 'bg-green-400' : 
-                  stage.status === 'error' ? 'bg-red-400' : 'bg-gray-400'
+                  stage.status === 'active' ? 'bg-success' : 
+                  stage.status === 'error' ? 'bg-destructive' : 'bg-gray-400'
                 }`} />
                 <div>
                   <h4 className="font-medium">{stage.stage}</h4>
@@ -296,7 +296,7 @@ export function ProcessingTab() {
                       {job.current_stage} • ETA: {job.estimated_completion}
                     </p>
                   </div>
-                  <Badge className="bg-blue-500/10 text-blue-400 border-blue-500/20">
+                  <Badge className="bg-info/10 text-info border-info/20">
                     {job.progress}%
                   </Badge>
                 </div>
@@ -330,8 +330,8 @@ export function ProcessingTab() {
                 </div>
                 <div className="text-right">
                   <Badge className={
-                    activity.status === 'processed' ? 'bg-green-500/10 text-green-400 border-green-500/20' :
-                    activity.status === 'failed' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
+                    activity.status === 'processed' ? 'bg-success/10 text-success border-success/20' :
+                    activity.status === 'failed' ? 'bg-destructive/10 text-destructive border-destructive/20' :
                     'bg-orange-500/10 text-orange-400 border-orange-500/20'
                   }>
                     {activity.status}

@@ -52,10 +52,10 @@ const PROVIDER_COLORS = [
 ]
 
 const PLAN_COLORS: Record<string, string> = {
-  starter: 'text-gray-400 border-gray-400/30 bg-gray-400/5',
-  pilot: 'text-blue-400 border-blue-400/30 bg-blue-400/5',
-  pro: 'text-purple-400 border-purple-400/30 bg-purple-400/5',
-  enterprise: 'text-amber-400 border-amber-400/30 bg-amber-400/5',
+  starter: 'text-muted-foreground border-border/30 bg-secondary/30',
+  pilot: 'text-info border-info/30 bg-info/5',
+  pro: 'text-agent border-agent/30 bg-agent/5',
+  enterprise: 'text-warning border-warning/30 bg-warning/5',
 }
 
 const PLAN_DONUT_COLORS: Record<string, string> = {
@@ -94,7 +94,7 @@ function PeriodToggle({ value, onChange }: { value: string; onChange: (v: string
         <button
           key={p.key}
           onClick={() => onChange(p.key)}
-          className={`px-3 py-1 text-xs font-medium rounded-md transition-all duration-200 ${
+          className={`px-3 py-1 text-xs font-medium rounded-md transition-all duration-220 ${
             value === p.key
               ? 'bg-primary text-primary-foreground shadow-sm'
               : 'text-muted-foreground hover:text-foreground'
@@ -115,7 +115,7 @@ function ProviderCostTooltip({ active, payload, label }: any) {
   return (
     <div className="rounded-xl border border-border/50 bg-card/95 backdrop-blur-lg px-4 py-3 shadow-2xl">
       <p className="text-xs text-muted-foreground mb-2 font-medium">{label}</p>
-      <div className="space-y-1.5">
+      <div className="space-y-2">
         {payload.filter((p: any) => p.value > 0).sort((a: any, b: any) => b.value - a.value).map((p: any) => (
           <div key={p.dataKey} className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-2">
@@ -506,7 +506,7 @@ export function AnalyticsAdmin({ days }: Props) {
                 {allWorkspaces.length > 0 && (
                   <div className="space-y-2">
                     <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Revenue by Workspace</p>
-                    <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                    <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
                       {[...allWorkspaces].sort((a, b) => b.cost - a.cost).slice(0, 10).map((ws) => (
                         <div key={ws.id} className="flex items-center gap-3">
                           <div className="flex-1 min-w-0">

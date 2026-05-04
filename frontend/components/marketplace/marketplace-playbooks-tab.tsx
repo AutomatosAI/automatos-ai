@@ -202,7 +202,7 @@ export function MarketplacePlaybooksTab({ searchQuery }: MarketplacePlaybooksTab
           {recipes.map((recipe: any) => (
             <Card
               key={recipe.id}
-              className="glass-card hover:border-primary/20 transition-all cursor-pointer"
+              className="glass-card card-glow hover:border-primary/20 transition-all cursor-pointer"
               onClick={() => handleViewPlaybook(recipe)}
             >
               <CardContent className="p-3">
@@ -212,14 +212,14 @@ export function MarketplacePlaybooksTab({ searchQuery }: MarketplacePlaybooksTab
                     return premiumIconName ? (
                       <PremiumIcon name={premiumIconName} size={36} className="text-primary shrink-0" />
                     ) : (
-                      <ChefHat className="w-9 h-9 text-primary shrink-0" />
+                      <ChefHat className="w-8 h-8 text-primary shrink-0" />
                     )
                   })()}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="font-semibold text-sm truncate">{recipe.name}</span>
                       {isAdmin && !recipe.is_approved && (
-                        <Badge variant="outline" className="text-[10px] border-yellow-500/30 text-yellow-400 shrink-0">
+                        <Badge variant="outline" className="text-[10px] border-warning/30 text-warning shrink-0">
                           Pending
                         </Badge>
                       )}
@@ -272,7 +272,7 @@ export function MarketplacePlaybooksTab({ searchQuery }: MarketplacePlaybooksTab
                           {recipe.name}
                         </h3>
                         {isAdmin && !recipe.is_approved && (
-                          <Badge variant="outline" className="text-xs border-yellow-500/30 text-yellow-400">
+                          <Badge variant="outline" className="text-xs border-warning/30 text-warning">
                             Pending
                           </Badge>
                         )}

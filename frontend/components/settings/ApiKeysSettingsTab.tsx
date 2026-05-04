@@ -337,7 +337,7 @@ export function ApiKeysSettingsTab() {
             </div>
           ) : isError ? (
             <div className="flex flex-col items-center justify-center py-10 text-muted-foreground">
-              <XCircle className="h-6 w-6 mb-2 text-red-400" />
+              <XCircle className="h-6 w-6 mb-2 text-destructive" />
               <p className="text-sm">Failed to load API keys.</p>
               <Button
                 variant="outline"
@@ -376,11 +376,11 @@ export function ApiKeysSettingsTab() {
 
                         {/* Active source indicator */}
                         {activeSource === 'byok' ? (
-                          <Badge className="bg-blue-500/15 text-blue-400 border-blue-500/30 text-xs">
+                          <Badge className="bg-info/15 text-info border-info/30 text-xs">
                             Using: Your Key
                           </Badge>
                         ) : activeSource === 'platform' ? (
-                          <Badge className="bg-green-500/15 text-green-400 border-green-500/30 text-xs">
+                          <Badge className="bg-success/15 text-success border-success/30 text-xs">
                             Using: Platform Key
                           </Badge>
                         ) : (

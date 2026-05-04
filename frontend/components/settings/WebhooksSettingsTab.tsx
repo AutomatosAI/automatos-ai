@@ -45,7 +45,7 @@ export default function WebhooksSettingsTab() {
                   variant="outline"
                   size="icon"
                   onClick={() => handleCopy(webhookUrl, 'webhook')}
-                  className={`shrink-0 transition-colors ${copiedField === 'webhook' ? 'text-green-500 border-green-500' : ''}`}
+                  className={`shrink-0 transition-colors ${copiedField === 'webhook' ? 'text-success border-green-500' : ''}`}
                 >
                   {copiedField === 'webhook' ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
                 </Button>
@@ -68,7 +68,7 @@ export default function WebhooksSettingsTab() {
                 </ul>
               </div>
 
-              <div className="rounded-lg border border-blue-500/20 bg-blue-500/5 p-3 text-xs text-muted-foreground">
+              <div className="rounded-lg border border-info/20 bg-info/5 p-3 text-xs text-muted-foreground">
                 To connect messaging platforms (WhatsApp, Telegram, Slack, Discord, etc.), go to the <strong>Channels</strong> tab.
               </div>
             </>

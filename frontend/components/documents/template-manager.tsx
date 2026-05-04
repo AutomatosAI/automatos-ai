@@ -47,9 +47,9 @@ interface DocumentTemplate {
 }
 
 const FORMAT_COLORS: Record<string, string> = {
-  pdf: 'bg-red-500/10 text-red-400 border-red-500/20',
-  docx: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-  xlsx: 'bg-green-500/10 text-green-400 border-green-500/20',
+  pdf: 'bg-destructive/10 text-destructive border-destructive/20',
+  docx: 'bg-info/10 text-info border-info/20',
+  xlsx: 'bg-success/10 text-success border-success/20',
 }
 
 const CATEGORIES = ['general', 'report', 'invoice', 'contract', 'letter', 'proposal', 'data']
@@ -231,7 +231,7 @@ export function TemplateManager() {
                     <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(t)}>
                       <Pencil className="h-3.5 w-3.5" />
                     </Button>
-                    <Button variant="ghost" size="icon" className="h-7 w-7 text-red-400 hover:text-red-300" onClick={() => setDeleteConfirm(t.id)}>
+                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive/80" onClick={() => setDeleteConfirm(t.id)}>
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
                   </div>

@@ -13,10 +13,10 @@ import {
   Download,
   Play,
 } from 'lucide-react'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { PageHeader, FilterTabs, TabsContent } from '@/components/shared'
 import { CreateMissionModal } from '@/components/missions/create-mission-modal'
 import { CreatePlaybookModal } from '@/components/workflows/create-playbook-modal'
 import { CreateTaskDialog } from '@/components/activity/board/create-task-dialog'
@@ -378,21 +378,11 @@ export function AssignmentsPage() {
   return (
     <div className="space-y-6">
       {/* ── Page Header ──────────────────────────────────────── */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-      >
-        <div className="flex flex-col gap-1">
-          <h1 className="text-2xl md:text-3xl font-bold">
-            <ClipboardList className="inline-block h-7 w-7 mr-2 -mt-1 text-primary" />
-            Assignments
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Plan, schedule, and orchestrate work for your crew
-          </p>
-        </div>
-      </motion.div>
+      <PageHeader
+        title="My"
+        titleAccent="Assignments"
+        subtitle="Plan, schedule, and orchestrate work for your crew"
+      />
 
       {/* ── Featured Hero Area (US-010) ──────────────────────── */}
       <FeaturedHeroCards />
@@ -404,30 +394,20 @@ export function AssignmentsPage() {
       <RecommendedGrid />
 
       {/* ── Category Tabs ────────────────────────────────────── */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.2 }}
+      <FilterTabs
+        tabs={TAB_CONFIG}
+        value={activeTab}
+        onValueChange={handleTabChange}
+        dataTour="assignments-tabs"
       >
-        <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
-          <TabsList data-tour="assignments-tabs" className="bg-secondary/50">
-            {TAB_CONFIG.map((tab) => (
-              <TabsTrigger key={tab.value} value={tab.value} className="flex items-center gap-1.5">
-                <tab.icon className="h-4 w-4" />
-                {tab.label}
-              </TabsTrigger>
-            ))}
-          </TabsList>
+        <TabsContent value="playbooks" className="mt-0">
+          <AssignmentsPlaybooksGrid />
+        </TabsContent>
 
-          <TabsContent value="playbooks" className="mt-0">
-            <AssignmentsPlaybooksGrid />
-          </TabsContent>
-
-          <TabsContent value="missions" className="mt-0">
-            <AssignmentsMissionsGrid />
-          </TabsContent>
-        </Tabs>
-      </motion.div>
+        <TabsContent value="missions" className="mt-0">
+          <AssignmentsMissionsGrid />
+        </TabsContent>
+      </FilterTabs>
     </div>
   )
 }

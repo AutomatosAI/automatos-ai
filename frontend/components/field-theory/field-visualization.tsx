@@ -272,8 +272,8 @@ export function FieldVisualization() {
                 Field Visualization
               </span>
               <Badge className={`${fieldType === 'scalar' ? 'bg-orange-500/10 text-orange-400' : 
-                                 fieldType === 'vector' ? 'bg-blue-500/10 text-blue-400' : 
-                                 'bg-purple-500/10 text-purple-400'} border-current/20`}>
+                                 fieldType === 'vector' ? 'bg-info/10 text-info' : 
+                                 'bg-agent/10 text-agent'} border-current/20`}>
                 {fieldType}
               </Badge>
             </CardTitle>
@@ -409,7 +409,7 @@ export function FieldVisualization() {
         <Card className="glass-card">
           <CardContent className="p-6">
             <div className="flex items-center justify-between mb-4">
-              <Activity className="w-8 h-8 text-green-400" />
+              <Activity className="w-8 h-8 text-success" />
               <Badge variant="outline">Stability</Badge>
             </div>
             <div className="space-y-1">
@@ -424,7 +424,7 @@ export function FieldVisualization() {
         <Card className="glass-card">
           <CardContent className="p-6">
             <div className="flex items-center justify-between mb-4">
-              <Zap className="w-8 h-8 text-blue-400" />
+              <Zap className="w-8 h-8 text-info" />
               <Badge variant="outline">Interactions</Badge>
             </div>
             <div className="space-y-1">

@@ -59,7 +59,7 @@ export function TeamWorkloadWidget({ period, className }: TeamWorkloadWidgetProp
                   </span>
                   <div className="flex-1 h-5 bg-secondary/30 rounded-full overflow-hidden">
                     <div
-                      className="h-full rounded-full bg-[hsl(var(--agent))] transition-all duration-500"
+                      className="h-full rounded-full bg-[hsl(var(--agent))] transition-all duration-300"
                       style={{ width: `${Math.max(pct, 4)}%`, opacity: 0.7 }}
                     />
                   </div>

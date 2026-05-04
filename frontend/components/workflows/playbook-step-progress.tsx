@@ -148,9 +148,9 @@ export function PlaybookStepProgress({
             className={cn(
               'text-xs',
               status === 'running' && 'border-orange-400/50 text-orange-400',
-              status === 'completed' && 'border-emerald-400/50 text-emerald-400',
-              status === 'failed' && 'border-red-400/50 text-red-400',
-              status === 'pending' && 'border-gray-400/50 text-gray-400'
+              status === 'completed' && 'border-success/50 text-success',
+              status === 'failed' && 'border-destructive/50 text-destructive',
+              status === 'pending' && 'border-border/50 text-muted-foreground'
             )}
           >
             {statusLabel}
@@ -163,8 +163,8 @@ export function PlaybookStepProgress({
         <motion.div
           className={cn(
             'h-full rounded-full',
-            status === 'completed' ? 'bg-emerald-500' :
-            status === 'failed' ? 'bg-red-500' :
+            status === 'completed' ? 'bg-success' :
+            status === 'failed' ? 'bg-destructive' :
             'bg-gradient-to-r from-orange-500 to-primary'
           )}
           initial={{ width: 0 }}
@@ -190,10 +190,10 @@ export function PlaybookStepProgress({
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: idx * 0.05 }}
                 className={cn(
-                  'rounded-xl border transition-all duration-200',
+                  'rounded-xl border transition-all duration-220',
                   step.status === 'running' && 'border-orange-400/30 bg-orange-400/5 ring-1 ring-orange-400/20',
-                  step.status === 'success' && 'border-emerald-400/20 bg-emerald-400/5',
-                  step.status === 'failed' && 'border-red-400/20 bg-red-400/5',
+                  step.status === 'success' && 'border-success/20 bg-success/5',
+                  step.status === 'failed' && 'border-destructive/20 bg-destructive/5',
                   step.status === 'pending' && 'border-border/30 bg-white/[0.02]',
                 )}
               >
@@ -207,8 +207,8 @@ export function PlaybookStepProgress({
                     <div className={cn(
                       'w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold',
                       step.status === 'running' && 'bg-orange-400/20 text-orange-400',
-                      step.status === 'success' && 'bg-emerald-400/20 text-emerald-400',
-                      step.status === 'failed' && 'bg-red-400/20 text-red-400',
+                      step.status === 'success' && 'bg-success/20 text-success',
+                      step.status === 'failed' && 'bg-destructive/20 text-destructive',
                       step.status === 'pending' && 'bg-white/10 text-muted-foreground',
                     )}>
                       {step.status === 'running' ? (
@@ -225,7 +225,7 @@ export function PlaybookStepProgress({
                     {idx < stepData.length - 1 && (
                       <div className={cn(
                         'absolute left-1/2 -translate-x-1/2 top-full w-px h-2',
-                        step.status === 'success' ? 'bg-emerald-400/30' : 'bg-white/10'
+                        step.status === 'success' ? 'bg-success/30' : 'bg-white/10'
                       )} />
                     )}
                   </div>
@@ -279,7 +279,7 @@ export function PlaybookStepProgress({
                       <div className="px-3 pb-3 space-y-2 border-t border-border/30 pt-2">
                         {/* Error message */}
                         {step.result.error && (
-                          <div className="bg-red-400/10 border border-red-400/20 rounded-lg p-2 text-xs text-red-400">
+                          <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-2 text-xs text-destructive">
                             {step.result.error}
                           </div>
                         )}
@@ -373,7 +373,7 @@ export function PlaybookStepProgress({
 
                         {/* Retries indicator */}
                         {step.result.retries != null && step.result.retries > 0 && (
-                          <span className="text-[10px] text-amber-400">
+                          <span className="text-[10px] text-warning">
                             Retried {step.result.retries} time{step.result.retries > 1 ? 's' : ''}
                           </span>
                         )}

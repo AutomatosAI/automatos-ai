@@ -89,7 +89,7 @@ export function SimpleDataVisualization({ isOpen, onClose, data }: SimpleDataVis
                   </div>
                   <div className="w-full bg-secondary rounded-full h-6 overflow-hidden">
                     <div
-                      className="h-full bg-gradient-to-r from-blue-500 to-purple-500 transition-all duration-500 flex items-center justify-end px-2"
+                      className="h-full bg-gradient-to-r from-blue-500 to-purple-500 transition-all duration-300 flex items-center justify-end px-2"
                       style={{ width: `${percentage}%` }}
                     >
                       <span className="text-xs text-white font-medium">

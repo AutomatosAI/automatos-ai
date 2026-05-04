@@ -76,8 +76,8 @@ export function RAGContextBuilder() {
   }
 
   const getSimilarityColor = (similarity: number) => {
-    if (similarity >= 0.8) return 'text-green-400 bg-green-500/10 border-green-500/20'
-    if (similarity >= 0.6) return 'text-yellow-400 bg-yellow-500/10 border-yellow-500/20'
+    if (similarity >= 0.8) return 'text-success bg-success/10 border-success/20'
+    if (similarity >= 0.6) return 'text-warning bg-warning/10 border-warning/20'
     return 'text-orange-400 bg-orange-500/10 border-orange-500/20'
   }
 
@@ -87,7 +87,7 @@ export function RAGContextBuilder() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold flex items-center gap-2">
-            <Brain className="w-6 h-6 text-purple-400" />
+            <Brain className="w-6 h-6 text-agent" />
             RAG Context Builder
           </h2>
           <p className="text-muted-foreground mt-1">
@@ -228,7 +228,7 @@ export function RAGContextBuilder() {
                     <p className="text-sm text-muted-foreground">Chunks</p>
                     <p className="text-2xl font-bold">{ragMutation.data.chunks?.length || 0}</p>
                   </div>
-                  <FileText className="w-8 h-8 text-blue-400" />
+                  <FileText className="w-8 h-8 text-info" />
                 </div>
               </CardContent>
             </Card>
@@ -240,7 +240,7 @@ export function RAGContextBuilder() {
                     <p className="text-sm text-muted-foreground">Tokens</p>
                     <p className="text-2xl font-bold">{ragMutation.data.total_tokens}</p>
                   </div>
-                  <Sparkles className="w-8 h-8 text-purple-400" />
+                  <Sparkles className="w-8 h-8 text-agent" />
                 </div>
                 <Progress 
                   value={(ragMutation.data.total_tokens / maxTokens) * 100} 
@@ -256,7 +256,7 @@ export function RAGContextBuilder() {
                     <p className="text-sm text-muted-foreground">Diversity</p>
                     <p className="text-2xl font-bold">{(ragMutation.data.diversity_score * 100).toFixed(0)}%</p>
                   </div>
-                  <BarChart3 className="w-8 h-8 text-green-400" />
+                  <BarChart3 className="w-8 h-8 text-success" />
                 </div>
               </CardContent>
             </Card>
@@ -268,7 +268,7 @@ export function RAGContextBuilder() {
                     <p className="text-sm text-muted-foreground">Time</p>
                     <p className="text-2xl font-bold">{ragMutation.data.execution_time_ms}ms</p>
                   </div>
-                  <Zap className="w-8 h-8 text-yellow-400" />
+                  <Zap className="w-8 h-8 text-warning" />
                 </div>
               </CardContent>
             </Card>
@@ -290,7 +290,7 @@ export function RAGContextBuilder() {
                 >
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex items-center gap-3">
-                      <Badge variant="outline" className="bg-blue-500/10 text-blue-400">
+                      <Badge variant="outline" className="bg-info/10 text-info">
                         #{index + 1}
                       </Badge>
                       <div>
@@ -349,9 +349,9 @@ export function RAGContextBuilder() {
 
       {/* Error State */}
       {ragMutation.isError && (
-        <Card className="glass-card border-red-500/20">
+        <Card className="glass-card border-destructive/20">
           <CardContent className="p-6 text-center">
-            <p className="text-red-400">
+            <p className="text-destructive">
               Error: {(ragMutation.error as Error).message}
             </p>
           </CardContent>

@@ -77,7 +77,7 @@ async def _collect_streaming_response(
     message_history = [{"role": msg.role, "parts": msg.parts} for msg in messages]
 
     # Determine agent via AutoBrain (same logic as chat.py)
-    use_system_llm = False
+    use_orchestrator_llm = False
     complexity_assessment = None
 
     if agent_id:
@@ -89,7 +89,7 @@ async def _collect_streaming_response(
         if complexity_assessment.action == Action.RESPOND:
             from api.chat import get_default_agent_id
             effective_agent_id = get_default_agent_id(db, workspace_id)
-            use_system_llm = True
+            use_orchestrator_llm = True
         elif complexity_assessment.action in (Action.DELEGATE, Action.MISSION):
             from core.routing.cache import get_routing_cache
             from core.routing.engine import UniversalRouter
@@ -111,16 +111,16 @@ async def _collect_streaming_response(
                 else:
                     from api.chat import get_default_agent_id
                     effective_agent_id = get_default_agent_id(db, workspace_id)
-                    use_system_llm = True
+                    use_orchestrator_llm = True
             except Exception:
                 logger.exception("[voice] Router failed, falling back to default agent")
                 from api.chat import get_default_agent_id
                 effective_agent_id = get_default_agent_id(db, workspace_id)
-                use_system_llm = True
+                use_orchestrator_llm = True
         else:
             from api.chat import get_default_agent_id
             effective_agent_id = get_default_agent_id(db, workspace_id)
-            use_system_llm = True
+            use_orchestrator_llm = True
 
     # Collect streaming output into a single string
     collected_text = []
@@ -134,7 +134,7 @@ async def _collect_streaming_response(
         messages=message_history,
         agent_id=effective_agent_id,
         user_id=user_id,
-        use_system_llm=use_system_llm,
+        use_orchestrator_llm=use_orchestrator_llm,
         skip_composio=skip_composio,
         complexity_assessment=complexity_assessment,
     ):

@@ -56,7 +56,7 @@ function MissionTaskNodeInner({ data }: NodeProps<MissionTaskNodeData>) {
         isPlanMode
           ? 'border-muted-foreground/20 bg-muted/5'
           : `${config.borderClass} ${config.bgClass}`,
-        isSynthesis && 'border-purple-500/40 bg-purple-500/5',
+        isSynthesis && 'border-agent/40 bg-agent/5',
         data.isSelected && 'ring-2 ring-primary shadow-[0_0_12px_rgba(249,115,22,0.15)]',
       )}
     >
@@ -64,7 +64,7 @@ function MissionTaskNodeInner({ data }: NodeProps<MissionTaskNodeData>) {
 
       {/* Header: icon + sequence + title */}
       <div className="flex items-start gap-2">
-        <div className={cn('mt-0.5 shrink-0', isSynthesis ? 'text-purple-400' : isPlanMode ? 'text-muted-foreground' : config.color)}>
+        <div className={cn('mt-0.5 shrink-0', isSynthesis ? 'text-agent' : isPlanMode ? 'text-muted-foreground' : config.color)}>
           {isSynthesis ? (
             <Merge className="w-4 h-4" />
           ) : (
@@ -117,7 +117,7 @@ function MissionTaskNodeInner({ data }: NodeProps<MissionTaskNodeData>) {
 
       {/* Status label (execution/review mode) */}
       {!isPlanMode && (
-        <div className={cn('mt-1 text-[10px] font-medium', isSynthesis ? 'text-purple-400' : config.color)}>
+        <div className={cn('mt-1 text-[10px] font-medium', isSynthesis ? 'text-agent' : config.color)}>
           {isSynthesis && 'Synthesis · '}{config.label}
         </div>
       )}

@@ -185,7 +185,7 @@ export function FileList({
                   <FileIcon
                     className={cn(
                       'h-4 w-4 flex-shrink-0',
-                      isDirectory ? 'text-blue-500' : 'text-muted-foreground'
+                      isDirectory ? 'text-info' : 'text-muted-foreground'
                     )}
                   />
                   <span

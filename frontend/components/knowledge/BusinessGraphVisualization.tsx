@@ -400,8 +400,8 @@ const BusinessGraphVisualization: React.FC<BusinessGraphVisualizationProps> = ({
           }}
         >
           <div className="flex items-center gap-4 flex-wrap">
-            <span className="text-gray-400 font-medium">Edges:</span>
-            <span className="text-gray-300 flex items-center gap-1">
+            <span className="text-muted-foreground font-medium">Edges:</span>
+            <span className="text-foreground/90 flex items-center gap-1">
               <svg width="24" height="8">
                 <line
                   x1="0"
@@ -414,7 +414,7 @@ const BusinessGraphVisualization: React.FC<BusinessGraphVisualizationProps> = ({
               </svg>
               Extracted
             </span>
-            <span className="text-gray-300 flex items-center gap-1">
+            <span className="text-foreground/90 flex items-center gap-1">
               <svg width="24" height="8">
                 <line
                   x1="0"
@@ -428,7 +428,7 @@ const BusinessGraphVisualization: React.FC<BusinessGraphVisualizationProps> = ({
               </svg>
               Inferred
             </span>
-            <span className="text-gray-300 flex items-center gap-1">
+            <span className="text-foreground/90 flex items-center gap-1">
               <svg width="24" height="8">
                 <line
                   x1="0"
@@ -449,7 +449,7 @@ const BusinessGraphVisualization: React.FC<BusinessGraphVisualizationProps> = ({
       {/* Empty state */}
       {nodes.length === 0 && (
         <div className="absolute inset-0 flex items-center justify-center">
-          <p className="text-gray-500 text-sm">
+          <p className="text-muted-foreground text-sm">
             No graph data available
           </p>
         </div>

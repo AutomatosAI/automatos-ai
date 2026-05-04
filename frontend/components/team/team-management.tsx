@@ -8,9 +8,9 @@ import { useWorkspace } from '@/hooks/use-workspace'
 import { InviteModal } from './invite-modal'
 import { useAuth } from '@clerk/nextjs'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
+import { PageHeader, SearchInput } from '@/components/shared'
 
 interface TeamMember {
     id: number
@@ -125,64 +125,44 @@ export function TeamManagement() {
     return (
         <div className="space-y-6">
             {/* Header */}
-            <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5 }}
-                className="flex flex-col sm:flex-row justify-between items-start gap-3"
-            >
-                <div>
-                    <h1 className="text-2xl md:text-3xl font-bold mb-1 md:mb-2">
-                        Team <span className="gradient-text">Management</span>
-                    </h1>
-                    <p className="text-sm md:text-base text-muted-foreground mt-1">
-                        Manage your workspace members, roles, and invitations.
-                    </p>
-                </div>
+            <PageHeader
+                title="Team"
+                titleAccent="Management"
+                subtitle="Manage your workspace members, roles, and invitations."
+                actions={
+                    <>
+                        <Badge variant="outline" className="text-brand-primary border-brand-primary/30">
+                            <Users className="w-3 h-3 mr-1" />
+                            {members.length} Members
+                        </Badge>
 
-                <div className="flex items-center gap-2 md:gap-3 flex-wrap shrink-0">
-                    <Badge variant="outline" className="text-brand-primary border-brand-primary/30">
-                        <Users className="w-3 h-3 mr-1" />
-                        {members.length} Members
-                    </Badge>
+                        <Button
+                            onClick={fetchMembers}
+                            variant="outline"
+                            size="sm"
+                            disabled={loading}
+                        >
+                            <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+                            Refresh
+                        </Button>
 
-                    <Button
-                        onClick={fetchMembers}
-                        variant="outline"
-                        size="sm"
-                        disabled={loading}
-                    >
-                        <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-                        Refresh
-                    </Button>
-
-                    <Button
-                        onClick={() => setIsInviteOpen(true)}
-                        className="bg-brand-primary hover:bg-brand-primary/90"
-                    >
-                        <UserPlus className="w-4 h-4 mr-2" />
-                        Invite Member
-                    </Button>
-                </div>
-            </motion.div>
+                        <Button
+                            onClick={() => setIsInviteOpen(true)}
+                            className="bg-brand-primary hover:bg-brand-primary/90"
+                        >
+                            <UserPlus className="w-4 h-4 mr-2" />
+                            Invite Member
+                        </Button>
+                    </>
+                }
+            />
 
             {/* Search Bar */}
-            <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.6, delay: 0.1 }}
-                className="flex gap-4"
-            >
-                <div className="relative flex-1">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
-                    <Input
-                        placeholder="Search members by name or email..."
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        className="pl-10"
-                    />
-                </div>
-            </motion.div>
+            <SearchInput
+                value={searchTerm}
+                onChange={setSearchTerm}
+                placeholder="Search members by name or email..."
+            />
 
             {/* Pending invitations */}
             {pendingInvites.length > 0 && (

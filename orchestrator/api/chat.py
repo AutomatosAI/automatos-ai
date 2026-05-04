@@ -420,7 +420,9 @@ async def stream_chat(
 
     routing_decision = None
     routing_request_id = None
-    use_system_llm = False  # True = use orchestrator LLM settings, not agent's model
+    # PRD-137 Fix #2: when True, agent_factory uses orchestrator-tier defaults
+    # (system_settings.orchestrator_llm.*) instead of the agent's model_config.
+    use_orchestrator_llm = False
     complexity_assessment = None
     _use_workflow_bridge = False  # PRD-68: DEPRECATED — kept for safety net only
     _suggest_mission = False     # PRD-125: True when ORGAN/ORGANISM → suggest mission
@@ -457,7 +459,7 @@ async def stream_chat(
         if complexity_assessment.action == Action.RESPOND or _platform_hints:
             # Auto handles directly — no routing, no delegation.
             effective_agent_id = _fallback_agent_id
-            use_system_llm = True
+            use_orchestrator_llm = True
             if _platform_hints:
                 # Override action so we don't fall into the DELEGATE branch below
                 complexity_assessment.action = Action.RESPOND
@@ -506,7 +508,7 @@ async def stream_chat(
             elif routing_decision is not None and routing_decision.route_type == "orchestrate":
                 # LLM explicitly chose Auto / orchestrate — use fallback agent with system LLM
                 effective_agent_id = _fallback_agent_id
-                use_system_llm = True
+                use_orchestrator_llm = True
                 logger.info(
                     f"[Auto] Router → orchestrate "
                     f"(confidence={routing_decision.confidence:.2f}, "
@@ -516,7 +518,7 @@ async def stream_chat(
             else:
                 # Router couldn't decide — fall back
                 effective_agent_id = _fallback_agent_id
-                use_system_llm = True
+                use_orchestrator_llm = True
                 logger.info(f"[Auto] Router returned no match — fallback agent_id={effective_agent_id}")
 
     # Build response headers (include routing metadata when available)
@@ -577,7 +579,7 @@ async def stream_chat(
                 messages=message_history,
                 agent_id=effective_agent_id,
                 user_id=user_id,
-                use_system_llm=use_system_llm,
+                use_orchestrator_llm=use_orchestrator_llm,
                 skip_composio=_skip_composio,
                 complexity_assessment=complexity_assessment,
                 mission_mode=bool(request.missionMode),

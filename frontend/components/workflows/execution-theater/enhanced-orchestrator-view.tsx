@@ -761,27 +761,27 @@ export function EnhancedOrchestratorView({
 
   const getMemoryColor = (type: MemoryActivity['type']) => {
     switch (type) {
-      case 'working': return 'text-blue-400 bg-blue-400/10'
-      case 'short_term': return 'text-yellow-400 bg-yellow-400/10'
-      case 'long_term': return 'text-green-400 bg-green-400/10'
-      case 'collective': return 'text-purple-400 bg-purple-400/10'
+      case 'working': return 'text-info bg-info/10'
+      case 'short_term': return 'text-warning bg-warning/10'
+      case 'long_term': return 'text-success bg-success/10'
+      case 'collective': return 'text-agent bg-agent/10'
     }
   }
 
   const getPriorityColor = (priority: CommunicationEvent['priority']) => {
     switch (priority) {
-      case 'low': return 'text-gray-400'
-      case 'normal': return 'text-blue-400'
+      case 'low': return 'text-muted-foreground'
+      case 'normal': return 'text-info'
       case 'high': return 'text-orange-400'
-      case 'critical': return 'text-red-400'
+      case 'critical': return 'text-destructive'
     }
   }
 
   const getImpactColor = (impact: LearningInsight['impact']) => {
     switch (impact) {
-      case 'low': return 'bg-gray-400/10 text-gray-400'
-      case 'medium': return 'bg-yellow-400/10 text-yellow-400'
-      case 'high': return 'bg-green-400/10 text-green-400'
+      case 'low': return 'bg-secondary/50 text-muted-foreground'
+      case 'medium': return 'bg-warning/10 text-warning'
+      case 'high': return 'bg-success/10 text-success'
     }
   }
 
@@ -1139,7 +1139,7 @@ export function EnhancedOrchestratorView({
                     <Card key={insight.id} className="p-4">
                       <div className="flex items-start justify-between">
                         <div className="flex items-start space-x-3">
-                          <Sparkles className="w-5 h-5 mt-1 text-yellow-400" />
+                          <Sparkles className="w-5 h-5 mt-1 text-warning" />
                           <div className="flex-1">
                             <div className="flex items-center gap-2">
                               <p className="font-medium">{insight.category}</p>

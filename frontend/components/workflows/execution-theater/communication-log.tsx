@@ -205,21 +205,21 @@ export function CommunicationLog({ workflowId, isExecuting, workflow }: Communic
   const getIcon = (type: string, status?: string) => {
     switch (type) {
       case 'orchestrator':
-        return <Bot className="w-4 h-4 text-blue-400" />
+        return <Bot className="w-4 h-4 text-info" />
       case 'agent_message':
-        return <MessageCircle className="w-4 h-4 text-blue-400" />
+        return <MessageCircle className="w-4 h-4 text-info" />
       case 'tool_call':
-        return <Zap className="w-4 h-4 text-yellow-400" />
+        return <Zap className="w-4 h-4 text-warning" />
       case 'memory_operation':
-        return <Brain className="w-4 h-4 text-purple-400" />
+        return <Brain className="w-4 h-4 text-agent" />
       case 'rag_operation':
-        return <Database className="w-4 h-4 text-green-400" />
+        return <Database className="w-4 h-4 text-success" />
       case 'system_event':
-        if (status === 'error') return <AlertCircle className="w-4 h-4 text-red-400" />
-        if (status === 'success') return <CheckCircle className="w-4 h-4 text-green-400" />
-        return <Clock className="w-4 h-4 text-gray-400" />
+        if (status === 'error') return <AlertCircle className="w-4 h-4 text-destructive" />
+        if (status === 'success') return <CheckCircle className="w-4 h-4 text-success" />
+        return <Clock className="w-4 h-4 text-muted-foreground" />
       default:
-        return <Bot className="w-4 h-4 text-gray-400" />
+        return <Bot className="w-4 h-4 text-muted-foreground" />
     }
   }
 
@@ -271,7 +271,7 @@ export function CommunicationLog({ workflowId, isExecuting, workflow }: Communic
             variant="ghost"
             size="sm"
             onClick={() => setAutoScroll(!autoScroll)}
-            className={autoScroll ? 'text-green-400' : 'text-gray-400'}
+            className={autoScroll ? 'text-success' : 'text-muted-foreground'}
           >
             {autoScroll ? 'Auto-scroll On' : 'Auto-scroll Off'}
           </Button>
@@ -477,13 +477,13 @@ export function CommunicationLog({ workflowId, isExecuting, workflow }: Communic
                     {(log.from || log.to) && (
                       <div className="flex items-center space-x-2 text-xs mb-1">
                         {log.from && (
-                          <span className="text-blue-400 font-medium">{log.from}</span>
+                          <span className="text-info font-medium">{log.from}</span>
                         )}
                         {log.from && log.to && (
                           <span className="text-muted-foreground">→</span>
                         )}
                         {log.to && (
-                          <span className="text-green-400 font-medium">{log.to}</span>
+                          <span className="text-success font-medium">{log.to}</span>
                         )}
                       </div>
                     )}

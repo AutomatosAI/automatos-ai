@@ -75,9 +75,9 @@ export function DatabaseQueryAnalytics() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Total Queries (24h)</p>
-                <p className="text-2xl font-bold text-blue-400">{stats?.total_queries || 0}</p>
+                <p className="text-2xl font-bold text-info">{stats?.total_queries || 0}</p>
               </div>
-              <Database className="h-8 w-8 text-blue-400 opacity-50" />
+              <Database className="h-8 w-8 text-info opacity-50" />
             </div>
           </CardContent>
         </Card>
@@ -87,9 +87,9 @@ export function DatabaseQueryAnalytics() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Success Rate</p>
-                <p className="text-2xl font-bold text-green-400">{stats?.success_rate?.toFixed(1) || '100'}%</p>
+                <p className="text-2xl font-bold text-success">{stats?.success_rate?.toFixed(1) || '100'}%</p>
               </div>
-              <CheckCircle className="h-8 w-8 text-green-400 opacity-50" />
+              <CheckCircle className="h-8 w-8 text-success opacity-50" />
             </div>
           </CardContent>
         </Card>
@@ -99,9 +99,9 @@ export function DatabaseQueryAnalytics() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Avg Query Time</p>
-                <p className="text-2xl font-bold text-purple-400">{stats?.avg_execution_time_ms?.toFixed(0) || 0}ms</p>
+                <p className="text-2xl font-bold text-agent">{stats?.avg_execution_time_ms?.toFixed(0) || 0}ms</p>
               </div>
-              <Clock className="h-8 w-8 text-purple-400 opacity-50" />
+              <Clock className="h-8 w-8 text-agent opacity-50" />
             </div>
           </CardContent>
         </Card>
@@ -131,7 +131,7 @@ export function DatabaseQueryAnalytics() {
                 <div key={idx} className="p-3 bg-secondary/30 rounded-lg border border-border/50">
                   <div className="flex items-start justify-between mb-2">
                     <p className="text-sm font-medium">{q.query}</p>
-                    <Badge variant="outline" className="bg-blue-500/10 border-blue-500/20 text-blue-400">
+                    <Badge variant="outline" className="bg-info/10 border-info/20 text-info">
                       {q.count}x
                     </Badge>
                   </div>
@@ -167,8 +167,8 @@ export function DatabaseQueryAnalytics() {
                   <span className="text-muted-foreground">{p.time}</span>
                   <div className="flex items-center gap-4">
                     <span>{p.queries} queries</span>
-                    <span className="text-purple-400">{p.avg_time_ms?.toFixed(0)}ms avg</span>
-                    <span className="text-green-400">{p.success_rate?.toFixed(1)}% success</span>
+                    <span className="text-agent">{p.avg_time_ms?.toFixed(0)}ms avg</span>
+                    <span className="text-success">{p.success_rate?.toFixed(1)}% success</span>
                   </div>
                 </div>
               ))}
@@ -182,7 +182,7 @@ export function DatabaseQueryAnalytics() {
         <CardHeader>
           <CardTitle className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Target className="h-5 w-5 text-purple-400" />
+              <Target className="h-5 w-5 text-agent" />
               NL2SQL Benchmark Accuracy
             </div>
             <Button
@@ -221,13 +221,13 @@ export function DatabaseQueryAnalytics() {
                 <div key={b.id || idx} className="flex items-center justify-between p-3 bg-secondary/30 rounded-lg border border-border/50">
                   <div className="flex items-center gap-3">
                     <div className="text-center">
-                      <div className="text-lg font-bold text-purple-400">
+                      <div className="text-lg font-bold text-agent">
                         {((b.exact_match_rate || 0) * 100).toFixed(1)}%
                       </div>
                       <div className="text-[10px] text-muted-foreground">Exact</div>
                     </div>
                     <div className="text-center">
-                      <div className="text-lg font-bold text-green-400">
+                      <div className="text-lg font-bold text-success">
                         {((b.execution_match_rate || 0) * 100).toFixed(1)}%
                       </div>
                       <div className="text-[10px] text-muted-foreground">Execution</div>
@@ -251,12 +251,12 @@ export function DatabaseQueryAnalytics() {
       </Card>
 
       {/* Info Message */}
-      <Card className="glass-card border-blue-500/30 bg-blue-500/5">
+      <Card className="glass-card border-info/30 bg-info/5">
         <CardContent className="pt-6">
           <div className="flex items-start gap-3">
-            <AlertCircle className="h-5 w-5 text-blue-400 flex-shrink-0 mt-0.5" />
+            <AlertCircle className="h-5 w-5 text-info flex-shrink-0 mt-0.5" />
             <div className="space-y-1">
-              <p className="text-sm font-medium text-blue-400">Real-Time Analytics</p>
+              <p className="text-sm font-medium text-info">Real-Time Analytics</p>
               <p className="text-xs text-muted-foreground">
                 All metrics are computed from the <code className="bg-muted px-1 rounded">database_query_audit</code> table. 
                 Statistics update automatically as users query connected databases via natural language.

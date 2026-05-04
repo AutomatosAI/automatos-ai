@@ -251,7 +251,7 @@ export function CommandCentreDashboard({ period, onViewAllActivity, onViewCalend
                         {isHidden ? (
                           <EyeOff className="w-3 h-3 text-muted-foreground" />
                         ) : (
-                          <Eye className="w-3 h-3 text-emerald-400" />
+                          <Eye className="w-3 h-3 text-success" />
                         )}
                       </button>
                     )

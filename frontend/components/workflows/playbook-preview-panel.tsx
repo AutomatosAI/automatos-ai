@@ -223,7 +223,7 @@ export function PlaybookPreviewPanel() {
           <div className="text-xs font-medium text-muted-foreground">
             Agents ({stepAgents.size})
           </div>
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             {Array.from(stepAgents.values()).map((agent) => (
               <div key={agent.id} className="flex items-center gap-2">
                 <Bot className="w-3 h-3 text-primary flex-shrink-0" />
@@ -271,7 +271,7 @@ export function PlaybookPreviewPanel() {
         <div className="flex items-center gap-3">
           <div className="flex-1 h-2 rounded-full bg-secondary/50 overflow-hidden">
             <div
-              className="h-full rounded-full transition-all duration-500"
+              className="h-full rounded-full transition-all duration-300"
               style={{
                 width: `${complexity.score}%`,
                 background: `linear-gradient(to right, hsl(var(--success)), hsl(var(--primary)), hsl(var(--destructive)))`,

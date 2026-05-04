@@ -10,15 +10,15 @@ interface AgentPerformanceWidgetProps {
 }
 
 function rateColor(rate: number): string {
-  if (rate >= 90) return 'bg-emerald-400'
-  if (rate >= 70) return 'bg-amber-400'
-  return 'bg-red-400'
+  if (rate >= 90) return 'bg-success'
+  if (rate >= 70) return 'bg-warning'
+  return 'bg-destructive'
 }
 
 function rateTextColor(rate: number): string {
-  if (rate >= 90) return 'text-emerald-400'
-  if (rate >= 70) return 'text-amber-400'
-  return 'text-red-400'
+  if (rate >= 90) return 'text-success'
+  if (rate >= 70) return 'text-warning'
+  return 'text-destructive'
 }
 
 export function AgentPerformanceWidget({ period, className }: AgentPerformanceWidgetProps) {
@@ -38,7 +38,7 @@ export function AgentPerformanceWidget({ period, className }: AgentPerformanceWi
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 py-2 space-y-1.5">
+      <div className="flex-1 overflow-y-auto px-4 py-2 space-y-2">
         {isLoading ? (
           <div className="flex items-center justify-center h-full">
             <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />

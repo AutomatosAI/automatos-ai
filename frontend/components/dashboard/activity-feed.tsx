@@ -59,13 +59,13 @@ export function ActivityFeed() {
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'success':
-        return 'text-green-500'
+        return 'text-success'
       case 'error':
-        return 'text-red-500'
+        return 'text-destructive'
       case 'warning':
-        return 'text-yellow-500'
+        return 'text-warning'
       default:
-        return 'text-blue-500'
+        return 'text-info'
     }
   }
 

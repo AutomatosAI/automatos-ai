@@ -497,7 +497,7 @@ export function MarketplaceLlmsTab({ searchQuery }: MarketplaceLlmsTabProps) {
             onClick={() => setFilterReasoning(!filterReasoning)}
             className={`h-9 text-xs gap-1.5 ${
               filterReasoning
-                ? 'bg-purple-500/15 border-purple-500/40 text-purple-400'
+                ? 'bg-agent/15 border-agent/40 text-agent'
                 : 'border-secondary text-muted-foreground'
             }`}
           >

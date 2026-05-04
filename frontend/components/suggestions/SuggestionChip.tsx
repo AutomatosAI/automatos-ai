@@ -42,7 +42,7 @@ export function SuggestionChip({ text, className, onClick, ...props }: Suggestio
         'active:scale-95',
 
         // Transitions
-        'transition-all duration-200',
+        'transition-all duration-220',
 
         // Focus styles
         'focus-visible:outline-none',

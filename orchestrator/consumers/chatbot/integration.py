@@ -169,33 +169,3 @@ def get_tool_choice_for_llm(orchestrated: OrchestratedRequest) -> Optional[str]:
     return orchestrated.tool_choice
 
 
-# =============================================================================
-# QUICK INTEGRATION EXAMPLE
-# =============================================================================
-"""
-# In StreamingChatService.stream_response_with_agent():
-
-# OLD WAY (scattered logic):
-#   memory_context = await self.memory_injector.retrieve_relevant_memories(...)
-#   llm_messages = self.prompt_analyzer.convert_to_llm_messages(...)
-#   if memory_context:
-#       llm_messages.insert(1, self.memory_injector.build_memory_injection_message(...))
-#   filtered_tools = self._filter_tools(...)
-
-# NEW WAY (unified):
-from consumers.chatbot.integration import SmartChatIntegration, apply_orchestration_to_messages
-
-# Initialize once in __init__:
-self.smart_chat = SmartChatIntegration(workspace_id, agent_id, agent_name)
-
-# In stream_response:
-orchestrated = await self.smart_chat.prepare(messages, available_tools, chat_id)
-
-# Use the results:
-llm_messages = apply_orchestration_to_messages(orchestrated)
-tools = orchestrated.tools if orchestrated.requires_tools else None
-tool_choice = orchestrated.tool_choice
-
-# After response complete:
-await self.smart_chat.store(user_message, assistant_response, chat_id)
-"""

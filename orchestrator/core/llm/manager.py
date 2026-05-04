@@ -108,9 +108,8 @@ def get_provider_and_model_from_settings(service_name: str = "orchestrator") -> 
     category = SERVICE_CATEGORY_MAP.get(service_name, "orchestrator_llm")
     
     # Get provider and model from settings (NO hardcoded defaults)
-    # Note: Settings use 'llm_provider' and 'llm_model' keys, not 'provider' and 'model'
-    provider_str = get_system_setting(category, "llm_provider") or get_system_setting(category, "provider")
-    model_str = get_system_setting(category, "llm_model") or get_system_setting(category, "model")
+    provider_str = get_system_setting(category, "provider") or get_system_setting(category, "llm_provider")
+    model_str = get_system_setting(category, "model") or get_system_setting(category, "llm_model")
     
     # Require provider to be set - no fallback
     if not provider_str:

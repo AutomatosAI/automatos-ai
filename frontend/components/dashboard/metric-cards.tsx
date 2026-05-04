@@ -37,9 +37,9 @@ function MetricCard({ title, value, change, changeType, icon: Icon, gradient, ba
             <div className="w-10 h-10 rounded-2xl bg-foreground/5 border border-border/60 flex items-center justify-center shrink-0">
               <Icon className={`w-5 h-5 ${
                 gradient.includes('orange') ? 'text-orange-400' :
-                gradient.includes('blue') ? 'text-blue-400' :
-                gradient.includes('green') ? 'text-green-400' :
-                gradient.includes('purple') ? 'text-purple-400' :
+                gradient.includes('blue') ? 'text-info' :
+                gradient.includes('green') ? 'text-success' :
+                gradient.includes('purple') ? 'text-agent' :
                 'text-foreground'
               }`} />
             </div>
@@ -59,9 +59,9 @@ function MetricCard({ title, value, change, changeType, icon: Icon, gradient, ba
             {change && (
               <div className={`text-xs ${
                 changeType === 'positive'
-                  ? 'text-green-400'
+                  ? 'text-success'
                   : changeType === 'negative'
-                  ? 'text-red-400'
+                  ? 'text-destructive'
                   : 'text-muted-foreground'
               }`}>
                 {change}

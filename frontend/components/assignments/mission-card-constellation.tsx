@@ -262,7 +262,7 @@ export function MissionConstellationCard({ onStart }: MissionConstellationCardPr
         {/* ── Live pill (top-left) ───────────────────────────────── */}
         {runningCount > 0 && (
           <div className="absolute top-4 left-4 z-10 flex items-center gap-2 px-2.5 py-1.5 rounded-full bg-background/60 border border-border/40 backdrop-blur-md font-mono text-[10.5px] tracking-[0.04em] text-muted-foreground lowercase">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(34,197,94,0.9)]" />
+            <span className="w-1.5 h-1.5 rounded-full bg-success shadow-[0_0_8px_rgba(34,197,94,0.9)]" />
             {runningCount} {runningCount === 1 ? 'mission' : 'missions'} running
           </div>
         )}

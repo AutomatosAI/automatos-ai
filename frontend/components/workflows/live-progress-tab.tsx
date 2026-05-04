@@ -49,8 +49,8 @@ export function LiveProgressTab() {
     return (
       <div className="flex items-center justify-center py-12">
         <div className="text-center">
-          <AlertTriangle className="h-8 w-8 text-red-400 mx-auto mb-4" />
-          <p className="text-red-400">Error loading executions</p>
+          <AlertTriangle className="h-8 w-8 text-destructive mx-auto mb-4" />
+          <p className="text-destructive">Error loading executions</p>
         </div>
       </div>
     )
@@ -75,7 +75,7 @@ export function LiveProgressTab() {
             variant="outline"
             size="sm"
             onClick={() => setAutoRefresh(!autoRefresh)}
-            className={autoRefresh ? 'border-green-500/50 text-green-400' : ''}
+            className={autoRefresh ? 'border-success/50 text-success' : ''}
           >
             <RefreshCw className={`w-4 h-4 mr-2 ${autoRefresh ? 'animate-spin' : ''}`} />
             Auto-refresh
@@ -91,7 +91,7 @@ export function LiveProgressTab() {
       {runningExecutions.length > 0 && (
         <div className="space-y-4">
           <h4 className="text-sm font-semibold flex items-center">
-            <Activity className="w-4 h-4 mr-2 text-blue-400 animate-pulse" />
+            <Activity className="w-4 h-4 mr-2 text-info animate-pulse" />
             Active Executions ({runningExecutions.length})
           </h4>
           <div className="grid gap-4">
@@ -102,11 +102,11 @@ export function LiveProgressTab() {
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ duration: 0.3, delay: index * 0.05 }}
               >
-                <Card className="glass-card border-blue-500/30">
+                <Card className="glass-card border-info/30">
                   <CardHeader className="pb-3">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
-                        <div className="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></div>
+                        <div className="w-2 h-2 rounded-full bg-info animate-pulse"></div>
                         <div>
                           <CardTitle className="text-base">
                             Workflow #{execution.workflow_id}
@@ -116,7 +116,7 @@ export function LiveProgressTab() {
                           </p>
                         </div>
                       </div>
-                      <Badge variant="outline" className="bg-blue-500/10 text-blue-400 border-blue-500/20">
+                      <Badge variant="outline" className="bg-info/10 text-info border-info/20">
                         <Play className="w-3 h-3 mr-1" />
                         Running
                       </Badge>
@@ -164,7 +164,7 @@ export function LiveProgressTab() {
       {recentCompleted.length > 0 && (
         <div className="space-y-4">
           <h4 className="text-sm font-semibold flex items-center">
-            <CheckCircle className="w-4 h-4 mr-2 text-green-400" />
+            <CheckCircle className="w-4 h-4 mr-2 text-success" />
             Recently Completed ({recentCompleted.length})
           </h4>
           <div className="grid gap-3">
@@ -175,11 +175,11 @@ export function LiveProgressTab() {
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ duration: 0.3, delay: index * 0.05 }}
               >
-                <Card className="glass-card border-green-500/20 hover:border-green-500/40 transition-all">
+                <Card className="glass-card border-success/20 hover:border-success/40 transition-all">
                   <CardContent className="pt-4">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
-                        <CheckCircle className="w-4 h-4 text-green-400" />
+                        <CheckCircle className="w-4 h-4 text-success" />
                         <div>
                           <p className="text-sm font-medium">
                             Workflow #{execution.workflow_id} · Execution #{execution.id}
