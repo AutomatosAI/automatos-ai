@@ -1,1 +1,30 @@
 
+## US-004 — GraphRouter service (PRD-139)
+
+Commit: a52074d98
+Branch: worktree-agent-af63a813 (for merge into ralph/prd-139-tool-routing-graph)
+
+### Files created
+- orchestrator/modules/tools/discovery/graph_router.py (290 lines)
+- orchestrator/tests/test_graph_router.py (510 lines)
+
+### Implementation summary
+- GraphRouter class wraps ActionSemanticIndex.rank_actions() for entry node selection (top 5)
+- Expands entry nodes through tool_routing_edges (used_after, single hop)
+- Queries tool_routing_affinities for intent/agent boosts
+- Scoring: cosine_score * edge_confidence + affinity_boosts
+- Hard caps: depth 2, max 50 expanded nodes
+- Per-agent filtering: agent_id with >= TOOL_ROUTING_GRAPH_AGENT_SAMPLE_FLOOR samples uses agent-specific affinities; else global
+- Empty graph fallback: returns single-action chains from embedding scores
+- DB error fallback: logs warning, returns single-action chains
+- Singleton via get_graph_router() factory (matches get_action_semantic_index pattern)
+- Cache: traversal results cached via CacheService Redis (TTL 5 minutes), keyed on (query_hash, agent_id, top_k)
+- Config vars read via safe getattr with defaults (TOOL_ROUTING_GRAPH_MIN_CONFIDENCE=0.6, TOOL_ROUTING_GRAPH_AGENT_SAMPLE_FLOOR=50)
+
+### Test results (14 passed)
+- AC-8: chains sorted descending, chain beats weak single, tuple shape, affinity boosts score
+- AC-9: empty edges returns singles, order matches cosine, no error on single/zero entries
+- AC-10: below floor uses global graph, above floor uses agent edges
+- AC-11: low confidence excluded, all below floor returns singles only
+- Singleton: returns same instance
+- DB error: falls back to single-action chains without error
