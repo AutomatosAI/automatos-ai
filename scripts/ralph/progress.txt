@@ -1,4 +1,49 @@
 
+## US-007 — Eval harness --mode graph + holdout evaluation (PRD-139)
+
+Branch: worktree-agent-abb4c6f3 (for merge into ralph/prd-139-tool-routing-graph)
+
+### Files modified
+- orchestrator/scripts/eval/tool_routing/prompt_builder.py (+78 lines)
+  - Added `build_graph(query, top_k)` -> (prompt, surfaced, is_fallback)
+  - Added `_graph()` private method: delegates to GraphRouter.rank_chains(), extracts unique action names, builds filtered prompt summary + chain hint block
+  - Updated `build()` to route graph mode
+  - Updated `build_tools()` to narrow schema for graph mode
+  - Added `_CHAIN_HINT_HEADER` constant
+- orchestrator/scripts/eval/tool_routing/run_eval.py (+20 lines)
+  - `--mode` accepts 'graph' and 'all' (4 modes: full, filtered, filtered_schema, graph)
+  - `graph_fallback` dict tracks no-edges state
+  - `get_prompt()` calls `build_graph()` for graph mode
+  - `get_tools()` passes ranked_names for graph mode
+  - Row output uses effective_mode 'graph (no-edges)' when fallback
+- orchestrator/scripts/eval/tool_routing/score.py (+6 lines)
+  - mode_order dict: graph=3, graph(no-edges)=4
+  - 3 new delta pairs: graph-full, graph-filtered, graph-filtered_schema
+  - Report title updated to "PRD-138 + PRD-139"
+
+### Files created
+- orchestrator/tests/test_eval_graph_mode.py (24 tests)
+
+### Test results (24 passed)
+- TestBuildGraphMode: graph mode accepted, invalid mode raises
+- TestBuildGraph: returns 3 elements, multi-action not fallback, single-action is fallback
+- TestGraphFallback: empty chains falls back, exception falls back
+- TestChainHints: hints present for multi-action, absent for single-action, action names deduplicated
+- TestBuildToolsGraph: graph narrows enum, full unchanged, filtered unchanged
+- TestScoreGraphMode: aggregate includes graph, accuracy correct, category breakdown includes graph, table sorts graph after filtered_schema, pair diff includes graph deltas, missing graph rows handled
+- TestRunEvalModes: all includes graph, standalone graph, valid argparse choice, no-edges label, with-edges label
+
+### Acceptance Criteria status
+- AC 1: PASS - prompt_builder.py _graph() mode delegates to GraphRouter
+- AC 2: PASS - run_eval.py --mode accepts 'graph' and 'all' (4 modes)
+- AC 3: PASS - score.py per-(model, mode) includes graph row + deltas
+- AC 4: PASS - Empty graph falls back, reports as 'graph (no-edges)'
+- AC 5-9: PENDING - Require OPENROUTER_API_KEY and manual eval run by Gerard
+- AC 10: PASS - AST parse + py_compile clean
+- AC 11: PASS - 24/24 tests green
+
+---
+
 ## US-006 — Bootstrap synthetic telemetry for cold-start pipeline (PRD-139)
 
 Commit: 8134828b2
