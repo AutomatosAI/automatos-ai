@@ -328,3 +328,36 @@ def register_workspace_actions(registry: ActionRegistry) -> None:
             "show the last 5 commits",
         ],
     ))
+
+    registry.register(ActionDefinition(
+        name="workspace_get_public_url",
+        description=(
+            "Get a publicly accessible URL for a workspace file (image or document). "
+            "Use when you need to share a workspace file with an external service "
+            "that requires a public URL — e.g. posting an image to Instagram, "
+            "Twitter, or LinkedIn. The file is uploaded to a CDN-backed store and "
+            "the returned URL is accessible without authentication."
+        ),
+        category="workspace_files",
+        parameters={
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": (
+                        "Relative path to the file inside the workspace "
+                        "(e.g. 'content/social/instagram/post.png')."
+                    ),
+                },
+            },
+            "required": ["path"],
+        },
+        permission_level="read",
+        promoted=True,
+        tags=["workspace", "files", "share", "public", "url", "social", "instagram"],
+        examples=[
+            "get a public URL for the rendered image",
+            "I need a shareable link to this PNG",
+            "make this image publicly accessible for Instagram",
+        ],
+    ))

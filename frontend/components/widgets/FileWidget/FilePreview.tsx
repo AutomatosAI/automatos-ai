@@ -71,7 +71,7 @@ async function authenticatedArrayBufferFetch(url: string): Promise<ArrayBuffer> 
  * behind a Bearer-auth API. For already-absolute URLs (presigned S3 etc.)
  * the URL is returned unchanged. The blob URL is revoked on cleanup.
  */
-function useAuthenticatedBlobUrl(url: string | undefined): {
+export function useAuthenticatedBlobUrl(url: string | undefined): {
   src: string | null
   error: string | null
 } {

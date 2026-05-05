@@ -54,12 +54,20 @@ MAX_INLINE_CONTENT_BYTES = 1_000_000  # 1 MB
 
 
 def _workspace_file_url(workspace_id: str | UUID, file_path: str) -> str:
-    """Build a URL to the workspace file-content endpoint.
+    """Build a URL to serve a workspace file to the browser.
 
-    This endpoint (`/api/workspaces/{id}/files/content?path=...`) is the canonical
-    way to stream workspace files to the browser — it handles auth, workspace
-    scoping, and MIME types. Used for both image previews and text downloads.
+    Uses `/files/raw` for binary formats (images, PDFs, etc.) which returns
+    actual bytes with correct MIME types. Uses `/files/content` for text files
+    which returns JSON for the code viewer.
     """
+    _, ext = os.path.splitext(file_path)
+    _BINARY_EXTENSIONS = {
+        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico",
+        ".pdf", ".docx", ".xlsx", ".pptx", ".zip", ".tar", ".gz",
+        ".mp4", ".mp3", ".wav", ".ogg", ".webm",
+    }
+    if ext.lower() in _BINARY_EXTENSIONS:
+        return f"/api/workspaces/{workspace_id}/files/raw?path={quote(file_path)}"
     return f"/api/workspaces/{workspace_id}/files/content?path={quote(file_path)}"
 
 
@@ -437,9 +445,9 @@ class DeliverableService:
                     data["content"] = (blog_row[0] if blog_row else "") or ""
                     data["content_truncated"] = False
                 elif data["storage_type"] == "workspace" and data["file_path"]:
-                    # Every workspace file has a streamable content URL (used for
-                    # <img src> on images and Download links on everything else).
-                    data["content_url"] = data.get("preview_url") or _workspace_file_url(
+                    # Always compute content_url fresh — older rows may have
+                    # preview_url pointing at /files/content which is JSON, not binary.
+                    data["content_url"] = _workspace_file_url(
                         self.workspace_id, data["file_path"]
                     )
 
@@ -721,7 +729,11 @@ class DeliverableService:
             "file_name": row.file_name,
             "file_type": row.file_type,
             "file_size_bytes": row.file_size_bytes,
-            "preview_url": row.preview_url,
+            "preview_url": (
+                _workspace_file_url(row.workspace_id, row.file_path)
+                if row.storage_type == "workspace" and row.file_path
+                else row.preview_url
+            ),
             "preview_type": row.preview_type,
             "extra": row.extra or {},
             "status": row.status,

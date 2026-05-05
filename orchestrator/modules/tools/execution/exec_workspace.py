@@ -3,7 +3,9 @@ Workspace tool executor -- proxy calls to the workspace worker via WorkspaceClie
 Extracted from unified_executor.py.
 """
 
+import base64
 import logging
+import mimetypes
 from typing import Any, Dict, Optional
 from uuid import UUID
 
@@ -114,6 +116,48 @@ def _auto_register_deliverable(
             "[tool-trace %s] Auto-register deliverable failed path=%s: %s",
             trace_id or "no-trace", file_path, exc, exc_info=True,
         )
+
+
+async def _get_public_url(client, path: str, workspace_id: UUID, trace_id: Optional[str]) -> Dict[str, Any]:
+    """Download a workspace file and upload to public image store.
+
+    Returns a publicly accessible URL that external services (Instagram,
+    Twitter, etc.) can fetch without authentication.
+    """
+    result = await client.download_file(path)
+    if result.get("success") is False:
+        return {"success": False, "error": f"Could not read file: {result.get('error')}", "tool": "workspace_get_public_url"}
+
+    file_bytes: bytes = result["content"]
+    if not file_bytes:
+        return {"success": False, "error": "File is empty", "tool": "workspace_get_public_url"}
+
+    content_type = result.get("content_type", "")
+    if not content_type or content_type == "application/octet-stream":
+        guessed, _ = mimetypes.guess_type(path)
+        content_type = guessed or "image/png"
+
+    b64_data = base64.b64encode(file_bytes).decode("ascii")
+
+    from core.services.image_store import get_image_store
+    store = get_image_store()
+    image_id = await store.save_image(b64_data, mime_type=content_type, workspace_id=str(workspace_id))
+
+    from config import config
+    backend_url = (config.BACKEND_URL or "").rstrip("/")
+    public_url = f"{backend_url}/api/generated-images/{image_id}"
+
+    logger.info(
+        "[tool-trace %s] workspace_get_public_url: %s -> %s (%d bytes)",
+        trace_id or "no-trace", path, public_url, len(file_bytes),
+    )
+    return {
+        "success": True,
+        "public_url": public_url,
+        "file_path": path,
+        "size_bytes": len(file_bytes),
+        "content_type": content_type,
+    }
 
 
 async def resolve_repo_dir(client) -> Optional[str]:
@@ -286,6 +330,12 @@ async def execute_workspace_action(
                 wait_for=parameters.get("wait_for", "[data-render-ready='true']"),
                 full_page=bool(parameters.get("full_page", False)),
             )
+
+        elif tool_name == "workspace_get_public_url":
+            path = parameters.get("path", "").strip()
+            if not path:
+                return {"success": False, "error": "path is required", "tool": tool_name}
+            result = await _get_public_url(client, path, workspace_id, trace_id)
 
         else:
             return {"success": False, "error": f"Unknown workspace tool: {tool_name}", "tool": tool_name}
