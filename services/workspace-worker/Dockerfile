@@ -26,11 +26,6 @@ RUN pip install --no-cache-dir \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Headless Chromium for workspace_html_to_png tool (PRD-social-render).
-# Installed AFTER pip so the playwright CLI is on PATH; --with-deps pulls
-# the Debian libs Chromium needs (libnss3, libatk1.0-0, libxkbcommon0, etc).
-RUN playwright install --with-deps chromium
-
 # Worker code (includes automatos_logging.py + automatos_metrics.py for observability)
 COPY . .
 
@@ -38,6 +33,13 @@ COPY . .
 RUN useradd -m -u 1000 worker \
     && mkdir -p /workspaces \
     && chown -R worker:worker /app /workspaces
+
+# Headless Chromium for workspace_html_to_png tool (PRD-social-render).
+# PLAYWRIGHT_BROWSERS_PATH ensures the binary is installed to a fixed
+# location that both root (build) and worker (runtime) can find.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers
+RUN playwright install --with-deps chromium \
+    && chmod -R o+rx /opt/playwright-browsers
 
 # Entrypoint fixes volume ownership then drops to worker user
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
