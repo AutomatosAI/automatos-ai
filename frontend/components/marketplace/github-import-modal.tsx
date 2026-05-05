@@ -132,7 +132,7 @@ export function GitHubImportModal({ open, onClose, onImportComplete }: GitHubImp
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{r.slug}</p>
                       {r.error && (
-                        <p className="text-xs text-red-400 truncate">{r.error}</p>
+                        <p className="text-xs text-destructive truncate">{r.error}</p>
                       )}
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
@@ -141,21 +141,21 @@ export function GitHubImportModal({ open, onClose, onImportComplete }: GitHubImp
                           variant="outline"
                           className={
                             r.security_status === 'safe'
-                              ? 'border-green-500/30 text-green-400 text-xs'
-                              : 'border-yellow-500/30 text-yellow-400 text-xs'
+                              ? 'border-success/30 text-success text-xs'
+                              : 'border-warning/30 text-warning text-xs'
                           }
                         >
                           {r.security_status}
                         </Badge>
                       )}
                       {(r.status === 'uploaded' || r.status === 'updated') && (
-                        <CheckCircle className="w-4 h-4 text-green-400" />
+                        <CheckCircle className="w-4 h-4 text-success" />
                       )}
                       {r.status === 'already_exists' && (
-                        <span title="Already exists"><SkipForward className="w-4 h-4 text-yellow-400" /></span>
+                        <span title="Already exists"><SkipForward className="w-4 h-4 text-warning" /></span>
                       )}
                       {r.status === 'error' && (
-                        <AlertCircle className="w-4 h-4 text-red-400" />
+                        <AlertCircle className="w-4 h-4 text-destructive" />
                       )}
                     </div>
                   </div>

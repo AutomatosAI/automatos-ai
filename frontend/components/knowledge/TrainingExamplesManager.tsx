@@ -202,7 +202,7 @@ export function TrainingExamplesManager({ sourceId }: TrainingExamplesManagerPro
           </Card>
           <Card className="glass-card">
             <CardContent className="p-3 text-center">
-              <div className="text-2xl font-bold text-yellow-500">
+              <div className="text-2xl font-bold text-warning">
                 {stats.verified_count}
               </div>
               <div className="text-xs text-muted-foreground">Golden SQL</div>
@@ -218,7 +218,7 @@ export function TrainingExamplesManager({ sourceId }: TrainingExamplesManagerPro
           </Card>
           <Card className="glass-card">
             <CardContent className="p-3 text-center">
-              <div className="text-2xl font-bold text-blue-500">
+              <div className="text-2xl font-bold text-info">
                 {stats.auto_generated_count}
               </div>
               <div className="text-xs text-muted-foreground">Auto-generated</div>
@@ -312,7 +312,7 @@ export function TrainingExamplesManager({ sourceId }: TrainingExamplesManagerPro
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
                       {ex.is_verified ? (
-                        <Star className="h-4 w-4 text-yellow-500 fill-yellow-500 shrink-0" />
+                        <Star className="h-4 w-4 text-warning fill-yellow-500 shrink-0" />
                       ) : (
                         <Star className="h-4 w-4 text-muted-foreground shrink-0" />
                       )}
@@ -374,7 +374,7 @@ export function TrainingExamplesManager({ sourceId }: TrainingExamplesManagerPro
                         title="Verify (Golden SQL)"
                         onClick={() => handleVerify(ex.id)}
                       >
-                        <Star className="h-3.5 w-3.5 text-yellow-500" />
+                        <Star className="h-3.5 w-3.5 text-warning" />
                       </Button>
                     )}
                     <Button

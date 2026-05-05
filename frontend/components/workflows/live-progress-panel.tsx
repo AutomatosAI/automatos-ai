@@ -117,18 +117,18 @@ export function LiveProgressPanel({ workflowId, workflowName, isOpen, onClose }:
 
   const getStepColor = (status: string) => {
     switch (status) {
-      case 'completed': return 'text-green-400'
-      case 'running': return 'text-blue-400'
-      case 'pending': return 'text-gray-400'
-      default: return 'text-gray-400'
+      case 'completed': return 'text-success'
+      case 'running': return 'text-info'
+      case 'pending': return 'text-muted-foreground'
+      default: return 'text-muted-foreground'
     }
   }
 
   const getLogLevelColor = (level: string) => {
     switch (level.toLowerCase()) {
-      case 'error': return 'text-red-400'
+      case 'error': return 'text-destructive'
       case 'warning': return 'text-orange-400'
-      case 'info': return 'text-blue-400'
+      case 'info': return 'text-info'
       default: return 'text-muted-foreground'
     }
   }
@@ -163,7 +163,7 @@ export function LiveProgressPanel({ workflowId, workflowName, isOpen, onClose }:
                 variant="outline"
                 size="sm"
                 onClick={() => setAutoRefresh(!autoRefresh)}
-                className={autoRefresh ? 'bg-green-500/10 border-green-500/20' : ''}
+                className={autoRefresh ? 'bg-success/10 border-success/20' : ''}
               >
                 <RefreshCw className={`w-4 h-4 mr-2 ${autoRefresh ? 'animate-spin' : ''}`} />
                 Auto Refresh
@@ -188,8 +188,8 @@ export function LiveProgressPanel({ workflowId, workflowName, isOpen, onClose }:
             {error && (
               <div className="flex items-center justify-center py-12">
                 <div className="text-center">
-                  <AlertTriangle className="h-8 w-8 text-red-400 mx-auto mb-4" />
-                  <p className="text-red-400 mb-4">Error: {error}</p>
+                  <AlertTriangle className="h-8 w-8 text-destructive mx-auto mb-4" />
+                  <p className="text-destructive mb-4">Error: {error}</p>
                   <Button onClick={loadProgressData} variant="outline">
                     Try Again
                   </Button>
@@ -205,7 +205,7 @@ export function LiveProgressPanel({ workflowId, workflowName, isOpen, onClose }:
                     <CardContent className="p-4">
                       <div className="flex items-center space-x-3">
                         <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-                          <Activity className="w-5 h-5 text-blue-400" />
+                          <Activity className="w-5 h-5 text-info" />
                         </div>
                         <div>
                           <p className="text-sm text-muted-foreground">Status</p>
@@ -233,7 +233,7 @@ export function LiveProgressPanel({ workflowId, workflowName, isOpen, onClose }:
                     <CardContent className="p-4">
                       <div className="flex items-center space-x-3">
                         <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-                          <Zap className="w-5 h-5 text-purple-400" />
+                          <Zap className="w-5 h-5 text-agent" />
                         </div>
                         <div>
                           <p className="text-sm text-muted-foreground">ETA</p>
@@ -255,7 +255,7 @@ export function LiveProgressPanel({ workflowId, workflowName, isOpen, onClose }:
                             Step {progressData.progress.current_step_index + 1} of {progressData.progress.total_steps}
                           </p>
                         </div>
-                        <Badge className="bg-blue-500/10 text-blue-400 border-blue-500/20">
+                        <Badge className="bg-info/10 text-info border-info/20">
                           {progressData.progress.percentage}%
                         </Badge>
                       </div>
@@ -303,9 +303,9 @@ export function LiveProgressPanel({ workflowId, workflowName, isOpen, onClose }:
                             </div>
                             
                             <Badge className={
-                              step.status === 'completed' ? 'bg-green-500/10 text-green-400 border-green-500/20' :
-                              step.status === 'running' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
-                              'bg-gray-500/10 text-gray-400 border-gray-500/20'
+                              step.status === 'completed' ? 'bg-success/10 text-success border-success/20' :
+                              step.status === 'running' ? 'bg-info/10 text-info border-info/20' :
+                              'bg-secondary/50 text-muted-foreground border-border/30'
                             }>
                               {step.status}
                             </Badge>
@@ -324,7 +324,7 @@ export function LiveProgressPanel({ workflowId, workflowName, isOpen, onClose }:
                   <CardContent className="p-6">
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <div className="flex items-center space-x-3">
-                        <User className="w-5 h-5 text-blue-400" />
+                        <User className="w-5 h-5 text-info" />
                         <div>
                           <p className="text-sm text-muted-foreground">Agent</p>
                           <p className="font-medium">Agent #{progressData.resources.agent_id}</p>
@@ -332,7 +332,7 @@ export function LiveProgressPanel({ workflowId, workflowName, isOpen, onClose }:
                       </div>
                       
                       <div className="flex items-center space-x-3">
-                        <MemoryStick className="w-5 h-5 text-green-400" />
+                        <MemoryStick className="w-5 h-5 text-success" />
                         <div>
                           <p className="text-sm text-muted-foreground">Memory</p>
                           <p className="font-medium">{progressData.resources.memory_usage}</p>

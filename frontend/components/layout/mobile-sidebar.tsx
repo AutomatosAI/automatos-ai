@@ -154,7 +154,7 @@ export function MobileSidebar({ onNavigate }: MobileSidebarProps) {
                 href={item.href}
                 onClick={onNavigate}
                 className={cn(
-                  'flex items-center gap-3 w-full px-4 py-3 rounded-xl transition-all duration-200',
+                  'flex items-center gap-3 w-full px-4 py-3 rounded-xl transition-all duration-220',
                   'min-h-[48px]',
                   isActive
                     ? 'bg-primary/10 border border-primary/20'
@@ -193,7 +193,7 @@ export function MobileSidebar({ onNavigate }: MobileSidebarProps) {
           href="https://docs.automatos.app"
           target="_blank"
           rel="noopener noreferrer"
-          className="flex items-center gap-3 w-full px-4 py-3 rounded-xl transition-all duration-200 min-h-[48px] hover:bg-secondary/40 active:bg-secondary/60"
+          className="flex items-center gap-3 w-full px-4 py-3 rounded-xl transition-all duration-220 min-h-[48px] hover:bg-secondary/40 active:bg-secondary/60"
         >
           <BookOpen className="w-5 h-5 shrink-0 text-muted-foreground" />
           <p className="text-sm font-medium text-muted-foreground">Docs</p>
@@ -206,7 +206,7 @@ export function MobileSidebar({ onNavigate }: MobileSidebarProps) {
             href="/settings"
             onClick={onNavigate}
             className={cn(
-              'flex items-center gap-3 w-full px-4 py-3 rounded-xl transition-all duration-200 min-h-[48px]',
+              'flex items-center gap-3 w-full px-4 py-3 rounded-xl transition-all duration-220 min-h-[48px]',
               pathname === '/settings'
                 ? 'bg-primary/10 border border-primary/20'
                 : 'hover:bg-secondary/40 active:bg-secondary/60'

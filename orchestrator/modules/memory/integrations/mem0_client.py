@@ -17,21 +17,21 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-# Circuit breaker settings
-_CB_FAILURE_THRESHOLD = 5      # Open circuit after 5 consecutive failures
-_CB_COOLDOWN_SECONDS = 60      # Stay open for 60 seconds before retrying
-_DEFAULT_TIMEOUT = 15           # Seconds — Mem0 calls OpenAI for fact extraction, needs headroom
+# PRD-137 Fix #6: tighter defaults — Mem0 is enrichment, not critical path.
+# Values are read from config.py at Mem0Client init time.
 _MAX_RETRIES = 1                # One retry with backoff
 
 
 class _CircuitBreaker:
     """Simple circuit breaker for Mem0 calls."""
-    __slots__ = ("failures", "last_failure_time", "is_open")
+    __slots__ = ("failures", "last_failure_time", "is_open", "threshold", "cooldown")
 
-    def __init__(self):
+    def __init__(self, threshold: int = 3, cooldown_seconds: int = 300):
         self.failures = 0
         self.last_failure_time = 0.0
         self.is_open = False
+        self.threshold = threshold
+        self.cooldown = cooldown_seconds
 
     def record_success(self):
         self.failures = 0
@@ -40,12 +40,12 @@ class _CircuitBreaker:
     def record_failure(self):
         self.failures += 1
         self.last_failure_time = time.monotonic()
-        if self.failures >= _CB_FAILURE_THRESHOLD:
+        if self.failures >= self.threshold:
             self.is_open = True
             logger.warning(
                 "[Mem0] Circuit breaker OPEN after %d failures — "
                 "skipping Mem0 calls for %ds",
-                self.failures, _CB_COOLDOWN_SECONDS,
+                self.failures, self.cooldown,
             )
 
     def allow_request(self) -> bool:
@@ -53,14 +53,25 @@ class _CircuitBreaker:
             return True
         # Check cooldown
         elapsed = time.monotonic() - self.last_failure_time
-        if elapsed >= _CB_COOLDOWN_SECONDS:
+        if elapsed >= self.cooldown:
             logger.info("[Mem0] Circuit breaker half-open — allowing probe request")
             return True  # Half-open: allow one probe
         return False
 
 
+def _make_breaker() -> _CircuitBreaker:
+    try:
+        from config import config
+        return _CircuitBreaker(
+            threshold=int(getattr(config, "MEM0_CIRCUIT_THRESHOLD", 3)),
+            cooldown_seconds=int(getattr(config, "MEM0_CIRCUIT_COOLDOWN_SECONDS", 300)),
+        )
+    except Exception:
+        return _CircuitBreaker()
+
+
 # Shared circuit breaker instance
-_breaker = _CircuitBreaker()
+_breaker = _make_breaker()
 
 
 class Mem0Client:
@@ -72,28 +83,24 @@ class Mem0Client:
         from config import config
         self.api_url = (api_url or config.MEM0_API_URL or "").strip()
         self.api_key = api_key or config.MEM0_API_KEY
-        self.timeout = _DEFAULT_TIMEOUT
+        self.timeout = float(getattr(config, "MEM0_TIMEOUT_SECONDS", 3.0))
 
         if not self.api_url:
-            logger.error("[Mem0] No API URL configured (MEM0_API_URL). Memory storage disabled.")
+            logger.info(
+                "[Mem0] Disabled — missing MEM0_API_URL. Memory features will be skipped silently.",
+            )
             self.api_url = ""
             self.headers = {}
             return
 
-        # Ensure URL has correct format
         if not self.api_url.startswith("http"):
             self.api_url = f"https://{self.api_url}"
 
         self.api_url = self.api_url.rstrip("/")
 
-        # OpenMemory API mounts routes under /api/v1 prefix
         if "/api/v1" not in self.api_url:
             self.api_url = f"{self.api_url}/api/v1"
-        self.headers = {}
-        if self.api_key:
-            self.headers["Authorization"] = f"Token {self.api_key}"
-        else:
-            logger.error("[Mem0] No API key configured (MEM0_API_KEY). Requests will be unauthenticated.")
+        self.headers = {"Authorization": f"Token {self.api_key}"} if self.api_key else {}
 
         logger.info(f"Initialized Mem0Client with URL: {self.api_url}")
 
@@ -119,12 +126,38 @@ class Mem0Client:
         for attempt in range(_MAX_RETRIES + 1):
             try:
                 resp = requests.request(method, url, **kwargs)
-                _breaker.record_success()
-                return resp
-            except (requests.Timeout, requests.ConnectionError) as e:
-                last_exc = e
+
+                if resp.status_code < 400:
+                    _breaker.record_success()
+                    return resp
+
+                if resp.status_code in (400, 401, 403, 404):
+                    logger.warning(
+                        "[Mem0] Client/config error %d on %s %s — not retrying",
+                        resp.status_code, method.upper(), url,
+                    )
+                    return resp
+
+                # 429 / 5xx — transient, retry then breaker
                 if attempt < _MAX_RETRIES:
-                    wait = 1.5 ** attempt  # 1s, 1.5s
+                    wait = 1.5 ** attempt
+                    logger.warning(
+                        "[Mem0] Transient %d (attempt %d/%d) — retrying in %.1fs",
+                        resp.status_code, attempt + 1, _MAX_RETRIES + 1, wait,
+                    )
+                    time.sleep(wait)
+                    continue
+
+                logger.error(
+                    "[Mem0] Transient %d after %d attempts on %s %s",
+                    resp.status_code, _MAX_RETRIES + 1, method.upper(), url,
+                )
+                _breaker.record_failure()
+                return resp
+
+            except (requests.Timeout, requests.ConnectionError) as e:
+                if attempt < _MAX_RETRIES:
+                    wait = 1.5 ** attempt
                     logger.warning(
                         "[Mem0] Request failed (attempt %d/%d): %s — retrying in %.1fs",
                         attempt + 1, _MAX_RETRIES + 1, e, wait,

@@ -362,13 +362,13 @@ export function InteractiveWorkflowExecution({ workflowId }: { workflowId: numbe
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'running':
-      case 'executing': return 'text-blue-400 bg-blue-500/10 border-blue-500/20'
-      case 'completed': return 'text-green-400 bg-green-500/10 border-green-500/20'
+      case 'executing': return 'text-info bg-info/10 border-info/20'
+      case 'completed': return 'text-success bg-success/10 border-success/20'
       case 'failed':
-      case 'error': return 'text-red-400 bg-red-500/10 border-red-500/20'
+      case 'error': return 'text-destructive bg-destructive/10 border-destructive/20'
       case 'waiting_input': return 'text-orange-400 bg-orange-500/10 border-orange-500/20'
-      case 'paused': return 'text-yellow-400 bg-yellow-500/10 border-yellow-500/20'
-      default: return 'text-gray-400 bg-gray-500/10 border-gray-500/20'
+      case 'paused': return 'text-warning bg-warning/10 border-warning/20'
+      default: return 'text-muted-foreground bg-secondary/50 border-border/30'
     }
   }
 
@@ -406,7 +406,7 @@ export function InteractiveWorkflowExecution({ workflowId }: { workflowId: numbe
                   <Pause className="w-4 h-4 mr-2" />
                   Pause
                 </Button>
-                <Button onClick={stopExecution} variant="outline" className="text-red-400 hover:bg-red-500/10">
+                <Button onClick={stopExecution} variant="outline" className="text-destructive hover:bg-destructive/10">
                   <Square className="w-4 h-4 mr-2" />
                   Stop
                 </Button>
@@ -431,7 +431,7 @@ export function InteractiveWorkflowExecution({ workflowId }: { workflowId: numbe
             variant="outline"
             size="sm"
             onClick={() => setAutoScroll(!autoScroll)}
-            className={autoScroll ? 'bg-blue-500/10 border-blue-500/20' : ''}
+            className={autoScroll ? 'bg-info/10 border-info/20' : ''}
           >
             <Eye className="w-4 h-4 mr-2" />
             Auto-scroll
@@ -642,7 +642,7 @@ export function InteractiveWorkflowExecution({ workflowId }: { workflowId: numbe
 
             <div className="bg-black/20 rounded-lg p-3 max-h-96 overflow-y-auto font-mono text-sm">
               {execution.orchestratorLogs.map((log, index) => (
-                <div key={index} className="text-green-400 mb-1">
+                <div key={index} className="text-success mb-1">
                   {log}
                 </div>
               ))}
@@ -720,7 +720,7 @@ export function InteractiveWorkflowExecution({ workflowId }: { workflowId: numbe
                   <Button
                     variant="outline"
                     onClick={() => handleHumanResponse(selectedInteraction.id, 'rejected')}
-                    className="flex-1 text-red-400 hover:bg-red-500/10"
+                    className="flex-1 text-destructive hover:bg-destructive/10"
                   >
                     <AlertTriangle className="w-4 h-4 mr-2" />
                     Reject

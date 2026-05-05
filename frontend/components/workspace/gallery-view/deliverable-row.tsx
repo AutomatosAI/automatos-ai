@@ -45,9 +45,9 @@ const FALLBACK_ICONS: Record<string, LucideIcon> = {
 }
 
 const FALLBACK_COLORS: Record<string, string> = {
-  archive: 'text-amber-400',
+  archive: 'text-warning',
   audio: 'text-pink-400',
-  video: 'text-red-400',
+  video: 'text-destructive',
 }
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -138,7 +138,7 @@ function DeliverableRowImpl({ deliverable, onClick, className }: DeliverableRowP
       )}
     >
       {/* Icon */}
-      <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted/50', iconColor)}>
+      <div className={cn('flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted/50', iconColor)}>
         {canonicalType ? (
           <DeliverableIcon type={canonicalType} size="row" />
         ) : (

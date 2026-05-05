@@ -521,8 +521,9 @@ class HeartbeatService:
                 request_type="heartbeat",
             )
 
-            # 5. Tool loop (max 5 iterations)
-            max_iterations = 5
+            # 5. Tool loop — budget from system_settings (agent_heartbeat.max_tool_iterations)
+            from config import config as _hb_config
+            max_iterations = _hb_config.AGENT_HEARTBEAT_MAX_TOOL_ITERATIONS
             total_tokens = 0
             executor = PlatformActionExecutor(db, workspace_id)
 

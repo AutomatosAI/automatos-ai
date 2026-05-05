@@ -2,12 +2,10 @@
 
 import * as React from 'react'
 import { useState, useEffect } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import { 
-  X, 
-  Download, 
-  CheckCircle, 
-  AlertTriangle, 
+import {
+  Download,
+  CheckCircle,
+  AlertTriangle,
   Loader2,
   FileDown,
   Pause,
@@ -15,7 +13,12 @@ import {
   StopCircle
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Progress } from '@/components/ui/progress'
 import { Badge } from '@/components/ui/badge'
 
@@ -115,9 +118,9 @@ export function DownloadProgressModal({
       case 'preparing':
         return {
           icon: Loader2,
-          color: 'text-blue-400',
-          bgColor: 'bg-blue-500/10',
-          borderColor: 'border-blue-500/20',
+          color: 'text-info',
+          bgColor: 'bg-info/10',
+          borderColor: 'border-info/20',
           message: 'Preparing download...'
         }
       case 'downloading':
@@ -131,33 +134,33 @@ export function DownloadProgressModal({
       case 'completed':
         return {
           icon: CheckCircle,
-          color: 'text-green-400',
-          bgColor: 'bg-green-500/10',
-          borderColor: 'border-green-500/20',
+          color: 'text-success',
+          bgColor: 'bg-success/10',
+          borderColor: 'border-success/20',
           message: 'Download completed successfully!'
         }
       case 'error':
         return {
           icon: AlertTriangle,
-          color: 'text-red-400',
-          bgColor: 'bg-red-500/10',
-          borderColor: 'border-red-500/20',
+          color: 'text-destructive',
+          bgColor: 'bg-destructive/10',
+          borderColor: 'border-destructive/20',
           message: 'Download failed'
         }
       case 'cancelled':
         return {
           icon: StopCircle,
-          color: 'text-gray-400',
-          bgColor: 'bg-gray-500/10',
-          borderColor: 'border-gray-500/20',
+          color: 'text-muted-foreground',
+          bgColor: 'bg-secondary/50',
+          borderColor: 'border-border/30',
           message: 'Download cancelled'
         }
       default:
         return {
           icon: Loader2,
-          color: 'text-gray-400',
-          bgColor: 'bg-gray-500/10',
-          borderColor: 'border-gray-500/20',
+          color: 'text-muted-foreground',
+          bgColor: 'bg-secondary/50',
+          borderColor: 'border-border/30',
           message: 'Initializing...'
         }
     }
@@ -167,36 +170,19 @@ export function DownloadProgressModal({
 
   const statusInfo = getStatusInfo()
   const StatusIcon = statusInfo.icon
+  const canClose = status === 'completed' || status === 'error' || status === 'cancelled'
 
   return (
-    <AnimatePresence>
-      <motion.div
-        className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        onClick={status === 'completed' || status === 'error' || status === 'cancelled' ? handleClose : undefined}
-      />
-      <motion.div 
-        className="fixed inset-0 z-50 flex items-center justify-center p-4" 
-        initial={{ opacity: 0, scale: 0.95 }} 
-        animate={{ opacity: 1, scale: 1 }} 
-        exit={{ opacity: 0, scale: 0.95 }}
-      >
-        <Card className="glass-card card-glow w-full max-w-md">
-          <CardHeader className="flex flex-row items-center justify-between border-b border-border/30">
-            <CardTitle className="flex items-center space-x-2">
-              <FileDown className="w-5 h-5 text-orange-400" />
-              <span className="text-lg">Download Progress</span>
-            </CardTitle>
-            {(status === 'completed' || status === 'error' || status === 'cancelled') && (
-              <Button variant="ghost" size="icon" onClick={handleClose}>
-                <X className="w-4 h-4" />
-              </Button>
-            )}
-          </CardHeader>
-          
-          <CardContent className="pt-6 space-y-6">
+    <Dialog open={open} onOpenChange={canClose ? handleClose : undefined}>
+      <DialogContent size="sm">
+        <DialogHeader>
+          <DialogTitle className="flex items-center space-x-2">
+            <FileDown className="w-5 h-5 text-primary" />
+            <span>Download Progress</span>
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="pt-2 space-y-6">
             {/* File Info */}
             <div className="text-center">
               <h3 className="font-semibold text-lg mb-2 truncate">{filename}</h3>
@@ -225,13 +211,13 @@ export function DownloadProgressModal({
               <div className="grid grid-cols-2 gap-4 text-center">
                 {speed && (
                   <div className="bg-secondary/30 rounded-lg p-3">
-                    <p className="text-lg font-bold text-blue-400">{speed}</p>
+                    <p className="text-lg font-bold text-info">{speed}</p>
                     <p className="text-xs text-muted-foreground">Download Speed</p>
                   </div>
                 )}
                 {timeRemaining && (
                   <div className="bg-secondary/30 rounded-lg p-3">
-                    <p className="text-lg font-bold text-green-400">{timeRemaining}</p>
+                    <p className="text-lg font-bold text-success">{timeRemaining}</p>
                     <p className="text-xs text-muted-foreground">Time Remaining</p>
                   </div>
                 )}
@@ -240,8 +226,8 @@ export function DownloadProgressModal({
 
             {/* Error Message */}
             {error && (
-              <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3">
-                <p className="text-red-400 text-sm">{error}</p>
+              <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-3">
+                <p className="text-destructive text-sm">{error}</p>
               </div>
             )}
 
@@ -270,17 +256,16 @@ export function DownloadProgressModal({
 
             {/* Completed Success Message */}
             {status === 'completed' && (
-              <div className="text-center bg-green-500/10 border border-green-500/20 rounded-lg p-4">
-                <CheckCircle className="w-8 h-8 text-green-400 mx-auto mb-2" />
-                <p className="text-green-400 font-medium">Download Complete!</p>
+              <div className="text-center bg-success/10 border border-success/20 rounded-lg p-4">
+                <CheckCircle className="w-8 h-8 text-success mx-auto mb-2" />
+                <p className="text-success font-medium">Download Complete!</p>
                 <p className="text-sm text-muted-foreground mt-1">
                   The file has been saved to your Downloads folder.
                 </p>
               </div>
             )}
-          </CardContent>
-        </Card>
-      </motion.div>
-    </AnimatePresence>
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }

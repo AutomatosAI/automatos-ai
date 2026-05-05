@@ -3,10 +3,10 @@
 import { useState, useMemo } from 'react'
 import { motion } from 'framer-motion'
 import { useInView } from 'react-intersection-observer'
-import { 
-  Brain, 
-  Search, 
-  Database, 
+import {
+  Brain,
+  Search,
+  Database,
   Network,
   Eye,
   Settings,
@@ -24,10 +24,11 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { TabsContent } from '@/components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, BarChart as RechartsBarChart, Bar, PieChart, Pie, Cell } from 'recharts'
+import { PageHeader, FilterTabs } from '@/components/shared'
 
 // Import all the context hooks
 import {
@@ -46,9 +47,9 @@ import { PatternDetailsModal } from './pattern-details-modal'
 import { DatabaseQueryAnalytics } from './DatabaseQueryAnalytics'
 
 const confidenceColors = {
-  high: 'text-green-400',
-  medium: 'text-yellow-400',
-  low: 'text-red-400'
+  high: 'text-success',
+  medium: 'text-warning',
+  low: 'text-destructive'
 }
 
 const getConfidenceLevel = (confidence: number) => {
@@ -62,6 +63,7 @@ export function ContextEngineering() {
   const [searchTerm, setSearchTerm] = useState('')
   const [configureModalOpen, setConfigureModalOpen] = useState(false)
   const [selectedPattern, setSelectedPattern] = useState<any>(null)
+  const [activeTab, setActiveTab] = useState('performance')
   const [ref, inView] = useInView({
     triggerOnce: true,
     threshold: 0.1,
@@ -89,14 +91,14 @@ export function ContextEngineering() {
       value: (contextStats as any)?.contextQueries?.toString() || '0',
       change: (contextStats as any)?.lastQueryTime ? `Last: ${new Date((contextStats as any).lastQueryTime).toLocaleTimeString()}` : 'No activity',
       icon: Search,
-      color: 'text-blue-400'
+      color: 'text-info'
     },
     {
       label: 'Retrieval Success',
       value: `${((contextStats as any)?.retrievalSuccess || 0).toFixed(1)}%`,
       change: (contextStats as any)?.systemStatus === 'operational' ? 'System operational' : 'No RAG activity',
       icon: Target,
-      color: 'text-green-400'
+      color: 'text-success'
     },
     {
       label: 'Avg Response Time',
@@ -110,7 +112,7 @@ export function ContextEngineering() {
       value: (contextStats as any)?.vectorEmbeddings?.toString() || '0',
       change: `${(contextStats as any)?.vectorEmbeddings || 0} total chunks`,
       icon: Database,
-      color: 'text-purple-400'
+      color: 'text-agent'
     }
   ], [contextStats])
 
@@ -200,35 +202,26 @@ export function ContextEngineering() {
   return (
     <div className="space-y-8">
       {/* Header */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.8 }}
-        className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3"
-      >
-        <div>
-          <h1 className="text-2xl md:text-3xl font-bold mb-1 md:mb-2">
-            Context <span className="gradient-text">Engineering</span>
-          </h1>
-          <p className="text-muted-foreground text-sm md:text-lg">
-            Monitor RAG system performance and context retrieval patterns
-          </p>
-        </div>
-
-        <div className="flex space-x-2 shrink-0">
-          <Button variant="outline" onClick={handleRefresh} disabled={loading}>
-            <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
-          </Button>
-          <Button 
-            className="gradient-accent hover:opacity-90"
-            onClick={() => setConfigureModalOpen(true)}
-          >
-            <Settings className="w-4 h-4 mr-2" />
-            Configure RAG
-          </Button>
-        </div>
-      </motion.div>
+      <PageHeader
+        title="Context"
+        titleAccent="Engineering"
+        subtitle="Monitor RAG system performance and context retrieval patterns"
+        actions={
+          <>
+            <Button variant="outline" onClick={handleRefresh} disabled={loading}>
+              <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+            <Button
+              className="gradient-accent hover:opacity-90"
+              onClick={() => setConfigureModalOpen(true)}
+            >
+              <Settings className="w-4 h-4 mr-2" />
+              Configure RAG
+            </Button>
+          </>
+        }
+      />
 
       {/* Stats Overview */}
       <motion.div
@@ -256,7 +249,7 @@ export function ContextEngineering() {
                   <div className="text-sm text-muted-foreground truncate">{stat.label}</div>
                 </div>
               </div>
-              <div className="shrink-0 text-right text-xs text-green-400">
+              <div className="shrink-0 text-right text-xs text-success">
                 {loading ? 'Loading…' : stat.change}
               </div>
             </div>
@@ -270,33 +263,18 @@ export function ContextEngineering() {
         animate={inView ? { opacity: 1, y: 0 } : {}}
         transition={{ duration: 0.8, delay: 0.4 }}
       >
-        <Tabs defaultValue="performance" className="space-y-6">
-          <TabsList className="w-full lg:w-auto justify-start gap-1 bg-secondary/50">
-            <TabsTrigger value="performance" className="flex items-center space-x-2">
-              <BarChart className="w-4 h-4" />
-              <span className="hidden sm:inline">Performance</span>
-            </TabsTrigger>
-            <TabsTrigger value="queries" className="flex items-center space-x-2">
-              <Search className="w-4 h-4" />
-              <span className="hidden sm:inline">Query Analysis</span>
-            </TabsTrigger>
-            <TabsTrigger value="database" className="flex items-center space-x-2">
-              <Database className="w-4 h-4" />
-              <span className="hidden sm:inline">Database Analytics</span>
-            </TabsTrigger>
-            <TabsTrigger value="patterns" className="flex items-center space-x-2">
-              <Network className="w-4 h-4" />
-              <span className="hidden sm:inline">Patterns</span>
-            </TabsTrigger>
-            <TabsTrigger value="optimization" className="flex items-center space-x-2">
-              <Brain className="w-4 h-4" />
-              <span className="hidden sm:inline">Optimization</span>
-            </TabsTrigger>
-            <TabsTrigger value="rag" className="flex items-center space-x-2">
-              <Zap className="w-4 h-4" />
-              <span className="hidden sm:inline">RAG Context</span>
-            </TabsTrigger>
-          </TabsList>
+        <FilterTabs
+          tabs={[
+            { value: 'performance', label: 'Performance', icon: BarChart },
+            { value: 'queries', label: 'Query Analysis', icon: Search },
+            { value: 'database', label: 'Database Analytics', icon: Database },
+            { value: 'patterns', label: 'Patterns', icon: Network },
+            { value: 'optimization', label: 'Optimization', icon: Brain },
+            { value: 'rag', label: 'RAG Context', icon: Zap },
+          ]}
+          value={activeTab}
+          onValueChange={setActiveTab}
+        >
 
           <TabsContent value="performance" className="space-y-6">
             {/* Performance Charts */}
@@ -665,14 +643,14 @@ export function ContextEngineering() {
                     <div className="flex items-center justify-between p-4 bg-secondary/30 rounded-lg">
                       <div className="flex items-center gap-3">
                         <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                          (optimizationData as any).system_health === 'healthy' ? 'bg-green-500/20' :
-                          (optimizationData as any).system_health === 'needs_attention' ? 'bg-yellow-500/20' :
-                          'bg-red-500/20'
+                          (optimizationData as any).system_health === 'healthy' ? 'bg-success/20' :
+                          (optimizationData as any).system_health === 'needs_attention' ? 'bg-warning/20' :
+                          'bg-destructive/20'
                         }`}>
                           <Activity className={`w-5 h-5 ${
-                            (optimizationData as any).system_health === 'healthy' ? 'text-green-500' :
-                            (optimizationData as any).system_health === 'needs_attention' ? 'text-yellow-500' :
-                            'text-red-500'
+                            (optimizationData as any).system_health === 'healthy' ? 'text-success' :
+                            (optimizationData as any).system_health === 'needs_attention' ? 'text-warning' :
+                            'text-destructive'
                           }`} />
                         </div>
                         <div>
@@ -709,18 +687,18 @@ export function ContextEngineering() {
                           animate={{ opacity: 1, x: 0 }}
                           transition={{ delay: index * 0.1 }}
                           className={`p-4 border rounded-lg ${
-                            rec.type === 'error' ? 'border-red-500/20 bg-red-500/5' :
-                            rec.type === 'warning' ? 'border-yellow-500/20 bg-yellow-500/5' :
-                            rec.type === 'success' ? 'border-green-500/20 bg-green-500/5' :
-                            'border-blue-500/20 bg-blue-500/5'
+                            rec.type === 'error' ? 'border-destructive/20 bg-destructive/5' :
+                            rec.type === 'warning' ? 'border-warning/20 bg-warning/5' :
+                            rec.type === 'success' ? 'border-success/20 bg-success/5' :
+                            'border-info/20 bg-info/5'
                           }`}
                         >
                           <div className="flex items-start gap-3">
                             <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
-                              rec.type === 'error' ? 'bg-red-500/20' :
-                              rec.type === 'warning' ? 'bg-yellow-500/20' :
-                              rec.type === 'success' ? 'bg-green-500/20' :
-                              'bg-blue-500/20'
+                              rec.type === 'error' ? 'bg-destructive/20' :
+                              rec.type === 'warning' ? 'bg-warning/20' :
+                              rec.type === 'success' ? 'bg-success/20' :
+                              'bg-info/20'
                             }`}>
                               {rec.type === 'error' ? '✗' :
                                rec.type === 'warning' ? '⚠' :
@@ -771,7 +749,7 @@ export function ContextEngineering() {
           <TabsContent value="rag" className="space-y-6">
             <RAGContextBuilder />
           </TabsContent>
-        </Tabs>
+        </FilterTabs>
       </motion.div>
 
       {/* Configure RAG Modal */}

@@ -4,10 +4,10 @@ import React from "react"
 import { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { useInView } from 'react-intersection-observer'
-import { 
-  Bot, 
-  FileText, 
-  GitBranch, 
+import {
+  Bot,
+  FileText,
+  GitBranch,
   Activity,
   TrendingUp,
   Clock,
@@ -27,6 +27,7 @@ import {
 
 // Import API hooks
 import { useSystemHealth, useSystemMetrics, useAgents, useDocuments, useWorkflows } from '@/hooks/use-api'
+import { PageHeader } from '@/components/shared'
 
 // Import PRD06 widgets
 import { ContextOptimizationPanel } from './widgets/context-optimization-panel'
@@ -247,29 +248,24 @@ export function Dashboard() {
     <div className="min-h-screen gradient-bg">
       <div className="max-w-7xl mx-auto p-8 space-y-8">
         {/* Header */}
-        <motion.div
-          ref={ref}
-          initial={{ opacity: 0, y: 20 }}
-          animate={inView ? { opacity: 1, y: 0 } : {}}
-          transition={{ duration: 0.8 }}
-          className="text-center"
-        >
-          <h1 className="text-4xl font-bold text-foreground mb-2">
-            🚀 Automatos AI Dashboard
-          </h1>
-          <p className="text-muted-foreground text-lg">
-            Real-time monitoring and analytics for your multi-agent platform
-          </p>
-          <div className="flex items-center justify-center gap-4 mt-4">
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 bg-green-400 rounded-full animate-pulse"></div>
-              <span className="text-green-400 text-sm font-medium">System Online</span>
-            </div>
-            <div className="text-muted-foreground text-sm">
-              Last updated: {data?.timestamp ? new Date(data.timestamp).toLocaleTimeString() : 'Unknown'}
-            </div>
-          </div>
-        </motion.div>
+        <div ref={ref}>
+          <PageHeader
+            title="Automatos AI"
+            titleAccent="Dashboard"
+            subtitle="Real-time monitoring and analytics for your multi-agent platform"
+            actions={
+              <>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 bg-green-400 rounded-full animate-pulse"></div>
+                  <span className="text-green-400 text-sm font-medium">System Online</span>
+                </div>
+                <div className="text-muted-foreground text-sm">
+                  Last updated: {data?.timestamp ? new Date(data.timestamp).toLocaleTimeString() : 'Unknown'}
+                </div>
+              </>
+            }
+          />
+        </div>
 
         {/* Main Metrics Grid */}
         <motion.div

@@ -7,10 +7,10 @@ import { cn } from '@/lib/utils'
 
 // Stable colour palette for agents (hashed by name)
 const AGENT_COLORS = [
-  { bg: 'bg-blue-500/20', border: 'border-blue-500/40', text: 'text-blue-300' },
-  { bg: 'bg-purple-500/20', border: 'border-purple-500/40', text: 'text-purple-300' },
-  { bg: 'bg-emerald-500/20', border: 'border-emerald-500/40', text: 'text-emerald-300' },
-  { bg: 'bg-amber-500/20', border: 'border-amber-500/40', text: 'text-amber-300' },
+  { bg: 'bg-info/20', border: 'border-info/40', text: 'text-info/80' },
+  { bg: 'bg-agent/20', border: 'border-agent/40', text: 'text-agent/80' },
+  { bg: 'bg-success/20', border: 'border-success/40', text: 'text-success/80' },
+  { bg: 'bg-warning/20', border: 'border-warning/40', text: 'text-amber-300' },
   { bg: 'bg-rose-500/20', border: 'border-rose-500/40', text: 'text-rose-300' },
   { bg: 'bg-cyan-500/20', border: 'border-cyan-500/40', text: 'text-cyan-300' },
   { bg: 'bg-orange-500/20', border: 'border-orange-500/40', text: 'text-orange-300' },

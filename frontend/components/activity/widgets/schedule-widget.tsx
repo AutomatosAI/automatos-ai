@@ -71,7 +71,7 @@ function UpcomingList({ items }: { items: ScheduleItem[] }) {
   }
 
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-2">
       {items.slice(0, 5).map((item) => {
         const nextRun = item.next_run_at ? parseISO(item.next_run_at) : null
         const timeStr = nextRun ? format(nextRun, 'HH:mm') : '--:--'

@@ -420,13 +420,13 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
                 if (!archData && !archLoading) fetchArchitecture()
                 setViewMode('heatmap')
               }}
-              className={`px-2 py-1 rounded text-xs transition-colors flex items-center gap-1 ${viewMode === 'heatmap' ? 'bg-red-600 text-white' : 'bg-secondary/80 text-muted-foreground hover:text-white'} ${archLoading ? 'opacity-50' : ''}`}
+              className={`px-2 py-1 rounded text-xs transition-colors flex items-center gap-1 ${viewMode === 'heatmap' ? 'bg-destructive text-white' : 'bg-secondary/80 text-muted-foreground hover:text-white'} ${archLoading ? 'opacity-50' : ''}`}
               title="Heatmap by complexity (green=low, red=high)"
             >
               <Flame className="w-3 h-3" /> Heatmap {archLoading && '...'}
             </button>
             {archData && archData.hotspots.length > 0 && (
-              <span className="ml-2 px-2 py-0.5 bg-yellow-900/50 text-yellow-400 text-xs rounded flex items-center gap-1">
+              <span className="ml-2 px-2 py-0.5 bg-yellow-900/50 text-warning text-xs rounded flex items-center gap-1">
                 <AlertTriangle className="w-3 h-3" /> {archData.hotspots.length} hotspots
               </span>
             )}
@@ -610,7 +610,7 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
                 {selectedNode.signature && (
                   <div>
                     <div className="text-muted-foreground text-xs mb-1">Signature</div>
-                    <pre className="bg-secondary/80 p-2 rounded text-xs text-green-400 overflow-x-auto">
+                    <pre className="bg-secondary/80 p-2 rounded text-xs text-success overflow-x-auto">
                       {selectedNode.signature}
                     </pre>
                   </div>

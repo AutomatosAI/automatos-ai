@@ -332,7 +332,7 @@ export function LandingPage() {
               whileHover={{ scale: 1.05, rotateY: 5 }}
               transition={{ duration: 0.3 }}
             >
-              <Card className="glass-card h-full border-0 text-center p-6 hover:shadow-2xl hover:shadow-orange-500/20">
+              <Card className="glass-card h-full border-0 text-center p-6">
                 <div className="w-12 h-12 mx-auto mb-4 rounded-xl bg-gradient-to-br from-orange-500 to-red-500 flex items-center justify-center">
                   <func.icon className="w-6 h-6 text-white" />
                 </div>
@@ -374,7 +374,7 @@ export function LandingPage() {
               whileHover={{ scale: 1.02 }}
               transition={{ duration: 0.3 }}
             >
-              <Card className="glass-card border-0 p-6 hover:shadow-xl">
+              <Card className="glass-card border-0 p-6">
                 <div className="flex items-start space-x-4">
                   <div className={`w-12 h-12 rounded-xl bg-black/20 flex items-center justify-center`}>
                     <feature.icon className={`w-6 h-6 ${feature.color}`} />
@@ -430,7 +430,7 @@ export function LandingPage() {
               whileHover={{ scale: 1.05, y: -10 }}
               transition={{ duration: 0.3 }}
             >
-              <Card className="glass-card border-0 text-center p-6 h-full hover:shadow-2xl hover:shadow-green-500/20">
+              <Card className="glass-card border-0 text-center p-6 h-full">
                 <div className="w-12 h-12 mx-auto mb-4 rounded-xl bg-gradient-to-br from-green-500 to-emerald-500 flex items-center justify-center">
                   <feature.icon className="w-6 h-6 text-white" />
                 </div>

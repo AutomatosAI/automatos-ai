@@ -193,7 +193,7 @@ export function PatternDetailsModal({ isOpen, onClose, pattern }: PatternDetails
                         <p className="text-sm text-muted-foreground">Usage</p>
                         <p className="text-2xl font-bold">{pattern.usage}</p>
                       </div>
-                      <Target className="w-8 h-8 text-blue-400" />
+                      <Target className="w-8 h-8 text-info" />
                     </div>
                   </CardContent>
                 </Card>
@@ -205,7 +205,7 @@ export function PatternDetailsModal({ isOpen, onClose, pattern }: PatternDetails
                         <p className="text-sm text-muted-foreground">Accuracy</p>
                         <p className="text-2xl font-bold">{pattern.accuracy}%</p>
                       </div>
-                      <TrendingUp className="w-8 h-8 text-green-400" />
+                      <TrendingUp className="w-8 h-8 text-success" />
                     </div>
                   </CardContent>
                 </Card>
@@ -217,7 +217,7 @@ export function PatternDetailsModal({ isOpen, onClose, pattern }: PatternDetails
                         <p className="text-sm text-muted-foreground">Avg Sources</p>
                         <p className="text-2xl font-bold">{pattern.avgSources}</p>
                       </div>
-                      <Database className="w-8 h-8 text-purple-400" />
+                      <Database className="w-8 h-8 text-agent" />
                     </div>
                   </CardContent>
                 </Card>
@@ -457,7 +457,7 @@ export function PatternDetailsModal({ isOpen, onClose, pattern }: PatternDetails
                   {testResults && (
                     <div className="mt-4 p-4 bg-secondary/30 rounded-lg">
                       {testResults.error ? (
-                        <div className="text-red-500 text-sm">
+                        <div className="text-destructive text-sm">
                           <AlertCircle className="w-4 h-4 inline mr-2" />
                           {testResults.error}
                         </div>

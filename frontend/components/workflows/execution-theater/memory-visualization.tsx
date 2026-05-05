@@ -30,7 +30,7 @@ export function MemoryVisualization({
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-border/50">
           <div className="flex items-center space-x-2">
-            <Brain className="w-5 h-5 text-purple-400" />
+            <Brain className="w-5 h-5 text-agent" />
             <h2 className="font-semibold">Memory Network</h2>
           </div>
           <Button variant="ghost" size="icon" onClick={onClose}>
@@ -42,14 +42,14 @@ export function MemoryVisualization({
         <ScrollArea className="flex-1 p-4">
           <div className="space-y-4">
             {/* Collective Memory (Shared) */}
-            <Card className="glass-card border-purple-500/20">
+            <Card className="glass-card border-agent/20">
               <CardHeader>
                 <CardTitle className="text-sm flex items-center justify-between">
                   <span className="flex items-center">
-                    <Users className="w-4 h-4 mr-2 text-purple-400" />
+                    <Users className="w-4 h-4 mr-2 text-agent" />
                     Collective Memory
                   </span>
-                  <Badge className="bg-purple-500/10 text-purple-400">
+                  <Badge className="bg-agent/10 text-agent">
                     Shared
                   </Badge>
                 </CardTitle>
@@ -97,7 +97,7 @@ export function MemoryVisualization({
                 <CardHeader>
                   <CardTitle className="text-sm flex items-center justify-between">
                     <span className="flex items-center">
-                      <Brain className="w-4 h-4 mr-2 text-blue-400" />
+                      <Brain className="w-4 h-4 mr-2 text-info" />
                       {agent.name}
                     </span>
                     <Badge variant="outline" className="text-xs">
@@ -138,11 +138,11 @@ export function MemoryVisualization({
                     </div>
                     <div className="space-y-1">
                       <div className="flex items-center justify-between text-xs">
-                        <span className="text-green-400">✓ Stored</span>
+                        <span className="text-success">✓ Stored</span>
                         <span className="text-muted-foreground">current_analysis</span>
                       </div>
                       <div className="flex items-center justify-between text-xs">
-                        <span className="text-blue-400">→ Retrieved</span>
+                        <span className="text-info">→ Retrieved</span>
                         <span className="text-muted-foreground">api_patterns</span>
                       </div>
                     </div>
@@ -171,7 +171,7 @@ export function MemoryVisualization({
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Storage Used:</span>
-                  <span className="font-medium text-green-400">2.3 GB</span>
+                  <span className="font-medium text-success">2.3 GB</span>
                 </div>
               </CardContent>
             </Card>
@@ -198,7 +198,7 @@ function MemoryItem({
       <div className="flex-1 min-w-0">
         <div className="font-medium truncate">{name}</div>
         <div className="text-muted-foreground">
-          <span className="text-purple-400">{source}</span> • {type}
+          <span className="text-agent">{source}</span> • {type}
         </div>
       </div>
       <Badge variant="outline" className="text-xs ml-2">
@@ -224,9 +224,9 @@ function MemoryLevel({
   const percentage = typeof capacity === 'number' ? (count / capacity) * 100 : 0
 
   const colorClasses = {
-    blue: 'text-blue-400 bg-blue-500/10',
-    green: 'text-green-400 bg-green-500/10',
-    purple: 'text-purple-400 bg-purple-500/10'
+    blue: 'text-info bg-info/10',
+    green: 'text-success bg-success/10',
+    purple: 'text-agent bg-agent/10'
   }
 
   return (
@@ -239,9 +239,9 @@ function MemoryLevel({
         <span className="font-medium">{count} {capacity !== '∞' && `/ ${capacity}`}</span>
       </div>
       {capacity !== '∞' && (
-        <div className="h-1 bg-gray-700 rounded-full overflow-hidden">
+        <div className="h-1 bg-secondary rounded-full overflow-hidden">
           <div 
-            className={`h-full ${colorClasses[color as keyof typeof colorClasses]} transition-all duration-500`}
+            className={`h-full ${colorClasses[color as keyof typeof colorClasses]} transition-all duration-300`}
             style={{ width: `${percentage}%` }}
           />
         </div>

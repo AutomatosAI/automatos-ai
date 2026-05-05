@@ -53,25 +53,25 @@ import { useViewMode } from '@/hooks/use-view-mode'
 const documentTypes = {
   pdf: {
     icon: FileText,
-    color: 'text-red-500',
+    color: 'text-destructive',
     bgColor: 'bg-red-50',
     name: 'PDF Document'
   },
   image: {
     icon: FileImage,
-    color: 'text-green-500',
+    color: 'text-success',
     bgColor: 'bg-green-50',
     name: 'Image'
   },
   video: {
     icon: FileVideo,
-    color: 'text-purple-500',
+    color: 'text-agent',
     bgColor: 'bg-purple-50',
     name: 'Video'
   },
   audio: {
     icon: FileAudio,
-    color: 'text-blue-500',
+    color: 'text-info',
     bgColor: 'bg-blue-50',
     name: 'Audio'
   },
@@ -83,17 +83,17 @@ const documentTypes = {
   },
   text: {
     icon: FileText,
-    color: 'text-gray-500',
+    color: 'text-muted-foreground',
     bgColor: 'bg-gray-50',
     name: 'Text Document'
   }
 }
 
 const statusStyles = {
-  completed: 'bg-green-500/10 text-green-400 border-green-500/20',
-  processing: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-  failed: 'bg-red-500/10 text-red-400 border-red-500/20',
-  pending: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20'
+  completed: 'bg-success/10 text-success border-success/20',
+  processing: 'bg-info/10 text-info border-info/20',
+  failed: 'bg-destructive/10 text-destructive border-destructive/20',
+  pending: 'bg-warning/10 text-warning border-warning/20'
 }
 
 interface DocumentLibraryProps {
@@ -329,7 +329,7 @@ export function DocumentLibrary({
               >
                 <Card
                   data-testid="doc-card"
-                  className={`glass-card cursor-pointer transition-all duration-300 hover:border-primary/20 ${
+                  className={`glass-card card-glow cursor-pointer transition-all duration-300 hover:border-primary/20 ${
                     selectedDocumentId === document.id ? 'border-primary' : ''
                   }`}
                 >
@@ -398,7 +398,7 @@ export function DocumentLibrary({
                             <DropdownMenuSeparator />
                             
                             <DropdownMenuItem 
-                              className="text-red-600"
+                              className="text-destructive"
                               onClick={() => handleDelete(document.id, document.name)}
                             >
                               <Trash2 className="w-4 h-4 mr-2" />
@@ -490,7 +490,7 @@ export function DocumentLibrary({
               >
                 <Card
                   data-testid="doc-card"
-                  className={`glass-card cursor-pointer transition-all duration-300 hover:border-primary/20 ${
+                  className={`glass-card card-glow cursor-pointer transition-all duration-300 hover:border-primary/20 ${
                     selectedDocumentId === document.id ? 'border-primary' : ''
                   }`}
                   onClick={() => onDocumentSelect(document.id)}
@@ -545,7 +545,7 @@ export function DocumentLibrary({
                           </DropdownMenuItem>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem 
-                            className="text-red-600"
+                            className="text-destructive"
                             onClick={() => handleDelete(document.id, document.name)}
                           >
                             <Trash2 className="w-4 h-4 mr-2" />

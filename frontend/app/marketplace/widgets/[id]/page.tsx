@@ -128,7 +128,7 @@ function RatingStars({ average, count, size = 'sm' }: { average: number; count: 
             key={star}
             className={`${sizeClass} ${
               star <= Math.round(average)
-                ? 'fill-yellow-400 text-yellow-400'
+                ? 'fill-warning text-warning'
                 : 'text-muted-foreground/40'
             }`}
           />
@@ -223,7 +223,7 @@ function ReviewItem({ review }: { review: Review }) {
               key={star}
               className={`h-3.5 w-3.5 ${
                 star <= review.rating
-                  ? 'fill-yellow-400 text-yellow-400'
+                  ? 'fill-warning text-warning'
                   : 'text-muted-foreground/40'
               }`}
             />
@@ -290,7 +290,7 @@ function ReviewForm({ widgetId, onSubmitted }: { widgetId: string; onSubmitted: 
               <Star
                 className={`h-6 w-6 transition-colors ${
                   star <= (hoverRating || rating)
-                    ? 'fill-yellow-400 text-yellow-400'
+                    ? 'fill-warning text-warning'
                     : 'text-muted-foreground/40 hover:text-muted-foreground/60'
                 }`}
               />

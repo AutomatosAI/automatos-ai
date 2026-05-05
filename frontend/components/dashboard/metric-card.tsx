@@ -34,7 +34,7 @@ export function MetricCard({
         </div>
         
         <div className={`flex items-center space-x-1 text-sm ${
-          changeType === 'positive' ? 'text-green-400' : changeType === 'negative' ? 'text-red-400' : 'text-gray-400'
+          changeType === 'positive' ? 'text-success' : changeType === 'negative' ? 'text-destructive' : 'text-muted-foreground'
         }`}>
           {changeType === 'positive' ? (
             <TrendingUp className="w-4 h-4" />

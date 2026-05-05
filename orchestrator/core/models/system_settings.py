@@ -43,6 +43,12 @@ class SettingCategory(str, Enum):
     MONITORING = "monitoring"
     LLM_COST_AUDIT = "llm_cost_audit"  # Cost tracking, budget alerts
 
+    # Tool-loop limits (chatbot conversational + recipe step + heartbeat + coordinator)
+    CHATBOT = "chatbot"
+    RECIPE = "recipe"
+    AGENT_HEARTBEAT = "agent_heartbeat"
+    COORDINATOR = "coordinator"
+
 
 class SystemSetting(Base):
     """System-wide configuration settings"""

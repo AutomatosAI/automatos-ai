@@ -64,7 +64,7 @@ export function ToolSuggestionBar({
         'px-12', // Indent from edges
 
         // Animation
-        'animate-in fade-in slide-in-from-bottom-2 duration-200',
+        'animate-in fade-in slide-in-from-bottom-2 duration-220',
 
         className
       )}

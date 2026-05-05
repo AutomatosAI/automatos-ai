@@ -137,7 +137,7 @@ export function PlaybookScheduleConfig({ webhookId }: PlaybookScheduleConfigProp
                 key={st.value}
                 type="button"
                 onClick={() => updateSchedule('type', st.value)}
-                className={`p-4 rounded-xl border text-left text-sm transition-all duration-200 ${
+                className={`p-4 rounded-xl border text-left text-sm transition-all duration-220 ${
                   scheduleConfig.type === st.value
                     ? 'border-primary bg-primary/10 text-foreground'
                     : 'border-border/30 bg-secondary/50 text-muted-foreground hover:border-border/60'
@@ -280,7 +280,7 @@ export function PlaybookScheduleConfig({ webhookId }: PlaybookScheduleConfigProp
                     variant="outline"
                     size="icon"
                     onClick={handleCopyWebhook}
-                    className={`shrink-0 rounded-xl transition-all duration-200 ${
+                    className={`shrink-0 rounded-xl transition-all duration-220 ${
                       copied
                         ? 'border-[hsl(var(--success))] text-[hsl(var(--success))]'
                         : 'border-primary/50 hover:border-primary hover:shadow-[0_0_12px_hsl(var(--primary)/0.3)]'

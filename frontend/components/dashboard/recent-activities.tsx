@@ -58,11 +58,11 @@ export function RecentActivities() {
             <div key={activity.id} className="flex items-start space-x-3 p-3 rounded-lg bg-secondary/20">
               <div className="flex-shrink-0">
                 {activity.status === 'success' ? (
-                  <CheckCircle className="w-5 h-5 text-green-400" />
+                  <CheckCircle className="w-5 h-5 text-success" />
                 ) : activity.status === 'warning' ? (
-                  <AlertCircle className="w-5 h-5 text-yellow-400" />
+                  <AlertCircle className="w-5 h-5 text-warning" />
                 ) : (
-                  <Clock className="w-5 h-5 text-blue-400" />
+                  <Clock className="w-5 h-5 text-info" />
                 )}
               </div>
               <div className="flex-1 min-w-0">

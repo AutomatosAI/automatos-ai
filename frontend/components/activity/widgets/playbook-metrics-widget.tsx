@@ -60,7 +60,7 @@ export function PlaybookMetricsWidget({ period, className }: PlaybookMetricsWidg
                   <td className="py-1.5 text-right text-muted-foreground">{pb.runs}</td>
                   <td className={cn(
                     'py-1.5 text-right font-medium',
-                    pb.success_pct >= 90 ? 'text-emerald-400' : pb.success_pct >= 70 ? 'text-amber-400' : 'text-red-400'
+                    pb.success_pct >= 90 ? 'text-success' : pb.success_pct >= 70 ? 'text-warning' : 'text-destructive'
                   )}>
                     {pb.success_pct}%
                   </td>

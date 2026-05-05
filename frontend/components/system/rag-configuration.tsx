@@ -158,7 +158,7 @@ export function RAGConfiguration() {
               configs.map((config, index) => (
                 <motion.div
                   key={config.id}
-                  className={`p-4 rounded-lg border cursor-pointer transition-all duration-200 ${
+                  className={`p-4 rounded-lg border cursor-pointer transition-all duration-220 ${
                     selectedConfig?.id === config.id
                       ? 'border-primary/50 bg-primary/5'
                       : 'border-border/50 hover:border-primary/20'

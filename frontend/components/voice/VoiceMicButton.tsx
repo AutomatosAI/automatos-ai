@@ -61,7 +61,7 @@ export function VoiceMicButton({
             initial={{ opacity: 0, x: -4 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -4 }}
-            className="mr-1.5 text-xs tabular-nums font-mono text-red-400"
+            className="mr-1.5 text-xs tabular-nums font-mono text-destructive"
           >
             {formatDuration(durationMs)}
           </motion.span>
@@ -77,7 +77,7 @@ export function VoiceMicButton({
         className={[
           'h-8 w-8 p-0 relative',
           isRecording
-            ? 'text-red-400 hover:text-red-300'
+            ? 'text-destructive hover:text-destructive/80'
             : 'text-muted-foreground hover:text-foreground',
         ].join(' ')}
         title={
@@ -100,7 +100,7 @@ export function VoiceMicButton({
                 repeat: Infinity,
                 ease: 'easeOut',
               }}
-              className="absolute inset-0 rounded-full bg-red-500/30"
+              className="absolute inset-0 rounded-full bg-destructive/30"
             />
           )}
         </AnimatePresence>

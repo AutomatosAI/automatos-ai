@@ -3,17 +3,15 @@
 
 import * as React from 'react'
 import { useState, useEffect } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import { 
-  X, 
-  FileText, 
-  Calendar, 
-  Database, 
-  HardDrive, 
-  Clock, 
-  CheckCircle, 
-  AlertTriangle, 
-  Info, 
+import {
+  FileText,
+  Calendar,
+  Database,
+  HardDrive,
+  Clock,
+  CheckCircle,
+  AlertTriangle,
+  Info,
   Download,
   Eye,
   Trash2,
@@ -22,6 +20,12 @@ import {
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Separator } from '@/components/ui/separator'
 import { Progress } from '@/components/ui/progress'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -159,56 +163,40 @@ export function DocumentDetailsModal({
   if (!open || !documentId) return null
 
   return (
-    <AnimatePresence>
-      <motion.div
-        className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        onClick={onClose}
-      />
-      <motion.div 
-        className="fixed inset-0 z-50 flex items-center justify-center p-4" 
-        initial={{ opacity: 0, scale: 0.95 }} 
-        animate={{ opacity: 1, scale: 1 }} 
-        exit={{ opacity: 0, scale: 0.95 }}
-      >
-        <Card className="glass-card card-glow w-full max-w-4xl max-h-[90vh] overflow-hidden">
-          <CardHeader className="flex flex-row items-center justify-between border-b border-border/30">
-            <CardTitle className="flex items-center space-x-2">
-              <FileText className="w-6 h-6 text-orange-400" />
-              <span>Document Details</span>
-            </CardTitle>
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent size="lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center justify-between">
             <div className="flex items-center space-x-2">
-              {document && (
-                <>
-                  <Button 
-                    variant="outline" 
-                    size="sm"
-                    onClick={handleDownload}
-                    className="hover:border-blue-500/50"
-                  >
-                    <Download className="w-4 h-4 mr-2" />
-                    Download
-                  </Button>
-                  <Button 
-                    variant="outline" 
-                    size="sm"
-                    onClick={handleDelete}
-                    className="hover:border-red-500/50 text-red-400"
-                  >
-                    <Trash2 className="w-4 h-4 mr-2" />
-                    Delete
-                  </Button>
-                </>
-              )}
-              <Button variant="ghost" size="icon" onClick={onClose}>
-                <X className="w-5 h-5" />
-              </Button>
+              <FileText className="w-6 h-6 text-primary" />
+              <span>Document Details</span>
             </div>
-          </CardHeader>
-          
-          <CardContent className="overflow-y-auto p-0">
+            {document && (
+              <div className="flex items-center space-x-2 mr-8">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleDownload}
+                  className="hover:border-blue-500/50"
+                >
+                  <Download className="w-4 h-4 mr-2" />
+                  Download
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleDelete}
+                  className="hover:border-red-500/50 text-red-400"
+                >
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  Delete
+                </Button>
+              </div>
+            )}
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="overflow-y-auto">
             {loading && (
               <div className="flex items-center justify-center py-12">
                 <div className="text-center">
@@ -473,9 +461,8 @@ export function DocumentDetailsModal({
                 </TabsContent>
               </Tabs>
             )}
-          </CardContent>
-        </Card>
-      </motion.div>
-    </AnimatePresence>
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }

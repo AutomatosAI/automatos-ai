@@ -44,9 +44,9 @@ interface ProviderCardsProps {
 }
 
 const providerIcons: Record<string, { icon: React.ComponentType<any>, color: string }> = {
-  manual: { icon: HardDrive, color: 'text-blue-400' },
-  googledrive: { icon: Cloud, color: 'text-green-400' },
-  dropbox: { icon: Database, color: 'text-blue-500' },
+  manual: { icon: HardDrive, color: 'text-info' },
+  googledrive: { icon: Cloud, color: 'text-success' },
+  dropbox: { icon: Database, color: 'text-info' },
   onedrive: { icon: Cloud, color: 'text-blue-600' },
   box: { icon: Database, color: 'text-indigo-400' }
 }
@@ -87,7 +87,7 @@ export function ProviderCards({ providers, onProviderClick }: ProviderCardsProps
               className="h-full"
             >
               <Card
-                className="glass-card hover:border-primary/20 transition-all duration-300 cursor-pointer group h-full min-h-[280px] flex flex-col"
+                className="card-glow hover:border-primary/20 transition-all duration-300 cursor-pointer group h-full min-h-[280px] flex flex-col"
                 onClick={() => onProviderClick(provider)}
               >
                 <CardContent className="p-6 flex flex-col h-full">
@@ -113,8 +113,8 @@ export function ProviderCards({ providers, onProviderClick }: ProviderCardsProps
                         <div className="flex items-center gap-2 mt-1">
                           {provider.connected ? (
                             <>
-                              <CheckCircle className="w-4 h-4 text-green-400" />
-                              <span className="text-xs text-green-400">Connected</span>
+                              <CheckCircle className="w-4 h-4 text-success" />
+                              <span className="text-xs text-success">Connected</span>
                             </>
                           ) : (
                             <>

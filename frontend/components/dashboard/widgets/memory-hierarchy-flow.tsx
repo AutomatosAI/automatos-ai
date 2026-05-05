@@ -47,9 +47,9 @@ export function MemoryHierarchyFlow({ data }: MemoryHierarchyFlowProps) {
             <div className="flex items-center justify-between">
               {/* Working Memory */}
               <div className="text-center flex-1">
-                <div className="w-20 h-20 mx-auto rounded-full bg-blue-500/10 flex items-center justify-center">
+                <div className="w-20 h-20 mx-auto rounded-full bg-info/10 flex items-center justify-center">
                   <div className="text-center">
-                    <p className="text-2xl font-bold text-blue-500">
+                    <p className="text-2xl font-bold text-info">
                       {data.working_memory_count}
                     </p>
                   </div>
@@ -66,9 +66,9 @@ export function MemoryHierarchyFlow({ data }: MemoryHierarchyFlowProps) {
 
               {/* Short-term Memory */}
               <div className="text-center flex-1">
-                <div className="w-20 h-20 mx-auto rounded-full bg-green-500/10 flex items-center justify-center">
+                <div className="w-20 h-20 mx-auto rounded-full bg-success/10 flex items-center justify-center">
                   <div className="text-center">
-                    <p className="text-2xl font-bold text-green-500">
+                    <p className="text-2xl font-bold text-success">
                       {data.short_term_count}
                     </p>
                   </div>
@@ -85,9 +85,9 @@ export function MemoryHierarchyFlow({ data }: MemoryHierarchyFlowProps) {
 
               {/* Long-term Memory */}
               <div className="text-center flex-1">
-                <div className="w-20 h-20 mx-auto rounded-full bg-purple-500/10 flex items-center justify-center">
+                <div className="w-20 h-20 mx-auto rounded-full bg-agent/10 flex items-center justify-center">
                   <div className="text-center">
-                    <p className="text-2xl font-bold text-purple-500">
+                    <p className="text-2xl font-bold text-agent">
                       {data.long_term_count}
                     </p>
                   </div>

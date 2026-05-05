@@ -183,7 +183,7 @@ export function MemoryViewer({
 
           {/* Metadata badges */}
           {Object.keys(meta).length > 0 && (
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Metadata</p>
               <div className="flex flex-wrap gap-1.5">
                 {meta.agent_name && <Badge variant="secondary" className="text-xs gap-1"><User className="w-3 h-3" />{meta.agent_name}</Badge>}

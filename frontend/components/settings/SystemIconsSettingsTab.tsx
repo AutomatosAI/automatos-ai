@@ -374,7 +374,7 @@ export function SystemIconsSettingsTab() {
     const totalSlots = ICON_SECTIONS.reduce((sum, s) => sum + s.items.length, 0);
 
     return (
-        <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+        <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-300">
             <div className="flex items-center justify-between">
                 <div>
                     <h2 className="text-xl font-semibold">System Icon Mappings</h2>

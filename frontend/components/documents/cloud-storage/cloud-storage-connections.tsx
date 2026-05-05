@@ -20,11 +20,11 @@ import {
 
 // Provider display config
 const PROVIDER_META: Record<string, { label: string; color: string }> = {
-  GOOGLEDRIVE: { label: 'Google Drive', color: 'text-blue-400' },
+  GOOGLEDRIVE: { label: 'Google Drive', color: 'text-info' },
   DROPBOX: { label: 'Dropbox', color: 'text-sky-400' },
   ONEDRIVE: { label: 'OneDrive', color: 'text-indigo-400' },
   BOX: { label: 'Box', color: 'text-cyan-400' },
-  SHAREPOINT: { label: 'SharePoint', color: 'text-purple-400' },
+  SHAREPOINT: { label: 'SharePoint', color: 'text-agent' },
 }
 
 function providerLabel(appName: string) {
@@ -59,7 +59,7 @@ export function CloudStorageConnections({
 
   if (error) {
     return (
-      <div className="text-center py-12 text-red-400">
+      <div className="text-center py-12 text-destructive">
         Failed to load cloud connections.
       </div>
     )
@@ -86,7 +86,7 @@ export function CloudStorageConnections({
         return (
           <motion.div
             key={conn.id}
-            className={`glass-card p-5 card-glow cursor-pointer transition-all duration-200 ${
+            className={`glass-card p-5 card-glow cursor-pointer transition-all duration-220 ${
               isSelected ? 'border-primary/40 ring-1 ring-primary/30' : 'hover:border-primary/20'
             }`}
             initial={{ opacity: 0, y: 12 }}
@@ -101,12 +101,12 @@ export function CloudStorageConnections({
                 <span className="font-semibold">{providerLabel(conn.app_name)}</span>
               </div>
               {isActive ? (
-                <Badge className="bg-green-500/10 text-green-400 border-green-500/20">
+                <Badge className="bg-success/10 text-success border-success/20">
                   <CheckCircle2 className="w-3 h-3 mr-1" />
                   Connected
                 </Badge>
               ) : (
-                <Badge className="bg-red-500/10 text-red-400 border-red-500/20">
+                <Badge className="bg-destructive/10 text-destructive border-destructive/20">
                   <XCircle className="w-3 h-3 mr-1" />
                   {conn.status}
                 </Badge>
@@ -129,9 +129,9 @@ export function CloudStorageConnections({
                 </div>
                 <div className="font-medium">
                   {conn.sync_enabled ? (
-                    <span className="text-green-400">Enabled</span>
+                    <span className="text-success">Enabled</span>
                   ) : (
-                    <span className="text-gray-400">Off</span>
+                    <span className="text-muted-foreground">Off</span>
                   )}
                 </div>
               </div>
@@ -168,7 +168,7 @@ export function CloudStorageConnections({
               <Button
                 size="sm"
                 variant="outline"
-                className="text-red-400 hover:text-red-300 hover:border-red-500/30"
+                className="text-destructive hover:text-destructive/80 hover:border-destructive/30"
                 onClick={(e) => {
                   e.stopPropagation()
                   onDisconnect(conn)

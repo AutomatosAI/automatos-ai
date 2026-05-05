@@ -133,7 +133,7 @@ function TreeNode({ entry, depth, onFileSelect, onDirectoryToggle, selectedPath 
         )}
 
         {/* File/folder icon */}
-        <Icon className={cn('h-3.5 w-3.5 flex-shrink-0', isDir ? 'text-amber-500' : 'text-muted-foreground')} />
+        <Icon className={cn('h-3.5 w-3.5 flex-shrink-0', isDir ? 'text-warning' : 'text-muted-foreground')} />
 
         {/* Name */}
         <span className="truncate">{entry.name}</span>

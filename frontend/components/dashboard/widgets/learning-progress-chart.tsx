@@ -90,12 +90,12 @@ export function LearningProgressChart({ learningData, overview }: LearningProgre
               <div>
                 <p className="text-xs text-muted-foreground">Total Memories</p>
                 <p className="text-2xl font-bold">{data.total_memories}</p>
-                <p className="text-xs text-green-500 flex items-center mt-1">
+                <p className="text-xs text-success flex items-center mt-1">
                   <TrendingUp className="w-3 h-3 mr-1" />
                   {data.memory_growth_rate > 0 ? '+' : ''}{data.memory_growth_rate.toFixed(1)}%
                 </p>
               </div>
-              <Brain className="w-8 h-8 text-purple-500" />
+              <Brain className="w-8 h-8 text-agent" />
             </div>
           </CardContent>
         </Card>
@@ -110,7 +110,7 @@ export function LearningProgressChart({ learningData, overview }: LearningProgre
                   {data.knowledge_edges} edges
                 </p>
               </div>
-              <GitBranch className="w-8 h-8 text-blue-500" />
+              <GitBranch className="w-8 h-8 text-info" />
             </div>
           </CardContent>
         </Card>
@@ -125,7 +125,7 @@ export function LearningProgressChart({ learningData, overview }: LearningProgre
                   Avg importance: {data.avg_importance_score.toFixed(2)}
                 </p>
               </div>
-              <Database className="w-8 h-8 text-green-500" />
+              <Database className="w-8 h-8 text-success" />
             </div>
           </CardContent>
         </Card>
@@ -271,7 +271,7 @@ export function LearningProgressChart({ learningData, overview }: LearningProgre
             <p className="text-sm font-semibold mb-2">Consolidation Flow</p>
             <div className="flex items-center justify-between text-xs text-muted-foreground">
               <div className="text-center">
-                <p className="text-lg font-bold text-blue-500">
+                <p className="text-lg font-bold text-info">
                   {data.working_memory_count}
                 </p>
                 <p>Working</p>
@@ -280,7 +280,7 @@ export function LearningProgressChart({ learningData, overview }: LearningProgre
                 <div className="h-0.5 bg-gradient-to-r from-blue-500 to-green-500" />
               </div>
               <div className="text-center">
-                <p className="text-lg font-bold text-green-500">
+                <p className="text-lg font-bold text-success">
                   {data.short_term_count}
                 </p>
                 <p>Short-term</p>
@@ -289,7 +289,7 @@ export function LearningProgressChart({ learningData, overview }: LearningProgre
                 <div className="h-0.5 bg-gradient-to-r from-green-500 to-purple-500" />
               </div>
               <div className="text-center">
-                <p className="text-lg font-bold text-purple-500">
+                <p className="text-lg font-bold text-agent">
                   {data.long_term_count}
                 </p>
                 <p>Long-term</p>

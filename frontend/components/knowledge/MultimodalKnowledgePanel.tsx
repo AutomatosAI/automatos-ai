@@ -55,14 +55,14 @@ const knowledgeTypeIcons = {
 }
 
 const knowledgeTypeColors = {
-  document: 'text-blue-400 bg-blue-500/10 border-blue-500/20',
-  codegraph: 'text-purple-400 bg-purple-500/10 border-purple-500/20',
-  table: 'text-green-400 bg-green-500/10 border-green-500/20',
+  document: 'text-info bg-info/10 border-info/20',
+  codegraph: 'text-agent bg-agent/10 border-agent/20',
+  table: 'text-success bg-success/10 border-success/20',
   image: 'text-orange-400 bg-orange-500/10 border-orange-500/20',
   formula: 'text-pink-400 bg-pink-500/10 border-pink-500/20',
   diagram: 'text-cyan-400 bg-cyan-500/10 border-cyan-500/20',
   knowledge_graph: 'text-violet-400 bg-violet-500/10 border-violet-500/20',
-  memory: 'text-yellow-400 bg-yellow-500/10 border-yellow-500/20'
+  memory: 'text-warning bg-warning/10 border-warning/20'
 }
 
 interface KnowledgeType {
@@ -210,7 +210,7 @@ export function MultimodalKnowledgePanel() {
   }
 
   const getTypeColor = (typeName: string) => {
-    return knowledgeTypeColors[typeName as keyof typeof knowledgeTypeColors] || 'text-gray-400 bg-gray-500/10 border-gray-500/20'
+    return knowledgeTypeColors[typeName as keyof typeof knowledgeTypeColors] || 'text-muted-foreground bg-secondary/50 border-border/30'
   }
 
   const handleViewItem = async (item: KnowledgeItem) => {
@@ -263,7 +263,7 @@ export function MultimodalKnowledgePanel() {
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="w-10 h-10 rounded-2xl bg-black/20 border border-orange-500/10 flex items-center justify-center shrink-0">
-                    <Database className="w-5 h-5 text-gray-300" />
+                    <Database className="w-5 h-5 text-foreground/90" />
                   </div>
                   <div className="min-w-0">
                     <div className="text-2xl font-bold leading-none">{stats.total_items}</div>
@@ -282,7 +282,7 @@ export function MultimodalKnowledgePanel() {
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="w-10 h-10 rounded-2xl bg-black/20 border border-orange-500/10 flex items-center justify-center shrink-0">
-                    <Table2 className="w-5 h-5 text-gray-300" />
+                    <Table2 className="w-5 h-5 text-foreground/90" />
                   </div>
                   <div className="min-w-0">
                     <div className="text-2xl font-bold leading-none">{stats.by_type?.table || 0}</div>
@@ -301,7 +301,7 @@ export function MultimodalKnowledgePanel() {
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="w-10 h-10 rounded-2xl bg-black/20 border border-orange-500/10 flex items-center justify-center shrink-0">
-                    <ImageIcon className="w-5 h-5 text-gray-300" />
+                    <ImageIcon className="w-5 h-5 text-foreground/90" />
                   </div>
                   <div className="min-w-0">
                     <div className="text-2xl font-bold leading-none">{stats.by_type?.image || 0}</div>
@@ -320,7 +320,7 @@ export function MultimodalKnowledgePanel() {
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="w-10 h-10 rounded-2xl bg-black/20 border border-orange-500/10 flex items-center justify-center shrink-0">
-                    <Calculator className="w-5 h-5 text-gray-300" />
+                    <Calculator className="w-5 h-5 text-foreground/90" />
                   </div>
                   <div className="min-w-0">
                     <div className="text-2xl font-bold leading-none">{stats.by_type?.formula || 0}</div>
@@ -338,8 +338,8 @@ export function MultimodalKnowledgePanel() {
 
       {/* Error Display */}
       {error && (
-        <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4">
-          <p className="text-sm text-red-400">{error}</p>
+        <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-4">
+          <p className="text-sm text-destructive">{error}</p>
         </div>
       )}
 
@@ -440,7 +440,7 @@ export function MultimodalKnowledgePanel() {
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.3, delay: index * 0.05 }}
                   >
-                    <Card className="glass-card hover:border-primary/50 transition-all cursor-pointer">
+                    <Card className="glass-card card-glow hover:border-primary/50 transition-all cursor-pointer">
                       <CardHeader className="pb-3">
                         <div className="flex items-start justify-between">
                           <div className="flex items-center space-x-3">
@@ -471,7 +471,7 @@ export function MultimodalKnowledgePanel() {
                                 Download
                               </DropdownMenuItem>
                               <DropdownMenuItem 
-                                className="text-red-400"
+                                className="text-destructive"
                                 onClick={() => handleDeleteItem(item.id)}
                               >
                                 <Trash2 className="w-4 h-4 mr-2" />
@@ -509,17 +509,17 @@ export function MultimodalKnowledgePanel() {
                                 <div className="overflow-x-auto">
                                   <table className="w-full text-xs border-collapse min-w-full">
                                     <thead>
-                                      <tr className="border-b border-gray-600">
+                                      <tr className="border-b border-border">
                                         {headers.map((header, i) => (
-                                          <th key={i} className="text-left p-1 font-medium bg-gray-800/50 text-gray-200">{header}</th>
+                                          <th key={i} className="text-left p-1 font-medium bg-secondary/50 text-gray-200">{header}</th>
                                         ))}
                                       </tr>
                                     </thead>
                                     <tbody>
                                       {rows.map((row, i) => (
-                                        <tr key={i} className="border-b border-gray-700">
+                                        <tr key={i} className="border-b border-border">
                                           {row.map((cell, j) => (
-                                            <td key={j} className="p-1 text-gray-300">{cell}</td>
+                                            <td key={j} className="p-1 text-foreground/90">{cell}</td>
                                           ))}
                                         </tr>
                                       ))}
@@ -575,7 +575,7 @@ export function MultimodalKnowledgePanel() {
               <div className="flex items-center justify-between">
                 <CardTitle className="flex items-center space-x-2">
                   {selectedItem.kb_type === 'formula' && <Calculator className="w-5 h-5 text-pink-400" />}
-                  {selectedItem.kb_type === 'table' && <Table2 className="w-5 h-5 text-green-400" />}
+                  {selectedItem.kb_type === 'table' && <Table2 className="w-5 h-5 text-success" />}
                   {selectedItem.kb_type === 'image' && <ImageIcon className="w-5 h-5 text-orange-400" />}
                   <span>{selectedItem.kb_type === 'formula' ? 'Formula' : selectedItem.kb_type === 'table' ? 'Table' : 'Image'} Details</span>
                 </CardTitle>
@@ -643,17 +643,17 @@ export function MultimodalKnowledgePanel() {
                               <div className="overflow-y-auto max-h-80">
                                 <table className="w-full text-sm border-collapse">
                                   <thead>
-                                    <tr className="border-b border-gray-600">
+                                    <tr className="border-b border-border">
                                       {headers.map((header, i) => (
-                                        <th key={i} className="text-left p-3 font-medium bg-gray-800/50 text-gray-200">{header}</th>
+                                        <th key={i} className="text-left p-3 font-medium bg-secondary/50 text-gray-200">{header}</th>
                                       ))}
                                     </tr>
                                   </thead>
                                   <tbody>
                                     {rows.map((row, i) => (
-                                      <tr key={i} className="border-b border-gray-700 hover:bg-gray-800/30">
+                                      <tr key={i} className="border-b border-border hover:bg-secondary/30">
                                         {row.map((cell, j) => (
-                                          <td key={j} className="p-3 text-gray-300">{cell}</td>
+                                          <td key={j} className="p-3 text-foreground/90">{cell}</td>
                                         ))}
                                       </tr>
                                     ))}
@@ -668,14 +668,14 @@ export function MultimodalKnowledgePanel() {
                             <div className="overflow-y-auto max-h-80">
                               <table className="w-full text-sm border-collapse">
                                 <thead>
-                                  <tr className="border-b border-gray-600">
-                                    <th className="text-left p-3 font-medium bg-gray-800/50 text-gray-200">Data</th>
+                                  <tr className="border-b border-border">
+                                    <th className="text-left p-3 font-medium bg-secondary/50 text-gray-200">Data</th>
                                   </tr>
                                 </thead>
                                 <tbody>
                                   {lines.map((line, i) => (
-                                    <tr key={i} className="border-b border-gray-700 hover:bg-gray-800/30">
-                                      <td className="p-3 text-gray-300">{line}</td>
+                                    <tr key={i} className="border-b border-border hover:bg-secondary/30">
+                                      <td className="p-3 text-foreground/90">{line}</td>
                                     </tr>
                                   ))}
                                 </tbody>

@@ -20,11 +20,18 @@ class SkillsSection(BaseSection):
 
     Loads the ``prompt_template`` field from the agent's active skills
     (via the ``agent_skills`` many-to-many relationship on the Agent model).
+
+    PRD-137 Fix #5: the primary skill (highest-priority active skill) is
+    rendered uncapped. Auxiliary skills share an aux budget. This stops
+    Auto's 11K-token platform-management SKILL.md being truncated to 3K.
     """
 
     name: str = "skills"
     priority: int = 4
-    max_tokens: Optional[int] = 3000
+    # Primary skill is uncapped. Auxiliary skills share this budget.
+    aux_max_tokens: int = 5000
+    # Class-level max_tokens kept None so legacy callers don't truncate.
+    max_tokens: Optional[int] = None
 
     async def render(self, ctx: SectionContext) -> str:
         """Load and return skill content for the agent."""
@@ -53,17 +60,30 @@ class SkillsSection(BaseSection):
         if not active_skills:
             return ""
 
-        parts: list[str] = []
-        for skill in active_skills:
-            content = self._get_skill_content(skill, ctx)
-            if content:
-                parts.append(content)
+        # Sort by skill priority (highest first); the first becomes the primary.
+        active_skills = sorted(
+            active_skills,
+            key=lambda s: getattr(s, "priority", 0) or 0,
+            reverse=True,
+        )
 
-        if not parts:
+        primary_text = self._get_skill_content(active_skills[0], ctx)
+        aux_texts = [
+            txt for txt in (self._get_skill_content(s, ctx) for s in active_skills[1:])
+            if txt
+        ]
+
+        if not primary_text and not aux_texts:
             return ""
 
-        # Join multiple skills with a separator
-        combined = "\n\n---\n\n".join(parts) if len(parts) > 1 else parts[0]
+        aux_combined = "\n\n---\n\n".join(aux_texts) if aux_texts else ""
+        if aux_combined and self.aux_max_tokens:
+            aux_combined = self.truncate(aux_combined, self.aux_max_tokens)
+
+        if primary_text and aux_combined:
+            combined = primary_text + "\n\n---\n\n" + aux_combined
+        else:
+            combined = primary_text or aux_combined
 
         # Skill tool usage instructions
         skill_tool_names = self._extract_skill_tool_names(active_skills)
@@ -77,8 +97,6 @@ class SkillsSection(BaseSection):
                 "do not just describe what you would do."
             )
 
-        if self.max_tokens:
-            combined = self.truncate(combined, self.max_tokens)
         return combined
 
     @staticmethod

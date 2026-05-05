@@ -73,13 +73,13 @@ export function AgentStatusGrid({ agentMetrics, agents = [] }: AgentStatusGridPr
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'active':
-        return 'bg-green-500'
+        return 'bg-success'
       case 'idle':
-        return 'bg-yellow-500'
+        return 'bg-warning'
       case 'error':
-        return 'bg-red-500'
+        return 'bg-destructive'
       default:
-        return 'bg-gray-500'
+        return 'bg-muted-foreground'
     }
   }
 
@@ -243,7 +243,7 @@ export function AgentStatusGrid({ agentMetrics, agents = [] }: AgentStatusGridPr
         <CardContent className="pt-6">
           <div className="grid grid-cols-4 gap-4 text-center">
             <div>
-              <p className="text-2xl font-bold text-green-500">
+              <p className="text-2xl font-bold text-success">
                 {safeAgents.filter(a => a.status === 'active').length}
               </p>
               <p className="text-xs text-muted-foreground">Active</p>

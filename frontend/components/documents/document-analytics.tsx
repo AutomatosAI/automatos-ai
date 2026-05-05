@@ -98,10 +98,10 @@ export function DocumentAnalytics({ documents, documentStats }: DocumentAnalytic
               <div>
                 <p className="text-sm font-medium text-muted-foreground">Total Documents</p>
                 <p className="text-2xl font-bold">{analytics.totalDocuments}</p>
-                <p className="text-xs text-green-400 mt-1">↑ 12% this week</p>
+                <p className="text-xs text-success mt-1">↑ 12% this week</p>
               </div>
               <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-                <FileText className="w-5 h-5 text-blue-400" />
+                <FileText className="w-5 h-5 text-info" />
               </div>
             </div>
           </CardContent>
@@ -113,10 +113,10 @@ export function DocumentAnalytics({ documents, documentStats }: DocumentAnalytic
               <div>
                 <p className="text-sm font-medium text-muted-foreground">Total Storage</p>
                 <p className="text-2xl font-bold">{formatFileSize(analytics.totalSize)}</p>
-                <p className="text-xs text-blue-400 mt-1">68% of quota used</p>
+                <p className="text-xs text-info mt-1">68% of quota used</p>
               </div>
               <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-                <HardDrive className="w-5 h-5 text-green-400" />
+                <HardDrive className="w-5 h-5 text-success" />
               </div>
             </div>
           </CardContent>
@@ -128,10 +128,10 @@ export function DocumentAnalytics({ documents, documentStats }: DocumentAnalytic
               <div>
                 <p className="text-sm font-medium text-muted-foreground">Processing Rate</p>
                 <p className="text-2xl font-bold">94.2%</p>
-                <p className="text-xs text-green-400 mt-1">↑ 2.1% improvement</p>
+                <p className="text-xs text-success mt-1">↑ 2.1% improvement</p>
               </div>
               <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-                <Zap className="w-5 h-5 text-purple-400" />
+                <Zap className="w-5 h-5 text-agent" />
               </div>
             </div>
           </CardContent>
@@ -143,7 +143,7 @@ export function DocumentAnalytics({ documents, documentStats }: DocumentAnalytic
               <div>
                 <p className="text-sm font-medium text-muted-foreground">Avg Process Time</p>
                 <p className="text-2xl font-bold">2.4s</p>
-                <p className="text-xs text-green-400 mt-1">↓ 0.3s faster</p>
+                <p className="text-xs text-success mt-1">↓ 0.3s faster</p>
               </div>
               <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
                 <Clock className="w-5 h-5 text-orange-400" />
@@ -267,7 +267,7 @@ export function DocumentAnalytics({ documents, documentStats }: DocumentAnalytic
         <Card className="glass-card">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Search className="w-5 h-5 text-blue-400" />
+              <Search className="w-5 h-5 text-info" />
               Popular Searches (Last {timeRange === '24h' ? '24 Hours' : timeRange === '7d' ? '7 Days' : '30 Days'})
             </CardTitle>
           </CardHeader>
@@ -286,12 +286,12 @@ export function DocumentAnalytics({ documents, documentStats }: DocumentAnalytic
                     className="flex items-center justify-between p-3 rounded-lg bg-secondary/20 border border-border/50"
                   >
                     <div className="flex items-center gap-3 flex-1">
-                      <Badge variant="outline" className="text-blue-400 bg-blue-500/10">
+                      <Badge variant="outline" className="text-info bg-info/10">
                         #{index + 1}
                       </Badge>
                       <span className="font-medium">{search.query}</span>
                     </div>
-                    <Badge className="bg-purple-500/10 text-purple-400">
+                    <Badge className="bg-agent/10 text-agent">
                       {search.count} searches
                     </Badge>
                   </div>
@@ -311,7 +311,7 @@ export function DocumentAnalytics({ documents, documentStats }: DocumentAnalytic
         <Card className="glass-card">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <TrendingUp className="w-5 h-5 text-green-400" />
+              <TrendingUp className="w-5 h-5 text-success" />
               Most Accessed Documents
             </CardTitle>
           </CardHeader>
@@ -330,7 +330,7 @@ export function DocumentAnalytics({ documents, documentStats }: DocumentAnalytic
                     className="flex items-center justify-between p-3 rounded-lg bg-secondary/20 border border-border/50"
                   >
                     <div className="flex items-center gap-3 flex-1 min-w-0">
-                      <Badge variant="outline" className="text-green-400 bg-green-500/10 shrink-0">
+                      <Badge variant="outline" className="text-success bg-success/10 shrink-0">
                         #{index + 1}
                       </Badge>
                       <div className="flex-1 min-w-0">
@@ -359,7 +359,7 @@ export function DocumentAnalytics({ documents, documentStats }: DocumentAnalytic
       <Card className="glass-card">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Activity className="w-5 h-5 text-purple-400" />
+            <Activity className="w-5 h-5 text-agent" />
             Document Activity Over Time
           </CardTitle>
         </CardHeader>
@@ -404,19 +404,19 @@ export function DocumentAnalytics({ documents, documentStats }: DocumentAnalytic
               {usageData.summary && (
                 <div className="grid grid-cols-3 gap-4 mt-6 pt-6 border-t border-border">
                   <div className="text-center">
-                    <div className="text-2xl font-bold text-blue-400">
+                    <div className="text-2xl font-bold text-info">
                       {usageData.summary.total_documents}
                     </div>
                     <div className="text-xs text-muted-foreground mt-1">Total Documents</div>
                   </div>
                   <div className="text-center">
-                    <div className="text-2xl font-bold text-green-400">
+                    <div className="text-2xl font-bold text-success">
                       {usageData.summary.processed_documents}
                     </div>
                     <div className="text-xs text-muted-foreground mt-1">Processed</div>
                   </div>
                   <div className="text-center">
-                    <div className="text-2xl font-bold text-purple-400">
+                    <div className="text-2xl font-bold text-agent">
                       {usageData.summary.documents_this_period}
                     </div>
                     <div className="text-xs text-muted-foreground mt-1">This Period</div>

@@ -57,7 +57,7 @@ export function TypesOfWorkWidget({ period, className }: TypesOfWorkWidgetProps)
                   <span className="text-sm font-medium w-20 shrink-0">{config.label}</span>
                   <div className="flex-1 h-5 bg-secondary/30 rounded-full overflow-hidden">
                     <div
-                      className="h-full rounded-full transition-all duration-500"
+                      className="h-full rounded-full transition-all duration-300"
                       style={{
                         width: `${Math.max(pct, 2)}%`,
                         backgroundColor: config.color,

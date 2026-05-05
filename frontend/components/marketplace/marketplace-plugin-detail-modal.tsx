@@ -12,10 +12,14 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Separator } from '@/components/ui/separator'
 import {
   X,
@@ -226,29 +230,10 @@ export function MarketplacePluginDetailModal({
   const needsApproval = plugin?.approval_status && plugin.approval_status !== 'approved'
 
   return (
-    <AnimatePresence>
-      {open && (
-        <>
-          {/* Backdrop */}
-          <motion.div
-            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={onClose}
-          />
-
-          {/* Modal */}
-          <motion.div
-            className="fixed inset-0 z-50 flex items-center justify-center p-4"
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            transition={{ duration: 0.2 }}
-          >
-            <Card className="glass-card card-glow w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
-              {/* Loading State */}
-              {loading && (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent size="lg">
+        {/* Loading State */}
+        {loading && (
                 <div className="p-12 flex flex-col items-center justify-center">
                   <Loader2 className="w-8 h-8 animate-spin text-muted-foreground mb-4" />
                   <p className="text-sm text-muted-foreground">Loading capability details...</p>
@@ -267,8 +252,8 @@ export function MarketplacePluginDetailModal({
               {plugin && !loading && !error && (
                 <>
                   {/* Header */}
-                  <CardHeader className="flex flex-row items-start justify-between pb-2">
-                    <CardTitle className="flex items-start gap-3 text-xl flex-1 min-w-0">
+                  <DialogHeader>
+                    <DialogTitle className="flex items-start gap-3 text-xl flex-1 min-w-0">
                       <div className="w-12 h-12 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center flex-shrink-0">
                         <Package className="w-6 h-6 text-primary" />
                       </div>
@@ -300,14 +285,11 @@ export function MarketplacePluginDetailModal({
                           )}
                         </div>
                       </div>
-                    </CardTitle>
-                    <Button variant="ghost" size="icon" onClick={onClose} className="flex-shrink-0">
-                      <X className="w-5 h-5" />
-                    </Button>
-                  </CardHeader>
+                    </DialogTitle>
+                  </DialogHeader>
 
                   {/* Scrollable Body */}
-                  <CardContent className="flex-1 overflow-y-auto pt-4 space-y-6">
+                  <div className="flex-1 overflow-y-auto pt-4 space-y-6">
                     {/* Approval Status Banner (admin view for pending/blocked plugins) */}
                     {isAdmin && needsApproval && (
                       <div className="flex items-center gap-3 p-3 rounded-lg border border-[hsl(var(--warning))]/30 bg-[hsl(var(--warning))]/10">
@@ -555,10 +537,10 @@ export function MarketplacePluginDetailModal({
                         </div>
                       </div>
                     )}
-                  </CardContent>
+                  </div>
 
                   {/* Footer — Admin actions or Enable/Disable */}
-                  <div className="p-6 border-t border-border/40 bg-background/50 backdrop-blur z-20 relative">
+                  <div className="border-t border-border/40 pt-4">
                     {isAdmin && needsApproval ? (
                       <div className="flex gap-3">
                         <Button
@@ -635,10 +617,7 @@ export function MarketplacePluginDetailModal({
                   </div>
                 </>
               )}
-            </Card>
-          </motion.div>
-        </>
-      )}
-    </AnimatePresence>
+      </DialogContent>
+    </Dialog>
   )
 }

@@ -66,7 +66,7 @@ export function Message({
     strong: ({ children }: any) => (
       <strong className="text-foreground font-semibold dark:text-gray-100">{children}</strong>
     ),
-    em: ({ children }: any) => <em className="text-muted-foreground italic dark:text-gray-300">{children}</em>,
+    em: ({ children }: any) => <em className="text-muted-foreground italic dark:text-foreground/90">{children}</em>,
     a: ({ href, children }: any) => (
       <a
         href={href}
@@ -102,7 +102,7 @@ export function Message({
     },
     pre: ({ children }: any) => <>{children}</>,
     blockquote: ({ children }: any) => (
-      <blockquote className="border-l-2 border-orange-500/40 pl-4 py-1 bg-orange-500/5 rounded-r-lg text-foreground/80 dark:text-gray-300 italic">
+      <blockquote className="border-l-2 border-orange-500/40 pl-4 py-1 bg-orange-500/5 rounded-r-lg text-foreground/80 dark:text-foreground/90 italic">
         {children}
       </blockquote>
     ),
@@ -119,14 +119,14 @@ export function Message({
       <hr className="border-0 h-px bg-gradient-to-r from-transparent via-orange-500/30 to-transparent my-4" />
     ),
     table: ({ children }: any) => (
-      <div className="overflow-x-auto rounded-xl border border-border/60 bg-card/50 dark:border-gray-800/60 dark:bg-gray-900/40">
+      <div className="overflow-x-auto rounded-xl border border-border/60 bg-card/50 dark:border-gray-800/60 dark:bg-background/40">
         <table className="min-w-full divide-y divide-border/60 text-sm text-foreground dark:divide-gray-800/70 dark:text-gray-100">
           {children}
         </table>
       </div>
     ),
     thead: ({ children }: any) => (
-      <thead className="bg-secondary/40 text-xs uppercase tracking-wide text-muted-foreground dark:bg-gray-900/60 dark:text-gray-400">
+      <thead className="bg-secondary/40 text-xs uppercase tracking-wide text-muted-foreground dark:bg-background/60 dark:text-muted-foreground">
         {children}
       </thead>
     ),
@@ -134,10 +134,10 @@ export function Message({
       <tbody className="divide-y divide-border/50 dark:divide-gray-800/70">{children}</tbody>
     ),
     tr: ({ children }: any) => (
-      <tr className="hover:bg-secondary/40 transition-colors dark:hover:bg-gray-900/60">{children}</tr>
+      <tr className="hover:bg-secondary/40 transition-colors dark:hover:bg-background/60">{children}</tr>
     ),
     th: ({ children }: any) => (
-      <th className="px-4 py-3 text-left font-semibold text-foreground/80 dark:text-gray-300">
+      <th className="px-4 py-3 text-left font-semibold text-foreground/80 dark:text-foreground/90">
         {children}
       </th>
     ),
@@ -190,7 +190,7 @@ export function Message({
           if (part.type === 'file' && 'filename' in part) {
             return (
               <div key={index} className="flex items-center space-x-2 p-2 bg-secondary/30 rounded-lg">
-                <FileText className="w-4 h-4 text-blue-400" />
+                <FileText className="w-4 h-4 text-info" />
                 <span className="text-sm text-muted-foreground">{part.filename}</span>
               </div>
             )
@@ -204,9 +204,9 @@ export function Message({
                 className="w-full text-left p-3 rounded-xl bg-secondary/30 border border-border/60 hover:bg-secondary/50 hover:border-border transition-all"
               >
                 <div className="flex items-center space-x-2">
-                  <Code className="w-4 h-4 text-purple-400" />
-                  <span className="text-sm text-foreground/80 dark:text-gray-300">{part.artifact.title}</span>
-                  <Badge variant="outline" className="bg-purple-500/10 border-purple-500/20 text-purple-400 text-xs">
+                  <Code className="w-4 h-4 text-agent" />
+                  <span className="text-sm text-foreground/80 dark:text-foreground/90">{part.artifact.title}</span>
+                  <Badge variant="outline" className="bg-agent/10 border-agent/20 text-agent text-xs">
                     {part.artifact.kind}
                   </Badge>
                 </div>
@@ -296,7 +296,7 @@ export function Message({
         {errorTools.map((tc) => (
           <div
             key={tc.toolCallId}
-            className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs bg-red-500/10 border border-red-500/30 text-red-300"
+            className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs bg-destructive/10 border border-destructive/30 text-destructive/80"
             title={tc.error || 'Tool failed'}
           >
             <XCircle className="w-3 h-3" />
@@ -333,7 +333,7 @@ export function Message({
         {/* Avatar */}
         <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
           isUser
-            ? 'bg-blue-600'
+            ? 'bg-info'
             : 'bg-gradient-to-br from-orange-500/40 to-red-500/30 ring-1 ring-orange-500/25 shadow-[0_0_12px_rgba(249,115,22,0.15)]'
         }`}>
           {isUser ? (
@@ -369,14 +369,14 @@ export function Message({
 
             {/* Metadata */}
             {message.metadata && message.role === 'assistant' && (
-              <div className="mt-2 pt-2 border-t border-border/30 flex items-center justify-between text-xs dark:border-gray-700/30">
+              <div className="mt-2 pt-2 border-t border-border/30 flex items-center justify-between text-xs dark:border-border/30">
                 <div className="flex items-center space-x-3 text-muted-foreground">
                   {message.metadata.source && (
                     <Badge variant="outline" className={`text-[10px] ${
-                      message.metadata.source === 'codegraph' ? 'bg-purple-500/10 border-purple-500/20 text-purple-400' :
-                      message.metadata.source === 'rag' ? 'bg-blue-500/10 border-blue-500/20 text-blue-400' :
-                      message.metadata.source === 'semantic' ? 'bg-green-500/10 border-green-500/20 text-green-400' :
-                      message.metadata.source === 'database' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' :
+                      message.metadata.source === 'codegraph' ? 'bg-agent/10 border-agent/20 text-agent' :
+                      message.metadata.source === 'rag' ? 'bg-info/10 border-info/20 text-info' :
+                      message.metadata.source === 'semantic' ? 'bg-success/10 border-success/20 text-success' :
+                      message.metadata.source === 'database' ? 'bg-success/10 border-success/20 text-success' :
                       message.metadata.source === 'llm' ? 'bg-orange-500/10 border-orange-500/20 text-orange-400' : ''
                     }`}>
                       {message.metadata.source.toUpperCase()}
@@ -401,11 +401,11 @@ export function Message({
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-2">
-                      <Code className="w-4 h-4 text-purple-400" />
-                      <span className="text-sm text-foreground/80 dark:text-gray-300 font-mono">{snippet.symbol_name || 'Code'}</span>
+                      <Code className="w-4 h-4 text-agent" />
+                      <span className="text-sm text-foreground/80 dark:text-foreground/90 font-mono">{snippet.symbol_name || 'Code'}</span>
                       <span className="text-xs text-muted-foreground">{snippet.file_path}</span>
                     </div>
-                    <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-foreground/80 dark:group-hover:text-gray-300" />
+                    <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-foreground/80 dark:group-hover:text-foreground/90" />
                   </div>
                 </button>
               ))}
@@ -440,17 +440,17 @@ export function Message({
                         })
                       }
                     }}
-                    className="w-full text-left rounded-xl border border-blue-500/30 bg-blue-500/5 p-4 hover:border-blue-400/60 hover:bg-blue-500/10 transition-all group"
+                    className="w-full text-left rounded-xl border border-info/30 bg-info/5 p-4 hover:border-info/60 hover:bg-info/10 transition-all group"
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center space-x-2">
-                        <FileText className="w-4 h-4 text-blue-400" />
+                        <FileText className="w-4 h-4 text-info" />
                         <span className="text-sm font-medium text-foreground dark:text-gray-200">{title}</span>
-                        <Badge variant="outline" className="bg-green-500/10 border-green-500/20 text-green-400 text-xs">
+                        <Badge variant="outline" className="bg-success/10 border-success/20 text-success text-xs">
                           {relevance.toFixed(0)}%
                         </Badge>
                       </div>
-                      <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-foreground/80 dark:group-hover:text-gray-300" />
+                      <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-foreground/80 dark:group-hover:text-foreground/90" />
                     </div>
 
                     {chunkCount !== undefined && (
@@ -460,12 +460,12 @@ export function Message({
                     )}
 
                     {preview && (
-                      <p className="mt-2 line-clamp-2 text-sm text-foreground/80 dark:text-gray-300 opacity-90">
+                      <p className="mt-2 line-clamp-2 text-sm text-foreground/80 dark:text-foreground/90 opacity-90">
                         {preview}
                       </p>
                     )}
 
-                    <div className="mt-3 text-xs text-blue-400 flex items-center gap-1">
+                    <div className="mt-3 text-xs text-info flex items-center gap-1">
                       <span>Click to view full document</span>
                     </div>
                   </button>
@@ -481,21 +481,21 @@ export function Message({
                 <button
                   key={idx}
                   onClick={() => onDatabaseSelect?.(dbResult)}
-                  className="w-full text-left p-4 rounded-xl bg-emerald-500/5 border border-emerald-500/25 hover:border-emerald-500/40 transition-all group"
+                  className="w-full text-left p-4 rounded-xl bg-success/5 border border-success/25 hover:border-success/40 transition-all group"
                 >
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center space-x-2">
-                      <Database className="w-4 h-4 text-green-400" />
-                      <span className="text-sm font-medium text-emerald-700 dark:text-green-300">{dbResult.database}</span>
-                      <Badge variant="outline" className="bg-green-500/10 border-green-500/20 text-green-400 text-xs">
+                      <Database className="w-4 h-4 text-success" />
+                      <span className="text-sm font-medium text-success">{dbResult.database}</span>
+                      <Badge variant="outline" className="bg-success/10 border-success/20 text-success text-xs">
                         {dbResult.row_count} rows {dbResult.execution_time_ms && `• ${dbResult.execution_time_ms.toFixed(0)}ms`}
                       </Badge>
                     </div>
-                    <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-emerald-700 dark:group-hover:text-green-300" />
+                    <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-success" />
                   </div>
 
                   {dbResult.sql && (
-                    <div className="mt-2 p-2 bg-muted/40 rounded-lg text-xs font-mono text-foreground/80 dark:bg-gray-900/50 dark:text-gray-300 overflow-x-auto">
+                    <div className="mt-2 p-2 bg-muted/40 rounded-lg text-xs font-mono text-foreground/80 dark:bg-background/50 dark:text-foreground/90 overflow-x-auto">
                       {dbResult.sql.substring(0, 100)}{dbResult.sql.length > 100 ? '...' : ''}
                     </div>
                   )}
@@ -518,7 +518,7 @@ export function Message({
                   ) : (
                     <>
                       {dbResult.pandas_ai?.summary && (
-                        <div className="mt-3 text-sm text-gray-200 bg-gray-900/40 border border-gray-800/60 rounded p-3 text-left">
+                        <div className="mt-3 text-sm text-gray-200 bg-background/40 border border-gray-800/60 rounded p-3 text-left">
                           {dbResult.pandas_ai.summary}
                         </div>
                       )}
@@ -528,14 +528,14 @@ export function Message({
                           {dbResult.pandas_ai.charts.slice(0, 2).map((chart, chartIdx) => (
                             <div
                               key={`${chart.filename}-${chartIdx}`}
-                              className="rounded-lg border border-gray-800/60 bg-gray-900/40 p-2 flex flex-col items-center"
+                              className="rounded-lg border border-gray-800/60 bg-background/40 p-2 flex flex-col items-center"
                             >
                               <img
                                 src={`data:${chart.mime_type};base64,${chart.base64}`}
                                 alt={chart.filename}
                                 className="rounded-md border border-gray-800/40 max-h-32 object-contain"
                               />
-                              <span className="mt-1 text-xs text-gray-500 truncate w-full text-center">
+                              <span className="mt-1 text-xs text-muted-foreground truncate w-full text-center">
                                 {chart.filename}
                               </span>
                             </div>

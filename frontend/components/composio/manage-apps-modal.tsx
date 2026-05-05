@@ -223,7 +223,7 @@ export function ManageAppsModal({ agentId, open, onClose }: ManageAppsModalProps
                                 size="sm"
                                 onClick={handleEnableAll}
                                 disabled={!selectedApp || enableAllFeatures.isPending}
-                                className="text-green-400 hover:text-green-300 hover:bg-green-500/10"
+                                className="text-success hover:text-green-300 hover:bg-success/10"
                             >
                                 <Check className="h-4 w-4 mr-1.5" />
                                 Enable all
@@ -244,7 +244,7 @@ export function ManageAppsModal({ agentId, open, onClose }: ManageAppsModalProps
                                 size="sm"
                                 onClick={handleDisconnect}
                                 disabled={!selectedApp || disconnectApp.isPending}
-                                className="text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                                className="text-destructive hover:text-destructive/80 hover:bg-destructive/10"
                             >
                                 <Trash2 className="h-4 w-4 mr-1.5" />
                                 Remove this app
@@ -267,7 +267,7 @@ export function ManageAppsModal({ agentId, open, onClose }: ManageAppsModalProps
                     <Button
                         onClick={handleSave}
                         disabled={updateFeatures.isPending}
-                        className={hasChanges ? 'bg-blue-600 hover:bg-blue-700' : ''}
+                        className={hasChanges ? 'bg-info hover:bg-info/80' : ''}
                     >
                         {hasChanges ? `Save Changes (${pendingToggles.size})` : 'Done'}
                     </Button>

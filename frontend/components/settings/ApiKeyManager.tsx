@@ -332,20 +332,20 @@ export function ApiKeyManager() {
       return {
         label: "Revoked",
         variant: "destructive",
-        className: "bg-red-500/15 text-red-400 border-red-500/30",
+        className: "bg-destructive/15 text-destructive border-destructive/30",
       };
     }
     if (isExpired(key.expires_at)) {
       return {
         label: "Expired",
         variant: "secondary",
-        className: "bg-yellow-500/15 text-yellow-400 border-yellow-500/30",
+        className: "bg-warning/15 text-warning border-warning/30",
       };
     }
     return {
       label: "Active",
       variant: "default",
-      className: "bg-green-500/15 text-green-400 border-green-500/30",
+      className: "bg-success/15 text-success border-success/30",
     };
   }
 
@@ -391,7 +391,7 @@ export function ApiKeyManager() {
             </div>
           ) : error ? (
             <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-              <AlertTriangle className="h-6 w-6 mb-2 text-red-400" />
+              <AlertTriangle className="h-6 w-6 mb-2 text-destructive" />
               <p className="text-sm">{error}</p>
               <Button
                 variant="outline"
@@ -452,8 +452,8 @@ export function ApiKeyManager() {
                             variant="outline"
                             className={
                               key.key_type === "server"
-                                ? "bg-purple-500/15 text-purple-400 border-purple-500/30"
-                                : "bg-blue-500/15 text-blue-400 border-blue-500/30"
+                                ? "bg-agent/15 text-agent border-agent/30"
+                                : "bg-info/15 text-info border-info/30"
                             }
                           >
                             {key.key_type === "server" ? "Server" : "Public"}
@@ -728,7 +728,7 @@ export function ApiKeyManager() {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Check className="h-5 w-5 text-green-500" />
+              <Check className="h-5 w-5 text-success" />
               API Key Created
             </DialogTitle>
             <DialogDescription>
@@ -738,9 +738,9 @@ export function ApiKeyManager() {
 
           <div className="space-y-4 py-4">
             {/* Warning */}
-            <div className="rounded-lg border border-yellow-500/30 bg-yellow-500/5 p-3 flex items-start gap-2">
-              <AlertTriangle className="h-4 w-4 text-yellow-500 mt-0.5 shrink-0" />
-              <p className="text-xs text-yellow-200/80">
+            <div className="rounded-lg border border-warning/30 bg-warning/5 p-3 flex items-start gap-2">
+              <AlertTriangle className="h-4 w-4 text-warning mt-0.5 shrink-0" />
+              <p className="text-xs text-warning/80">
                 This key will only be shown once. Copy it now and store it
                 securely. You will not be able to retrieve it later.
               </p>
@@ -758,7 +758,7 @@ export function ApiKeyManager() {
                 size="icon"
                 className={`shrink-0 transition-colors ${
                   copied
-                    ? "text-green-500 border-green-500"
+                    ? "text-success border-green-500"
                     : ""
                 }`}
                 onClick={() => createdKey && handleCopy(createdKey)}

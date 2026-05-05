@@ -26,7 +26,7 @@ from uuid import UUID
 from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
-from config import COMPLEXITY_TOKEN_BUDGET, Config
+from config import COMPLEXITY_TOKEN_BUDGET, Config, config
 from core.models.core import Agent
 from core.models.orchestration import (
     OrchestrationArchive,
@@ -68,6 +68,16 @@ from services.orchestration_state import (
 )
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Mission Power Modes — per-mode caps for model, tokens, and tool iterations.
+# "standard" is the default when power_mode is absent from mission config.
+# ---------------------------------------------------------------------------
+_POWER_MODE_CAPS: Dict[str, Dict[str, Any]] = {
+    "light":    {"max_tokens": 2_000,  "max_tool_iterations": 5,  "force_llm_tier": "system_llm"},
+    "standard": {"max_tokens": 4_000,  "max_tool_iterations": 10, "force_llm_tier": None},
+    "max":      {"max_tokens": 16_000, "max_tool_iterations": 50, "force_llm_tier": "orchestrator_llm"},
+}
 
 
 # ---------------------------------------------------------------------------
@@ -876,7 +886,8 @@ class CoordinatorService:
             if prepared:
                 agent_coros = [
                     self._run_agent_io(p["factory"], p["agent_id"], p["prompt"],
-                                       p["task"], p["attachment_ids"])
+                                       p["task"], p["attachment_ids"],
+                                       run_config=p.get("run_config"))
                     for p in prepared
                 ]
                 results = await asyncio.gather(*agent_coros, return_exceptions=True)
@@ -1175,17 +1186,32 @@ class CoordinatorService:
         else:
             prompt = MissionDispatcher.build_task_prompt(task)
 
-        # Activate agent and bump max_tokens
+        # Activate agent with power-mode overrides
         factory = AgentFactory(db_session=db)
+        run_config = run.config or {}
+        power_mode = run_config.get("power_mode", "standard")
+        mode_caps = _POWER_MODE_CAPS.get(power_mode, _POWER_MODE_CAPS["standard"])
 
-        agent_runtime = factory.active_agents.get(agent_id)
-        if not agent_runtime:
-            agent_runtime = await factory.activate_agent(agent_id, workspace_dir="/tmp/automatos_workspace")
+        force_tier = mode_caps.get("force_llm_tier")
+        if force_tier:
+            factory.active_agents.pop(agent_id, None)
+            agent_runtime = await factory.activate_agent(
+                agent_id, workspace_dir="/tmp/automatos_workspace",
+                force_llm_tier=force_tier,
+            )
+            logger.info(
+                "Task %s: power_mode=%s, force_llm_tier=%s for agent %d",
+                task.id, power_mode, force_tier, agent_id,
+            )
+        else:
+            agent_runtime = factory.active_agents.get(agent_id)
+            if not agent_runtime:
+                agent_runtime = await factory.activate_agent(agent_id, workspace_dir="/tmp/automatos_workspace")
 
         if agent_runtime and hasattr(agent_runtime, "llm_manager"):
-            original_max_tokens = agent_runtime.llm_manager.config.max_tokens
             agent_runtime.llm_manager.config.max_tokens = max(
-                original_max_tokens, Config().COORDINATOR_TASK_MAX_TOKENS
+                agent_runtime.llm_manager.config.max_tokens,
+                mode_caps["max_tokens"],
             )
 
         return {
@@ -1194,6 +1220,7 @@ class CoordinatorService:
             "prompt": prompt,
             "factory": factory,
             "attachment_ids": task_attachment_ids,
+            "run_config": run_config,
         }
 
     async def _run_agent_io(
@@ -1203,18 +1230,23 @@ class CoordinatorService:
         prompt: str,
         task: Any,
         attachment_ids: List[str],
+        run_config: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Execute agent I/O — safe to run concurrently via asyncio.gather().
 
         No DB access here — only the LLM + tool loop.
         """
+        power_mode = (run_config or {}).get("power_mode", "standard")
+        mode_caps = _POWER_MODE_CAPS.get(power_mode, _POWER_MODE_CAPS["standard"])
+        max_iters = mode_caps["max_tool_iterations"]
+
         try:
             result = await asyncio.wait_for(
                 factory.execute_with_prompt(
                     agent=agent_id,
                     prompt=prompt,
                     max_retries=0,
-                    max_tool_iterations=10,
+                    max_tool_iterations=max_iters,
                     attachment_ids=attachment_ids,
                 ),
                 timeout=Config.COORDINATOR_TASK_EXECUTION_TIMEOUT,

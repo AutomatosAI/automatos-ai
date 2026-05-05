@@ -35,7 +35,7 @@ interface OnboardingAgent {
 }
 
 const MODEL_TIERS: Record<string, { label: string; color: string }> = {
-  'anthropic/claude-opus-4-20250514': { label: 'Premium', color: 'bg-purple-500' },
+  'anthropic/claude-opus-4-20250514': { label: 'Premium', color: 'bg-agent' },
   'anthropic/claude-sonnet-4-20250514': { label: 'Mid', color: 'bg-blue-500' },
   'openai/gpt-4.1': { label: 'Mid', color: 'bg-green-500' },
   'deepseek/deepseek-chat': { label: 'Budget', color: 'bg-yellow-500' },
@@ -286,7 +286,7 @@ export function OnboardingAgentsTab() {
         <Card>
           <CardHeader>
             <div className="flex items-center gap-3">
-              <ShieldCheck className="h-5 w-5 text-green-500" />
+              <ShieldCheck className="h-5 w-5 text-success" />
               <div>
                 <CardTitle className="text-base">Verification (Advisory)</CardTitle>
                 <CardDescription>

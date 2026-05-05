@@ -138,7 +138,7 @@ export function CodeWidget({
           <div className="flex min-h-full">
             {/* Line numbers - separate column */}
             {showLineNumbers && (
-              <div className="flex-shrink-0 w-12 bg-[#252525] border-r border-[#3a3a3a] text-right pr-3 py-4 text-xs text-gray-500 select-none font-mono">
+              <div className="flex-shrink-0 w-12 bg-[#252525] border-r border-[#3a3a3a] text-right pr-3 py-4 text-xs text-muted-foreground select-none font-mono">
                 {Array.from({ length: lineCount }, (_, i) => (
                   <div key={i} className="leading-relaxed text-sm">
                     {i + 1}

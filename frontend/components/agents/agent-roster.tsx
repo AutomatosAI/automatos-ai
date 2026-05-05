@@ -309,14 +309,14 @@ export function AgentRoster({
               <div
                 key={agent.id}
                 data-testid="agent-card"
-                className="glass-card p-3 hover:border-primary/20 transition-all cursor-pointer"
+                className="glass-card card-glow p-3 hover:border-primary/20 transition-all cursor-pointer"
                 onClick={() => onViewDetails(agent.id.toString())}
               >
                 <div className="flex items-center gap-3">
                   {premiumIconName ? (
                     <PremiumIcon name={premiumIconName} size={36} className={`shrink-0 ${iconColor}`} />
                   ) : (
-                    <AgentIcon className={`w-9 h-9 ${iconColor} shrink-0`} />
+                    <AgentIcon className={`w-8 h-8 ${iconColor} shrink-0`} />
                   )}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
@@ -409,22 +409,22 @@ export function AgentRoster({
                 transition={{ duration: 0.5, delay: index * 0.1 }}
               >
                 {/* Header */}
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center space-x-3">
+                <div className="flex items-center justify-between mb-4 gap-2">
+                  <div className="flex items-center space-x-3 min-w-0 flex-1">
                     {premiumIconName ? (
                       <PremiumIcon name={premiumIconName} size={40} className={`shrink-0 ${iconColor}`} />
                     ) : (
                       <AgentIcon className={`w-10 h-10 ${iconColor} shrink-0`} />
                     )}
-                    <div>
-                      <h3 className="font-semibold">{agent.name || 'Unknown Agent'}</h3>
+                    <div className="min-w-0 flex-1">
+                      <h3 className="font-semibold truncate">{agent.name || 'Unknown Agent'}</h3>
                       <p className="text-xs text-muted-foreground truncate">{getAgentRoleLine(agent)}</p>
                     </div>
                   </div>
 
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-8 w-8" data-tour="agent-card-menu">
+                      <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" data-tour="agent-card-menu">
                         <MoreVertical className="w-4 h-4" />
                       </Button>
                     </DropdownMenuTrigger>
