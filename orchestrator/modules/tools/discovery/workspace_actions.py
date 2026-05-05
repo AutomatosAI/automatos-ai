@@ -279,9 +279,9 @@ def register_workspace_actions(registry: ActionRegistry) -> None:
         name="workspace_git",
         description=(
             "Execute a git operation in the workspace repository. Allowed operations: "
-            "status, diff, add, commit, push, pull, log, branch, checkout, stash, "
-            "show, blame, fetch. Use to check changes, commit fixes, push code, "
-            "or inspect git history."
+            "clone, status, diff, add, commit, push, pull, log, branch, checkout, stash, "
+            "show, blame, fetch. For clone, pass the repo HTTPS URL as 'args' — the repo "
+            "is cloned into repos/{repo-name}."
         ),
         category="workspace_git",
         parameters={
@@ -290,7 +290,7 @@ def register_workspace_actions(registry: ActionRegistry) -> None:
                 "operation": {
                     "type": "string",
                     "enum": [
-                        "status", "diff", "add", "commit", "push", "pull",
+                        "clone", "status", "diff", "add", "commit", "push", "pull",
                         "log", "branch", "checkout", "stash", "show", "blame", "fetch",
                     ],
                     "description": "The git operation to perform.",

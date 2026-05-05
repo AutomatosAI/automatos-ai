@@ -159,7 +159,8 @@ async def execute_workspace_action(
 
         # Auto-detect repo directory for tools that need it
         repo_dir: Optional[str] = None
-        needs_repo = tool_name in ("workspace_git", "workspace_exec")
+        is_git_clone = tool_name == "workspace_git" and parameters.get("operation") == "clone"
+        needs_repo = tool_name in ("workspace_git", "workspace_exec") and not is_git_clone
         needs_path_prefix = tool_name in (
             "workspace_read_file", "workspace_write_file",
             "workspace_grep", "workspace_list_dir",
