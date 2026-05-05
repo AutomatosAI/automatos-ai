@@ -354,6 +354,11 @@ class UnifiedToolExecutor:
                 # LLMs often put params at top level instead of nested under "params"
                 if not action_params:
                     action_params = {k: v for k, v in parameters.items() if k not in ("action", "params")}
+                else:
+                    # Merge any required keys the LLM placed at top level but omitted from params
+                    for k, v in parameters.items():
+                        if k not in ("action", "params") and k not in action_params:
+                            action_params[k] = v
                 if not action_name:
                     result = {"success": False, "error": "Missing required field: action", "tool": tool_name}
                     return result
