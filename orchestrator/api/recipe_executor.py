@@ -860,12 +860,31 @@ async def _execute_recipe_inner(
             step_id = step.get('step_id', f'step-{idx + 1}')
             step_order = step.get('order', idx + 1)
             agent_id = step.get('agent_id')
-            prompt_template = step.get('prompt_template', '')
+            prompt_template = (step.get('prompt_template') or '').strip()
             error_handling = step.get('error_handling', 'stop')
             max_retries = step.get('max_retries', 1)
             output_key = step.get('output_key', f'step_{step_order}')
             agent = agent_map.get(agent_id)
             agent_name = agent.name if agent else f"Agent {agent_id}"
+
+            if not prompt_template:
+                msg = f"Step {step_order} ({agent_name}) has no prompt_template — skipping"
+                logger.warning(f"[recipe_direct] {msg}")
+                step_result = {
+                    "step_id": step_id, "order": step_order,
+                    "agent_id": agent_id, "agent_name": agent_name,
+                    "prompt_template": "", "output_key": output_key,
+                    "status": "skipped", "output": msg,
+                    "tool_calls": [], "duration_ms": 0, "tokens_used": 0,
+                    "started_at": datetime.now(timezone.utc).isoformat(),
+                    "completed_at": datetime.now(timezone.utc).isoformat(),
+                    "error": msg, "retries": 0,
+                }
+                step_results.append(step_result)
+                if error_handling == 'stop':
+                    await _fail_execution(db, recipe_execution_id, msg, step_results=step_results)
+                    return
+                continue
 
             agent_cfg = getattr(agent, 'configuration', None) or {}
             step_max_iter = step.get(

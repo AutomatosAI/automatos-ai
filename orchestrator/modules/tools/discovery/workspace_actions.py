@@ -265,7 +265,7 @@ def register_workspace_actions(registry: ActionRegistry) -> None:
             "required": ["url", "viewport", "output_path"],
         },
         permission_level="write",
-        promoted=True,
+        promoted=False,
         tags=["workspace", "render", "html", "png", "screenshot", "social"],
         examples=[
             "render the definition template for instagram",
