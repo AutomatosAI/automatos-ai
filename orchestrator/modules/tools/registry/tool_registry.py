@@ -756,9 +756,12 @@ class ToolRegistry:
         ))
         
         # ==========================================
-        # FILE OPERATIONS (from ActionExecutor)
+        # FILE OPERATIONS — SUPERSEDED by workspace_* promoted actions
+        # (workspace_read_file, workspace_write_file, workspace_list_dir, etc.)
+        # Kept for backward compat with exec_file_ops.py proxy but
+        # is_active=False so they don't appear in agent tool lists.
         # ==========================================
-        
+
         self.register_tool(ToolSpec(
             name="read_file",
             category=ToolCategory.FILE_OPERATIONS,
@@ -786,11 +789,12 @@ class ToolRegistry:
             ],
             security_level=SecurityLevel.SAFE,
             permissions_required={"read": True},
+            is_active=False,
             examples=[
                 {"action": "read_file", "params": {"file_path": "config.json"}}
             ]
         ))
-        
+
         self.register_tool(ToolSpec(
             name="write_file",
             category=ToolCategory.FILE_OPERATIONS,
@@ -824,11 +828,12 @@ class ToolRegistry:
             ],
             security_level=SecurityLevel.CAUTIOUS,
             permissions_required={"read": True, "write": True},
+            is_active=False,
             examples=[
                 {"action": "write_file", "params": {"file_path": "output.txt", "content": "Hello World"}}
             ]
         ))
-        
+
         self.register_tool(ToolSpec(
             name="delete_file",
             category=ToolCategory.FILE_OPERATIONS,
@@ -848,11 +853,12 @@ class ToolRegistry:
             ],
             security_level=SecurityLevel.DANGEROUS,
             permissions_required={"read": True, "write": True, "delete": True},
+            is_active=False,
             examples=[
                 {"action": "delete_file", "params": {"file_path": "temp.txt"}}
             ]
         ))
-        
+
         self.register_tool(ToolSpec(
             name="list_directory",
             category=ToolCategory.FILE_OPERATIONS,
@@ -873,11 +879,12 @@ class ToolRegistry:
             ],
             security_level=SecurityLevel.SAFE,
             permissions_required={"read": True},
+            is_active=False,
             examples=[
                 {"action": "list_directory", "params": {"dir_path": "src"}}
             ]
         ))
-        
+
         self.register_tool(ToolSpec(
             name="create_directory",
             category=ToolCategory.FILE_OPERATIONS,
@@ -894,6 +901,7 @@ class ToolRegistry:
             ],
             security_level=SecurityLevel.CAUTIOUS,
             permissions_required={"read": True, "write": True},
+            is_active=False,
             examples=[
                 {"action": "create_directory", "params": {"dir_path": "new_folder"}}
             ]

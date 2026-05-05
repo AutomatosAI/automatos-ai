@@ -1182,10 +1182,9 @@ class StreamingChatService:
         # Multi-step tools that get a higher retry cap
         _MULTI_STEP_TOOLS = {
             "composio_execute",
-            "read_file", "write_file", "list_directory", "create_directory", "delete_file",
             "generate_document",
             "workspace_read_file", "workspace_grep", "workspace_list_dir",
-            "workspace_write_file", "workspace_create_directory",
+            "workspace_write_file", "workspace_exec", "workspace_git",
         }
 
         while current_response.tool_calls and iteration < max_iterations:

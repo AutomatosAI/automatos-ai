@@ -193,6 +193,7 @@ async def _execute_step(
         agent=agent,
         workspace_id=str(workspace_id),
         recipe_step=recipe_step_dict,
+        query=prompt_for_hints or clean_prompt,
     )
 
     messages = [{"role": "system", "content": context.system_prompt}]

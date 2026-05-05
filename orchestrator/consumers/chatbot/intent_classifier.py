@@ -345,7 +345,7 @@ class SmartIntentClassifier:
             )
 
         if is_creation:
-            suggested = ["generate_document", "write_file"]
+            suggested = ["generate_document", "workspace_write_file"]
             suggested += self._get_platform_tool_hints(query_lower)
             return IntentResult(
                 primary_intent=Intent.CREATION,

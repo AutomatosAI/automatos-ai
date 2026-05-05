@@ -78,7 +78,7 @@ class TaskContextSection(BaseSection):
         parts.append("4. For document generation tasks: Transform the input into the requested format")
         parts.append("")
         parts.append("When your task involves writing/creating documents:")
-        parts.append("- Use the write_file tool to save your output")
+        parts.append("- Use the workspace_write_file tool to save your output")
         parts.append("- The task description will specify the output filename")
         parts.append("- Actually WRITE the content, don't just describe what you would write")
 

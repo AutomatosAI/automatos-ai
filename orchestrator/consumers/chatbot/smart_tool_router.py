@@ -84,10 +84,10 @@ class SmartToolRouter:
             "TAVILY_TAVILY_SEARCH", "COMPOSIO_SEARCH_FETCH_URL_CONTENT",
             "COMPOSIO_SEARCH_SEC_FILINGS", "composio_execute",
         ],
-        "files": ["read_file", "write_file", "list_directory", "create_directory", "delete_file"],
+        "files": ["workspace_read_file", "workspace_write_file", "workspace_list_dir", "workspace_grep"],
         "external": ["composio_execute", "composio_actions"],
-        "creation": ["write_file", "create_directory", "generate_document"],
-        "document": ["generate_document", "write_file"],
+        "creation": ["workspace_write_file", "generate_document"],
+        "document": ["generate_document", "workspace_write_file"],
         "code": ["search_codebase", "execute_code", "run_command"],
         # Promoted platform tool categories (PRD-122 US-010)
         "platform_management": [
