@@ -14,12 +14,14 @@ Handles:
 - Execution-time validation (defense in depth)
 """
 
+import asyncio
+import concurrent.futures
 import json
 import logging
 import re
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Coroutine, Dict, List, Optional, Tuple
 from uuid import UUID, uuid4
 
 # Import from submodules directly to avoid circular import
@@ -77,6 +79,89 @@ def _is_fatal_dependency_error(error: Optional[str]) -> bool:
     return "composio openai sdk not available" in lowered or "composio-openai" in lowered
 
 
+# =============================================================================
+# PRD-138 US-009: Semantic narrowing of platform_execute action enum
+# =============================================================================
+
+
+def _semantic_routing_enabled() -> bool:
+    """Read the SEMANTIC_TOOL_ROUTING flag from the canonical config singleton."""
+    try:
+        from config import config
+        return bool(getattr(config, "SEMANTIC_TOOL_ROUTING", False))
+    except Exception:
+        return False
+
+
+def _semantic_routing_top_k() -> int:
+    """Configured top_k with safe default (matches PlatformActionsSection)."""
+    try:
+        from config import config
+        return int(getattr(config, "SEMANTIC_TOOL_ROUTING_TOP_K", 15))
+    except (ImportError, TypeError, ValueError):
+        return 15
+
+
+def _run_coroutine_blocking(coro: Coroutine) -> Any:
+    """Run an async coroutine from a sync caller, even when an event loop is
+    already running on this thread.
+
+    get_tools_for_agent is sync (called both at module-load and from inside
+    async chatbot/agent paths), but ActionSemanticIndex.rank_actions is
+    async because the embedding manager is. When we're inside a running
+    loop we can't ``asyncio.run`` directly, so we ship the coroutine to a
+    helper thread that owns its own loop. Coroutines aren't bound to a
+    specific loop until they're awaited, so this transfer is safe.
+    """
+    try:
+        asyncio.get_running_loop()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(asyncio.run, coro).result()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+
+def _rank_actions_for_dispatcher(
+    query: str,
+    top_k: int,
+    exclude_admin: bool,
+    exclude_promoted: bool,
+) -> Optional[List[str]]:
+    """Return the top-K action names for ``query`` from ActionSemanticIndex,
+    or None on any failure (caller falls back to the full enum).
+
+    Empty results also return None — the dispatcher's allowed_names=[] path
+    falls back to the full enum, but routing through None is cleaner here:
+    we never want a callable schema with zero actions, so we let the
+    no-narrowing branch handle it instead of the empty-list defensive
+    fallback in to_dispatcher_schema.
+    """
+    try:
+        from modules.tools.discovery.action_semantic_index import (
+            get_action_semantic_index,
+        )
+        index = get_action_semantic_index()
+        ranked = _run_coroutine_blocking(
+            index.rank_actions(
+                query,
+                top_k=top_k,
+                exclude_admin=exclude_admin,
+                exclude_promoted=exclude_promoted,
+            )
+        )
+        if not ranked:
+            return None
+        return [name for name, _score in ranked]
+    except Exception as exc:
+        logger.warning(
+            "_rank_actions_for_dispatcher failed (query=%r): %s — "
+            "falling back to full enum",
+            (query or "")[:80],
+            exc,
+        )
+        return None
+
+
 def _resolve_relative_date_window_utc(intent: str) -> Optional[tuple[datetime.date, datetime.date]]:
     """
     Resolve common relative date phrases to an (after_date, before_date) window in UTC.
@@ -131,10 +216,19 @@ def get_tools_for_agent(
     db_session=None,
     workspace_id: Optional[Any] = None,
     is_admin: bool = False,
+    query: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """
     Get tools from modules.tools.ToolRegistry in OpenAI function format.
     SINGLE SOURCE OF TRUTH — no duplicate definitions.
+
+    Args:
+        query: Optional natural-language query (typically the latest user
+            turn). When provided AND SEMANTIC_TOOL_ROUTING is on, the
+            platform_execute dispatcher's action.enum is narrowed via
+            ActionSemanticIndex to the top-K most relevant actions —
+            closes the prompt-vs-schema gap from PRD-138 Phase 1 (US-008).
+            On any error or empty rank, falls back to the full enum.
     """
     session_used = db_session or SessionLocal()
     trace_id = _new_trace_id()
@@ -280,18 +374,56 @@ def get_tools_for_agent(
                 logger.debug(f"[tool-trace {trace_id}] Could not resolve workspace admin status: {exc}")
 
         # PRD-64: Single dispatcher for platform actions (reduces 58 schemas → 1)
+        # PRD-138 US-009: Narrow the dispatcher's action.enum to the top-K
+        # semantically relevant actions when a query is supplied AND
+        # SEMANTIC_TOOL_ROUTING is on. Closes the steering-vs-enforcement gap
+        # from Phase 1 (prompt-text-only filtering) — same fallback pattern as
+        # PlatformActionsSection.
         action_registry = None
         try:
             from modules.tools.discovery import get_action_registry
             action_registry = get_action_registry()
+
+            allowed_names: Optional[List[str]] = None
+            narrow_reason: Optional[str] = None
+            if not _semantic_routing_enabled():
+                narrow_reason = "flag SEMANTIC_TOOL_ROUTING=False"
+            elif not query:
+                narrow_reason = "no query supplied"
+            else:
+                allowed_names = _rank_actions_for_dispatcher(
+                    query=query,
+                    top_k=_semantic_routing_top_k(),
+                    exclude_admin=not is_admin,
+                    exclude_promoted=True,
+                )
+                if allowed_names is None:
+                    narrow_reason = "rank_actions returned empty or raised"
+
             dispatcher_schema = action_registry.to_dispatcher_schema(
                 exclude_admin=not is_admin,
                 exclude_promoted=True,  # promoted actions have first-class schemas below
+                allowed_names=allowed_names,
             )
             openai_tools.append(dispatcher_schema)
             all_actions = action_registry.get_all()
             dispatcher_count = len([a for a in all_actions if not a.promoted])
-            logger.info(f"[tool-trace {trace_id}] Added platform_execute dispatcher ({dispatcher_count} actions behind it)")
+
+            if allowed_names is not None:
+                enum_size = len(
+                    dispatcher_schema["function"]["parameters"]
+                    ["properties"]["action"].get("enum", [])
+                )
+                logger.info(
+                    f"[tool-trace {trace_id}] dispatcher enum narrowed to "
+                    f"{enum_size} actions via ActionSemanticIndex "
+                    f"(query={(query or '')[:60]!r}, full={dispatcher_count})"
+                )
+            else:
+                logger.info(
+                    f"[tool-trace {trace_id}] dispatcher enum NOT narrowed: "
+                    f"reason={narrow_reason}; full={dispatcher_count} actions"
+                )
         except Exception as e:
             logger.debug(f"[tool-trace {trace_id}] Platform actions unavailable: {e}")
 

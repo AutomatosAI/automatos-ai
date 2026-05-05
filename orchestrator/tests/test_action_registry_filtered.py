@@ -233,3 +233,120 @@ def test_build_prompt_summary_exclude_admin(registry):
     summary = registry.build_prompt_summary(exclude_admin=True)
     assert "platform_list_agents" in summary
     assert "platform_admin_only_action" not in summary
+
+
+# ---- PRD-138 US-008: to_dispatcher_schema(allowed_names=...) ----
+
+
+def _enum_of(schema: dict) -> list[str]:
+    """Pull the action enum out of a dispatcher schema."""
+    return schema["function"]["parameters"]["properties"]["action"]["enum"]
+
+
+def test_dispatcher_allowed_names_narrows_enum(registry):
+    """AC #1: allowed_names with two known non-admin/non-promoted names yields
+    an enum equal to exactly those two names (sorted)."""
+    schema = registry.to_dispatcher_schema(
+        allowed_names=["platform_list_agents", "platform_create_agent"],
+    )
+    assert _enum_of(schema) == ["platform_create_agent", "platform_list_agents"]
+
+
+def test_dispatcher_allowed_names_none_matches_legacy(registry):
+    """AC #2: allowed_names=None must produce byte-identical schema to the
+    pre-US-008 call (no allowed_names argument)."""
+    legacy = registry.to_dispatcher_schema()
+    new = registry.to_dispatcher_schema(allowed_names=None)
+    assert legacy == new
+
+
+def test_dispatcher_empty_allowed_names_falls_back_to_full(registry, caplog):
+    """AC #3: allowed_names=[] returns the full eligible enum and logs a WARNING
+    (empty allow-list is treated as 'ranker returned nothing', not 'block everything')."""
+    import logging
+    with caplog.at_level(logging.WARNING):
+        schema = registry.to_dispatcher_schema(allowed_names=[])
+    full = registry.to_dispatcher_schema(allowed_names=None)
+    assert _enum_of(schema) == _enum_of(full)
+    assert any(
+        "allowed_names=[]" in record.message and "empty allow-list" in record.message
+        for record in caplog.records
+    ), f"Expected empty-allow-list warning, got: {[r.message for r in caplog.records]}"
+
+
+def test_dispatcher_admin_excluded_even_when_in_allowed_names(registry):
+    """AC #4: An admin action listed in allowed_names is still excluded when
+    exclude_admin=True. Permission filters run before the allow-list."""
+    schema = registry.to_dispatcher_schema(
+        exclude_admin=True,
+        allowed_names=["platform_list_agents", "platform_admin_only_action"],
+    )
+    enum = _enum_of(schema)
+    assert "platform_list_agents" in enum
+    assert "platform_admin_only_action" not in enum
+
+
+def test_dispatcher_admin_passes_when_exclude_admin_false(registry):
+    """Companion to AC #4: when exclude_admin=False (default), an admin action
+    in allowed_names is allowed through."""
+    schema = registry.to_dispatcher_schema(
+        allowed_names=["platform_list_agents", "platform_admin_only_action"],
+    )
+    enum = _enum_of(schema)
+    assert "platform_list_agents" in enum
+    assert "platform_admin_only_action" in enum
+
+
+def test_dispatcher_unknown_names_silently_dropped(registry):
+    """AC #5: Names in allowed_names that aren't registered are silently skipped,
+    not an error. Valid names from the same call still appear."""
+    schema = registry.to_dispatcher_schema(
+        allowed_names=[
+            "platform_list_agents",
+            "platform_does_not_exist",
+            "another_phantom_action",
+        ],
+    )
+    enum = _enum_of(schema)
+    assert enum == ["platform_list_agents"]
+
+
+def test_dispatcher_only_unknown_names_falls_back_to_full(registry, caplog):
+    """When every name in allowed_names is unknown, the intersection is empty,
+    so the dispatcher falls back to the full enum and logs a WARNING. The LLM
+    must never be handed a schema with zero callable actions."""
+    import logging
+    with caplog.at_level(logging.WARNING):
+        schema = registry.to_dispatcher_schema(
+            allowed_names=["nope_one", "nope_two"],
+        )
+    full = registry.to_dispatcher_schema(allowed_names=None)
+    assert _enum_of(schema) == _enum_of(full)
+    assert any(
+        "intersection is empty" in record.message
+        for record in caplog.records
+    ), f"Expected intersection-empty warning, got: {[r.message for r in caplog.records]}"
+
+
+def test_dispatcher_promoted_excluded_even_when_in_allowed_names(registry):
+    """exclude_promoted=True (default) drops promoted actions even if listed
+    in allowed_names. Same precedence rule as exclude_admin."""
+    schema = registry.to_dispatcher_schema(
+        allowed_names=["platform_list_agents", "platform_promoted_action"],
+    )
+    enum = _enum_of(schema)
+    assert "platform_list_agents" in enum
+    assert "platform_promoted_action" not in enum
+
+
+def test_dispatcher_allowed_names_preserves_sorted_order(registry):
+    """The enum order must be deterministic (sorted) so prompt cache keys are
+    stable across calls with the same allow-list in different orders."""
+    schema_a = registry.to_dispatcher_schema(
+        allowed_names=["platform_list_missions", "platform_list_agents", "platform_create_agent"],
+    )
+    schema_b = registry.to_dispatcher_schema(
+        allowed_names=["platform_create_agent", "platform_list_missions", "platform_list_agents"],
+    )
+    assert _enum_of(schema_a) == _enum_of(schema_b)
+    assert _enum_of(schema_a) == sorted(_enum_of(schema_a))
