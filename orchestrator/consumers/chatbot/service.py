@@ -1936,6 +1936,13 @@ class StreamingChatService:
                     query=latest_text,
                 )
             else:
+                # ATOM path skips full tool loading, but always include
+                # platform_execute so the agent can respond to platform
+                # queries even when the classifier under-estimates complexity.
+                # PRD-138 US-009: ATOM path also narrows the dispatcher's
+                # action enum when SEMANTIC_TOOL_ROUTING is on, so a model
+                # in the lightweight ATOM lane sees the same focused
+                # surface as the full path.
                 try:
                     from modules.tools.discovery.action_registry import get_action_registry
                     _allowed = None
