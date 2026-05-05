@@ -166,7 +166,7 @@ async def execute_workspace_action(
             "workspace_grep", "workspace_list_dir",
         )
         # Paths starting with these prefixes are workspace-root relative, not repo-relative
-        _WORKSPACE_ROOT_PREFIXES = ("repos/", "artifacts/", "content/", "reports/", "logs/")
+        _WORKSPACE_ROOT_PREFIXES = ("repos/", "artifacts/", "content/", "reports/", "logs/", "deliverables/")
         param_path = parameters.get("path", "")
         param_cwd = parameters.get("cwd", "")
         path_is_workspace_root = any(param_path.startswith(p) for p in _WORKSPACE_ROOT_PREFIXES)
@@ -234,16 +234,41 @@ async def execute_workspace_action(
             )
 
         elif tool_name == "workspace_html_to_png":
-            # Render an HTML page to a PNG inside the workspace. The resulting
-            # file is auto-registered as a deliverable below (artifact_type
-            # 'image' — inferred from .png).
-            url = parameters.get("url", "")
-            output_path = parameters.get("output_path", "")
+            url = parameters.get("url", "").strip()
+            output_path = parameters.get("output_path", "").strip()
             viewport = parameters.get("viewport") or {}
             if not url:
                 return {"success": False, "error": "url is required", "tool": tool_name}
             if not output_path:
                 return {"success": False, "error": "output_path is required", "tool": tool_name}
+
+            # Auto-append .png if the agent forgot the extension
+            if not output_path.lower().endswith(".png"):
+                output_path = output_path.rstrip(".") + ".png"
+
+            # If agent passed a workspace-relative path instead of file:// URL,
+            # auto-prefix so the worker can resolve it.
+            if not url.startswith(("file://", "http://", "https://")):
+                ws_id = str(workspace_id)
+                url = f"file:///workspaces/{ws_id}/{url.lstrip('/')}"
+
+            # Reject non-HTML file:// URLs (agents sometimes pass .md or .json)
+            if url.startswith("file://"):
+                from urllib.parse import urlparse
+                parsed_path = urlparse(url).path
+                if not parsed_path.lower().endswith((".html", ".htm")):
+                    ext = parsed_path.rsplit(".", 1)[-1] if "." in parsed_path else "none"
+                    return {
+                        "success": False,
+                        "error": (
+                            f"url points to a .{ext} file — this tool renders HTML pages "
+                            f"to PNG. Pass the HTML template URL with query params, e.g. "
+                            f"file:///workspaces/{{id}}/repos/automatos-social/render/"
+                            f"index.html?template=...&size=..."
+                        ),
+                        "tool": tool_name,
+                    }
+
             try:
                 viewport_w = int(viewport.get("w", 0))
                 viewport_h = int(viewport.get("h", 0))
