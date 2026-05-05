@@ -39,17 +39,14 @@ RUN useradd -m -u 1000 worker \
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libnss3 libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 libdrm2 \
-    libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 \
+    libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 \
     libpango-1.0-0 libcairo2 libasound2t64 libxshmfence1 \
     fonts-liberation fonts-noto-color-emoji fonts-unifont \
     && rm -rf /var/lib/apt/lists/* \
     && PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers playwright install chromium \
-    && if [ ! -d /opt/playwright-browsers ] && [ -d /root/.cache/ms-playwright ]; then \
-         mv /root/.cache/ms-playwright /opt/playwright-browsers; \
-       fi \
     && chmod -R o+rx /opt/playwright-browsers \
     && mkdir -p /home/worker/.cache && ln -sf /opt/playwright-browsers /home/worker/.cache/ms-playwright \
-    && ln -sf /opt/playwright-browsers /root/.cache/ms-playwright
+    && mkdir -p /root/.cache && ln -sf /opt/playwright-browsers /root/.cache/ms-playwright
 
 # Entrypoint fixes volume ownership then drops to worker user
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
