@@ -464,6 +464,14 @@ async def _boot_phase_2_extensions(app_instance: "FastAPI") -> "DeferredInitResu
                     except Exception as _mj_err:
                         logger.warning("Could not start MemoryJobScheduler: %s", _mj_err)
 
+                # PRD-139: Nightly edge builder (populates graph regardless of flag)
+                try:
+                    from services.edge_builder_scheduler import get_edge_builder_scheduler
+                    await get_edge_builder_scheduler().start(scheduler=shared_sched)
+                    logger.info("EdgeBuilderScheduler started on unified scheduler")
+                except Exception as _eb_err:
+                    logger.warning("Could not start EdgeBuilderScheduler: %s", _eb_err)
+
                 # PRD-77: Load agent-scheduled tasks into APScheduler
                 try:
                     from services.scheduled_task_service import ScheduledTaskService
