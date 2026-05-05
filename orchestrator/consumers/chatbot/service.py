@@ -2108,7 +2108,6 @@ class StreamingChatService:
             logger.error(f"Error streaming response with agent: {e}", exc_info=True)
             yield self.streaming_handler.format_aisdk_error(str(e))
 
-<<<<<<< HEAD
     async def stream_response(
         self,
         chat_id: str,
