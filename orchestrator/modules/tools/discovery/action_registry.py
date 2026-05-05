@@ -227,7 +227,7 @@ class ActionRegistry:
             },
         }
 
-    def build_prompt_summary(self, exclude_admin: bool = False, exclude_promoted: bool = True) -> str:
+    def build_prompt_summary(self, exclude_admin: bool = False, exclude_promoted: bool = False) -> str:
         """
         Build a markdown summary of all platform actions for injection
         into the agent's system prompt.  Grouped by category.
@@ -235,8 +235,9 @@ class ActionRegistry:
         Args:
             exclude_admin: If True, admin_only actions are skipped from the
                 summary (non-admin callers won't see them).
-            exclude_promoted: If True (default), promoted actions are skipped
-                since they have their own first-class schemas.
+            exclude_promoted: If True, promoted actions are skipped from the
+                prompt text. Default False — promoted actions appear in a
+                "Direct Tools" section with call-directly instructions.
         """
         self._ensure_initialized()
         return self._format_actions_summary(
@@ -249,7 +250,7 @@ class ActionRegistry:
         self,
         action_names: List[str],
         exclude_admin: bool = False,
-        exclude_promoted: bool = True,
+        exclude_promoted: bool = False,
     ) -> str:
         """
         Build a markdown summary of only the named subset of platform actions,
@@ -264,8 +265,9 @@ class ActionRegistry:
                 yields a summary header with no action lines (does NOT
                 fall back to all actions).
             exclude_admin: If True, admin_only actions are skipped.
-            exclude_promoted: If True (default), promoted actions are skipped
-                since they have their own first-class schemas.
+            exclude_promoted: If True, promoted actions are skipped from
+                the prompt text. Default False — promoted actions appear
+                in a "Direct Tools" section.
         """
         self._ensure_initialized()
         # Preserve registry-membership filtering; unknown names silently skipped.
@@ -280,6 +282,17 @@ class ActionRegistry:
         )
 
     @staticmethod
+    def _format_action_line(action: ActionDefinition) -> str:
+        props = action.parameters.get("properties", {})
+        required = action.parameters.get("required", [])
+        param_hints = []
+        for pname in props:
+            req_marker = " (required)" if pname in required else ""
+            param_hints.append(f"`{pname}`{req_marker}")
+        param_str = f" — params: {', '.join(param_hints)}" if param_hints else ""
+        return f"- `{action.name}`: {action.description}{param_str}"
+
+    @staticmethod
     def _format_actions_summary(
         actions: List[ActionDefinition],
         exclude_admin: bool,
@@ -289,33 +302,48 @@ class ActionRegistry:
         Render a list of ActionDefinitions as the canonical markdown summary
         used in agent system prompts.  Shared between build_prompt_summary
         and build_filtered_prompt_summary so output format stays identical.
+
+        Promoted actions are rendered in a separate section with instructions
+        to call them directly by name (they have first-class tool schemas).
+        Non-promoted actions are rendered with ``platform_execute`` calling
+        instructions.
         """
-        by_category: Dict[str, List[ActionDefinition]] = {}
+        promoted_by_cat: Dict[str, List[ActionDefinition]] = {}
+        dispatcher_by_cat: Dict[str, List[ActionDefinition]] = {}
+
         for action in actions:
             if exclude_admin and action.admin_only:
                 continue
             if exclude_promoted and action.promoted:
                 continue
-            by_category.setdefault(action.category, []).append(action)
+            bucket = promoted_by_cat if action.promoted else dispatcher_by_cat
+            bucket.setdefault(action.category, []).append(action)
 
-        lines = ["\n## Available Platform Actions\n"]
-        lines.append(
-            "Use `platform_execute(action, params)` to call these. "
-            "The `action` field must be the exact action name.\n"
-        )
-        for category in sorted(by_category.keys()):
-            lines.append(f"### {category.replace('_', ' ').title()}")
-            for action in sorted(by_category[category], key=lambda a: a.name):
-                # Extract required params from schema
-                props = action.parameters.get("properties", {})
-                required = action.parameters.get("required", [])
-                param_hints = []
-                for pname, pdef in props.items():
-                    req_marker = " (required)" if pname in required else ""
-                    param_hints.append(f"`{pname}`{req_marker}")
-                param_str = f" — params: {', '.join(param_hints)}" if param_hints else ""
-                lines.append(f"- `{action.name}`: {action.description}{param_str}")
-            lines.append("")
+        lines: List[str] = []
+
+        if promoted_by_cat:
+            lines.append("\n## Direct Tools\n")
+            lines.append(
+                "Call these tools directly by name (they have their own "
+                "function schemas). Do NOT wrap them in `platform_execute`.\n"
+            )
+            for category in sorted(promoted_by_cat.keys()):
+                lines.append(f"### {category.replace('_', ' ').title()}")
+                for action in sorted(promoted_by_cat[category], key=lambda a: a.name):
+                    lines.append(ActionRegistry._format_action_line(action))
+                lines.append("")
+
+        if dispatcher_by_cat:
+            lines.append("\n## Available Platform Actions\n")
+            lines.append(
+                "Use `platform_execute(action, params)` to call these. "
+                "The `action` field must be the exact action name.\n"
+            )
+            for category in sorted(dispatcher_by_cat.keys()):
+                lines.append(f"### {category.replace('_', ' ').title()}")
+                for action in sorted(dispatcher_by_cat[category], key=lambda a: a.name):
+                    lines.append(ActionRegistry._format_action_line(action))
+                lines.append("")
 
         return "\n".join(lines)
 

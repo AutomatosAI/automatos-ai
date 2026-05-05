@@ -35,11 +35,16 @@ RUN useradd -m -u 1000 worker \
     && chown -R worker:worker /app /workspaces
 
 # Headless Chromium for workspace_html_to_png tool (PRD-social-render).
-# PLAYWRIGHT_BROWSERS_PATH ensures the binary is installed to a fixed
-# location that both root (build) and worker (runtime) can find.
+# Force install path via both ENV and inline var (Docker layer cache may miss ENV).
+# Symlink from default user paths so Playwright finds it regardless of user context.
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers
-RUN playwright install --with-deps chromium \
-    && chmod -R o+rx /opt/playwright-browsers
+RUN PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers playwright install --with-deps chromium \
+    && if [ ! -d /opt/playwright-browsers ] && [ -d /root/.cache/ms-playwright ]; then \
+         mv /root/.cache/ms-playwright /opt/playwright-browsers; \
+       fi \
+    && chmod -R o+rx /opt/playwright-browsers \
+    && mkdir -p /home/worker/.cache && ln -sf /opt/playwright-browsers /home/worker/.cache/ms-playwright \
+    && ln -sf /opt/playwright-browsers /root/.cache/ms-playwright
 
 # Entrypoint fixes volume ownership then drops to worker user
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
