@@ -291,7 +291,7 @@ export function PlaybookStepBuilder() {
                 Agent <span className="text-[hsl(var(--destructive))]">*</span>
               </Label>
               <select
-                value={step.agent_id}
+                value={String(step.agent_id || '')}
                 onChange={(e) => updateStep(index, 'agent_id', e.target.value)}
                 className="w-full mt-1 bg-secondary/50 rounded-xl border border-border/30 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 appearance-none cursor-pointer"
               >
@@ -311,7 +311,7 @@ export function PlaybookStepBuilder() {
               </select>
               {/* Agent info badge */}
               {step.agent_id && (() => {
-                const selected = agents.find((a) => String(a.id) === step.agent_id)
+                const selected = agents.find((a) => String(a.id) === String(step.agent_id))
                 if (!selected) return null
                 const model = getModelDisplayName(
                   selected.agent_model_config?.model_id || selected.model_config?.model_id
@@ -383,7 +383,7 @@ export function PlaybookStepBuilder() {
                       <option key={s.step_id} value={s.step_id}>
                         Step {s.order}
                         {s.agent_id
-                          ? ` (${agents.find((a) => String(a.id) === s.agent_id)?.name || 'Agent'})`
+                          ? ` (${agents.find((a) => String(a.id) === String(s.agent_id))?.name || 'Agent'})`
                           : ''}
                       </option>
                     ))}
