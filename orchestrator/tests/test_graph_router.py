@@ -107,37 +107,37 @@ class _StubAffinity:
 _fake_tr_mod.ToolRoutingEdge = _StubEdge
 _fake_tr_mod.ToolRoutingAffinity = _StubAffinity
 
-# sqlalchemy stubs
+# sqlalchemy stubs — graph_router.py uses lazy `from sqlalchemy import and_, or_`
+# inside methods.  _StubEdge._Col returns plain tuples from operator overloads,
+# so the real sqlalchemy operators would reject them.  We need a fake sqlalchemy
+# for this test but MUST NOT leave it in sys.modules after module load (other
+# tests in the same pytest session need the real one).
+#
+# Strategy: import the real sqlalchemy first (lands it in sys.modules), build a
+# fake with the same module name, then swap it in ONLY via an autouse fixture.
+import sqlalchemy as _real_sa  # noqa: E402 — ensures real module is cached
+import sqlalchemy.orm as _real_sa_orm  # noqa: E402
+
 _fake_sa = type(sys)("sqlalchemy")
 _fake_sa.and_ = lambda *args: ("and_", args)
 _fake_sa.or_ = lambda *args: ("or_", args)  # noqa
 _fake_sa.func = MagicMock()
+_fake_sa.__path__ = _real_sa.__path__
+_fake_sa.__file__ = _real_sa.__file__
 
-# Ensure all nested package paths exist
-for mod_path in [
+# Core module stubs are installed/restored per-test via the _swap_sqlalchemy
+# fixture below (along with sqlalchemy).  We track which modules to stub here.
+_CORE_STUBS = {
+    "core.database.database": _fake_db_mod,
+    "core.cache.service": _fake_cache_mod,
+    "core.models.tool_routing": _fake_tr_mod,
+}
+_CORE_PACKAGES = [
     "core",
     "core.database",
-    "core.database.database",
     "core.cache",
-    "core.cache.service",
     "core.models",
-    "core.models.tool_routing",
-    "sqlalchemy",
-    "sqlalchemy.orm",
-]:
-    if mod_path not in sys.modules:
-        m = type(sys)(mod_path)
-        if "." not in mod_path:
-            m.__path__ = []
-        sys.modules[mod_path] = m
-
-sys.modules["core.database.database"] = _fake_db_mod
-sys.modules["core.cache.service"] = _fake_cache_mod
-sys.modules["core.models.tool_routing"] = _fake_tr_mod
-sys.modules["sqlalchemy"] = _fake_sa
-# Keep sqlalchemy.orm
-_sa_orm = sys.modules.get("sqlalchemy.orm") or type(sys)("sqlalchemy.orm")
-sys.modules["sqlalchemy.orm"] = _sa_orm
+]
 
 
 # ---------------------------------------------------------------------------
@@ -336,6 +336,48 @@ def _rank(router, edges=None, affinities=None, agent_id=None,
         GraphRouter._min_confidence = orig_min
         GraphRouter._agent_sample_floor = orig_floor
         _fake_db_mod.get_db_session = orig_db
+
+
+# ---------------------------------------------------------------------------
+# Fixture: swap in fake sqlalchemy for test execution, restore real after
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(autouse=True)
+def _swap_modules():
+    """Install fake sqlalchemy + core stubs for graph_router's lazy imports.
+
+    The fake provides no-op and_, or_, func that work with _StubEdge._Col.
+    Core stubs provide fake DB session, cache, and model classes.
+    All are restored after each test so other test modules are not poisoned.
+    """
+    saved = {}
+    # Save and replace sqlalchemy
+    saved["sqlalchemy"] = sys.modules.get("sqlalchemy")
+    sys.modules["sqlalchemy"] = _fake_sa
+
+    # Save and install core package paths + stubs
+    for pkg in _CORE_PACKAGES:
+        saved[pkg] = sys.modules.get(pkg)
+        if pkg not in sys.modules:
+            m = type(sys)(pkg)
+            m.__path__ = []
+            sys.modules[pkg] = m
+
+    for mod_path, fake_mod in _CORE_STUBS.items():
+        saved[mod_path] = sys.modules.get(mod_path)
+        sys.modules[mod_path] = fake_mod
+
+    yield
+
+    # Restore everything
+    sys.modules["sqlalchemy"] = _real_sa
+    for key, orig in saved.items():
+        if key == "sqlalchemy":
+            continue
+        if orig is None:
+            sys.modules.pop(key, None)
+        else:
+            sys.modules[key] = orig
 
 
 # ===========================================================================

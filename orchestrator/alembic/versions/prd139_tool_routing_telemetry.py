@@ -29,13 +29,14 @@ def upgrade() -> None:
         nullable=True,
     )
     # Drop existing FK constraint and re-add with SET NULL
+    # Production DB uses 'fk_tool_execution_agent' (not the SQLAlchemy default name)
     op.drop_constraint(
-        "tool_execution_logs_agent_id_fkey",
+        "fk_tool_execution_agent",
         "tool_execution_logs",
         type_="foreignkey",
     )
     op.create_foreign_key(
-        "tool_execution_logs_agent_id_fkey",
+        "fk_tool_execution_agent",
         "tool_execution_logs",
         "agents",
         ["agent_id"],
@@ -70,12 +71,12 @@ def downgrade() -> None:
 
     # Revert agent_id to non-nullable with CASCADE
     op.drop_constraint(
-        "tool_execution_logs_agent_id_fkey",
+        "fk_tool_execution_agent",
         "tool_execution_logs",
         type_="foreignkey",
     )
     op.create_foreign_key(
-        "tool_execution_logs_agent_id_fkey",
+        "fk_tool_execution_agent",
         "tool_execution_logs",
         "agents",
         ["agent_id"],
