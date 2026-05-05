@@ -413,10 +413,15 @@ class WorkspaceToolExecutor:
         # orchestrator; outbound HTTPS to render templates from CDNs is OK.
         if url.startswith("file://"):
             file_path = url[len("file://"):]
-            # file:// URLs may have an empty host before the path; strip a
-            # leading slash if the path looks absolute.
+            # Strip query string and fragment before resolving as a filesystem
+            # path — Playwright handles ?params correctly but Path() would
+            # treat the entire string (including params) as a filename and
+            # fail with ENAMETOOLONG on long query strings.
+            from urllib.parse import urlparse
+            parsed = urlparse(url)
+            file_path_clean = parsed.path
             try:
-                resolved_target = Path(file_path).resolve()
+                resolved_target = Path(file_path_clean).resolve()
                 # Containment check: the target file must live inside this
                 # workspace's root (so an agent cannot screenshot, say,
                 # /etc/passwd via file:///etc/passwd).
@@ -430,7 +435,7 @@ class WorkspaceToolExecutor:
             if not resolved_target.exists():
                 return {
                     "success": False,
-                    "error": f"file:// target does not exist: {file_path}",
+                    "error": f"file:// target does not exist: {file_path_clean}",
                 }
         elif not (url.startswith("http://") or url.startswith("https://")):
             return {
