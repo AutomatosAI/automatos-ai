@@ -51,12 +51,15 @@ class SmartToolRouter:
     """
 
     # Core tools that are almost always useful
+    # NOTE: smart_query_database / query_database intentionally excluded —
+    # NL2SQL has no workspace scoping and leaks cross-tenant data.
+    # Platform tools (platform_list_agents etc.) are the correct path
+    # for querying workspace data.  NL2SQL stays in the "data" category
+    # so it's still reachable when the intent explicitly asks for SQL.
     CORE_TOOLS = frozenset({
         "search_knowledge",
         "semantic_search",
         "search_codebase",
-        "smart_query_database",
-        "query_database",
         "composio_execute",
         "generate_document",
     })
