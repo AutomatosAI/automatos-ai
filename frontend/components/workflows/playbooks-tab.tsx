@@ -230,8 +230,6 @@ export function PlaybooksTab({
   }
 
   const handleEditClick = (playbook: any) => {
-    // DEBUG: dump raw steps from API to diagnose agent_id matching
-    console.log('[DEBUG handleEditClick] raw steps:', JSON.stringify(playbook.steps, null, 2))
     const backendConfig = playbook.execution_config || {}
     const backendSchedule = playbook.schedule_config || {}
 
