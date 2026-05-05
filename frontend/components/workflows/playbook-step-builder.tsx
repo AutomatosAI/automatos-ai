@@ -117,6 +117,19 @@ export function PlaybookStepBuilder() {
     return list.filter((a: Agent) => a.status === 'active')
   }, [agentsData])
 
+  // DEBUG: log agent IDs vs step agent_ids to diagnose mismatch
+  React.useEffect(() => {
+    if (agents.length > 0 && steps.length > 0) {
+      console.log('[DEBUG StepBuilder] agents ids:', agents.map(a => ({ id: a.id, type: typeof a.id, name: a.name })))
+      console.log('[DEBUG StepBuilder] step agent_ids:', steps.map(s => ({ agent_id: s.agent_id, type: typeof s.agent_id, stringified: String(s.agent_id) })))
+      console.log('[DEBUG StepBuilder] matches:', steps.map(s => ({
+        step_agent_id: s.agent_id,
+        found: agents.some(a => String(a.id) === String(s.agent_id)),
+        selectValue: String(s.agent_id || ''),
+      })))
+    }
+  }, [agents, steps])
+
   const addStep = () => {
     const newStep = {
       step_id: `step-${Date.now()}`,
