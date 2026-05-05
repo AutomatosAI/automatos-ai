@@ -1,4 +1,49 @@
 
+## US-006 — Bootstrap synthetic telemetry for cold-start pipeline (PRD-139)
+
+Commit: 8134828b2
+Branch: worktree-agent-a854fd00 (for merge into ralph/prd-139-tool-routing-graph)
+
+### Files created
+- orchestrator/scripts/eval/tool_routing/seed_telemetry.py (370 lines)
+- orchestrator/tests/test_seed_telemetry.py (450 lines)
+
+### Files modified
+- orchestrator/scripts/eval/tool_routing/README.md (added seed->build->eval pipeline docs)
+
+### Implementation summary
+- Loads 47 eval queries from eval_set.jsonl
+- Generates 2341 synthetic ToolExecutionLog rows:
+  - 47 queries x 42 repetitions = 1974 base rows
+  - 367 multi-action turn pairings (used_after signal)
+- 3 synthetic agents with category-biased preferences:
+  - Agent 9001 (Sentinel-like): heavy reports + memory (27.4% of rows)
+  - Agent 9002 (Scout-like): heavy workspace + documents (31.6%)
+  - Agent 9003 (Ops-like): balanced, favors agents + missions (41.0%)
+- 81.6% success / 18.4% failure ratio
+- Multi-action pairs: get_latest_report->submit_report, search_memory->store_memory,
+  read_file->write_file, list_agents->get_agent, etc. (45% probability per eligible turn)
+- Timestamps spread over 30 days with realistic hour-of-day distribution
+- All rows tagged telemetry_source='synthetic' for production exclusion
+- Idempotent: DELETE WHERE telemetry_source='synthetic' before INSERT
+- CLI: --dry-run (stats only), --verify (calls build_edges after seeding)
+- Deterministic with pinned random seed (RANDOM_SEED=139006)
+
+### Test results (23 passed)
+- TestRowGeneration: 3 tests (min 2000, all queries, per-query counts)
+- TestAgentBias: 4 tests (3 agents used, sentinel reports, scout workspace, ops agents/missions)
+- TestStatusDistribution: 2 tests (80% success rate, both statuses)
+- TestTelemetrySourceTag: 1 test (all rows tagged synthetic)
+- TestMultiActionTurns: 3 tests (turns exist, known pairs, timestamp ordering)
+- TestDataQuality: 5 tests (app_name, exec time, timestamps, workspace_id, turn_id)
+- TestIdempotency: 1 test (clears prior synthetic on re-run)
+- TestEdgePipelineIntegration: 3 tests (produces edges, all affinity types, above sample floor)
+- TestDeterminism: 1 test (pinned base_time = identical output)
+
+Acceptance Criteria met: All 9 criteria satisfied.
+
+---
+
 ## US-004 — GraphRouter service (PRD-139)
 
 Commit: a52074d98
