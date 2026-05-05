@@ -53,6 +53,9 @@ SUCCESS_RATE = 0.80
 # Workspace UUID for synthetic data (deterministic from seed)
 SYNTHETIC_WORKSPACE_ID = uuid.UUID("00000000-dead-beef-cafe-000000139006")
 
+# Synthetic user_id (outside real user ID range)
+SYNTHETIC_USER_ID = 99999
+
 # Time window: spread rows over 30 days ending at script run time
 TIME_WINDOW_DAYS = 30
 
@@ -315,9 +318,10 @@ def _build_row(
 ) -> Dict[str, Any]:
     """Build a row dict for insertion."""
     return {
-        "agent_id": agent_id,
+        "agent_id": _resolve_agent_id(agent_id),
         "app_name": app_name,
         "action_name": action_name,
+        "user_id": SYNTHETIC_USER_ID,
         "user_query": user_query,
         "workspace_id": workspace_id,
         "status": status,
@@ -325,10 +329,24 @@ def _build_row(
         "executed_at": executed_at,
         "telemetry_source": TELEMETRY_SOURCE,
         "routing_source": "keyword",  # Synthetic assumes keyword routing
-        "router_decision": {"turn_id": turn_id},
+        "router_decision": {"turn_id": turn_id, "synthetic_agent_id": agent_id},
         "input_parameters": {"keys": ["query"]},
         "cache_hit": False,
     }
+
+
+# Map synthetic agent IDs to real agent IDs that exist in production DB.
+# These are stable agents that won't be deleted.
+_AGENT_ID_MAP: Dict[int, int] = {
+    AGENT_SENTINEL: 483,   # Auto
+    AGENT_SCOUT: 507,      # Blog QA
+    AGENT_OPS: 512,        # Jobs Scheduler
+}
+
+
+def _resolve_agent_id(synthetic_id: int) -> int:
+    """Map synthetic agent ID to a real agent ID in the database."""
+    return _AGENT_ID_MAP.get(synthetic_id, 483)
 
 
 # ---------------------------------------------------------------------------
@@ -366,6 +384,7 @@ def seed_telemetry(db: Session, rows: List[Dict[str, Any]]) -> int:
             agent_id=row_data["agent_id"],
             app_name=row_data["app_name"],
             action_name=row_data["action_name"],
+            user_id=row_data["user_id"],
             user_query=row_data["user_query"],
             workspace_id=row_data["workspace_id"],
             status=row_data["status"],
@@ -376,6 +395,7 @@ def seed_telemetry(db: Session, rows: List[Dict[str, Any]]) -> int:
             router_decision=row_data["router_decision"],
             input_parameters=row_data["input_parameters"],
             cache_hit=row_data["cache_hit"],
+            estimated_cost=0.0,
         )
         db.add(entry)
 
