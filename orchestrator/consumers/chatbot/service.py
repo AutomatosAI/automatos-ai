@@ -105,7 +105,7 @@ class ToolExecutionTracker:
         'list_directory': 5,
         'read_file': 8,
         'write_file': 5,
-        'platform_default': 5,
+        'platform_default': 25,
         'workspace_default': 8,
         'default': 5,
     }

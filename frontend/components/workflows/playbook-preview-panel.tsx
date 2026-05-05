@@ -88,8 +88,9 @@ export function PlaybookPreviewPanel() {
     const map = new Map<string, Agent>()
     for (const step of steps) {
       if (step.agent_id) {
-        const agent = agents.find((a) => String(a.id) === step.agent_id)
-        if (agent) map.set(step.agent_id, agent)
+        const agentIdStr = String(step.agent_id)
+        const agent = agents.find((a) => String(a.id) === agentIdStr)
+        if (agent) map.set(agentIdStr, agent)
       }
     }
     return map
@@ -168,7 +169,7 @@ export function PlaybookPreviewPanel() {
           <div className="text-xs font-medium text-muted-foreground mb-3">Workflow Flow</div>
           <div className="space-y-0">
             {steps.map((step, index) => {
-              const agent = step.agent_id ? stepAgents.get(step.agent_id) : null
+              const agent = step.agent_id ? stepAgents.get(String(step.agent_id)) : null
               const isLast = index === steps.length - 1
               const hasCustomRoute = Boolean(step.pass_to)
 
