@@ -15,6 +15,7 @@ modules/tools/execution/exec_*.py for maintainability.
 """
 
 import logging
+import time as _time
 from typing import Dict, Any, Optional, Tuple
 from uuid import UUID
 from sqlalchemy.orm import Session
@@ -33,6 +34,7 @@ from modules.tools.execution import exec_document
 from modules.tools.execution import exec_multimodal
 from modules.tools.execution import exec_workspace
 from modules.tools.execution import exec_planning
+from modules.tools.execution.telemetry import fire_telemetry
 
 # PRD-36: Composio Integration (lazy import to avoid startup overhead)
 _composio_executor = None
@@ -335,6 +337,8 @@ class UnifiedToolExecutor:
         Returns:
             Tool execution result with standard format
         """
+        _exec_start = _time.monotonic()
+        result: Dict[str, Any] = {"success": False, "error": "Unknown dispatch failure", "tool": tool_name}
         try:
             trace = trace_id or "no-trace"
             logger.info(
@@ -351,7 +355,8 @@ class UnifiedToolExecutor:
                 if not action_params:
                     action_params = {k: v for k, v in parameters.items() if k not in ("action", "params")}
                 if not action_name:
-                    return {"success": False, "error": "Missing required field: action", "tool": tool_name}
+                    result = {"success": False, "error": "Missing required field: action", "tool": tool_name}
+                    return result
 
                 # Validate action exists in registry
                 from modules.tools.discovery import get_action_registry
@@ -359,11 +364,12 @@ class UnifiedToolExecutor:
                 action_def = registry.get(action_name)
                 if not action_def:
                     available = [a.name for a in registry.get_all()]
-                    return {
+                    result = {
                         "success": False,
                         "error": f"Unknown platform action: '{action_name}'. Use one of: {available[:20]}...",
                         "tool": tool_name,
                     }
+                    return result
 
                 # Validate required params
                 required = action_def.parameters.get("required", [])
@@ -376,7 +382,7 @@ class UnifiedToolExecutor:
                         for p in missing if p in props
                     ]
                     hint_str = "\n".join(hints)
-                    return {
+                    result = {
                         "success": False,
                         "error": (
                             f"Missing required params for '{action_name}': {missing}. "
@@ -384,34 +390,39 @@ class UnifiedToolExecutor:
                         ),
                         "tool": tool_name,
                     }
+                    return result
 
                 logger.info(f"[tool-trace {trace}] platform_execute -> {action_name}")
                 # Workspace actions registered in ActionRegistry need workspace routing
                 if action_name.startswith("workspace_"):
-                    return await self._execute_workspace_action(
+                    result = await self._execute_workspace_action(
                         action_name, action_params, workspace_id=workspace_id, trace_id=trace,
                         agent_id=agent_id, caller_context=caller_context,
                     )
-                return await self._execute_platform_action(
+                    return result
+                result = await self._execute_platform_action(
                     action_name, action_params, workspace_id=workspace_id, trace_id=trace,
                     caller_context=caller_context,
                 )
+                return result
 
             # PRD-64: Route platform_* actions to PlatformActionExecutor (direct calls)
             if tool_name.startswith("platform_"):
                 logger.info(f"[tool-trace {trace}] Routing to PlatformActionExecutor: {tool_name}")
-                return await self._execute_platform_action(
+                result = await self._execute_platform_action(
                     tool_name, parameters, workspace_id=workspace_id, trace_id=trace,
                     caller_context=caller_context,
                 )
+                return result
 
             # Workspace tools: proxy to worker via WorkspaceClient
             if tool_name.startswith("workspace_"):
                 logger.info(f"[tool-trace {trace}] Routing to WorkspaceClient: {tool_name}")
-                return await self._execute_workspace_action(
+                result = await self._execute_workspace_action(
                     tool_name, parameters, workspace_id=workspace_id, trace_id=trace,
                     agent_id=agent_id, caller_context=caller_context,
                 )
+                return result
 
             # PRD-36: Route Composio per-action tools (SDK-provided schemas).
             # The LLM calls e.g. COMPOSIO_SEARCH_WEB(query="...") directly.
@@ -419,43 +430,47 @@ class UnifiedToolExecutor:
             if tool_name in self.composio_actions:
                 resolved_app = self.composio_actions[tool_name]
                 logger.info(f"[tool-trace {trace}] Routing Composio per-action tool: {tool_name} (app={resolved_app})")
-                return await self._execute_composio_execute(
+                result = await self._execute_composio_execute(
                     tool_name,
                     {"action": tool_name, "params": parameters, "app_name": resolved_app},
                     agent_id,
                     workspace_id=workspace_id,
                     trace_id=trace,
                 )
+                return result
 
             # Check if tool exists in registry
             tool_spec = self.tool_registry.get_tool(tool_name)
             if not tool_spec:
-                return {
+                result = {
                     "success": False,
                     "error": f"Unknown tool: {tool_name}",
                     "tool": tool_name,
                 }
+                return result
 
             # PRD-36: Legacy composio_execute meta-tool (fallback for older agents)
             if tool_name == "composio_execute":
                 logger.info(f"[tool-trace {trace}] Routing to Composio executor: {tool_name}")
-                return await self._execute_composio_execute(
+                result = await self._execute_composio_execute(
                     tool_name,
                     parameters,
                     agent_id,
                     workspace_id=workspace_id,
                     trace_id=trace,
                 )
+                return result
 
             if tool_spec.metadata and tool_spec.metadata.get("integration_type") == "composio":
                 logger.info(f"[tool-trace {trace}] Routing to Composio executor: {tool_name}")
-                return await self._execute_composio_tool(
+                result = await self._execute_composio_tool(
                     tool_spec,
                     parameters,
                     agent_id,
                     workspace_id,
                     trace_id=trace
                 )
+                return result
 
             # Route to appropriate executor
             executor_func = self.tool_routes.get(tool_name)
@@ -475,19 +490,34 @@ class UnifiedToolExecutor:
                 logger.info(f"  Tool '{tool_name}' executed successfully")
                 return result
             else:
-                return {
+                result = {
                     "success": False,
                     "error": f"Unknown tool: {tool_name}",
                     "tool": tool_name,
                 }
+                return result
 
         except Exception as e:
             logger.error(f"[tool-trace {trace_id or 'no-trace'}] Tool execution failed: {tool_name} - {e}")
-            return {
+            result = {
                 "success": False,
                 "error": str(e),
                 "tool": tool_name
             }
+            return result
+        finally:
+            # PRD-139: Universal telemetry — fire-and-forget, never fails the tool call
+            _exec_ms = int((_time.monotonic() - _exec_start) * 1000)
+            fire_telemetry(
+                self.db,
+                tool_name=tool_name,
+                parameters=parameters if isinstance(parameters, dict) else {},
+                agent_id=agent_id,
+                workspace_id=workspace_id,
+                result=result,
+                execution_time_ms=_exec_ms,
+                caller_context=caller_context,
+            )
 
     # ------------------------------------------------------------------
     # Delegate methods -- thin wrappers calling extracted modules

@@ -60,9 +60,17 @@ class _StubConfig:
     SEMANTIC_TOOL_ROUTING_TOP_K: int = 3
 
 
-_stub_config_module = ModuleType("config")
-_stub_config_module.config = _StubConfig()
-sys.modules["config"] = _stub_config_module
+if "config" not in sys.modules:
+    _stub_config_module = ModuleType("config")
+    _stub_config_module.config = _StubConfig()
+    sys.modules["config"] = _stub_config_module
+else:
+    # Ensure required attrs exist on whatever config is already loaded
+    _existing_cfg = sys.modules["config"].config
+    if not hasattr(_existing_cfg, "SEMANTIC_TOOL_ROUTING"):
+        _existing_cfg.SEMANTIC_TOOL_ROUTING = True
+    if not hasattr(_existing_cfg, "SEMANTIC_TOOL_ROUTING_TOP_K"):
+        _existing_cfg.SEMANTIC_TOOL_ROUTING_TOP_K = 3
 
 
 # Provide a minimal ``modules.context.estimator.TokenEstimator`` so base.py
@@ -106,16 +114,24 @@ SectionContext = _base_mod.SectionContext
 
 # Stub ``modules.tools.discovery.action_registry`` with the real registry
 # class so build_(filtered_)prompt_summary actually works.
-_ar_module = ModuleType("modules.tools.discovery.action_registry")
+# Use setdefault so graph tests (which may load first) keep their module.
+if "modules.tools.discovery.action_registry" not in sys.modules:
+    _ar_module = ModuleType("modules.tools.discovery.action_registry")
+    sys.modules["modules.tools.discovery.action_registry"] = _ar_module
+else:
+    _ar_module = sys.modules["modules.tools.discovery.action_registry"]
 _ar_module.ActionDefinition = ActionDefinition
 _ar_module.ActionRegistry = ActionRegistry
 # get_action_registry will be assigned per-test via _install_registry().
-sys.modules["modules.tools.discovery.action_registry"] = _ar_module
 
 
 # Stub ``modules.tools.discovery.action_semantic_index`` with a controllable
 # fake. The section calls ``get_action_semantic_index().rank_actions(...)``.
-_asi_module = ModuleType("modules.tools.discovery.action_semantic_index")
+if "modules.tools.discovery.action_semantic_index" not in sys.modules:
+    _asi_module = ModuleType("modules.tools.discovery.action_semantic_index")
+    sys.modules["modules.tools.discovery.action_semantic_index"] = _asi_module
+else:
+    _asi_module = sys.modules["modules.tools.discovery.action_semantic_index"]
 
 
 class _FakeSemanticIndex:
@@ -147,17 +163,18 @@ class _FakeSemanticIndex:
 
 _asi_module._fake_singleton = _FakeSemanticIndex()
 _asi_module.get_action_semantic_index = lambda: _asi_module._fake_singleton  # type: ignore[attr-defined]
-sys.modules["modules.tools.discovery.action_semantic_index"] = _asi_module
 
 
-# Finally load the section itself.
-_sec_spec = importlib.util.spec_from_file_location(
-    "modules.context.sections.platform_actions", _SECTIONS / "platform_actions.py"
-)
-_sec_mod = importlib.util.module_from_spec(_sec_spec)
-sys.modules["modules.context.sections.platform_actions"] = _sec_mod
-_sec_spec.loader.exec_module(_sec_mod)
-PlatformActionsSection = _sec_mod.PlatformActionsSection
+# Finally load the section itself (or reuse if graph tests loaded it first).
+if "modules.context.sections.platform_actions" not in sys.modules:
+    _sec_spec = importlib.util.spec_from_file_location(
+        "modules.context.sections.platform_actions", _SECTIONS / "platform_actions.py"
+    )
+    _sec_mod = importlib.util.module_from_spec(_sec_spec)
+    sys.modules["modules.context.sections.platform_actions"] = _sec_mod
+    _sec_spec.loader.exec_module(_sec_mod)
+
+PlatformActionsSection = sys.modules["modules.context.sections.platform_actions"].PlatformActionsSection
 
 
 # ---------------------------------------------------------------------------
@@ -216,8 +233,9 @@ def _ctx(query: str | None = "__unset__") -> SectionContext:
 
 
 def _set_flag(enabled: bool, top_k: int = 3) -> None:
-    _StubConfig.SEMANTIC_TOOL_ROUTING = enabled
-    _StubConfig.SEMANTIC_TOOL_ROUTING_TOP_K = top_k
+    cfg = sys.modules["config"].config
+    cfg.SEMANTIC_TOOL_ROUTING = enabled
+    cfg.SEMANTIC_TOOL_ROUTING_TOP_K = top_k
 
 
 def _run(coro):

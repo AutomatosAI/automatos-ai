@@ -1,7 +1,7 @@
 """
 Prompt assembly for the tool-routing eval.
 
-Three modes:
+Four modes:
 
 * `full`            — dump every ActionDefinition the registry knows about,
                       formatted to match production's `ActionRegistry.build_prompt_summary()`.
@@ -21,20 +21,29 @@ Three modes:
                       (US-008..US-010): both the prompt summary and the dispatcher
                       schema's enum narrow together.
 
+* `graph`           — graph-based ranking (PRD-139 US-007): delegate to the production
+                      `GraphRouter` (US-004) which uses edges + affinities over the
+                      embedding entry nodes. Prompt includes chain hints when chains have
+                      depth > 1. Falls back to `filtered` when the graph is empty (no
+                      edges), tagging the result as `graph (no-edges)`.
+
 Public surface:
 
     builder = PromptBuilder(actions=registry.get_all())
     prompt, surfaced = builder.build("list my agents", mode="full")
     prompt, surfaced = builder.build("list my agents", mode="filtered", top_k=15)
     prompt, surfaced = builder.build("list my agents", mode="filtered_schema", top_k=15)
+    prompt, surfaced, is_fallback = builder.build_graph("list my agents", top_k=15)
     tools = builder.build_tools(TOP_LEVEL_TOOLS, "list my agents",
                                 mode="filtered_schema", top_k=15)
 
 Each `build()` call returns `(markdown, surfaced_action_names)` where
 `surfaced_action_names` is the in-set candidate list used by `score.py`
-to compute the in-set hit rate. `build_tools()` returns the tools list
-ready to pass to OpenRouter — narrowed for `filtered_schema`, unchanged
-for `full` and `filtered`.
+to compute the in-set hit rate. `build_graph()` adds a third element
+`is_fallback` (True when graph had no edges and fell back to filtered).
+`build_tools()` returns the tools list ready to pass to OpenRouter —
+narrowed for `filtered_schema` and `graph`, unchanged for `full` and
+`filtered`.
 """
 
 from __future__ import annotations
@@ -66,6 +75,10 @@ _CATALOG_HEADER = (
 
 # Modes that rank via ActionSemanticIndex (vs the full-dump baseline).
 _RANKED_MODES = frozenset({"filtered", "filtered_schema"})
+
+# Chain hint block injected above the filtered catalog when graph mode
+# produces multi-action chains (depth > 1).
+_CHAIN_HINT_HEADER = "\n## Likely Platform Action Chains\n\n"
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -118,6 +131,9 @@ class PromptBuilder:
         Returns (markdown, surfaced_action_names). The runner uses the second
         element to compute "in-set hit rate" — i.e. did the filter at least
         surface a correct action, even if the LLM picked the wrong one?
+
+        For graph mode, use `build_graph()` instead — it returns a third
+        element indicating whether the graph fell back to filtered.
         """
         if mode == "full":
             return self._full(), [a.name for a in self.actions]
@@ -125,7 +141,21 @@ class PromptBuilder:
             # filtered and filtered_schema use the same prompt — they differ
             # only in whether the schema's action.enum is also narrowed.
             return self._filtered(query, top_k=top_k)
+        if mode == "graph":
+            prompt, surfaced, _is_fallback = self.build_graph(query, top_k=top_k)
+            return prompt, surfaced
         raise ValueError(f"unknown mode: {mode!r}")
+
+    def build_graph(
+        self, query: str, top_k: int = 15
+    ) -> Tuple[str, List[str], bool]:
+        """Build prompt using GraphRouter for graph-mode evaluation.
+
+        Returns (markdown, surfaced_action_names, is_fallback) where
+        is_fallback is True when the graph had no edges and we fell back
+        to the filtered (embedding-only) path.
+        """
+        return self._graph(query, top_k=top_k)
 
     def build_tools(
         self,
@@ -150,7 +180,7 @@ class PromptBuilder:
         Falls back to the unchanged tools list on any ranker error — same
         defensive pattern as production's `to_dispatcher_schema(allowed_names=[])`.
         """
-        if mode != "filtered_schema":
+        if mode not in ("filtered_schema", "graph"):
             return top_level_tools
 
         if ranked_names is None:
@@ -235,3 +265,81 @@ class PromptBuilder:
             )
         )
         return [name for name, _score in ranked]
+
+    def _graph(self, query: str, top_k: int) -> Tuple[str, List[str], bool]:
+        """Delegate ranking to the production GraphRouter (PRD-139 US-004).
+
+        Algorithm:
+        1. Call GraphRouter.rank_chains() to get scored chains.
+        2. If chains are empty (no edges / cold start), fall back to the
+           filtered (embedding-only) path and set is_fallback=True.
+        3. Extract unique action names from chains (preserving rank order).
+        4. Build the filtered prompt summary using those names.
+        5. If any chains have depth > 1, prepend chain hint block.
+
+        Returns (markdown, surfaced_action_names, is_fallback).
+        """
+        from modules.tools.discovery.graph_router import get_graph_router
+        from modules.tools.discovery.action_registry import get_action_registry
+
+        router = get_graph_router()
+        try:
+            chains = asyncio.run(
+                router.rank_chains(
+                    query,
+                    top_k=top_k,
+                    exclude_admin=False,
+                    exclude_promoted=False,
+                )
+            )
+        except Exception:
+            logger.warning(
+                "_graph: GraphRouter.rank_chains() raised — falling back to filtered",
+                exc_info=True,
+            )
+            prompt, surfaced = self._filtered(query, top_k=top_k)
+            return prompt, surfaced, True
+
+        if not chains:
+            # Empty graph — fall back to filtered (embedding-only).
+            prompt, surfaced = self._filtered(query, top_k=top_k)
+            return prompt, surfaced, True
+
+        # Check if all chains are single-action (no edges found in graph).
+        has_multi_action = any(len(chain_actions) > 1 for _, _, chain_actions in chains)
+        is_fallback = not has_multi_action
+
+        # Extract unique action names from chains, preserving rank order.
+        action_names: List[str] = list(dict.fromkeys(
+            name
+            for _, _, chain_actions in chains
+            for name in chain_actions
+        ))
+
+        # Build filtered prompt summary using the graph-ranked names.
+        registry = get_action_registry()
+        catalog = registry.build_filtered_prompt_summary(
+            action_names,
+            exclude_admin=False,
+            exclude_promoted=False,
+        )
+
+        # Build chain hints for multi-action chains.
+        chain_hints = ""
+        if has_multi_action:
+            hint_lines = [_CHAIN_HINT_HEADER.rstrip("\n")]
+            seen_pairs: set = set()
+            for primary, _score, chain_actions in chains:
+                if len(chain_actions) <= 1:
+                    continue
+                pair_key = tuple(chain_actions)
+                if pair_key in seen_pairs:
+                    continue
+                seen_pairs.add(pair_key)
+                hint_lines.append(
+                    f"- {' -> '.join(f'`{a}`' for a in chain_actions)}"
+                )
+            hint_lines.append("")
+            chain_hints = "\n".join(hint_lines) + "\n"
+
+        return _PREAMBLE + chain_hints + catalog, action_names, is_fallback

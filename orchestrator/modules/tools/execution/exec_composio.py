@@ -5,7 +5,6 @@ Extracted from unified_executor.py.
 
 import base64
 import logging
-import os
 import pathlib
 from typing import Any, Dict, Optional
 from uuid import UUID
@@ -190,9 +189,6 @@ async def execute_composio_execute(
         f"(raw: {raw_action}) agent={agent_id} workspace={workspace_id} params_keys={list(params.keys())}"
     )
 
-    import time as _time
-    _exec_start = _time.monotonic()
-
     result = await executor.composio_executor.execute(
         action=action,
         params=params,
@@ -201,34 +197,11 @@ async def execute_composio_execute(
         app_name=str(app_name).upper().strip() if app_name else None,
     )
 
-    _exec_ms = int((_time.monotonic() - _exec_start) * 1000)
-
     # Post-process: upload local image files to image store and replace paths with public URLs
     await _upload_local_images(result, workspace_id)
 
-    # Log to tool_execution_logs (triggers auto-increment of AgentAppFeature.usage_count)
-    try:
-        from core.models.composio_cache import ToolExecutionLog
-        exec_status = "success" if result.get("success") else "error"
-        inferred_app = (app_name or action.split("_")[0]).upper() if action else "UNKNOWN"
-        log_entry = ToolExecutionLog(
-            agent_id=agent_id,
-            app_name=inferred_app,
-            action_name=action,
-            workspace_id=workspace_id,
-            input_parameters={"keys": list(params.keys())} if params else {},
-            status=exec_status,
-            error_message=result.get("error") if not result.get("success") else None,
-            execution_time_ms=_exec_ms,
-        )
-        executor.db.add(log_entry)
-        executor.db.commit()
-    except Exception as log_err:
-        logger.debug(f"[Composio] Tool execution log skipped: {log_err}")
-        try:
-            executor.db.rollback()
-        except Exception:
-            pass
+    # PRD-139: Telemetry write removed — unified hook in execute_tool handles this.
+    # See modules/tools/execution/telemetry.py
 
     # Schema-driven enhancement: Look up response_schema from cache
     # This enables generic widget detection without hardcoding provider names

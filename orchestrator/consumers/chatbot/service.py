@@ -1930,7 +1930,6 @@ class StreamingChatService:
             agent_ctx = await self._load_agent_context(agent_runtime)
             all_tools = []
             if _complexity != Complexity.ATOM:
-                agent_ctx = await self._load_agent_context(agent_runtime)
                 all_tools = self._get_tools(
                     agent_id,
                     agent_ctx.get("skill_tools"),

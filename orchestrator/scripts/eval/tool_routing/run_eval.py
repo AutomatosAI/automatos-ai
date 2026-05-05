@@ -352,14 +352,15 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--mode",
-        choices=["full", "filtered", "filtered_schema", "all"],
+        choices=["full", "filtered", "filtered_schema", "graph", "all"],
         default="all",
         help=(
             "Which prompt mode(s) to run. "
             "'full' = no narrowing. "
             "'filtered' = prompt-only narrowing (Phase 1 baseline). "
             "'filtered_schema' = prompt + schema enum narrowing (Phase 1b). "
-            "'all' = run all three. Default: all."
+            "'graph' = graph-based chain ranking (PRD-139). "
+            "'all' = run all four. Default: all."
         ),
     )
     parser.add_argument(
@@ -404,7 +405,7 @@ def main() -> int:
 
     modes: List[str]
     if args.mode == "all":
-        modes = ["full", "filtered", "filtered_schema"]
+        modes = ["full", "filtered", "filtered_schema", "graph"]
     else:
         modes = [args.mode]
 
@@ -426,12 +427,13 @@ def main() -> int:
     actions = registry.get_all()
     logger.info(f"Loaded {len(actions)} actions from live registry")
 
-    needs_embedding = any(m in {"filtered", "filtered_schema"} for m in modes)
+    needs_embedding = any(m in {"filtered", "filtered_schema", "graph"} for m in modes)
     if needs_embedding and not api_key and not args.dry_run:
         # The production ActionSemanticIndex routes embeddings through
         # EmbeddingManager, which (per .env: EMBEDDING_PROVIDER=openrouter)
         # also requires OPENROUTER_API_KEY at request time.
-        print("filtered / filtered_schema mode needs OPENROUTER_API_KEY", file=sys.stderr)
+        # Graph mode also uses embeddings via GraphRouter → ActionSemanticIndex.
+        print("filtered / filtered_schema / graph mode needs OPENROUTER_API_KEY", file=sys.stderr)
         return 2
 
     builder = PromptBuilder(actions=actions)
@@ -455,14 +457,24 @@ def main() -> int:
     # tools: full mode → TOP_LEVEL_TOOLS unchanged. filtered → unchanged (prompt
     # narrows, schema does not). filtered_schema → deep-copied with platform_execute
     # action.enum set to the same surfaced list used in the prompt.
+    # graph mode → graph-ranked prompt + narrowed schema; tracks fallback state.
     prompt_cache: Dict[Tuple[str, str], Tuple[str, List[str]]] = {}
     tools_cache: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
+    # Tracks whether graph mode fell back to filtered (no edges).
+    # Key: (mode, query), value: True if graph had no edges.
+    graph_fallback: Dict[Tuple[str, str], bool] = {}
 
     def get_prompt(mode: str, query: str) -> Tuple[str, List[str]]:
         key = (mode, query)
         if key in prompt_cache:
             return prompt_cache[key]
-        catalog, surfaced = builder.build(query, mode=mode, top_k=top_k)
+        if mode == "graph":
+            catalog, surfaced, is_fallback = builder.build_graph(
+                query, top_k=top_k
+            )
+            graph_fallback[key] = is_fallback
+        else:
+            catalog, surfaced = builder.build(query, mode=mode, top_k=top_k)
         prompt = SYSTEM_PROMPT_PREAMBLE + catalog
         prompt_cache[key] = (prompt, surfaced)
         return prompt_cache[key]
@@ -476,7 +488,7 @@ def main() -> int:
             query,
             mode=mode,
             top_k=top_k,
-            ranked_names=surfaced if mode == "filtered_schema" else None,
+            ranked_names=surfaced if mode in ("filtered_schema", "graph") else None,
         )
         tools_cache[key] = tools
         return tools
@@ -495,17 +507,24 @@ def main() -> int:
                 prompt, surfaced = get_prompt(mode, q["query"])
                 tools = get_tools(mode, q["query"], surfaced)
 
+                # Determine effective mode label for graph fallback.
+                effective_mode = mode
+                if mode == "graph":
+                    is_fb = graph_fallback.get((mode, q["query"]), False)
+                    if is_fb:
+                        effective_mode = "graph (no-edges)"
+
                 if args.dry_run:
                     pe_enum = _platform_execute_enum_size(tools)
                     logger.info(
-                        f"[dry-run] {model_id} | {mode} | {q['query_id']} | "
+                        f"[dry-run] {model_id} | {effective_mode} | {q['query_id']} | "
                         f"prompt={len(prompt)} chars, surfaced={len(surfaced)}, "
                         f"platform_execute.enum={pe_enum}"
                     )
                     cells_run += 1
                     continue
 
-                logger.info(f"→ {model_id} | {mode} | {q['query_id']} | {q['query'][:60]!r}")
+                logger.info(f"→ {model_id} | {effective_mode} | {q['query_id']} | {q['query'][:60]!r}")
                 result, err = _call_model(
                     client,
                     model=model_id,
@@ -519,7 +538,7 @@ def main() -> int:
                 row = {
                     "ts": _now_iso(),
                     "model": model_id,
-                    "mode": mode,
+                    "mode": effective_mode,
                     "query_id": q["query_id"],
                     "query": q["query"],
                     "correct_actions": q["correct_actions"],

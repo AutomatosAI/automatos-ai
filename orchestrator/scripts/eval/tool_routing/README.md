@@ -18,6 +18,7 @@ selection — at a fraction of the cost.
 | `prompt_builder.py` | Replicates production prompt, plus filtered top-K mode |
 | `run_eval.py` | Cartesian runner over (model × mode × query), writes `results/results.jsonl` |
 | `score.py` | Aggregations + markdown report (`results/report.md`) + CSV summary |
+| `seed_telemetry.py` | Generates 2000+ synthetic `ToolExecutionLog` rows for cold-start graph seeding (PRD-139 US-006) |
 | `_registry_bootstrap.py` | Loads `ActionRegistry` without booting the full orchestrator package chain |
 | `results/` | All eval output (gitignored) |
 | `.embedding_cache.json` | Disk-cached embeddings, keyed by `model::sha256(text)` (gitignored) |
@@ -163,6 +164,77 @@ In `prompt_builder.py`:
 * `_action_text_for_embedding()` controls what gets embedded per action.
   Currently: `name + description + tags + examples`. If actions get
   better tags/examples in the registry, embeddings improve automatically.
+
+## Seeding synthetic telemetry (PRD-139 US-006)
+
+The graph-based routing layer (PRD-139) needs execution telemetry before it
+can build edges and affinities. `seed_telemetry.py` bootstraps this by
+generating 2000+ synthetic `tool_execution_logs` rows from the 47 eval queries.
+
+### Full pipeline: seed -> build -> eval
+
+```bash
+cd orchestrator
+
+# Step 1: Seed the eval set (if not already done)
+python -m scripts.eval.tool_routing.seed_eval_set
+
+# Step 2: Seed synthetic telemetry into tool_execution_logs
+python -m scripts.eval.tool_routing.seed_telemetry
+
+# Step 3: Build graph edges from the telemetry
+#   seed_telemetry --verify does steps 2+3 in one shot:
+python -m scripts.eval.tool_routing.seed_telemetry --verify
+
+# Step 4: Run the eval with graph mode enabled
+#   (requires TOOL_ROUTING_GRAPH=true in .env)
+python -m scripts.eval.tool_routing.run_eval
+```
+
+### Dry run (no DB write)
+
+```bash
+python -m scripts.eval.tool_routing.seed_telemetry --dry-run
+```
+
+### What it generates
+
+- **2000+ rows** across 47 queries x ~42 repetitions
+- **3 synthetic agents** with biased preferences:
+  - Agent 9001 (Sentinel-like): heavy on reports + memory
+  - Agent 9002 (Scout-like): heavy on workspace + documents
+  - Agent 9003 (Ops-like): balanced, favors agents + missions
+- **80% success / 20% failure** ratio
+- **Multi-action turns**: paired actions (e.g. `platform_get_latest_report`
+  -> `platform_submit_report`) in the same turn to create `used_after` edges
+- **Timestamps** spread over 30 days with realistic hour-of-day distribution
+- All rows tagged `telemetry_source='synthetic'` so production analysis can
+  filter them out
+
+### Idempotency
+
+The script is idempotent. Before inserting, it deletes all rows where
+`telemetry_source='synthetic'`. Running it again replaces synthetic data
+without touching production rows.
+
+### Verifying the pipeline
+
+After seeding, `--verify` calls `build_edges()` from the edge builder service
+(US-003) and prints a summary:
+
+```
+Edge Build Verification Summary
+============================================================
+  Logs processed:    2174
+  Edges built:       42
+  Affinities built:  156
+  Intent clusters:   8
+  Duration (ms):     1234
+============================================================
+```
+
+If edges or affinities are 0, check that the sample floor (`_SAMPLE_FLOOR=3`
+in edge_builder.py) isn't filtering everything out.
 
 ## What this *doesn't* measure
 

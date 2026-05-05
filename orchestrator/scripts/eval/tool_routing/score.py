@@ -262,8 +262,15 @@ def _render_main_table(summary: List[Dict[str, Any]], tiers: Dict[str, str]) -> 
 
     tier_order = {"frontier": 0, "mid": 1, "small": 2, "unknown": 3}
     # Order modes left-to-right by narrowing intensity so the diff reads naturally:
-    # full (no narrowing) → filtered (prompt only) → filtered_schema (prompt + schema).
-    mode_order = {"full": 0, "filtered": 1, "filtered_schema": 2}
+    # full (no narrowing) → filtered (prompt only) → filtered_schema (prompt + schema)
+    # → graph (graph-ranked chains) → graph (no-edges) (fallback).
+    mode_order = {
+        "full": 0,
+        "filtered": 1,
+        "filtered_schema": 2,
+        "graph": 3,
+        "graph (no-edges)": 4,
+    }
     summary_sorted = sorted(
         summary,
         key=lambda s: (
@@ -348,6 +355,9 @@ def _render_pair_diff(summary: List[Dict[str, Any]], tiers: Dict[str, str]) -> s
         ("filtered", "full"),
         ("filtered_schema", "full"),
         ("filtered_schema", "filtered"),
+        ("graph", "full"),
+        ("graph", "filtered"),
+        ("graph", "filtered_schema"),
     ]
 
     headers = [
@@ -463,7 +473,7 @@ def main() -> int:
 
     report = "\n".join(
         [
-            "# PRD-138 — Tool-routing eval results",
+            "# Tool-routing eval results (PRD-138 + PRD-139)",
             "",
             f"Total cells: {len(rows)} across {len({(r['model'], r['mode']) for r in rows})} (model, mode) pairs.",
             "",
