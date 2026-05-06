@@ -22,8 +22,10 @@ def _get_graph_extraction_model() -> str:
     """Read graph extraction model from system_settings (knowledge_graph category)."""
     return Config().GRAPHIFY_MODEL
 
-# Per-document LLM timeout (seconds). Prevents silent hangs on dropped connections.
-_EXTRACTION_TIMEOUT = 90
+def _extraction_timeout() -> int:
+    from core.llm.manager import get_system_setting
+    return int(get_system_setting("knowledge_graph", "extraction_timeout", "90"))
+
 
 logger = logging.getLogger(__name__)
 
@@ -297,11 +299,11 @@ async def extract_from_document(
                 {"role": "system", "content": "You are a knowledge-graph extraction engine. Output valid JSON only."},
                 {"role": "user", "content": prompt},
             ]),
-            timeout=_EXTRACTION_TIMEOUT,
+            timeout=_extraction_timeout(),
         )
         raw_text = response.content if hasattr(response, "content") else str(response)
     except asyncio.TimeoutError:
-        logger.error("LLM call timed out after %ds for %s", _EXTRACTION_TIMEOUT, doc_path)
+        logger.error("LLM call timed out after %ds for %s", _extraction_timeout(), doc_path)
         return _empty_graph()
     except Exception:
         logger.exception("LLM call failed during document extraction for %s", doc_path)
@@ -352,11 +354,11 @@ async def extract_from_report(
                 {"role": "system", "content": "You are a knowledge-graph extraction engine. Output valid JSON only."},
                 {"role": "user", "content": prompt},
             ]),
-            timeout=_EXTRACTION_TIMEOUT,
+            timeout=_extraction_timeout(),
         )
         raw_text = response.content if hasattr(response, "content") else str(response)
     except asyncio.TimeoutError:
-        logger.error("LLM call timed out after %ds for %s", _EXTRACTION_TIMEOUT, report_path)
+        logger.error("LLM call timed out after %ds for %s", _extraction_timeout(), report_path)
         return _empty_graph()
     except Exception:
         logger.exception("LLM call failed during report extraction for %s", report_path)
