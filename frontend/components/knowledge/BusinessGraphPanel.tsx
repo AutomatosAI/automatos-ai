@@ -187,25 +187,9 @@ export function BusinessGraphPanel() {
 
   // ── Data fetching ──
 
-  const {
-    data: graphData,
-    isLoading: graphLoading,
-    error: graphError,
-  } = useQuery<GraphData>({
-    queryKey: graphQueryKeys.data(workspaceId ?? ''),
-    queryFn: async () => {
-      const result = await apiClient.getWorkspaceFileContent(workspaceId!, 'graph/meta.json')
-      const content = (result as any)?.content ?? result
-      const metaCheck = typeof content === 'string' ? JSON.parse(content) : content
-      if (metaCheck?.node_count > 5000) return { nodes: [], links: [] }
-      const gResult = await apiClient.getWorkspaceFileContent(workspaceId!, 'graph/graph.json')
-      const gContent = (gResult as any)?.content ?? gResult
-      return typeof gContent === 'string' ? JSON.parse(gContent) : gContent
-    },
-    enabled: !!workspaceId,
-    staleTime: 5 * 60 * 1000,
-    retry: false,
-  })
+  const graphData = undefined as GraphData | undefined
+  const graphLoading = false
+  const graphError = null as unknown
 
   const {
     data: meta,
