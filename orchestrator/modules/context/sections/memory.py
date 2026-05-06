@@ -47,7 +47,12 @@ class MemorySection(BaseSection):
 
     name: str = "memory"
     priority: int = 6
-    max_tokens: Optional[int] = 1500
+    max_tokens: Optional[int] = None
+
+    def __init__(self) -> None:
+        super().__init__()
+        from config import config
+        self.max_tokens = config.MEMORY_SECTION_MAX_TOKENS
 
     async def render(self, ctx: SectionContext) -> str:
         """Return formatted memory + daily-log block for the system prompt."""
@@ -77,6 +82,14 @@ class MemorySection(BaseSection):
         else:
             # --- Fallback: SmartMemoryManager ---
             content = await self._build_from_smart_memory(ctx, chat_id)
+
+        # Recipe memories (Mem0 learnings from previous runs) — step 1 only
+        recipe_memories = ctx.kwargs.get("recipe_memories")
+        if recipe_memories:
+            summary = recipe_memories.get("summary", "")
+            if summary and summary != "No relevant memories found":
+                recipe_block = f"## Learnings from Previous Runs\n{summary}"
+                content = f"{content}\n\n{recipe_block}" if content else recipe_block
 
         # Stash raw memory text for ContextResult.memory_context (SSE events)
         if content:

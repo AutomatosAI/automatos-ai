@@ -58,6 +58,7 @@ class _StubConfig:
 
     SEMANTIC_TOOL_ROUTING: bool = True
     SEMANTIC_TOOL_ROUTING_TOP_K: int = 3
+    PLATFORM_ACTIONS_MAX_TOKENS: int = 4000
 
 
 if "config" not in sys.modules:
@@ -71,6 +72,8 @@ else:
         _existing_cfg.SEMANTIC_TOOL_ROUTING = True
     if not hasattr(_existing_cfg, "SEMANTIC_TOOL_ROUTING_TOP_K"):
         _existing_cfg.SEMANTIC_TOOL_ROUTING_TOP_K = 3
+    if not hasattr(_existing_cfg, "PLATFORM_ACTIONS_MAX_TOKENS"):
+        _existing_cfg.PLATFORM_ACTIONS_MAX_TOKENS = 4000
 
 
 # Provide a minimal ``modules.context.estimator.TokenEstimator`` so base.py

@@ -920,27 +920,6 @@ class AgentFactory:
                     if "assistant_response" in mem:
                         messages.append({"role": "assistant", "content": mem["assistant_response"]})
 
-            # Recipe step context injection
-            _has_step_outputs = context and context.get("step_outputs")
-            _has_step_results = context and context.get("step_results")
-            if _has_step_outputs or _has_step_results:
-                recipe_step = context.get("step", "?")
-                total_steps = context.get("total_steps", "?")
-                if _has_step_outputs:
-                    completed_count = len(context["step_outputs"])
-                else:
-                    completed_count = len([sr for sr in context["step_results"] if sr.get("status") == "completed"])
-
-                if completed_count > 0:
-                    recipe_ctx = (
-                        f"You are executing step {recipe_step} of {total_steps} in a recipe.\n"
-                        "Previous steps have already completed. Their outputs are provided "
-                        "in a separate system context message. When the user's task mentions "
-                        "'results', 'output', 'data', or 'findings', it refers to that "
-                        "previous step content. Use it directly — do not invent or fabricate data."
-                    )
-                    messages.append({"role": "system", "content": recipe_ctx})
-
             # Preserve original prompt for Composio hint generation
             original_user_prompt = prompt
 

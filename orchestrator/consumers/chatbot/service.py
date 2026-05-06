@@ -750,20 +750,6 @@ class StreamingChatService:
         # Do NOT inject again here — double injection causes the model to echo
         # its intro twice (observed on Shopify widget).
 
-        # Multi-step execution policy
-        llm_messages.insert(
-            1,
-            {
-                "role": "system",
-                "content": (
-                    "Execution policy: If the user requests multiple distinct tasks, you may call tools "
-                    "multiple times to complete ALL tasks before producing your final answer. "
-                    "Prefer data-gathering (read/list/fetch) steps before side-effect (send/post/create/update) steps. "
-                    "Only send/post after you have the final content to send."
-                ),
-            },
-        )
-
         # Plan mode: inject research-focused system prompt, disable tools
         if plan_mode:
             llm_messages.insert(

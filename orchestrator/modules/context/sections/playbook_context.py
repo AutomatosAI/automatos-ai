@@ -24,7 +24,12 @@ class PlaybookContextSection(BaseSection):
 
     name: str = "playbook_context"
     priority: int = 2
-    max_tokens: Optional[int] = 2000
+    max_tokens: Optional[int] = None
+
+    def __init__(self) -> None:
+        super().__init__()
+        from config import config
+        self.max_tokens = config.PLAYBOOK_CONTEXT_MAX_TOKENS
 
     async def render(self, ctx: SectionContext) -> str:
         """Build the playbook context block for the system prompt."""
@@ -77,9 +82,41 @@ class PlaybookContextSection(BaseSection):
         elif step_number is not None:
             parts.append(f"\n### Step {step_number}")
 
+        # Step scope — prevent agent from wandering into other steps' tasks
+        if step_number is not None and total_steps is not None and total_steps > 1:
+            parts.append(
+                f"\nYou are executing step {step_number} of a multi-step recipe. "
+                "Focus ONLY on the task described in the user message below. "
+                "Do NOT perform tasks that belong to other steps (e.g., sending notifications, "
+                "creating PRs, or any action not explicitly required by YOUR task). "
+                "Use ONLY the external app actions that are directly relevant to your specific task."
+            )
+
         # Instructions body
         if instructions:
             parts.append(f"\n{instructions}")
+
+        # Original trigger/input data (passed via ctx.kwargs["input_data"])
+        input_data = ctx.kwargs.get("input_data") if ctx.kwargs else None
+        if input_data:
+            input_content = input_data.get("content", "")
+            input_meta = {
+                k: v for k, v in input_data.items()
+                if k not in ("content", "metadata")
+            }
+            if input_content or input_meta:
+                ctx_parts = [
+                    "\n" + "=" * 40,
+                    "ORIGINAL REQUEST / TRIGGER DATA",
+                    "=" * 40,
+                ]
+                if input_content:
+                    ctx_parts.append(input_content)
+                if input_meta:
+                    ctx_parts.append("\nMetadata:")
+                    for mk, mv in input_meta.items():
+                        ctx_parts.append(f"  {mk}: {mv}")
+                parts.append("\n".join(ctx_parts))
 
         # Previous step results (truncated to fit budget)
         if previous_output:
