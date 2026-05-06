@@ -186,8 +186,6 @@ export function BusinessGraphPanel() {
   }, [workspaceId, queryClient])
 
   // ── Data fetching ──
-  // Cap visualization to prevent browser crash on large graphs (20K+ nodes)
-  const VIZ_NODE_CAP = 2000
 
   const {
     data: graphData,
@@ -198,23 +196,26 @@ export function BusinessGraphPanel() {
     queryFn: async () => {
       const result = await apiClient.getWorkspaceFileContent(workspaceId!, 'graph/graph.json')
       const content = result?.content ?? result
-      const raw: GraphData = typeof content === 'string' ? JSON.parse(content) : content
+      const raw = typeof content === 'string' ? JSON.parse(content) : content
+      const nodes: GraphNode[] = Array.isArray(raw?.nodes) ? raw.nodes : []
+      const links: GraphEdge[] = Array.isArray(raw?.links) ? raw.links : []
 
-      if (raw.nodes.length <= VIZ_NODE_CAP) return raw
+      const VIZ_CAP = 2000
+      if (nodes.length <= VIZ_CAP) return { nodes, links }
 
-      // Large graph: keep top nodes by edge count to avoid browser OOM
       const degreeMap = new Map<string, number>()
-      for (const link of raw.links) {
-        degreeMap.set(link.source, (degreeMap.get(link.source) ?? 0) + 1)
-        degreeMap.set(link.target, (degreeMap.get(link.target) ?? 0) + 1)
+      for (const l of links) {
+        degreeMap.set(l.source, (degreeMap.get(l.source) ?? 0) + 1)
+        degreeMap.set(l.target, (degreeMap.get(l.target) ?? 0) + 1)
       }
-      const sorted = [...raw.nodes].sort(
+      const sorted = [...nodes].sort(
         (a, b) => (degreeMap.get(b.id) ?? 0) - (degreeMap.get(a.id) ?? 0)
       )
-      const kept = new Set(sorted.slice(0, VIZ_NODE_CAP).map(n => n.id))
-      const nodes = raw.nodes.filter(n => kept.has(n.id))
-      const links = raw.links.filter(e => kept.has(e.source) && kept.has(e.target))
-      return { nodes, links }
+      const kept = new Set(sorted.slice(0, VIZ_CAP).map(n => n.id))
+      return {
+        nodes: nodes.filter(n => kept.has(n.id)),
+        links: links.filter(e => kept.has(e.source) && kept.has(e.target)),
+      }
     },
     enabled: !!workspaceId,
     staleTime: 5 * 60 * 1000,
