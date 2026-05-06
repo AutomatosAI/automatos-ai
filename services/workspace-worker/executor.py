@@ -338,7 +338,7 @@ class WorkspaceToolExecutor:
     # and gets back a path it can hand to a Composio poster.
 
     # Hard cap on render time. Pages with no animation should be done in <2s.
-    _RENDER_TIMEOUT_MS = 30_000
+    _RENDER_TIMEOUT_MS = 60_000
     # Cap viewport so an agent can't request a 32k×32k canvas and OOM the worker.
     _MAX_VIEWPORT_DIM = 4096
 
@@ -462,7 +462,12 @@ class WorkspaceToolExecutor:
                 # Acceptable here: we already validated URL containment, and
                 # the worker is itself the sandbox boundary.
                 browser = await pw.chromium.launch(
-                    args=["--no-sandbox", "--disable-dev-shm-usage"],
+                    args=[
+                        "--no-sandbox",
+                        "--disable-dev-shm-usage",
+                        "--allow-file-access-from-files",
+                        "--disable-web-security",
+                    ],
                 )
                 try:
                     context = await browser.new_context(
