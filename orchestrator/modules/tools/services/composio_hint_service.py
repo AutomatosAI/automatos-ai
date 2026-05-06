@@ -187,7 +187,7 @@ class ComposioHintService:
             # Step 5: Format output
             app_matches.sort(key=lambda x: (-len(x[1]), x[0]))
             for app, actions in app_matches[:6]:
-                hint_lines.append(f"- {app} available actions (use these EXACT names): {', '.join(actions)}")
+                hint_lines.append(f"- {app} available actions: {', '.join(actions)}")
                 result.matched_actions.extend(actions)
 
             if top_action_params:
@@ -693,6 +693,10 @@ class ComposioHintService:
         parameter schemas (Composio's bulk API omits them). The SDK per-app
         tools.get() endpoint returns full OpenAI function-calling schemas.
         One call per app, only for apps with matched actions missing params.
+
+        Also expands app_matches with all available SDK actions so the agent
+        can see dependency actions (e.g. TWITTER_UPLOAD_MEDIA alongside
+        TWITTER_CREATION_OF_A_POST).
         """
         actions_needing_params = []
         for app, actions in app_matches:
@@ -718,16 +722,32 @@ class ComposioHintService:
                     continue
 
                 param_map = {}
+                all_sdk_actions: List[str] = []
                 for tool in sdk_tools:
                     name = (tool.get("name") or "").strip()
+                    if not name:
+                        continue
+                    all_sdk_actions.append(name)
                     params = tool.get("parameters") or {}
-                    if name and isinstance(params, dict) and params.get("properties"):
+                    if isinstance(params, dict) and params.get("properties"):
                         param_map[name] = params
 
                 for action in actions:
                     if action in param_map and len(top_action_params) < MAX_PARAM_HINT_ACTIONS:
                         self._extract_param_hints_from_json(action, param_map[action], top_action_params)
                         enriched += 1
+
+                # Expand app_matches: replace token-matched subset with full
+                # SDK action list so the agent sees all available actions
+                # (e.g. TWITTER_UPLOAD_MEDIA alongside TWITTER_CREATION_OF_A_POST)
+                if all_sdk_actions:
+                    for i, (app_name, _) in enumerate(app_matches):
+                        if app_name == app:
+                            # Keep original matched actions first, then add remaining SDK actions
+                            existing = set(app_matches[i][1])
+                            extra = [a for a in all_sdk_actions if a not in existing]
+                            app_matches[i] = (app, list(app_matches[i][1]) + extra)
+                            break
 
             except Exception as e:
                 logger.warning(f"[ComposioHintService] SDK param fetch failed for {app}: {e}")
