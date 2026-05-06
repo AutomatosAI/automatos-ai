@@ -787,14 +787,20 @@ class GraphifyService:
         if graph.number_of_nodes() > 0 and graph.number_of_edges() == 0:
             logger.warning("_export_graph: graph has nodes but no edges — skipping HTML export")
         else:
-            with tempfile.TemporaryDirectory() as tmpdir:
-                html_path = os.path.join(tmpdir, "graph.html")
-                await loop.run_in_executor(
-                    None, partial(to_html, graph, communities, html_path)
+            try:
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    html_path = os.path.join(tmpdir, "graph.html")
+                    await loop.run_in_executor(
+                        None, partial(to_html, graph, communities, html_path)
+                    )
+                    with open(html_path, "r", encoding="utf-8") as f:
+                        html_content = f.read()
+                await ws.write_file(_GRAPH_HTML_PATH, html_content)
+            except ValueError:
+                logger.info(
+                    "_export_graph: graph too large for HTML viz (%d nodes) — skipping, JSON still exported",
+                    graph.number_of_nodes(),
                 )
-                with open(html_path, "r", encoding="utf-8") as f:
-                    html_content = f.read()
-            await ws.write_file(_GRAPH_HTML_PATH, html_content)
 
     @staticmethod
     def _format_communities(
