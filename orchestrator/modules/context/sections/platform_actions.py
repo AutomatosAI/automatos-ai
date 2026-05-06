@@ -38,7 +38,12 @@ class PlatformActionsSection(BaseSection):
 
     name: str = "platform_actions"
     priority: int = 5
-    max_tokens: Optional[int] = 2000
+    max_tokens: Optional[int] = None
+
+    def __init__(self) -> None:
+        super().__init__()
+        from config import config
+        self.max_tokens = config.PLATFORM_ACTIONS_MAX_TOKENS
 
     async def render(self, ctx: SectionContext) -> str:
         """Return the platform-action catalog for the system prompt.
