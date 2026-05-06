@@ -1608,7 +1608,7 @@ export function AgentConfigurationModal({
                           value={[formData.model_config?.max_tokens || 2000]}
                           onValueChange={([value]) => updateModelConfig('max_tokens', value)}
                           min={100}
-                          max={4000}
+                          max={16384}
                           step={100}
                           className="w-full"
                         />

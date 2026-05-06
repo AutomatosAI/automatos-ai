@@ -780,7 +780,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                               <Label className="flex items-center gap-1">Max Output Tokens: {modelConfig.max_tokens} <InlineHelp id="agents.config.model.max_tokens" size="sm" /></Label>
                               <Slider
                                 min={100}
-                                max={8000}
+                                max={16384}
                                 step={100}
                                 value={[modelConfig.max_tokens]}
                                 onValueChange={([value]) => handleModelConfigChange('max_tokens', value)}
