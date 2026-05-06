@@ -202,7 +202,8 @@ export function BusinessGraphPanel() {
     staleTime: 5 * 60 * 1000,
   })
 
-  const graphTooLarge = (meta?.node_count ?? 0) > 5000
+  const graphTooLarge = !!meta && (meta.node_count ?? 0) > 5000
+  const metaSaysSmallEnough = !!meta && (meta.node_count ?? 0) <= 5000
 
   const {
     data: graphData,
@@ -218,7 +219,7 @@ export function BusinessGraphPanel() {
       const links: GraphEdge[] = Array.isArray(raw?.links) ? raw.links : []
       return { nodes, links }
     },
-    enabled: !!workspaceId && !metaLoading && !graphTooLarge,
+    enabled: !!workspaceId && metaSaysSmallEnough,
     staleTime: 5 * 60 * 1000,
   })
 
