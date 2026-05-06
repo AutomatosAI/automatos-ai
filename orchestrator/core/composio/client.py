@@ -100,7 +100,10 @@ class ComposioClient:
         # Bypasses SDK semantic search (which returns alphabetical, not semantic).
         self._schema_cache: Dict[str, Dict[str, Dict[str, Any]]] = {}  # {APP: {ACTION_NAME: schema}}
         self._schema_cache_ts: Dict[str, float] = {}
-        self._schema_cache_ttl = 3600  # 1 hour
+        self._schema_cache_ttl = 3600
+        from config import Config
+        self._schema_cache_limit = Config.COMPOSIO_SCHEMA_CACHE_LIMIT
+        self._schema_cache_max_limit = Config.COMPOSIO_SCHEMA_CACHE_MAX_LIMIT
     
     @property
     def composio(self):
@@ -976,31 +979,29 @@ class ComposioClient:
                     break
 
         # If some explicitly-requested actions weren't in the top-N cache,
-        # fetch them individually via the SDK (they may have been cut by limit).
+        # re-fetch their app with no limit so they're included.
         missing = set(action_names) - seen
-        if missing and self.toolset:
+        if missing:
+            refetched_apps: set = set()
             for name in missing:
-                try:
-                    tools = self.toolset.tools.get(
-                        user_id=entity_id,
-                        actions=[name],
-                    )
-                    for tool in tools:
-                        tool_dict = tool.model_dump() if hasattr(tool, "model_dump") else (tool if isinstance(tool, dict) else {})
-                        fn = tool_dict.get("function") or {}
-                        if fn.get("name") == name:
-                            results.append({
-                                "action_name": name,
-                                "schema": tool_dict,
-                                "app_name": name.split("_", 1)[0],
-                            })
-                            seen.add(name)
-                            break
-                except Exception as e:
-                    logger.warning(
-                        "[ComposioClient] Individual fetch failed for %s: %s",
-                        name, e,
-                    )
+                app_key = name.split("_", 1)[0]
+                if app_key in refetched_apps:
+                    continue
+                refetched_apps.add(app_key)
+                self._populate_schema_cache(
+                    app_key, entity_id,
+                    limit=self._schema_cache_max_limit,
+                )
+            for name in missing:
+                for app_key, app_cache in self._schema_cache.items():
+                    if name in app_cache:
+                        results.append({
+                            "action_name": name,
+                            "schema": app_cache[name],
+                            "app_name": app_key,
+                        })
+                        seen.add(name)
+                        break
 
         logger.info(
             "[ComposioClient] get_action_schemas_by_name: requested=%d resolved=%d "
@@ -1010,15 +1011,17 @@ class ComposioClient:
         )
         return results
 
-    def _populate_schema_cache(self, app_name: str, entity_id: str, limit: int = 30):
+    def _populate_schema_cache(self, app_name: str, entity_id: str, limit: int | None = None):
         """Fetch action schemas for an app and cache them.
 
         Args:
             app_name: Composio app name (e.g. "GMAIL", "COMPOSIO_SEARCH")
             entity_id: Composio entity/user ID
             limit: Max actions to fetch per app (SDK returns by importance).
-                   Default 30 keeps context manageable for large apps (SLACK=153, GITHUB=874).
+                   Defaults to COMPOSIO_SCHEMA_CACHE_LIMIT from config.
         """
+        if limit is None:
+            limit = self._schema_cache_limit
         import time as _time
         app_upper = app_name.upper()
         cache: Dict[str, Dict[str, Any]] = {}
