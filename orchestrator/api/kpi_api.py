@@ -24,7 +24,7 @@ from core.models.orchestration import OrchestrationRun
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/kpi", tags=["kpi"])
 
-PERIOD_DAYS = {"7d": 7, "30d": 30, "90d": 90}
+PERIOD_DAYS = {"1d": 1, "7d": 7, "30d": 30, "90d": 90}
 
 
 def _parse_period(period: str) -> int:
@@ -36,7 +36,7 @@ def _parse_period(period: str) -> int:
 
 @router.get("/cost-tracker")
 async def get_cost_tracker(
-    period: str = Query("30d", regex="^(7d|30d|90d)$"),
+    period: str = Query("30d", regex="^(1d|7d|30d|90d)$"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
@@ -132,7 +132,7 @@ async def get_cost_tracker(
 
 @router.get("/agent-performance")
 async def get_agent_performance(
-    period: str = Query("30d", regex="^(7d|30d|90d)$"),
+    period: str = Query("30d", regex="^(1d|7d|30d|90d)$"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
@@ -217,7 +217,7 @@ async def get_agent_performance(
 
 @router.get("/playbook-metrics")
 async def get_playbook_metrics(
-    period: str = Query("30d", regex="^(7d|30d|90d)$"),
+    period: str = Query("30d", regex="^(1d|7d|30d|90d)$"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
@@ -283,7 +283,7 @@ async def get_playbook_metrics(
 
 @router.get("/approval-gates")
 async def get_approval_gates(
-    period: str = Query("30d", regex="^(7d|30d|90d)$"),
+    period: str = Query("30d", regex="^(1d|7d|30d|90d)$"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
