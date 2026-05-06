@@ -194,12 +194,17 @@ export function BusinessGraphPanel() {
   } = useQuery<GraphData>({
     queryKey: graphQueryKeys.data(workspaceId ?? ''),
     queryFn: async () => {
-      const result = await apiClient.getWorkspaceFileContent(workspaceId!, 'graph/graph.json')
-      const content = result?.content ?? result
-      return typeof content === 'string' ? JSON.parse(content) : content
+      const result = await apiClient.getWorkspaceFileContent(workspaceId!, 'graph/meta.json')
+      const content = (result as any)?.content ?? result
+      const metaCheck = typeof content === 'string' ? JSON.parse(content) : content
+      if (metaCheck?.node_count > 5000) return { nodes: [], links: [] }
+      const gResult = await apiClient.getWorkspaceFileContent(workspaceId!, 'graph/graph.json')
+      const gContent = (gResult as any)?.content ?? gResult
+      return typeof gContent === 'string' ? JSON.parse(gContent) : gContent
     },
     enabled: !!workspaceId,
     staleTime: 5 * 60 * 1000,
+    retry: false,
   })
 
   const {
@@ -208,7 +213,7 @@ export function BusinessGraphPanel() {
   } = useQuery<GraphMeta>({
     queryKey: graphQueryKeys.meta(workspaceId ?? ''),
     queryFn: async () => {
-      const result = await apiClient.getWorkspaceFileContent(workspaceId!, 'graph/meta.json')
+      const result: any = await apiClient.getWorkspaceFileContent(workspaceId!, 'graph/meta.json')
       const content = result?.content ?? result
       return typeof content === 'string' ? JSON.parse(content) : content
     },
@@ -480,7 +485,7 @@ export function BusinessGraphPanel() {
         {/* Graph Visualization */}
         <div className="flex-1 glass-card bg-white/5 backdrop-blur-sm border border-white/10 rounded-lg overflow-hidden min-h-[400px]">
           <BusinessGraphVisualization
-            graphData={filteredData ?? { nodes: [], links: [] }}
+            graphData={(filteredData ?? { nodes: [], links: [] }) as any}
             onNodeSelect={handleNodeSelect}
             selectedCommunity={selectedCommunity}
             minConfidence={confidenceMin}
