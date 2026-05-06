@@ -280,14 +280,14 @@ def test_filtered_path_when_query_and_flag_enabled():
     assert call["query"] == "how do I list agents"
     assert call["top_k"] == 3
     assert call["exclude_admin"] is True
-    assert call["exclude_promoted"] is False
+    assert call["exclude_promoted"] is True
 
     # Returned markdown contains the ranked names but NOT the unrelated one.
     assert "platform_list_agents" in out
     assert "platform_create_agent" in out
     assert "platform_list_missions" in out
     assert "platform_unrelated_thing" not in out
-    assert "## Platform Tools & Actions" in out  # preamble retained
+    assert "## Platform Actions" in out  # preamble retained
 
     # AC: result contains <= top_k action lines.
     action_lines = [line for line in out.splitlines() if line.startswith("- `platform_")]
@@ -336,7 +336,7 @@ def test_fallback_when_index_raises():
     # Fell back to the full dump — both actions must be present.
     assert "platform_list_agents" in out
     assert "platform_create_agent" in out
-    assert "## Platform Tools & Actions" in out
+    assert "## Platform Actions" in out
 
 
 # ---------------------------------------------------------------------------
@@ -454,7 +454,7 @@ def test_top_k_threaded_from_config():
 
     assert fake.calls[0]["top_k"] == 7
     assert fake.calls[0]["exclude_admin"] is True
-    assert fake.calls[0]["exclude_promoted"] is False
+    assert fake.calls[0]["exclude_promoted"] is True
 
 
 # ---------------------------------------------------------------------------

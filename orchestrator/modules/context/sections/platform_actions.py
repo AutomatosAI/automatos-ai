@@ -87,9 +87,10 @@ class PlatformActionsSection(BaseSection):
     # ------------------------------------------------------------------
 
     _PREAMBLE = (
-        "## Platform Tools & Actions\n\n"
-        "**Direct tools** — call by name (they have their own function schemas).\n"
-        "**Platform actions** — call via `platform_execute(action, params)`.\n"
+        "## Platform Actions\n\n"
+        "Use `platform_execute(action, params)` to call these actions.\n"
+        "Your other tools (workspace_*, platform_store_memory, etc.) are called "
+        "directly by name — they have their own function schemas.\n"
         "If a call fails, check the error and retry with corrected parameters "
         "— do not guess or fabricate results.\n\n"
     )
@@ -147,7 +148,7 @@ class PlatformActionsSection(BaseSection):
         # Build filtered summary from registry
         registry = get_action_registry()
         catalog = registry.build_filtered_prompt_summary(
-            action_names, exclude_admin=True, exclude_promoted=False
+            action_names, exclude_admin=True, exclude_promoted=True
         )
 
         if not catalog:
@@ -189,7 +190,7 @@ class PlatformActionsSection(BaseSection):
         from modules.tools.discovery.action_registry import get_action_registry
 
         registry = get_action_registry()
-        catalog: str = registry.build_prompt_summary(exclude_promoted=False, exclude_admin=True)
+        catalog: str = registry.build_prompt_summary(exclude_promoted=True, exclude_admin=True)
 
         if not catalog:
             logger.warning(
@@ -224,7 +225,7 @@ class PlatformActionsSection(BaseSection):
                 query,
                 top_k=top_k,
                 exclude_admin=True,
-                exclude_promoted=False,
+                exclude_promoted=True,
             )
             if not ranked:
                 logger.debug(
@@ -238,7 +239,7 @@ class PlatformActionsSection(BaseSection):
             catalog = registry.build_filtered_prompt_summary(
                 top_names,
                 exclude_admin=True,
-                exclude_promoted=False,
+                exclude_promoted=True,
             )
             if not catalog:
                 return None
