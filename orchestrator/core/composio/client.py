@@ -975,6 +975,33 @@ class ComposioClient:
                     seen.add(name)
                     break
 
+        # If some explicitly-requested actions weren't in the top-N cache,
+        # fetch them individually via the SDK (they may have been cut by limit).
+        missing = set(action_names) - seen
+        if missing and self.toolset:
+            for name in missing:
+                try:
+                    tools = self.toolset.tools.get(
+                        user_id=entity_id,
+                        actions=[name],
+                    )
+                    for tool in tools:
+                        tool_dict = tool.model_dump() if hasattr(tool, "model_dump") else (tool if isinstance(tool, dict) else {})
+                        fn = tool_dict.get("function") or {}
+                        if fn.get("name") == name:
+                            results.append({
+                                "action_name": name,
+                                "schema": tool_dict,
+                                "app_name": name.split("_", 1)[0],
+                            })
+                            seen.add(name)
+                            break
+                except Exception as e:
+                    logger.warning(
+                        "[ComposioClient] Individual fetch failed for %s: %s",
+                        name, e,
+                    )
+
         logger.info(
             "[ComposioClient] get_action_schemas_by_name: requested=%d resolved=%d "
             "actions=%s",
