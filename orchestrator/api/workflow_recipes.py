@@ -1035,6 +1035,14 @@ async def cancel_execution(
         execution.completed_at = sa_func.now()
         db.commit()
 
+        try:
+            from services.board_task_bridge import complete_recipe_board_task
+            complete_recipe_board_task(
+                db, execution_id, success=False, error_message="Cancelled by user"
+            )
+        except Exception:
+            logger.warning("Board task update on cancel failed (non-blocking)", exc_info=True)
+
         logger.info(f"[cancel_execution] {execution_id} cancelled by user")
         return {"status": "cancelled", "execution_id": execution_id}
 

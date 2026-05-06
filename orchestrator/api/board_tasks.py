@@ -613,10 +613,10 @@ def _launch_task_execution(
             )
             try:
                 task = db.query(BoardTask).get(task_id)
-                if task:
-                    task.status = "inbox"
+                if task and task.status == "in_progress":
+                    task.status = "done"
                     task.error_message = str(e)[:500]
-                    task.started_at = None
+                    task.completed_at = datetime.now(timezone.utc)
                     db.commit()
             except Exception:
                 db.rollback()
