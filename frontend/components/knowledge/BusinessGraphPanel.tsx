@@ -186,6 +186,23 @@ export function BusinessGraphPanel() {
   }, [workspaceId, queryClient])
 
   // ── Data fetching ──
+  // Load meta first (tiny file). Only fetch graph.json if node count is safe for browser.
+
+  const {
+    data: meta,
+    isLoading: metaLoading,
+  } = useQuery<GraphMeta>({
+    queryKey: graphQueryKeys.meta(workspaceId ?? ''),
+    queryFn: async () => {
+      const result: any = await apiClient.getWorkspaceFileContent(workspaceId!, 'graph/meta.json')
+      const content = result?.content ?? result
+      return typeof content === 'string' ? JSON.parse(content) : content
+    },
+    enabled: !!workspaceId,
+    staleTime: 5 * 60 * 1000,
+  })
+
+  const graphTooLarge = (meta?.node_count ?? 0) > 5000
 
   const {
     data: graphData,
@@ -194,44 +211,14 @@ export function BusinessGraphPanel() {
   } = useQuery<GraphData>({
     queryKey: graphQueryKeys.data(workspaceId ?? ''),
     queryFn: async () => {
-      const result = await apiClient.getWorkspaceFileContent(workspaceId!, 'graph/graph.json')
+      const result: any = await apiClient.getWorkspaceFileContent(workspaceId!, 'graph/graph.json')
       const content = result?.content ?? result
       const raw = typeof content === 'string' ? JSON.parse(content) : content
       const nodes: GraphNode[] = Array.isArray(raw?.nodes) ? raw.nodes : []
       const links: GraphEdge[] = Array.isArray(raw?.links) ? raw.links : []
-
-      const VIZ_CAP = 2000
-      if (nodes.length <= VIZ_CAP) return { nodes, links }
-
-      const degreeMap = new Map<string, number>()
-      for (const l of links) {
-        degreeMap.set(l.source, (degreeMap.get(l.source) ?? 0) + 1)
-        degreeMap.set(l.target, (degreeMap.get(l.target) ?? 0) + 1)
-      }
-      const sorted = [...nodes].sort(
-        (a, b) => (degreeMap.get(b.id) ?? 0) - (degreeMap.get(a.id) ?? 0)
-      )
-      const kept = new Set(sorted.slice(0, VIZ_CAP).map(n => n.id))
-      return {
-        nodes: nodes.filter(n => kept.has(n.id)),
-        links: links.filter(e => kept.has(e.source) && kept.has(e.target)),
-      }
+      return { nodes, links }
     },
-    enabled: !!workspaceId,
-    staleTime: 5 * 60 * 1000,
-  })
-
-  const {
-    data: meta,
-    isLoading: metaLoading,
-  } = useQuery<GraphMeta>({
-    queryKey: graphQueryKeys.meta(workspaceId ?? ''),
-    queryFn: async () => {
-      const result = await apiClient.getWorkspaceFileContent(workspaceId!, 'graph/meta.json')
-      const content = result?.content ?? result
-      return typeof content === 'string' ? JSON.parse(content) : content
-    },
-    enabled: !!workspaceId,
+    enabled: !!workspaceId && !metaLoading && !graphTooLarge,
     staleTime: 5 * 60 * 1000,
   })
 
@@ -304,7 +291,7 @@ export function BusinessGraphPanel() {
 
   // ── Empty state — drag-and-drop zone (matches document upload pattern) ──
 
-  if (graphError || !graphData?.nodes?.length) {
+  if (!graphTooLarge && (graphError || !graphData?.nodes?.length)) {
     return (
       <div className="space-y-6">
         {/* Hidden file input — same pattern as document-management.tsx */}
@@ -383,8 +370,8 @@ export function BusinessGraphPanel() {
 
   // ── Stats ──
 
-  const nodeCount = meta?.node_count ?? graphData.nodes.length
-  const edgeCount = meta?.edge_count ?? graphData.links.length
+  const nodeCount = meta?.node_count ?? graphData?.nodes?.length ?? 0
+  const edgeCount = meta?.edge_count ?? graphData?.links?.length ?? 0
   const communityCount = meta?.community_count ?? communities.length
   const lastBuilt = meta?.last_built
     ? formatDistanceToNow(new Date(meta.last_built * 1000), { addSuffix: true })
@@ -457,7 +444,17 @@ export function BusinessGraphPanel() {
       </div>
 
       {/* Main Layout: Sidebar + Graph */}
-      <div className="flex flex-col md:flex-row gap-4 min-h-[500px]">
+      {graphTooLarge && (
+        <div className="glass-card bg-white/5 backdrop-blur-sm border border-white/10 rounded-lg p-8 text-center">
+          <Network className="w-10 h-10 mx-auto mb-3 text-muted-foreground" />
+          <h3 className="text-lg font-semibold mb-1">Graph too large for browser visualization</h3>
+          <p className="text-sm text-muted-foreground">
+            {nodeCount.toLocaleString()} nodes / {edgeCount.toLocaleString()} edges.
+            Agents can still query it via platform_query_graph tools.
+          </p>
+        </div>
+      )}
+      {!graphTooLarge && <div className="flex flex-col md:flex-row gap-4 min-h-[500px]">
         {/* Community Sidebar */}
         <div className="w-full md:w-48 shrink-0 glass-card bg-white/5 backdrop-blur-sm border border-white/10 rounded-lg p-3 space-y-1 max-h-[500px] overflow-y-auto">
           <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
@@ -499,54 +496,56 @@ export function BusinessGraphPanel() {
         {/* Graph Visualization */}
         <div className="flex-1 glass-card bg-white/5 backdrop-blur-sm border border-white/10 rounded-lg overflow-hidden min-h-[400px]">
           <BusinessGraphVisualization
-            graphData={filteredData ?? { nodes: [], links: [] }}
+            graphData={filteredData as any ?? { nodes: [], links: [] }}
             onNodeSelect={handleNodeSelect}
             selectedCommunity={selectedCommunity}
             minConfidence={confidenceMin}
           />
         </div>
-      </div>
+      </div>}
 
       {/* Search + Confidence Controls */}
-      <div className="glass-card bg-white/5 backdrop-blur-sm border border-white/10 rounded-lg px-4 py-3 flex flex-col sm:flex-row items-start sm:items-center gap-4">
-        <div className="relative flex-1 w-full sm:max-w-xs">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <Input
-            placeholder="Search nodes..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-9 bg-transparent border-white/10"
-          />
-          {searchTerm && (
-            <button
-              onClick={() => setSearchTerm('')}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          )}
-        </div>
+      {!graphTooLarge && (
+        <div className="glass-card bg-white/5 backdrop-blur-sm border border-white/10 rounded-lg px-4 py-3 flex flex-col sm:flex-row items-start sm:items-center gap-4">
+          <div className="relative flex-1 w-full sm:max-w-xs">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Input
+              placeholder="Search nodes..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-9 bg-transparent border-white/10"
+            />
+            {searchTerm && (
+              <button
+                onClick={() => setSearchTerm('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
 
-        <div className="flex items-center gap-3 flex-1 w-full sm:w-auto">
-          <span className="text-xs text-muted-foreground whitespace-nowrap">
-            Confidence:
-          </span>
-          <Slider
-            min={0}
-            max={1}
-            step={0.05}
-            value={[confidenceMin]}
-            onValueChange={([val]) => setConfidenceMin(val)}
-            className="flex-1 max-w-[200px]"
-          />
-          <span className="text-xs font-mono w-8 text-right">
-            {confidenceMin.toFixed(2)}
-          </span>
+          <div className="flex items-center gap-3 flex-1 w-full sm:w-auto">
+            <span className="text-xs text-muted-foreground whitespace-nowrap">
+              Confidence:
+            </span>
+            <Slider
+              min={0}
+              max={1}
+              step={0.05}
+              value={[confidenceMin]}
+              onValueChange={([val]) => setConfidenceMin(val)}
+              className="flex-1 max-w-[200px]"
+            />
+            <span className="text-xs font-mono w-8 text-right">
+              {confidenceMin.toFixed(2)}
+            </span>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Node Detail Panel */}
-      {selectedNode && (
+      {!graphTooLarge && selectedNode && (
         <div className="glass-card bg-white/5 backdrop-blur-sm border border-white/10 rounded-lg p-4 space-y-3">
           <div className="flex items-start justify-between">
             <div className="space-y-1">
