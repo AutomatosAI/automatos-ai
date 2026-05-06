@@ -148,6 +148,22 @@ class GraphifyService:
             self._build_locks[workspace_id] = asyncio.Lock()
         return self._build_locks[workspace_id]
 
+    @staticmethod
+    def _normalize_node_link_data(data: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalize graph JSON for NetworkX node_link_graph compatibility.
+
+        Handles: 'links' vs 'edges' key, missing 'source'/'target' on edges
+        that only have '_src'/'_tgt'.
+        """
+        if "links" not in data and "edges" in data:
+            data["links"] = data.pop("edges")
+        for link in data.get("links", []):
+            if "source" not in link and "_src" in link:
+                link["source"] = link["_src"]
+            if "target" not in link and "_tgt" in link:
+                link["target"] = link["_tgt"]
+        return data
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -270,9 +286,9 @@ class GraphifyService:
             return None
 
         loop = asyncio.get_event_loop()
-        edges_key = "links" if "links" in data else "edges"
+        data = self._normalize_node_link_data(data)
         graph: nx.Graph = await loop.run_in_executor(
-            None, partial(nx.node_link_graph, data, edges=edges_key)
+            None, partial(nx.node_link_graph, data)
         )
 
         # Warm cache
@@ -321,11 +337,10 @@ class GraphifyService:
         ws = DbWorkspaceClient(str(workspace_id))
         loop = asyncio.get_event_loop()
 
-        # Parse the imported graph — handle both "links" and "edges" key names
-        # across NetworkX versions
-        edges_key = "links" if "links" in graph_data else "edges"
+        # Normalize edge format for NetworkX 3.1 compatibility
+        graph_data = self._normalize_node_link_data(graph_data)
         imported: nx.Graph = await loop.run_in_executor(
-            None, partial(nx.node_link_graph, graph_data, edges=edges_key)
+            None, partial(nx.node_link_graph, graph_data)
         )
 
         if imported.number_of_nodes() == 0:
@@ -837,9 +852,9 @@ class GraphifyService:
 
         # Reconstruct previous graph and compute diff
         try:
-            prev_edges_key = "links" if "links" in prev_data else "edges"
+            prev_data = self._normalize_node_link_data(prev_data)
             prev_graph: nx.Graph = await loop.run_in_executor(
-                None, partial(nx.node_link_graph, prev_data, edges=prev_edges_key)
+                None, partial(nx.node_link_graph, prev_data)
             )
             diff: Dict[str, Any] = await loop.run_in_executor(
                 None, partial(graph_diff, prev_graph, graph)
