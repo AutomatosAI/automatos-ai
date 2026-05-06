@@ -138,8 +138,9 @@ class ComposioHintService:
                 "You have these external apps connected (via Composio): "
                 + ", ".join(sorted(set(allowed_apps))) + ".",
                 "IMPORTANT: To interact with these apps, call `composio_execute` with "
-                "the EXACT action name from the list below. Do NOT guess or invent action names — "
-                "only use the exact names listed here. Do NOT use search_codebase to look for code "
+                "the EXACT action name. The most relevant actions are listed below, but you may "
+                "also use any action from your skill instructions for connected apps. "
+                "Do NOT guess or invent action names. Do NOT use search_codebase to look for code "
                 "when your task is to interact with external apps.",
                 "Usage: composio_execute({\"action\": \"ACTION_NAME\", \"params\": {<action-specific fields>}}). "
                 "All action parameters (issue_key, channel, text, etc.) MUST go inside the `params` object.",
