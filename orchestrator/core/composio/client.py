@@ -101,9 +101,6 @@ class ComposioClient:
         self._schema_cache: Dict[str, Dict[str, Dict[str, Any]]] = {}  # {APP: {ACTION_NAME: schema}}
         self._schema_cache_ts: Dict[str, float] = {}
         self._schema_cache_ttl = 3600
-        from config import Config
-        self._schema_cache_limit = Config.COMPOSIO_SCHEMA_CACHE_LIMIT
-        self._schema_cache_max_limit = Config.COMPOSIO_SCHEMA_CACHE_MAX_LIMIT
     
     @property
     def composio(self):
@@ -978,8 +975,8 @@ class ComposioClient:
                     seen.add(name)
                     break
 
-        # If some explicitly-requested actions weren't in the top-N cache,
-        # re-fetch their app with no limit so they're included.
+        # If some explicitly-requested actions weren't in the initial cache,
+        # re-fetch their app with no limit so all actions are available.
         missing = set(action_names) - seen
         if missing:
             refetched_apps: set = set()
@@ -990,7 +987,7 @@ class ComposioClient:
                 refetched_apps.add(app_key)
                 self._populate_schema_cache(
                     app_key, entity_id,
-                    limit=self._schema_cache_max_limit,
+                    limit=500,
                 )
             for name in missing:
                 for app_key, app_cache in self._schema_cache.items():
@@ -1011,17 +1008,16 @@ class ComposioClient:
         )
         return results
 
-    def _populate_schema_cache(self, app_name: str, entity_id: str, limit: int | None = None):
+    def _populate_schema_cache(self, app_name: str, entity_id: str, limit: int = 30):
         """Fetch action schemas for an app and cache them.
 
         Args:
             app_name: Composio app name (e.g. "GMAIL", "COMPOSIO_SEARCH")
             entity_id: Composio entity/user ID
             limit: Max actions to fetch per app (SDK returns by importance).
-                   Defaults to COMPOSIO_SCHEMA_CACHE_LIMIT from config.
+                   Initial fetch uses 30 for performance; fallback re-fetch
+                   uses 500 to get all actions when explicit names are missing.
         """
-        if limit is None:
-            limit = self._schema_cache_limit
         import time as _time
         app_upper = app_name.upper()
         cache: Dict[str, Dict[str, Any]] = {}
