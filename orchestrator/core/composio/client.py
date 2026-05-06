@@ -229,15 +229,13 @@ class ComposioClient:
             )
 
         try:
-            # Default options
-            options = {"type": "use_composio_managed_auth"}
-
             if "API_KEY" in schemes:
                 options = {"type": "use_custom_auth", "authScheme": "API_KEY"}
             elif "BASIC" in schemes:
                 options = {"type": "use_custom_auth", "authScheme": "BASIC"}
+            else:
+                options = {"type": "use_composio_managed_auth"}
 
-            # Create new auth config
             logger.info(f"Creating new Auth Config for {app_slug} with options={options}")
             config = self.composio.auth_configs.create(
                 toolkit=app_slug,
@@ -245,6 +243,18 @@ class ComposioClient:
             )
             return config.id
         except Exception as e:
+            if "DefaultAuthConfigNotFound" in str(e) and options.get("type") == "use_composio_managed_auth":
+                logger.warning(f"Managed auth unavailable for {app_slug}, falling back to custom OAUTH2")
+                try:
+                    fallback = {"type": "use_custom_auth", "authScheme": "OAUTH2"}
+                    config = self.composio.auth_configs.create(
+                        toolkit=app_slug,
+                        options=fallback
+                    )
+                    return config.id
+                except Exception as e2:
+                    logger.error(f"Custom auth fallback also failed for {app_slug}: {e2}")
+                    raise ValueError(f"Could not setup authentication for {app_slug}: {str(e2)}")
             logger.error(f"Failed to create auth config for {app_slug}: {e}")
             raise ValueError(f"Could not setup authentication for {app_slug}: {str(e)}")
 
