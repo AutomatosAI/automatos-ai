@@ -310,7 +310,14 @@ async def _execute_step(
 
             try:
                 tool_args = json.loads(tool_args_raw) if isinstance(tool_args_raw, str) else (tool_args_raw or {})
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as jde:
+                logger.warning(
+                    "[recipe_direct] JSON decode failed for %s args (len=%d, first 200=%r): %s",
+                    tool_name,
+                    len(tool_args_raw) if isinstance(tool_args_raw, str) else 0,
+                    tool_args_raw[:200] if isinstance(tool_args_raw, str) else tool_args_raw,
+                    jde,
+                )
                 tool_args = {}
 
             # Handle scratchpad tools inline (no tool_router needed)

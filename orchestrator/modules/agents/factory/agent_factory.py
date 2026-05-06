@@ -1193,8 +1193,15 @@ class AgentFactory:
             try:
                 func_args = json.loads(func_args_str)
                 canonical_args = json.dumps(func_args, sort_keys=True)
-            except json.JSONDecodeError:
-                canonical_args = func_args_str.strip()
+            except json.JSONDecodeError as jde:
+                self.logger.warning(
+                    "[tool_call] JSON decode failed for %s args (len=%d, first 200=%r): %s",
+                    func_name,
+                    len(func_args_str) if isinstance(func_args_str, str) else 0,
+                    func_args_str[:200] if isinstance(func_args_str, str) else func_args_str,
+                    jde,
+                )
+                canonical_args = func_args_str.strip() if isinstance(func_args_str, str) else ""
                 func_args = {}
 
             call_hash = f"{func_name}:{canonical_args}"
