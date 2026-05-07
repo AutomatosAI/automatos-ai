@@ -12,6 +12,8 @@ This executor:
 """
 
 import logging
+import tempfile
+from pathlib import Path
 from typing import Dict, Any, Optional, List
 from uuid import UUID
 from datetime import datetime, timezone
@@ -137,7 +139,104 @@ class ComposioToolExecutor:
         
         manager = EntityManager(self.db)
         return manager.get_or_create_entity(workspace_id)
-    
+
+    _UPLOAD_ACTIONS = {
+        "TWITTER_UPLOAD_MEDIA",
+        "TWITTER_INITIALIZE_MEDIA_UPLOAD",
+        "TWITTER_UPLOAD_LARGE_MEDIA",
+        "TWITTER_APPEND_MEDIA_UPLOAD",
+    }
+    _FILE_PARAM_NAMES = {"media", "media_data", "media_url", "file", "image", "video", "media_file"}
+
+    async def _resolve_file_uploads(
+        self,
+        action: str,
+        params: Dict[str, Any],
+        workspace_id: UUID,
+    ) -> tuple[Dict[str, Any], list[Path]]:
+        """Download workspace files and convert to FileUploadable for actions that need binary.
+
+        Twitter's media upload requires binary data but agents pass workspace paths.
+        Detects known upload actions, pulls the file from the workspace, writes a
+        temp file, and uses Composio's FileUploadable to upload the binary to S3.
+
+        Returns (modified params, list of temp files to clean up).
+        """
+        temp_files: list[Path] = []
+        action_upper = action.upper()
+
+        if action_upper not in self._UPLOAD_ACTIONS:
+            return params, temp_files
+
+        try:
+            from composio.client.files import FileUploadable
+            from core.workspace_client import WorkspaceClient
+
+            import httpx
+
+            ws_client = WorkspaceClient(workspace_id)
+
+            for param_name in list(params.keys()):
+                if param_name.lower() not in self._FILE_PARAM_NAMES:
+                    continue
+                value = params[param_name]
+                if not value or not isinstance(value, str):
+                    continue
+                if isinstance(value, dict) and "s3key" in value:
+                    continue
+
+                file_bytes: Optional[bytes] = None
+                file_hint = value
+
+                if value.startswith(("http://", "https://")):
+                    logger.info("[FileUpload] Downloading from URL for %s", param_name)
+                    try:
+                        async with httpx.AsyncClient(timeout=30) as http:
+                            resp = await http.get(value)
+                            resp.raise_for_status()
+                            file_bytes = resp.content
+                    except Exception as dl_err:
+                        logger.warning("[FileUpload] URL download failed for %s: %s", param_name, dl_err)
+                        continue
+                else:
+                    workspace_path = value
+                    logger.info("[FileUpload] Downloading workspace file %s for %s", workspace_path, param_name)
+                    result = await ws_client.download_file(workspace_path)
+                    if not result.get("success"):
+                        logger.warning("[FileUpload] Failed to download %s: %s", workspace_path, result.get("error"))
+                        continue
+                    file_bytes = result["content"]
+
+                if not file_bytes:
+                    continue
+
+                suffix = Path(file_hint).suffix or ".png"
+                tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+                tmp.write(file_bytes)
+                tmp.close()
+                tmp_path = Path(tmp.name)
+                temp_files.append(tmp_path)
+
+                action_slug = action_upper.lower().replace("_", "-")
+                app_slug = action_upper.split("_", 1)[0].lower()
+                uploadable = FileUploadable.from_path(
+                    file=tmp_path,
+                    client=self.client.composio,
+                    action=action_slug,
+                    app=app_slug,
+                )
+                params[param_name] = uploadable.model_dump()
+                logger.info(
+                    "[FileUpload] Uploaded %s (%d bytes) -> s3key=%s",
+                    file_hint, len(file_bytes), uploadable.s3key,
+                )
+        except ImportError:
+            logger.debug("[FileUpload] Composio FileUploadable not available, skipping")
+        except Exception as e:
+            logger.warning("[FileUpload] Failed to resolve file uploads for %s: %s", action, e)
+
+        return params, temp_files
+
     async def execute(
         self,
         action: str,
@@ -486,6 +585,15 @@ class ComposioToolExecutor:
                 "execution_time_ms": int((time.time() - start_time) * 1000)
             }
         
+        # Resolve workspace file paths to binary uploads for actions that need them
+        temp_files: list[Path] = []
+        try:
+            params, temp_files = await self._resolve_file_uploads(
+                action=action_upper, params=params, workspace_id=workspace_id,
+            )
+        except Exception as e:
+            logger.warning("[FileUpload] Pre-processing failed (continuing): %s", e)
+
         # Execute via Composio
         try:
             result = self.client.execute_action(
@@ -541,6 +649,12 @@ class ComposioToolExecutor:
                 "data": None,
                 "execution_time_ms": int((time.time() - start_time) * 1000)
             }
+        finally:
+            for tmp in temp_files:
+                try:
+                    tmp.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     def get_agent_enabled_actions(
         self,
