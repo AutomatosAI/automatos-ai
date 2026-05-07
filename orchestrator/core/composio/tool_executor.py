@@ -169,11 +169,15 @@ class ComposioToolExecutor:
             return params, temp_files
 
         try:
-            from composio.client.files import FileUploadable
+            try:
+                from composio.core.models._files import FileUploadable
+            except ImportError:
+                from composio.client.files import FileUploadable
             from core.workspace_client import WorkspaceClient
 
-            import httpx
-
+            http_client = self.client.composio.client
+            action_slug = action_upper.lower().replace("_", "-")
+            app_slug = action_upper.split("_", 1)[0].lower()
             ws_client = WorkspaceClient(workspace_id)
 
             for param_name in list(params.keys()):
@@ -185,55 +189,41 @@ class ComposioToolExecutor:
                 if isinstance(value, dict) and "s3key" in value:
                     continue
 
-                file_bytes: Optional[bytes] = None
-                file_hint = value
-
                 if value.startswith(("http://", "https://")):
-                    logger.info("[FileUpload] Downloading from URL for %s", param_name)
-                    try:
-                        async with httpx.AsyncClient(timeout=30) as http:
-                            resp = await http.get(value)
-                            resp.raise_for_status()
-                            file_bytes = resp.content
-                    except Exception as dl_err:
-                        logger.warning("[FileUpload] URL download failed for %s: %s", param_name, dl_err)
-                        continue
+                    logger.info("[FileUpload] Uploading from URL for %s: %s", param_name, value[:120])
+                    uploadable = FileUploadable.from_url(
+                        client=http_client,
+                        url=value,
+                        tool=action_slug,
+                        toolkit=app_slug,
+                    )
                 else:
-                    workspace_path = value
-                    logger.info("[FileUpload] Downloading workspace file %s for %s", workspace_path, param_name)
-                    result = await ws_client.download_file(workspace_path)
-                    if not result.get("success"):
-                        logger.warning("[FileUpload] Failed to download %s: %s", workspace_path, result.get("error"))
+                    logger.info("[FileUpload] Downloading workspace file %s for %s", value, param_name)
+                    dl_result = await ws_client.download_file(value)
+                    if not dl_result.get("success"):
+                        logger.warning("[FileUpload] Failed to download %s: %s", value, dl_result.get("error"))
                         continue
-                    file_bytes = result["content"]
+                    file_bytes: bytes = dl_result["content"]
+                    suffix = Path(value).suffix or ".png"
+                    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+                    tmp.write(file_bytes)
+                    tmp.close()
+                    tmp_path = Path(tmp.name)
+                    temp_files.append(tmp_path)
+                    uploadable = FileUploadable.from_path(
+                        client=http_client,
+                        file=tmp_path,
+                        tool=action_slug,
+                        toolkit=app_slug,
+                        sensitive_file_upload_protection=False,
+                    )
 
-                if not file_bytes:
-                    continue
-
-                suffix = Path(file_hint).suffix or ".png"
-                tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-                tmp.write(file_bytes)
-                tmp.close()
-                tmp_path = Path(tmp.name)
-                temp_files.append(tmp_path)
-
-                action_slug = action_upper.lower().replace("_", "-")
-                app_slug = action_upper.split("_", 1)[0].lower()
-                uploadable = FileUploadable.from_path(
-                    file=tmp_path,
-                    client=self.client.composio,
-                    action=action_slug,
-                    app=app_slug,
-                )
                 params[param_name] = uploadable.model_dump()
-                logger.info(
-                    "[FileUpload] Uploaded %s (%d bytes) -> s3key=%s",
-                    file_hint, len(file_bytes), uploadable.s3key,
-                )
+                logger.info("[FileUpload] Resolved %s -> s3key=%s", param_name, uploadable.s3key)
         except ImportError:
-            logger.debug("[FileUpload] Composio FileUploadable not available, skipping")
+            logger.warning("[FileUpload] FileUploadable not found in composio SDK — cannot resolve binary uploads")
         except Exception as e:
-            logger.warning("[FileUpload] Failed to resolve file uploads for %s: %s", action, e)
+            logger.warning("[FileUpload] Failed to resolve file uploads for %s: %s", action, e, exc_info=True)
 
         return params, temp_files
 
