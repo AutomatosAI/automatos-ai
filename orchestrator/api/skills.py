@@ -473,8 +473,16 @@ async def list_skills(
         GET /api/v1/skills?search=security&tags=authentication,authorization
     """
     try:
+        # Workspace isolation: a caller may only see marketplace skills (workspace_id IS NULL)
+        # plus skills owned by their own workspace. Admins see everything.
+        is_admin = getattr(ctx.user, "system_role", "user") == "admin"
         query = db.query(Skill).filter(Skill.is_active == True)
-        
+        if not is_admin:
+            query = query.filter(
+                (Skill.workspace_id.is_(None)) |
+                (Skill.workspace_id == ctx.workspace_id)
+            )
+
         # Apply filters
         if category:
             query = query.filter(Skill.category == category)

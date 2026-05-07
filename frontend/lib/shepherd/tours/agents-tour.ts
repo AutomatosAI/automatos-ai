@@ -34,14 +34,12 @@ export function createAgentsTour(userId: string) {
   // Step 2: Tabs
   tour.addStep({
     id: 'agents-tabs',
-    title: title('Five', 'Agent Views'),
+    title: title('Three', 'Agent Views'),
     text: `
       ${tabList([
         ['Roster', 'The full list of agents as cards or rows — create, edit, start/pause, delete.'],
-        ['Org Chart', 'Visualise reporting lines and coordination hierarchy between agents.'],
+        ['Org Chart', 'Visualise reporting lines and hierarchy between agents.'],
         ['Configuration', 'Deep settings — model, system prompt, memory, guardrails.'],
-        ['Coordination', 'Rules for how agents hand off work to each other and share context.'],
-        ['Playbooks', 'Reusable playbooks assigned to an agent — the jobs they know how to run.'],
       ])}
       ${stepProgress(2, TOTAL)}
     `,
