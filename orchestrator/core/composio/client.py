@@ -340,6 +340,28 @@ class ComposioClient:
             logger.error(f"Failed to get connection status: {e}")
             return None
 
+    @staticmethod
+    def _extract_token_from_connection(conn) -> Optional[str]:
+        """Extract OAuth token from a connected account object (Pydantic model or dict)."""
+        for attr in ('access_token', 'token'):
+            val = getattr(conn, attr, None)
+            if val and isinstance(val, str):
+                return val
+
+        cp = getattr(conn, 'connectionParams', None)
+        if cp is None:
+            return None
+        # Pydantic model (SDK returns AuthConnectionParamsModel)
+        token = getattr(cp, 'access_token', None) or getattr(cp, 'token', None)
+        if token and isinstance(token, str):
+            return token
+        # Plain dict fallback
+        if isinstance(cp, dict):
+            token = cp.get('access_token') or cp.get('token')
+            if token:
+                return token
+        return None
+
     def get_app_access_token(self, entity_id: str, app: str) -> Optional[str]:
         """
         Retrieve the OAuth access token for a connected app.
@@ -365,30 +387,27 @@ class ComposioClient:
                 if conn.status not in ('ACTIVE', 'INITIATED'):
                     continue
 
-                # Try common token attributes on the connection object
-                for attr in ('access_token', 'token', 'connectionParams'):
-                    val = getattr(conn, attr, None)
-                    if val and isinstance(val, str):
-                        return val
-                    # connectionParams may be a dict with nested token
-                    if val and isinstance(val, dict):
-                        token = val.get('access_token') or val.get('token')
-                        if token:
-                            return token
+                token = self._extract_token_from_connection(conn)
+                if token:
+                    return token
 
-                # Try .get() if the SDK supports it (returns full details)
+                # Fetch full details if list response was sparse
                 try:
-                    detail = self.composio.connected_accounts.get(nanoid=conn.id)
-                    for attr in ('access_token', 'token', 'connectionParams'):
-                        val = getattr(detail, attr, None)
-                        if val and isinstance(val, str):
-                            return val
-                        if val and isinstance(val, dict):
-                            token = val.get('access_token') or val.get('token')
-                            if token:
-                                return token
-                except Exception:
-                    pass
+                    detail = self.composio.connected_accounts.get(conn.id)
+                    token = self._extract_token_from_connection(detail)
+                    if token:
+                        return token
+                    # Log what the detail object looks like for debugging
+                    cp = getattr(detail, 'connectionParams', None)
+                    cp_debug = {}
+                    if cp:
+                        for f in ('access_token', 'token', 'scope', 'token_type', 'base_url', 'refresh_token'):
+                            v = getattr(cp, f, None) if not isinstance(cp, dict) else cp.get(f)
+                            cp_debug[f] = f"<{len(v)} chars>" if isinstance(v, str) and v else repr(v)
+                    logger.warning("get_app_access_token: conn %s status=%s connectionParams fields: %s",
+                                   conn.id, conn.status, cp_debug)
+                except Exception as detail_err:
+                    logger.warning("get_app_access_token: .get(%s) failed: %s", conn.id, detail_err)
 
             return None
         except Exception as e:

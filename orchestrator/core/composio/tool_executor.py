@@ -697,6 +697,32 @@ class ComposioToolExecutor:
         except Exception as e:
             logger.warning("[FileUpload] Pre-processing failed (continuing): %s", e)
 
+        # --- WORKAROUND: Composio LinkedIn image upload is broken (issues #3094, #3113) ---
+        # Route LinkedIn posts with images through direct API calls.
+        # Remove when Composio fixes their LinkedIn integration — see linkedin_image_workaround.py
+        if action_upper == "LINKEDIN_CREATE_LINKED_IN_POST":
+            from core.composio.linkedin_image_workaround import has_image_params, execute_linkedin_image_post
+            if has_image_params(params):
+                logger.info("[LinkedInWorkaround] Intercepting %s with images", action_upper)
+                result = await execute_linkedin_image_post(
+                    params=params,
+                    workspace_id=workspace_id,
+                    entity_id=composio_entity_id,
+                    composio_client=self.client,
+                )
+                for tf in temp_files:
+                    try:
+                        tf.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+                execution_time = int((time.time() - start_time) * 1000)
+                return {
+                    **result,
+                    "execution_time_ms": execution_time,
+                    "action": action_upper,
+                    "app": app_name,
+                }
+
         # Execute via Composio
         try:
             result = self.client.execute_action(

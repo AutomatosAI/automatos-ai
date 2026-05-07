@@ -152,6 +152,7 @@ async def _execute_step(
     from modules.tools.services.composio_hint_service import ComposioHintService
     from modules.tools.services.composio_tool_service import ComposioToolService
     from core.composio.tool_executor import resolve_file_uploads
+    from core.composio.client import get_composio_client
     from modules.agents.factory.agent_factory import AgentFactory
     from modules.context import ContextService, ContextMode
     from modules.tools.builtin.scratchpad_tool import (
@@ -380,6 +381,46 @@ async def _execute_step(
                     _temp_files: list = []
                     try:
                         t0 = time.time()
+
+                        # --- WORKAROUND: Composio LinkedIn image upload is broken (#3094, #3113) ---
+                        # Remove when Composio fixes — see linkedin_image_workaround.py
+                        _tool_upper = tool_name.upper()
+                        if _tool_upper == "LINKEDIN_CREATE_LINKED_IN_POST":
+                            from core.composio.linkedin_image_workaround import has_image_params, execute_linkedin_image_post
+                            if has_image_params(tool_args):
+                                logger.info("[LinkedInWorkaround] Intercepting %s in recipe", _tool_upper)
+                                try:
+                                    exec_result = await execute_linkedin_image_post(
+                                        params=tool_args,
+                                        workspace_id=workspace_id,
+                                        entity_id=composio_result.entity_id,
+                                        composio_client=get_composio_client(),
+                                    )
+                                except Exception as wa_exc:
+                                    logger.error("[LinkedInWorkaround] Exception: %s", wa_exc, exc_info=True)
+                                    exec_result = {"success": False, "data": None, "error": str(wa_exc)}
+                                exec_ms = int((time.time() - t0) * 1000)
+                                success = exec_result.get("success", False)
+                                data = exec_result.get("data")
+                                error = exec_result.get("error")
+                                if success:
+                                    result_text = json.dumps(data, default=str) if isinstance(data, (dict, list)) else str(data or "")
+                                    logger.info(f"[recipe_step] LinkedIn workaround OK in {exec_ms}ms")
+                                else:
+                                    result_text = f"Error executing {tool_name}: {error or 'unknown error'}"
+                                    logger.warning(f"[recipe_step] LinkedIn workaround failed: {error}")
+                                _composio_call_cache[_dedup_key] = result_text
+                                all_tool_calls.append({
+                                    "action": tool_name, "params": tool_args,
+                                    "result": result_text[:8000], "duration_ms": exec_ms,
+                                    "composio_direct": True,
+                                })
+                                messages.append({
+                                    "role": "tool", "tool_call_id": tool_id,
+                                    "content": result_text[:20000],
+                                })
+                                continue
+
                         tool_args, _temp_files = await resolve_file_uploads(
                             action=tool_name,
                             params=tool_args,
