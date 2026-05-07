@@ -268,9 +268,10 @@ async def check_token_extraction(
     workspace_id: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ):
-    """Diagnostic: verify OAuth token can be extracted for a connected app.
-    No auth required — returns token presence only, never the token itself.
-    Pass ?workspace_id=<uuid> to specify which workspace to check."""
+    """Diagnostic: test LinkedIn image post workaround via Composio proxy.
+    No auth required. Pass ?workspace_id=<uuid> to specify workspace."""
+    import httpx
+
     client = get_composio_client()
     if not workspace_id:
         workspace_id = "ae8320bc-95e1-4de1-bbe9-396bef19cbf8"
@@ -280,99 +281,31 @@ async def check_token_extraction(
         return {"ok": False, "error": "No Composio entity for workspace"}
 
     entity_id = entity["composio_entity_id"]
-    token = client.get_app_access_token(entity_id, app_name.upper())
-    result: Dict[str, Any] = {
-        "ok": token is not None,
-        "entity_id": entity_id,
-        "app": app_name.upper(),
-        "token_found": token is not None,
-        "token_length": len(token) if token else 0,
+    from core.composio.linkedin_image_workaround import _resolve_connection_id
+    conn_id = _resolve_connection_id(client, entity_id)
+    if not conn_id:
+        return {"ok": False, "error": "No active LinkedIn connection"}
+
+    # Test: GET userinfo via Composio proxy
+    resp = httpx.post(
+        "https://backend.composio.dev/api/v2/actions/proxy",
+        headers={"x-api-key": config.COMPOSIO_API_KEY, "Content-Type": "application/json"},
+        json={
+            "connectedAccountId": conn_id,
+            "endpoint": "https://api.linkedin.com/rest/userinfo",
+            "method": "GET",
+            "parameters": [
+                {"in": "header", "name": "LinkedIn-Version", "value": "202405"},
+            ],
+        },
+        timeout=15,
+    )
+    return {
+        "ok": resp.status_code == 200,
+        "connection_id": conn_id,
+        "proxy_status": resp.status_code,
+        "linkedin_response": resp.json() if resp.status_code == 200 else resp.text[:300],
     }
-
-    if not token:
-        try:
-            sdk = client.composio
-            # Use auth_config filter (same path as get_app_access_token)
-            auth_config_id = client._resolve_auth_config_id(app_name.upper())
-            result["auth_config_id"] = auth_config_id
-
-            if auth_config_id:
-                resp = sdk.connected_accounts.list(
-                    user_ids=[entity_id], auth_config_ids=[auth_config_id]
-                )
-                conns = resp.items if hasattr(resp, 'items') else resp.data if hasattr(resp, 'data') else []
-                result["filtered_count"] = len(conns)
-                for conn in conns:
-                    cp = getattr(conn, 'connectionParams', None)
-                    cp_detail = {}
-                    if cp:
-                        for f in vars(cp) if hasattr(cp, '__dict__') else (cp.keys() if isinstance(cp, dict) else []):
-                            if f.startswith('_'):
-                                continue
-                            v = getattr(cp, f, None) if not isinstance(cp, dict) else cp.get(f)
-                            if isinstance(v, str) and v:
-                                cp_detail[f] = f"<{len(v)} chars>"
-                            else:
-                                cp_detail[f] = repr(v)
-                    # Also try .get() for full details
-                    get_cp = {}
-                    try:
-                        detail = sdk.connected_accounts.get(conn.id)
-                        dcp = getattr(detail, 'connectionParams', None)
-                        if dcp:
-                            for f in vars(dcp) if hasattr(dcp, '__dict__') else (dcp.keys() if isinstance(dcp, dict) else []):
-                                if f.startswith('_'):
-                                    continue
-                                v = getattr(dcp, f, None) if not isinstance(dcp, dict) else dcp.get(f)
-                                if isinstance(v, str) and v:
-                                    get_cp[f] = f"<{len(v)} chars>"
-                                else:
-                                    get_cp[f] = repr(v)
-                    except Exception as get_err:
-                        get_cp = {"error": str(get_err)}
-
-                    # Test proxy endpoint across API versions
-                    proxy_result = {}
-                    try:
-                        import httpx
-                        from config import config
-                        proxy_body = {
-                            "connectedAccountId": conn.id,
-                            "endpoint": "/rest/userinfo",
-                            "method": "GET",
-                            "body": {},
-                        }
-                        hdrs = {"x-api-key": config.COMPOSIO_API_KEY, "Content-Type": "application/json"}
-                        # v2 returned 400 last time — capture error and try variants
-                        for body_variant, label in [
-                            (proxy_body, "standard"),
-                            ({"connectedAccountId": conn.id, "endpoint": "https://api.linkedin.com/rest/userinfo", "method": "GET"}, "full_url"),
-                            ({"connectedAccountId": conn.id, "endpoint": "/rest/userinfo", "method": "GET", "parameters": []}, "with_params"),
-                        ]:
-                            resp = httpx.post(
-                                "https://backend.composio.dev/api/v2/actions/proxy",
-                                headers=hdrs, json=body_variant, timeout=15,
-                            )
-                            proxy_result[label] = {
-                                "status": resp.status_code,
-                                "body": resp.text[:400],
-                            }
-                            if resp.status_code == 200:
-                                proxy_result["working"] = label
-                                break
-                    except Exception as proxy_err:
-                        proxy_result = {"error": str(proxy_err)}
-
-                    result["connection"] = {
-                        "id": conn.id,
-                        "status": conn.status,
-                        "proxy_test": proxy_result,
-                    }
-                    break
-        except Exception as e:
-            result["debug_error"] = str(e)
-
-    return result
 
 
 @router.post("/connect/{app_name}", response_model=InitiateConnectionResponse)
