@@ -266,10 +266,12 @@ async def list_connections(
 async def check_token_extraction(
     app_name: str,
     workspace_id: Optional[str] = Query(None),
+    action: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ):
-    """Diagnostic: test LinkedIn image post workaround via Composio proxy.
-    No auth required. Pass ?workspace_id=<uuid> to specify workspace."""
+    """Diagnostic + fix for LinkedIn connection.
+    ?action=fix-version  → patch the stored LinkedIn-Version header
+    ?action=test-proxy   → test proxy call to LinkedIn (default)"""
     import httpx
 
     client = get_composio_client()
@@ -286,16 +288,45 @@ async def check_token_extraction(
     if not conn_id:
         return {"ok": False, "error": "No active LinkedIn connection"}
 
-    # Test: GET userinfo via Composio proxy
+    hdrs = {"x-api-key": config.COMPOSIO_API_KEY, "Content-Type": "application/json"}
+
+    if action == "fix-version":
+        # Try to PATCH the connection's stored params to update version
+        results = {}
+        for method in ("PATCH", "PUT"):
+            for api_ver in ("v2", "v3"):
+                resp = httpx.request(
+                    method,
+                    f"https://backend.composio.dev/api/{api_ver}/connected_accounts/{conn_id}",
+                    headers=hdrs,
+                    json={
+                        "params": {
+                            "headers": {
+                                "LinkedIn-Version": "202501",
+                                "X-Restli-Protocol-Version": "2.0.0",
+                            }
+                        }
+                    },
+                    timeout=15,
+                )
+                results[f"{method}_{api_ver}"] = {
+                    "status": resp.status_code,
+                    "body": resp.text[:300],
+                }
+                if resp.status_code in (200, 204):
+                    return {"ok": True, "fixed_via": f"{method}_{api_ver}", "response": resp.text[:300]}
+        return {"ok": False, "attempts": results}
+
+    # Default: test proxy
     resp = httpx.post(
         "https://backend.composio.dev/api/v2/actions/proxy",
-        headers={"x-api-key": config.COMPOSIO_API_KEY, "Content-Type": "application/json"},
+        headers=hdrs,
         json={
             "connectedAccountId": conn_id,
             "endpoint": "https://api.linkedin.com/rest/userinfo",
             "method": "GET",
             "parameters": [
-                {"in": "header", "name": "LinkedIn-Version", "value": "202405"},
+                {"in": "header", "name": "LinkedIn-Version", "value": "202501"},
             ],
         },
         timeout=15,
