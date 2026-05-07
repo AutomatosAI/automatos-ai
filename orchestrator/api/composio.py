@@ -344,13 +344,22 @@ async def check_token_extraction(
                         raw_cp["status_code"] = raw.status_code
                         if raw.status_code == 200:
                             raw_data = raw.json()
-                            raw_conn_params = raw_data.get("connectionParams", {})
-                            for k, v in raw_conn_params.items():
-                                if isinstance(v, str) and v:
-                                    raw_cp[k] = f"<{len(v)} chars>"
-                                else:
-                                    raw_cp[k] = repr(v)
                             result["raw_top_keys"] = list(raw_data.keys())
+                            # Check all candidate fields for token
+                            for field in ("connectionParams", "params", "data"):
+                                blob = raw_data.get(field)
+                                if not blob:
+                                    continue
+                                label = f"raw_{field}"
+                                raw_cp[label] = {}
+                                if isinstance(blob, dict):
+                                    for k, v in blob.items():
+                                        if isinstance(v, str) and v:
+                                            raw_cp[label][k] = f"<{len(v)} chars>"
+                                        elif isinstance(v, dict):
+                                            raw_cp[label][k] = {sk: f"<{len(sv)} chars>" if isinstance(sv, str) and sv else repr(sv) for sk, sv in v.items()}
+                                        else:
+                                            raw_cp[label][k] = repr(v)
                     except Exception as raw_err:
                         raw_cp = {"error": str(raw_err)}
 
