@@ -262,6 +262,33 @@ async def list_connections(
     return result
 
 
+@router.get("/linkedin/test-upload-init")
+async def test_linkedin_upload_init(
+    workspace_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    """Smoke test: call LINKEDIN_INITIALIZE_IMAGE_UPLOAD via execute_action.
+    Verifies auth+version headers work without running a full playbook."""
+    client = get_composio_client()
+    if not workspace_id:
+        workspace_id = "ae8320bc-95e1-4de1-bbe9-396bef19cbf8"
+    entity_manager = EntityManager(db)
+    entity = entity_manager.get_entity_by_workspace(workspace_id)
+    if not entity:
+        return {"ok": False, "error": "No Composio entity for workspace"}
+
+    entity_id = entity["composio_entity_id"]
+    result = client.execute_action(
+        "LINKEDIN_INITIALIZE_IMAGE_UPLOAD",
+        {"owner": "urn:li:organization:108072660"},
+        entity_id,
+    )
+    return {
+        "ok": result.get("success", False),
+        "result": result,
+    }
+
+
 
 
 @router.post("/connect/{app_name}", response_model=InitiateConnectionResponse)
