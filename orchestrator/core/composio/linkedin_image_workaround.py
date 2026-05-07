@@ -95,9 +95,10 @@ async def execute_linkedin_image_post(
     # --- 1. Get OAuth token from Composio connection ---
     token = composio_client.get_app_access_token(entity_id, "LINKEDIN")
     if not token:
-        # Fallback: try via entity → connection → connectionParams
+        # Fallback: use SDK entity object to get connection params
         try:
-            entity = composio_client.get_entity(entity_id)
+            sdk = composio_client.composio
+            entity = sdk.get_entity(entity_id)
             conn = entity.get_connection(app="linkedin")
             if conn:
                 cp = getattr(conn, "connectionParams", None) or {}
@@ -106,12 +107,16 @@ async def execute_linkedin_image_post(
                     or getattr(conn, "access_token", None)
                     or getattr(conn, "token", None)
                 )
-                if token:
-                    logger.info("[LinkedInWorkaround] Got token via entity.get_connection()")
+                if not token:
+                    # Log all available attrs for debugging
+                    attrs = {k: type(v).__name__ for k, v in vars(conn).items() if not k.startswith("_")}
+                    logger.warning("[LinkedInWorkaround] Connection found but no token. Attrs: %s", attrs)
+                else:
+                    logger.info("[LinkedInWorkaround] Got token via SDK entity.get_connection()")
         except Exception as tok_err:
             logger.warning("[LinkedInWorkaround] Fallback token lookup failed: %s", tok_err)
     if not token:
-        logger.error("[LinkedInWorkaround] entity_id=%s — no token found via either method", entity_id)
+        logger.error("[LinkedInWorkaround] entity_id=%s — no token found", entity_id)
         return {"success": False, "data": None,
                 "error": "No LinkedIn OAuth token found. Is LinkedIn connected?"}
 
