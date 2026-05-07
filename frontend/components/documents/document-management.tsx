@@ -333,6 +333,8 @@ export function DocumentManagement() {
   const [documentToDelete, setDocumentToDelete] = useState<{id: number, filename: string} | null>(null)
   const [showAddDatabaseModal, setShowAddDatabaseModal] = useState(false)
   const [showUploadModal, setShowUploadModal] = useState(false)
+  const [graphImporting, setGraphImporting] = useState(false)
+  const graphFileRef = useRef<HTMLInputElement>(null)
 
   // Cloud storage state
   const [selectedProvider, setSelectedProvider] = useState<any>(null)
@@ -486,6 +488,32 @@ export function DocumentManagement() {
     handleFileUpload(e.target.files)
   }
 
+  const handleGraphImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file || !file.name.endsWith('.json')) return
+    if (graphFileRef.current) graphFileRef.current.value = ''
+    setGraphImporting(true)
+    try {
+      const { default: apiClient } = await import('@/lib/api-client')
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('merge', 'false')
+      const headers = await apiClient.getAuthHeaders()
+      const wsId = localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
+      if (wsId) (headers as any)['X-Workspace-ID'] = wsId
+      const res = await fetch(`${apiClient.getBaseUrl()}/api/knowledge/graph/import`, {
+        method: 'POST',
+        headers,
+        body: formData,
+      })
+      if (!res.ok) throw new Error(await res.text())
+    } catch (err: any) {
+      console.error('[GraphImport]', err?.message || err)
+    } finally {
+      setGraphImporting(false)
+    }
+  }
+
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
@@ -606,14 +634,25 @@ export function DocumentManagement() {
           titleAccent="Bases"
           subtitle="Manage documents, code repositories, and knowledge sources"
           actions={
-            <Button
-              variant="outline"
-              onClick={() => setShowUploadModal(true)}
-              disabled={uploadDocumentMutation.isLoading}
-            >
-              <Upload className={`w-4 h-4 mr-2 ${uploadDocumentMutation.isLoading ? 'animate-spin' : ''}`} />
-              {uploadDocumentMutation.isLoading ? 'Uploading...' : 'Upload Documents'}
-            </Button>
+            <div className="flex items-center gap-2">
+              <input ref={graphFileRef} type="file" accept=".json" onChange={handleGraphImport} className="hidden" />
+              <Button
+                variant="outline"
+                onClick={() => graphFileRef.current?.click()}
+                disabled={graphImporting}
+              >
+                <Network className={`w-4 h-4 mr-2 ${graphImporting ? 'animate-spin' : ''}`} />
+                {graphImporting ? 'Importing...' : 'Import Graph'}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setShowUploadModal(true)}
+                disabled={uploadDocumentMutation.isLoading}
+              >
+                <Upload className={`w-4 h-4 mr-2 ${uploadDocumentMutation.isLoading ? 'animate-spin' : ''}`} />
+                {uploadDocumentMutation.isLoading ? 'Uploading...' : 'Upload Documents'}
+              </Button>
+            </div>
           }
         />
       </div>

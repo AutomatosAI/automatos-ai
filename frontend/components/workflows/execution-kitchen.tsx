@@ -536,9 +536,8 @@ export function ExecutionKitchen({
           execution: data,
         }))
 
-        if (data.status === 'completed' || data.status === 'failed') {
+        if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
           setIsExecuting(false)
-          // Stop polling — execution is done
           if (recipePollingRef.current) {
             clearInterval(recipePollingRef.current)
             recipePollingRef.current = null
@@ -1090,12 +1089,33 @@ export function ExecutionKitchen({
           </div>
           <div className="flex items-center gap-2">
             {isRecipeMode ? (
-              // Recipe mode: execution already started, just show status
+              // Recipe mode: execution already started, show status + cancel
               isExecuting && (
-                <Badge variant="outline" className="bg-orange-500/10 text-orange-400 border-orange-500/30">
-                  <Loader2 className="w-3 h-3 mr-2 animate-spin" />
-                  Cooking...
-                </Badge>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="bg-orange-500/10 text-orange-400 border-orange-500/30">
+                    <Loader2 className="w-3 h-3 mr-2 animate-spin" />
+                    Cooking...
+                  </Badge>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-destructive hover:text-destructive/80"
+                    onClick={async () => {
+                      if (recipeId && recipeExecId) {
+                        try {
+                          await apiClient.cancelRecipeExecution(recipeId, recipeExecId)
+                          setIsExecuting(false)
+                          setRecipeExecData((prev: any) => prev ? { ...prev, status: 'cancelled' } : prev)
+                        } catch (err) {
+                          console.error('Failed to cancel:', err)
+                        }
+                      }
+                    }}
+                  >
+                    <Square className="w-4 h-4 mr-2" />
+                    Cancel
+                  </Button>
+                </div>
               )
             ) : (
               // Workflow mode: full execution controls
@@ -1245,13 +1265,15 @@ export function ExecutionKitchen({
                     {recipeExecData.output_data.final_output}
                   </pre>
                 </div>
-              ) : recipeExecData?.status === 'failed' ? (
+              ) : recipeExecData?.status === 'failed' || recipeExecData?.status === 'cancelled' ? (
                 <div className="space-y-3">
                   <div className="flex items-center gap-2 mb-2">
                     <AlertCircle className="w-4 h-4 text-destructive" />
-                    <h3 className="text-sm font-semibold text-destructive">Execution Failed</h3>
+                    <h3 className="text-sm font-semibold text-destructive">
+                      {recipeExecData.status === 'cancelled' ? 'Execution Cancelled' : 'Execution Failed'}
+                    </h3>
                   </div>
-                  <p className="text-sm text-destructive/80">{recipeExecData.error_message || 'Unknown error'}</p>
+                  <p className="text-sm text-destructive/80">{recipeExecData.error_message || (recipeExecData.status === 'cancelled' ? 'Cancelled by user' : 'Unknown error')}</p>
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center h-full text-center">

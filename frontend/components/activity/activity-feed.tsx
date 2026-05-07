@@ -188,7 +188,7 @@ export function ActivityFeed({ period = '1d', openExecution, deepLinkRecipeId }:
       setSelectedItem({
         id: `recipe-${openExecution}`,
         type: 'recipe',
-        name: 'Recipe Execution',
+        name: 'Playbook Execution',
         status: 'completed',
         started_at: null,
         completed_at: null,
@@ -287,7 +287,7 @@ export function ActivityFeed({ period = '1d', openExecution, deepLinkRecipeId }:
           <Activity className="w-12 h-12 mx-auto mb-3 opacity-30" />
           <p className="font-medium">No activity yet</p>
           <p className="text-sm mt-1 max-w-sm mx-auto">
-            Create a routine or run a recipe to see your workforce in action
+            Create a routine or run a playbook to see your workforce in action
           </p>
         </div>
       </div>
@@ -422,7 +422,7 @@ function FeedRow({ item, index, isNew, onView }: FeedRowProps) {
             {isRecipe && (
               <Badge className="text-xs bg-orange-500/20 text-orange-300 border-orange-500/30 shrink-0">
                 <Zap className="w-3 h-3 mr-1" />
-                Recipe
+                Playbook
               </Badge>
             )}
             {item.type === 'mission' && (

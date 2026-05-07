@@ -100,7 +100,7 @@ class ComposioClient:
         # Bypasses SDK semantic search (which returns alphabetical, not semantic).
         self._schema_cache: Dict[str, Dict[str, Dict[str, Any]]] = {}  # {APP: {ACTION_NAME: schema}}
         self._schema_cache_ts: Dict[str, float] = {}
-        self._schema_cache_ttl = 3600  # 1 hour
+        self._schema_cache_ttl = 3600
     
     @property
     def composio(self):
@@ -229,15 +229,13 @@ class ComposioClient:
             )
 
         try:
-            # Default options
-            options = {"type": "use_composio_managed_auth"}
-
             if "API_KEY" in schemes:
                 options = {"type": "use_custom_auth", "authScheme": "API_KEY"}
             elif "BASIC" in schemes:
                 options = {"type": "use_custom_auth", "authScheme": "BASIC"}
+            else:
+                options = {"type": "use_composio_managed_auth"}
 
-            # Create new auth config
             logger.info(f"Creating new Auth Config for {app_slug} with options={options}")
             config = self.composio.auth_configs.create(
                 toolkit=app_slug,
@@ -245,6 +243,18 @@ class ComposioClient:
             )
             return config.id
         except Exception as e:
+            if "DefaultAuthConfigNotFound" in str(e) and options.get("type") == "use_composio_managed_auth":
+                logger.warning(f"Managed auth unavailable for {app_slug}, falling back to custom OAUTH2")
+                try:
+                    fallback = {"type": "use_custom_auth", "authScheme": "OAUTH2"}
+                    config = self.composio.auth_configs.create(
+                        toolkit=app_slug,
+                        options=fallback
+                    )
+                    return config.id
+                except Exception as e2:
+                    logger.error(f"Custom auth fallback also failed for {app_slug}: {e2}")
+                    raise ValueError(f"Could not setup authentication for {app_slug}: {str(e2)}")
             logger.error(f"Failed to create auth config for {app_slug}: {e}")
             raise ValueError(f"Could not setup authentication for {app_slug}: {str(e)}")
 
@@ -975,6 +985,31 @@ class ComposioClient:
                     seen.add(name)
                     break
 
+        # If some explicitly-requested actions weren't in the initial cache,
+        # re-fetch their app with no limit so all actions are available.
+        missing = set(action_names) - seen
+        if missing:
+            refetched_apps: set = set()
+            for name in missing:
+                app_key = name.split("_", 1)[0]
+                if app_key in refetched_apps:
+                    continue
+                refetched_apps.add(app_key)
+                self._populate_schema_cache(
+                    app_key, entity_id,
+                    limit=500,
+                )
+            for name in missing:
+                for app_key, app_cache in self._schema_cache.items():
+                    if name in app_cache:
+                        results.append({
+                            "action_name": name,
+                            "schema": app_cache[name],
+                            "app_name": app_key,
+                        })
+                        seen.add(name)
+                        break
+
         logger.info(
             "[ComposioClient] get_action_schemas_by_name: requested=%d resolved=%d "
             "actions=%s",
@@ -990,7 +1025,8 @@ class ComposioClient:
             app_name: Composio app name (e.g. "GMAIL", "COMPOSIO_SEARCH")
             entity_id: Composio entity/user ID
             limit: Max actions to fetch per app (SDK returns by importance).
-                   Default 30 keeps context manageable for large apps (SLACK=153, GITHUB=874).
+                   Initial fetch uses 30 for performance; fallback re-fetch
+                   uses 500 to get all actions when explicit names are missing.
         """
         import time as _time
         app_upper = app_name.upper()

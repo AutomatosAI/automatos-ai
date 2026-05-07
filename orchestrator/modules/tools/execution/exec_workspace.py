@@ -3,7 +3,9 @@ Workspace tool executor -- proxy calls to the workspace worker via WorkspaceClie
 Extracted from unified_executor.py.
 """
 
+import base64
 import logging
+import mimetypes
 from typing import Any, Dict, Optional
 from uuid import UUID
 
@@ -116,6 +118,48 @@ def _auto_register_deliverable(
         )
 
 
+async def _get_public_url(client, path: str, workspace_id: UUID, trace_id: Optional[str]) -> Dict[str, Any]:
+    """Download a workspace file and upload to public image store.
+
+    Returns a publicly accessible URL that external services (Instagram,
+    Twitter, etc.) can fetch without authentication.
+    """
+    result = await client.download_file(path)
+    if result.get("success") is False:
+        return {"success": False, "error": f"Could not read file: {result.get('error')}", "tool": "workspace_get_public_url"}
+
+    file_bytes: bytes = result["content"]
+    if not file_bytes:
+        return {"success": False, "error": "File is empty", "tool": "workspace_get_public_url"}
+
+    content_type = result.get("content_type", "")
+    if not content_type or content_type == "application/octet-stream":
+        guessed, _ = mimetypes.guess_type(path)
+        content_type = guessed or "image/png"
+
+    b64_data = base64.b64encode(file_bytes).decode("ascii")
+
+    from core.services.image_store import get_image_store
+    store = get_image_store()
+    image_id = await store.save_image(b64_data, mime_type=content_type, workspace_id=str(workspace_id))
+
+    from config import config
+    backend_url = (config.BACKEND_URL or "").rstrip("/")
+    public_url = f"{backend_url}/api/generated-images/{image_id}"
+
+    logger.info(
+        "[tool-trace %s] workspace_get_public_url: %s -> %s (%d bytes)",
+        trace_id or "no-trace", path, public_url, len(file_bytes),
+    )
+    return {
+        "success": True,
+        "public_url": public_url,
+        "file_path": path,
+        "size_bytes": len(file_bytes),
+        "content_type": content_type,
+    }
+
+
 async def resolve_repo_dir(client) -> Optional[str]:
     """Auto-detect the git repo directory inside a workspace.
 
@@ -159,13 +203,14 @@ async def execute_workspace_action(
 
         # Auto-detect repo directory for tools that need it
         repo_dir: Optional[str] = None
-        needs_repo = tool_name in ("workspace_git", "workspace_exec")
+        is_git_clone = tool_name == "workspace_git" and parameters.get("operation") == "clone"
+        needs_repo = tool_name in ("workspace_git", "workspace_exec") and not is_git_clone
         needs_path_prefix = tool_name in (
             "workspace_read_file", "workspace_write_file",
             "workspace_grep", "workspace_list_dir",
         )
         # Paths starting with these prefixes are workspace-root relative, not repo-relative
-        _WORKSPACE_ROOT_PREFIXES = ("repos/", "artifacts/", "content/", "reports/", "logs/")
+        _WORKSPACE_ROOT_PREFIXES = ("repos/", "artifacts/", "content/", "reports/", "logs/", "deliverables/")
         param_path = parameters.get("path", "")
         param_cwd = parameters.get("cwd", "")
         path_is_workspace_root = any(param_path.startswith(p) for p in _WORKSPACE_ROOT_PREFIXES)
@@ -233,16 +278,41 @@ async def execute_workspace_action(
             )
 
         elif tool_name == "workspace_html_to_png":
-            # Render an HTML page to a PNG inside the workspace. The resulting
-            # file is auto-registered as a deliverable below (artifact_type
-            # 'image' — inferred from .png).
-            url = parameters.get("url", "")
-            output_path = parameters.get("output_path", "")
+            url = parameters.get("url", "").strip()
+            output_path = parameters.get("output_path", "").strip()
             viewport = parameters.get("viewport") or {}
             if not url:
                 return {"success": False, "error": "url is required", "tool": tool_name}
             if not output_path:
                 return {"success": False, "error": "output_path is required", "tool": tool_name}
+
+            # Auto-append .png if the agent forgot the extension
+            if not output_path.lower().endswith(".png"):
+                output_path = output_path.rstrip(".") + ".png"
+
+            # If agent passed a workspace-relative path instead of file:// URL,
+            # auto-prefix so the worker can resolve it.
+            if not url.startswith(("file://", "http://", "https://")):
+                ws_id = str(workspace_id)
+                url = f"file:///workspaces/{ws_id}/{url.lstrip('/')}"
+
+            # Reject non-HTML file:// URLs (agents sometimes pass .md or .json)
+            if url.startswith("file://"):
+                from urllib.parse import urlparse
+                parsed_path = urlparse(url).path
+                if not parsed_path.lower().endswith((".html", ".htm")):
+                    ext = parsed_path.rsplit(".", 1)[-1] if "." in parsed_path else "none"
+                    return {
+                        "success": False,
+                        "error": (
+                            f"url points to a .{ext} file — this tool renders HTML pages "
+                            f"to PNG. Pass the HTML template URL with query params, e.g. "
+                            f"file:///workspaces/{{id}}/repos/automatos-social/render/"
+                            f"index.html?template=...&size=..."
+                        ),
+                        "tool": tool_name,
+                    }
+
             try:
                 viewport_w = int(viewport.get("w", 0))
                 viewport_h = int(viewport.get("h", 0))
@@ -260,6 +330,12 @@ async def execute_workspace_action(
                 wait_for=parameters.get("wait_for", "[data-render-ready='true']"),
                 full_page=bool(parameters.get("full_page", False)),
             )
+
+        elif tool_name == "workspace_get_public_url":
+            path = parameters.get("path", "").strip()
+            if not path:
+                return {"success": False, "error": "path is required", "tool": tool_name}
+            result = await _get_public_url(client, path, workspace_id, trace_id)
 
         else:
             return {"success": False, "error": f"Unknown workspace tool: {tool_name}", "tool": tool_name}

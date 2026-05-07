@@ -58,22 +58,17 @@ def test_workflow_execution_status(client, workflow_state):
 
 
 def test_workflow_execution_list(client, workflow_state):
-    """GET /api/workflows/{id}/executions — list executions for a workflow."""
-    if not workflow_state["workflow_id"]:
-        pytest.skip("No workflow_id available")
-
+    """GET /api/workflows/executions/ — list all workflow executions."""
     r = client.get(
-        f"/api/workflows/{workflow_state['workflow_id']}/executions",
+        "/api/workflows/executions/",
         params={"limit": 10},
     )
-    # Some APIs may not have this endpoint — accept 200 or 404
-    assert r.status_code in (200, 404), (
+    assert r.status_code == 200, (
         f"Execution list returned unexpected {r.status_code}: {r.text[:300]}"
     )
-    if r.status_code == 200:
-        data = r.json()
-        items = data if isinstance(data, list) else data.get("items", data.get("executions", []))
-        assert isinstance(items, list)
+    data = r.json()
+    items = data if isinstance(data, list) else data.get("items", data.get("executions", []))
+    assert isinstance(items, list)
 
 
 def test_workflow_templates_available(client):
@@ -85,6 +80,6 @@ def test_workflow_templates_available(client):
 
 
 def test_workflow_stats_endpoint(client):
-    """GET /api/workflow-recipes/stats — recipe stats for dashboard."""
-    r = client.get("/api/workflow-recipes/stats")
+    """GET /api/workflow-recipes/stats/dashboard — playbook stats for dashboard."""
+    r = client.get("/api/workflow-recipes/stats/dashboard")
     assert r.status_code in (200, 404)

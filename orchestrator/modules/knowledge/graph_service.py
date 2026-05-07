@@ -55,6 +55,7 @@ from graphify.serve import (
 
 from config import config
 from core.graph_storage import DbWorkspaceClient
+from core.llm.manager import get_system_setting
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +72,8 @@ _GRAPH_HTML_PATH = f"{_GRAPH_DIR}/graph.html"
 _HISTORY_DIR = f"{_GRAPH_DIR}/history"
 _REPORTS_DIR = f"{_GRAPH_DIR}/reports"
 _LATEST_DIFF_PATH = f"{_GRAPH_DIR}/latest_diff.json"
-_MAX_HISTORY_SNAPSHOTS = 30
+def _max_history_snapshots() -> int:
+    return int(get_system_setting("knowledge_graph", "max_history_snapshots", "30"))
 
 _CACHE_MAX_SIZE = 20
 _DEBOUNCE_SECONDS = 60
@@ -146,6 +148,22 @@ class GraphifyService:
             self._build_locks[workspace_id] = asyncio.Lock()
         return self._build_locks[workspace_id]
 
+    @staticmethod
+    def _normalize_node_link_data(data: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalize graph JSON for NetworkX node_link_graph compatibility.
+
+        Handles: 'links' vs 'edges' key, missing 'source'/'target' on edges
+        that only have '_src'/'_tgt'.
+        """
+        if "links" not in data and "edges" in data:
+            data["links"] = data.pop("edges")
+        for link in data.get("links", []):
+            if "source" not in link and "_src" in link:
+                link["source"] = link["_src"]
+            if "target" not in link and "_tgt" in link:
+                link["target"] = link["_tgt"]
+        return data
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -157,18 +175,20 @@ class GraphifyService:
         Pipeline-level timeout of 10 minutes prevents silent hangs.
         """
         async with self._lock_for(workspace_id):
+            build_timeout = int(get_system_setting("knowledge_graph", "build_timeout", "1800"))
             try:
                 return await asyncio.wait_for(
                     self._build_graph_unlocked(workspace_id),
-                    timeout=600,  # 10 min hard cap
+                    timeout=build_timeout,
                 )
             except asyncio.TimeoutError:
                 logger.error(
-                    "build_graph: TIMED OUT after 600s for workspace %s",
+                    "build_graph: TIMED OUT after %ds for workspace %s",
+                    build_timeout,
                     workspace_id,
                 )
                 raise TimeoutError(
-                    f"Graph build timed out after 10 minutes for workspace {workspace_id}"
+                    f"Graph build timed out after {build_timeout}s for workspace {workspace_id}"
                 )
 
     async def _build_graph_unlocked(self, workspace_id: str) -> Dict[str, Any]:
@@ -266,6 +286,7 @@ class GraphifyService:
             return None
 
         loop = asyncio.get_event_loop()
+        data = self._normalize_node_link_data(data)
         graph: nx.Graph = await loop.run_in_executor(
             None, partial(nx.node_link_graph, data)
         )
@@ -316,7 +337,8 @@ class GraphifyService:
         ws = DbWorkspaceClient(str(workspace_id))
         loop = asyncio.get_event_loop()
 
-        # Parse the imported graph
+        # Normalize edge format for NetworkX 3.1 compatibility
+        graph_data = self._normalize_node_link_data(graph_data)
         imported: nx.Graph = await loop.run_in_executor(
             None, partial(nx.node_link_graph, graph_data)
         )
@@ -667,8 +689,8 @@ class GraphifyService:
             model=extraction_model,
         )
 
-        # Parallel extraction with concurrency limit (avoid rate-limiting)
-        sem = asyncio.Semaphore(5)
+        max_concurrent = int(get_system_setting("knowledge_graph", "max_concurrent_extractions", "5"))
+        sem = asyncio.Semaphore(max_concurrent)
 
         async def _extract_one(source: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             async with sem:
@@ -695,9 +717,10 @@ class GraphifyService:
                     return None
 
         logger.info(
-            "_extract_all: extracting %d documents in parallel (max 5 concurrent) "
+            "_extract_all: extracting %d documents in parallel (max %d concurrent) "
             "using %s for workspace %s",
             len(doc_sources),
+            max_concurrent,
             extraction_model,
             workspace_id,
         )
@@ -764,14 +787,20 @@ class GraphifyService:
         if graph.number_of_nodes() > 0 and graph.number_of_edges() == 0:
             logger.warning("_export_graph: graph has nodes but no edges — skipping HTML export")
         else:
-            with tempfile.TemporaryDirectory() as tmpdir:
-                html_path = os.path.join(tmpdir, "graph.html")
-                await loop.run_in_executor(
-                    None, partial(to_html, graph, communities, html_path)
+            try:
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    html_path = os.path.join(tmpdir, "graph.html")
+                    await loop.run_in_executor(
+                        None, partial(to_html, graph, communities, html_path)
+                    )
+                    with open(html_path, "r", encoding="utf-8") as f:
+                        html_content = f.read()
+                await ws.write_file(_GRAPH_HTML_PATH, html_content)
+            except ValueError:
+                logger.info(
+                    "_export_graph: graph too large for HTML viz (%d nodes) — skipping, JSON still exported",
+                    graph.number_of_nodes(),
                 )
-                with open(html_path, "r", encoding="utf-8") as f:
-                    html_content = f.read()
-            await ws.write_file(_GRAPH_HTML_PATH, html_content)
 
     @staticmethod
     def _format_communities(
@@ -829,6 +858,7 @@ class GraphifyService:
 
         # Reconstruct previous graph and compute diff
         try:
+            prev_data = self._normalize_node_link_data(prev_data)
             prev_graph: nx.Graph = await loop.run_in_executor(
                 None, partial(nx.node_link_graph, prev_data)
             )
@@ -932,7 +962,7 @@ class GraphifyService:
         await ws.write_file(report_path, "\n".join(lines))
 
     async def _prune_history(self, ws: DbWorkspaceClient) -> None:
-        """Keep at most ``_MAX_HISTORY_SNAPSHOTS`` in /graph/history/.
+        """Keep at most ``_max_history_snapshots()`` in /graph/history/.
 
         Deletes oldest snapshots first.  If WorkspaceClient lacks a
         delete_file method the excess files are logged but not removed.
@@ -948,7 +978,7 @@ class GraphifyService:
             if (e.get("name", "") if isinstance(e, dict) else str(e)).endswith("_graph.json")
         )
 
-        excess_count = len(snapshot_names) - _MAX_HISTORY_SNAPSHOTS
+        excess_count = len(snapshot_names) - _max_history_snapshots()
         if excess_count <= 0:
             return
 

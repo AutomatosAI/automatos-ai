@@ -11,20 +11,20 @@ from datetime import datetime, timedelta
 from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, and_, extract, cast, Date
+from sqlalchemy import func, extract, cast, Date
 from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db
-from core.models import Agent, WorkflowExecution
-from core.models.core import LLMUsage, BoardTask
+from core.models import Agent
+from core.models.core import LLMUsage, BoardTask, RecipeExecution, WorkflowTemplate
 from core.models.orchestration import OrchestrationRun
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/kpi", tags=["kpi"])
 
-PERIOD_DAYS = {"7d": 7, "30d": 30, "90d": 90}
+PERIOD_DAYS = {"1d": 1, "7d": 7, "30d": 30, "90d": 90}
 
 
 def _parse_period(period: str) -> int:
@@ -36,7 +36,7 @@ def _parse_period(period: str) -> int:
 
 @router.get("/cost-tracker")
 async def get_cost_tracker(
-    period: str = Query("30d", regex="^(7d|30d|90d)$"),
+    period: str = Query("30d", regex="^(1d|7d|30d|90d)$"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
@@ -132,75 +132,56 @@ async def get_cost_tracker(
 
 @router.get("/agent-performance")
 async def get_agent_performance(
-    period: str = Query("30d", regex="^(7d|30d|90d)$"),
+    period: str = Query("30d", regex="^(1d|7d|30d|90d)$"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
-    """Per-agent success rate, avg completion time, tasks done."""
+    """Per-agent success rate, avg completion time, tasks done.
+
+    Sources: BoardTask (agent task board) for task counts + completion times.
+    """
     try:
         days = _parse_period(period)
         since = datetime.now() - timedelta(days=days)
 
-        agents = (
-            db.query(Agent)
-            .filter(Agent.workspace_id == ctx.workspace_id, Agent.status == "active")
+        rows = (
+            db.query(
+                BoardTask.assigned_agent_id,
+                Agent.name,
+                func.count(BoardTask.id).label("total"),
+                func.count(BoardTask.id).filter(BoardTask.status == "done").label("done"),
+                func.avg(
+                    extract("epoch", BoardTask.completed_at)
+                    - extract("epoch", BoardTask.started_at)
+                ).filter(
+                    BoardTask.status == "done",
+                    BoardTask.completed_at.isnot(None),
+                    BoardTask.started_at.isnot(None),
+                ).label("avg_sec"),
+            )
+            .join(Agent, BoardTask.assigned_agent_id == Agent.id)
+            .filter(
+                BoardTask.workspace_id == ctx.workspace_id,
+                BoardTask.assigned_agent_id.isnot(None),
+                BoardTask.created_at >= since,
+            )
+            .group_by(BoardTask.assigned_agent_id, Agent.name)
             .all()
         )
 
         results = []
-        for agent in agents:
-            total = (
-                db.query(func.count(WorkflowExecution.id))
-                .filter(
-                    WorkflowExecution.agent_id == agent.id,
-                    WorkflowExecution.workspace_id == ctx.workspace_id,
-                    WorkflowExecution.started_at >= since,
-                )
-                .scalar()
-                or 0
-            )
-
+        for r in rows:
+            total = r.total or 0
             if total == 0:
                 continue
-
-            successful = (
-                db.query(func.count(WorkflowExecution.id))
-                .filter(
-                    WorkflowExecution.agent_id == agent.id,
-                    WorkflowExecution.workspace_id == ctx.workspace_id,
-                    WorkflowExecution.status == "completed",
-                    WorkflowExecution.started_at >= since,
-                )
-                .scalar()
-                or 0
-            )
-
-            avg_sec = (
-                db.query(
-                    func.avg(
-                        extract("epoch", WorkflowExecution.completed_at)
-                        - extract("epoch", WorkflowExecution.started_at)
-                    )
-                )
-                .filter(
-                    WorkflowExecution.agent_id == agent.id,
-                    WorkflowExecution.workspace_id == ctx.workspace_id,
-                    WorkflowExecution.status == "completed",
-                    WorkflowExecution.completed_at.isnot(None),
-                    WorkflowExecution.started_at.isnot(None),
-                    WorkflowExecution.started_at >= since,
-                )
-                .scalar()
-                or 0
-            )
-
-            success_rate = round(successful / total * 100, 1)
+            done = r.done or 0
+            success_rate = round(done / total * 100, 1)
             results.append({
-                "agent_id": agent.id,
-                "name": agent.name,
+                "agent_id": r.assigned_agent_id,
+                "name": r.name,
                 "success_rate": success_rate,
                 "tasks_completed": total,
-                "avg_completion_seconds": round(float(avg_sec), 1),
+                "avg_completion_seconds": round(float(r.avg_sec or 0), 1),
             })
 
         results.sort(key=lambda x: x["success_rate"], reverse=True)
@@ -217,53 +198,59 @@ async def get_agent_performance(
 
 @router.get("/playbook-metrics")
 async def get_playbook_metrics(
-    period: str = Query("30d", regex="^(7d|30d|90d)$"),
+    period: str = Query("30d", regex="^(1d|7d|30d|90d)$"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
-    """Playbook/recipe runs, success %, avg duration."""
+    """Playbook/recipe runs, success %, avg duration.
+
+    Sources: RecipeExecution (recipe_executions table) joined with
+    WorkflowTemplate (workflow_recipes table) for names.
+    """
     try:
         days = _parse_period(period)
         since = datetime.now() - timedelta(days=days)
 
-        # Playbook executions tracked as WorkflowExecution with workflow_id set
         rows = (
             db.query(
-                WorkflowExecution.workflow_id,
-                func.count(WorkflowExecution.id).label("runs"),
-                func.count(WorkflowExecution.id)
-                .filter(WorkflowExecution.status == "completed")
+                RecipeExecution.recipe_id,
+                func.count(RecipeExecution.id).label("runs"),
+                func.count(RecipeExecution.id)
+                .filter(RecipeExecution.status == "completed")
                 .label("successes"),
                 func.avg(
-                    extract("epoch", WorkflowExecution.completed_at)
-                    - extract("epoch", WorkflowExecution.started_at)
+                    extract("epoch", RecipeExecution.completed_at)
+                    - extract("epoch", RecipeExecution.started_at)
+                ).filter(
+                    RecipeExecution.status == "completed",
+                    RecipeExecution.completed_at.isnot(None),
                 ).label("avg_duration"),
             )
             .filter(
-                WorkflowExecution.workspace_id == ctx.workspace_id,
-                WorkflowExecution.workflow_id.isnot(None),
-                WorkflowExecution.started_at >= since,
+                RecipeExecution.workspace_id == ctx.workspace_id,
+                RecipeExecution.started_at >= since,
             )
-            .group_by(WorkflowExecution.workflow_id)
+            .group_by(RecipeExecution.recipe_id)
             .all()
         )
 
-        # Resolve workflow names
-        from core.models import Workflow
-
-        wf_ids = [r.workflow_id for r in rows if r.workflow_id]
-        wf_map = {}
-        if wf_ids:
-            wfs = db.query(Workflow.id, Workflow.name).filter(Workflow.id.in_(wf_ids)).all()
-            wf_map = {w.id: w.name for w in wfs}
+        recipe_ids = [r.recipe_id for r in rows if r.recipe_id]
+        name_map = {}
+        if recipe_ids:
+            templates = (
+                db.query(WorkflowTemplate.id, WorkflowTemplate.name)
+                .filter(WorkflowTemplate.id.in_(recipe_ids))
+                .all()
+            )
+            name_map = {t.id: t.name for t in templates}
 
         playbooks = []
         for r in rows:
             runs = r.runs or 0
             successes = r.successes or 0
             playbooks.append({
-                "workflow_id": r.workflow_id,
-                "name": wf_map.get(r.workflow_id, f"Playbook {r.workflow_id}"),
+                "recipe_id": r.recipe_id,
+                "name": name_map.get(r.recipe_id, f"Playbook {r.recipe_id}"),
                 "runs": runs,
                 "success_pct": round(successes / runs * 100, 1) if runs > 0 else 0,
                 "avg_duration_seconds": round(float(r.avg_duration or 0), 1),
@@ -283,7 +270,7 @@ async def get_playbook_metrics(
 
 @router.get("/approval-gates")
 async def get_approval_gates(
-    period: str = Query("30d", regex="^(7d|30d|90d)$"),
+    period: str = Query("30d", regex="^(1d|7d|30d|90d)$"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:

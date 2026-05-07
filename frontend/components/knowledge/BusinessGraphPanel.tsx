@@ -188,32 +188,37 @@ export function BusinessGraphPanel() {
   // ── Data fetching ──
 
   const {
+    data: meta,
+    isLoading: metaLoading,
+    error: metaError,
+  } = useQuery<GraphMeta>({
+    queryKey: graphQueryKeys.meta(workspaceId ?? ''),
+    queryFn: async () => {
+      const result: any = await apiClient.getWorkspaceFileContent(workspaceId!, 'graph/meta.json')
+      const content = result?.content ?? result
+      return typeof content === 'string' ? JSON.parse(content) : content
+    },
+    enabled: !!workspaceId,
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  })
+
+  const vizSafe = !!meta && (meta.node_count ?? 0) <= 5000
+
+  const {
     data: graphData,
     isLoading: graphLoading,
     error: graphError,
   } = useQuery<GraphData>({
     queryKey: graphQueryKeys.data(workspaceId ?? ''),
     queryFn: async () => {
-      const result = await apiClient.getWorkspaceFileContent(workspaceId!, 'graph/graph.json')
+      const result: any = await apiClient.getWorkspaceFileContent(workspaceId!, 'graph/graph.json')
       const content = result?.content ?? result
       return typeof content === 'string' ? JSON.parse(content) : content
     },
-    enabled: !!workspaceId,
+    enabled: !!workspaceId && vizSafe,
     staleTime: 5 * 60 * 1000,
-  })
-
-  const {
-    data: meta,
-    isLoading: metaLoading,
-  } = useQuery<GraphMeta>({
-    queryKey: graphQueryKeys.meta(workspaceId ?? ''),
-    queryFn: async () => {
-      const result = await apiClient.getWorkspaceFileContent(workspaceId!, 'graph/meta.json')
-      const content = result?.content ?? result
-      return typeof content === 'string' ? JSON.parse(content) : content
-    },
-    enabled: !!workspaceId,
-    staleTime: 5 * 60 * 1000,
+    retry: false,
   })
 
   // ── Derived data ──
@@ -284,8 +289,9 @@ export function BusinessGraphPanel() {
   }
 
   // ── Empty state — drag-and-drop zone (matches document upload pattern) ──
+  // Only show when there's genuinely no graph (meta missing/errored)
 
-  if (graphError || !graphData?.nodes?.length) {
+  if (!meta && (metaError || !metaLoading)) {
     return (
       <div className="space-y-6">
         {/* Hidden file input — same pattern as document-management.tsx */}
@@ -364,8 +370,8 @@ export function BusinessGraphPanel() {
 
   // ── Stats ──
 
-  const nodeCount = meta?.node_count ?? graphData.nodes.length
-  const edgeCount = meta?.edge_count ?? graphData.links.length
+  const nodeCount = meta?.node_count ?? graphData?.nodes?.length ?? 0
+  const edgeCount = meta?.edge_count ?? graphData?.links?.length ?? 0
   const communityCount = meta?.community_count ?? communities.length
   const lastBuilt = meta?.last_built
     ? formatDistanceToNow(new Date(meta.last_built * 1000), { addSuffix: true })
@@ -437,8 +443,21 @@ export function BusinessGraphPanel() {
         )}
       </div>
 
+      {/* Large graph info */}
+      {!vizSafe && meta && (
+        <div className="glass-card bg-white/5 backdrop-blur-sm border border-white/10 rounded-lg p-6 text-center">
+          <Network className="w-8 h-8 mx-auto mb-2 text-success" />
+          <h3 className="text-base font-semibold mb-1">Knowledge Graph Active</h3>
+          <p className="text-sm text-muted-foreground">
+            {nodeCount.toLocaleString()} nodes · {edgeCount.toLocaleString()} edges · {communityCount} communities.
+            Browser visualization is disabled for graphs over 5,000 nodes.
+            Agents can query this graph via platform tools.
+          </p>
+        </div>
+      )}
+
       {/* Main Layout: Sidebar + Graph */}
-      <div className="flex flex-col md:flex-row gap-4 min-h-[500px]">
+      {vizSafe && <div className="flex flex-col md:flex-row gap-4 min-h-[500px]">
         {/* Community Sidebar */}
         <div className="w-full md:w-48 shrink-0 glass-card bg-white/5 backdrop-blur-sm border border-white/10 rounded-lg p-3 space-y-1 max-h-[500px] overflow-y-auto">
           <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
@@ -480,16 +499,16 @@ export function BusinessGraphPanel() {
         {/* Graph Visualization */}
         <div className="flex-1 glass-card bg-white/5 backdrop-blur-sm border border-white/10 rounded-lg overflow-hidden min-h-[400px]">
           <BusinessGraphVisualization
-            graphData={filteredData ?? { nodes: [], links: [] }}
+            graphData={(filteredData ?? { nodes: [], links: [] }) as any}
             onNodeSelect={handleNodeSelect}
             selectedCommunity={selectedCommunity}
             minConfidence={confidenceMin}
           />
         </div>
-      </div>
+      </div>}
 
       {/* Search + Confidence Controls */}
-      <div className="glass-card bg-white/5 backdrop-blur-sm border border-white/10 rounded-lg px-4 py-3 flex flex-col sm:flex-row items-start sm:items-center gap-4">
+      {vizSafe && <div className="glass-card bg-white/5 backdrop-blur-sm border border-white/10 rounded-lg px-4 py-3 flex flex-col sm:flex-row items-start sm:items-center gap-4">
         <div className="relative flex-1 w-full sm:max-w-xs">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input
@@ -524,10 +543,10 @@ export function BusinessGraphPanel() {
             {confidenceMin.toFixed(2)}
           </span>
         </div>
-      </div>
+      </div>}
 
       {/* Node Detail Panel */}
-      {selectedNode && (
+      {vizSafe && selectedNode && (
         <div className="glass-card bg-white/5 backdrop-blur-sm border border-white/10 rounded-lg p-4 space-y-3">
           <div className="flex items-start justify-between">
             <div className="space-y-1">

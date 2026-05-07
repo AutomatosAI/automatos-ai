@@ -100,13 +100,34 @@ class TaskReconciler:
                 {"cutoff": now - _timedelta_seconds(app_config.TASK_PENDING_TIMEOUT_SECONDS)},
             ).fetchall()
 
-            total = len(stalled_running) + len(stuck_pending)
+            # 3. Orphaned board tasks — in_progress with no backing async task
+            #    (standalone user tasks executed via fire-and-forget, or recipe
+            #    tasks whose execution already finished/failed but bridge missed)
+            orphaned_board = db.execute(
+                text("""
+                    SELECT bt.id, bt.source_type, bt.source_id, bt.started_at
+                    FROM board_tasks bt
+                    WHERE bt.status = 'in_progress'
+                      AND bt.started_at < :cutoff
+                      AND (
+                          bt.source_type = 'user'
+                          OR (bt.source_type = 'recipe' AND EXISTS (
+                              SELECT 1 FROM recipe_executions re
+                              WHERE re.execution_id = bt.source_id
+                                AND re.status IN ('completed', 'failed', 'cancelled')
+                          ))
+                      )
+                """),
+                {"cutoff": now - _timedelta_seconds(app_config.TASK_STALL_TIMEOUT_SECONDS)},
+            ).fetchall()
+
+            total = len(stalled_running) + len(stuck_pending) + len(orphaned_board)
             if total == 0:
                 return
 
             logger.warning(
-                "[TaskReconciler] Found %d stalled (running=%d, pending=%d)",
-                total, len(stalled_running), len(stuck_pending),
+                "[TaskReconciler] Found %d stalled (running=%d, pending=%d, orphan_board=%d)",
+                total, len(stalled_running), len(stuck_pending), len(orphaned_board),
             )
 
             for row in stalled_running:
@@ -114,6 +135,23 @@ class TaskReconciler:
 
             for row in stuck_pending:
                 await self._handle_stalled(row, db, reason="pending", timeout=app_config.TASK_PENDING_TIMEOUT_SECONDS)
+
+            for row in orphaned_board:
+                error_msg = (
+                    f"Stalled: in_progress for >{app_config.TASK_STALL_TIMEOUT_SECONDS}s "
+                    f"with no active execution (source={row.source_type})"
+                )
+                db.execute(
+                    text("""
+                        UPDATE board_tasks
+                        SET status = 'done',
+                            error_message = :error,
+                            completed_at = :now
+                        WHERE id = :id AND status = 'in_progress'
+                    """),
+                    {"error": error_msg, "now": now, "id": row.id},
+                )
+                logger.warning("[TaskReconciler] Closed orphaned board task %d — %s", row.id, error_msg)
 
             db.commit()
 
@@ -156,6 +194,13 @@ class TaskReconciler:
         logger.warning(
             "[TaskReconciler] Marked execution %s as failed — %s", execution_id, error_msg,
         )
+
+        # Sync linked board task so it doesn't stay stuck in_progress
+        try:
+            from services.board_task_bridge import complete_recipe_board_task
+            complete_recipe_board_task(db, execution_id, success=False, error_message=error_msg)
+        except Exception as bt_err:
+            logger.warning("[TaskReconciler] Board task sync failed for %s: %s", execution_id, bt_err)
 
         # Check retry eligibility
         if attempt_count >= max_retries:

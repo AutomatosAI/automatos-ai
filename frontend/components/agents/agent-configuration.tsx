@@ -1097,7 +1097,7 @@ export function AgentConfiguration({
               value={[modelConfigData?.max_tokens || 2000]}
               onValueChange={(value) => handleModelConfigChange('max_tokens', value[0])}
               min={100}
-              max={4000}
+              max={16384}
               step={100}
               className="w-full"
             />

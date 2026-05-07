@@ -71,6 +71,11 @@ export function AssignmentsPlaybooksGrid() {
       <PlaybooksTab
         viewMode="grid"
         onUseRecipe={() => {}}
+        onExecuteRecipe={(_wfId, info) => {
+          if (info?.recipeExecutionId) {
+            router.push(`/activity/execution?id=${info.recipeExecutionId}&recipeId=${info.recipeId || ''}`)
+          }
+        }}
         emptyState={emptyState}
       />
     </div>

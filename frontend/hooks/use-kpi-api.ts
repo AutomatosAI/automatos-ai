@@ -30,7 +30,7 @@ export interface AgentPerformanceData {
 
 export interface PlaybookMetricsData {
   playbooks: Array<{
-    workflow_id: number
+    recipe_id: number
     name: string
     runs: number
     success_pct: number

@@ -111,13 +111,9 @@ def test_filter_returns_only_requested_actions(registry):
 # ---- Acceptance criteria: empty list ----
 
 def test_empty_list_emits_no_action_lines(registry):
-    """AC #8: Empty list returns header-only summary, no action lines."""
+    """AC #8: Empty list returns empty summary — no actions, no headers."""
     summary = registry.build_filtered_prompt_summary([])
-    # Header is present
-    assert "## Available Platform Actions" in summary
-    # No action bullet lines (no "- `platform_..." entries)
     assert "- `platform_" not in summary
-    # No category headers
     assert "### " not in summary
 
 
@@ -170,22 +166,23 @@ def test_admin_included_by_default(registry):
 
 
 def test_exclude_promoted_filters_promoted(registry):
-    """exclude_promoted=True (default) drops promoted actions even if requested."""
+    """exclude_promoted=True drops promoted actions even if requested."""
     summary = registry.build_filtered_prompt_summary(
         ["platform_list_agents", "platform_promoted_action"],
+        exclude_promoted=True,
     )
     assert "platform_list_agents" in summary
     assert "platform_promoted_action" not in summary
 
 
-def test_include_promoted_when_disabled(registry):
-    """exclude_promoted=False keeps promoted actions in the summary."""
+def test_promoted_included_by_default(registry):
+    """exclude_promoted defaults to False — promoted actions appear in Direct Tools section."""
     summary = registry.build_filtered_prompt_summary(
         ["platform_list_agents", "platform_promoted_action"],
-        exclude_promoted=False,
     )
     assert "platform_list_agents" in summary
     assert "platform_promoted_action" in summary
+    assert "Direct Tools" in summary
 
 
 # ---- AC #2: format identical to build_prompt_summary ----
@@ -197,7 +194,7 @@ def test_format_matches_build_prompt_summary(registry):
     Strategy: include ALL non-admin non-promoted actions in the filter,
     expect identical bytes to the unfiltered (default flags) summary.
     """
-    full = registry.build_prompt_summary()  # exclude_admin=False, exclude_promoted=True
+    full = registry.build_prompt_summary()  # exclude_admin=False, exclude_promoted=False
     all_names = [a.name for a in registry.get_all()]
     filtered = registry.build_filtered_prompt_summary(all_names)
     assert filtered == full
@@ -222,8 +219,9 @@ def test_build_prompt_summary_still_works(registry):
     assert "platform_list_agents" in summary
     assert "platform_create_agent" in summary
     assert "platform_list_missions" in summary
-    # promoted excluded by default
-    assert "platform_promoted_action" not in summary
+    # promoted included by default (exclude_promoted=False) in Direct Tools section
+    assert "platform_promoted_action" in summary
+    assert "Direct Tools" in summary
     # admin included by default (exclude_admin=False)
     assert "platform_admin_only_action" in summary
 

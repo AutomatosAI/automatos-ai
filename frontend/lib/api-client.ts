@@ -1453,6 +1453,12 @@ class ApiClient {
     return this.request(`/api/workflow-recipes/${recipeId}/executions/${executionId}`)
   }
 
+  async cancelRecipeExecution(recipeId: string, executionId: string) {
+    return this.request(`/api/workflow-recipes/${recipeId}/executions/${executionId}/cancel`, {
+      method: 'POST'
+    })
+  }
+
   async getRecipeStepFullLogs(recipeId: string, executionId: string, stepOrder: number) {
     return this.request(`/api/workflow-recipes/${recipeId}/executions/${executionId}/steps/${stepOrder}/logs`)
   }

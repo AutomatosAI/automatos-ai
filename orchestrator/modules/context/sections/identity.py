@@ -177,6 +177,16 @@ class IdentitySection(BaseSection):
         if persona_text:
             parts.append(f"\n## Persona & Communication Style\n{persona_text}")
 
+        # Execution policy — always on for chatbot mode
+        parts.append(
+            "\n## Execution Policy\n"
+            "If the user requests multiple distinct tasks, you may call tools "
+            "multiple times to complete ALL tasks before producing your final answer. "
+            "Prefer data-gathering (read/list/fetch) steps before side-effect "
+            "(send/post/create/update) steps. "
+            "Only send/post after you have the final content to send."
+        )
+
         # No max_tokens truncation — the full chatbot personality is essential
         return "\n".join(parts)
 

@@ -87,8 +87,6 @@ class Config:
     MEMORY_SESSION_CONSOLIDATION_TTL_SECONDS: int = int(os.getenv("MEMORY_SESSION_CONSOLIDATION_TTL_SECONDS", "3600"))
     # L3 Cache: TTL for Mem0 search result caching in Redis
     MEMORY_CACHE_TTL_SECONDS: int = int(os.getenv("MEMORY_CACHE_TTL_SECONDS", "300"))
-    # Context Router: total token budget for pre-LLM context injection
-    CONTEXT_BUDGET_TOKENS: int = int(os.getenv("CONTEXT_BUDGET_TOKENS", "4000"))
     # Context Router: per-source sub-budgets (tokens)
     CONTEXT_BUDGET_SESSION: int = int(os.getenv("CONTEXT_BUDGET_SESSION", "500"))
     CONTEXT_BUDGET_LONG_TERM: int = int(os.getenv("CONTEXT_BUDGET_LONG_TERM", "800"))
@@ -127,9 +125,7 @@ class Config:
     # =============================================================================
     # API SECURITY
     # =============================================================================
-    API_KEY: str = os.getenv("API_KEY")
     ORCHESTRATOR_API_KEY: str = os.getenv("ORCHESTRATOR_API_KEY") or os.getenv("AUTOMATOS_API_KEY") or os.getenv("API_KEY")
-    REQUIRE_API_KEY: bool = os.getenv("REQUIRE_API_KEY", "true").lower() == "true"
     REQUIRE_AUTH: bool = os.getenv("REQUIRE_AUTH", "true").strip().lower() in ("true", "1", "yes")
     AUTH_DEBUG: bool = os.getenv("AUTH_DEBUG", "").strip().lower() in ("1", "true", "yes", "on")
     
@@ -185,9 +181,6 @@ class Config:
         except Exception:
             return os.getenv("LLM_MODEL", DEFAULT_LLM_MODEL)
     
-    LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.7"))
-    LLM_MAX_TOKENS: int = int(os.getenv("LLM_MAX_TOKENS", "2000"))
-
     @property
     def PLANNER_MODEL(self) -> str:
         """Planner model — resolves to System LLM tier (PRD-136)."""
@@ -283,7 +276,6 @@ class Config:
     # ENVIRONMENT
     # =============================================================================
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
-    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
     
     @property
     def IS_PRODUCTION(self) -> bool:
@@ -293,18 +285,6 @@ class Config:
     def IS_DEVELOPMENT(self) -> bool:
         return self.ENVIRONMENT.lower() == "development"
     
-    # =============================================================================
-    # DEPLOYMENT (for scripts)
-    # =============================================================================
-    DEPLOY_HOST: str = os.getenv("DEPLOY_HOST")
-    DEPLOY_PORT: int = int(os.getenv("DEPLOY_PORT", "22"))
-    DEPLOY_USER: str = os.getenv("DEPLOY_USER", "root")
-    
-    # =============================================================================
-    # FRONTEND ENV (NextAuth)
-    # =============================================================================
-    NEXTAUTH_SECRET: str = os.getenv("NEXTAUTH_SECRET")
-    NEXTAUTH_URL: str = os.getenv("NEXTAUTH_URL")
     NEXT_PUBLIC_API_URL: str = os.getenv("NEXT_PUBLIC_API_URL")
     
     # =============================================================================
@@ -334,7 +314,6 @@ class Config:
     RAILWAY_GQL_URL: str = os.getenv("RAILWAY_GQL_URL", "https://backboard.railway.app/graphql/v2")
     INTERNAL_API_HOSTNAME: str = os.getenv("INTERNAL_API_HOSTNAME", "automatos-ai.railway.internal")
     INTERNAL_FRONTEND_HOSTNAME: str = os.getenv("INTERNAL_FRONTEND_HOSTNAME", "automatos-ai-frontend.railway.internal")
-    SKILLS_SH_API_URL: str = os.getenv("SKILLS_SH_API_URL", "https://api.skills.sh/v1")
     COMPOSIO_API_KEY: str = os.getenv("COMPOSIO_API_KEY") or os.getenv("COMPOSIO_KEY")
     # v3.1 default: tool endpoints automatically serve the latest toolkit version
     # (no `toolkit_versions=latest` param required). Only tool endpoints differ
@@ -350,7 +329,7 @@ class Config:
     ROUTING_LLM_CONFIDENCE_THRESHOLD: float = float(os.getenv("ROUTING_LLM_CONFIDENCE_THRESHOLD", "0.5"))
 
     # GitHub
-    GITHUB_PAT: str = os.getenv("GITHUB", "")  # Personal Access Token for git push
+    GITHUB_PAT: str = os.getenv("GITHUB", "")
     GITHUB_REPO_OWNER: str = os.getenv("GITHUB_REPO_OWNER", "")
     GITHUB_REPO_NAME: str = os.getenv("GITHUB_REPO_NAME", "")
     GITHUB_DEFAULT_BRANCH: str = os.getenv("GITHUB_DEFAULT_BRANCH", "main")
@@ -370,8 +349,6 @@ class Config:
     # =============================================================================
     TASK_RUNNER_BACKEND: str = os.getenv("TASK_RUNNER_BACKEND", "local")  # local, queued, kubernetes
     WORKSPACE_VOLUME_PATH: str = os.getenv("WORKSPACE_VOLUME_PATH", "/workspaces")
-    WORKSPACE_DEFAULT_QUOTA_GB: int = int(os.getenv("WORKSPACE_DEFAULT_QUOTA_GB", "5"))
-    WORKER_CONCURRENCY: int = int(os.getenv("WORKER_CONCURRENCY", "3"))
 
     # Bounded Concurrency (per-workspace execution limits)
     DEFAULT_MAX_CONCURRENT_TOTAL: int = int(os.getenv("DEFAULT_MAX_CONCURRENT_TOTAL", "3"))
@@ -408,7 +385,6 @@ class Config:
     # =============================================================================
     LOKI_URL: str = os.getenv("LOKI_URL", "http://loki.railway.internal:3100")
     PROMETHEUS_URL: str = os.getenv("PROMETHEUS_URL", "http://prometheus.railway.internal:9090")
-    ALERTMANAGER_URL: str = os.getenv("ALERTMANAGER_URL", "http://alertmanager.railway.internal:9093")
     GRAFANA_URL: str = os.getenv("GRAFANA_URL", "")
     GRAFANA_SERVICE_ACCOUNT_TOKEN: str = os.getenv("GRAFANA_SERVICE_ACCOUNT_TOKEN", "")
     GRAFANA_LOKI_DATASOURCE_UID: str = os.getenv("GRAFANA_LOKI_DATASOURCE_UID", "loki")
@@ -416,7 +392,6 @@ class Config:
     # =============================================================================
     # FEATURE FLAGS
     # =============================================================================
-    ENABLE_BATCH_API: bool = os.getenv("ENABLE_BATCH_API", "false").lower() == "true"
     HEARTBEAT_ENABLED: bool = os.getenv("HEARTBEAT_ENABLED", "true").lower() == "true"
     RECIPE_SCHEDULER_ENABLED: bool = os.getenv("RECIPE_SCHEDULER_ENABLED", "true").lower() == "true"
     COORDINATOR_ENABLED: bool = os.getenv("COORDINATOR_ENABLED", "true").lower() == "true"
@@ -502,6 +477,10 @@ class Config:
     CHANNELS_ENABLED: bool = os.getenv("CHANNELS_ENABLED", "true").lower() == "true"
     SEMANTIC_TOOL_ROUTING: bool = os.getenv("SEMANTIC_TOOL_ROUTING", "true").lower() == "true"
     SEMANTIC_TOOL_ROUTING_TOP_K: int = int(os.getenv("SEMANTIC_TOOL_ROUTING_TOP_K", "15"))
+    PLATFORM_ACTIONS_MAX_TOKENS: int = int(os.getenv("PLATFORM_ACTIONS_MAX_TOKENS", "4000"))
+    PLAYBOOK_CONTEXT_MAX_TOKENS: int = int(os.getenv("PLAYBOOK_CONTEXT_MAX_TOKENS", "2000"))
+    MEMORY_SECTION_MAX_TOKENS: int = int(os.getenv("MEMORY_SECTION_MAX_TOKENS", "1500"))
+    COMPOSIO_SECTION_MAX_TOKENS: int = int(os.getenv("COMPOSIO_SECTION_MAX_TOKENS", "1000"))
     TOOL_ROUTING_GRAPH: bool = os.getenv("TOOL_ROUTING_GRAPH", "false").lower() == "true"
     TOOL_ROUTING_GRAPH_MIN_CONFIDENCE: float = float(os.getenv("TOOL_ROUTING_GRAPH_MIN_CONFIDENCE", "0.6"))
     TOOL_ROUTING_GRAPH_AGENT_SAMPLE_FLOOR: int = int(os.getenv("TOOL_ROUTING_GRAPH_AGENT_SAMPLE_FLOOR", "50"))
@@ -529,8 +508,6 @@ class Config:
     # PRD-58: FutureAGI Integration (Prompt Scoring & Optimization)
     # =============================================================================
     FUTUREAGI_API_KEY: str = os.getenv("FUTUREAGI_API_KEY")
-    FUTUREAGI_SECRET_KEY: str = os.getenv("FUTUREAGI_SECRET_KEY")
-    FUTUREAGI_ENABLED: bool = os.getenv("FUTUREAGI_ENABLED", "false").lower() == "true"
     AGENT_OPT_WORKER_URL: str = os.getenv("AGENT_OPT_WORKER_URL", "http://agent-opt-worker.railway.internal:8080")
 
     # =============================================================================
@@ -553,7 +530,6 @@ class Config:
     # RECIPE EXECUTION (Scratchpad, Logs, Memory)
     # =============================================================================
     RECIPE_SCRATCHPAD_TTL: int = int(os.getenv("RECIPE_SCRATCHPAD_TTL", "3600"))
-    RECIPE_LOG_RETENTION_DAYS: int = int(os.getenv("RECIPE_LOG_RETENTION_DAYS", "30"))
     RECIPE_LOG_S3_BUCKET: str = os.getenv("RECIPE_LOG_S3_BUCKET", "automatos-ai")
     MEM0_API_URL: str = os.getenv("MEM0_API_URL", "http://automatos-mem0-server.railway.internal")
     MEM0_API_KEY: str = os.getenv("MEM0_API_KEY")
@@ -595,27 +571,13 @@ class Config:
     # AGENT EXECUTION
     # =============================================================================
     AUTOMATOS_WORKSPACE: str = os.getenv("AUTOMATOS_WORKSPACE", "/tmp/automatos_workspace")
-    AUTOMATOS_RESULTS_BASE: str = os.getenv("AUTOMATOS_RESULTS_BASE", "/var/lib/automatos/results")
     AUTOMATOS_DOCUMENTS_DIRS: str = os.getenv("AUTOMATOS_DOCUMENTS_DIRS") or os.getenv("AUTOMATOS_DOCUMENTS_DIR") or os.getenv("DOCUMENTS_DIR")
     IMAGE_STORE_LOCAL_DIR: str = os.getenv("IMAGE_STORE_LOCAL_DIR")
     GOTENBERG_URL: str = os.getenv("GOTENBERG_URL", "http://gotenberg:3000")
     DOCUMENT_STORAGE_DIR: str = os.getenv("DOCUMENT_STORAGE_DIR", "documents")
 
-    # =============================================================================
-    # FEATURE FLAGS (additional)
-    # =============================================================================
-    ENABLE_LLM_QUALITY_ASSESSMENT: bool = os.getenv("ENABLE_LLM_QUALITY_ASSESSMENT", "false").lower() == "true"
-    ENABLE_CONTEXT_OPTIMIZATION: bool = os.getenv("ENABLE_CONTEXT_OPTIMIZATION", "false").lower() == "true"
     INJECT_DAILY_LOGS: bool = os.getenv("INJECT_DAILY_LOGS", "true").lower() == "true"
     COMPLEXITY_CACHE_TTL_HOURS: int = int(os.getenv("COMPLEXITY_CACHE_TTL_HOURS", "24"))
-
-    # =============================================================================
-    # SEARCH MODULE (modules/search)
-    # =============================================================================
-    SIMILARITY_FUNCTION: str = os.getenv("SIMILARITY_FUNCTION", "cosine")
-    VECTOR_TABLE_NAME: str = os.getenv("VECTOR_TABLE_NAME", "document_chunks")
-    SEARCH_DEFAULT_MAX_RESULTS: int = int(os.getenv("SEARCH_DEFAULT_MAX_RESULTS", "10"))
-    SEARCH_DEFAULT_MIN_RELEVANCE: float = float(os.getenv("SEARCH_DEFAULT_MIN_RELEVANCE", "0.5"))
 
     # =============================================================================
     # RAG / KNOWLEDGE SERVICES API
@@ -681,9 +643,6 @@ class Config:
     VOICE_TTS_DEFAULT_VOICE: str = os.getenv("VOICE_TTS_DEFAULT_VOICE", "af_heart")
     VOICE_ENABLED: bool = os.getenv("VOICE_ENABLED", "true").lower() == "true"
     VOICE_MAX_AUDIO_SIZE_MB: int = int(os.getenv("VOICE_MAX_AUDIO_SIZE_MB", "25"))
-    VOICE_MAX_DURATION_SECONDS: int = int(os.getenv("VOICE_MAX_DURATION_SECONDS", "120"))
-    # Auto agent voice defaults (PRD-74 Phase 2)
-    AUTO_VOICE_ID: str = os.getenv("AUTO_VOICE_ID", "auto_default")
     AUTO_VOICE_PROVIDER: str = os.getenv("AUTO_VOICE_PROVIDER", "chatterbox")
 
     def validate(self) -> bool:
@@ -692,47 +651,39 @@ class Config:
         Returns True if all required config is present
         """
         errors = []
-        
-        # Check database
+
         if not all([self.POSTGRES_DB, self.POSTGRES_USER, self.POSTGRES_HOST, self.POSTGRES_PORT]):
             errors.append("Database not configured: POSTGRES_DB, POSTGRES_USER, POSTGRES_HOST, POSTGRES_PORT required")
-        
-        # Check API key
-        if self.REQUIRE_API_KEY and not self.API_KEY:
-            errors.append("API_KEY required when REQUIRE_API_KEY=true")
-        
-        # Print errors if any
+
+        if not self.ORCHESTRATOR_API_KEY:
+            errors.append("ORCHESTRATOR_API_KEY (or AUTOMATOS_API_KEY / API_KEY) required")
+
         if errors:
-            logger.error("❌ Configuration errors:")
+            logger.error("Configuration errors:")
             for error in errors:
                 logger.error(f"  - {error}")
             return False
-        
+
         return True
     
     def print_config(self, show_secrets: bool = False) -> None:
-        """
-        Print current configuration (masks secrets by default)
-        """
+        """Print current configuration (masks secrets by default)."""
         print("=" * 60)
         print("AUTOMATOS AI CONFIGURATION")
         print("=" * 60)
-        
+
         print(f"Environment: {self.ENVIRONMENT}")
         print(f"Database: {self.POSTGRES_DB}@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}")
         print(f"Redis: {self.REDIS_HOST}:{self.REDIS_PORT if self.REDIS_HOST else 'Not configured'}")
         print(f"LLM Provider: {self.LLM_PROVIDER} ({self.LLM_MODEL})")
-        
+
         if show_secrets:
             print(f"OpenAI Key: {self.OPENAI_API_KEY[:10]}..." if self.OPENAI_API_KEY else "Not set")
             print(f"Anthropic Key: {self.ANTHROPIC_API_KEY[:10]}..." if self.ANTHROPIC_API_KEY else "Not set")
-            print(f"API Key: {self.API_KEY[:10]}..." if self.API_KEY else "Not set")
         else:
-            print(f"OpenAI Key: {'✅ Set' if self.OPENAI_API_KEY else '❌ Not set'}")
-            print(f"Anthropic Key: {'✅ Set' if self.ANTHROPIC_API_KEY else '❌ Not set'}")
-            print(f"API Key: {'✅ Set' if self.API_KEY else '❌ Not set'}")
-        
-        print(f"API Key Required: {self.REQUIRE_API_KEY}")
+            print(f"OpenAI Key: {'Set' if self.OPENAI_API_KEY else 'Not set'}")
+            print(f"Anthropic Key: {'Set' if self.ANTHROPIC_API_KEY else 'Not set'}")
+
         print("=" * 60)
 
 # Singleton instance

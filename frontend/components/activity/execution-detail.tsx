@@ -295,10 +295,10 @@ export function ExecutionDetail({ item, onClose }: ExecutionDetailProps) {
       { playbookId: item.source_id },
       {
         onSuccess: () => {
-          toast.success('Recipe execution started')
+          toast.success('Playbook execution started')
         },
         onError: () => {
-          toast.error('Failed to start recipe execution')
+          toast.error('Failed to start playbook execution')
         },
       }
     )

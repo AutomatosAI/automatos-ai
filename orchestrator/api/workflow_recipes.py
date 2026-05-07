@@ -1007,6 +1007,53 @@ async def get_recipe_execution_detail(
 
 
 # ===================================================================
+# CANCEL EXECUTION
+# ===================================================================
+
+@router.post("/{recipe_id}/executions/{execution_id}/cancel")
+async def cancel_execution(
+    recipe_id: str,
+    execution_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
+    """Cancel a running or pending execution."""
+    try:
+        execution = db.query(RecipeExecution).filter(
+            RecipeExecution.execution_id == execution_id,
+            RecipeExecution.workspace_id == ctx.workspace_id,
+        ).first()
+
+        if not execution:
+            raise HTTPException(status_code=404, detail="Execution not found")
+
+        if execution.status in ("completed", "failed", "cancelled"):
+            return {"status": execution.status, "message": "Execution already finished"}
+
+        execution.status = "cancelled"
+        execution.error_message = "Cancelled by user"
+        execution.completed_at = sa_func.now()
+        db.commit()
+
+        try:
+            from services.board_task_bridge import complete_recipe_board_task
+            complete_recipe_board_task(
+                db, execution_id, success=False, error_message="Cancelled by user"
+            )
+        except Exception:
+            logger.warning("Board task update on cancel failed (non-blocking)", exc_info=True)
+
+        logger.info(f"[cancel_execution] {execution_id} cancelled by user")
+        return {"status": "cancelled", "execution_id": execution_id}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error cancelling execution: {e}")
+        raise HTTPException(status_code=500, detail="Failed to cancel execution")
+
+
+# ===================================================================
 # STEP LOG ENDPOINT (Lazy-load full logs from S3)
 # ===================================================================
 

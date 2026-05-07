@@ -193,21 +193,13 @@ async def _execute_step(
         agent=agent,
         workspace_id=str(workspace_id),
         recipe_step=recipe_step_dict,
+        query=prompt_for_hints or clean_prompt,
+        input_data=input_data,
+        recipe_memories=recipe_memories if step_order == 1 else None,
     )
 
     messages = [{"role": "system", "content": context.system_prompt}]
     base_tools = context.tools
-
-    # 1b. Recipe step scope — prevent agent from wandering into other steps' tasks
-    scope_instruction = (
-        f"## Recipe Step Scope\n"
-        f"You are executing step {step_order} of a multi-step recipe. "
-        f"Focus ONLY on the task described in the user message below. "
-        f"Do NOT perform tasks that belong to other steps (e.g., sending notifications, "
-        f"creating PRs, or any action not explicitly required by YOUR task). "
-        f"Use ONLY the external app actions that are directly relevant to your specific task."
-    )
-    messages.append({"role": "system", "content": scope_instruction})
 
     # 2. Composio tools — SDK semantic search for per-action function-calling tools.
     #    Falls back to hint-based composio_execute if SDK search returns empty.
@@ -251,34 +243,7 @@ async def _execute_step(
         except Exception as exc:
             logger.warning(f"[recipe_step] Hint injection failed: {exc}", exc_info=True)
 
-    # 3a. Mem0 memories (first step only)
-    if recipe_memories and step_order == 1:
-        summary = recipe_memories.get("summary", "")
-        if summary and summary != "No relevant memories found":
-            messages.append({
-                "role": "system",
-                "content": (
-                    "## Learnings from Previous Runs\n"
-                    f"{summary}"
-                ),
-            })
-            logger.info("[recipe_step] Injected %d Mem0 memories into step 1", recipe_memories.get("total_memories", 0))
-
-    # 3b. Original trigger/input data as persistent context
-    if input_data:
-        input_content = input_data.get("content", "")
-        input_meta = {k: v for k, v in input_data.items() if k not in ("content", "metadata")}
-        if input_content or input_meta:
-            ctx_parts = ["=" * 40, "ORIGINAL REQUEST / TRIGGER DATA", "=" * 40]
-            if input_content:
-                ctx_parts.append(input_content)
-            if input_meta:
-                ctx_parts.append("\nMetadata:")
-                for mk, mv in input_meta.items():
-                    ctx_parts.append(f"  {mk}: {mv}")
-            messages.append({"role": "system", "content": "\n".join(ctx_parts)})
-
-    # 3c. Scratchpad context — now handled via recipe_step.previous_output
+    # 3. Scratchpad context — now handled via recipe_step.previous_output
     #    in ContextService, but we still inject raw scratchpad for steps > 1
     #    in case the RecipeContextSection truncated it.
 
@@ -345,7 +310,14 @@ async def _execute_step(
 
             try:
                 tool_args = json.loads(tool_args_raw) if isinstance(tool_args_raw, str) else (tool_args_raw or {})
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as jde:
+                logger.warning(
+                    "[recipe_direct] JSON decode failed for %s args (len=%d, first 200=%r): %s",
+                    tool_name,
+                    len(tool_args_raw) if isinstance(tool_args_raw, str) else 0,
+                    tool_args_raw[:200] if isinstance(tool_args_raw, str) else tool_args_raw,
+                    jde,
+                )
                 tool_args = {}
 
             # Handle scratchpad tools inline (no tool_router needed)
@@ -860,12 +832,31 @@ async def _execute_recipe_inner(
             step_id = step.get('step_id', f'step-{idx + 1}')
             step_order = step.get('order', idx + 1)
             agent_id = step.get('agent_id')
-            prompt_template = step.get('prompt_template', '')
+            prompt_template = (step.get('prompt_template') or '').strip()
             error_handling = step.get('error_handling', 'stop')
             max_retries = step.get('max_retries', 1)
             output_key = step.get('output_key', f'step_{step_order}')
             agent = agent_map.get(agent_id)
             agent_name = agent.name if agent else f"Agent {agent_id}"
+
+            if not prompt_template:
+                msg = f"Step {step_order} ({agent_name}) has no prompt_template — skipping"
+                logger.warning(f"[recipe_direct] {msg}")
+                step_result = {
+                    "step_id": step_id, "order": step_order,
+                    "agent_id": agent_id, "agent_name": agent_name,
+                    "prompt_template": "", "output_key": output_key,
+                    "status": "skipped", "output": msg,
+                    "tool_calls": [], "duration_ms": 0, "tokens_used": 0,
+                    "started_at": datetime.now(timezone.utc).isoformat(),
+                    "completed_at": datetime.now(timezone.utc).isoformat(),
+                    "error": msg, "retries": 0,
+                }
+                step_results.append(step_result)
+                if error_handling == 'stop':
+                    await _fail_execution(db, recipe_execution_id, msg, step_results=step_results)
+                    return
+                continue
 
             agent_cfg = getattr(agent, 'configuration', None) or {}
             step_max_iter = step.get(

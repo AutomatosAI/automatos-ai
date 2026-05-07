@@ -14,5 +14,5 @@ def test_workflow_templates(client):
 
 
 def test_workflow_stats(client):
-    r = client.get("/api/workflow-recipes/stats")
+    r = client.get("/api/workflow-recipes/stats/dashboard")
     assert r.status_code in (200, 404)

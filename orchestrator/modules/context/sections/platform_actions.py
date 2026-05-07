@@ -38,7 +38,12 @@ class PlatformActionsSection(BaseSection):
 
     name: str = "platform_actions"
     priority: int = 5
-    max_tokens: Optional[int] = 2000
+    max_tokens: Optional[int] = None
+
+    def __init__(self) -> None:
+        super().__init__()
+        from config import config
+        self.max_tokens = config.PLATFORM_ACTIONS_MAX_TOKENS
 
     async def render(self, ctx: SectionContext) -> str:
         """Return the platform-action catalog for the system prompt.
@@ -88,10 +93,11 @@ class PlatformActionsSection(BaseSection):
 
     _PREAMBLE = (
         "## Platform Actions\n\n"
-        "You can execute these actions via `platform_execute`. Always specify the "
-        "action name and include all required parameters. If an action fails, check "
-        "the error and retry with corrected parameters — do not guess or fabricate "
-        "results.\n\n"
+        "Use `platform_execute(action, params)` to call these actions.\n"
+        "Your other tools (workspace_*, platform_store_memory, etc.) are called "
+        "directly by name — they have their own function schemas.\n"
+        "If a call fails, check the error and retry with corrected parameters "
+        "— do not guess or fabricate results.\n\n"
     )
 
     def _semantic_routing_enabled(self) -> bool:
