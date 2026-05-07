@@ -145,8 +145,11 @@ class ComposioToolExecutor:
         "TWITTER_INITIALIZE_MEDIA_UPLOAD",
         "TWITTER_UPLOAD_LARGE_MEDIA",
         "TWITTER_APPEND_MEDIA_UPLOAD",
+        "LINKEDIN_CREATE_LINKED_IN_POST",
+        "LINKEDIN_CREATE_IMAGE_POST",
+        "LINKEDIN_CREATE_SHARE",
     }
-    _FILE_PARAM_NAMES = {"media", "media_data", "media_url", "file", "image", "video", "media_file"}
+    _FILE_PARAM_NAMES = {"media", "media_data", "media_url", "media_urls", "file", "image", "video", "media_file"}
 
     async def _resolve_file_uploads(
         self,
@@ -156,9 +159,9 @@ class ComposioToolExecutor:
     ) -> tuple[Dict[str, Any], list[Path]]:
         """Download workspace files and convert to FileUploadable for actions that need binary.
 
-        Twitter's media upload requires binary data but agents pass workspace paths.
-        Detects known upload actions, pulls the file from the workspace, writes a
-        temp file, and uses Composio's FileUploadable to upload the binary to S3.
+        Detects known upload actions, pulls files from the workspace or URLs,
+        and uses Composio's FileUploadable to upload binaries to S3.
+        Handles both single values (Twitter) and arrays (LinkedIn media_urls).
 
         Returns (modified params, list of temp files to clean up).
         """
@@ -184,48 +187,96 @@ class ComposioToolExecutor:
                 if param_name.lower() not in self._FILE_PARAM_NAMES:
                     continue
                 value = params[param_name]
-                if not value or not isinstance(value, str):
+                if not value:
                     continue
                 if isinstance(value, dict) and "s3key" in value:
                     continue
 
-                if value.startswith(("http://", "https://")):
-                    logger.info("[FileUpload] Uploading from URL for %s: %s", param_name, value[:120])
-                    uploadable = FileUploadable.from_url(
-                        client=http_client,
-                        url=value,
-                        tool=action_slug,
-                        toolkit=app_slug,
+                if isinstance(value, list):
+                    resolved = []
+                    for i, item in enumerate(value):
+                        if not isinstance(item, str) or not item:
+                            resolved.append(item)
+                            continue
+                        if isinstance(item, dict) and "s3key" in item:
+                            resolved.append(item)
+                            continue
+                        up, tfs = await self._resolve_single_file(
+                            item, param_name, i, http_client, action_slug, app_slug, ws_client,
+                        )
+                        temp_files.extend(tfs)
+                        resolved.append(up.model_dump() if up else item)
+                    params[param_name] = resolved
+                elif isinstance(value, str):
+                    up, tfs = await self._resolve_single_file(
+                        value, param_name, None, http_client, action_slug, app_slug, ws_client,
                     )
-                else:
-                    logger.info("[FileUpload] Downloading workspace file %s for %s", value, param_name)
-                    dl_result = await ws_client.download_file(value)
-                    if not dl_result.get("success"):
-                        logger.warning("[FileUpload] Failed to download %s: %s", value, dl_result.get("error"))
-                        continue
-                    file_bytes: bytes = dl_result["content"]
-                    suffix = Path(value).suffix or ".png"
-                    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-                    tmp.write(file_bytes)
-                    tmp.close()
-                    tmp_path = Path(tmp.name)
-                    temp_files.append(tmp_path)
-                    uploadable = FileUploadable.from_path(
-                        client=http_client,
-                        file=tmp_path,
-                        tool=action_slug,
-                        toolkit=app_slug,
-                        sensitive_file_upload_protection=False,
-                    )
-
-                params[param_name] = uploadable.model_dump()
-                logger.info("[FileUpload] Resolved %s -> s3key=%s", param_name, uploadable.s3key)
+                    temp_files.extend(tfs)
+                    if up:
+                        params[param_name] = up.model_dump()
+                        logger.info("[FileUpload] Resolved %s -> s3key=%s", param_name, up.s3key)
         except ImportError:
             logger.warning("[FileUpload] FileUploadable not found in composio SDK — cannot resolve binary uploads")
         except Exception as e:
             logger.warning("[FileUpload] Failed to resolve file uploads for %s: %s", action, e, exc_info=True)
 
         return params, temp_files
+
+    async def _resolve_single_file(
+        self,
+        value: str,
+        param_name: str,
+        index: Optional[int],
+        http_client,
+        action_slug: str,
+        app_slug: str,
+        ws_client,
+    ):
+        """Resolve a single file reference (URL or workspace path) to FileUploadable.
+
+        Returns (FileUploadable | None, list of temp file Paths).
+        """
+        try:
+            from composio.core.models._files import FileUploadable
+        except ImportError:
+            from composio.client.files import FileUploadable
+
+        temp_files: list[Path] = []
+        label = f"{param_name}[{index}]" if index is not None else param_name
+
+        if value.startswith(("http://", "https://")):
+            logger.info("[FileUpload] Uploading from URL for %s: %s", label, value[:120])
+            uploadable = FileUploadable.from_url(
+                client=http_client,
+                url=value,
+                tool=action_slug,
+                toolkit=app_slug,
+            )
+            logger.info("[FileUpload] Resolved %s -> s3key=%s", label, uploadable.s3key)
+            return uploadable, temp_files
+
+        logger.info("[FileUpload] Downloading workspace file %s for %s", value, label)
+        dl_result = await ws_client.download_file(value)
+        if not dl_result.get("success"):
+            logger.warning("[FileUpload] Failed to download %s: %s", value, dl_result.get("error"))
+            return None, temp_files
+
+        file_bytes: bytes = dl_result["content"]
+        suffix = Path(value).suffix or ".png"
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+        tmp.write(file_bytes)
+        tmp.close()
+        tmp_path = Path(tmp.name)
+        temp_files.append(tmp_path)
+        uploadable = FileUploadable.from_path(
+            client=http_client,
+            file=tmp_path,
+            tool=action_slug,
+            toolkit=app_slug,
+            sensitive_file_upload_protection=False,
+        )
+        logger.info("[FileUpload] Resolved %s -> s3key=%s", label, uploadable.s3key)
+        return uploadable, temp_files
 
     async def execute(
         self,
