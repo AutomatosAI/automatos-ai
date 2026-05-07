@@ -599,21 +599,9 @@ export function ToolsDashboard() {
   const handleRemoveFromWorkspace = async (tool: Tool) => {
     setLoading(true)
     try {
-      // Resolve the canonical Composio app name (e.g. "GOOGLEDRIVE"), not the
-      // display name ("Google Drive") — backend looks up by ComposioConnection.app_name.
-      const integrationUrl = (tool as any).integration_url || tool.metadata?.integration_url
-      const composioFromUrl = integrationUrl?.startsWith('composio://')
-        ? integrationUrl.replace('composio://', '').split('/')[0]
-        : null
-      const appName =
-        tool.composio_app_name ||
-        tool.metadata?.composio_app_name ||
-        tool.metadata?.app_name ||
-        composioFromUrl ||
-        tool.name
-
-      console.log(`Removing ${appName} from workspace`)
-
+      // tool.name is the canonical Composio app name (e.g. "GOOGLEDRIVE"),
+      // mapped from app_name in apiClient.getTools — this is what the backend looks up.
+      const appName = tool.name
       await apiClient.delete(`/api/tools/remove-from-workspace/${encodeURIComponent(appName)}`)
 
       // Close modal and refresh tools list

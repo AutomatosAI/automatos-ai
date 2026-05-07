@@ -267,7 +267,7 @@ export function AgentManagement() {
           </TabsContent>
 
           <TabsContent value="skills" className="space-y-6">
-            <WorkspaceSkillsTab />
+            <WorkspaceSkillsTab viewMode={viewMode} />
           </TabsContent>
         </FilterTabs>
       </motion.div>

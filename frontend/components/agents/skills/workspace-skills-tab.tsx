@@ -9,15 +9,35 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Brain, Plus, Search, Pencil, Eye, GitBranch, ShoppingBag } from 'lucide-react'
+import {
+  Brain,
+  Eye,
+  GitBranch,
+  Pencil,
+  Plus,
+  Search,
+  ShoppingBag,
+  Trash2,
+} from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { useToast } from '@/hooks/use-toast'
 import { useWorkspace } from '@/components/workspace-provider'
 import { useSkillsApi } from '@/hooks/use-skills-api'
+import type { ViewMode } from '@/components/shared/view-toggle'
 
 import { SkillEditorModal, type SkillEditorMode } from './skill-editor-modal'
 
@@ -35,10 +55,14 @@ interface WorkspaceSkillRow {
   forked_from_skill_id: number | null
 }
 
-export function WorkspaceSkillsTab() {
+interface Props {
+  viewMode?: ViewMode
+}
+
+export function WorkspaceSkillsTab({ viewMode = 'grid' }: Props) {
   const { workspace } = useWorkspace()
   const { toast } = useToast()
-  const { listWorkspaceSkills } = useSkillsApi()
+  const { listWorkspaceSkills, deleteWorkspaceSkill } = useSkillsApi()
 
   const [skills, setSkills] = useState<WorkspaceSkillRow[]>([])
   const [search, setSearch] = useState('')
@@ -48,6 +72,9 @@ export function WorkspaceSkillsTab() {
   const [editorOpen, setEditorOpen] = useState(false)
   const [editorMode, setEditorMode] = useState<SkillEditorMode>('view')
   const [editorSkillId, setEditorSkillId] = useState<number | null>(null)
+
+  const [removeTarget, setRemoveTarget] = useState<WorkspaceSkillRow | null>(null)
+  const [removing, setRemoving] = useState(false)
 
   const loadSkills = useCallback(async () => {
     if (!workspace?.id) return
@@ -97,6 +124,17 @@ export function WorkspaceSkillsTab() {
       loadSkills()
     }
   }, [loadSkills])
+
+  const confirmRemove = useCallback(async () => {
+    if (!removeTarget || !workspace?.id) return
+    setRemoving(true)
+    const ok = await deleteWorkspaceSkill(workspace.id, removeTarget.skill_id)
+    setRemoving(false)
+    if (ok) {
+      setRemoveTarget(null)
+      loadSkills()
+    }
+  }, [removeTarget, workspace?.id, deleteWorkspaceSkill, loadSkills])
 
   const ownedCount = useMemo(() => skills.filter((s) => s.origin === 'workspace').length, [skills])
   const marketplaceCount = useMemo(() => skills.filter((s) => s.origin === 'marketplace').length, [skills])
@@ -149,23 +187,36 @@ export function WorkspaceSkillsTab() {
         </div>
       </div>
 
-      {/* Cards */}
+      {/* Cards or list */}
       {loading ? (
-        <SkillCardsSkeleton />
+        <SkillCardsSkeleton viewMode={viewMode} />
       ) : filtered.length === 0 ? (
         <EmptyState
           hasAny={skills.length > 0}
           onCreate={openNew}
           searching={search.trim().length > 0 || originFilter !== 'all'}
         />
+      ) : viewMode === 'list' ? (
+        <div className="space-y-2">
+          {filtered.map((skill) => (
+            <SkillRow
+              key={skill.skill_id}
+              skill={skill}
+              onView={() => openViewer(skill.skill_id, 'view')}
+              onEdit={() => openViewer(skill.skill_id, 'edit')}
+              onRemove={() => setRemoveTarget(skill)}
+            />
+          ))}
+        </div>
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {filtered.map((skill) => (
             <SkillCard
               key={skill.skill_id}
               skill={skill}
               onView={() => openViewer(skill.skill_id, 'view')}
               onEdit={() => openViewer(skill.skill_id, 'edit')}
+              onRemove={() => setRemoveTarget(skill)}
             />
           ))}
         </div>
@@ -177,6 +228,29 @@ export function WorkspaceSkillsTab() {
         skillId={editorSkillId}
         onClose={handleEditorClose}
       />
+
+      <AlertDialog open={!!removeTarget} onOpenChange={(open) => !open && setRemoveTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove from workspace?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {removeTarget?.forked_from_skill_id
+                ? `Removes your forked copy of "${removeTarget?.name}" from this workspace and unassigns it from any agents. The original marketplace skill stays available to re-install.`
+                : `Removes "${removeTarget?.name}" from this workspace and unassigns it from any agents. This only affects your workspace — nothing changes for the marketplace or other users.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={removing}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmRemove}
+              disabled={removing}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Remove
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
@@ -185,10 +259,12 @@ function SkillCard({
   skill,
   onView,
   onEdit,
+  onRemove,
 }: {
   skill: WorkspaceSkillRow
   onView: () => void
   onEdit: () => void
+  onRemove: () => void
 }) {
   const isWorkspace = skill.origin === 'workspace'
   return (
@@ -237,16 +313,111 @@ function SkillCard({
             <Pencil className="mr-1.5 h-3.5 w-3.5" />
             {isWorkspace ? 'Edit' : 'Fork & edit'}
           </Button>
+          {isWorkspace && (
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-9 w-9 shrink-0 text-destructive hover:text-destructive hover:border-destructive/50"
+              onClick={onRemove}
+              aria-label="Remove from workspace"
+              title="Remove from workspace"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          )}
         </div>
       </CardContent>
     </Card>
   )
 }
 
-function SkillCardsSkeleton() {
+function SkillRow({
+  skill,
+  onView,
+  onEdit,
+  onRemove,
+}: {
+  skill: WorkspaceSkillRow
+  onView: () => void
+  onEdit: () => void
+  onRemove: () => void
+}) {
+  const isWorkspace = skill.origin === 'workspace'
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      {[0, 1, 2, 3, 4, 5].map((i) => (
+    <div className="glass-card group flex items-center gap-4 p-3 transition-colors hover:border-primary/40">
+      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+        <Brain className="h-4 w-4" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span className="font-medium truncate">{skill.name}</span>
+          {isWorkspace ? (
+            <Badge variant="secondary" className="text-[10px] shrink-0">
+              <GitBranch className="mr-1 h-3 w-3" />
+              {skill.forked_from_skill_id ? 'Forked' : 'Yours'}
+            </Badge>
+          ) : (
+            <Badge variant="outline" className="text-[10px] shrink-0">
+              <ShoppingBag className="mr-1 h-3 w-3" />
+              Marketplace
+            </Badge>
+          )}
+          {skill.skill_version && (
+            <Badge variant="outline" className="text-[10px] shrink-0">v{skill.skill_version}</Badge>
+          )}
+        </div>
+        {skill.description && (
+          <p className="text-xs text-muted-foreground truncate mt-0.5">{skill.description}</p>
+        )}
+      </div>
+      <div className="hidden shrink-0 text-xs text-muted-foreground sm:block">
+        {skill.category ?? 'Uncategorised'}
+      </div>
+      <div className="hidden shrink-0 text-xs text-muted-foreground tabular-nums md:block">
+        ~{skill.estimated_tokens.toLocaleString()} tok
+      </div>
+      <div className="flex shrink-0 gap-1">
+        <Button variant="ghost" size="sm" onClick={onView} aria-label="View">
+          <Eye className="h-4 w-4" />
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onEdit} aria-label={isWorkspace ? 'Edit' : 'Fork & edit'}>
+          <Pencil className="h-4 w-4" />
+        </Button>
+        {isWorkspace && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onRemove}
+            aria-label="Remove from workspace"
+            className="text-destructive hover:text-destructive"
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function SkillCardsSkeleton({ viewMode }: { viewMode: ViewMode }) {
+  if (viewMode === 'list') {
+    return (
+      <div className="space-y-2">
+        {[0, 1, 2, 3, 4].map((i) => (
+          <div key={i} className="glass-card flex items-center gap-4 p-3">
+            <div className="h-9 w-9 rounded-md bg-secondary/50" />
+            <div className="flex-1 space-y-2">
+              <div className="h-3 w-1/3 rounded bg-secondary/50" />
+              <div className="h-2 w-2/3 rounded bg-secondary/30" />
+            </div>
+          </div>
+        ))}
+      </div>
+    )
+  }
+  return (
+    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+      {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => (
         <Card key={i} className="glass-card">
           <CardContent className="p-5 space-y-3">
             <div className="h-10 w-10 rounded-lg bg-secondary/50" />
