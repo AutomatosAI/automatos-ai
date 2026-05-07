@@ -330,7 +330,6 @@ class ComposioToolExecutor:
         return manager.get_or_create_entity(workspace_id)
 
     _UPLOAD_ACTIONS = UPLOAD_ACTIONS
-    _FILE_PARAM_NAMES = FILE_PARAM_NAMES
 
     async def _resolve_file_uploads(
         self,
