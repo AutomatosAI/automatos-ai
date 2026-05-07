@@ -331,29 +331,34 @@ async def check_token_extraction(
                     except Exception as get_err:
                         get_cp = {"error": str(get_err)}
 
-                    # Test proxy endpoint (Composio injects auth server-side)
+                    # Test proxy endpoint across API versions
                     proxy_result = {}
                     try:
                         import httpx
                         from config import config
-                        # Try v3 proxy endpoints
-                        for proxy_path in ("tools/proxy", "actions/proxy"):
-                            proxy_resp = httpx.post(
-                                f"https://backend.composio.dev/api/v3/{proxy_path}",
-                                headers={"x-api-key": config.COMPOSIO_API_KEY},
-                                json={
-                                    "connectedAccountId": conn.id,
-                                    "endpoint": "https://api.linkedin.com/rest/userinfo",
-                                    "method": "GET",
-                                    "body": {},
-                                },
-                                timeout=15,
+                        proxy_body = {
+                            "connectedAccountId": conn.id,
+                            "endpoint": "/rest/userinfo",
+                            "method": "GET",
+                            "body": {},
+                        }
+                        hdrs = {"x-api-key": config.COMPOSIO_API_KEY, "Content-Type": "application/json"}
+                        for path in (
+                            "api/v1/actions/proxy",
+                            "api/v2/actions/proxy",
+                            "api/v3/actions/proxy",
+                            "api/v3.1/actions/proxy",
+                            "api/v1/tools/proxy",
+                            "api/v3.1/tools/proxy",
+                        ):
+                            resp = httpx.post(
+                                f"https://backend.composio.dev/{path}",
+                                headers=hdrs, json=proxy_body, timeout=15,
                             )
-                            proxy_result[proxy_path] = {
-                                "status_code": proxy_resp.status_code,
-                                "response_preview": proxy_resp.text[:200],
-                            }
-                            if proxy_resp.status_code == 200:
+                            proxy_result[path] = resp.status_code
+                            if resp.status_code == 200:
+                                proxy_result["working_path"] = path
+                                proxy_result["response_preview"] = resp.text[:300]
                                 break
                     except Exception as proxy_err:
                         proxy_result = {"error": str(proxy_err)}
