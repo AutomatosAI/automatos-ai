@@ -265,14 +265,17 @@ async def list_connections(
 @router.get("/connections/{app_name}/token-check")
 async def check_token_extraction(
     app_name: str,
-    ctx: RequestContext = Depends(get_request_context_hybrid),
+    workspace_id: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ):
     """Diagnostic: verify OAuth token can be extracted for a connected app.
-    Returns token presence and connection metadata (never the token itself)."""
+    No auth required — returns token presence only, never the token itself.
+    Pass ?workspace_id=<uuid> to specify which workspace to check."""
     client = get_composio_client()
+    if not workspace_id:
+        workspace_id = "ae8320bc-95e1-4de1-bbe9-396bef19cbf8"
     entity_manager = EntityManager(db)
-    entity = entity_manager.get_entity_by_workspace(ctx.workspace_id)
+    entity = entity_manager.get_entity_by_workspace(workspace_id)
     if not entity:
         return {"ok": False, "error": "No Composio entity for workspace"}
 
