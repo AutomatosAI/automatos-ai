@@ -29,6 +29,148 @@ from core.composio.client import ComposioClient, get_composio_client
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Shared file-upload resolution (used by both ComposioToolExecutor and
+# recipe_executor so that ANY Composio action that needs file params
+# gets the URL→S3 conversion regardless of execution path).
+# ---------------------------------------------------------------------------
+
+UPLOAD_ACTIONS = {
+    "TWITTER_UPLOAD_MEDIA",
+    "TWITTER_INITIALIZE_MEDIA_UPLOAD",
+    "TWITTER_UPLOAD_LARGE_MEDIA",
+    "TWITTER_APPEND_MEDIA_UPLOAD",
+    "LINKEDIN_CREATE_LINKED_IN_POST",
+    "LINKEDIN_CREATE_IMAGE_POST",
+    "LINKEDIN_CREATE_SHARE",
+    "LINKEDIN_INITIALIZE_IMAGE_UPLOAD",
+    "LINKEDIN_REGISTER_IMAGE_UPLOAD",
+}
+FILE_PARAM_NAMES = {"media", "media_data", "media_url", "media_urls", "file", "image", "video", "media_file"}
+
+
+async def _resolve_single_file_standalone(
+    value: str,
+    param_name: str,
+    index: Optional[int],
+    http_client,
+    action_slug: str,
+    app_slug: str,
+    workspace_id: UUID,
+):
+    """Resolve a single file reference (URL or workspace path) to FileUploadable."""
+    try:
+        from composio.core.models._files import FileUploadable
+    except ImportError:
+        from composio.client.files import FileUploadable
+
+    temp_files: list[Path] = []
+    label = f"{param_name}[{index}]" if index is not None else param_name
+
+    if value.startswith(("http://", "https://")):
+        logger.info("[FileUpload] Uploading from URL for %s: %s", label, value[:120])
+        uploadable = FileUploadable.from_url(
+            client=http_client,
+            url=value,
+            tool=action_slug,
+            toolkit=app_slug,
+        )
+        logger.info("[FileUpload] Resolved %s -> s3key=%s", label, uploadable.s3key)
+        return uploadable, temp_files
+
+    from core.workspace_client import WorkspaceClient
+    ws_client = WorkspaceClient(workspace_id)
+    logger.info("[FileUpload] Downloading workspace file %s for %s", value, label)
+    dl_result = await ws_client.download_file(value)
+    if not dl_result.get("success"):
+        logger.warning("[FileUpload] Failed to download %s: %s", value, dl_result.get("error"))
+        return None, temp_files
+
+    file_bytes: bytes = dl_result["content"]
+    suffix = Path(value).suffix or ".png"
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+    tmp.write(file_bytes)
+    tmp.close()
+    tmp_path = Path(tmp.name)
+    temp_files.append(tmp_path)
+    uploadable = FileUploadable.from_path(
+        client=http_client,
+        file=tmp_path,
+        tool=action_slug,
+        toolkit=app_slug,
+        sensitive_file_upload_protection=False,
+    )
+    logger.info("[FileUpload] Resolved %s -> s3key=%s", label, uploadable.s3key)
+    return uploadable, temp_files
+
+
+async def resolve_file_uploads(
+    action: str,
+    params: Dict[str, Any],
+    workspace_id: UUID,
+) -> tuple[Dict[str, Any], list[Path]]:
+    """Resolve file references in params to Composio FileUploadable objects.
+
+    Shared by ComposioToolExecutor.execute() and recipe_executor so that
+    every Composio action gets identical file handling regardless of path.
+    """
+    temp_files: list[Path] = []
+    action_upper = action.upper()
+
+    if action_upper not in UPLOAD_ACTIONS:
+        return params, temp_files
+
+    try:
+        try:
+            from composio.core.models._files import FileUploadable
+        except ImportError:
+            from composio.client.files import FileUploadable
+
+        client = get_composio_client()
+        http_client = client.composio.client
+        action_slug = action_upper.lower().replace("_", "-")
+        app_slug = action_upper.split("_", 1)[0].lower()
+
+        for param_name in list(params.keys()):
+            if param_name.lower() not in FILE_PARAM_NAMES:
+                continue
+            value = params[param_name]
+            if not value:
+                continue
+            if isinstance(value, dict) and "s3key" in value:
+                continue
+
+            if isinstance(value, list):
+                resolved = []
+                for i, item in enumerate(value):
+                    if not isinstance(item, str) or not item:
+                        resolved.append(item)
+                        continue
+                    if isinstance(item, dict) and "s3key" in item:
+                        resolved.append(item)
+                        continue
+                    up, tfs = await _resolve_single_file_standalone(
+                        item, param_name, i, http_client, action_slug, app_slug, workspace_id,
+                    )
+                    temp_files.extend(tfs)
+                    resolved.append(up.model_dump() if up else item)
+                params[param_name] = resolved
+            elif isinstance(value, str):
+                up, tfs = await _resolve_single_file_standalone(
+                    value, param_name, None, http_client, action_slug, app_slug, workspace_id,
+                )
+                temp_files.extend(tfs)
+                if up:
+                    params[param_name] = up.model_dump()
+                    logger.info("[FileUpload] Resolved %s -> s3key=%s", param_name, up.s3key)
+    except ImportError:
+        logger.warning("[FileUpload] FileUploadable not found in composio SDK — cannot resolve binary uploads")
+    except Exception as e:
+        logger.warning("[FileUpload] Failed to resolve file uploads for %s: %s", action, e, exc_info=True)
+
+    return params, temp_files
+
+
 class ComposioToolExecutor:
     """
     Executes Composio tools with access validation.
@@ -140,18 +282,8 @@ class ComposioToolExecutor:
         manager = EntityManager(self.db)
         return manager.get_or_create_entity(workspace_id)
 
-    _UPLOAD_ACTIONS = {
-        "TWITTER_UPLOAD_MEDIA",
-        "TWITTER_INITIALIZE_MEDIA_UPLOAD",
-        "TWITTER_UPLOAD_LARGE_MEDIA",
-        "TWITTER_APPEND_MEDIA_UPLOAD",
-        "LINKEDIN_CREATE_LINKED_IN_POST",
-        "LINKEDIN_CREATE_IMAGE_POST",
-        "LINKEDIN_CREATE_SHARE",
-        "LINKEDIN_INITIALIZE_IMAGE_UPLOAD",
-        "LINKEDIN_REGISTER_IMAGE_UPLOAD",
-    }
-    _FILE_PARAM_NAMES = {"media", "media_data", "media_url", "media_urls", "file", "image", "video", "media_file"}
+    _UPLOAD_ACTIONS = UPLOAD_ACTIONS
+    _FILE_PARAM_NAMES = FILE_PARAM_NAMES
 
     async def _resolve_file_uploads(
         self,
@@ -159,126 +291,8 @@ class ComposioToolExecutor:
         params: Dict[str, Any],
         workspace_id: UUID,
     ) -> tuple[Dict[str, Any], list[Path]]:
-        """Download workspace files and convert to FileUploadable for actions that need binary.
-
-        Detects known upload actions, pulls files from the workspace or URLs,
-        and uses Composio's FileUploadable to upload binaries to S3.
-        Handles both single values (Twitter) and arrays (LinkedIn media_urls).
-
-        Returns (modified params, list of temp files to clean up).
-        """
-        temp_files: list[Path] = []
-        action_upper = action.upper()
-
-        if action_upper not in self._UPLOAD_ACTIONS:
-            return params, temp_files
-
-        try:
-            try:
-                from composio.core.models._files import FileUploadable
-            except ImportError:
-                from composio.client.files import FileUploadable
-            from core.workspace_client import WorkspaceClient
-
-            http_client = self.client.composio.client
-            action_slug = action_upper.lower().replace("_", "-")
-            app_slug = action_upper.split("_", 1)[0].lower()
-            ws_client = WorkspaceClient(workspace_id)
-
-            for param_name in list(params.keys()):
-                if param_name.lower() not in self._FILE_PARAM_NAMES:
-                    continue
-                value = params[param_name]
-                if not value:
-                    continue
-                if isinstance(value, dict) and "s3key" in value:
-                    continue
-
-                if isinstance(value, list):
-                    resolved = []
-                    for i, item in enumerate(value):
-                        if not isinstance(item, str) or not item:
-                            resolved.append(item)
-                            continue
-                        if isinstance(item, dict) and "s3key" in item:
-                            resolved.append(item)
-                            continue
-                        up, tfs = await self._resolve_single_file(
-                            item, param_name, i, http_client, action_slug, app_slug, ws_client,
-                        )
-                        temp_files.extend(tfs)
-                        resolved.append(up.model_dump() if up else item)
-                    params[param_name] = resolved
-                elif isinstance(value, str):
-                    up, tfs = await self._resolve_single_file(
-                        value, param_name, None, http_client, action_slug, app_slug, ws_client,
-                    )
-                    temp_files.extend(tfs)
-                    if up:
-                        params[param_name] = up.model_dump()
-                        logger.info("[FileUpload] Resolved %s -> s3key=%s", param_name, up.s3key)
-        except ImportError:
-            logger.warning("[FileUpload] FileUploadable not found in composio SDK — cannot resolve binary uploads")
-        except Exception as e:
-            logger.warning("[FileUpload] Failed to resolve file uploads for %s: %s", action, e, exc_info=True)
-
-        return params, temp_files
-
-    async def _resolve_single_file(
-        self,
-        value: str,
-        param_name: str,
-        index: Optional[int],
-        http_client,
-        action_slug: str,
-        app_slug: str,
-        ws_client,
-    ):
-        """Resolve a single file reference (URL or workspace path) to FileUploadable.
-
-        Returns (FileUploadable | None, list of temp file Paths).
-        """
-        try:
-            from composio.core.models._files import FileUploadable
-        except ImportError:
-            from composio.client.files import FileUploadable
-
-        temp_files: list[Path] = []
-        label = f"{param_name}[{index}]" if index is not None else param_name
-
-        if value.startswith(("http://", "https://")):
-            logger.info("[FileUpload] Uploading from URL for %s: %s", label, value[:120])
-            uploadable = FileUploadable.from_url(
-                client=http_client,
-                url=value,
-                tool=action_slug,
-                toolkit=app_slug,
-            )
-            logger.info("[FileUpload] Resolved %s -> s3key=%s", label, uploadable.s3key)
-            return uploadable, temp_files
-
-        logger.info("[FileUpload] Downloading workspace file %s for %s", value, label)
-        dl_result = await ws_client.download_file(value)
-        if not dl_result.get("success"):
-            logger.warning("[FileUpload] Failed to download %s: %s", value, dl_result.get("error"))
-            return None, temp_files
-
-        file_bytes: bytes = dl_result["content"]
-        suffix = Path(value).suffix or ".png"
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-        tmp.write(file_bytes)
-        tmp.close()
-        tmp_path = Path(tmp.name)
-        temp_files.append(tmp_path)
-        uploadable = FileUploadable.from_path(
-            client=http_client,
-            file=tmp_path,
-            tool=action_slug,
-            toolkit=app_slug,
-            sensitive_file_upload_protection=False,
-        )
-        logger.info("[FileUpload] Resolved %s -> s3key=%s", label, uploadable.s3key)
-        return uploadable, temp_files
+        """Delegate to the module-level resolve_file_uploads()."""
+        return await resolve_file_uploads(action, params, workspace_id)
 
     async def execute(
         self,
