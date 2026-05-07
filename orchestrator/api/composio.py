@@ -343,22 +343,22 @@ async def check_token_extraction(
                             "body": {},
                         }
                         hdrs = {"x-api-key": config.COMPOSIO_API_KEY, "Content-Type": "application/json"}
-                        for path in (
-                            "api/v1/actions/proxy",
-                            "api/v2/actions/proxy",
-                            "api/v3/actions/proxy",
-                            "api/v3.1/actions/proxy",
-                            "api/v1/tools/proxy",
-                            "api/v3.1/tools/proxy",
-                        ):
+                        # v2 returned 400 last time — capture error and try variants
+                        for body_variant, label in [
+                            (proxy_body, "standard"),
+                            ({"connectedAccountId": conn.id, "endpoint": "https://api.linkedin.com/rest/userinfo", "method": "GET"}, "full_url"),
+                            ({"connectedAccountId": conn.id, "endpoint": "/rest/userinfo", "method": "GET", "parameters": []}, "with_params"),
+                        ]:
                             resp = httpx.post(
-                                f"https://backend.composio.dev/{path}",
-                                headers=hdrs, json=proxy_body, timeout=15,
+                                "https://backend.composio.dev/api/v2/actions/proxy",
+                                headers=hdrs, json=body_variant, timeout=15,
                             )
-                            proxy_result[path] = resp.status_code
+                            proxy_result[label] = {
+                                "status": resp.status_code,
+                                "body": resp.text[:400],
+                            }
                             if resp.status_code == 200:
-                                proxy_result["working_path"] = path
-                                proxy_result["response_preview"] = resp.text[:300]
+                                proxy_result["working"] = label
                                 break
                     except Exception as proxy_err:
                         proxy_result = {"error": str(proxy_err)}
