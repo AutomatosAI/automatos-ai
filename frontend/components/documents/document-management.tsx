@@ -40,6 +40,7 @@ import { PageHeader } from '@/components/shared/page-header'
 import { StatsBar } from '@/components/shared/stats-bar'
 import { CodeGraphPanel } from '@/components/knowledge/CodeGraphPanel'
 import { BusinessGraphPanel } from '@/components/knowledge/BusinessGraphPanel'
+import { MemoryTab } from '@/components/knowledge/memory-tab'
 import { GraphDiffBanner } from '@/components/knowledge/GraphDiffBanner'
 import { MultimodalKnowledgePanel } from '@/components/knowledge/MultimodalKnowledgePanel'
 import { DatabaseQueryExplorer } from '@/components/knowledge/DatabaseQueryExplorer'
@@ -684,6 +685,10 @@ export function DocumentManagement() {
               <Network className="w-4 h-4" />
               <span>Business Graph</span>
             </TabsTrigger>
+            <TabsTrigger value="memory" className="flex items-center space-x-2">
+              <Brain className="w-4 h-4" />
+              <span>Memory</span>
+            </TabsTrigger>
             {/* Analytics tab removed — see /analytics */}
           </TabsList>
 
@@ -1136,6 +1141,10 @@ export function DocumentManagement() {
           <TabsContent value="businessgraph" className="space-y-6">
             <GraphDiffBanner />
             <BusinessGraphPanel />
+          </TabsContent>
+
+          <TabsContent value="memory" className="space-y-6">
+            <MemoryTab />
           </TabsContent>
         </Tabs>
       </motion.div>
