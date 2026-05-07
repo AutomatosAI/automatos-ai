@@ -32,7 +32,7 @@ from core.workspace_client import WorkspaceClient
 logger = logging.getLogger(__name__)
 
 LINKEDIN_API = "https://api.linkedin.com"
-LINKEDIN_VERSION = "202405"
+LINKEDIN_VERSION = "202501"
 COMPOSIO_PROXY = "https://backend.composio.dev/api/v2/actions/proxy"
 ORG_URN = "urn:li:organization:108072660"
 
