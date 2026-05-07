@@ -20,6 +20,7 @@ import {
   User,
   ChevronDown,
   ChevronUp,
+  ListTodo,
 } from 'lucide-react'
 import { format, formatDistanceToNow } from 'date-fns'
 import { toast } from 'react-hot-toast'
@@ -56,7 +57,22 @@ const TYPE_CONFIG = {
     accentColor: 'text-[hsl(var(--success))]',
     borderColor: 'border-l-[hsl(var(--success))]',
   },
+  task: {
+    icon: ListTodo,
+    label: 'Task',
+    accentColor: 'text-[hsl(var(--info))]',
+    borderColor: 'border-l-[hsl(var(--info))]',
+  },
 } as const
+
+const TYPE_FALLBACK = {
+  icon: ListTodo,
+  label: 'Activity',
+  accentColor: 'text-muted-foreground',
+  borderColor: 'border-l-border',
+} as const
+
+const STATUS_FALLBACK = { label: 'Unknown', variant: 'neutral' as StatusVariant, dot: false }
 
 const STATUS_MAP: Record<ActivityFeedItem['status'], { label: string; variant: StatusVariant; dot: boolean }> = {
   pending: { label: 'Waiting', variant: 'neutral', dot: false },
@@ -274,8 +290,8 @@ export function ExecutionDetail({ item, onClose }: ExecutionDetailProps) {
   const prefersReducedMotion = useReducedMotion()
   const [logsExpanded, setLogsExpanded] = useState(true)
 
-  const typeConfig = TYPE_CONFIG[item.type]
-  const statusConfig = STATUS_MAP[item.status]
+  const typeConfig = TYPE_CONFIG[item.type as keyof typeof TYPE_CONFIG] ?? TYPE_FALLBACK
+  const statusConfig = STATUS_MAP[item.status] ?? STATUS_FALLBACK
   const TypeIcon = typeConfig.icon
   const logEntries = generateLogEntries(item)
 
