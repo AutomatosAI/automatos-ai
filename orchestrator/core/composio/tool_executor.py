@@ -140,8 +140,13 @@ class ComposioToolExecutor:
         manager = EntityManager(self.db)
         return manager.get_or_create_entity(workspace_id)
 
-    _UPLOAD_ACTIONS = {"TWITTER_UPLOAD_MEDIA", "TWITTER_INITIALIZE_MEDIA_UPLOAD"}
-    _FILE_PARAM_NAMES = {"media", "media_data", "file", "image", "video", "media_file"}
+    _UPLOAD_ACTIONS = {
+        "TWITTER_UPLOAD_MEDIA",
+        "TWITTER_INITIALIZE_MEDIA_UPLOAD",
+        "TWITTER_UPLOAD_LARGE_MEDIA",
+        "TWITTER_APPEND_MEDIA_UPLOAD",
+    }
+    _FILE_PARAM_NAMES = {"media", "media_data", "media_url", "file", "image", "video", "media_file"}
 
     async def _resolve_file_uploads(
         self,
@@ -167,6 +172,8 @@ class ComposioToolExecutor:
             from composio.client.files import FileUploadable
             from core.workspace_client import WorkspaceClient
 
+            import httpx
+
             ws_client = WorkspaceClient(workspace_id)
 
             for param_name in list(params.keys()):
@@ -177,19 +184,33 @@ class ComposioToolExecutor:
                     continue
                 if isinstance(value, dict) and "s3key" in value:
                     continue
+
+                file_bytes: Optional[bytes] = None
+                file_hint = value
+
                 if value.startswith(("http://", "https://")):
-                    logger.info("[FileUpload] Param %s is a URL — agent should pass workspace path instead", param_name)
+                    logger.info("[FileUpload] Downloading from URL for %s", param_name)
+                    try:
+                        async with httpx.AsyncClient(timeout=30) as http:
+                            resp = await http.get(value)
+                            resp.raise_for_status()
+                            file_bytes = resp.content
+                    except Exception as dl_err:
+                        logger.warning("[FileUpload] URL download failed for %s: %s", param_name, dl_err)
+                        continue
+                else:
+                    workspace_path = value
+                    logger.info("[FileUpload] Downloading workspace file %s for %s", workspace_path, param_name)
+                    result = await ws_client.download_file(workspace_path)
+                    if not result.get("success"):
+                        logger.warning("[FileUpload] Failed to download %s: %s", workspace_path, result.get("error"))
+                        continue
+                    file_bytes = result["content"]
+
+                if not file_bytes:
                     continue
 
-                workspace_path = value
-                logger.info("[FileUpload] Downloading workspace file %s for %s", workspace_path, param_name)
-                result = await ws_client.download_file(workspace_path)
-                if not result.get("success"):
-                    logger.warning("[FileUpload] Failed to download %s: %s", workspace_path, result.get("error"))
-                    continue
-
-                file_bytes: bytes = result["content"]
-                suffix = Path(workspace_path).suffix or ".png"
+                suffix = Path(file_hint).suffix or ".png"
                 tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
                 tmp.write(file_bytes)
                 tmp.close()
@@ -207,7 +228,7 @@ class ComposioToolExecutor:
                 params[param_name] = uploadable.model_dump()
                 logger.info(
                     "[FileUpload] Uploaded %s (%d bytes) -> s3key=%s",
-                    workspace_path, len(file_bytes), uploadable.s3key,
+                    file_hint, len(file_bytes), uploadable.s3key,
                 )
         except ImportError:
             logger.debug("[FileUpload] Composio FileUploadable not available, skipping")
