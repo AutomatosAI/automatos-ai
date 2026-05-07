@@ -314,10 +314,34 @@ async def check_token_extraction(
                                 cp_detail[f] = f"<{len(v)} chars>"
                             else:
                                 cp_detail[f] = repr(v)
-                    # Also try raw HTTP for this specific connection
+                    # Also try .get() for full details
+                    get_cp = {}
+                    try:
+                        detail = sdk.connected_accounts.get(conn.id)
+                        dcp = getattr(detail, 'connectionParams', None)
+                        if dcp:
+                            for f in vars(dcp) if hasattr(dcp, '__dict__') else (dcp.keys() if isinstance(dcp, dict) else []):
+                                if f.startswith('_'):
+                                    continue
+                                v = getattr(dcp, f, None) if not isinstance(dcp, dict) else dcp.get(f)
+                                if isinstance(v, str) and v:
+                                    get_cp[f] = f"<{len(v)} chars>"
+                                else:
+                                    get_cp[f] = repr(v)
+                    except Exception as get_err:
+                        get_cp = {"error": str(get_err)}
+
+                    # Raw HTTP call with httpx
                     raw_cp = {}
                     try:
-                        raw = sdk.http.get(url=f"https://backend.composio.dev/api/v3/connected_accounts/{conn.id}")
+                        import httpx
+                        from config import config
+                        raw = httpx.get(
+                            f"https://backend.composio.dev/api/v3/connected_accounts/{conn.id}",
+                            headers={"x-api-key": config.COMPOSIO_API_KEY},
+                            timeout=10,
+                        )
+                        raw_cp["status_code"] = raw.status_code
                         if raw.status_code == 200:
                             raw_data = raw.json()
                             raw_conn_params = raw_data.get("connectionParams", {})
@@ -326,13 +350,15 @@ async def check_token_extraction(
                                     raw_cp[k] = f"<{len(v)} chars>"
                                 else:
                                     raw_cp[k] = repr(v)
+                            result["raw_top_keys"] = list(raw_data.keys())
                     except Exception as raw_err:
                         raw_cp = {"error": str(raw_err)}
 
                     result["connection"] = {
                         "id": conn.id,
                         "status": conn.status,
-                        "sdk_connectionParams": cp_detail,
+                        "sdk_list_connectionParams": cp_detail,
+                        "sdk_get_connectionParams": get_cp,
                         "raw_api_connectionParams": raw_cp,
                     }
                     break
