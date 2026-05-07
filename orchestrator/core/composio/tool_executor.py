@@ -138,8 +138,6 @@ async def resolve_file_uploads(
         app_slug = action_upper.split("_", 1)[0].lower()
 
         for param_name in list(params.keys()):
-            if param_name.lower() not in FILE_PARAM_NAMES:
-                continue
             value = params[param_name]
             if not value:
                 continue
@@ -147,12 +145,42 @@ async def resolve_file_uploads(
                 continue
 
             if isinstance(value, list):
+                has_urls = any(
+                    (isinstance(it, str) and it.startswith(("http://", "https://")))
+                    or (isinstance(it, dict) and any(
+                        isinstance(v, str) and v.startswith(("http://", "https://"))
+                        for v in it.values()
+                    ))
+                    for it in value
+                )
+                if not has_urls:
+                    continue
+
+                logger.info("[FileUpload] Resolving %s (%d items)", param_name, len(value))
                 resolved = []
                 for i, item in enumerate(value):
+                    if isinstance(item, dict):
+                        if "s3key" in item:
+                            resolved.append(item)
+                            continue
+                        url = next(
+                            (v for v in item.values()
+                             if isinstance(v, str) and v.startswith(("http://", "https://"))),
+                            None,
+                        )
+                        if url:
+                            up, tfs = await _resolve_single_file_standalone(
+                                url, param_name, i, http_client, action_slug, app_slug, workspace_id,
+                            )
+                            temp_files.extend(tfs)
+                            resolved.append(up.model_dump() if up else item)
+                            continue
+                        resolved.append(item)
+                        continue
                     if not isinstance(item, str) or not item:
                         resolved.append(item)
                         continue
-                    if isinstance(item, dict) and "s3key" in item:
+                    if not item.startswith(("http://", "https://")):
                         resolved.append(item)
                         continue
                     up, tfs = await _resolve_single_file_standalone(
@@ -161,7 +189,8 @@ async def resolve_file_uploads(
                     temp_files.extend(tfs)
                     resolved.append(up.model_dump() if up else item)
                 params[param_name] = resolved
-            elif isinstance(value, str):
+            elif isinstance(value, str) and value.startswith(("http://", "https://")):
+                logger.info("[FileUpload] Resolving %s (single URL)", param_name)
                 up, tfs = await _resolve_single_file_standalone(
                     value, param_name, None, http_client, action_slug, app_slug, workspace_id,
                 )
