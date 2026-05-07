@@ -3,16 +3,15 @@ LinkedIn Image Post — TEMPORARY WORKAROUND
 ===========================================
 Composio's LinkedIn integration cannot upload images (May 2026).
 LINKEDIN_CREATE_LINKED_IN_POST is text-only. LINKEDIN_INITIALIZE_IMAGE_UPLOAD
-returns an upload URL but no action exists to PUT the binary bytes.
-Composio also redacts OAuth tokens from their API (access_token="REDACTED"),
-so we cannot call LinkedIn directly with a Bearer token.
+returns an upload URL but no action to PUT the binary bytes.
+Composio also redacts OAuth tokens and mangles the LinkedIn-Version header
+(appends "01" to YYYYMM format, causing 426 errors via proxy).
 
-Solution: use Composio's v2 proxy endpoint for auth-requiring JSON calls
-(Composio injects the OAuth token server-side), and PUT image bytes
-directly to LinkedIn's pre-signed upload URL (no auth needed).
+Solution: use Composio execute_action for the JSON API calls (version
+header handled correctly internally), and PUT image bytes directly to
+LinkedIn's pre-signed upload URL (no auth needed).
 
-See Composio issues: #3094 (SDK returns 4/22 actions), #3113 (426 errors),
-#3231 (version header fix — text posts only).
+See Composio issues: #3094, #3113, #3231.
 
 REMOVAL CHECKLIST (when Composio ships a working image post action):
   1. Delete this file
@@ -26,14 +25,10 @@ import httpx
 from typing import Any, Dict, List
 from uuid import UUID
 
-from config import config
 from core.workspace_client import WorkspaceClient
 
 logger = logging.getLogger(__name__)
 
-LINKEDIN_API = "https://api.linkedin.com"
-LINKEDIN_VERSION = "202501"
-COMPOSIO_PROXY = "https://backend.composio.dev/api/v2/actions/proxy"
 ORG_URN = "urn:li:organization:108072660"
 
 
@@ -82,66 +77,18 @@ def _extract_author(params: Dict[str, Any]) -> str:
     return params.get("author") or params.get("owner") or ORG_URN
 
 
-def _resolve_connection_id(composio_client, entity_id: str) -> str | None:
-    """Find the LinkedIn connected account ID for this entity."""
-    try:
-        auth_config_id = composio_client._resolve_auth_config_id("LINKEDIN")
-        if not auth_config_id:
-            logger.warning("[LinkedInWorkaround] No auth_config for LINKEDIN")
-            return None
-        sdk = composio_client.composio
-        response = sdk.connected_accounts.list(
-            user_ids=[entity_id], auth_config_ids=[auth_config_id]
-        )
-        connections = response.items if hasattr(response, 'items') else response.data if hasattr(response, 'data') else []
-        for conn in connections:
-            if conn.status in ('ACTIVE', 'INITIATED'):
-                logger.info("[LinkedInWorkaround] Found connection %s (status=%s)", conn.id, conn.status)
-                return conn.id
-        logger.warning("[LinkedInWorkaround] No active LinkedIn connection for entity %s", entity_id)
-        return None
-    except Exception as e:
-        logger.error("[LinkedInWorkaround] Connection lookup failed: %s", e)
-        return None
-
-
-async def _composio_proxy(
-    http: httpx.AsyncClient,
-    connection_id: str,
-    method: str,
-    endpoint: str,
-    body: Dict[str, Any] | None = None,
-) -> httpx.Response:
-    """Make an authenticated LinkedIn API call via Composio's v2 proxy."""
-    proxy_body: Dict[str, Any] = {
-        "connectedAccountId": connection_id,
-        "endpoint": f"{LINKEDIN_API}{endpoint}",
-        "method": method.upper(),
-        "parameters": [
-            {"in": "header", "name": "LinkedIn-Version", "value": LINKEDIN_VERSION},
-            {"in": "header", "name": "X-Restli-Protocol-Version", "value": "2.0.0"},
-        ],
-    }
-    if body is not None:
-        proxy_body["body"] = body
-
-    return await http.post(
-        COMPOSIO_PROXY,
-        headers={
-            "x-api-key": config.COMPOSIO_API_KEY,
-            "Content-Type": "application/json",
-        },
-        json=proxy_body,
-    )
-
-
 async def execute_linkedin_image_post(
     params: Dict[str, Any],
     workspace_id: UUID,
     entity_id: str,
     composio_client,
 ) -> Dict[str, Any]:
-    """Post to LinkedIn with images via Composio proxy + pre-signed upload.
+    """Post to LinkedIn with images via Composio actions + direct binary upload.
+
+    Steps:
+      1. LINKEDIN_INITIALIZE_IMAGE_UPLOAD via Composio (handles auth+version)
+      2. PUT binary bytes to pre-signed upload URL (no auth needed)
+      3. Create post via Composio proxy with image URNs
 
     Returns a result dict matching ComposioClient.execute_action() shape.
     """
@@ -156,12 +103,6 @@ async def execute_linkedin_image_post(
         return {"success": False, "data": None,
                 "error": "No post text found in params"}
 
-    # --- 1. Resolve LinkedIn connection ID ---
-    connection_id = _resolve_connection_id(composio_client, entity_id)
-    if not connection_id:
-        return {"success": False, "data": None,
-                "error": "No active LinkedIn connection found. Is LinkedIn connected in Composio?"}
-
     ws_client = WorkspaceClient(workspace_id)
     image_urns: List[str] = []
     failed_images: List[str] = []
@@ -170,7 +111,7 @@ async def execute_linkedin_image_post(
         for i, img_path in enumerate(image_paths):
             label = f"image[{i}]"
 
-            # --- 2a. Download image from workspace ---
+            # --- 1. Download image from workspace ---
             if img_path.startswith(("http://", "https://")):
                 logger.info("[LinkedInWorkaround] Downloading URL %s", img_path[:100])
                 resp = await http.get(img_path)
@@ -184,7 +125,6 @@ async def execute_linkedin_image_post(
                 logger.info("[LinkedInWorkaround] Downloading workspace file: %s", img_path)
                 dl = await ws_client.download_file(img_path)
                 if not dl.get("success"):
-                    # Try read_file as fallback (returns text but may work for binary)
                     logger.info("[LinkedInWorkaround] download_file failed, trying read_file: %s", img_path)
                     dl = await ws_client.read_file(img_path)
                 if not dl.get("success"):
@@ -199,43 +139,51 @@ async def execute_linkedin_image_post(
                 failed_images.append(img_path)
                 continue
 
-            # --- 2b. Initialize upload via Composio proxy (auth injected) ---
-            init_body = {
-                "initializeUploadRequest": {
-                    "owner": author,
-                }
-            }
-            logger.info("[LinkedInWorkaround] Initializing upload for %s (%d bytes)",
-                        label, len(image_bytes))
-            init_resp = await _composio_proxy(
-                http, connection_id, "POST",
-                "/rest/images?action=initializeUpload",
-                body=init_body,
+            # --- 2. Initialize upload via Composio action ---
+            logger.info("[LinkedInWorkaround] Initializing upload for %s (%d bytes)", label, len(image_bytes))
+            init_result = composio_client.execute_action(
+                "LINKEDIN_INITIALIZE_IMAGE_UPLOAD",
+                {"owner": author},
+                entity_id,
             )
-            if init_resp.status_code != 200:
-                logger.error("[LinkedInWorkaround] Proxy initializeUpload failed: %s %s",
-                             init_resp.status_code, init_resp.text[:300])
+            logger.info("[LinkedInWorkaround] initializeUpload result: %s", str(init_result)[:500])
+
+            if not init_result.get("success"):
+                logger.error("[LinkedInWorkaround] initializeUpload failed: %s", init_result.get("error"))
                 failed_images.append(img_path)
                 continue
 
-            proxy_data = init_resp.json()
-            # Composio wraps the LinkedIn response in {data: ..., successful: true}
-            li_response = proxy_data.get("data", proxy_data)
-            if isinstance(li_response, dict) and "value" in li_response:
-                li_response = li_response["value"]
-
-            upload_url = li_response.get("uploadUrl")
-            image_urn = li_response.get("image")
+            # Extract uploadUrl and image URN from response
+            init_data = init_result.get("data", {})
+            # Composio wraps responses differently — dig for the values
+            upload_url = None
+            image_urn = None
+            if isinstance(init_data, dict):
+                # Try nested paths
+                value = init_data.get("value", init_data)
+                if isinstance(value, dict):
+                    upload_url = value.get("uploadUrl") or value.get("upload_url")
+                    image_urn = value.get("image")
+                # Try flat
+                if not upload_url:
+                    upload_url = init_data.get("uploadUrl") or init_data.get("upload_url")
+                if not image_urn:
+                    image_urn = init_data.get("image")
+                # Try response_data wrapper
+                rd = init_data.get("response_data", {})
+                if isinstance(rd, dict) and not upload_url:
+                    value = rd.get("value", rd)
+                    upload_url = value.get("uploadUrl") or value.get("upload_url")
+                    image_urn = image_urn or value.get("image")
 
             if not upload_url or not image_urn:
-                logger.error("[LinkedInWorkaround] Missing uploadUrl/image in response: %s",
-                             str(li_response)[:300])
+                logger.error("[LinkedInWorkaround] Missing uploadUrl/image in init response: %s",
+                             str(init_data)[:500])
                 failed_images.append(img_path)
                 continue
 
-            # --- 2c. PUT binary to pre-signed upload URL (no auth needed) ---
-            logger.info("[LinkedInWorkaround] Uploading %d bytes to LinkedIn for %s",
-                        len(image_bytes), label)
+            # --- 3. PUT binary to pre-signed upload URL (no auth needed) ---
+            logger.info("[LinkedInWorkaround] Uploading %d bytes to LinkedIn for %s", len(image_bytes), label)
             put_resp = await http.put(upload_url, content=image_bytes)
             if put_resp.status_code not in (200, 201):
                 logger.error("[LinkedInWorkaround] PUT upload failed: %s %s",
@@ -250,7 +198,7 @@ async def execute_linkedin_image_post(
             return {"success": False, "data": None,
                     "error": f"All image uploads failed ({len(failed_images)} failures)"}
 
-        # --- 3. Create the post via Composio proxy (auth injected) ---
+        # --- 4. Create the post with image URNs ---
         if len(image_urns) == 1:
             content_block = {
                 "media": {
@@ -268,7 +216,7 @@ async def execute_linkedin_image_post(
                 }
             }
 
-        post_body = {
+        post_params = {
             "author": author,
             "commentary": text,
             "visibility": "PUBLIC",
@@ -283,16 +231,18 @@ async def execute_linkedin_image_post(
         }
 
         logger.info("[LinkedInWorkaround] Creating post with %d images", len(image_urns))
-        post_resp = await _composio_proxy(
-            http, connection_id, "POST", "/rest/posts", body=post_body,
+        post_result = composio_client.execute_action(
+            "LINKEDIN_CREATE_LINKED_IN_POST",
+            post_params,
+            entity_id,
         )
+        logger.info("[LinkedInWorkaround] createPost result: %s", str(post_result)[:500])
 
-        if post_resp.status_code == 200:
-            post_data = post_resp.json()
-            li_result = post_data.get("data", post_data)
+        if post_result.get("success"):
+            post_data = post_result.get("data", {})
             post_id = ""
-            if isinstance(li_result, dict):
-                post_id = li_result.get("id", li_result.get("post_id", ""))
+            if isinstance(post_data, dict):
+                post_id = post_data.get("id", post_data.get("post_id", ""))
             logger.info("[LinkedInWorkaround] Post created: %s", post_id)
             return {
                 "success": True,
@@ -302,16 +252,14 @@ async def execute_linkedin_image_post(
                     "images_uploaded": len(image_urns),
                     "images_failed": len(failed_images),
                     "image_urns": image_urns,
-                    "workaround": "composio_proxy",
+                    "workaround": "composio_execute_action",
                 },
                 "error": None,
             }
         else:
-            logger.error("[LinkedInWorkaround] Create post failed: %s %s",
-                         post_resp.status_code, post_resp.text[:500])
+            logger.error("[LinkedInWorkaround] Create post failed: %s", post_result.get("error"))
             return {
                 "success": False,
-                "data": {"status_code": post_resp.status_code,
-                         "response": post_resp.text[:500]},
-                "error": f"LinkedIn create post failed: {post_resp.status_code} — {post_resp.text[:200]}",
+                "data": post_result.get("data"),
+                "error": f"LinkedIn create post failed: {post_result.get('error')}",
             }
