@@ -331,43 +331,35 @@ async def check_token_extraction(
                     except Exception as get_err:
                         get_cp = {"error": str(get_err)}
 
-                    # Raw HTTP call with httpx
-                    raw_cp = {}
+                    # Try /info endpoint (returns unredacted credentials)
+                    info_result = {}
                     try:
                         import httpx
                         from config import config
-                        raw = httpx.get(
-                            f"https://backend.composio.dev/api/v3/connected_accounts/{conn.id}",
+                        info_resp = httpx.get(
+                            f"https://backend.composio.dev/api/v3/connected_accounts/{conn.id}/info",
                             headers={"x-api-key": config.COMPOSIO_API_KEY},
                             timeout=10,
                         )
-                        raw_cp["status_code"] = raw.status_code
-                        if raw.status_code == 200:
-                            raw_data = raw.json()
-                            result["raw_top_keys"] = list(raw_data.keys())
-                            # Check all candidate fields for token
-                            for field in ("connectionParams", "params", "data"):
-                                blob = raw_data.get(field)
-                                if not blob or not isinstance(blob, dict):
-                                    continue
-                                label = f"raw_{field}"
-                                raw_cp[label] = {}
-                                for k, v in blob.items():
-                                    if isinstance(v, str) and v:
-                                        raw_cp[label][k] = f"<{len(v)} chars> preview={v[:3]}..."
-                                    elif isinstance(v, dict):
-                                        raw_cp[label][k] = {sk: f"<{len(sv)} chars>" if isinstance(sv, str) and sv else repr(sv) for sk, sv in v.items()}
-                                    else:
-                                        raw_cp[label][k] = repr(v)
-                    except Exception as raw_err:
-                        raw_cp = {"error": str(raw_err)}
+                        info_result["status_code"] = info_resp.status_code
+                        if info_resp.status_code == 200:
+                            info_data = info_resp.json()
+                            info_result["top_keys"] = list(info_data.keys())
+                            # Check body for token
+                            body = info_data.get("body", {})
+                            if isinstance(body, dict):
+                                info_result["body_keys"] = list(body.keys())
+                                at = body.get("access_token", "")
+                                info_result["access_token_length"] = len(at) if at else 0
+                                info_result["access_token_preview"] = f"{at[:4]}...{at[-4:]}" if len(at) > 12 else f"<{len(at)} chars>"
+                            info_result["base_url"] = info_data.get("base_url", "")
+                    except Exception as info_err:
+                        info_result = {"error": str(info_err)}
 
                     result["connection"] = {
                         "id": conn.id,
                         "status": conn.status,
-                        "sdk_list_connectionParams": cp_detail,
-                        "sdk_get_connectionParams": get_cp,
-                        "raw_api_connectionParams": raw_cp,
+                        "info_endpoint": info_result,
                     }
                     break
         except Exception as e:
