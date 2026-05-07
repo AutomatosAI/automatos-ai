@@ -50,12 +50,19 @@ def has_image_params(params: Dict[str, Any]) -> bool:
     return False
 
 
+def _normalize_path(v) -> str:
+    """Extract a usable file path from a string or dict (workspace file ref)."""
+    if isinstance(v, dict):
+        return v.get("s3key") or v.get("path") or v.get("name") or ""
+    return str(v)
+
+
 def _extract_image_paths(params: Dict[str, Any]) -> List[str]:
     """Pull image paths/URLs from whichever param name the agent used."""
     for key in ("media_urls", "images", "media", "media_files", "image_urls"):
         val = params.get(key)
         if isinstance(val, list) and len(val) > 0:
-            return [str(v) for v in val]
+            return [p for p in (_normalize_path(v) for v in val) if p]
         if isinstance(val, str) and "/" in val:
             return [val]
     return []
@@ -174,14 +181,18 @@ async def execute_linkedin_image_post(
                     continue
                 image_bytes = resp.content
             else:
-                logger.info("[LinkedInWorkaround] Downloading workspace file %s", img_path)
+                logger.info("[LinkedInWorkaround] Downloading workspace file: %s", img_path)
                 dl = await ws_client.download_file(img_path)
                 if not dl.get("success"):
-                    logger.warning("[LinkedInWorkaround] Workspace download failed for %s: %s",
+                    # Try read_file as fallback (returns text but may work for binary)
+                    logger.info("[LinkedInWorkaround] download_file failed, trying read_file: %s", img_path)
+                    dl = await ws_client.read_file(img_path)
+                if not dl.get("success"):
+                    logger.warning("[LinkedInWorkaround] All download methods failed for %s: %s",
                                    img_path, dl.get("error"))
                     failed_images.append(img_path)
                     continue
-                image_bytes = dl["content"]
+                image_bytes = dl.get("content") or dl.get("data", b"")
 
             if not image_bytes:
                 logger.warning("[LinkedInWorkaround] Empty file: %s", img_path)
