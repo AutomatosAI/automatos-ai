@@ -37,6 +37,8 @@ import {
 import { useToast } from '@/hooks/use-toast'
 import { useWorkspace } from '@/components/workspace-provider'
 import { useSkillsApi } from '@/hooks/use-skills-api'
+import { useSystemIcons } from '@/hooks/use-system-config-api'
+import { PremiumIcon } from '@/components/shared'
 import type { ViewMode } from '@/components/shared/view-toggle'
 
 import { SkillEditorModal, type SkillEditorMode } from './skill-editor-modal'
@@ -63,6 +65,13 @@ export function WorkspaceSkillsTab({ viewMode = 'grid' }: Props) {
   const { workspace } = useWorkspace()
   const { toast } = useToast()
   const { listWorkspaceSkills, deleteWorkspaceSkill } = useSkillsApi()
+  const { data: iconMappings = {} } = useSystemIcons()
+
+  const resolveIconName = useCallback(
+    (skill: WorkspaceSkillRow): string | null =>
+      (skill.category && iconMappings[skill.category]) || iconMappings['global_skill'] || null,
+    [iconMappings],
+  )
 
   const [skills, setSkills] = useState<WorkspaceSkillRow[]>([])
   const [search, setSearch] = useState('')
@@ -202,6 +211,7 @@ export function WorkspaceSkillsTab({ viewMode = 'grid' }: Props) {
             <SkillRow
               key={skill.skill_id}
               skill={skill}
+              iconName={resolveIconName(skill)}
               onView={() => openViewer(skill.skill_id, 'view')}
               onEdit={() => openViewer(skill.skill_id, 'edit')}
               onRemove={() => setRemoveTarget(skill)}
@@ -214,6 +224,7 @@ export function WorkspaceSkillsTab({ viewMode = 'grid' }: Props) {
             <SkillCard
               key={skill.skill_id}
               skill={skill}
+              iconName={resolveIconName(skill)}
               onView={() => openViewer(skill.skill_id, 'view')}
               onEdit={() => openViewer(skill.skill_id, 'edit')}
               onRemove={() => setRemoveTarget(skill)}
@@ -257,11 +268,13 @@ export function WorkspaceSkillsTab({ viewMode = 'grid' }: Props) {
 
 function SkillCard({
   skill,
+  iconName,
   onView,
   onEdit,
   onRemove,
 }: {
   skill: WorkspaceSkillRow
+  iconName: string | null
   onView: () => void
   onEdit: () => void
   onRemove: () => void
@@ -272,7 +285,11 @@ function SkillCard({
       <CardContent className="p-5 space-y-3">
         <div className="flex items-start justify-between gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            <Brain className="h-5 w-5" />
+            {iconName ? (
+              <PremiumIcon name={iconName} size={28} className="text-primary" />
+            ) : (
+              <Brain className="h-5 w-5" />
+            )}
           </div>
           <div className="flex flex-wrap justify-end gap-1.5">
             {isWorkspace ? (
@@ -333,11 +350,13 @@ function SkillCard({
 
 function SkillRow({
   skill,
+  iconName,
   onView,
   onEdit,
   onRemove,
 }: {
   skill: WorkspaceSkillRow
+  iconName: string | null
   onView: () => void
   onEdit: () => void
   onRemove: () => void
@@ -346,7 +365,11 @@ function SkillRow({
   return (
     <div className="glass-card group flex items-center gap-4 p-3 transition-colors hover:border-primary/40">
       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
-        <Brain className="h-4 w-4" />
+        {iconName ? (
+          <PremiumIcon name={iconName} size={22} className="text-primary" />
+        ) : (
+          <Brain className="h-4 w-4" />
+        )}
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
