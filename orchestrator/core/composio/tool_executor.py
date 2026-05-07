@@ -46,7 +46,11 @@ UPLOAD_ACTIONS = {
     "LINKEDIN_INITIALIZE_IMAGE_UPLOAD",
     "LINKEDIN_REGISTER_IMAGE_UPLOAD",
 }
-FILE_PARAM_NAMES = {"media", "media_data", "media_url", "media_urls", "file", "image", "video", "media_file"}
+FILE_PARAM_NAMES = {
+    "media", "media_data", "media_url", "media_urls",
+    "file", "image", "image_url", "image_urls", "images",
+    "video", "media_file", "media_files",
+}
 
 
 async def _resolve_single_file_standalone(
@@ -119,6 +123,8 @@ async def resolve_file_uploads(
 
     if action_upper not in UPLOAD_ACTIONS:
         return params, temp_files
+
+    logger.info("[FileUpload] Checking %s params=%s", action_upper, list(params.keys()))
 
     try:
         try:
