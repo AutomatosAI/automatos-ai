@@ -294,19 +294,24 @@ async def check_token_extraction(
             sdk = client.composio
             response = sdk.connected_accounts.list(user_ids=[entity_id])
             conns = response.items if hasattr(response, 'items') else response.data if hasattr(response, 'data') else []
+            all_apps = []
             matches = []
             for conn in conns:
                 app_id = getattr(conn, 'appName', '') or getattr(conn, 'appUniqueId', '')
+                status = getattr(conn, 'status', '?')
+                all_apps.append({"app": app_id, "status": status, "id": getattr(conn, 'id', '?')})
                 if app_name.lower() in app_id.lower():
                     cp = getattr(conn, 'connectionParams', None)
                     matches.append({
                         "id": getattr(conn, 'id', '?'),
-                        "status": getattr(conn, 'status', '?'),
+                        "status": status,
                         "appName": app_id,
                         "connectionParams_type": type(cp).__name__,
                         "has_access_token": bool(getattr(cp, 'access_token', None) if cp else None),
                         "cp_attrs": list(vars(cp).keys()) if cp and hasattr(cp, '__dict__') else (list(cp.keys()) if isinstance(cp, dict) else []),
                     })
+            result["total_connections"] = len(conns)
+            result["all_apps"] = all_apps
             result["connections_found"] = len(matches)
             result["connection_details"] = matches
         except Exception as e:
