@@ -148,6 +148,8 @@ class ComposioToolExecutor:
         "LINKEDIN_CREATE_LINKED_IN_POST",
         "LINKEDIN_CREATE_IMAGE_POST",
         "LINKEDIN_CREATE_SHARE",
+        "LINKEDIN_INITIALIZE_IMAGE_UPLOAD",
+        "LINKEDIN_REGISTER_IMAGE_UPLOAD",
     }
     _FILE_PARAM_NAMES = {"media", "media_data", "media_url", "media_urls", "file", "image", "video", "media_file"}
 
