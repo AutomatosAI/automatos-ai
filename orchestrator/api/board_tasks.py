@@ -38,6 +38,105 @@ _PRIORITY_SLA_HOURS: dict[str, int] = {
 }
 
 
+# ── Auto-report creation (mirrors heartbeat_service._auto_create_report) ───
+async def _auto_create_task_report(
+    db: Session,
+    workspace_id: str,
+    task: BoardTask,
+    exec_result: Dict[str, Any],
+) -> None:
+    """
+    Persist an agent_reports row for a completed task so it shows up in
+    Reports / Deliverables / Activity Feed — same pattern heartbeats use.
+    Always non-blocking: never raises, just warns on failure.
+    """
+    try:
+        from services.report_service import ReportService
+
+        agent_name = "Unknown Agent"
+        if task.assigned_agent_id:
+            agent = db.query(Agent).filter(Agent.id == task.assigned_agent_id).first()
+            if agent:
+                agent_name = agent.name
+
+        # Source the body from the agent's actual response, falling back to whatever
+        # text was captured in task.result.
+        llm_text = (
+            exec_result.get("result")
+            or exec_result.get("response")
+            or exec_result.get("output")
+            or exec_result.get("content")
+            or task.result
+            or ""
+        )
+
+        usage = exec_result.get("usage") or {}
+        tokens = (
+            usage.get("total_tokens")
+            or exec_result.get("tokens_used")
+            or 0
+        )
+
+        report_status = "ok" if task.status in ("done", "review") else "warning"
+        if task.error_message:
+            report_status = "critical"
+
+        # Render the same shape heartbeat reports use so consumers stay uniform.
+        lines = [
+            f"# {agent_name} — Task Report",
+            f"**Task:** {task.title}",
+            f"**Status:** {task.status}",
+            "",
+        ]
+        if task.error_message:
+            lines.append("## Error")
+            lines.append(str(task.error_message))
+            lines.append("")
+        if llm_text:
+            lines.append("## Result")
+            lines.append(str(llm_text))
+            lines.append("")
+        lines.append("## Metrics")
+        lines.append(f"- Tokens used: {tokens}")
+        lines.append(f"- Duration: {task.duration_seconds() if hasattr(task, 'duration_seconds') else 'n/a'}")
+        content = "\n".join(lines)
+
+        # Summary is the first non-empty body line — same convention as heartbeat reports.
+        summary = None
+        for line in str(llm_text).split("\n"):
+            stripped = line.strip().lstrip("#").strip()
+            if stripped:
+                summary = (stripped[:497] + "...") if len(stripped) > 497 else stripped
+                break
+
+        svc = ReportService(db, workspace_id)
+        report_result = await svc.create_report(
+            agent_id=task.assigned_agent_id,
+            agent_name=agent_name,
+            title=f"Task: {task.title}",
+            content=content,
+            report_type="task",
+            status=report_status,
+            summary=summary,
+            metrics={
+                "tokens_used": tokens,
+                "task_id": task.id,
+                "task_status": task.status,
+            },
+        )
+        if not report_result.get("success"):
+            logger.warning(
+                "[BoardTasks] Auto-report creation failed for task=%s: %s",
+                task.id, report_result.get("error"),
+            )
+    except Exception:
+        logger.error(
+            "[BoardTasks] _auto_create_task_report raised for task=%s",
+            getattr(task, "id", "?"),
+            exc_info=True,
+        )
+
+
 # ── PRD-128: Unified notification dispatch ─────────────────────────
 async def _dispatch_task_complete(db: Session, workspace_id, task: BoardTask) -> None:
     """Fire a ``task_complete`` event through NotificationDispatcher.
@@ -601,6 +700,9 @@ def _launch_task_execution(
                 # PRD-128: dispatch task_complete only on terminal 'done'
                 if task.status == "done":
                     await _dispatch_task_complete(db, workspace_id, task)
+                # Persist a report row for every completed task so it surfaces
+                # in Reports / Deliverables / Activity Feed (mirrors heartbeats).
+                await _auto_create_task_report(db, workspace_id, task, exec_result)
                 db.commit()
 
             logger.info(
@@ -617,6 +719,12 @@ def _launch_task_execution(
                     task.status = "done"
                     task.error_message = str(e)[:500]
                     task.completed_at = datetime.now(timezone.utc)
+                    db.commit()
+                    # Surface failures the same way successes are surfaced.
+                    await _auto_create_task_report(
+                        db, workspace_id, task,
+                        {"result": "", "tokens_used": 0},
+                    )
                     db.commit()
             except Exception:
                 db.rollback()

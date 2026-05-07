@@ -14,6 +14,7 @@ import {
   Zap,
   Eye,
   MessageCircle,
+  CheckSquare,
 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { formatDistanceToNow } from 'date-fns'
@@ -235,6 +236,11 @@ export function ActivityFeed({ period = '1d', openExecution, deepLinkRecipeId }:
       router.push(`/chat/${item.source_id}`)
       return
     }
+    // For tasks, jump to the kanban board with the task highlighted
+    if (item.type === 'task' && item.source_id) {
+      router.push(`/command-center?tab=board&task=${item.source_id}` as any)
+      return
+    }
     // Fallback to inline detail for routines
     setSelectedItem(item)
   }, [router])
@@ -429,6 +435,12 @@ function FeedRow({ item, index, isNew, onView }: FeedRowProps) {
               <Badge className="text-xs bg-cyan-500/20 text-cyan-300 border-cyan-500/30 shrink-0">
                 <Rocket className="w-3 h-3 mr-1" />
                 Mission
+              </Badge>
+            )}
+            {item.type === 'task' && (
+              <Badge className="text-xs bg-purple-500/20 text-purple-300 border-purple-500/30 shrink-0">
+                <CheckSquare className="w-3 h-3 mr-1" />
+                Task
               </Badge>
             )}
             <Badge className={cn('text-xs shrink-0', statusBadge.className)}>
