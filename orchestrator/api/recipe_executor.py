@@ -419,7 +419,6 @@ async def _execute_step(
                                     "role": "tool", "tool_call_id": tool_id,
                                     "content": result_text[:20000],
                                 })
-                                yield {"tool_call": tool_name, "result": result_text}
                                 continue
 
                         tool_args, _temp_files = await resolve_file_uploads(
