@@ -32,7 +32,7 @@ export interface ActivityFeedItem {
   id: string
   type: 'chat' | 'routine' | 'recipe' | 'mission' | 'task'
   name: string
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'paused' | 'working' | 'attention'
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'paused'
   started_at: string | null
   completed_at: string | null
   duration_seconds: number | null

@@ -350,11 +350,15 @@ class ActivityService:
 
             items: List[Dict[str, Any]] = []
             for t in tasks:
+                # Map kanban statuses to the activity feed's internal status
+                # vocabulary (running/completed/failed/pending) — same shape
+                # heartbeats and recipes use, so STATUS_MAP / STATUS_VARIANT_MAP
+                # / _map_status_filter all work without special-casing.
                 feed_status = {
-                    "in_progress": "working",
-                    "review": "attention",
+                    "in_progress": "running",
+                    "review": "pending",
                     "done": "completed",
-                    "blocked": "attention",
+                    "blocked": "failed",
                 }.get(t.status, "completed")
 
                 agent = agents_by_id.get(t.assigned_agent_id) if t.assigned_agent_id else None
