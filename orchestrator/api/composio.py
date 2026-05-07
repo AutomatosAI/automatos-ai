@@ -331,35 +331,37 @@ async def check_token_extraction(
                     except Exception as get_err:
                         get_cp = {"error": str(get_err)}
 
-                    # Try /info endpoint (returns unredacted credentials)
-                    info_result = {}
+                    # Test proxy endpoint (Composio injects auth server-side)
+                    proxy_result = {}
                     try:
                         import httpx
                         from config import config
-                        info_resp = httpx.get(
-                            f"https://backend.composio.dev/api/v3/connected_accounts/{conn.id}/info",
-                            headers={"x-api-key": config.COMPOSIO_API_KEY},
-                            timeout=10,
-                        )
-                        info_result["status_code"] = info_resp.status_code
-                        if info_resp.status_code == 200:
-                            info_data = info_resp.json()
-                            info_result["top_keys"] = list(info_data.keys())
-                            # Check body for token
-                            body = info_data.get("body", {})
-                            if isinstance(body, dict):
-                                info_result["body_keys"] = list(body.keys())
-                                at = body.get("access_token", "")
-                                info_result["access_token_length"] = len(at) if at else 0
-                                info_result["access_token_preview"] = f"{at[:4]}...{at[-4:]}" if len(at) > 12 else f"<{len(at)} chars>"
-                            info_result["base_url"] = info_data.get("base_url", "")
-                    except Exception as info_err:
-                        info_result = {"error": str(info_err)}
+                        # Try v3 proxy endpoints
+                        for proxy_path in ("tools/proxy", "actions/proxy"):
+                            proxy_resp = httpx.post(
+                                f"https://backend.composio.dev/api/v3/{proxy_path}",
+                                headers={"x-api-key": config.COMPOSIO_API_KEY},
+                                json={
+                                    "connectedAccountId": conn.id,
+                                    "endpoint": "https://api.linkedin.com/rest/userinfo",
+                                    "method": "GET",
+                                    "body": {},
+                                },
+                                timeout=15,
+                            )
+                            proxy_result[proxy_path] = {
+                                "status_code": proxy_resp.status_code,
+                                "response_preview": proxy_resp.text[:200],
+                            }
+                            if proxy_resp.status_code == 200:
+                                break
+                    except Exception as proxy_err:
+                        proxy_result = {"error": str(proxy_err)}
 
                     result["connection"] = {
                         "id": conn.id,
                         "status": conn.status,
-                        "info_endpoint": info_result,
+                        "proxy_test": proxy_result,
                     }
                     break
         except Exception as e:
