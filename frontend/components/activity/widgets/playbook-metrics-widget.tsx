@@ -55,7 +55,7 @@ export function PlaybookMetricsWidget({ period, className }: PlaybookMetricsWidg
             </thead>
             <tbody>
               {playbooks.map((pb) => (
-                <tr key={pb.workflow_id} className="border-b border-border/10">
+                <tr key={pb.recipe_id} className="border-b border-border/10">
                   <td className="py-1.5 truncate max-w-[120px]">{pb.name}</td>
                   <td className="py-1.5 text-right text-muted-foreground">{pb.runs}</td>
                   <td className={cn(

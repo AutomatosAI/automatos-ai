@@ -94,10 +94,20 @@ class HeartbeatService:
     # ------------------------------------------------------------------
 
     async def _load_heartbeat_configs(self):
-        """Load all active heartbeat configs from DB and schedule jobs."""
+        """Load all active heartbeat configs from DB and schedule jobs.
+
+        Clears stale heartbeat jobs first (e.g. from Redis jobstore persistence)
+        so disabled agents don't keep running after a restart.
+        """
         from core.database.database import SessionLocal
         from core.models.workspaces import Workspace
         from core.models import Agent
+
+        # Remove any leftover heartbeat jobs from previous runs before
+        # re-adding only the currently-enabled ones.
+        for job in list(self._scheduler.get_jobs()):
+            if job.id.startswith("agent_hb_") or job.id.startswith("orch_hb_"):
+                self._scheduler.remove_job(job.id)
 
         db = SessionLocal()
         try:

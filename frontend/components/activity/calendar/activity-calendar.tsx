@@ -44,14 +44,14 @@ export function ActivityCalendar({ className }: ActivityCalendarProps) {
   }
   const items = freshItems.length > 0 ? freshItems : lastGoodData.current
 
-  // Split into "always running" (< 60 min interval) and regular scheduled
+  // Split into "always running" (hourly or more frequent) and regular scheduled
   const { alwaysRunning, scheduled } = useMemo(() => {
     const always: ScheduleItem[] = []
     const sched: ScheduleItem[] = []
 
     for (const item of items) {
       const intervalMin = parseIntervalMinutes(item.frequency)
-      if (intervalMin !== null && intervalMin < 60) {
+      if (intervalMin !== null && intervalMin <= 60) {
         always.push(item)
       } else {
         sched.push(item)

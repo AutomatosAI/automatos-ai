@@ -59,12 +59,7 @@ class SearchConfig:
         """Create config from app config (prefers system settings)"""
         return cls(
             database_url=app_config.DATABASE_URL or "",
-            embedding_dimension=_get_system_dimension(),  # Always from system settings
+            embedding_dimension=_get_system_dimension(),
             embedding_model=app_config.EMBEDDING_MODEL or "",
-            similarity_function=app_config.SIMILARITY_FUNCTION,
-            vector_table_name=app_config.VECTOR_TABLE_NAME,
-            default_max_results=app_config.SEARCH_DEFAULT_MAX_RESULTS,
-            default_min_relevance=app_config.SEARCH_DEFAULT_MIN_RELEVANCE,
-            cache_ttl_minutes=30,
         )
 
