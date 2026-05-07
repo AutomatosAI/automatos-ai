@@ -21,6 +21,7 @@ import {
 
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
+import { apiClient } from '@/lib/api-client'
 import {
   useDeliverables,
   type Deliverable,
@@ -28,6 +29,40 @@ import {
 } from '@/hooks/use-deliverables-api'
 import { DeliverablePreview } from '@/components/workspace/gallery-view/deliverable-preview'
 import { DeliverableArtwork } from '@/components/deliverables/deliverable-artwork'
+
+const BINARY_IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico'])
+
+/**
+ * Build a usable image URL for a deliverable. Tries (in order):
+ *   1. preview_url as-is if it's already absolute (http://...)
+ *   2. preview_url with the API base prepended if it's a relative /api/... path
+ *   3. Synthesise a /files/raw URL from workspace_id + file_path when the
+ *      backend hasn't populated preview_url for some reason — happens for
+ *      freshly-registered today items via certain code paths.
+ *   4. null when nothing renderable is available (fall back to artwork).
+ */
+function resolveImageSrc(d: Deliverable): string | null {
+  const isImageish =
+    d.artifact_type === 'image' ||
+    d.preview_type === 'image' ||
+    BINARY_IMAGE_EXTS.has((d.file_path?.split('.').pop() ?? '').toLowerCase())
+
+  if (!isImageish) return null
+
+  const base = (apiClient.getBaseUrl?.() ?? '').replace(/\/$/, '')
+  const join = (path: string): string =>
+    path.startsWith('http') ? path : `${base}${path.startsWith('/') ? '' : '/'}${path}`
+
+  if (d.preview_url) return join(d.preview_url)
+
+  if (d.storage_type === 'workspace' && d.file_path && d.workspace_id) {
+    return join(
+      `/api/workspaces/${d.workspace_id}/files/raw?path=${encodeURIComponent(d.file_path)}`,
+    )
+  }
+
+  return null
+}
 
 // ============= CONSTANTS =============
 
@@ -65,14 +100,17 @@ interface TodayCardProps {
 function TodayCard({ deliverable, onClick }: TodayCardProps) {
   const {
     artifact_type,
-    preview_url,
     title,
     file_name,
     agent_name,
     created_at,
   } = deliverable
 
-  const isImage = artifact_type === 'image' && !!preview_url
+  const imageSrc = useMemo(() => resolveImageSrc(deliverable), [deliverable])
+  // Track image-load failure so we can degrade to the stylised artwork
+  // tile instead of a broken-image glyph.
+  const [imgFailed, setImgFailed] = useState(false)
+  const showImage = !!imageSrc && !imgFailed
 
   return (
     <button
@@ -85,11 +123,12 @@ function TodayCard({ deliverable, onClick }: TodayCardProps) {
     >
       {/* Thumbnail */}
       <div className="relative flex h-28 items-center justify-center overflow-hidden bg-muted/30">
-        {isImage ? (
+        {showImage ? (
           <img
-            src={preview_url!}
+            src={imageSrc!}
             alt={title}
             loading="lazy"
+            onError={() => setImgFailed(true)}
             className="h-full w-full object-cover"
           />
         ) : (
