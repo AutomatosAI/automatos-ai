@@ -110,11 +110,36 @@ async def execute_linkedin_image_post(
                 if token:
                     logger.info("[LinkedInWorkaround] Got token via unfiltered connection list")
                     break
-                # Log connection shape for debugging
                 attrs = {k: type(v).__name__ for k, v in vars(conn).items() if not k.startswith("_")}
                 logger.warning("[LinkedInWorkaround] LinkedIn connection found but no token. Attrs: %s", attrs)
         except Exception as tok_err:
             logger.warning("[LinkedInWorkaround] Fallback token lookup failed: %s", tok_err)
+
+    if not token:
+        # Last resort: call Composio REST API directly for connection info
+        try:
+            sdk = composio_client.composio
+            conn_id = None
+            response = sdk.connected_accounts.list(user_ids=[entity_id])
+            conns = response.items if hasattr(response, 'items') else response.data if hasattr(response, 'data') else []
+            for c in conns:
+                a = getattr(c, 'appName', '') or getattr(c, 'appUniqueId', '')
+                if 'linkedin' in a.lower() and getattr(c, 'status', '') in ('ACTIVE', 'INITIATED'):
+                    conn_id = c.id
+                    break
+            if conn_id:
+                raw_resp = sdk.http.get(url=f"https://backend.composio.dev/api/v3/connected_accounts/{conn_id}")
+                if raw_resp.status_code == 200:
+                    data = raw_resp.json()
+                    cp = data.get("connectionParams", {})
+                    token = cp.get("access_token") or cp.get("token")
+                    if token:
+                        logger.info("[LinkedInWorkaround] Got token via raw REST API")
+                    else:
+                        logger.warning("[LinkedInWorkaround] REST API connectionParams keys: %s",
+                                       list(cp.keys()) if isinstance(cp, dict) else "not-a-dict")
+        except Exception as raw_err:
+            logger.warning("[LinkedInWorkaround] Raw REST API fallback failed: %s", raw_err)
     if not token:
         logger.error("[LinkedInWorkaround] entity_id=%s — no token found", entity_id)
         return {"success": False, "data": None,

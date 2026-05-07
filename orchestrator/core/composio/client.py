@@ -397,8 +397,17 @@ class ComposioClient:
                     token = self._extract_token_from_connection(detail)
                     if token:
                         return token
-                except Exception:
-                    pass
+                    # Log what the detail object looks like for debugging
+                    cp = getattr(detail, 'connectionParams', None)
+                    cp_debug = {}
+                    if cp:
+                        for f in ('access_token', 'token', 'scope', 'token_type', 'base_url', 'refresh_token'):
+                            v = getattr(cp, f, None) if not isinstance(cp, dict) else cp.get(f)
+                            cp_debug[f] = f"<{len(v)} chars>" if isinstance(v, str) and v else repr(v)
+                    logger.warning("get_app_access_token: conn %s status=%s connectionParams fields: %s",
+                                   conn.id, conn.status, cp_debug)
+                except Exception as detail_err:
+                    logger.warning("get_app_access_token: .get(%s) failed: %s", conn.id, detail_err)
 
             return None
         except Exception as e:
