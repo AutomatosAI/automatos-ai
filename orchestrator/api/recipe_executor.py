@@ -151,6 +151,7 @@ async def _execute_step(
     from modules.tools.tool_router import get_tool_router
     from modules.tools.services.composio_hint_service import ComposioHintService
     from modules.tools.services.composio_tool_service import ComposioToolService
+    from core.composio.tool_executor import resolve_file_uploads
     from modules.agents.factory.agent_factory import AgentFactory
     from modules.context import ContextService, ContextMode
     from modules.tools.builtin.scratchpad_tool import (
@@ -376,8 +377,14 @@ async def _execute_step(
                     exec_ms = 0
                     logger.info(f"[recipe_step] Composio dedup hit: {tool_name} (skipped repeat call)")
                 else:
+                    _temp_files: list = []
                     try:
                         t0 = time.time()
+                        tool_args, _temp_files = await resolve_file_uploads(
+                            action=tool_name,
+                            params=tool_args,
+                            workspace_id=workspace_id,
+                        )
                         exec_result = tool_service.execute_action(
                             action_name=tool_name,
                             params=tool_args,
@@ -399,6 +406,12 @@ async def _execute_step(
                         exec_ms = int((time.time() - t0) * 1000)
                         result_text = f"Error executing {tool_name}: {exc}"
                         logger.error(f"[recipe_step] Composio direct exception: {tool_name}: {exc}", exc_info=True)
+                    finally:
+                        for tf in _temp_files:
+                            try:
+                                tf.unlink(missing_ok=True)
+                            except Exception:
+                                pass
                     _composio_call_cache[_dedup_key] = result_text
 
                 all_tool_calls.append({
