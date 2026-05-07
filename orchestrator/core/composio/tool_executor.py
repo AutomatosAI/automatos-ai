@@ -46,11 +46,23 @@ UPLOAD_ACTIONS = {
     "LINKEDIN_INITIALIZE_IMAGE_UPLOAD",
     "LINKEDIN_REGISTER_IMAGE_UPLOAD",
 }
-FILE_PARAM_NAMES = {
-    "media", "media_data", "media_url", "media_urls",
-    "file", "image", "image_url", "image_urls", "images",
-    "video", "media_file", "media_files",
+
+_FILE_EXTENSIONS = {
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg",
+    ".mp4", ".mov", ".avi", ".webm",
+    ".pdf", ".bmp", ".tiff", ".heic",
 }
+
+
+def _is_file_reference(value: str) -> bool:
+    """Return True if a string looks like a URL or workspace file path."""
+    if value.startswith(("http://", "https://")):
+        return True
+    if "/" in value:
+        ext = Path(value).suffix.lower()
+        if ext in _FILE_EXTENSIONS:
+            return True
+    return False
 
 
 async def _resolve_single_file_standalone(
@@ -145,15 +157,15 @@ async def resolve_file_uploads(
                 continue
 
             if isinstance(value, list):
-                has_urls = any(
-                    (isinstance(it, str) and it.startswith(("http://", "https://")))
+                has_resolvable = any(
+                    (isinstance(it, str) and _is_file_reference(it))
                     or (isinstance(it, dict) and any(
-                        isinstance(v, str) and v.startswith(("http://", "https://"))
+                        isinstance(v, str) and _is_file_reference(v)
                         for v in it.values()
                     ))
                     for it in value
                 )
-                if not has_urls:
+                if not has_resolvable:
                     continue
 
                 logger.info("[FileUpload] Resolving %s (%d items)", param_name, len(value))
@@ -163,14 +175,14 @@ async def resolve_file_uploads(
                         if "s3key" in item:
                             resolved.append(item)
                             continue
-                        url = next(
+                        ref = next(
                             (v for v in item.values()
-                             if isinstance(v, str) and v.startswith(("http://", "https://"))),
+                             if isinstance(v, str) and _is_file_reference(v)),
                             None,
                         )
-                        if url:
+                        if ref:
                             up, tfs = await _resolve_single_file_standalone(
-                                url, param_name, i, http_client, action_slug, app_slug, workspace_id,
+                                ref, param_name, i, http_client, action_slug, app_slug, workspace_id,
                             )
                             temp_files.extend(tfs)
                             resolved.append(up.model_dump() if up else item)
@@ -180,7 +192,7 @@ async def resolve_file_uploads(
                     if not isinstance(item, str) or not item:
                         resolved.append(item)
                         continue
-                    if not item.startswith(("http://", "https://")):
+                    if not _is_file_reference(item):
                         resolved.append(item)
                         continue
                     up, tfs = await _resolve_single_file_standalone(
@@ -189,8 +201,8 @@ async def resolve_file_uploads(
                     temp_files.extend(tfs)
                     resolved.append(up.model_dump() if up else item)
                 params[param_name] = resolved
-            elif isinstance(value, str) and value.startswith(("http://", "https://")):
-                logger.info("[FileUpload] Resolving %s (single URL)", param_name)
+            elif isinstance(value, str) and _is_file_reference(value):
+                logger.info("[FileUpload] Resolving %s (single ref): %s", param_name, value[:120])
                 up, tfs = await _resolve_single_file_standalone(
                     value, param_name, None, http_client, action_slug, app_slug, workspace_id,
                 )
