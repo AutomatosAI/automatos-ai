@@ -292,28 +292,50 @@ async def check_token_extraction(
     if not token:
         try:
             sdk = client.composio
-            response = sdk.connected_accounts.list(user_ids=[entity_id])
-            conns = response.items if hasattr(response, 'items') else response.data if hasattr(response, 'data') else []
-            all_apps = []
-            matches = []
-            for conn in conns:
-                app_id = getattr(conn, 'appName', '') or getattr(conn, 'appUniqueId', '')
-                status = getattr(conn, 'status', '?')
-                all_apps.append({"app": app_id, "status": status, "id": getattr(conn, 'id', '?')})
-                if app_name.lower() in app_id.lower():
+            # Use auth_config filter (same path as get_app_access_token)
+            auth_config_id = client._resolve_auth_config_id(app_name.upper())
+            result["auth_config_id"] = auth_config_id
+
+            if auth_config_id:
+                resp = sdk.connected_accounts.list(
+                    user_ids=[entity_id], auth_config_ids=[auth_config_id]
+                )
+                conns = resp.items if hasattr(resp, 'items') else resp.data if hasattr(resp, 'data') else []
+                result["filtered_count"] = len(conns)
+                for conn in conns:
                     cp = getattr(conn, 'connectionParams', None)
-                    matches.append({
-                        "id": getattr(conn, 'id', '?'),
-                        "status": status,
-                        "appName": app_id,
-                        "connectionParams_type": type(cp).__name__,
-                        "has_access_token": bool(getattr(cp, 'access_token', None) if cp else None),
-                        "cp_attrs": list(vars(cp).keys()) if cp and hasattr(cp, '__dict__') else (list(cp.keys()) if isinstance(cp, dict) else []),
-                    })
-            result["total_connections"] = len(conns)
-            result["all_apps"] = all_apps
-            result["connections_found"] = len(matches)
-            result["connection_details"] = matches
+                    cp_detail = {}
+                    if cp:
+                        for f in vars(cp) if hasattr(cp, '__dict__') else (cp.keys() if isinstance(cp, dict) else []):
+                            if f.startswith('_'):
+                                continue
+                            v = getattr(cp, f, None) if not isinstance(cp, dict) else cp.get(f)
+                            if isinstance(v, str) and v:
+                                cp_detail[f] = f"<{len(v)} chars>"
+                            else:
+                                cp_detail[f] = repr(v)
+                    # Also try raw HTTP for this specific connection
+                    raw_cp = {}
+                    try:
+                        raw = sdk.http.get(url=f"https://backend.composio.dev/api/v3/connected_accounts/{conn.id}")
+                        if raw.status_code == 200:
+                            raw_data = raw.json()
+                            raw_conn_params = raw_data.get("connectionParams", {})
+                            for k, v in raw_conn_params.items():
+                                if isinstance(v, str) and v:
+                                    raw_cp[k] = f"<{len(v)} chars>"
+                                else:
+                                    raw_cp[k] = repr(v)
+                    except Exception as raw_err:
+                        raw_cp = {"error": str(raw_err)}
+
+                    result["connection"] = {
+                        "id": conn.id,
+                        "status": conn.status,
+                        "sdk_connectionParams": cp_detail,
+                        "raw_api_connectionParams": raw_cp,
+                    }
+                    break
         except Exception as e:
             result["debug_error"] = str(e)
 
