@@ -263,30 +263,27 @@ async def list_connections(
 
 
 @router.get("/linkedin/test-upload-init")
-async def test_linkedin_upload_init(
-    workspace_id: Optional[str] = Query(None),
-    db: Session = Depends(get_db),
-):
-    """Smoke test: call LINKEDIN_INITIALIZE_IMAGE_UPLOAD via execute_action.
-    Verifies auth+version headers work without running a full playbook."""
-    client = get_composio_client()
-    if not workspace_id:
-        workspace_id = "ae8320bc-95e1-4de1-bbe9-396bef19cbf8"
-    entity_manager = EntityManager(db)
-    entity = entity_manager.get_entity_by_workspace(workspace_id)
-    if not entity:
-        return {"ok": False, "error": "No Composio entity for workspace"}
+async def test_linkedin_upload_init():
+    """Smoke test: call LinkedIn initializeUpload directly (no Composio).
+    Verifies OAuth token + API version work without running a playbook."""
+    import httpx as _httpx
+    from core.composio.linkedin_image_workaround import _get_access_token, _initialize_image_upload
+    from config import config as _cfg
 
-    entity_id = entity["composio_entity_id"]
-    result = client.execute_action(
-        "LINKEDIN_INITIALIZE_IMAGE_UPLOAD",
-        {"owner": "urn:li:organization:108072660"},
-        entity_id,
-    )
-    return {
-        "ok": result.get("success", False),
-        "result": result,
-    }
+    try:
+        async with _httpx.AsyncClient(timeout=15) as http:
+            token = await _get_access_token(http)
+            upload_url, image_urn = await _initialize_image_upload(
+                http, token, _cfg.LINKEDIN_ORG_URN,
+            )
+            return {
+                "ok": bool(upload_url and image_urn),
+                "upload_url": (upload_url or "")[:80] + "..." if upload_url else None,
+                "image_urn": image_urn,
+                "token_preview": f"{token[:4]}...{token[-4:]}" if token else None,
+            }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 

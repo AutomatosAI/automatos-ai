@@ -315,6 +315,13 @@ class Config:
     INTERNAL_API_HOSTNAME: str = os.getenv("INTERNAL_API_HOSTNAME", "automatos-ai.railway.internal")
     INTERNAL_FRONTEND_HOSTNAME: str = os.getenv("INTERNAL_FRONTEND_HOSTNAME", "automatos-ai-frontend.railway.internal")
     COMPOSIO_API_KEY: str = os.getenv("COMPOSIO_API_KEY") or os.getenv("COMPOSIO_KEY")
+
+    # LinkedIn Direct API (bypasses Composio for image posts)
+    LINKEDIN_CLIENT_ID: str = os.getenv("LINKEDIN_CLIENT_ID", "")
+    LINKEDIN_CLIENT_SECRET: str = os.getenv("LINKEDIN_CLIENT_SECRET", "")
+    LINKEDIN_REFRESH_TOKEN: str = os.getenv("LINKEDIN_REFRESH_TOKEN", "")
+    LINKEDIN_ACCESS_TOKEN: str = os.getenv("LINKEDIN_ACCESS_TOKEN", "")
+    LINKEDIN_ORG_URN: str = os.getenv("LINKEDIN_ORG_URN", "")
     # v3.1 default: tool endpoints automatically serve the latest toolkit version
     # (no `toolkit_versions=latest` param required). Only tool endpoints differ
     # between v3 and v3.1 — auth_configs / connected_accounts / triggers / toolkits
