@@ -262,6 +262,56 @@ async def list_connections(
     return result
 
 
+@router.get("/connections/{app_name}/token-check")
+async def check_token_extraction(
+    app_name: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
+    """Diagnostic: verify OAuth token can be extracted for a connected app.
+    Returns token presence and connection metadata (never the token itself)."""
+    client = get_composio_client()
+    entity_manager = EntityManager(db)
+    entity = entity_manager.get_entity_by_workspace(ctx.workspace_id)
+    if not entity:
+        return {"ok": False, "error": "No Composio entity for workspace"}
+
+    entity_id = entity["composio_entity_id"]
+    token = client.get_app_access_token(entity_id, app_name.upper())
+    result: Dict[str, Any] = {
+        "ok": token is not None,
+        "entity_id": entity_id,
+        "app": app_name.upper(),
+        "token_found": token is not None,
+        "token_length": len(token) if token else 0,
+    }
+
+    if not token:
+        try:
+            sdk = client.composio
+            response = sdk.connected_accounts.list(user_ids=[entity_id])
+            conns = response.items if hasattr(response, 'items') else response.data if hasattr(response, 'data') else []
+            matches = []
+            for conn in conns:
+                app_id = getattr(conn, 'appName', '') or getattr(conn, 'appUniqueId', '')
+                if app_name.lower() in app_id.lower():
+                    cp = getattr(conn, 'connectionParams', None)
+                    matches.append({
+                        "id": getattr(conn, 'id', '?'),
+                        "status": getattr(conn, 'status', '?'),
+                        "appName": app_id,
+                        "connectionParams_type": type(cp).__name__,
+                        "has_access_token": bool(getattr(cp, 'access_token', None) if cp else None),
+                        "cp_attrs": list(vars(cp).keys()) if cp and hasattr(cp, '__dict__') else (list(cp.keys()) if isinstance(cp, dict) else []),
+                    })
+            result["connections_found"] = len(matches)
+            result["connection_details"] = matches
+        except Exception as e:
+            result["debug_error"] = str(e)
+
+    return result
+
+
 @router.post("/connect/{app_name}", response_model=InitiateConnectionResponse)
 async def initiate_connection(
     app_name: str,

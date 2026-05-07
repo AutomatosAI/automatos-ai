@@ -95,24 +95,24 @@ async def execute_linkedin_image_post(
     # --- 1. Get OAuth token from Composio connection ---
     token = composio_client.get_app_access_token(entity_id, "LINKEDIN")
     if not token:
-        # Fallback: use SDK entity object to get connection params
+        # Fallback: list ALL connections for this user (skips auth_config_id filter)
         try:
             sdk = composio_client.composio
-            entity = sdk.get_entity(entity_id)
-            conn = entity.get_connection(app="linkedin")
-            if conn:
-                cp = getattr(conn, "connectionParams", None) or {}
-                token = (
-                    cp.get("access_token") or cp.get("token")
-                    or getattr(conn, "access_token", None)
-                    or getattr(conn, "token", None)
-                )
-                if not token:
-                    # Log all available attrs for debugging
-                    attrs = {k: type(v).__name__ for k, v in vars(conn).items() if not k.startswith("_")}
-                    logger.warning("[LinkedInWorkaround] Connection found but no token. Attrs: %s", attrs)
-                else:
-                    logger.info("[LinkedInWorkaround] Got token via SDK entity.get_connection()")
+            response = sdk.connected_accounts.list(user_ids=[entity_id])
+            connections = response.items if hasattr(response, 'items') else response.data if hasattr(response, 'data') else []
+            for conn in connections:
+                app_name = getattr(conn, 'appName', '') or getattr(conn, 'appUniqueId', '')
+                if 'linkedin' not in app_name.lower():
+                    continue
+                if getattr(conn, 'status', '') not in ('ACTIVE', 'INITIATED'):
+                    continue
+                token = composio_client._extract_token_from_connection(conn)
+                if token:
+                    logger.info("[LinkedInWorkaround] Got token via unfiltered connection list")
+                    break
+                # Log connection shape for debugging
+                attrs = {k: type(v).__name__ for k, v in vars(conn).items() if not k.startswith("_")}
+                logger.warning("[LinkedInWorkaround] LinkedIn connection found but no token. Attrs: %s", attrs)
         except Exception as tok_err:
             logger.warning("[LinkedInWorkaround] Fallback token lookup failed: %s", tok_err)
     if not token:
