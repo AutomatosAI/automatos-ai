@@ -146,14 +146,32 @@ async def resolve_file_uploads(
             if isinstance(value, dict) and "s3key" in value:
                 continue
 
+            logger.info(
+                "[FileUpload] Matched param %s type=%s preview=%s",
+                param_name, type(value).__name__,
+                str(value)[:200],
+            )
+
             if isinstance(value, list):
                 resolved = []
                 for i, item in enumerate(value):
+                    if isinstance(item, dict):
+                        if "s3key" in item:
+                            resolved.append(item)
+                            continue
+                        url = item.get("url") or item.get("id") or item.get("image_url")
+                        if url and isinstance(url, str) and url.startswith(("http://", "https://")):
+                            up, tfs = await _resolve_single_file_standalone(
+                                url, param_name, i, http_client, action_slug, app_slug, workspace_id,
+                            )
+                            temp_files.extend(tfs)
+                            resolved.append(up.model_dump() if up else item)
+                            continue
+                        resolved.append(item)
+                        continue
                     if not isinstance(item, str) or not item:
                         resolved.append(item)
                         continue
-                    if isinstance(item, dict) and "s3key" in item:
-                        resolved.append(item)
                         continue
                     up, tfs = await _resolve_single_file_standalone(
                         item, param_name, i, http_client, action_slug, app_slug, workspace_id,
