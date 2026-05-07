@@ -30,9 +30,9 @@ export interface ActivityChannel {
 
 export interface ActivityFeedItem {
   id: string
-  type: 'chat' | 'routine' | 'recipe' | 'mission'
+  type: 'chat' | 'routine' | 'recipe' | 'mission' | 'task'
   name: string
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'paused'
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'paused' | 'working' | 'attention'
   started_at: string | null
   completed_at: string | null
   duration_seconds: number | null
@@ -41,7 +41,7 @@ export interface ActivityFeedItem {
   summary: string
   source_id: string | null
   source_url: string | null
-  trigger: 'manual' | 'scheduled' | 'event' | 'webhook' | 'heartbeat' | null
+  trigger: 'manual' | 'scheduled' | 'event' | 'webhook' | 'heartbeat' | string | null
   channel?: ActivityChannel | null
   step_progress?: ActivityStepProgress | null
   error_message: string | null
