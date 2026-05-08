@@ -201,29 +201,21 @@ async def execute_workspace_action(
         from core.workspace_client import WorkspaceClient
         client = WorkspaceClient(str(workspace_id))
 
-        # Auto-detect repo directory for tools that need it
+        # Auto-detect repo directory ONLY for git/exec which need a cwd.
+        # File operations (read, write, list, grep) treat paths as
+        # workspace-root relative — agents can write to any directory
+        # without needing a hardcoded allowlist.
         repo_dir: Optional[str] = None
         is_git_clone = tool_name == "workspace_git" and parameters.get("operation") == "clone"
         needs_repo = tool_name in ("workspace_git", "workspace_exec") and not is_git_clone
-        needs_path_prefix = tool_name in (
-            "workspace_read_file", "workspace_write_file",
-            "workspace_grep", "workspace_list_dir",
-        )
-        # Paths starting with these prefixes are workspace-root relative, not repo-relative
-        _WORKSPACE_ROOT_PREFIXES = ("repos/", "artifacts/", "content/", "reports/", "logs/", "deliverables/")
-        param_path = parameters.get("path", "")
         param_cwd = parameters.get("cwd", "")
-        path_is_workspace_root = any(param_path.startswith(p) for p in _WORKSPACE_ROOT_PREFIXES)
-        if (needs_repo or needs_path_prefix) and not param_cwd and not path_is_workspace_root:
+        if needs_repo and not param_cwd:
             repo_dir = await resolve_repo_dir(client)
 
         if tool_name == "workspace_read_file":
             path = parameters.get("path", "")
             if not path:
                 return {"success": False, "error": "path is required", "tool": tool_name}
-            # Auto-prefix with repo dir if path is relative and doesn't already include it
-            if repo_dir and not path.startswith("repos/") and not path.startswith("/"):
-                path = f"{repo_dir}/{path}"
             result = await client.read_file(path)
 
         elif tool_name == "workspace_write_file":
@@ -233,26 +225,19 @@ async def execute_workspace_action(
                 return {"success": False, "error": "path is required", "tool": tool_name}
             if content is None:
                 return {"success": False, "error": "content is required", "tool": tool_name}
-            if repo_dir and not path.startswith("repos/") and not path.startswith("/"):
-                path = f"{repo_dir}/{path}"
             result = await client.write_file(path, content)
 
         elif tool_name == "workspace_list_dir":
             path = parameters.get("path", ".")
-            if repo_dir and path == ".":
-                path = repo_dir
             result = await client.list_dir(path)
 
         elif tool_name == "workspace_grep":
             pattern = parameters.get("pattern", "")
             if not pattern:
                 return {"success": False, "error": "pattern is required", "tool": tool_name}
-            grep_path = parameters.get("path", ".")
-            if repo_dir and grep_path == ".":
-                grep_path = repo_dir
             result = await client.grep(
                 pattern=pattern,
-                path=grep_path,
+                path=parameters.get("path", "."),
                 include=parameters.get("include", ""),
                 max_results=parameters.get("max_results", 50),
             )
