@@ -319,6 +319,13 @@ async def _boot_phase_1_core():
         except Exception as e:
             logger.warning("System settings seed: %s", e)
 
+        # Seed credential types (schema changes ship with code)
+        try:
+            from core.database.load_seed_data import load_seed_data
+            load_seed_data(load_credentials=True, load_platform_defaults=False)
+        except Exception as e:
+            logger.warning("Credential types seed: %s", e)
+
         logger.info("Boot seeds completed (leader worker)")
 
 
