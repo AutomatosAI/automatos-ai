@@ -265,22 +265,24 @@ async def list_connections(
 @router.get("/linkedin/test-upload-init")
 async def test_linkedin_upload_init():
     """Smoke test: call LinkedIn initializeUpload directly (no Composio).
-    Verifies OAuth token + API version work without running a playbook."""
+    Verifies credential store + OAuth token + API version work."""
     import httpx as _httpx
-    from core.composio.linkedin_image_workaround import _get_access_token, _initialize_image_upload
-    from config import config as _cfg
+    from core.composio.linkedin_image_workaround import (
+        _get_access_token, _initialize_image_upload, _load_linkedin_credentials,
+    )
 
     try:
+        creds = _load_linkedin_credentials()
+        org_urn = creds.get("organization_urn", "")
         async with _httpx.AsyncClient(timeout=15) as http:
             token = await _get_access_token(http)
-            upload_url, image_urn = await _initialize_image_upload(
-                http, token, _cfg.LINKEDIN_ORG_URN,
-            )
+            upload_url, image_urn = await _initialize_image_upload(http, token, org_urn)
             return {
                 "ok": bool(upload_url and image_urn),
                 "upload_url": (upload_url or "")[:80] + "..." if upload_url else None,
                 "image_urn": image_urn,
-                "token_preview": f"{token[:4]}...{token[-4:]}" if token else None,
+                "org_urn": org_urn,
+                "credential_found": True,
             }
     except Exception as e:
         return {"ok": False, "error": str(e)}

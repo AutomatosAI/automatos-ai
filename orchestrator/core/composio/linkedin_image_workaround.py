@@ -5,6 +5,10 @@ Composio cannot upload images to LinkedIn (May 2026 — issues #3094, #3113, #32
 This module bypasses Composio and calls LinkedIn's Community Management API directly
 for image posts, using the same flow as Postiz (github.com/gitroomhq/postiz-app).
 
+Credentials are loaded from the platform's credential store (PRD-18) — the same
+system used for PostgreSQL, OpenAI, and MCP server credentials. Users add a
+"LinkedIn Community Management OAuth2 API" credential via System Settings.
+
 Text-only posts still go through Composio. This module only activates when
 the agent passes image file references (media_urls, images, etc.).
 
@@ -16,8 +20,7 @@ REMOVAL CHECKLIST (when Composio ships a working image post action):
   1. Delete this file
   2. Remove the hook in tool_executor.py  (search: linkedin_image_workaround)
   3. Remove the hook in recipe_executor.py (search: linkedin_image_workaround)
-  4. Remove LINKEDIN_* env vars from config.py
-  5. Update SKILL.md to use the native Composio action
+  4. Update SKILL.md to use the native Composio action
 """
 
 import asyncio
@@ -31,13 +34,13 @@ from uuid import UUID
 
 import httpx
 
-from config import config
 from core.workspace_client import WorkspaceClient
 
 logger = logging.getLogger(__name__)
 
 LINKEDIN_API = "https://api.linkedin.com"
 LINKEDIN_VERSION = "202601"
+CREDENTIAL_TYPE_NAME = "linkedInCommunityManagementOAuth2Api"
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
 
 _RESTLI_HEADERS = {
@@ -47,7 +50,63 @@ _RESTLI_HEADERS = {
 
 _cached_token: Optional[str] = None
 _cached_token_expires: float = 0
+_cached_creds: Optional[Dict[str, Any]] = None
 _token_lock = asyncio.Lock()
+
+
+# ---------------------------------------------------------------------------
+# Credential resolution via platform credential store
+# ---------------------------------------------------------------------------
+
+def _load_linkedin_credentials() -> Dict[str, Any]:
+    """Load LinkedIn credentials from the platform credential store.
+
+    Returns dict with keys: client_id, client_secret, access_token,
+    refresh_token (optional), organization_urn.
+    """
+    global _cached_creds
+    if _cached_creds:
+        return _cached_creds
+
+    from core.database.database import SessionLocal
+    from core.credentials.service import CredentialStore
+    from core.models.credentials import CredentialType, Credential
+
+    db = SessionLocal()
+    try:
+        cred_type = db.query(CredentialType).filter(
+            CredentialType.name == CREDENTIAL_TYPE_NAME
+        ).first()
+        if not cred_type:
+            raise ValueError(
+                f"Credential type '{CREDENTIAL_TYPE_NAME}' not found. "
+                "Run seed_credential_types to add it."
+            )
+
+        cred = db.query(Credential).filter(
+            Credential.credential_type_id == cred_type.id,
+            Credential.is_active == True,
+        ).first()
+        if not cred:
+            raise ValueError(
+                "No active LinkedIn Community Management credential found. "
+                "Add one in System Settings > Credentials."
+            )
+
+        store = CredentialStore(db)
+        data = store.get_decrypted_credential(
+            cred.id,
+            service_name="linkedin_image_post",
+        )
+        if not data.get("access_token"):
+            raise ValueError("LinkedIn credential missing access_token field")
+        if not data.get("organization_urn"):
+            raise ValueError("LinkedIn credential missing organization_urn field")
+
+        _cached_creds = data
+        return data
+    finally:
+        db.close()
 
 
 # ---------------------------------------------------------------------------
@@ -56,29 +115,33 @@ _token_lock = asyncio.Lock()
 
 async def _get_access_token(http: httpx.AsyncClient) -> str:
     """Return a valid LinkedIn access token, refreshing if needed."""
-    global _cached_token, _cached_token_expires
+    global _cached_token, _cached_token_expires, _cached_creds
 
     async with _token_lock:
         if _cached_token and time.time() < _cached_token_expires:
             return _cached_token
 
-        if config.LINKEDIN_ACCESS_TOKEN and not _cached_token:
-            _cached_token = config.LINKEDIN_ACCESS_TOKEN
+        creds = _load_linkedin_credentials()
+
+        if not _cached_token:
+            _cached_token = creds["access_token"]
             _cached_token_expires = time.time() + 86400
             return _cached_token
 
-        if not config.LINKEDIN_REFRESH_TOKEN:
+        refresh_token = creds.get("refresh_token")
+        if not refresh_token:
             raise ValueError(
-                "LINKEDIN_REFRESH_TOKEN not set — cannot authenticate with LinkedIn."
+                "LinkedIn access token may be expired and no refresh_token is set. "
+                "Update the credential in System Settings > Credentials."
             )
 
         resp = await http.post(
             "https://www.linkedin.com/oauth/v2/accessToken",
             data={
                 "grant_type": "refresh_token",
-                "refresh_token": config.LINKEDIN_REFRESH_TOKEN,
-                "client_id": config.LINKEDIN_CLIENT_ID,
-                "client_secret": config.LINKEDIN_CLIENT_SECRET,
+                "refresh_token": refresh_token,
+                "client_id": creds["client_id"],
+                "client_secret": creds["client_secret"],
             },
             headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
@@ -89,6 +152,7 @@ async def _get_access_token(http: httpx.AsyncClient) -> str:
         data = resp.json()
         _cached_token = data["access_token"]
         _cached_token_expires = time.time() + data.get("expires_in", 3600) - 60
+        _cached_creds = None
         logger.info("[LinkedIn] Access token refreshed, expires in %ds", data.get("expires_in", 0))
         return _cached_token
 
@@ -102,7 +166,7 @@ def _auth_headers(token: str) -> Dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# Parameter extraction (reused from original workaround)
+# Parameter extraction
 # ---------------------------------------------------------------------------
 
 def has_image_params(params: Dict[str, Any]) -> bool:
@@ -146,8 +210,15 @@ def _extract_text(params: Dict[str, Any]) -> str:
 
 
 def _extract_author(params: Dict[str, Any]) -> Optional[str]:
-    """Pull author URN, defaulting to configured org page."""
-    return params.get("author") or params.get("owner") or config.LINKEDIN_ORG_URN or None
+    """Pull author URN, defaulting to the credential's organization_urn."""
+    explicit = params.get("author") or params.get("owner")
+    if explicit:
+        return explicit
+    try:
+        creds = _load_linkedin_credentials()
+        return creds.get("organization_urn")
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -228,9 +299,7 @@ async def _initialize_image_upload(
         return None, None
 
     value = resp.json().get("value", {})
-    upload_url = value.get("uploadUrl")
-    image_urn = value.get("image")
-    return upload_url, image_urn
+    return value.get("uploadUrl"), value.get("image")
 
 
 async def _upload_image_bytes(
@@ -259,9 +328,7 @@ async def _create_post(
     text: str,
     image_urns: List[str],
 ) -> Tuple[bool, str, Optional[str]]:
-    """Step 3: Create the LinkedIn post with image URNs.
-    Returns (success, post_id_or_error, safe_error_msg).
-    """
+    """Step 3: Create the LinkedIn post with image URNs."""
     if len(image_urns) == 1:
         content_block = {"media": {"id": image_urns[0]}}
     else:
@@ -292,15 +359,14 @@ async def _create_post(
     )
 
     if resp.status_code in (200, 201):
-        post_id = resp.headers.get("x-restli-id", "")
-        return True, post_id, None
+        return True, resp.headers.get("x-restli-id", ""), None
     else:
         logger.debug("[LinkedIn] createPost error body: %s", resp.text[:300])
         return False, "", f"LinkedIn API returned {resp.status_code}"
 
 
 # ---------------------------------------------------------------------------
-# Main entry point — same signature as before so hooks don't change
+# Main entry point — same signature so hooks don't change
 # ---------------------------------------------------------------------------
 
 async def execute_linkedin_image_post(
@@ -314,11 +380,11 @@ async def execute_linkedin_image_post(
     Bypasses Composio entirely for image posts. Uses LinkedIn's Community
     Management API directly: initializeUpload -> PUT binary -> createPost.
 
-    The composio_client and entity_id params are accepted but unused —
-    kept for interface compatibility with the hooks in tool_executor.py
-    and recipe_executor.py.
+    Credentials are loaded from the platform credential store — users add
+    a "LinkedIn Community Management OAuth2 API" credential via Settings.
 
-    Returns a result dict matching ComposioClient.execute_action() shape.
+    The composio_client and entity_id params are accepted but unused —
+    kept for interface compatibility with the hooks.
     """
     image_paths = _extract_image_paths(params)
     text = _extract_text(params)
@@ -329,7 +395,7 @@ async def execute_linkedin_image_post(
     if not text:
         return {"success": False, "data": None, "error": "No post text found in params"}
     if not author:
-        return {"success": False, "data": None, "error": "No LinkedIn author URN configured"}
+        return {"success": False, "data": None, "error": "No LinkedIn author URN configured — add a LinkedIn credential in System Settings"}
 
     ws_client = WorkspaceClient(workspace_id)
     image_urns: List[str] = []
