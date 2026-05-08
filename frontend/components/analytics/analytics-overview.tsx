@@ -143,36 +143,62 @@ export function AnalyticsOverview({ days }: OverviewProps) {
             <CardTitle className="flex items-center gap-2"><Activity className="h-5 w-5" /> Heartbeat Activity</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-4 gap-4">
-              <div className="text-center p-3 rounded-lg bg-muted/50">
-                <p className="text-xl font-bold">{heartbeatStats.total_heartbeats}</p>
-                <p className="text-xs text-muted-foreground">Today</p>
-              </div>
-              <div className="text-center p-3 rounded-lg bg-muted/50">
-                <p className="text-xl font-bold">{heartbeatStats.successes}</p>
-                <p className="text-xs text-muted-foreground">Successes</p>
-              </div>
-              <div className="text-center p-3 rounded-lg bg-muted/50">
-                <p className="text-xl font-bold">{heartbeatStats.errors}</p>
-                <p className="text-xs text-muted-foreground">Errors</p>
-              </div>
-              <div className="text-center p-3 rounded-lg bg-muted/50">
-                <p className="text-xl font-bold">{heartbeatStats.total_tokens?.toLocaleString() || 0}</p>
-                <p className="text-xs text-muted-foreground">Tokens</p>
-              </div>
+            <div className="grid grid-cols-4 gap-3">
+              {[
+                { label: 'Today', value: heartbeatStats.total_heartbeats ?? 0 },
+                { label: 'Successes', value: heartbeatStats.successes ?? 0, accent: (heartbeatStats.successes ?? 0) > 0 ? 'text-green-400' : '' },
+                { label: 'Errors', value: heartbeatStats.errors ?? 0, accent: (heartbeatStats.errors ?? 0) === 0 ? 'text-muted-foreground' : 'text-red-400' },
+                { label: 'Tokens', value: heartbeatStats.total_tokens?.toLocaleString() || 0 },
+              ].map((stat) => (
+                <div
+                  key={stat.label}
+                  className="rounded-xl px-4 py-3 bg-muted/30 border border-border/40"
+                >
+                  <p className={`text-xl font-semibold tabular-nums ${stat.accent ?? ''}`}>{stat.value}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{stat.label}</p>
+                </div>
+              ))}
             </div>
-            {heartbeatStats.recent_events?.length > 0 && (
-              <div className="mt-4 space-y-2">
-                {heartbeatStats.recent_events.slice(0, 5).map((evt: any, i: number) => (
-                  <div key={i} className="flex items-center gap-2 text-sm p-2 rounded bg-muted/30">
-                    <span className={`h-2 w-2 rounded-full ${evt.status === 'success' ? 'bg-green-500' : 'bg-red-500'}`} />
-                    <span className="text-muted-foreground">{evt.source_type}</span>
-                    <span className="flex-1 truncate">{evt.source_id}</span>
-                    <span className="text-xs text-muted-foreground">{new Date(evt.created_at).toLocaleTimeString()}</span>
-                  </div>
-                ))}
-              </div>
-            )}
+            {heartbeatStats.recent_events?.length > 0 && (() => {
+              // Group consecutive pings from the same source — a single
+              // chatty agent shouldn't fill the panel with identical rows.
+              type Event = { source_type: string; source_id: string; status: string; created_at: string }
+              const events: Event[] = heartbeatStats.recent_events.slice(0, 25)
+              const groups: Array<{ key: string; type: string; id: string; count: number; lastAt: string; statuses: string[] }> = []
+              for (const evt of events) {
+                const key = `${evt.source_type}::${evt.source_id}`
+                const last = groups[groups.length - 1]
+                if (last && last.key === key) {
+                  last.count += 1
+                  last.lastAt = evt.created_at
+                  last.statuses.push(evt.status)
+                } else {
+                  groups.push({ key, type: evt.source_type, id: evt.source_id, count: 1, lastAt: evt.created_at, statuses: [evt.status] })
+                }
+              }
+              return (
+                <div className="mt-4 space-y-1.5">
+                  {groups.slice(0, 5).map((g) => {
+                    const allOk = g.statuses.every((s) => s === 'success')
+                    return (
+                      <div key={g.key + g.lastAt} className="flex items-center gap-3 text-sm py-2 border-t border-border/30 first:border-t-0">
+                        <span className={`h-2 w-2 rounded-full shrink-0 ${allOk ? 'bg-green-500 ring-4 ring-green-500/10' : 'bg-red-500 ring-4 ring-red-500/10'}`} />
+                        <span className="text-muted-foreground text-xs uppercase tracking-wide">{g.type}</span>
+                        <span className="flex-1 truncate font-medium">{g.id}</span>
+                        {g.count > 1 && (
+                          <span className="text-[11px] px-2 py-0.5 rounded-full bg-secondary/40 border border-border/40 text-muted-foreground">
+                            {g.count} pings
+                          </span>
+                        )}
+                        <span className="text-xs text-muted-foreground tabular-nums shrink-0">
+                          {new Date(g.lastAt).toLocaleTimeString()}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            })()}
           </CardContent>
         </Card>
       </motion.div>
