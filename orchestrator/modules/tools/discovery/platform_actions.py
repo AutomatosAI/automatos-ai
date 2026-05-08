@@ -20,6 +20,7 @@ from .actions_monitoring import register_monitoring_actions
 from .actions_search import register_search_actions
 from .actions_tools_llms import register_tools_llms_actions
 from .actions_marketplace import register_marketplace_actions
+from .actions_skills import register_skills_actions
 from .actions_assignments import register_assignments_actions
 from .actions_board_tasks import register_board_task_actions
 from .actions_scheduling import register_scheduling_actions
@@ -44,6 +45,7 @@ def register_all_actions(registry: ActionRegistry) -> None:
     register_search_actions(registry)
     register_tools_llms_actions(registry)
     register_marketplace_actions(registry)
+    register_skills_actions(registry)
     register_assignments_actions(registry)
     register_board_task_actions(registry)
     register_scheduling_actions(registry)
