@@ -72,6 +72,8 @@ class WorkspaceSkillOut(BaseModel):
     origin: str = "marketplace"
     # If origin='workspace' and this skill was forked, the marketplace id it came from.
     forked_from_skill_id: Optional[int] = None
+    # Number of agents in this workspace that have this skill assigned.
+    assigned_agent_count: int = 0
 
     class Config:
         from_attributes = True
@@ -138,11 +140,28 @@ async def list_workspace_skills(
     _assert_workspace_access(ctx, workspace_id)
 
     try:
-        from core.models.core import Skill
+        from sqlalchemy import func
+        from core.models.core import Agent, Skill, agent_skills as agent_skills_table
         from core.models.marketplace_plugins import WorkspaceEnabledSkill
 
         items: List[WorkspaceSkillOut] = []
         seen_skill_ids: set[int] = set()
+
+        # Pre-compute assignment counts per skill_id, scoped to agents in this workspace,
+        # so the "assigned / unassigned" filter and the remove-when-unused affordance
+        # don't need an N+1 round trip from the UI.
+        workspace_agent_ids_subq = (
+            db.query(Agent.id)
+            .filter(Agent.workspace_id == workspace_id)
+            .subquery()
+        )
+        assignment_rows = (
+            db.query(agent_skills_table.c.skill_id, func.count().label("agent_count"))
+            .filter(agent_skills_table.c.agent_id.in_(workspace_agent_ids_subq))
+            .group_by(agent_skills_table.c.skill_id)
+            .all()
+        )
+        assigned_count_by_skill: Dict[int, int] = {row.skill_id: row.agent_count for row in assignment_rows}
 
         # Workspace-owned skills (forked or user-created)
         owned_skills = (
@@ -169,6 +188,7 @@ async def list_workspace_skills(
                 enabled_at=skill.created_at.isoformat() if skill.created_at else None,
                 origin="workspace",
                 forked_from_skill_id=metadata.get("forked_from_skill_id"),
+                assigned_agent_count=assigned_count_by_skill.get(skill.id, 0),
             ))
             seen_skill_ids.add(skill.id)
 
@@ -198,6 +218,7 @@ async def list_workspace_skills(
                 skill_source=skill.skill_source,
                 enabled_at=wes.enabled_at.isoformat() if wes.enabled_at else None,
                 origin="marketplace",
+                assigned_agent_count=assigned_count_by_skill.get(skill.id, 0),
             ))
 
         return {"items": [item.model_dump() for item in items]}

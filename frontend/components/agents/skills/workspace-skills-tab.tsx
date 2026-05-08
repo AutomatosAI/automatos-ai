@@ -55,6 +55,7 @@ interface WorkspaceSkillRow {
   enabled_at: string | null
   origin: 'marketplace' | 'workspace'
   forked_from_skill_id: number | null
+  assigned_agent_count: number
 }
 
 interface Props {
@@ -64,7 +65,7 @@ interface Props {
 export function WorkspaceSkillsTab({ viewMode = 'grid' }: Props) {
   const { workspace } = useWorkspace()
   const { toast } = useToast()
-  const { listWorkspaceSkills, deleteWorkspaceSkill } = useSkillsApi()
+  const { listWorkspaceSkills, deleteWorkspaceSkill, disableWorkspaceSkill } = useSkillsApi()
   const { data: iconMappings = {} } = useSystemIcons()
 
   const resolveIconName = useCallback(
@@ -76,6 +77,7 @@ export function WorkspaceSkillsTab({ viewMode = 'grid' }: Props) {
   const [skills, setSkills] = useState<WorkspaceSkillRow[]>([])
   const [search, setSearch] = useState('')
   const [originFilter, setOriginFilter] = useState<'all' | 'workspace' | 'marketplace'>('all')
+  const [assignmentFilter, setAssignmentFilter] = useState<'all' | 'assigned' | 'unassigned'>('all')
   const [loading, setLoading] = useState(true)
 
   const [editorOpen, setEditorOpen] = useState(false)
@@ -106,6 +108,8 @@ export function WorkspaceSkillsTab({ viewMode = 'grid' }: Props) {
     const q = search.trim().toLowerCase()
     return skills.filter((s) => {
       if (originFilter !== 'all' && s.origin !== originFilter) return false
+      if (assignmentFilter === 'assigned' && s.assigned_agent_count === 0) return false
+      if (assignmentFilter === 'unassigned' && s.assigned_agent_count > 0) return false
       if (!q) return true
       return (
         s.name.toLowerCase().includes(q) ||
@@ -113,7 +117,7 @@ export function WorkspaceSkillsTab({ viewMode = 'grid' }: Props) {
         (s.tags || []).some((t) => t.toLowerCase().includes(q))
       )
     })
-  }, [skills, search, originFilter])
+  }, [skills, search, originFilter, assignmentFilter])
 
   const openViewer = useCallback((skillId: number, mode: SkillEditorMode) => {
     setEditorSkillId(skillId)
@@ -137,20 +141,26 @@ export function WorkspaceSkillsTab({ viewMode = 'grid' }: Props) {
   const confirmRemove = useCallback(async () => {
     if (!removeTarget || !workspace?.id) return
     setRemoving(true)
-    const ok = await deleteWorkspaceSkill(workspace.id, removeTarget.skill_id)
+    // Workspace-owned skills are deleted entirely; marketplace skills are
+    // disabled (junction dropped — original stays in the catalogue).
+    const ok = removeTarget.origin === 'workspace'
+      ? await deleteWorkspaceSkill(workspace.id, removeTarget.skill_id)
+      : await disableWorkspaceSkill(workspace.id, removeTarget.skill_id)
     setRemoving(false)
     if (ok) {
       setRemoveTarget(null)
       loadSkills()
     }
-  }, [removeTarget, workspace?.id, deleteWorkspaceSkill, loadSkills])
+  }, [removeTarget, workspace?.id, deleteWorkspaceSkill, disableWorkspaceSkill, loadSkills])
 
   const ownedCount = useMemo(() => skills.filter((s) => s.origin === 'workspace').length, [skills])
   const marketplaceCount = useMemo(() => skills.filter((s) => s.origin === 'marketplace').length, [skills])
+  const assignedCount = useMemo(() => skills.filter((s) => s.assigned_agent_count > 0).length, [skills])
+  const unassignedCount = useMemo(() => skills.filter((s) => s.assigned_agent_count === 0).length, [skills])
 
   return (
     <div className="space-y-4">
-      {/* Header row */}
+      {/* Header row: search + new */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <div className="relative flex-1 min-w-[220px] max-w-md">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -162,38 +172,63 @@ export function WorkspaceSkillsTab({ viewMode = 'grid' }: Props) {
           />
         </div>
 
-        <div className="flex gap-2">
-          <Button
-            variant={originFilter === 'all' ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setOriginFilter('all')}
-          >
-            All <span className="ml-1.5 text-xs text-muted-foreground">{skills.length}</span>
-          </Button>
-          <Button
-            variant={originFilter === 'workspace' ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setOriginFilter('workspace')}
-          >
-            <GitBranch className="mr-1.5 h-3.5 w-3.5" />
-            Yours <span className="ml-1.5 text-xs text-muted-foreground">{ownedCount}</span>
-          </Button>
-          <Button
-            variant={originFilter === 'marketplace' ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setOriginFilter('marketplace')}
-          >
-            <ShoppingBag className="mr-1.5 h-3.5 w-3.5" />
-            Marketplace <span className="ml-1.5 text-xs text-muted-foreground">{marketplaceCount}</span>
-          </Button>
-        </div>
-
         <div className="ml-auto">
           <Button onClick={openNew}>
             <Plus className="mr-2 h-4 w-4" />
             New Skill
           </Button>
         </div>
+      </div>
+
+      {/* Filter row */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs uppercase tracking-wide text-muted-foreground mr-1">Origin</span>
+        <Button
+          variant={originFilter === 'all' ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => setOriginFilter('all')}
+        >
+          All <span className="ml-1.5 text-xs text-muted-foreground">{skills.length}</span>
+        </Button>
+        <Button
+          variant={originFilter === 'workspace' ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => setOriginFilter('workspace')}
+        >
+          <GitBranch className="mr-1.5 h-3.5 w-3.5" />
+          Yours <span className="ml-1.5 text-xs text-muted-foreground">{ownedCount}</span>
+        </Button>
+        <Button
+          variant={originFilter === 'marketplace' ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => setOriginFilter('marketplace')}
+        >
+          <ShoppingBag className="mr-1.5 h-3.5 w-3.5" />
+          Marketplace <span className="ml-1.5 text-xs text-muted-foreground">{marketplaceCount}</span>
+        </Button>
+
+        <span className="ml-3 text-xs uppercase tracking-wide text-muted-foreground mr-1">Assignment</span>
+        <Button
+          variant={assignmentFilter === 'all' ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => setAssignmentFilter('all')}
+        >
+          All
+        </Button>
+        <Button
+          variant={assignmentFilter === 'assigned' ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => setAssignmentFilter('assigned')}
+        >
+          Assigned <span className="ml-1.5 text-xs text-muted-foreground">{assignedCount}</span>
+        </Button>
+        <Button
+          variant={assignmentFilter === 'unassigned' ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => setAssignmentFilter('unassigned')}
+        >
+          Unassigned <span className="ml-1.5 text-xs text-muted-foreground">{unassignedCount}</span>
+        </Button>
       </div>
 
       {/* Cards or list */}
@@ -203,7 +238,11 @@ export function WorkspaceSkillsTab({ viewMode = 'grid' }: Props) {
         <EmptyState
           hasAny={skills.length > 0}
           onCreate={openNew}
-          searching={search.trim().length > 0 || originFilter !== 'all'}
+          searching={
+            search.trim().length > 0 ||
+            originFilter !== 'all' ||
+            assignmentFilter !== 'all'
+          }
         />
       ) : viewMode === 'list' ? (
         <div className="space-y-2">
@@ -243,11 +282,15 @@ export function WorkspaceSkillsTab({ viewMode = 'grid' }: Props) {
       <AlertDialog open={!!removeTarget} onOpenChange={(open) => !open && setRemoveTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Remove from workspace?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {removeTarget?.origin === 'workspace' ? 'Delete from workspace?' : 'Remove from workspace?'}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              {removeTarget?.forked_from_skill_id
-                ? `Removes your forked copy of "${removeTarget?.name}" from this workspace and unassigns it from any agents. The original marketplace skill stays available to re-install.`
-                : `Removes "${removeTarget?.name}" from this workspace and unassigns it from any agents. This only affects your workspace — nothing changes for the marketplace or other users.`}
+              {removeTarget?.origin === 'workspace'
+                ? removeTarget?.forked_from_skill_id
+                    ? `Deletes your forked copy of "${removeTarget?.name}" from this workspace. The original marketplace skill stays available to re-install. This cannot be undone.`
+                    : `Deletes "${removeTarget?.name}" from this workspace permanently. Nothing in the marketplace or other workspaces is affected. This cannot be undone.`
+                : `Removes "${removeTarget?.name}" from this workspace. The marketplace original stays in the catalogue and can be re-installed any time. Other workspaces are unaffected.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -257,7 +300,7 @@ export function WorkspaceSkillsTab({ viewMode = 'grid' }: Props) {
               disabled={removing}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              Remove
+              {removeTarget?.origin === 'workspace' ? 'Delete' : 'Remove'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -280,6 +323,8 @@ function SkillCard({
   onRemove: () => void
 }) {
   const isWorkspace = skill.origin === 'workspace'
+  const canRemove = skill.assigned_agent_count === 0
+  const removeLabel = isWorkspace ? 'Delete from workspace' : 'Remove from workspace'
   return (
     <Card className="glass-card group transition-all hover:border-primary/40">
       <CardContent className="p-5 space-y-3">
@@ -321,6 +366,14 @@ function SkillCard({
           <span className="tabular-nums">~{skill.estimated_tokens.toLocaleString()} tok</span>
         </div>
 
+        <div className="flex items-center justify-between text-xs">
+          <span className={skill.assigned_agent_count > 0 ? 'text-foreground' : 'text-muted-foreground'}>
+            {skill.assigned_agent_count > 0
+              ? `Assigned to ${skill.assigned_agent_count} ${skill.assigned_agent_count === 1 ? 'agent' : 'agents'}`
+              : 'Unassigned'}
+          </span>
+        </div>
+
         <div className="flex gap-2 pt-1">
           <Button variant="outline" size="sm" className="flex-1" onClick={onView}>
             <Eye className="mr-1.5 h-3.5 w-3.5" />
@@ -330,14 +383,14 @@ function SkillCard({
             <Pencil className="mr-1.5 h-3.5 w-3.5" />
             {isWorkspace ? 'Edit' : 'Fork & edit'}
           </Button>
-          {isWorkspace && (
+          {canRemove && (
             <Button
               variant="outline"
               size="icon"
               className="h-9 w-9 shrink-0 text-destructive hover:text-destructive hover:border-destructive/50"
               onClick={onRemove}
-              aria-label="Remove from workspace"
-              title="Remove from workspace"
+              aria-label={removeLabel}
+              title={removeLabel}
             >
               <Trash2 className="h-3.5 w-3.5" />
             </Button>
@@ -362,6 +415,8 @@ function SkillRow({
   onRemove: () => void
 }) {
   const isWorkspace = skill.origin === 'workspace'
+  const canRemove = skill.assigned_agent_count === 0
+  const removeLabel = isWorkspace ? 'Delete from workspace' : 'Remove from workspace'
   return (
     <div className="glass-card group flex items-center gap-4 p-3 transition-colors hover:border-primary/40">
       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
@@ -393,6 +448,13 @@ function SkillRow({
           <p className="text-xs text-muted-foreground truncate mt-0.5">{skill.description}</p>
         )}
       </div>
+      <div className="hidden shrink-0 text-xs sm:block">
+        <span className={skill.assigned_agent_count > 0 ? 'text-foreground' : 'text-muted-foreground'}>
+          {skill.assigned_agent_count > 0
+            ? `${skill.assigned_agent_count} ${skill.assigned_agent_count === 1 ? 'agent' : 'agents'}`
+            : 'Unassigned'}
+        </span>
+      </div>
       <div className="hidden shrink-0 text-xs text-muted-foreground sm:block">
         {skill.category ?? 'Uncategorised'}
       </div>
@@ -406,12 +468,13 @@ function SkillRow({
         <Button variant="ghost" size="sm" onClick={onEdit} aria-label={isWorkspace ? 'Edit' : 'Fork & edit'}>
           <Pencil className="h-4 w-4" />
         </Button>
-        {isWorkspace && (
+        {canRemove && (
           <Button
             variant="ghost"
             size="sm"
             onClick={onRemove}
-            aria-label="Remove from workspace"
+            aria-label={removeLabel}
+            title={removeLabel}
             className="text-destructive hover:text-destructive"
           >
             <Trash2 className="h-4 w-4" />
