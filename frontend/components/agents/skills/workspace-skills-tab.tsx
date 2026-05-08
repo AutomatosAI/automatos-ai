@@ -75,6 +75,7 @@ export function WorkspaceSkillsTab({ viewMode = 'grid' }: Props) {
   )
 
   const [skills, setSkills] = useState<WorkspaceSkillRow[]>([])
+  const [marketplaceTotal, setMarketplaceTotal] = useState(0)
   const [search, setSearch] = useState('')
   const [originFilter, setOriginFilter] = useState<'all' | 'workspace' | 'marketplace'>('all')
   const [assignmentFilter, setAssignmentFilter] = useState<'all' | 'assigned' | 'unassigned'>('all')
@@ -91,8 +92,9 @@ export function WorkspaceSkillsTab({ viewMode = 'grid' }: Props) {
     if (!workspace?.id) return
     setLoading(true)
     try {
-      const items = await listWorkspaceSkills(workspace.id)
-      setSkills(items as WorkspaceSkillRow[])
+      const result = await listWorkspaceSkills(workspace.id)
+      setSkills(result.items as WorkspaceSkillRow[])
+      setMarketplaceTotal(result.marketplace_total ?? 0)
     } catch (err: any) {
       toast({ title: 'Failed to load skills', description: err.message, variant: 'destructive' })
     } finally {
@@ -202,9 +204,13 @@ export function WorkspaceSkillsTab({ viewMode = 'grid' }: Props) {
           variant={originFilter === 'marketplace' ? 'default' : 'outline'}
           size="sm"
           onClick={() => setOriginFilter('marketplace')}
+          title={`${marketplaceCount} marketplace skills enabled for this workspace${marketplaceTotal ? ` (catalogue has ${marketplaceTotal})` : ''}`}
         >
           <ShoppingBag className="mr-1.5 h-3.5 w-3.5" />
-          Marketplace <span className="ml-1.5 text-xs text-muted-foreground">{marketplaceCount}</span>
+          Marketplace
+          <span className="ml-1.5 text-xs text-muted-foreground">
+            {marketplaceTotal > 0 ? `${marketplaceCount} of ${marketplaceTotal}` : marketplaceCount}
+          </span>
         </Button>
 
         <span className="ml-3 text-xs uppercase tracking-wide text-muted-foreground mr-1">Assignment</span>
