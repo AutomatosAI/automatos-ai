@@ -1,8 +1,9 @@
 'use client'
 
-import { useCallback, useRef } from 'react'
+import { useCallback, useMemo } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import {
+  ArrowLeft,
   Loader2,
   LayoutGrid,
   FileText,
@@ -12,12 +13,19 @@ import {
 
 import { MainLayout } from '@/components/layout/main-layout'
 import { PageHeader, FilterTabs, TabsContent } from '@/components/shared'
-import { CreatedToday } from '@/components/deliverables/created-today'
+import { Button } from '@/components/ui/button'
+import { OutputsFeed } from '@/components/deliverables/outputs-feed'
 import { DeliverablesBlog } from '@/components/deliverables/deliverables-blogs'
 import { TemplateManager } from '@/components/documents/template-manager'
 import { GalleryView } from '@/components/workspace/gallery-view'
 import { useWorkspace } from '@/components/workspace-provider'
 import { usePageAPI } from '@/hooks/use-page-api'
+import {
+  DEFAULT_FILTERS,
+  FEED_DEFAULT_FILTERS,
+  type FilterState,
+} from '@/hooks/use-deliverables-api'
+import { deliverableLabel, isDeliverableType } from '@/components/icons/deliverable-icon'
 
 type DeliverableTab = 'outputs' | 'blogs' | 'templates'
 
@@ -33,9 +41,24 @@ export default function DeliverablesPage() {
   const { workspace, isLoading } = useWorkspace()
   const searchParams = useSearchParams()
   const router = useRouter()
-  const galleryRef = useRef<HTMLDivElement>(null)
 
   const activeTab = resolveTab(searchParams?.get('tab') ?? null)
+  const artifactTypeParam = searchParams?.get('artifact_type') ?? null
+
+  const drilldownTitle = useMemo(() => {
+    if (artifactTypeParam && isDeliverableType(artifactTypeParam)) {
+      return deliverableLabel(artifactTypeParam)
+    }
+    return null
+  }, [artifactTypeParam])
+
+  const drilldownFilters = useMemo<FilterState>(() => {
+    if (!artifactTypeParam) return DEFAULT_FILTERS
+    return {
+      ...FEED_DEFAULT_FILTERS,
+      artifact_type: artifactTypeParam,
+    }
+  }, [artifactTypeParam])
 
   const handleTabChange = useCallback(
     (value: string) => {
@@ -48,9 +71,9 @@ export default function DeliverablesPage() {
     [router],
   )
 
-  const handleBrowseRecent = useCallback(() => {
-    galleryRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [])
+  const handleBackToFeed = useCallback(() => {
+    router.replace('/deliverables?tab=outputs')
+  }, [router])
 
   return (
     <MainLayout>
@@ -77,11 +100,31 @@ export default function DeliverablesPage() {
             dataTour="deliverables-tabs"
           >
             <TabsContent value="outputs">
-              <div className="mx-auto max-w-[1600px] space-y-6">
-                <CreatedToday onBrowseRecent={handleBrowseRecent} />
-                <div ref={galleryRef}>
-                  <GalleryView workspaceId={workspace.id} />
-                </div>
+              <div className="mx-auto max-w-[1600px]">
+                {drilldownTitle ? (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="gap-1.5 text-muted-foreground hover:text-foreground"
+                        onClick={handleBackToFeed}
+                      >
+                        <ArrowLeft className="h-3.5 w-3.5" />
+                        Back to feed
+                      </Button>
+                      <h2 className="text-sm font-medium text-muted-foreground">
+                        Showing all <span className="text-foreground">{drilldownTitle}</span>
+                      </h2>
+                    </div>
+                    <GalleryView
+                      workspaceId={workspace.id}
+                      initialFilters={drilldownFilters}
+                    />
+                  </div>
+                ) : (
+                  <OutputsFeed />
+                )}
               </div>
             </TabsContent>
 

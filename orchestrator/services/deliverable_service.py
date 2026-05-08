@@ -311,6 +311,7 @@ class DeliverableService:
         *,
         artifact_type: Optional[str] = None,
         source_type: Optional[str] = None,
+        source_type_exclude: Optional[str] = None,
         agent_id: Optional[int] = None,
         date_from: Optional[str] = None,
         date_to: Optional[str] = None,
@@ -318,7 +319,12 @@ class DeliverableService:
         limit: int = 24,
         offset: int = 0,
     ) -> Dict[str, Any]:
-        """List deliverables with filters. Excludes soft-deleted rows."""
+        """List deliverables with filters. Excludes soft-deleted rows.
+
+        ``source_type_exclude`` is a comma-separated list of source_types to
+        exclude (e.g. ``"heartbeat"``). Used by the redesigned Deliverables
+        feed to keep agent self-status noise out of the main grid.
+        """
         limit = max(1, min(int(limit or 24), 100))
         offset = max(0, int(offset or 0))
 
@@ -331,6 +337,13 @@ class DeliverableService:
         if source_type:
             conditions.append("o.source_type = :source_type")
             params["source_type"] = source_type
+        if source_type_exclude:
+            excluded = [s.strip() for s in source_type_exclude.split(",") if s.strip()]
+            if excluded:
+                placeholders = ", ".join(f":excl_src_{i}" for i in range(len(excluded)))
+                conditions.append(f"o.source_type NOT IN ({placeholders})")
+                for i, s in enumerate(excluded):
+                    params[f"excl_src_{i}"] = s
         if agent_id is not None:
             conditions.append("o.agent_id = :agent_id")
             params["agent_id"] = agent_id
