@@ -162,7 +162,20 @@ export function WorkspaceSkillsTab({ viewMode = 'grid' }: Props) {
 
   return (
     <div className="space-y-4">
-      {/* Header row: search + new */}
+      {/* Page header — unambiguous: this view shows workspace contents only */}
+      <div className="flex flex-wrap items-end justify-between gap-2">
+        <div>
+          <h2 className="text-lg font-semibold leading-tight">Skills in your workspace</h2>
+          <p className="text-xs text-muted-foreground">
+            Everything installed or created here. Use the filters below to triage what's actually wired to an agent.
+          </p>
+        </div>
+        <div className="text-xs text-muted-foreground tabular-nums">
+          {skills.length} {skills.length === 1 ? 'skill' : 'skills'}
+        </div>
+      </div>
+
+      {/* Search + new */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <div className="relative flex-1 min-w-[220px] max-w-md">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -184,7 +197,7 @@ export function WorkspaceSkillsTab({ viewMode = 'grid' }: Props) {
 
       {/* Filter row */}
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs uppercase tracking-wide text-muted-foreground mr-1">Origin</span>
+        <span className="text-xs uppercase tracking-wide text-muted-foreground mr-1">Source</span>
         <Button
           variant={originFilter === 'all' ? 'default' : 'outline'}
           size="sm"
@@ -196,28 +209,31 @@ export function WorkspaceSkillsTab({ viewMode = 'grid' }: Props) {
           variant={originFilter === 'workspace' ? 'default' : 'outline'}
           size="sm"
           onClick={() => setOriginFilter('workspace')}
+          title="Skills you created or forked into this workspace"
         >
           <GitBranch className="mr-1.5 h-3.5 w-3.5" />
-          Yours <span className="ml-1.5 text-xs text-muted-foreground">{ownedCount}</span>
+          Created here <span className="ml-1.5 text-xs text-muted-foreground">{ownedCount}</span>
         </Button>
         <Button
           variant={originFilter === 'marketplace' ? 'default' : 'outline'}
           size="sm"
           onClick={() => setOriginFilter('marketplace')}
-          title={`${marketplaceCount} marketplace skills enabled for this workspace${marketplaceTotal ? ` (catalogue has ${marketplaceTotal})` : ''}`}
+          title={
+            marketplaceTotal > 0
+              ? `${marketplaceCount} installed in this workspace (the marketplace catalogue has ${marketplaceTotal} total)`
+              : `${marketplaceCount} installed in this workspace`
+          }
         >
           <ShoppingBag className="mr-1.5 h-3.5 w-3.5" />
-          Marketplace
-          <span className="ml-1.5 text-xs text-muted-foreground">
-            {marketplaceTotal > 0 ? `${marketplaceCount} of ${marketplaceTotal}` : marketplaceCount}
-          </span>
+          Installed <span className="ml-1.5 text-xs text-muted-foreground">{marketplaceCount}</span>
         </Button>
 
-        <span className="ml-3 text-xs uppercase tracking-wide text-muted-foreground mr-1">Assignment</span>
+        <span className="ml-3 text-xs uppercase tracking-wide text-muted-foreground mr-1">Agent assignment</span>
         <Button
           variant={assignmentFilter === 'all' ? 'default' : 'outline'}
           size="sm"
           onClick={() => setAssignmentFilter('all')}
+          title="Show every skill regardless of agent assignment"
         >
           All
         </Button>
@@ -225,15 +241,17 @@ export function WorkspaceSkillsTab({ viewMode = 'grid' }: Props) {
           variant={assignmentFilter === 'assigned' ? 'default' : 'outline'}
           size="sm"
           onClick={() => setAssignmentFilter('assigned')}
+          title="Skills assigned to one or more agents in this workspace"
         >
-          Assigned <span className="ml-1.5 text-xs text-muted-foreground">{assignedCount}</span>
+          Assigned to agent <span className="ml-1.5 text-xs text-muted-foreground">{assignedCount}</span>
         </Button>
         <Button
           variant={assignmentFilter === 'unassigned' ? 'default' : 'outline'}
           size="sm"
           onClick={() => setAssignmentFilter('unassigned')}
+          title="Skills installed in your workspace but not assigned to any agent"
         >
-          Unassigned <span className="ml-1.5 text-xs text-muted-foreground">{unassignedCount}</span>
+          Not assigned <span className="ml-1.5 text-xs text-muted-foreground">{unassignedCount}</span>
         </Button>
       </div>
 
