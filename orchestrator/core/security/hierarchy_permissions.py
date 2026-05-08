@@ -1,257 +1,336 @@
-"""Hierarchy permissions — PRD-140 Phase 1.
+"""PRD-140 — hierarchy permission helper.
 
-Single helper that decides whether an actor agent may modify a target
-resource based on the org chart (``Agent.reports_to_id``).
+Single chokepoint that says yes/no/why for "actor X wants to make change C
+on target T". Designed to be called from service-layer mutations (the only
+correct enforcement point) and from tool wrappers as a defence in depth.
 
 Defaults are conservative:
 
-  - System agents (``is_system_agent=True``) bypass — Auto / CTO are the
-    workspace authority.
-  - Skills are out of scope at every tier — they affect behaviour beyond
-    one agent and always escalate to Auto/ATLAS (PRD-140 §5.3, Q11).
-  - All other resource types require the target to live inside the
-    actor's reports-to subtree.
-  - Default-deny on anything not explicitly allowed.
+  * Default DENY on broken state — missing manager, cycle in reports_to_id
+    chain, unknown target, deleted/inactive actor.
+  * Default DENY on ambiguity — if the helper cannot decide, the caller
+    must NOT proceed. No "fail open" path.
 
-The helper is consulted from a single dispatch site
-(``PlatformActionExecutor.execute``) so individual action handlers don't
-each have to opt in. A CI audit-grep gate enforces that any new mutating
-``platform_*`` action passes through that dispatcher (no bypass).
+System-agent bypass is **narrowed**: not every ``is_system_agent=True``
+record gets a free pass. Only the specific named system actors registered
+in :data:`SYSTEM_BYPASS_ALLOWLIST` may bypass, and every bypass is recorded
+to ``permission_bypass_log`` (see :mod:`core.security.bypass_audit`).
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Optional
-
-from sqlalchemy import text
-from sqlalchemy.orm import Session
+from typing import Iterable, Optional, Set
+from uuid import UUID
 
 logger = logging.getLogger(__name__)
 
 
-# Resource types we know how to scope. Anything else returns "not_scoped"
-# and the dispatcher falls through to the existing admin/rate-limit gates.
-TARGET_AGENT = "agent"
-TARGET_HEARTBEAT = "heartbeat"
-TARGET_PLAYBOOK = "playbook"
-TARGET_TASK = "task"
-TARGET_SKILL = "skill"
-TARGET_TOOL_ASSIGNMENT = "tool_assignment"
+# ----------------------------------------------------------------- constants
 
-KNOWN_TARGETS = frozenset({
-    TARGET_AGENT,
-    TARGET_HEARTBEAT,
-    TARGET_PLAYBOOK,
-    TARGET_TASK,
-    TARGET_SKILL,
-    TARGET_TOOL_ASSIGNMENT,
-})
+
+# Narrowed bypass allowlist — these specific named actors may bypass the
+# hierarchy. Adding to this list is a security-sensitive change. ``Auto``
+# is the workspace orchestrator (slug auto-{workspace_id}); the others are
+# platform service actors.
+SYSTEM_BYPASS_ALLOWLIST: frozenset[str] = frozenset(
+    {
+        "Auto",                   # workspace orchestrator
+        "HARNESS",                # weekly self-optimisation service actor
+        "platform-admin",         # explicit admin agent
+        "platform-system",        # internal service actor
+    }
+)
+
+# Maximum subtree depth before we treat the chain as broken. Real org
+# trees rarely exceed 6 levels; anything deeper is almost certainly a
+# cycle the visited-set didn't catch (defence in depth).
+MAX_SUBTREE_DEPTH: int = 16
+
+
+# ----------------------------------------------------------------- types
 
 
 @dataclass(frozen=True)
 class PermissionDecision:
-    """Result of a hierarchy permission check.
-
-    ``allowed`` is the only field most callers need. ``reason`` carries a
-    short human-readable explanation suitable for a tool result and for
-    audit / log output. ``escalation_target`` names where the actor
-    should route the request when denied (e.g. Auto's agent id) so the
-    caller can produce a useful error or queue the change for review.
-    """
+    """Result of a permission check. Always inspect ``allowed`` first."""
 
     allowed: bool
     reason: str
-    escalation_target: Optional[str] = None  # "auto", "human", or None
+    bypass: bool = False
+    bypass_kind: Optional[str] = None  # 'system_actor' | 'workspace_owner' | None
+    actor_agent_id: Optional[int] = None
+    actor_name: Optional[str] = None
+    target_type: Optional[str] = None
+    target_id: Optional[str] = None
+    change_type: Optional[str] = None
+    source: Optional[str] = None
 
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-
-def _is_system_agent(db: Session, agent_id: int) -> Optional[bool]:
-    """Return True/False for system flag, or None when the agent is missing."""
-    row = db.execute(
-        text("SELECT is_system_agent FROM agents WHERE id = :id"),
-        {"id": agent_id},
-    ).first()
-    if row is None:
-        return None
-    return bool(row[0])
-
-
-def _subtree_ids(db: Session, root_agent_id: int) -> set[int]:
-    """Return the set of agent IDs that report (transitively) to ``root_agent_id``.
-
-    The root itself is included so an actor can act on its own row when
-    that's the relevant change (e.g. an agent updating its own job title
-    is still constrained to itself).
-    """
-    rows = db.execute(
-        text(
-            """
-            WITH RECURSIVE subtree AS (
-                SELECT id FROM agents WHERE id = :root
-                UNION ALL
-                SELECT a.id
-                FROM agents a
-                JOIN subtree s ON a.reports_to_id = s.id
-            )
-            SELECT id FROM subtree
-            """
-        ),
-        {"root": root_agent_id},
-    ).fetchall()
-    return {row[0] for row in rows}
-
-
-def _agent_owner(db: Session, target_kind: str, target_id) -> Optional[int]:
-    """Resolve a target's owning agent_id for hierarchy checks.
-
-    Returns ``None`` when the target either doesn't exist or has no agent
-    owner — caller should treat as not-scoped (default-deny in this module,
-    falls through to the existing gates above).
-    """
-    if target_id is None:
-        return None
-    if target_kind == TARGET_AGENT:
-        return int(target_id)
-    if target_kind == TARGET_HEARTBEAT:
-        # heartbeat_results is a wide log; the durable per-agent config
-        # lives on the agent row itself. The only valid target_id for a
-        # heartbeat-config change is the owning agent's id.
-        return int(target_id)
-    if target_kind == TARGET_TASK:
-        row = db.execute(
-            text("SELECT assigned_agent_id FROM board_tasks WHERE id = :id"),
-            {"id": int(target_id)},
-        ).first()
-        return int(row[0]) if row and row[0] is not None else None
-    if target_kind == TARGET_PLAYBOOK:
-        # workflow_recipes (PRD-71 canonical name) — owner column varies
-        # historically. Try the modern columns first; fall back to None
-        # so the caller queues the change rather than auto-applying.
-        try:
-            row = db.execute(
-                text(
-                    "SELECT created_by_agent_id FROM workflow_recipes WHERE id = :id"
-                ),
-                {"id": int(target_id)},
-            ).first()
-            if row and row[0] is not None:
-                return int(row[0])
-        except Exception:
-            pass
-        return None
-    if target_kind == TARGET_TOOL_ASSIGNMENT:
-        # Tool assignments target an agent; target_id should be the agent's id.
-        return int(target_id)
-    return None
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
+# ----------------------------------------------------------------- main API
 
 
 def can_actor_modify(
-    db: Session,
+    db,
+    *,
     actor_agent_id: Optional[int],
     target_type: str,
-    target_id,
-    change_type: str = "update",
+    target_id: Optional[str],
+    change_type: str,
+    workspace_id: UUID | str,
+    source: Optional[str] = None,
 ) -> PermissionDecision:
-    """Decide whether ``actor_agent_id`` may perform ``change_type`` on the target.
+    """Decide whether ``actor`` may apply ``change_type`` to ``target``.
 
-    Args:
-        db: Active SQLAlchemy session — used for the recursive subtree
-            query and the system-agent lookup.
-        actor_agent_id: The calling agent's id (``params._agent_id`` from
-            the tool dispatcher). ``None`` means no agent context — e.g.
-            a system call from the heartbeat scheduler — and is treated
-            as system-level (allowed). Callers that want stricter handling
-            should resolve the agent before calling.
-        target_type: One of the TARGET_* constants. Unknown values return
-            ``allowed=False, reason="unknown_target_type"`` so callers
-            can fall back to the existing admin/rate-limit gates.
-        target_id: Identifier for the target. Type varies by target_type
-            (int agent_id, int task_id, etc.). May be ``None`` for create
-            actions where the target doesn't exist yet — those default
-            to the workspace-level gates rather than this helper.
-        change_type: ``"create" | "update" | "delete" | "assign"``. Used
-            for logging / audit; doesn't change the rule today, but the
-            field is here so a future tier can vary the answer per change.
+    Parameters
+    ----------
+    db                : SQLAlchemy session.
+    actor_agent_id    : ID of the agent attempting the change. ``None`` is
+                        treated as an anonymous caller and almost always
+                        denied (only the explicit platform-system flow may
+                        pass with ``None``).
+    target_type       : 'agent' | 'playbook' | 'task' | 'skill' | 'tool' | ...
+    target_id         : ID of the target row (string for UUID tables, int as
+                        string for integer PKs).
+    change_type       : Free-form short verb e.g. 'update', 'delete',
+                        'assign_skill', 'configure_heartbeat'.
+    workspace_id      : Workspace scope — every check is workspace-bound.
+                        Cross-workspace mutations are always denied here.
+    source            : Optional caller identifier for audit ('platform_tool',
+                        'api/agents', 'heartbeat_tick', etc.).
 
-    Returns:
-        PermissionDecision. ``allowed=True`` means the dispatcher should
-        proceed; ``allowed=False`` means the dispatcher should return a
-        permission_denied result and (optionally) queue the change to
-        Auto via ``escalation_target``.
+    Returns
+    -------
+    PermissionDecision (always non-None — never raises for permission state).
     """
-    # No actor → system call (heartbeat scheduler, migration, console).
-    # The platform-level admin / rate-limit gates already cover these.
+    from core.models import Agent
+
+    workspace_id_str = str(workspace_id)
+
+    # --- Anonymous / missing actor: always deny (no ambient authority) ---
     if actor_agent_id is None:
         return PermissionDecision(
-            allowed=True,
-            reason="no_actor_context_assumed_system",
+            allowed=False,
+            reason="anonymous_actor",
+            actor_agent_id=None,
+            target_type=target_type,
+            target_id=str(target_id) if target_id is not None else None,
+            change_type=change_type,
+            source=source,
         )
 
-    if target_type not in KNOWN_TARGETS:
+    actor = db.query(Agent).filter(Agent.id == actor_agent_id).first()
+    if actor is None:
         return PermissionDecision(
             allowed=False,
-            reason=f"unknown_target_type:{target_type}",
+            reason="actor_not_found",
+            actor_agent_id=actor_agent_id,
+            target_type=target_type,
+            target_id=str(target_id) if target_id is not None else None,
+            change_type=change_type,
+            source=source,
         )
 
-    # Skills always escalate — never team-lead controlled (PRD-140 §5.3, Q11).
-    # System agents still bypass below, so Auto / CTO can edit skills.
-    if target_type == TARGET_SKILL:
-        if _is_system_agent(db, actor_agent_id):
+    # --- Workspace boundary check (cross-tenant attack surface) ---
+    if str(actor.workspace_id) != workspace_id_str:
+        return PermissionDecision(
+            allowed=False,
+            reason="cross_workspace_actor",
+            actor_agent_id=actor.id,
+            actor_name=actor.name,
+            target_type=target_type,
+            target_id=str(target_id) if target_id is not None else None,
+            change_type=change_type,
+            source=source,
+        )
+
+    # --- Inactive actor cannot mutate ---
+    if (actor.status or "").lower() != "active":
+        return PermissionDecision(
+            allowed=False,
+            reason="actor_inactive",
+            actor_agent_id=actor.id,
+            actor_name=actor.name,
+            target_type=target_type,
+            target_id=str(target_id) if target_id is not None else None,
+            change_type=change_type,
+            source=source,
+        )
+
+    # --- Narrowed system-agent bypass ---
+    # Bypass is only granted when BOTH conditions hold: ``is_system_agent``
+    # is set AND the agent's name is on the explicit allowlist. The flag
+    # alone is not a golden key.
+    if (
+        bool(getattr(actor, "is_system_agent", False))
+        and (actor.name or "") in SYSTEM_BYPASS_ALLOWLIST
+    ):
+        return PermissionDecision(
+            allowed=True,
+            reason="system_actor_bypass",
+            bypass=True,
+            bypass_kind="system_actor",
+            actor_agent_id=actor.id,
+            actor_name=actor.name,
+            target_type=target_type,
+            target_id=str(target_id) if target_id is not None else None,
+            change_type=change_type,
+            source=source,
+        )
+
+    # --- Subtree authority (team-lead path) ---
+    # The actor may modify any agent in their reports-to subtree, plus
+    # workspace-owned playbooks and board tasks they (or their reports)
+    # own. Cross-team and shared-resource mutations are denied at this layer.
+    if target_type == "agent":
+        if target_id is None:
+            return _deny(actor, target_type, target_id, change_type, source, "missing_target")
+        try:
+            target_int = int(target_id)
+        except (TypeError, ValueError):
+            return _deny(actor, target_type, target_id, change_type, source, "invalid_target_id")
+
+        if target_int == actor.id:
             return PermissionDecision(
                 allowed=True,
-                reason="system_agent_bypass",
+                reason="self_mutation",
+                actor_agent_id=actor.id,
+                actor_name=actor.name,
+                target_type=target_type,
+                target_id=str(target_id),
+                change_type=change_type,
+                source=source,
             )
-        return PermissionDecision(
-            allowed=False,
-            reason="skill_changes_route_to_auto",
-            escalation_target="auto",
-        )
 
-    # System agents (Auto / CTO) bypass for every other target type too.
-    is_system = _is_system_agent(db, actor_agent_id)
-    if is_system is None:
-        return PermissionDecision(
-            allowed=False,
-            reason="actor_agent_not_found",
-        )
-    if is_system:
-        return PermissionDecision(
-            allowed=True,
-            reason="system_agent_bypass",
-        )
+        target = db.query(Agent).filter(Agent.id == target_int).first()
+        if target is None:
+            return _deny(actor, target_type, target_id, change_type, source, "target_not_found")
+        if str(target.workspace_id) != workspace_id_str:
+            return _deny(actor, target_type, target_id, change_type, source, "cross_workspace_target")
 
-    # Everything below is for non-system actors acting on a specific target.
-    owner = _agent_owner(db, target_type, target_id)
-    if owner is None:
-        # Couldn't resolve an owning agent — playbook with no owner column,
-        # task with no assignee, missing row. Queue rather than apply so
-        # Auto can decide.
-        return PermissionDecision(
-            allowed=False,
-            reason="target_owner_unresolved_route_to_auto",
-            escalation_target="auto",
-        )
+        in_subtree = _agent_in_subtree(db, root_id=actor.id, candidate_id=target_int)
+        if in_subtree is None:
+            # Cycle detected or chain too deep — default DENY.
+            return _deny(actor, target_type, target_id, change_type, source, "broken_hierarchy")
+        if in_subtree:
+            return PermissionDecision(
+                allowed=True,
+                reason="subtree_authority",
+                actor_agent_id=actor.id,
+                actor_name=actor.name,
+                target_type=target_type,
+                target_id=str(target_id),
+                change_type=change_type,
+                source=source,
+            )
+        return _deny(actor, target_type, target_id, change_type, source, "out_of_subtree")
 
-    subtree = _subtree_ids(db, actor_agent_id)
-    if owner in subtree:
-        return PermissionDecision(
-            allowed=True,
-            reason="target_in_actor_subtree",
-        )
+    # Other target_types fall through to default-deny here — wiring for
+    # playbook / skill / tool / task is added per resource as the chokepoint
+    # rolls out (Ticket 2). Default-deny means a new tool added before its
+    # permission rules are coded gets blocked, not silently allowed.
+    return _deny(
+        actor,
+        target_type,
+        target_id,
+        change_type,
+        source,
+        f"unsupported_target_type:{target_type}",
+    )
 
+
+# ----------------------------------------------------------------- helpers
+
+
+def subtree_of(db, root_agent_id: int) -> Set[int]:
+    """Return every agent id reachable via reports_to_id from ``root``.
+
+    Cycle-safe (visited set + depth cap). Returns at minimum ``{root_id}``
+    even when the agent has no direct reports. Returns an empty set when
+    the chain is broken or the depth cap is exceeded.
+    """
+    from core.models import Agent
+
+    out: Set[int] = {root_agent_id}
+    frontier: Set[int] = {root_agent_id}
+
+    for _ in range(MAX_SUBTREE_DEPTH):
+        if not frontier:
+            return out
+        rows = (
+            db.query(Agent.id)
+            .filter(Agent.reports_to_id.in_(frontier))
+            .all()
+        )
+        next_frontier: Set[int] = {row.id for row in rows} - out
+        out.update(next_frontier)
+        frontier = next_frontier
+
+    # Hit depth cap — chain is suspect. Default deny by returning empty.
+    logger.warning(
+        "[hierarchy] subtree_of(%s) exceeded MAX_SUBTREE_DEPTH=%d — defaulting deny",
+        root_agent_id,
+        MAX_SUBTREE_DEPTH,
+    )
+    return set()
+
+
+def _agent_in_subtree(db, root_id: int, candidate_id: int) -> Optional[bool]:
+    """Return True / False / None.
+
+    None signals broken hierarchy (cycle, depth cap, missing manager) so
+    the caller can choose default deny.
+    """
+    from core.models import Agent
+
+    # Walk UP from candidate toward root with cycle detection. This is
+    # cheaper than expanding the full subtree of root when the tree is
+    # wide — we only ever load the actor's reporting chain.
+    visited: Set[int] = set()
+    cursor: Optional[int] = candidate_id
+    depth = 0
+
+    while cursor is not None:
+        if cursor in visited:
+            logger.warning(
+                "[hierarchy] cycle detected at agent_id=%s while walking from %s",
+                cursor,
+                candidate_id,
+            )
+            return None
+        if depth >= MAX_SUBTREE_DEPTH:
+            logger.warning(
+                "[hierarchy] depth cap exceeded walking from %s",
+                candidate_id,
+            )
+            return None
+        visited.add(cursor)
+        if cursor == root_id:
+            return True
+        row = (
+            db.query(Agent.reports_to_id)
+            .filter(Agent.id == cursor)
+            .first()
+        )
+        if row is None:
+            # candidate row vanished mid-walk — treat as broken
+            return None
+        # SQLAlchemy Row supports attribute access by column label.
+        cursor = getattr(row, "reports_to_id", None)
+        depth += 1
+
+    return False
+
+
+def _deny(actor, target_type, target_id, change_type, source, reason) -> PermissionDecision:
     return PermissionDecision(
         allowed=False,
-        reason="target_outside_actor_subtree",
-        escalation_target="auto",
+        reason=reason,
+        actor_agent_id=getattr(actor, "id", None),
+        actor_name=getattr(actor, "name", None),
+        target_type=target_type,
+        target_id=str(target_id) if target_id is not None else None,
+        change_type=change_type,
+        source=source,
     )
