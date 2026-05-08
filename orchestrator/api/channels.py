@@ -110,7 +110,24 @@ async def create_channel(
     db.commit()
 
     logger.info("Created channel connection %s (%s) for workspace %s", conn_id, platform, ctx.workspace_id)
-    return {"id": str(conn_id), "platform": platform, "status": "inactive"}
+
+    started = False
+    try:
+        from channels.manager import get_channel_manager
+        manager = get_channel_manager()
+        started = await manager.start_adapter(str(conn_id), str(ctx.workspace_id), platform, config)
+    except Exception as exc:
+        logger.warning("Failed to auto-start adapter for new channel %s: %s", conn_id, exc)
+
+    if started:
+        db.execute(
+            text("UPDATE channel_connections SET status = 'active', updated_at = NOW() WHERE id = :id"),
+            {"id": str(conn_id)},
+        )
+        db.commit()
+
+    final_status = "active" if started else "inactive"
+    return {"id": str(conn_id), "platform": platform, "status": final_status}
 
 
 @router.put("/{channel_id}")
