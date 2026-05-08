@@ -260,6 +260,7 @@ async def _execute_step(
     max_iterations: Optional[int] = None,
     recipe_name: str = "",
     total_steps: int = 1,
+    recipe_execution_id: Optional[str] = None,
 ) -> dict:
     """
     Execute a single recipe step using the chatbot's exact component path.
@@ -458,6 +459,8 @@ async def _execute_step(
     llm = agent_runtime.llm_manager
     if hasattr(llm, '_tracking_ctx'):
         llm._tracking_ctx["request_type"] = "recipe"
+        if recipe_execution_id:
+            llm._tracking_ctx["execution_id"] = recipe_execution_id
 
     # 7. Generate + tool loop
     tool_router = get_tool_router()
@@ -1280,6 +1283,7 @@ async def _execute_recipe_inner(
                             max_iterations=step_max_iter,
                             recipe_name=recipe.name,
                             total_steps=total_steps,
+                            recipe_execution_id=recipe_execution_id,
                         ),
                         timeout=step_timeout_sec,
                     )
