@@ -83,6 +83,12 @@ from modules.tools.discovery.handlers_marketplace import (
     install_skill,
     install_model,
 )
+from modules.tools.discovery.handlers_skills import (
+    get_skill_content,
+    create_workspace_skill,
+    update_skill,
+    delete_workspace_skill,
+)
 from modules.tools.discovery.handlers_board_tasks import (
     create_board_task,
     list_board_tasks,
@@ -238,6 +244,11 @@ class PlatformActionExecutor:
             "platform_install_plugin": install_plugin,
             "platform_install_skill": install_skill,
             "platform_install_model": install_model,
+            # Skill editing (read / create / update / delete)
+            "platform_get_skill_content": get_skill_content,
+            "platform_create_workspace_skill": create_workspace_skill,
+            "platform_update_skill": update_skill,
+            "platform_delete_workspace_skill": delete_workspace_skill,
             # Agent assignment (PRD-71)
             "platform_assign_tool_to_agent": assign_tool_to_agent,
             "platform_assign_skill_to_agent": assign_skill_to_agent,

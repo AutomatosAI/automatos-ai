@@ -171,6 +171,69 @@ queries:
     difficulty: easy
 
   # ──────────────────────────────────────────────────────────────────
+  # Skills (read / create / update / delete)
+  # ──────────────────────────────────────────────────────────────────
+  - q: "show me the VECTOR skill content"
+    correct_actions: [platform_get_skill_content]
+    category: skills
+    difficulty: easy
+
+  - q: "open the platform-cost-watchdog skill so I can read it"
+    correct_actions: [platform_get_skill_content]
+    category: skills
+    difficulty: easy
+
+  - q: "what does the SENTINEL skill actually say?"
+    correct_actions: [platform_get_skill_content]
+    category: skills
+    difficulty: paraphrase
+
+  - q: "draft a new workspace skill called daily-standup-summary"
+    correct_actions: [platform_create_workspace_skill]
+    category: skills
+    difficulty: easy
+
+  - q: "save this SKILL.md as a workspace skill"
+    correct_actions: [platform_create_workspace_skill]
+    category: skills
+    difficulty: paraphrase
+
+  - q: "update VECTOR's skill content"
+    correct_actions: [platform_update_skill]
+    category: skills
+    difficulty: easy
+
+  - q: "improve the operating manual for ATLAS"
+    correct_actions: [platform_update_skill]
+    category: skills
+    difficulty: paraphrase
+
+  - q: "fork the growth-hacker skill and tweak it for our workspace"
+    correct_actions: [platform_update_skill]
+    category: skills
+    difficulty: ambiguous
+
+  - q: "rewrite my version of the platform-optimization-architect skill"
+    correct_actions: [platform_update_skill]
+    category: skills
+    difficulty: paraphrase
+
+  - q: "delete the test-skill workspace skill"
+    correct_actions: [platform_delete_workspace_skill]
+    category: skills
+    difficulty: easy
+
+  - q: "drop my draft skill, I don't need it anymore"
+    correct_actions: [platform_delete_workspace_skill]
+    category: skills
+    difficulty: paraphrase
+
+  - q: "give VECTOR a fresh skill and assign it to him"
+    correct_actions: [platform_create_workspace_skill, platform_assign_skill_to_agent]
+    category: skills
+    difficulty: cross
+
+  # ──────────────────────────────────────────────────────────────────
   # Memory
   # ──────────────────────────────────────────────────────────────────
   - q: "how much memory have you stored about me?"

@@ -285,6 +285,27 @@ _PLATFORM_KEYWORDS = {
         "install skill", "enable skill", "add skill",
         "activate skill",
     ],
+    "platform_get_skill_content": [
+        "show skill content", "read skill", "open skill",
+        "view skill content", "get skill content",
+        "what does the skill say", "show me the skill",
+        "inspect skill", "read SKILL.md",
+    ],
+    "platform_create_workspace_skill": [
+        "create skill", "create a new skill", "new skill",
+        "draft a skill", "make a skill", "build a skill",
+        "save this as a skill", "create workspace skill",
+    ],
+    "platform_update_skill": [
+        "update skill", "edit skill", "modify skill",
+        "change skill", "improve skill", "rewrite skill",
+        "fork and edit skill", "update SKILL.md",
+        "edit the workspace skill", "change skill content",
+    ],
+    "platform_delete_workspace_skill": [
+        "delete skill", "remove skill", "drop skill",
+        "delete workspace skill", "remove my skill",
+    ],
     "platform_install_model": [
         "install model", "enable model", "add model",
         "activate model",
