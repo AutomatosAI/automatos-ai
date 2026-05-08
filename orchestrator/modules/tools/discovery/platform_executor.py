@@ -22,6 +22,9 @@ from modules.tools.discovery.handlers_agents import (
     create_agent,
     update_agent,
     delete_agent,
+    get_agent_heartbeat,
+    unassign_skill_from_agent,
+    unassign_tool_from_agent,
 )
 from modules.tools.discovery.handlers_playbooks import (
     list_playbooks,
@@ -254,6 +257,9 @@ class PlatformActionExecutor:
             "platform_assign_skill_to_agent": assign_skill_to_agent,
             "platform_assign_plugin_to_agent": assign_plugin_to_agent,
             "platform_configure_agent_heartbeat": configure_agent_heartbeat,
+            "platform_get_agent_heartbeat": get_agent_heartbeat,
+            "platform_unassign_skill_from_agent": unassign_skill_from_agent,
+            "platform_unassign_tool_from_agent": unassign_tool_from_agent,
             # PRD-76: Agent Reports
             "platform_submit_report": submit_report,
             "platform_get_latest_report": get_latest_report,
