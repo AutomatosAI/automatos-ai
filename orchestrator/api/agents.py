@@ -571,13 +571,16 @@ async def get_org_chart(
     try:
         from core.models.composio_cache import AgentAppAssignment
 
-        # Fetch active workspace agents — the system agent (Auto / CTO) is
-        # included so the chart has a single root; the regular Roster page
-        # keeps its own is_system_agent filter so Auto stays hidden there.
+        # Fetch active workspace agents — the workspace Auto (slug=auto-{ws_id})
+        # is included so the chart has a single root. Excludes the global
+        # Auto CTO defensively (slug=auto-cto is supposed to be workspace_id=NULL
+        # but stale data has leaked in the past — keep this filter even if
+        # the data is correct, so a future drift doesn't surface it again).
         agents = (
             db.query(Agent)
             .filter(Agent.workspace_id == ctx.workspace_id)
             .filter(Agent.status == "active")
+            .filter(Agent.slug != "auto-cto")
             .all()
         )
 
