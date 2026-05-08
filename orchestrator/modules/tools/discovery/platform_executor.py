@@ -179,6 +179,62 @@ from modules.tools.discovery.handlers_analytics_enhanced import (
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Hierarchy permissions — PRD-140 Phase 1
+# ---------------------------------------------------------------------------
+# Maps mutating action_name → (target_type, param_key).
+#
+#   target_type — one of core.security.hierarchy_permissions.KNOWN_TARGETS
+#   param_key   — name of the field on params that carries the target id
+#                 (the `_agent_id` field is the *actor*; this is a different
+#                 key — the thing being modified).
+#
+# Actions NOT in this map skip the hierarchy check entirely — they are
+# either workspace-scoped (e.g. platform_store_memory) or already protected
+# by admin_only / rate-limit gates. Add an entry here when introducing a new
+# mutating action that targets a specific agent / playbook / task / skill /
+# tool assignment / heartbeat. The CI audit-grep gate enforces this.
+# ---------------------------------------------------------------------------
+
+from core.security.hierarchy_permissions import (  # noqa: E402
+    can_actor_modify,
+    TARGET_AGENT,
+    TARGET_HEARTBEAT,
+    TARGET_PLAYBOOK,
+    TARGET_TASK,
+    TARGET_SKILL,
+    TARGET_TOOL_ASSIGNMENT,
+)
+
+_HIERARCHY_TARGETS: Dict[str, tuple[str, Optional[str]]] = {
+    # Agent edits — owner of the change is the target agent itself.
+    "platform_update_agent":              (TARGET_AGENT, "agent_id"),
+    "platform_delete_agent":              (TARGET_AGENT, "agent_id"),
+    # Heartbeat edits live on the agent row.
+    "platform_configure_agent_heartbeat": (TARGET_HEARTBEAT, "agent_id"),
+    # Tool / skill / plugin assignments — target is the receiving agent.
+    "platform_assign_plugin_to_agent":     (TARGET_TOOL_ASSIGNMENT, "agent_id"),
+    "platform_assign_skill_to_agent":      (TARGET_TOOL_ASSIGNMENT, "agent_id"),
+    "platform_assign_tool_to_agent":       (TARGET_TOOL_ASSIGNMENT, "agent_id"),
+    "platform_unassign_skill_from_agent":  (TARGET_TOOL_ASSIGNMENT, "agent_id"),
+    "platform_unassign_tool_from_agent":   (TARGET_TOOL_ASSIGNMENT, "agent_id"),
+    # Skill content — always escalates for non-system actors regardless of id.
+    "platform_create_workspace_skill":     (TARGET_SKILL, None),
+    "platform_update_skill":               (TARGET_SKILL, "skill_id"),
+    "platform_delete_workspace_skill":     (TARGET_SKILL, "skill_id"),
+    # Playbook edits.
+    "platform_update_playbook":            (TARGET_PLAYBOOK, "playbook_id"),
+    "platform_delete_playbook":            (TARGET_PLAYBOOK, "playbook_id"),
+    "platform_update_recipe":              (TARGET_PLAYBOOK, "recipe_id"),
+    "platform_add_playbook_step":          (TARGET_PLAYBOOK, "playbook_id"),
+    "platform_update_playbook_step":       (TARGET_PLAYBOOK, "playbook_id"),
+    "platform_delete_playbook_step":       (TARGET_PLAYBOOK, "playbook_id"),
+    # Tasks — target is the assigned agent (resolved via the task row).
+    "platform_assign_task":                (TARGET_TASK, "task_id"),
+    "platform_update_task_status":         (TARGET_TASK, "task_id"),
+}
+
+
 class PlatformActionExecutor:
     """
     Executes platform actions using direct database queries.
@@ -462,6 +518,57 @@ class PlatformActionExecutor:
                 ),
                 "params": params,
             }
+
+        # PRD-140 Phase 1 — hierarchy permission check. Runs before the
+        # rate limiter so denied calls don't spend rate-limit budget.
+        # Only mutating actions in _HIERARCHY_TARGETS are gated; everything
+        # else (workspace-scoped, admin-only, read) falls through.
+        if action_def and action_def.permission_level in ("write", "destructive"):
+            target_spec = _HIERARCHY_TARGETS.get(action_name)
+            if target_spec is not None:
+                target_type, target_param = target_spec
+                actor_id_raw = params.get("_agent_id") if isinstance(params, dict) else None
+                target_id_raw = (
+                    params.get(target_param)
+                    if (target_param and isinstance(params, dict))
+                    else None
+                )
+                try:
+                    actor_id = int(actor_id_raw) if actor_id_raw is not None else None
+                except (TypeError, ValueError):
+                    actor_id = None
+                try:
+                    target_id = int(target_id_raw) if target_id_raw is not None else None
+                except (TypeError, ValueError):
+                    target_id = target_id_raw  # leave string IDs alone (UUIDs etc.)
+
+                decision = can_actor_modify(
+                    self.db,
+                    actor_agent_id=actor_id,
+                    target_type=target_type,
+                    target_id=target_id,
+                    change_type="update" if action_def.permission_level == "write" else "delete",
+                )
+                if not decision.allowed:
+                    logger.warning(
+                        "[PlatformExecutor] hierarchy_denied action=%s actor=%s target=%s/%s reason=%s",
+                        action_name, actor_id, target_type, target_id, decision.reason,
+                    )
+                    return {
+                        "success": False,
+                        "permission_denied": True,
+                        "reason": decision.reason,
+                        "escalation_target": decision.escalation_target,
+                        "error": (
+                            f"Action '{action_name}' denied — {decision.reason}. "
+                            + (
+                                f"Route this through the {decision.escalation_target} "
+                                "for arbitration."
+                                if decision.escalation_target
+                                else ""
+                            )
+                        ).strip(),
+                    }
 
         # Rate limit write/destructive actions — scoped per (workspace, agent)
         # so a chatty Auto session doesn't starve mission tasks of headroom.
