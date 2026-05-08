@@ -119,23 +119,120 @@ class HarnessService:
     # Public helpers (called by platform tool handlers)
     # ------------------------------------------------------------------
 
-    def get_status(self, workspace_id: UUID) -> Dict[str, Any]:
-        """Return current HARNESS state by reading baseline_latest.json."""
-        baseline = self._read_baseline(None, workspace_id)
-        if baseline is None:
+    def get_status(
+        self, workspace_id: UUID, db: Optional["Session"] = None
+    ) -> Dict[str, Any]:
+        """Return current HARNESS state with granular, observable status.
+
+        Possible statuses:
+          - disabled                      — workspace explicitly opted out
+          - running                       — tick is in flight right now
+          - failed                        — last tick raised an exception
+          - dormant_insufficient_agents   — fewer than _MIN_AGENTS active
+          - dormant_insufficient_data     — heartbeat history < _MIN_DATA_DAYS
+          - scheduled_not_run_yet         — eligible but cron hasn't fired
+          - completed                     — last tick produced a baseline
+        """
+        ws_key = str(workspace_id)
+        next_scheduled = "Sunday 02:00 UTC"
+
+        # 1. Currently running — short-circuit
+        if self._running.get(ws_key):
+            last_run = self._read_last_run(workspace_id)
             return {
-                "status": "dormant",
-                "message": "No HARNESS runs yet",
-                "iteration_count": 0,
+                "status": "running",
+                "started_at": last_run.get("timestamp") if last_run else None,
+                "next_scheduled_run": next_scheduled,
+                "iteration_count": (last_run or {}).get("iteration", 0),
             }
-        conv = baseline.get("convergence", {})
-        return {
-            "status": conv.get("status", "unknown"),
-            "iteration_count": conv.get("iteration_count", 0),
-            "last_run": baseline.get("created_at"),
-            "total_delta_magnitude": conv.get("total_delta_magnitude"),
-            "next_scheduled_run": "Sunday 02:00 UTC",
-        }
+
+        own_db = db is None
+        if own_db:
+            from core.database.database import SessionLocal
+            db = SessionLocal()
+        try:
+            from core.models.workspaces import Workspace as WsModel
+
+            ws = db.query(WsModel).get(workspace_id)
+
+            # 2. Disabled by workspace settings
+            if ws is not None and not self._workspace_opted_in(ws):
+                return {
+                    "status": "disabled",
+                    "message": (
+                        "HARNESS is disabled for this workspace. "
+                        "Set workspace.settings.orchestrator.harness.disabled = false to re-enable."
+                    ),
+                    "iteration_count": 0,
+                    "next_scheduled_run": None,
+                }
+
+            last_run = self._read_last_run(workspace_id)
+            baseline = self._read_baseline(db, workspace_id)
+            sufficiency = self._sufficiency_breakdown(db, workspace_id)
+
+            # 3. Last tick failed
+            if last_run and last_run.get("status") == "failed":
+                return {
+                    "status": "failed",
+                    "last_run_at": last_run.get("timestamp"),
+                    "error": last_run.get("error", "unknown"),
+                    "iteration_count": (
+                        baseline.get("iteration", 0) if baseline else 0
+                    ),
+                    "next_scheduled_run": next_scheduled,
+                    **sufficiency,
+                }
+
+            # 4. Last tick was dormant
+            if last_run and str(last_run.get("status", "")).startswith("dormant_"):
+                return {
+                    "status": last_run["status"],
+                    "last_run_at": last_run.get("timestamp"),
+                    "iteration_count": 0,
+                    "next_scheduled_run": next_scheduled,
+                    **sufficiency,
+                }
+
+            # 5. Completed run with baseline
+            if baseline:
+                conv = baseline.get("convergence", {})
+                artifacts = (last_run or {}).get("artifacts", {})
+                return {
+                    "status": "completed",
+                    "iteration_count": conv.get("iteration_count", baseline.get("iteration", 0)),
+                    "convergence": conv.get("status", "unknown"),
+                    "last_run_at": baseline.get("created_at"),
+                    "total_delta_magnitude": conv.get("total_delta_magnitude"),
+                    "next_scheduled_run": next_scheduled,
+                    "artifacts": artifacts,
+                }
+
+            # 6. Never run — explain why
+            if not sufficiency["agents_ok"]:
+                return {
+                    "status": "dormant_insufficient_agents",
+                    "iteration_count": 0,
+                    "next_scheduled_run": next_scheduled,
+                    **sufficiency,
+                }
+            if not sufficiency["data_ok"]:
+                return {
+                    "status": "dormant_insufficient_data",
+                    "iteration_count": 0,
+                    "next_scheduled_run": next_scheduled,
+                    **sufficiency,
+                }
+
+            return {
+                "status": "scheduled_not_run_yet",
+                "iteration_count": 0,
+                "next_scheduled_run": next_scheduled,
+                **sufficiency,
+            }
+        finally:
+            if own_db:
+                db.close()
 
     async def trigger_now(self, workspace_id: UUID) -> None:
         """Kick off a HARNESS run outside the weekly cron schedule."""
@@ -159,9 +256,25 @@ class HarnessService:
 
         db = SessionLocal()
         try:
-            # ----- Dormancy check -----
-            if not self._has_sufficient_data(db, workspace_id):
-                logger.info("[HARNESS] Dormant for %s — insufficient data", ws_key)
+            # ----- Dormancy check (with breakdown for status) -----
+            sufficiency = self._sufficiency_breakdown(db, workspace_id)
+            if not sufficiency["agents_ok"]:
+                logger.info(
+                    "[HARNESS] Dormant for %s — insufficient agents (%d/%d)",
+                    ws_key, sufficiency["active_agents"], sufficiency["min_required_agents"],
+                )
+                self._write_last_run(
+                    workspace_id, "dormant_insufficient_agents", sufficiency=sufficiency,
+                )
+                return
+            if not sufficiency["data_ok"]:
+                logger.info(
+                    "[HARNESS] Dormant for %s — insufficient data (%d/%d days)",
+                    ws_key, sufficiency["heartbeat_days_available"], sufficiency["min_required_days"],
+                )
+                self._write_last_run(
+                    workspace_id, "dormant_insufficient_data", sufficiency=sufficiency,
+                )
                 return
 
             # ----- Read workspace harness config -----
@@ -175,7 +288,9 @@ class HarnessService:
             diagnosis = await self._phase_diagnose(workspace_id, metrics, db)
             prescriptions = await self._phase_prescribe(workspace_id, diagnosis, metrics, db)
             changelog = await self._phase_apply(workspace_id, prescriptions, db, allow_auto_apply=allow_auto)
-            await self._phase_baseline(workspace_id, metrics, diagnosis, prescriptions, changelog, db)
+            baseline, artifacts = await self._phase_baseline(
+                workspace_id, metrics, diagnosis, prescriptions, changelog, db,
+            )
 
             elapsed = time.monotonic() - t0
             logger.info(
@@ -185,8 +300,14 @@ class HarnessService:
                 len(changelog.get("applied", [])),
                 len(changelog.get("queued", [])),
             )
-        except Exception:
+            self._write_last_run(
+                workspace_id, "completed",
+                artifacts=artifacts,
+                iteration=baseline.get("iteration"),
+            )
+        except Exception as exc:
             logger.error("[HARNESS] Tick failed for %s", ws_key, exc_info=True)
+            self._write_last_run(workspace_id, "failed", error=str(exc))
         finally:
             db.close()
             self._running[ws_key] = False
@@ -197,25 +318,33 @@ class HarnessService:
 
     @staticmethod
     def _workspace_opted_in(workspace: "Workspace") -> bool:
-        """Check workspace.settings.orchestrator.harness.enabled.
+        """Decide whether HARNESS should run for this workspace.
 
-        Stored in workspace.settings JSONB under orchestrator.harness:
-          enabled:  bool (default False) — user must opt in
-          schedule: "weekly" | "biweekly" | "monthly"
-          mode:     "full_auto" | "manual"
+        PRD-121 says "no setup required" — HARNESS is on by default.
+        Workspaces opt out via `orchestrator.harness.disabled = true` (or
+        the legacy explicit `enabled = false`); anything else means enabled.
         """
         settings = workspace.settings or {}
         harness = settings.get("orchestrator", {}).get("harness", {})
-        return harness.get("enabled", False)
+        if harness.get("disabled") is True:
+            return False
+        return harness.get("enabled", True)
 
     @staticmethod
     def _get_harness_config(workspace_settings: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-        """Return harness config from workspace settings."""
+        """Return harness config merged onto defaults (enabled by default)."""
+        defaults = {
+            "enabled": True,
+            "disabled": False,
+            "schedule": "weekly",
+            "mode": "full_auto",
+        }
         if not workspace_settings:
-            return {"enabled": False, "schedule": "weekly", "mode": "full_auto"}
-        return workspace_settings.get("orchestrator", {}).get("harness", {
-            "enabled": False, "schedule": "weekly", "mode": "full_auto",
-        })
+            return defaults
+        return {
+            **defaults,
+            **workspace_settings.get("orchestrator", {}).get("harness", {}),
+        }
 
     @staticmethod
     def _workspace_allows_auto_apply(workspace_settings: Optional[Dict[str, Any]]) -> bool:
@@ -229,7 +358,10 @@ class HarnessService:
     # Dormancy check
     # ------------------------------------------------------------------
 
-    def _has_sufficient_data(self, db: "Session", workspace_id: UUID) -> bool:
+    def _sufficiency_breakdown(
+        self, db: "Session", workspace_id: UUID
+    ) -> Dict[str, Any]:
+        """Return per-criterion dormancy detail used by status + tick."""
         from core.models import Agent
         from sqlalchemy import text
 
@@ -238,10 +370,7 @@ class HarnessService:
             .filter(Agent.workspace_id == workspace_id, Agent.is_active.is_(True))
             .count()
         )
-        if agent_count < _MIN_AGENTS:
-            return False
 
-        # Check earliest heartbeat_result for this workspace (raw SQL — no ORM model)
         row = db.execute(
             text(
                 "SELECT MIN(created_at) FROM heartbeat_results "
@@ -251,13 +380,25 @@ class HarnessService:
         ).fetchone()
 
         if row is None or row[0] is None:
-            return False
+            days_of_data = 0
+        else:
+            earliest_dt = row[0]
+            if earliest_dt.tzinfo is None:
+                earliest_dt = earliest_dt.replace(tzinfo=timezone.utc)
+            days_of_data = (datetime.now(timezone.utc) - earliest_dt).days
 
-        earliest_dt = row[0]
-        if earliest_dt.tzinfo is None:
-            earliest_dt = earliest_dt.replace(tzinfo=timezone.utc)
-        days_of_data = (datetime.now(timezone.utc) - earliest_dt).days
-        return days_of_data >= _MIN_DATA_DAYS
+        return {
+            "active_agents": agent_count,
+            "min_required_agents": _MIN_AGENTS,
+            "agents_ok": agent_count >= _MIN_AGENTS,
+            "heartbeat_days_available": days_of_data,
+            "min_required_days": _MIN_DATA_DAYS,
+            "data_ok": days_of_data >= _MIN_DATA_DAYS,
+        }
+
+    def _has_sufficient_data(self, db: "Session", workspace_id: UUID) -> bool:
+        sb = self._sufficiency_breakdown(db, workspace_id)
+        return sb["agents_ok"] and sb["data_ok"]
 
     # ------------------------------------------------------------------
     # Phase 1: COLLECT
@@ -648,8 +789,14 @@ class HarnessService:
         prescriptions: List[Dict[str, Any]],
         changelog: Dict[str, Any],
         db: "Session",
-    ) -> Dict[str, Any]:
-        """Snapshot new org state, publish artifacts, submit audit report."""
+    ) -> "tuple[Dict[str, Any], Dict[str, str]]":
+        """Snapshot new org state, publish artifacts, submit audit report.
+
+        Returns ``(baseline, artifacts)`` where ``artifacts`` records the
+        per-file outcome ("ok" or "failed: <reason>"). Failures of single
+        artifacts are logged but do NOT abort the phase — the goal is to
+        leave a visible trail in get_status() rather than swallow.
+        """
         logger.info("[HARNESS] Phase 5 BASELINE — workspace %s", workspace_id)
 
         from modules.tools.discovery.platform_executor import PlatformActionExecutor
@@ -695,46 +842,89 @@ class HarnessService:
         }
 
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        report_content = self._build_changelog_markdown(
+            iteration, diagnosis, prescriptions, changelog, convergence_status
+        )
 
-        # Write workspace files
-        files_to_write = {
-            "/harness/baseline_latest.json": json.dumps(baseline, indent=2),
-            f"/harness/baselines/{today}.json": json.dumps(baseline, indent=2),
-            f"/harness/traces/{today}_trace.json": json.dumps({
+        # Each labelled artifact tracked independently — Patch D
+        files_to_write = [
+            ("baseline_latest", "/harness/baseline_latest.json", json.dumps(baseline, indent=2)),
+            ("baseline_archive", f"/harness/baselines/{today}.json", json.dumps(baseline, indent=2)),
+            ("trace", f"/harness/traces/{today}_trace.json", json.dumps({
                 "metrics": self._make_serializable(metrics),
                 "diagnosis": self._make_serializable(diagnosis),
-            }, indent=2),
-            f"/harness/prescriptions/{today}_rx.json": json.dumps(prescriptions, indent=2),
-            f"/harness/changelog/{today}.md": self._build_changelog_markdown(
-                iteration, diagnosis, prescriptions, changelog, convergence_status
-            ),
-        }
+            }, indent=2)),
+            ("prescriptions", f"/harness/prescriptions/{today}_rx.json", json.dumps(prescriptions, indent=2)),
+            ("changelog", f"/harness/changelog/{today}.md", report_content),
+        ]
 
-        for path, content in files_to_write.items():
+        artifacts: Dict[str, str] = {}
+        for label, path, content in files_to_write:
             try:
                 await executor.execute("workspace_write_file", {
                     "path": path,
                     "content": content,
                 })
+                artifacts[label] = "ok"
             except Exception as exc:
-                logger.error("[HARNESS] Failed to write %s: %s", path, exc)
+                logger.error("[HARNESS] Failed to write %s (%s): %s", label, path, exc, exc_info=True)
+                artifacts[label] = f"failed: {exc}"
 
-        # Submit audit report
-        try:
-            report_content = self._build_changelog_markdown(
-                iteration, diagnosis, prescriptions, changelog, convergence_status
+        # Submit audit report — Patch C: resolve Auto agent + attribute report
+        artifacts["audit_report"] = await self._submit_audit_report(
+            executor, db, workspace_id, iteration, report_content,
+            warning=bool(diagnosis.get("issues")),
+        )
+
+        logger.info(
+            "[HARNESS] BASELINE done — iteration %d, status=%s, artifacts=%s",
+            iteration, convergence_status, artifacts,
+        )
+        return baseline, artifacts
+
+    async def _submit_audit_report(
+        self,
+        executor: "PlatformActionExecutor",
+        db: "Session",
+        workspace_id: UUID,
+        iteration: int,
+        report_content: str,
+        warning: bool,
+    ) -> str:
+        """Submit HARNESS audit report attributed to Auto.
+
+        Returns "ok" or "failed: <reason>" so the caller can surface the
+        outcome via last_run.json and get_status().
+        """
+        auto_agent = self._resolve_auto_agent(db, workspace_id)
+        if auto_agent is None:
+            msg = "no system agent (Auto) found in workspace — report not attributable"
+            logger.error(
+                "[HARNESS] %s — workspace %s. Audit report skipped.",
+                msg, workspace_id,
             )
-            await executor.execute("platform_submit_report", {
+            return f"failed: {msg}"
+
+        try:
+            result = await executor.execute("platform_submit_report", {
                 "title": f"HARNESS Weekly Org Review — Run #{iteration}",
                 "content": report_content,
                 "report_type": "audit",
-                "status": "ok" if not diagnosis.get("issues") else "warning",
+                "status": "warning" if warning else "ok",
+                "_agent_id": auto_agent["id"],
+                "_agent_name": auto_agent["name"],
             })
         except Exception as exc:
-            logger.error("[HARNESS] Failed to submit report: %s", exc)
+            logger.error("[HARNESS] Failed to submit report: %s", exc, exc_info=True)
+            return f"failed: {exc}"
 
-        logger.info("[HARNESS] BASELINE done — iteration %d, status=%s", iteration, convergence_status)
-        return baseline
+        # Surface handler-level failures (the handler returns dicts, not raises)
+        if isinstance(result, dict) and result.get("success") is False:
+            err = result.get("error", "unknown")
+            logger.error("[HARNESS] platform_submit_report returned failure: %s", err)
+            return f"failed: {err}"
+
+        return "ok"
 
     # ==================================================================
     # Private helpers
@@ -757,6 +947,104 @@ class HarnessService:
                     return json.load(f)
         except Exception:
             logger.warning("[HARNESS] Failed to read baseline for %s", workspace_id, exc_info=True)
+        return None
+
+    @staticmethod
+    def _last_run_path(workspace_id: UUID) -> str:
+        from config import config
+        import os
+
+        return os.path.join(
+            config.WORKSPACE_VOLUME_PATH,
+            str(workspace_id),
+            "harness",
+            "runs",
+            "last_run.json",
+        )
+
+    def _read_last_run(self, workspace_id: UUID) -> Optional[Dict[str, Any]]:
+        """Read last_run.json — most recent tick outcome marker."""
+        import os
+
+        try:
+            path = self._last_run_path(workspace_id)
+            if os.path.exists(path):
+                with open(path, "r") as f:
+                    return json.load(f)
+        except Exception:
+            logger.warning(
+                "[HARNESS] Failed to read last_run.json for %s",
+                workspace_id, exc_info=True,
+            )
+        return None
+
+    def _write_last_run(
+        self,
+        workspace_id: UUID,
+        status: str,
+        *,
+        error: Optional[str] = None,
+        artifacts: Optional[Dict[str, Any]] = None,
+        iteration: Optional[int] = None,
+        sufficiency: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Persist a marker for the last tick so get_status can describe it."""
+        import os
+
+        path = self._last_run_path(workspace_id)
+        payload: Dict[str, Any] = {
+            "status": status,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        if error is not None:
+            payload["error"] = error
+        if artifacts is not None:
+            payload["artifacts"] = artifacts
+        if iteration is not None:
+            payload["iteration"] = iteration
+        if sufficiency is not None:
+            payload["sufficiency"] = sufficiency
+
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                json.dump(payload, f, indent=2)
+        except Exception as exc:
+            logger.warning(
+                "[HARNESS] Failed to write last_run.json for %s: %s",
+                workspace_id, exc,
+            )
+
+    @staticmethod
+    def _resolve_auto_agent(
+        db: "Session", workspace_id: UUID
+    ) -> Optional[Dict[str, str]]:
+        """Resolve the workspace's canonical reporting agent.
+
+        Fallback chain:
+          1. Agent.slug == "auto-{workspace_id}" + is_system_agent
+          2. Any system agent named "Auto" in workspace
+          3. Any system agent in workspace
+        Returns {"id": str, "name": str} or None.
+        """
+        from core.models import Agent
+
+        slug = f"auto-{workspace_id}"
+
+        candidates = [
+            (Agent.slug == slug, Agent.is_system_agent.is_(True)),
+            (Agent.is_system_agent.is_(True), Agent.name == "Auto"),
+            (Agent.is_system_agent.is_(True),),
+        ]
+
+        for clauses in candidates:
+            agent = (
+                db.query(Agent)
+                .filter(Agent.workspace_id == workspace_id, *clauses)
+                .first()
+            )
+            if agent is not None:
+                return {"id": str(agent.id), "name": agent.name}
         return None
 
     def _extract_agents_list(self, metrics: Dict[str, Any]) -> List[Dict[str, Any]]:
