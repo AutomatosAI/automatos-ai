@@ -157,13 +157,31 @@ def route_for_event(
 # ----------------------------------------------------------------- internals
 
 
-def _resolve_alias(settings: Dict[str, Any], destination: str) -> str:
-    """Map ``primary``/``fallback`` aliases onto the configured channels."""
+# Concrete destinations the dispatcher knows how to deliver.
+_VALID_DESTINATIONS: frozenset[str] = frozenset(
+    {"in_app", "telegram", "slack", "webhook", "silent"}
+)
+_VALID_CHANNELS: frozenset[str] = frozenset({"telegram", "slack", "in_app", "webhook"})
+
+
+def _resolve_alias(settings: Dict[str, Any], destination: str) -> Optional[str]:
+    """Map ``primary``/``fallback`` aliases onto the configured channels.
+
+    Unknown destinations return ``None`` so a malformed ``routes`` entry
+    falls back to the workspace's existing notification_preferences rather
+    than letting an agent inject an arbitrary channel name.
+    """
+    if not isinstance(destination, str):
+        return None
     if destination == "primary":
-        return settings.get("primary_channel") or "in_app"
+        primary = settings.get("primary_channel")
+        return primary if primary in _VALID_CHANNELS else "in_app"
     if destination == "fallback":
-        return settings.get("fallback_channel") or "in_app"
-    return destination
+        fallback = settings.get("fallback_channel")
+        return fallback if fallback in _VALID_CHANNELS else "in_app"
+    if destination in _VALID_DESTINATIONS:
+        return destination
+    return None
 
 
 def _parse_hhmm(value: str) -> dtime:

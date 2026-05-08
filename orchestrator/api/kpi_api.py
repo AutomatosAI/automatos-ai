@@ -433,12 +433,18 @@ async def get_decisions_needed(
                 item.get("created_at") or "",
             )
         )
+        # Trim before counting — sub-queries each LIMIT independently, so
+        # raw counts could double up. The widget's "total" must match the
+        # number of rows it actually shows.
+        items = merged[:limit]
+        reports_in_items = sum(1 for i in items if i["kind"] == "report")
+        missions_in_items = sum(1 for i in items if i["kind"] == "mission")
 
         return {
-            "total": len(merged),
-            "reports_count": len(reports),
-            "missions_count": len(missions),
-            "items": merged[:limit],
+            "total": len(items),
+            "reports_count": reports_in_items,
+            "missions_count": missions_in_items,
+            "items": items,
         }
 
     except Exception as e:

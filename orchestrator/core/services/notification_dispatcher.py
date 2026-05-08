@@ -109,9 +109,12 @@ class NotificationDispatcher:
         ``slack``, ``webhook``, ``channel:<uuid>``). Silent and failed
         destinations are not included.
         """
-        # Wave 2 — auto_reporting overrides
+        # Wave 2 — auto_reporting overrides.
+        # If settings load fails, _load_auto_reporting returns {}; treat that
+        # as disabled rather than enabled, otherwise a transient load error
+        # would silently engage routing logic with empty state.
         ar_settings = self._load_auto_reporting()
-        ar_enabled = bool(ar_settings.get("enabled", True))
+        ar_enabled = bool(ar_settings) and bool(ar_settings.get("enabled", False))
 
         override_destination: Optional[str] = None
         if ar_enabled:
