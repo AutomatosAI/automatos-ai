@@ -676,6 +676,7 @@ class HeartbeatService:
             return {"status": "skipped", "reason": "already_ran_this_period"}
 
         self._running_ticks[tick_key] = True
+        run_started_at = datetime.utcnow()
         result: Dict[str, Any] = {
             "source_type": "agent",
             "source_id": str(agent_id),
@@ -684,6 +685,7 @@ class HeartbeatService:
             "findings": [],
             "actions_taken": [],
             "tokens_used": 0,
+            "_run_started_at": run_started_at,
         }
 
         try:
@@ -837,6 +839,7 @@ class HeartbeatService:
             finally:
                 db.close()
 
+            result["_run_completed_at"] = datetime.utcnow()
             await self._store_heartbeat_result(result)
             await self._dispatch_heartbeat_notification(result)
             await self._auto_create_report(agent_id, workspace_id, result)
@@ -850,6 +853,7 @@ class HeartbeatService:
             )
             result["status"] = "error"
             result["findings"].append({"check": "error", "detail": str(e)})
+            result["_run_completed_at"] = datetime.utcnow()
             await self._store_heartbeat_result(result)
             await self._dispatch_heartbeat_notification(result)
             await self._auto_create_report(agent_id, workspace_id, result)
@@ -1199,7 +1203,7 @@ class HeartbeatService:
         try:
             from core.database.database import SessionLocal
             from core.models import Agent
-            from services.report_service import ReportService
+            from services.report_service import ReportService, compute_execution_metrics
 
             db = SessionLocal()
             try:
@@ -1211,6 +1215,24 @@ class HeartbeatService:
                 actions = result.get("actions_taken", [])
                 hb_status = result.get("status", "success")
                 tokens = result.get("tokens_used", 0)
+                started_at = result.get("_run_started_at")
+                completed_at = result.get("_run_completed_at")
+
+                # Pull cost/model/duration rollup from llm_usage
+                exec_metrics = compute_execution_metrics(
+                    db,
+                    workspace_id,
+                    agent_id=agent_id,
+                    started_at=started_at,
+                    completed_at=completed_at,
+                    extra={
+                        "findings_count": len(findings),
+                        "actions_count": len(actions),
+                        "trigger": "heartbeat",
+                    },
+                )
+                if exec_metrics.get("tokens_used"):
+                    tokens = exec_metrics["tokens_used"]
 
                 lines = [
                     f"# {agent_name} — Heartbeat Report",
@@ -1235,8 +1257,17 @@ class HeartbeatService:
                             lines.append(f"- {a}")
                     lines.append("")
 
-                lines.append("## Metrics")
-                lines.append(f"- Tokens used: {tokens}")
+                lines.append("## Execution Metrics")
+                lines.append(f"- Model: {exec_metrics.get('model') or 'unknown'}")
+                lines.append(f"- LLM calls: {exec_metrics.get('llm_calls', 0)}")
+                lines.append(f"- Tokens (in/out/total): "
+                             f"{exec_metrics.get('input_tokens', 0)} / "
+                             f"{exec_metrics.get('output_tokens', 0)} / "
+                             f"{exec_metrics.get('tokens_used', tokens)}")
+                lines.append(f"- Cost: ${exec_metrics.get('cost_usd', 0):.4f}")
+                duration_ms = exec_metrics.get('duration_ms')
+                if duration_ms is not None:
+                    lines.append(f"- Duration: {duration_ms} ms")
                 lines.append(f"- Findings: {len(findings)}")
                 lines.append(f"- Actions: {len(actions)}")
 
@@ -1264,11 +1295,7 @@ class HeartbeatService:
                     report_type="standup",
                     status=report_status,
                     summary=summary,
-                    metrics={
-                        "tokens_used": tokens,
-                        "findings_count": len(findings),
-                        "actions_count": len(actions),
-                    },
+                    metrics=exec_metrics,
                     heartbeat_result_id=result.get("_heartbeat_result_id"),
                 )
 
