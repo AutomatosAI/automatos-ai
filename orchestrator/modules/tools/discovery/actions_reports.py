@@ -61,6 +61,40 @@ def register_report_actions(registry: ActionRegistry) -> None:
                     "items": {"type": "string"},
                     "description": "Optional list of section headings the report must contain (e.g. ['Summary', 'Metrics', 'Next Steps']). Submission fails if any are missing from the markdown content.",
                 },
+                "recommendations": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "title": {"type": "string"},
+                            "rationale": {"type": "string"},
+                            "impact": {"type": "string", "description": "Expected outcome if adopted."},
+                        },
+                    },
+                    "description": "Structured recommendations Auto can route or surface as decisions. Prefer these over burying recommendations in markdown — they make the report machine-readable.",
+                },
+                "action_items": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "title": {"type": "string"},
+                            "owner": {"type": "string", "description": "Agent or person who owns this action."},
+                            "due": {"type": "string", "description": "ISO timestamp or natural deadline."},
+                            "priority": {"type": "string", "enum": ["urgent", "high", "medium", "low"]},
+                        },
+                    },
+                    "description": "Concrete next steps. Auto can promote these into board tasks automatically.",
+                },
+                "linked_task_ids": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": "Board task IDs this report references (origin task, follow-up tasks, etc.).",
+                },
+                "requires_approval": {
+                    "type": "boolean",
+                    "description": "Set to true when the report's recommendations need a human decision before any action. Surfaces in the 'Decisions Needed' queue.",
+                },
             },
             "required": ["title", "content", "report_type", "status"],
         },
