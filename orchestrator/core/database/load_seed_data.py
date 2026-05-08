@@ -70,11 +70,18 @@ def load_seed_data(load_credentials: bool = True, load_platform_defaults: bool =
                 for cred in credential_types:
                     try:
                         cursor.execute("""
-                            INSERT INTO credential_types 
-                            (id, name, display_name, category, icon, description, 
+                            INSERT INTO credential_types
+                            (id, name, display_name, category, icon, description,
                              schema_definition, test_endpoint, documentation_url, is_system, is_active)
                             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                            ON CONFLICT (name) DO NOTHING
+                            ON CONFLICT (name) DO UPDATE SET
+                                display_name = EXCLUDED.display_name,
+                                category = EXCLUDED.category,
+                                icon = EXCLUDED.icon,
+                                description = EXCLUDED.description,
+                                schema_definition = EXCLUDED.schema_definition,
+                                test_endpoint = EXCLUDED.test_endpoint,
+                                documentation_url = EXCLUDED.documentation_url
                         """, (
                             cred['id'],
                             cred['name'],
