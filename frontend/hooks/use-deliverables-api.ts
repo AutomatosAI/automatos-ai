@@ -105,6 +105,7 @@ export interface DeliverableStats {
 export interface FilterState {
   artifact_type: string | null
   source_type: string | null
+  source_type_exclude: string[] | null
   agent_id: number | null
   date_range: DateRange
   search: string
@@ -113,9 +114,20 @@ export interface FilterState {
 export const DEFAULT_FILTERS: FilterState = {
   artifact_type: null,
   source_type: null,
+  source_type_exclude: null,
   agent_id: null,
   date_range: 'all',
   search: '',
+}
+
+/**
+ * Filter preset for the redesigned Deliverables feed (Today hero + Netflix
+ * type rows). Excludes heartbeats — they're agent self-status noise that
+ * gets demoted to the System Strip and only fully visible in Explorer.
+ */
+export const FEED_DEFAULT_FILTERS: FilterState = {
+  ...DEFAULT_FILTERS,
+  source_type_exclude: ['heartbeat'],
 }
 
 // ============= HELPERS =============
@@ -146,6 +158,9 @@ function buildListQuery(filters: FilterState, offset: number): string {
   params.set('offset', String(offset))
   if (filters.artifact_type) params.set('artifact_type', filters.artifact_type)
   if (filters.source_type) params.set('source_type', filters.source_type)
+  if (filters.source_type_exclude && filters.source_type_exclude.length > 0) {
+    params.set('source_type_exclude', filters.source_type_exclude.join(','))
+  }
   if (filters.agent_id !== null) params.set('agent_id', String(filters.agent_id))
   if (filters.search.trim()) params.set('search', filters.search.trim())
   const dateFrom = dateRangeToFrom(filters.date_range)

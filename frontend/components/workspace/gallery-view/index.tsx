@@ -31,10 +31,12 @@ import { FilterBar } from './filter-bar'
 export interface GalleryViewProps {
   workspaceId?: string | null
   className?: string
+  /** Pre-applied filter state (drill-in from a TypeRow's "See all"). */
+  initialFilters?: FilterState
 }
 
-export function GalleryView({ className }: GalleryViewProps) {
-  const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS)
+export function GalleryView({ className, initialFilters }: GalleryViewProps) {
+  const [filters, setFilters] = useState<FilterState>(initialFilters ?? DEFAULT_FILTERS)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [viewMode, setViewMode] = useViewMode('gallery')
