@@ -5,33 +5,27 @@
 
 The following files were used as context for generating this wiki page:
 
-- [docs/reviews/COMPOSIO-TOOL-REGRESSION-REVIEW.md](docs/reviews/COMPOSIO-TOOL-REGRESSION-REVIEW.md)
 - [frontend/app/api/chat/route.ts](frontend/app/api/chat/route.ts)
-- [frontend/components/chatbot/chat-mode-bar.tsx](frontend/components/chatbot/chat-mode-bar.tsx)
 - [frontend/components/chatbot/chat.tsx](frontend/components/chatbot/chat.tsx)
-- [frontend/components/chatbot/message-actions.tsx](frontend/components/chatbot/message-actions.tsx)
 - [frontend/components/chatbot/message.tsx](frontend/components/chatbot/message.tsx)
 - [frontend/components/chatbot/mission-suggestion-card.tsx](frontend/components/chatbot/mission-suggestion-card.tsx)
-- [frontend/components/missions/create-mission-modal.tsx](frontend/components/missions/create-mission-modal.tsx)
+- [frontend/components/chatbot/multimodal-input.tsx](frontend/components/chatbot/multimodal-input.tsx)
+- [frontend/components/voice/VoiceMessage.tsx](frontend/components/voice/VoiceMessage.tsx)
+- [frontend/components/voice/VoiceMicButton.tsx](frontend/components/voice/VoiceMicButton.tsx)
+- [frontend/components/voice/VoicePlayer.tsx](frontend/components/voice/VoicePlayer.tsx)
+- [frontend/components/voice/VoiceRecordingIndicator.tsx](frontend/components/voice/VoiceRecordingIndicator.tsx)
+- [frontend/hooks/use-voice-playback.ts](frontend/hooks/use-voice-playback.ts)
+- [frontend/hooks/use-voice-recorder.ts](frontend/hooks/use-voice-recorder.ts)
 - [frontend/lib/chat/hooks.ts](frontend/lib/chat/hooks.ts)
+- [frontend/lib/voice-client.ts](frontend/lib/voice-client.ts)
 - [frontend/stores/mission-store.ts](frontend/stores/mission-store.ts)
 - [frontend/types/chat.ts](frontend/types/chat.ts)
 - [orchestrator/api/chat.py](orchestrator/api/chat.py)
-- [orchestrator/api/chat_voice.py](orchestrator/api/chat_voice.py)
-- [orchestrator/consumers/chatbot/auto.py](orchestrator/consumers/chatbot/auto.py)
-- [orchestrator/consumers/chatbot/intent_classifier.py](orchestrator/consumers/chatbot/intent_classifier.py)
-- [orchestrator/consumers/chatbot/personality.py](orchestrator/consumers/chatbot/personality.py)
+- [orchestrator/api/recipe_executor.py](orchestrator/api/recipe_executor.py)
 - [orchestrator/consumers/chatbot/service.py](orchestrator/consumers/chatbot/service.py)
-- [orchestrator/consumers/chatbot/smart_tool_router.py](orchestrator/consumers/chatbot/smart_tool_router.py)
-- [orchestrator/core/llm/manager.py](orchestrator/core/llm/manager.py)
-- [orchestrator/core/routing/engine.py](orchestrator/core/routing/engine.py)
-- [orchestrator/modules/orchestrator/service.py](orchestrator/modules/orchestrator/service.py)
-- [orchestrator/modules/tools/discovery/actions_analytics_enhanced.py](orchestrator/modules/tools/discovery/actions_analytics_enhanced.py)
-- [orchestrator/modules/tools/discovery/handlers_analytics_enhanced.py](orchestrator/modules/tools/discovery/handlers_analytics_enhanced.py)
-- [orchestrator/modules/tools/discovery/handlers_search.py](orchestrator/modules/tools/discovery/handlers_search.py)
-- [orchestrator/modules/tools/discovery/platform_actions.py](orchestrator/modules/tools/discovery/platform_actions.py)
-- [orchestrator/modules/tools/discovery/platform_executor.py](orchestrator/modules/tools/discovery/platform_executor.py)
-- [orchestrator/modules/tools/tool_router.py](orchestrator/modules/tools/tool_router.py)
+- [orchestrator/consumers/chatbot/streaming.py](orchestrator/consumers/chatbot/streaming.py)
+- [orchestrator/core/models/stream_events.py](orchestrator/core/models/stream_events.py)
+- [orchestrator/modules/agents/factory/agent_factory.py](orchestrator/modules/agents/factory/agent_factory.py)
 
 </details>
 
@@ -52,7 +46,6 @@ The chat system follows a request-response pipeline with streaming support, comp
 ```mermaid
 graph TB
     User["User Input<br/>(frontend/components/chatbot/chat.tsx)"]
-    EdgeProxy["Edge Route<br/>(frontend/app/api/chat/route.ts)"]
     ChatAPI["POST /api/chat<br/>(orchestrator/api/chat.py)"]
     
     subgraph "Request Processing"
@@ -63,36 +56,32 @@ graph TB
     
     subgraph "Execution Layer"
         StreamingSvc["StreamingChatService<br/>(orchestrator/consumers/chatbot/service.py)"]
-        AgentFactory["AgentFactory<br/>(orchestrator/modules/agents/factory/agent_factory.py)"]
-        ToolLoop["Tool Loop<br/>(ToolExecutionTracker)"]
-        ContextSvc["ContextService<br/>(orchestrator/modules/context/service.py)"]
+        WorkflowBridge["_stream_workflow_bridge<br/>(orchestrator/api/chat.py)"]
+        ToolLoop["ToolExecutionTracker<br/>(orchestrator/consumers/chatbot/service.py)"]
+        LLM["LLM Manager<br/>(orchestrator/core/llm/manager.py)"]
     end
     
     subgraph "Response Generation"
-        LLM["LLM Manager<br/>(orchestrator/core/llm/manager.py)"]
         MemoryStore["Memory Storage<br/>(SmartChatIntegration)"]
         AISDK["AI SDK Data Stream<br/>(orchestrator/consumers/chatbot/streaming.py)"]
     end
     
-    User --> EdgeProxy
-    EdgeProxy --> ChatAPI
+    User --> ChatAPI
     ChatAPI --> CTX
     CTX --> AutoBrain
     AutoBrain --> Router
     Router --> StreamingSvc
     
-    StreamingSvc --> AgentFactory
-    AgentFactory --> ContextSvc
-    ContextSvc --> ToolLoop
+    StreamingSvc --> WorkflowBridge
+    StreamingSvc --> ToolLoop
     ToolLoop --> LLM
     
     LLM --> MemoryStore
     MemoryStore --> AISDK
-    AISDK --> EdgeProxy
-    EdgeProxy --> User
+    AISDK --> User
 ```
 
-Sources: [orchestrator/api/chat.py:63-63](), [orchestrator/consumers/chatbot/service.py:11-12](), [orchestrator/consumers/chatbot/streaming.py:21-25](), [orchestrator/core/routing/engine.py:58-68]()
+Sources: [orchestrator/api/chat.py:30-30](), [orchestrator/consumers/chatbot/service.py:11-12](), [orchestrator/core/llm/manager.py:25-25]()
 
 ---
 
@@ -113,104 +102,104 @@ X-Workspace-ID: <workspace-uuid>
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | `string?` | Chat session ID (UUID). Omit to create new chat. |
-| `message` | `ChatMessageRequest` | User message with role and parts. |
-| `agentId` | `int?` | Selected agent ID for explicit routing. |
-| `missionMode` | `boolean?` | Conversational mission planning [frontend/lib/chat/hooks.ts:118-119](). |
-| `planMode` | `boolean?` | Research and strategy mode [frontend/lib/chat/hooks.ts:120-121](). |
+| `id` | `string?` | Chat session ID (UUID). Omit to create new chat [orchestrator/api/chat.py:186-191](). |
+| `message` | `ChatMessageRequest` | User message with role and parts [orchestrator/api/chat.py:186-188](). |
+| `agentId` | `int?` | Selected agent ID for explicit routing [frontend/lib/chat/hooks.ts:116-117](). |
+| `missionMode` | `boolean?` | Conversational mission planning [frontend/lib/chat/hooks.ts:119-120](). |
+| `planMode` | `boolean?` | Research and strategy mode [frontend/lib/chat/hooks.ts:121-122](). |
 
 **Response Format (AI SDK Data Stream)**
 
-The response is a `text/plain` SSE stream. The backend sets routing headers like `x-routing-agent-id` and `x-routing-confidence` which are extracted by the frontend hook [frontend/lib/chat/hooks.ts:142-146](). The `StreamingHandler` formats chunks as `0:"text"` (text parts) or `d:{"type":"..."}` (data parts) [orchestrator/consumers/chatbot/streaming.py:105-115]().
+The response is a `text/plain` SSE stream. The backend forwards routing headers like `x-routing-agent-id` and `x-routing-confidence` [frontend/lib/chat/hooks.ts:143-147](). The frontend `useChat` hook parses the stream, handling text chunks (`0:`), tool calls, and custom data events (`d:`) [frontend/lib/chat/hooks.ts:182-200]().
 
-Sources: [orchestrator/api/chat.py:63-63](), [orchestrator/consumers/chatbot/streaming.py:102-177](), [frontend/lib/chat/hooks.ts:98-124]()
+Sources: [orchestrator/api/chat.py:30-190](), [frontend/lib/chat/hooks.ts:99-165](), [orchestrator/consumers/chatbot/streaming.py:105-176]()
 
 ---
 
 ## Complexity Assessment (AutoBrain)
 
-AutoBrain (PRD-68) performs **3-tier progressive complexity assessment** (Atom → Organism) to determine the execution strategy [orchestrator/consumers/chatbot/auto.py:14-22]().
+AutoBrain performs progressive complexity assessment to determine if a request can be handled as a simple chat or requires a full workflow execution [orchestrator/api/chat.py:45-45]().
 
 **Complexity Scale**
 
 | Level | Name | Description |
 |-------|------|-------------|
-| **ATOM** | `Complexity.ATOM` | Simple: greetings, factual, chitchat [orchestrator/consumers/chatbot/auto.py:44-44](). |
-| **MOLECULE** | `Complexity.MOLECULE` | Needs a single tool or specific agent skill [orchestrator/consumers/chatbot/auto.py:45-45](). |
-| **CELL** | `Complexity.CELL` | Needs memory + tool + reasoning [orchestrator/consumers/chatbot/auto.py:46-46](). |
-| **ORGAN** | `Complexity.ORGAN` | Multi-agent coordination; triggers workflow bridge [orchestrator/consumers/chatbot/auto.py:47-47](). |
-| **ORGANISM** | `Complexity.ORGANISM` | Enterprise pipeline with learning + feedback [orchestrator/consumers/chatbot/auto.py:48-48](). |
+| **ATOM** | `Complexity.ATOM` | Simple greetings or factual chitchat. |
+| **MOLECULE** | `Complexity.MOLECULE` | Needs a single tool or specific agent skill. |
+| **CELL** | `Complexity.CELL` | Needs memory + tool + reasoning. |
+| **ORGAN** | `Complexity.ORGAN` | Multi-agent coordination; triggers workflow bridge [orchestrator/api/chat.py:48-48](). |
+| **ORGANISM** | `Complexity.ORGANISM` | Enterprise pipeline, learning + feedback. |
 
-**3-Tier Assessment Flow**
-
-1.  **Tier 1: Cache**: Redis lookup for identical previous queries [orchestrator/consumers/chatbot/auto.py:15-15]().
-2.  **Tier 2: Heuristics**: Fast-path regex patterns for greetings (`_ATOM_PATTERNS`) and platform keywords (`_PLATFORM_KEYWORDS`) [orchestrator/consumers/chatbot/auto.py:92-116]().
-3.  **Tier 3: LLM**: Classification using a model to determine complexity, action, and tool hints [orchestrator/consumers/chatbot/auto.py:59-73]().
-
-Sources: [orchestrator/consumers/chatbot/auto.py:1-85](), [orchestrator/api/chat.py:70-88]()
+Sources: [orchestrator/api/chat.py:37-55](), [orchestrator/consumers/chatbot/service.py:34-34]()
 
 ---
 
 ## Streaming Chat Service
 
-`StreamingChatService` orchestrates the response generation. For high-complexity tasks (**ORGAN** or **ORGANISM**), it utilizes a `_stream_workflow_bridge` [orchestrator/api/chat.py:70-88]().
+`StreamingChatService` orchestrates the response generation. For high-complexity tasks (**ORGAN** or **ORGANISM**), it utilizes a `_stream_workflow_bridge` to move from a chat bubble to a structured pipeline [orchestrator/api/chat.py:37-46]().
 
 **Workflow Bridge Pipeline**
-1.  **Create Transient Workflow**: Generates a `Workflow` object from the user message, tagged as `chat_generated` [orchestrator/api/chat.py:101-120]().
-2.  **Execution**: Triggers `execute_workflow_with_progress` with a 120s safety timeout [orchestrator/api/chat.py:153-161]().
-3.  **Streaming**: Forwards workflow updates (started, error, result) back to the chat response [orchestrator/api/chat.py:143-177]().
+1.  **Create Transient Workflow**: Generates a `Workflow` object from the user message, tagged as `chat_generated` [orchestrator/api/chat.py:68-84]().
+2.  **Execution**: Triggers `execute_workflow_with_progress` with a safety timeout (120s) [orchestrator/api/chat.py:120-126]().
+3.  **Result Integration**: Saves the final workflow output as an assistant message in the chat session [orchestrator/api/chat.py:147-156]().
 
-Sources: [orchestrator/api/chat.py:70-190](), [orchestrator/consumers/chatbot/service.py:11-13]()
+Sources: [orchestrator/api/chat.py:37-174](), [orchestrator/consumers/chatbot/service.py:11-13]()
 
 ---
 
 ## Tool Loop Prevention
 
-To prevent infinite loops, the system uses a `ToolExecutionTracker` within each conversation turn [orchestrator/consumers/chatbot/service.py:78-85]().
+To prevent infinite loops and redundant API calls, the system uses a `ToolExecutionTracker` within each conversation turn [orchestrator/consumers/chatbot/service.py:83-90]().
 
 **Deduplication Strategies:**
-- **Exact Deduplication**: Skips if the same tool name and argument hash are detected [orchestrator/consumers/chatbot/service.py:126-129]().
-- **Semantic Deduplication**: For search tools (e.g., `search_knowledge`), checks for similar queries using `SequenceMatcher` [orchestrator/consumers/chatbot/service.py:57-67](), [orchestrator/consumers/chatbot/service.py:131-137]().
-- **Per-Tool Limits**: Enforces `TOOL_RETRY_LIMITS` (e.g., `composio_execute` is limited to 2 calls per turn) [orchestrator/consumers/chatbot/service.py:93-104]().
+- **Exact Deduplication**: Skips if the same tool is called with identical parameter hashes [orchestrator/consumers/chatbot/service.py:163-167]().
+- **Semantic Deduplication**: Checks if search queries are semantically similar (threshold 0.75) for tools like `search_knowledge` [orchestrator/consumers/chatbot/service.py:62-71](), [orchestrator/consumers/chatbot/service.py:168-176]().
+- **Per-Tool Limits**: Enforces `TOOL_RETRY_LIMITS` (e.g., `read_file` limit of 8, `composio_execute` limit of 5) [orchestrator/consumers/chatbot/service.py:98-111]().
 
-Sources: [orchestrator/consumers/chatbot/service.py:48-156]()
+Sources: [orchestrator/consumers/chatbot/service.py:53-185]()
 
 ---
 
-## Memory Integration
+## Voice & Multimodal Integration
 
-The chat interface integrates with memory through several specialized handlers and tool routers:
-- **`SmartToolRouter`**: Categorizes tools (data, search, memory) and filters them based on detected intent (e.g., `Intent.MEMORY_RECALL`) [orchestrator/consumers/chatbot/smart_tool_router.py:112-125]().
-- **`platform_search_memory`**: A promoted tool always available for memory-related queries [orchestrator/consumers/chatbot/smart_tool_router.py:66-73]().
-- **`PlatformActionExecutor`**: Routes platform-specific memory actions like `platform_store_memory` and `platform_get_memory_stats` to domain handlers [orchestrator/modules/tools/discovery/platform_executor.py:183-193]().
+The chat interface supports voice interactions and multimodal inputs.
 
-Sources: [orchestrator/consumers/chatbot/smart_tool_router.py:1-135](), [orchestrator/modules/tools/discovery/platform_executor.py:49-54]()
+**Voice Pipeline**
+- **Recording**: Handled by `useVoiceRecorder` hook in the UI [frontend/components/chatbot/multimodal-input.tsx:124-127]().
+- **Processing**: The `handleVoiceComplete` callback sends audio blobs to the voice endpoint which performs STT, agent execution, and TTS [frontend/components/chatbot/multimodal-input.tsx:69-122]().
+- **Playback**: `useVoicePlayback` manages `AudioContext` for word-boundary-aware audio streaming [frontend/hooks/use-voice-playback.ts:19-212]().
+
+**Attachments**
+- **Ephemeral Attachments**: PRD-127 introduces `attachment_id` for ephemeral file references in messages [frontend/components/chatbot/multimodal-input.tsx:56-60]().
+- **Payload**: The frontend sends `attachment_ids` instead of document URLs to ensure workspace isolation [frontend/components/chatbot/multimodal-input.tsx:166-184]().
+
+Sources: [frontend/components/chatbot/multimodal-input.tsx:69-195](), [frontend/hooks/use-voice-playback.ts:1-225](), [orchestrator/api/chat.py:176-183]()
 
 ---
 
 ## Chat UI Components
 
-The frontend is built with Next.js and uses a custom `useChat` hook to manage state and streaming [frontend/lib/chat/hooks.ts:8-28]().
+The frontend is built with Next.js and uses a custom `useChat` hook to manage SSE stream parsing and state [frontend/lib/chat/hooks.ts:9-29]().
 
 **Key Components:**
-- **`Chat`**: Main container managing artifacts, resizable panels, and workspace context [frontend/components/chatbot/chat.tsx:56-64]().
-- **`MultimodalInput`**: Handles text and file uploads for the chat session [frontend/components/chatbot/chat.tsx:9-9]().
-- **`ChatModeBar`**: Toggles between different interaction modes (e.g., Mission mode, Plan mode) [frontend/components/chatbot/chat.tsx:38-38]().
-- **`ToolSuggestionBar`**: Provides dynamic tool suggestions based on the current context (PRD-40) [frontend/components/chatbot/chat.tsx:29-32]().
+- **`Chat`**: Main container managing artifacts, resizable panels, and workspace context [frontend/components/chatbot/chat.tsx:57-65]().
+- **`Message`**: Renders markdown, code blocks, and tool call status [frontend/components/chatbot/message.tsx:41-53]().
+- **`MultimodalInput`**: Textarea with support for file uploads and voice recording [frontend/components/chatbot/multimodal-input.tsx:38-51]().
+- **`ChatModeBar`**: Toggles between pinned agents and specialized mission/plan modes [frontend/components/chatbot/chat.tsx:39-39]().
 
-Sources: [frontend/components/chatbot/chat.tsx:1-166](), [frontend/lib/chat/hooks.ts:1-180]()
+Sources: [frontend/components/chatbot/chat.tsx:1-166](), [frontend/components/chatbot/message.tsx:15-184](), [frontend/lib/chat/hooks.ts:1-165]()
 
 ---
 
 ## Widget System
 
-The system supports a **Widget Architecture** (PRD-38.1) for isolated memory and task access [frontend/components/chatbot/chat.tsx:19-22]().
+The system supports a **Widget Architecture** (PRD-38.1) for specialized execution views [frontend/components/chatbot/chat.tsx:20-20]().
 
 **Integration Points:**
-- **`useWorkspaceStore`**: Dispatches events like `memory-injected`, `memory-stored`, and `workflow-update` to update widget states [frontend/components/chatbot/chat.tsx:75-78]().
-- **`CodingCanvasWidgetData`**: Opens a dedicated "Code Canvas" widget for sandboxed code execution and file management [frontend/components/chatbot/chat.tsx:113-124]().
-- **`Canvas`**: The rendering layer for active widgets within the workspace [frontend/components/chatbot/chat.tsx:21-21]().
+- **`useWorkspaceStore`**: Dispatches SSE events like `memory-injected` or `workflow-update` to update widget states [frontend/components/chatbot/chat.tsx:71-79]().
+- **`CodingCanvasWidgetData`**: Opens a dedicated code canvas for sandboxed file operations within the chat view [frontend/components/chatbot/chat.tsx:115-126]().
+- **`ArtifactViewer`**: Displays generated artifacts (documents, code, diagrams) alongside the conversation [frontend/components/chatbot/chat.tsx:11-11]().
 
-Sources: [frontend/components/chatbot/chat.tsx:68-132](), [frontend/stores/workspace-store.ts]()
+Sources: [frontend/components/chatbot/chat.tsx:68-134](), [frontend/lib/chat/hooks.ts:31-35](), [orchestrator/consumers/chatbot/streaming.py:179-200]()
 
 ---

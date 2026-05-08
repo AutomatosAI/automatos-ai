@@ -8,27 +8,17 @@ The following files were used as context for generating this wiki page:
 - [frontend/components/agents/agent-configuration-modal.tsx](frontend/components/agents/agent-configuration-modal.tsx)
 - [frontend/components/agents/agent-configuration.tsx](frontend/components/agents/agent-configuration.tsx)
 - [frontend/components/agents/agent-details-modal.tsx](frontend/components/agents/agent-details-modal.tsx)
-- [frontend/components/agents/agent-management.tsx](frontend/components/agents/agent-management.tsx)
-- [frontend/components/agents/agent-performance.tsx](frontend/components/agents/agent-performance.tsx)
 - [frontend/components/agents/agent-roster.tsx](frontend/components/agents/agent-roster.tsx)
-- [frontend/components/agents/agent-skills.tsx](frontend/components/agents/agent-skills.tsx)
-- [frontend/components/agents/agent-status-control-modal.tsx](frontend/components/agents/agent-status-control-modal.tsx)
 - [frontend/components/agents/create-agent-modal.tsx](frontend/components/agents/create-agent-modal.tsx)
-- [frontend/components/agents/create-skill-modal.tsx](frontend/components/agents/create-skill-modal.tsx)
-- [frontend/components/agents/skill-configuration-modal.tsx](frontend/components/agents/skill-configuration-modal.tsx)
 - [frontend/components/documents/analytics-tab.tsx](frontend/components/documents/analytics-tab.tsx)
 - [frontend/components/documents/processing-tab.tsx](frontend/components/documents/processing-tab.tsx)
-- [frontend/hooks/use-agent-api.ts](frontend/hooks/use-agent-api.ts)
-- [frontend/hooks/use-document-api.ts](frontend/hooks/use-document-api.ts)
-- [frontend/hooks/use-marketplace-api.ts](frontend/hooks/use-marketplace-api.ts)
+- [frontend/lib/agent-constants.ts](frontend/lib/agent-constants.ts)
+- [orchestrator/alembic/versions/add_job_title_to_agents.py](orchestrator/alembic/versions/add_job_title_to_agents.py)
+- [orchestrator/alembic/versions/agent_public_id_and_slug_fix.py](orchestrator/alembic/versions/agent_public_id_and_slug_fix.py)
+- [orchestrator/alembic/versions/seed_auto_agents_existing_workspaces.py](orchestrator/alembic/versions/seed_auto_agents_existing_workspaces.py)
 - [orchestrator/api/agents.py](orchestrator/api/agents.py)
-- [orchestrator/api/marketplace.py](orchestrator/api/marketplace.py)
-- [orchestrator/core/models/__init__.py](orchestrator/core/models/__init__.py)
 - [orchestrator/core/models/core.py](orchestrator/core/models/core.py)
-- [orchestrator/modules/coordination/__init__.py](orchestrator/modules/coordination/__init__.py)
-- [orchestrator/modules/coordination/agent_matcher.py](orchestrator/modules/coordination/agent_matcher.py)
-- [orchestrator/modules/coordination/templates.py](orchestrator/modules/coordination/templates.py)
-- [orchestrator/services/heartbeat_service.py](orchestrator/services/heartbeat_service.py)
+- [orchestrator/core/utils/agent_resolver.py](orchestrator/core/utils/agent_resolver.py)
 
 </details>
 
@@ -42,19 +32,19 @@ The agent creation wizard collects configuration in 5 progressive steps, each re
 
 | Step | Tab ID | Purpose | Primary State |
 |------|--------|---------|---------------|
-| 1 | `step-1` | Basic metadata (category, name, description, tags) | `agentData.category`, `agentData.name` [frontend/components/agents/create-agent-modal.tsx:68-72]() |
-| 2 | `step-2` | Persona assignment (predefined/custom/none) | `personaMode`, `selectedPersonaId` [frontend/components/agents/create-agent-modal.tsx:93-94]() |
-| 3 | `step-3` | LLM configuration (provider, model_id, parameters) | `modelConfig` object [frontend/components/agents/create-agent-modal.tsx:81-90]() |
-| 4 | `step-4` | Composio tool assignments (e.g., Gmail, Slack) | `agentData.tools` array [frontend/components/agents/create-agent-modal.tsx:74]() |
-| 5 | `step-5` | Marketplace plugin assignments | `agentData.plugins` array [frontend/components/agents/create-agent-modal.tsx:73]() |
+| 1 | `step-1` | Basic metadata (category, name, description, tags) | `agentData.category`, `agentData.name` [[frontend/components/agents/create-agent-modal.tsx:68-72]]() |
+| 2 | `step-2` | Persona assignment (predefined/custom/none) | `personaMode`, `selectedPersonaId` [[frontend/components/agents/create-agent-modal.tsx:84-85]]() |
+| 3 | `step-3` | LLM configuration (provider, model_id, parameters) | `modelConfig` object [[frontend/components/agents/create-agent-modal.tsx:81-81]]() |
+| 4 | `step-4` | Composio tool assignments (e.g., Gmail, Slack) | `agentData.tools` array [[frontend/components/agents/create-agent-modal.tsx:74-74]]() |
+| 5 | `step-5` | Marketplace plugin assignments | `agentData.plugins` array [[frontend/components/agents/create-agent-modal.tsx:73-73]]() |
 
-The `handleCreate` function at [frontend/components/agents/create-agent-modal.tsx:188-353]() orchestrates the atomic creation flow by calling:
-1. `useCreateAgent().mutateAsync()` → `POST /api/agents` [orchestrator/api/agents.py:404]()
-2. `useUpdateAgentModelConfig().mutateAsync()` → `PUT /api/agents/{id}/model` [frontend/components/agents/create-agent-modal.tsx:227]()
-3. `apiClient.request()` → `PUT /api/agents/{id}/persona` [frontend/components/agents/create-agent-modal.tsx:240]()
-4. `apiClient.request()` → `PUT /api/agents/{id}/plugins` [frontend/components/agents/create-agent-modal.tsx:262]()
+The `handleCreate` function at [[frontend/components/agents/create-agent-modal.tsx:176-320]]() orchestrates the atomic creation flow by calling:
+1. `useCreateAgent().mutateAsync()` → `POST /api/agents` [[frontend/components/agents/create-agent-modal.tsx:215-215]]()
+2. `useUpdateAgentModelConfig().mutateAsync()` → `PUT /api/agents/{id}/model` [[frontend/components/agents/create-agent-modal.tsx:227-227]]()
+3. `apiClient.request()` → `PUT /api/agents/{id}/persona` [[frontend/components/agents/create-agent-modal.tsx:240-240]]()
+4. `apiClient.request()` → `PUT /api/agents/{id}/plugins` [[frontend/components/agents/create-agent-modal.tsx:262-262]]()
 
-**Sources:** [frontend/components/agents/create-agent-modal.tsx:66-114](), [frontend/components/agents/create-agent-modal.tsx:188-353](), [orchestrator/api/agents.py:31-483]()
+**Sources:** [[frontend/components/agents/create-agent-modal.tsx:66-102]](), [[frontend/components/agents/create-agent-modal.tsx:176-320]]()
 
 ---
 
@@ -68,10 +58,8 @@ sequenceDiagram
     participant User
     participant CreateAgentModal
     participant useCreateAgent
-    participant POST_agents as "POST /api/agents<br/>(orchestrator/api/agents.py:404)"
-    participant Agent_table as "Agent table"
-    participant useUpdateModelConfig
-    participant AgentAppAssignment_table as "AgentAppAssignment table"
+    participant API as "FastAPI Backend<br/>(orchestrator/api/agents.py)"
+    participant DB as "PostgreSQL<br/>(Agent & AgentAppAssignment)"
     
     User->>CreateAgentModal: Click "Create Agent"
     CreateAgentModal->>CreateAgentModal: "setStep(1)" - Basic Info
@@ -88,15 +76,14 @@ sequenceDiagram
     
     CreateAgentModal->>CreateAgentModal: Validate name & category
     CreateAgentModal->>useCreateAgent: "mutateAsync(agentPayload)"
-    useCreateAgent->>POST_agents: HTTP POST with payload
-    POST_agents->>Agent_table: "INSERT INTO agents"
-    Note over POST_agents,Agent_table: Fields: name, agent_type,<br/>description, tags, workspace_id
-    POST_agents->>AgentAppAssignment_table: "INSERT tool assignments"
-    POST_agents-->>useCreateAgent: Return "newAgent {id}"
+    useCreateAgent->>API: HTTP POST /api/agents
+    API->>DB: INSERT INTO agents
+    Note over API,DB: Fields: name, agent_type,<br/>description, tags, workspace_id
+    API->>DB: INSERT tool assignments
+    API-->>useCreateAgent: Return "newAgent {id}"
     
     alt Model config provided
-        CreateAgentModal->>useUpdateModelConfig: "mutateAsync({agentId, modelConfig})"
-        useUpdateModelConfig->>POST_agents: "PUT /api/agents/{id}/model"
+        CreateAgentModal->>API: "PUT /api/agents/{id}/model"
     end
     
     CreateAgentModal->>CreateAgentModal: Reset form, close modal
@@ -108,9 +95,8 @@ sequenceDiagram
 Title: Component to Code Mapping
 ```mermaid
 graph TB
-    AgentManagement["AgentManagement<br/>(frontend/components/agents/agent-management.tsx)"]
-    CreateButton["Button<br/>data-tour='create-agent-btn'"]
-    CreateAgentModal["CreateAgentModal<br/>(frontend/components/agents/create-agent-modal.tsx:66)"]
+    AgentRoster["AgentRoster<br/>(frontend/components/agents/agent-roster.tsx)"]
+    CreateAgentModal["CreateAgentModal<br/>(frontend/components/agents/create-agent-modal.tsx)"]
     TabsComponent["Tabs<br/>value='step-{step}'"]
     TabContent1["TabsContent value='step-1'<br/>Basic Info"]
     TabContent2["TabsContent value='step-2'<br/>Persona Selection"]
@@ -118,8 +104,7 @@ graph TB
     TabContent4["TabsContent value='step-4'<br/>Tool Grid"]
     TabContent5["TabsContent value='step-5'<br/>Plugin Grid"]
     
-    AgentManagement -->|"onClick"| CreateButton
-    CreateButton --> CreateAgentModal
+    AgentRoster -->|"onClick"| CreateAgentModal
     CreateAgentModal --> TabsComponent
     TabsComponent --> TabContent1
     TabsComponent --> TabContent2
@@ -127,35 +112,35 @@ graph TB
     TabsComponent --> TabContent4
     TabsComponent --> TabContent5
     
-    TabContent1 -->|"Select"| CategorySelect["AGENT_CATEGORIES<br/>(frontend/lib/agent-constants.ts)"]
+    TabContent1 -->|"Select"| CategoryConstants["CATEGORY_TO_DB_MAP<br/>(frontend/lib/agent-constants.ts)"]
     TabContent3 -->|"PRD-15"| ModelSelectorComp["ModelSelector<br/>(frontend/components/agents/model-selector.tsx)"]
-    TabContent4 -->|"Composio"| ToolCheckbox["useTools hook<br/>(frontend/hooks/use-tools-api.ts)"]
+    TabContent4 -->|"Composio"| ToolHook["useTools hook<br/>(frontend/hooks/use-tools-api.ts)"]
 ```
 
-**Sources:** [frontend/components/agents/create-agent-modal.tsx:188-353](), [orchestrator/api/agents.py:404-483](), [frontend/components/agents/agent-management.tsx:168-175]()
+**Sources:** [[frontend/components/agents/create-agent-modal.tsx:176-320]](), [[frontend/components/agents/agent-roster.tsx:198-230]](), [[frontend/lib/agent-constants.ts:48-65]]()
 
 ---
 
 ## Triggering Agent Creation
 
-The agent creation modal is triggered from the `AgentManagement` component via the "Create Agent" button.
+The agent creation modal is typically triggered from the Agent Management views (like `AgentRoster`) or specialized dashboards.
 
 ### Entry Point
 
-The button is located in the `PageHeader` actions section of the management view.
+In the `AgentRoster` component, the modal is managed via state:
 
 ```typescript
-<Button
-  variant="outline"
-  data-tour="create-agent-btn"
-  onClick={() => setShowCreateModal(true)}
->
-  <Plus className="w-4 h-4 mr-2" />
-  Create Agent
-</Button>
+// Example from agent-roster.tsx context
+const [showCreateModal, setShowCreateModal] = useState(false)
+// ...
+<CreateAgentModal 
+  open={showCreateModal} 
+  onClose={() => setShowCreateModal(false)} 
+  onSuccess={onRefresh} 
+/>
 ```
 
-**Sources:** [frontend/components/agents/agent-management.tsx:168-175](), [frontend/components/agents/create-agent-modal.tsx:58-62]()
+**Sources:** [[frontend/components/agents/agent-roster.tsx:213-230]]()
 
 ---
 
@@ -165,7 +150,7 @@ The button is located in the `PageHeader` actions section of the management view
 
 **Form State Structure**
 
-[frontend/components/agents/create-agent-modal.tsx:68-78]() defines the `agentData` state:
+[[frontend/components/agents/create-agent-modal.tsx:68-78]]() defines the `agentData` state:
 
 ```typescript
 const [agentData, setAgentData] = useState({
@@ -182,7 +167,7 @@ const [agentData, setAgentData] = useState({
 
 **Category to agent_type Conversion**
 
-At [frontend/components/agents/create-agent-modal.tsx:208-213](), the UI category is converted to the database `agent_type` enum using a constant map:
+At [[frontend/components/agents/create-agent-modal.tsx:196-202]](), the UI category is converted to the database `agent_type` value using a constant map defined in `agent-constants.ts` [[frontend/lib/agent-constants.ts:48-65]]():
 
 ```typescript
 const dbAgentType = CATEGORY_TO_DB_MAP[agentData.category] || 'custom'
@@ -190,14 +175,13 @@ const dbAgentType = CATEGORY_TO_DB_MAP[agentData.category] || 'custom'
 const agentPayload = {
   name: agentData.name,
   agent_type: dbAgentType,
-  marketplace_category: agentData.category,
+  marketplace_category: agentData.category, // Round-trip preservation
+  description: agentData.description || '',
   // ...
 }
 ```
 
-The backend at [orchestrator/api/agents.py:419-428]() stores both values to preserve UI context while maintaining strict database typing.
-
-**Sources:** [frontend/components/agents/create-agent-modal.tsx:68-78](), [orchestrator/api/agents.py:419-428](), [frontend/lib/agent-constants.ts]()
+**Sources:** [[frontend/components/agents/create-agent-modal.tsx:68-78]](), [[frontend/components/agents/create-agent-modal.tsx:196-202]](), [[frontend/lib/agent-constants.ts:48-65]]()
 
 ---
 
@@ -206,48 +190,32 @@ The backend at [orchestrator/api/agents.py:419-428]() stores both values to pres
 The persona step allows users to define the agent's identity. Three modes are supported:
 
 - **None**: Default system prompt.
-- **Predefined**: Select from a library of personas fetched via `GET /api/personas` [frontend/components/agents/create-agent-modal.tsx:144]().
+- **Predefined**: Select from a library of personas fetched via `GET /api/personas` [[frontend/components/agents/create-agent-modal.tsx:132-142]]().
 - **Custom**: Write a custom system prompt.
 
 #### Predefined Persona Filtering
 
-Personas are automatically filtered by the agent category selected in Step 1 to ensure relevance:
+Personas can be filtered by category to ensure relevance to the agent's intended role [[frontend/components/agents/create-agent-modal.tsx:89-89]]().
 
-[frontend/components/agents/create-agent-modal.tsx:627-629]()
-
-```typescript
-.filter(p => !agentData.category || agentData.category === 'custom' || 
-  p.category?.toLowerCase() === agentData.category.toLowerCase())
-```
-
-**Sources:** [frontend/components/agents/create-agent-modal.tsx:93-99](), [frontend/components/agents/create-agent-modal.tsx:144-154]()
+**Sources:** [[frontend/components/agents/create-agent-modal.tsx:84-91]](), [[frontend/components/agents/create-agent-modal.tsx:132-142]]()
 
 ---
 
 ### Step 3: Model Selection (PRD-15)
 
-The model step allows users to select an LLM provider and configure parameters.
+The model step allows users to select an LLM provider and configure parameters using the `ModelSelector` component [[frontend/components/agents/create-agent-modal.tsx:39-39]]().
 
 #### Model Configuration State
 
-[frontend/components/agents/create-agent-modal.tsx:81-90]()
+[[frontend/components/agents/create-agent-modal.tsx:81-81]]() initializes with defaults:
 
 ```typescript
-const [modelConfig, setModelConfig] = useState({
-  provider: 'openai',
-  model_id: 'gpt-4',
-  temperature: 0.7,
-  max_tokens: 2000,
-  top_p: 1.0,
-  frequency_penalty: 0.0,
-  presence_penalty: 0.0,
-  fallback_model_id: null as string | null
-})
+const [modelConfig, setModelConfig] = useState(getDefaultModelConfig())
 ```
 
-Parameter controls use the `Slider` component for values like `temperature` [frontend/components/agents/create-agent-modal.tsx:782]().
+The `LLMModel` registry in the backend stores metadata, capabilities, and costs for these selections [[orchestrator/core/models/core.py:43-94]]().
 
-**Sources:** [frontend/components/agents/create-agent-modal.tsx:81-90](), [frontend/components/agents/create-agent-modal.tsx:782-795]()
+**Sources:** [[frontend/components/agents/create-agent-modal.tsx:81-81]](), [[frontend/components/agents/create-agent-modal.tsx:39-39]](), [[orchestrator/core/models/core.py:43-94]]()
 
 ---
 
@@ -257,18 +225,18 @@ The tools step allows users to assign Composio app integrations to the agent.
 
 #### Tools Data Fetching
 
-Available tools are fetched via the `useTools` hook, filtering for active connections in the current workspace:
+Available tools are fetched via the `useTools` hook, filtering for active connections:
 
-[frontend/components/agents/create-agent-modal.tsx:107]()
+[[frontend/components/agents/create-agent-modal.tsx:98-99]]()
 
 ```typescript
 const { data: toolsResponse, isLoading: toolsLoading } = useTools({ status: 'active', limit: 100 })
 const availableTools = toolsResponse?.data || []
 ```
 
-Tool assignment is tracked in the `agentData.tools` array of IDs [frontend/components/agents/create-agent-modal.tsx:175-182]().
+Tool assignment is tracked in the `agentData.tools` array of IDs [[frontend/components/agents/create-agent-modal.tsx:163-170]](). These assignments are persisted in the `agent_app_assignments` table in the backend [[orchestrator/api/agents.py:182-186]]().
 
-**Sources:** [frontend/components/agents/create-agent-modal.tsx:107-108](), [frontend/components/agents/create-agent-modal.tsx:175-182]()
+**Sources:** [[frontend/components/agents/create-agent-modal.tsx:98-99]](), [[frontend/components/agents/create-agent-modal.tsx:163-170]](), [[orchestrator/api/agents.py:182-186]]()
 
 ---
 
@@ -278,15 +246,9 @@ The final step allows users to assign marketplace plugins to the agent.
 
 #### Workspace Plugin Fetching
 
-Only workspace-enabled plugins are available for assignment. These are fetched via `GET /api/workspaces/{workspaceId}/plugins` when the modal opens [frontend/components/agents/create-agent-modal.tsx:127]().
+Only workspace-enabled plugins are available for assignment. These are fetched via `GET /api/workspaces/{workspaceId}/plugins` when the modal opens [[frontend/components/agents/create-agent-modal.tsx:105-126]](). Assignments are stored in the `AgentAssignedPlugin` model [[orchestrator/api/agents.py:15-15]]().
 
-#### Plugin Assignment UI
-
-Each plugin card shows metadata such as:
-- **Skills count**: Number of specialized skills [frontend/components/agents/create-agent-modal.tsx:986]().
-- **Commands count**: Number of executable commands [frontend/components/agents/create-agent-modal.tsx:991]().
-
-**Sources:** [frontend/components/agents/create-agent-modal.tsx:117-138](), [frontend/components/agents/create-agent-modal.tsx:986-991]()
+**Sources:** [[frontend/components/agents/create-agent-modal.tsx:105-126]](), [[orchestrator/api/agents.py:15-15]]()
 
 ---
 
@@ -298,29 +260,18 @@ The agent creation process involves multiple sequential API calls to ensure all 
 
 The `handleCreate` function orchestrates the flow:
 
-[frontend/components/agents/create-agent-modal.tsx:188-353]()
+[[frontend/components/agents/create-agent-modal.tsx:176-320]]()
 
-1. **POST /api/agents**: Creates the base agent record and initial tool assignments [orchestrator/api/agents.py:404]().
-2. **PUT /api/agents/{id}/model**: Persists LLM settings to the `agent_model_config` table [frontend/components/agents/create-agent-modal.tsx:227]().
-3. **PUT /api/agents/{id}/persona**: Updates persona identity or custom prompt [frontend/components/agents/create-agent-modal.tsx:240]().
-4. **PUT /api/agents/{id}/plugins**: Bulk assigns marketplace plugins [frontend/components/agents/create-agent-modal.tsx:262]().
+1. **POST /api/agents**: Creates the base agent record. The backend also handles semantic re-indexing of the agent for the router [[orchestrator/api/agents.py:38-65]]().
+2. **PUT /api/agents/{id}/model**: Persists LLM settings to the model configuration JSONB field [[orchestrator/core/models/core.py:207-207]]().
+3. **PUT /api/agents/{id}/persona**: Updates persona identity or custom prompt.
+4. **PUT /api/agents/{id}/plugins**: Bulk assigns marketplace plugins.
 
-### Backend Persistence
+### Heartbeat Configuration
 
-The backend at [orchestrator/api/agents.py:449-463]() handles tool assignments by inserting rows into the `AgentAppAssignment` table:
+Agents can also be configured with a "Heartbeat" (autonomous periodic check) via the `AgentConfigurationModal` [[frontend/components/agents/agent-configuration-modal.tsx:156-172]](). This schedules autonomous checks for the agent's assigned tasks.
 
-```python
-for app_name in resolved_app_names:
-    assignment = AgentAppAssignment(
-        agent_id=new_agent.id,
-        app_name=app_name,
-        assigned_by=_assigned_by_user_id(ctx),
-        is_active=True
-    )
-    db.add(assignment)
-```
-
-**Sources:** [orchestrator/api/agents.py:404-483](), [frontend/components/agents/create-agent-modal.tsx:188-353](), [orchestrator/core/models/composio_cache.py]()
+**Sources:** [[frontend/components/agents/create-agent-modal.tsx:176-320]](), [[orchestrator/api/agents.py:38-65]](), [[frontend/components/agents/agent-configuration-modal.tsx:156-172]]()
 
 ---
 
@@ -328,9 +279,9 @@ for app_name in resolved_app_names:
 
 The creation flow includes error handling for both critical and non-critical failures:
 
-- **Critical**: Failure to create the base agent via `POST /api/agents` triggers a `toast.error` and halts the flow [frontend/components/agents/create-agent-modal.tsx:191-195]().
-- **Non-Critical**: Failures in setting model config or persona are logged but allow the process to continue, as these can be updated later in the Configuration tab [frontend/components/agents/create-agent-modal.tsx:234-238]().
+- **Critical**: Failure to provide a name or category triggers a `toast.error` and halts the flow [[frontend/components/agents/create-agent-modal.tsx:179-183]]().
+- **Async Operations**: Each subsequent configuration call (model, persona, plugins) is awaited. Errors during these steps are caught and displayed via toast notifications [[frontend/components/agents/create-agent-modal.tsx:313-317]]().
 
-**Sources:** [frontend/components/agents/create-agent-modal.tsx:347-352]()
+**Sources:** [[frontend/components/agents/create-agent-modal.tsx:179-183]](), [[frontend/components/agents/create-agent-modal.tsx:313-317]]()
 
 ---

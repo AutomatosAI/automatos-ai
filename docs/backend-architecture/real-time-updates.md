@@ -5,202 +5,137 @@
 
 The following files were used as context for generating this wiki page:
 
-- [README.md](README.md)
 - [docker-compose.yml](docker-compose.yml)
-- [docs/README.md](docs/README.md)
 - [frontend/.dockerignore](frontend/.dockerignore)
 - [frontend/Dockerfile](frontend/Dockerfile)
 - [orchestrator/Dockerfile](orchestrator/Dockerfile)
 - [orchestrator/api/cloud_documents.py](orchestrator/api/cloud_documents.py)
-- [orchestrator/consumers/chatbot/streaming.py](orchestrator/consumers/chatbot/streaming.py)
-- [orchestrator/core/models/stream_events.py](orchestrator/core/models/stream_events.py)
 - [orchestrator/core/redis/client.py](orchestrator/core/redis/client.py)
-- [orchestrator/modules/tools/execution/exec_composio.py](orchestrator/modules/tools/execution/exec_composio.py)
-- [orchestrator/modules/tools/execution/exec_document.py](orchestrator/modules/tools/execution/exec_document.py)
-- [orchestrator/modules/tools/execution/exec_file_ops.py](orchestrator/modules/tools/execution/exec_file_ops.py)
-- [orchestrator/modules/tools/execution/exec_multimodal.py](orchestrator/modules/tools/execution/exec_multimodal.py)
-- [orchestrator/modules/tools/execution/exec_planning.py](orchestrator/modules/tools/execution/exec_planning.py)
-- [orchestrator/modules/tools/services/__init__.py](orchestrator/modules/tools/services/__init__.py)
 - [orchestrator/requirements.txt](orchestrator/requirements.txt)
 
 </details>
 
 
 
-This document covers the real-time update mechanisms in Automatos AI's backend architecture, including the **AI SDK Data Stream** protocol for chat streaming, **Redis Pub/Sub** for workflow events, and the structured **StreamEvent** system for lifecycle transparency.
+This page details the real-time update architecture of Automatos AI, focusing on the integration of **Redis Pub/Sub** for cross-service event broadcasting, **Server-Sent Events (SSE)** for AI SDK Data Stream delivery, and the specialized **Workflow Event** pipeline.
 
 ---
 
 ## Overview
 
-Automatos AI implements real-time updates through three primary mechanisms:
+Automatos AI utilizes a multi-tiered real-time update system designed for high concurrency and low latency:
 
-1.  **AI SDK Data Stream Protocol** — SSE-based streaming for chat responses with structured data chunks (text, tool calls, usage, and memory events) [[orchestrator/consumers/chatbot/streaming.py:102-103]]().
-2.  **Redis Pub/Sub** — Event broadcasting for workflow stage updates and cross-service communication [[orchestrator/core/redis/client.py:1-4]]().
-3.  **Structured Stream Events** — A typed event system (PRD-123) that extends the AI SDK format with granular agent and tool lifecycle states [[orchestrator/core/models/stream_events.py:1-7]]().
-
-The system utilizes **Server-Sent Events (SSE)** for unidirectional streaming from the backend to the frontend, complemented by **Redis Pub/Sub** for broadcasting events across distributed worker processes like the `workspace-worker` [[docker-compose.yml:178-182]]().
-
-**Sources:** [[orchestrator/consumers/chatbot/streaming.py:1-10]](), [[orchestrator/core/models/stream_events.py:1-7]](), [[orchestrator/core/redis/client.py:1-10]]()
+1.  **Redis Pub/Sub**: Acts as the backbone for distributed event broadcasting. It allows the FastAPI backend and independent workers (like the `workspace-worker`) to communicate status updates asynchronously `[orchestrator/core/redis/client.py:14-16]()`.
+2.  **AI SDK Data Stream Protocol**: A specialized SSE implementation that streams structured data chunks (text, tool calls, and metadata) from the backend to the frontend.
+3.  **Workflow Event Pipeline**: Uses dedicated Redis channels to track execution progress across multi-agent recipes `[orchestrator/core/redis/client.py:91-110]()`.
 
 ---
 
-## System Architecture
+## Redis Pub/Sub Architecture
 
-The following diagrams illustrate how the `StreamingHandler`, `StreamEvent` model, and `RedisClient` bridge the gap between internal execution logic and the real-time UI.
+The `RedisClient` manages connections to the Redis instance, supporting both synchronous publishing and asynchronous subscription for non-blocking message delivery in WebSocket or SSE endpoints.
 
-### Real-Time Update Data Flow
+### Redis Event Flow
 
+Title: Redis Pub/Sub Event Distribution Flow
 ```mermaid
-graph TB
-    subgraph "Frontend_Clients"
-        ChatUI["Chat UI (useChat hook)"]
-        WorkflowUI["Workflow Dashboard"]
-    end
-    
-    subgraph "FastAPI_Backend"
-        ChatAPI["POST /api/chat"]
-        WorkflowAPI["POST /api/workflows/execute"]
-    end
-    
-    subgraph "Streaming_Logic"
-        StreamingHandler["StreamingHandler (streaming.py)"]
-        StreamEvent["StreamEvent (stream_events.py)"]
-    end
-    
-    subgraph "Event_Bus_Redis"
-        RedisClient["RedisClient (redis/client.py)"]
-        RedisPubSub["Redis Pub/Sub Channel"]
-    end
-    
-    subgraph "Execution_Services"
-        AgentFactory["AgentFactory"]
+graph TD
+    subgraph "Event Producers"
         WorkflowEngine["Workflow Engine"]
+        AgentRuntime["Agent Runtime"]
+        WorkspaceWorker["WorkspaceWorker [ARQ]"]
     end
-    
-    ChatUI -->|HTTP_POST| ChatAPI
-    ChatAPI --> AgentFactory
-    AgentFactory -->|Raw_Chunks| StreamingHandler
-    AgentFactory -->|Lifecycle_Events| StreamEvent
-    StreamingHandler -->|SSE_AI_SDK_Format| ChatUI
-    StreamEvent -->|d_payload| ChatUI
-    
-    WorkflowUI -->|HTTP_POST| WorkflowAPI
-    WorkflowAPI --> WorkflowEngine
-    WorkflowEngine -->|Progress_Updates| RedisClient
-    RedisClient -->|Publish| RedisPubSub
-    RedisPubSub -.->|Subscribe| WorkflowUI
+
+    subgraph "Redis Infrastructure [core/redis/client.py]"
+        RedisPool["ConnectionPool [max_connections=50]"]
+        WorkflowChan["Channel: workflow:{id}:execution:{eid}"]
+        TaskChan["Channel: task_updates"]
+    end
+
+    subgraph "Event Consumers"
+        FastAPI["FastAPI SSE/WS Handlers"]
+        LogSvc["Logging Service"]
+    end
+
+    WorkflowEngine -->|publish_workflow_event| RedisPool
+    AgentRuntime -->|publish| RedisPool
+    WorkspaceWorker -->|publish| RedisPool
+    RedisPool --> WorkflowChan
+    RedisPool --> TaskChan
+    WorkflowChan -.->|get_async_pubsub| FastAPI
+    TaskChan -.-> LogSvc
 ```
 
-**Sources:** [[orchestrator/consumers/chatbot/streaming.py:21-30]](), [[orchestrator/core/redis/client.py:14-15]](), [[orchestrator/core/redis/client.py:91-97]](), [[orchestrator/core/models/stream_events.py:51-62]]()
+**Sources:** `[orchestrator/core/redis/client.py:14-64]()`, `[orchestrator/core/redis/client.py:91-110]()`, `[docker-compose.yml:178-184]()`
+
+### Implementation Details
+
+| Component | Role | Code Entity |
+| :--- | :--- | :--- |
+| **Connection Management** | Manages a pool of 50 connections with `decode_responses=True` | `RedisClient.pool` `[orchestrator/core/redis/client.py:22-29]()` |
+| **Async Streaming** | Provides `aioredis` pubsub clients for non-blocking SSE | `RedisClient.get_async_pubsub` `[orchestrator/core/redis/client.py:48-64]()` |
+| **Workflow Tracking** | Formats and publishes events to specific workflow execution channels | `RedisClient.publish_workflow_event` `[orchestrator/core/redis/client.py:91-119]()` |
+| **Global Access** | Singleton-style lazy initialization using `REDIS_URL` or env vars | `get_redis_client()` `[orchestrator/core/redis/client.py:149-197]()` |
 
 ---
 
 ## AI SDK Data Stream Protocol
 
-The primary streaming mechanism for chat responses uses the **AI SDK Data Stream** format over SSE. The `StreamingHandler` class manages the formatting of these chunks to ensure compatibility with frontend hooks.
+The chat interface relies on the **AI SDK Data Stream** format. This protocol uses specific prefixes to distinguish between different types of data within a single SSE stream. The backend handles this via the `main.py` router and specialized streaming logic.
 
-### Protocol Implementation
+### Protocol Prefixes and Handlers
 
-The system supports two formats:
-1.  **Legacy SSE**: `data: {json}\n\n` used for backward compatibility [[orchestrator/consumers/chatbot/streaming.py:31-32]]().
-2.  **AI SDK Data Stream**: Typed prefixes (e.g., `0:` for text, `d:` for data, `e:` for error) [[orchestrator/consumers/chatbot/streaming.py:102-103]]().
-
-### Key Formatting Methods
-
-| Method | Prefix | Description |
+| Prefix | Protocol Type | Usage |
 | :--- | :--- | :--- |
-| `format_aisdk_text(text)` | `0:` | Escaped text chunk for the UI [[orchestrator/consumers/chatbot/streaming.py:105-108]](). |
-| `format_aisdk_tool_start(...)` | `d:` | Notifies UI that a tool call has begun for lifecycle UI [[orchestrator/consumers/chatbot/streaming.py:125-139]](). |
-| `format_aisdk_tool_end(...)` | `d:` | Sends tool execution results, success status, and duration [[orchestrator/consumers/chatbot/streaming.py:141-159]](). |
-| `format_aisdk_memory_injected(...)` | `d:` | Sends retrieved memories used in context to the widget [[orchestrator/consumers/chatbot/streaming.py:182-194]](). |
-| `format_aisdk_error(error)` | `e:` | Formats error messages for the stream [[orchestrator/consumers/chatbot/streaming.py:174-176]](). |
+| `0:` | **Text** | Streaming LLM tokens |
+| `d:` | **Data** | Tool calls, workflow updates, and complexity results |
+| `e:` | **Error** | Streaming backend exceptions to the UI |
+| `9:` | **Control** | Signaling end of stream with usage stats |
 
-**Sources:** [[orchestrator/consumers/chatbot/streaming.py:102-176]](), [[orchestrator/consumers/chatbot/streaming.py:182-194]]()
+### Streaming Data Flow
 
----
-
-## Typed Stream Events (PRD-123)
-
-The `StreamEvent` class and `StreamEventType` enum provide a structured way to broadcast agent and tool lifecycle transitions during a stream [[orchestrator/core/models/stream_events.py:16-48]]().
-
-### Event Categories
-
+Title: Chat Streaming Sequence (Natural Language to Code Entity)
 ```mermaid
-classDiagram
-    class StreamEventType {
-        <<enumeration>>
-        AGENT_ASSIGNED
-        AGENT_THINKING
-        TOOL_EXECUTING
-        TOOL_RESULT
-        MEMORY_STORED
-        BUDGET_WARNING
-        TASK_STATE_CHANGE
-    }
-    class StreamEvent {
-        +StreamEventType type
-        +str content
-        +dict metadata
-        +datetime timestamp
-        +to_sse() str
-    }
-    StreamEvent --> StreamEventType
+sequenceDiagram
+    participant User as User (Frontend)
+    participant ChatAPI as "POST /api/chat [api/chat.py]"
+    participant Orchestrator as "SmartChatOrchestrator"
+    participant Redis as "RedisClient [core/redis/client.py]"
+
+    User->>ChatAPI: Send Message
+    ChatAPI->>Orchestrator: orchestrate_response()
+    Orchestrator->>Redis: publish_workflow_event() (if applicable)
+    Redis-->>ChatAPI: Async Pub/Sub Message
+    ChatAPI->>User: SSE Chunk "d:{'type':'workflow_update'...}"
+    Orchestrator->>User: SSE Chunk "0:LLM Token"
 ```
 
-When a `StreamEvent` is serialized via `to_sse()`, it follows the `d:{json}\n` pattern, allowing the frontend to react to specific state changes like `AGENT_THINKING` or `CONTEXT_COMPACTED` [[orchestrator/core/models/stream_events.py:63-71]]().
-
-**Sources:** [[orchestrator/core/models/stream_events.py:16-71]]()
+**Sources:** `[orchestrator/core/redis/client.py:102-119]()`, `[orchestrator/api/cloud_documents.py:25-27]()`, `[orchestrator/requirements.txt:2-4]()`
 
 ---
 
-## Redis Pub/Sub Event Broadcasting
+## Workflow Events & Progress
 
-For asynchronous operations like workflows, the `RedisClient` provides a broadcasting mechanism to update the UI as steps complete.
+Real-time updates for workflows are bridged through the backend API. This allows long-running agentic processes to report progress back to the user interface dynamically.
 
-### Redis Client Configuration
-The `RedisClient` uses a connection pool with `decode_responses=True` to handle JSON payloads efficiently [[orchestrator/core/redis/client.py:22-29]](). It supports both synchronous publishing and asynchronous subscription for WebSocket endpoints [[orchestrator/core/redis/client.py:48-64]]().
+### Event Lifecycle
+1.  **Execution**: The workflow engine triggers events like `execution_started` or `subtask_execution_update` `[orchestrator/core/redis/client.py:104]()`.
+2.  **Publishing**: `RedisClient.publish_workflow_event` constructs a channel name using the pattern `workflow:{workflow_id}:execution:{execution_id}` `[orchestrator/core/redis/client.py:110-111]()`.
+3.  **Consumption**: The API layer subscribes to this channel using `get_async_pubsub` and wraps the JSON payload into an SSE chunk `[orchestrator/core/redis/client.py:48-64]()`.
 
-### Workflow Event Publication
-The `publish_workflow_event` method standardizes the channel naming convention as `workflow:{workflow_id}:execution:{execution_id}` [[orchestrator/core/redis/client.py:110]]().
-
-```python
-# Example of event structure published to Redis
-message = {
-    "type": event_type, # e.g., 'execution_started', 'subtask_execution_update'
-    "data": {
-        "execution_id": execution_id,
-        "workflow_id": workflow_id,
-        **data
-    }
-}
-```
-**Sources:** [[orchestrator/core/redis/client.py:91-119]]()
+**Sources:** `[orchestrator/core/redis/client.py:91-119]()`, `[orchestrator/core/redis/client.py:48-64]()`
 
 ---
 
-## Infrastructure and Deployment
+## Infrastructure Configuration
 
-### Redis Service Definition
-In `docker-compose.yml`, Redis is configured with a memory limit and LRU eviction policy [[docker-compose.yml:55-58]](). Security is enforced by renaming dangerous commands like `FLUSHDB` and `FLUSHALL` to empty strings [[docker-compose.yml:59-61]]().
+Real-time capabilities are dependent on the Redis service availability. The system is designed to degrade gracefully if Redis is unavailable.
 
-### Connection Management
-The backend initializes a global `RedisClient` instance using `REDIS_URL` (standard for Railway/Heroku) or fallback `REDIS_HOST` variables [[orchestrator/core/redis/client.py:149-162]](). If Redis is unavailable, real-time broadcasting features are gracefully disabled [[orchestrator/core/redis/client.py:188-190]]().
+-   **Docker Compose**: The `redis` service is defined with a `maxmemory` of 256MB and an `allkeys-lru` policy to ensure performance for transient real-time data `[docker-compose.yml:48-61]()`.
+-   **Security**: Redis commands like `FLUSHALL` and `DEBUG` are renamed to empty strings in production to prevent accidental data loss `[docker-compose.yml:59-61]()`.
+-   **Environment**: The backend connects via `REDIS_URL` or individual `REDIS_HOST`/`REDIS_PORT` variables. If these are missing, Redis features are disabled gracefully `[orchestrator/core/redis/client.py:161-197]()`.
+-   **Dependencies**: The system uses `redis>=4.5.0` for sync operations and `aioredis` (via the main redis package) for async streaming `[orchestrator/requirements.txt:58]()`.
 
-**Sources:** [[docker-compose.yml:48-73]](), [[orchestrator/core/redis/client.py:141-197]]()
-
----
-
-## Summary of Real-Time Components
-
-| Feature | Code Entity | File Path |
-| :--- | :--- | :--- |
-| **SSE Formatting** | `StreamingHandler` | [[orchestrator/consumers/chatbot/streaming.py:21]]() |
-| **Typed Events** | `StreamEvent` | [[orchestrator/core/models/stream_events.py:51]]() |
-| **Redis Pub/Sub** | `RedisClient` | [[orchestrator/core/redis/client.py:14]]() |
-| **Async Subscriptions** | `get_async_pubsub` | [[orchestrator/core/redis/client.py:48]]() |
-| **Workflow Events** | `publish_workflow_event` | [[orchestrator/core/redis/client.py:91]]() |
-
-**Sources:** [[orchestrator/consumers/chatbot/streaming.py:21-172]](), [[orchestrator/core/redis/client.py:14-119]](), [[orchestrator/core/models/stream_events.py:51-62]]()
+**Sources:** `[docker-compose.yml:48-73]()`, `[orchestrator/core/redis/client.py:161-197]()`, `[orchestrator/requirements.txt:58]()`
 
 ---

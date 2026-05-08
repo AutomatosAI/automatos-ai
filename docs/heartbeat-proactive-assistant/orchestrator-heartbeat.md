@@ -5,25 +5,14 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/components/agents/agent-configuration-modal.tsx](frontend/components/agents/agent-configuration-modal.tsx)
-- [frontend/components/agents/agent-configuration.tsx](frontend/components/agents/agent-configuration.tsx)
-- [frontend/components/agents/agent-details-modal.tsx](frontend/components/agents/agent-details-modal.tsx)
-- [frontend/components/agents/agent-management.tsx](frontend/components/agents/agent-management.tsx)
-- [frontend/components/agents/agent-performance.tsx](frontend/components/agents/agent-performance.tsx)
-- [frontend/components/agents/agent-roster.tsx](frontend/components/agents/agent-roster.tsx)
-- [frontend/components/agents/agent-skills.tsx](frontend/components/agents/agent-skills.tsx)
-- [frontend/components/agents/agent-status-control-modal.tsx](frontend/components/agents/agent-status-control-modal.tsx)
-- [frontend/components/agents/create-agent-modal.tsx](frontend/components/agents/create-agent-modal.tsx)
-- [frontend/components/agents/create-skill-modal.tsx](frontend/components/agents/create-skill-modal.tsx)
-- [frontend/components/agents/skill-configuration-modal.tsx](frontend/components/agents/skill-configuration-modal.tsx)
-- [frontend/components/documents/analytics-tab.tsx](frontend/components/documents/analytics-tab.tsx)
-- [frontend/components/documents/processing-tab.tsx](frontend/components/documents/processing-tab.tsx)
-- [frontend/hooks/use-agent-api.ts](frontend/hooks/use-agent-api.ts)
-- [frontend/hooks/use-document-api.ts](frontend/hooks/use-document-api.ts)
-- [orchestrator/api/agents.py](orchestrator/api/agents.py)
-- [orchestrator/core/models/__init__.py](orchestrator/core/models/__init__.py)
-- [orchestrator/core/models/core.py](orchestrator/core/models/core.py)
+- [orchestrator/alembic/versions/wave3_escalation_level.py](orchestrator/alembic/versions/wave3_escalation_level.py)
+- [orchestrator/core/services/escalation.py](orchestrator/core/services/escalation.py)
+- [orchestrator/modules/tools/discovery/actions_reports.py](orchestrator/modules/tools/discovery/actions_reports.py)
+- [orchestrator/modules/tools/discovery/actions_workspace.py](orchestrator/modules/tools/discovery/actions_workspace.py)
+- [orchestrator/modules/tools/discovery/handlers_reports.py](orchestrator/modules/tools/discovery/handlers_reports.py)
+- [orchestrator/modules/tools/discovery/handlers_workspace.py](orchestrator/modules/tools/discovery/handlers_workspace.py)
 - [orchestrator/services/heartbeat_service.py](orchestrator/services/heartbeat_service.py)
+- [orchestrator/services/report_service.py](orchestrator/services/report_service.py)
 
 </details>
 
@@ -41,7 +30,7 @@ The orchestrator heartbeat provides **workspace-wide health monitoring** through
 
 Unlike agent heartbeats which focus on task completion, orchestrator heartbeats provide **platform-wide situational awareness** for workspace administrators.
 
-Sources: [orchestrator/services/heartbeat_service.py:24-31](), [orchestrator/services/heartbeat_service.py:104-112]()
+Sources: [orchestrator/services/heartbeat_service.py:24-31](), [orchestrator/services/heartbeat_service.py:114-122]()
 
 ## System Architecture
 
@@ -94,26 +83,26 @@ graph TB
 | `HeartbeatService` | [orchestrator/services/heartbeat_service.py:24-31]() | Singleton managing `AsyncIOScheduler` jobs and tick routing. |
 | `_orchestrator_tick_llm` | [orchestrator/services/heartbeat_service.py:382-390]() | High-fidelity execution using LLM and platform tools. |
 | `_orchestrator_tick_shallow` | [orchestrator/services/heartbeat_service.py:547-550]() | Low-fidelity fallback using direct DB queries (agent counts). |
-| `LLMManager` | [orchestrator/core/llm/manager.py:27-41]() | Provides the model configured for the `orchestrator` service. |
-| `UnifiedToolExecutor` | [orchestrator/modules/agents/factory/agent_factory.py:42-44]() | Routed via `get_unified_tool_executor` to handle tool calls. |
+| `ReportService` | [orchestrator/services/report_service.py:149-155]() | Handles report creation and persistence for heartbeat findings. |
+| `EscalationLevel` | [orchestrator/core/services/escalation.py:26-31]() | L0-L4 ladder (FYI, TASK, APPROVAL, URGENT, SECURITY) for triaging heartbeat findings. |
 
-Sources: [orchestrator/services/heartbeat_service.py:24-545](), [orchestrator/core/llm/manager.py:30-41](), [orchestrator/modules/agents/factory/agent_factory.py:168-171]()
+Sources: [orchestrator/services/heartbeat_service.py:24-545](), [orchestrator/services/heartbeat_service.py:382-390](), [orchestrator/services/heartbeat_service.py:547-550](), [orchestrator/services/report_service.py:149-155]()
 
 ## Configuration Structure
 
-Orchestrator heartbeat configuration is stored in the workspace settings JSONB field under `settings.orchestrator.heartbeat`. The UI for managing these settings is integrated into the `AgentConfigurationModal` and `AgentConfiguration` components.
+Orchestrator heartbeat configuration is stored in the workspace settings JSONB field under `settings.orchestrator.heartbeat`.
 
 ### Proactive Levels
-The `proactive_level` (often mapped to `auto_act` in the frontend) determines the tool permissions granted to the LLM during the tick:
+The `proactive_level` determines the tool permissions granted to the LLM during the tick:
 
 | Level | Behavior | Tool Access |
 |-------|----------|-------------|
-| `silent` | Report findings only. | Read-only (`platform_list_*`) |
+| `silent` | Report findings only. | Read-only (`platform_list_*`, `platform_browse_*`) |
 | `notify` | Report findings and send alerts. | Read-only (`platform_list_*`) |
-| `act_notify` | Take corrective actions and notify. | Read + Write (`platform_create_*`, `platform_restart_*`) |
-| `autonomous` | Full independence. | All (including destructive `platform_delete_*`) |
+| `act_notify` | Take corrective actions and notify. | Read + Write (`platform_submit_report`, `platform_store_memory`) |
+| `autonomous` | Full independence. | All (including destructive `platform_delete_memory`) |
 
-Sources: [orchestrator/services/heartbeat_service.py:107-111](), [orchestrator/services/heartbeat_service.py:399-410](), [frontend/components/agents/agent-configuration-modal.tsx:156-167]()
+Sources: [orchestrator/services/heartbeat_service.py:117-121](), [orchestrator/services/heartbeat_service.py:399-410](), [orchestrator/modules/tools/discovery/actions_reports.py:9-110](), [orchestrator/modules/tools/discovery/actions_workspace.py:60-108]()
 
 ## Tick Execution Flow
 
@@ -127,14 +116,20 @@ sequenceDiagram
     participant C as ContextService
     participant L as LLMManager
     participant T as UnifiedToolExecutor
+    participant P as PlatformActionExecutor
+    participant R as ReportService
     
     S->>C: build_context(mode="HEARTBEAT")
     C-->>S: System Prompt + Platform Tools
     
     loop Max 5 Iterations
         S->>L: generate_response(messages)
-        L-->>S: Tool Call (e.g., platform_list_agents)
-        S->>T: execute(tool_name, args)
+        L-->>S: Tool Call (e.g., platform_submit_report)
+        S->>T: route(tool_name, args)
+        T->>P: execute_action(tool_name, args)
+        P->>R: create_report()
+        R-->>P: report_id
+        P-->>T: Action Result
         T-->>S: Tool Output
     end
     
@@ -144,33 +139,35 @@ sequenceDiagram
 ### Context Assembly for Heartbeat Mode
 The `HEARTBEAT` mode in `ContextService` assembles a specialized prompt. It ignores user-specific memory (L3/L4) to maintain a stateless "system administrator" persona. It injects:
 1. **Identity**: Defined as "Automatos Orchestrator".
-2. **Platform Tools**: Tools defined in `PlatformActionExecutor`.
+2. **Platform Tools**: Tools defined in `PlatformActionExecutor`, such as `platform_submit_report` [orchestrator/modules/tools/discovery/actions_reports.py:9-16]() and `platform_get_memory_stats` [orchestrator/modules/tools/discovery/actions_workspace.py:38-44]().
 3. **Task Description**: Built from the `checklist` and `proactive_level` instructions.
 
-Sources: [orchestrator/services/heartbeat_service.py:426-444](), [orchestrator/services/heartbeat_service.py:466-470]()
+Sources: [orchestrator/services/heartbeat_service.py:426-444](), [orchestrator/services/heartbeat_service.py:466-470](), [orchestrator/modules/tools/discovery/actions_reports.py:9-16]()
 
 ## Tool Loop and Deduplication
 
-To prevent looping on the same health check, the heartbeat leverages logic similar to the `ToolExecutionTracker` found in the Chat Service, though strictly limited by the iteration counter.
+To prevent looping on the same health check, the heartbeat leverages logic limited by the iteration counter.
+
+**Tool Loop Constraints:**
+- **Max Iterations**: Hard-coded to 5 in `_orchestrator_tick_llm`. [orchestrator/services/heartbeat_service.py:472-475]()
+- **Deduplication**: Prevents identical tool calls within the same tick to avoid redundant processing.
 
 **Context Trimming Logic:**
-If the message history exceeds 10 messages during the 5-iteration loop, the system performs "Exchange Trimming":
+If the message history grows too large during the 5-iteration loop, the system performs "Exchange Trimming":
 - It preserves the first 2 messages (System Prompt and Initial Task).
-- It identifies "Exchange Starts" (messages with `role: assistant`).
 - It keeps only the last 2 complete assistant-tool exchanges.
 
 This ensures the LLM does not exceed token limits while maintaining the immediate context of its recent actions.
 
-Sources: [orchestrator/services/heartbeat_service.py:488-500]()
+Sources: [orchestrator/services/heartbeat_service.py:472-475](), [orchestrator/services/heartbeat_service.py:488-500]()
 
 ## Shallow Mode Fallback
 
-When LLM providers are unavailable or credentials fail, the system executes `_orchestrator_tick_shallow`. This method:
-1. Directly queries the `Agent` table for the `workspace_id`. [orchestrator/services/heartbeat_service.py:557-562]()
-2. Counts active vs. inactive agents. [orchestrator/services/heartbeat_service.py:563-568]()
-3. Parses the raw `checklist` string from the config and marks items as "Reviewed (Shallow Mode)". [orchestrator/services/heartbeat_service.py:575-585]()
+When LLM providers are unavailable or credentials fail, the system executes `_orchestrator_tick_shallow`. This method provides basic monitoring without intelligence.
 
-This ensures that "Heartbeat Skipped" events are minimized, providing at least basic connectivity and status data.
+1. **Agent Inventory**: Directly queries the `Agent` table for the `workspace_id`. [orchestrator/services/heartbeat_service.py:557-562]()
+2. **Status Count**: Counts active vs. inactive agents. [orchestrator/services/heartbeat_service.py:563-568]()
+3. **Checklist Processing**: Parses the raw `checklist` string from the config and marks items as "Reviewed (Shallow Mode)". [orchestrator/services/heartbeat_service.py:575-585]()
 
 Sources: [orchestrator/services/heartbeat_service.py:547-589]()
 
@@ -178,31 +175,34 @@ Sources: [orchestrator/services/heartbeat_service.py:547-589]()
 
 The heartbeat respects the workspace's active hours to avoid processing (and potentially notifying) during off-hours.
 
-- **Timezone Awareness**: Uses `pytz` to localize the current time based on the `timezone` string in the config. [orchestrator/services/heartbeat_service.py:270-272]()
+- **Timezone Awareness**: Localizes the current time based on the `timezone` string in the config. [orchestrator/services/heartbeat_service.py:270-272]()
 - **Window Comparison**: Converts "HH:MM" strings to total minutes from midnight for robust comparison, even for windows that cross the midnight boundary. [orchestrator/services/heartbeat_service.py:275-294]()
 
 Sources: [orchestrator/services/heartbeat_service.py:227-240]()
 
 ## Result Storage and Reporting
 
-Every tick results in a record in the `heartbeat_results` table (managed via `_store_heartbeat_result`).
+Every tick results in a record in the `heartbeat_results` table (managed via `_store_heartbeat_result`). Additionally, the orchestrator often uses `platform_submit_report` to persist detailed findings.
 
 | Field | Description |
 |-------|-------------|
 | `status` | `success`, `error`, or `skipped`. |
 | `findings` | JSON array of observations (e.g., "Agent X is offline"). |
 | `actions_taken` | JSON array of tool executions performed. |
-| `tokens_used` | Total tokens consumed by the LLM tick. |
+| `escalation_level` | L0-L4 severity assigned to the findings [orchestrator/core/services/escalation.py:72-85](). |
 
-Sources: [orchestrator/services/heartbeat_service.py:607-620](), [orchestrator/services/heartbeat_service.py:630-644]()
+Reports generated during heartbeats are handled by `ReportService.create_report` [orchestrator/services/report_service.py:156-172](), which writes a markdown file to the workspace and creates a DB entry in `agent_reports` [orchestrator/alembic/versions/wave3_escalation_level.py:20-24]().
+
+Sources: [orchestrator/services/heartbeat_service.py:607-620](), [orchestrator/services/report_service.py:156-172](), [orchestrator/core/services/escalation.py:72-85]()
 
 ## Security and Permissions
 
 The heartbeat is restricted to `platform_*` tools. These tools are executed via the `PlatformActionExecutor` and routed through the `UnifiedToolExecutor`.
 
-- **Registry Source**: Tools are registered within the `ActionRegistry` (referenced in [orchestrator/core/composio/tool_executor.py:185-191]()).
-- **Validation**: Before execution, the `ComposioToolExecutor` validates the action against the agent's allowed features to ensure the heartbeat does not exceed its workspace boundaries. [orchestrator/core/composio/tool_executor.py:66-82]()
+- **Registry Source**: Tools are registered within the `ActionRegistry`.
+- **Dispatcher**: `PlatformActionExecutor` routes calls to specific handlers like `submit_report` [orchestrator/modules/tools/discovery/handlers_reports.py:14-16]() or `get_memory_stats` [orchestrator/modules/tools/discovery/handlers_workspace.py:40-42]().
+- **Multi-Tenancy**: Every platform action handler is strictly workspace-scoped, ensuring the orchestrator only sees data for its own workspace. [orchestrator/modules/tools/discovery/handlers_workspace.py:14-18]()
 
-Sources: [orchestrator/core/composio/tool_executor.py:141-162](), [orchestrator/modules/agents/factory/agent_factory.py:42-44]()
+Sources: [orchestrator/modules/tools/discovery/handlers_reports.py:14-92](), [orchestrator/modules/tools/discovery/handlers_workspace.py:14-142](), [orchestrator/modules/tools/discovery/actions_reports.py:9-110]()
 
 ---

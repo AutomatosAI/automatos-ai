@@ -5,14 +5,9 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/components/documents/document-management.tsx](frontend/components/documents/document-management.tsx)
 - [frontend/components/documents/local-storage-browser.tsx](frontend/components/documents/local-storage-browser.tsx)
 - [orchestrator/api/documents.py](orchestrator/api/documents.py)
 - [orchestrator/api/knowledge_multimodal.py](orchestrator/api/knowledge_multimodal.py)
-- [orchestrator/api/widgets/docs.py](orchestrator/api/widgets/docs.py)
-- [orchestrator/core/database/migrations/010_vector_dimensions_4096.sql](orchestrator/core/database/migrations/010_vector_dimensions_4096.sql)
-- [orchestrator/core/models/cloud_sync.py](orchestrator/core/models/cloud_sync.py)
-- [orchestrator/core/team_access.py](orchestrator/core/team_access.py)
 - [orchestrator/modules/agents/services/agent_platform_tools.py](orchestrator/modules/agents/services/agent_platform_tools.py)
 - [orchestrator/modules/rag/chunking/semantic_chunker.py](orchestrator/modules/rag/chunking/semantic_chunker.py)
 - [orchestrator/modules/rag/ingestion/manager.py](orchestrator/modules/rag/ingestion/manager.py)
@@ -20,10 +15,7 @@ The following files were used as context for generating this wiki page:
 - [orchestrator/modules/rag/services/cloud_file_downloader.py](orchestrator/modules/rag/services/cloud_file_downloader.py)
 - [orchestrator/modules/rag/services/cloud_sync_service.py](orchestrator/modules/rag/services/cloud_sync_service.py)
 - [orchestrator/modules/search/services/entity_extractor.py](orchestrator/modules/search/services/entity_extractor.py)
-- [orchestrator/modules/search/vector_store/__init__.py](orchestrator/modules/search/vector_store/__init__.py)
-- [orchestrator/modules/search/vector_store/backends/s3_vectors_backend.py](orchestrator/modules/search/vector_store/backends/s3_vectors_backend.py)
 - [orchestrator/modules/tools/formatting/result_formatter.py](orchestrator/modules/tools/formatting/result_formatter.py)
-- [orchestrator/scripts/recreate_s3_index.py](orchestrator/scripts/recreate_s3_index.py)
 
 </details>
 
@@ -33,7 +25,7 @@ The following files were used as context for generating this wiki page:
 
 The Document Ingestion Pipeline transforms raw documents from multiple sources into searchable, semantically-indexed content that agents can query through RAG (Retrieval-Augmented Generation). This pipeline handles text extraction, chunking, embedding generation, and storage in high-performance vector databases.
 
-The system supports local file uploads via `DocumentManager` [orchestrator/modules/rag/ingestion/manager.py:81]() and automated synchronization with cloud providers (Google Drive, Dropbox, OneDrive, Box) via the `CloudSyncService` and `Composio` integration layer [orchestrator/modules/rag/services/cloud_file_downloader.py:29-35]().
+The system supports local file uploads via the `DocumentManager` [orchestrator/modules/rag/ingestion/manager.py:77-86](), automated synchronization with cloud providers via `CloudSyncService` [orchestrator/modules/rag/services/cloud_sync_service.py:38-48](), and advanced multimodal extraction including tables, images, and formulas [orchestrator/api/knowledge_multimodal.py:1-22]().
 
 ---
 
@@ -46,179 +38,176 @@ This diagram illustrates the flow from raw data to the "Code Entity Space" where
 
 ```mermaid
 graph TB
-    subgraph "Input Sources"
-        Upload["Local Upload<br/>(DocumentManager)"]
-        CloudSync["Cloud Sync<br/>(CloudSyncService)"]
+    subgraph "InputSources"
+        Upload["handle_request<br/>(documents.py)"]
+        CloudSync["CloudSyncService<br/>(cloud_sync_service.py)"]
+        CloudDown["CloudFileDownloader<br/>(cloud_file_downloader.py)"]
     end
     
-    subgraph "Stage 1: Format Detection"
+    subgraph "Stage1_FormatDetection"
         MagicDetect["python-magic<br/>MIME & Extension"]
-        FormatRoute["DocumentProcessor.detect_file_type"]
+        FormatRoute["DocumentProcessor<br/>detect_file_type"]
     end
     
-    subgraph "Stage 2: Text Extraction"
+    subgraph "Stage2_Extraction"
         PDFExtract["pdfplumber<br/>PyPDF2 Fallback"]
         DOCXExtract["python-docx"]
-        CodeExtract["Source Code<br/>(Python/JSON/CSV)"]
+        MultiModal["create_multimodal_processor<br/>(Tables/Images/Formulas)"]
         TextExtract["Plain Text"]
     end
     
-    subgraph "Stage 3: Semantic Chunking"
+    subgraph "Stage3_SemanticChunking"
         SemanticChunker["SemanticChunker<br/>(Strategy-based)"]
-        Strategies["Similarity / Density<br/>/ Topic / Hierarchical"]
+        Strategies["SEMANTIC_SIMILARITY<br/>INFORMATION_DENSITY<br/>HIERARCHICAL"]
     end
     
-    subgraph "Stage 4: Embedding"
-        EmbedMgr["EmbeddingManager<br/>(OpenRouter/Qwen3)"]
-        VectorDim["4096 Dimensions"]
+    subgraph "Stage4_Embeddings_Entities"
+        EmbedMgr["EmbeddingManager<br/>(create_embedding_manager)"]
+        EntityExt["EntityExtractor<br/>(NER + LLM)"]
     end
     
-    subgraph "Stage 5: Storage"
-        S3Vectors["S3VectorsBackend<br/>(AWS S3 Vectors)"]
-        PGMetadata["PostgreSQL<br/>(cloud_documents)"]
+    subgraph "Stage5_Storage"
+        S3Vectors["S3_VECTORS_ENABLED<br/>(config.py)"]
+        PGMetadata["PostgreSQL<br/>(Document & KnowledgeItems)"]
     end
     
     Upload --> MagicDetect
-    CloudSync --> MagicDetect
+    CloudSync --> CloudDown
+    CloudDown --> MagicDetect
     MagicDetect --> FormatRoute
     
     FormatRoute -->|PDF| PDFExtract
     FormatRoute -->|DOCX| DOCXExtract
-    FormatRoute -->|Code| CodeExtract
+    FormatRoute -->|Multimodal| MultiModal
     FormatRoute -->|Text| TextExtract
     
     PDFExtract --> SemanticChunker
     DOCXExtract --> SemanticChunker
-    CodeExtract --> SemanticChunker
+    MultiModal --> SemanticChunker
     TextExtract --> SemanticChunker
     
     SemanticChunker --> Strategies
     Strategies --> EmbedMgr
-    EmbedMgr --> VectorDim
+    Strategies --> EntityExt
     
-    VectorDim --> S3Vectors
-    VectorDim --> PGMetadata
+    EmbedMgr --> S3Vectors
+    EntityExt --> PGMetadata
+    S3Vectors --> PGMetadata
 ```
 
-**Sources:** [orchestrator/modules/rag/ingestion/manager.py:6-12](), [orchestrator/modules/rag/services/cloud_sync_service.py:5-9](), [orchestrator/modules/rag/service.py:187-195]()
+**Sources:** [orchestrator/api/documents.py:106-116](), [orchestrator/modules/rag/ingestion/manager.py:113-130](), [orchestrator/modules/rag/services/cloud_file_downloader.py:60-84](), [orchestrator/api/knowledge_multimodal.py:37-43]()
 
 ---
 
 ## Stage 1: Format Detection
 
-The `DocumentProcessor` uses `python-magic` and file extensions to categorize documents into `DocumentType` enums [orchestrator/modules/rag/ingestion/manager.py:131-155]().
+The `DocumentProcessor` uses `python-magic` and file extensions to categorize documents into `DocumentType` enums [orchestrator/modules/rag/ingestion/manager.py:131-155](). The API layer also enforces a strict `ALLOWED_MIME_TYPES` allowlist to prevent malicious uploads [orchestrator/api/documents.py:89-104]().
 
 | Format | DocumentType | Detection Method |
 |--------|--------------|------------------|
-| PDF | `PDF` | `application/pdf` or `.pdf` [orchestrator/modules/rag/ingestion/manager.py:137-138]() |
-| Word | `DOCX` | OpenXML MIME or `.docx` [orchestrator/modules/rag/ingestion/manager.py:139-140]() |
-| Markdown | `MARKDOWN` | `.md`, `.markdown` [orchestrator/modules/rag/ingestion/manager.py:141-142]() |
-| Python | `PYTHON` | `.py` [orchestrator/modules/rag/ingestion/manager.py:143-144]() |
-| Spreadsheet | `XLSX` / `CSV` | OpenXML Spreadsheet / `text/csv` [orchestrator/modules/rag/ingestion/manager.py:147-150]() |
+| PDF | `PDF` | `application/pdf` or `.pdf` |
+| Word | `DOCX` | OpenXML MIME or `.docx` |
+| Markdown | `MARKDOWN` | `.md`, `.markdown` |
+| Python | `PYTHON` | `.py` |
+| Spreadsheet | `XLSX` / `CSV` | OpenXML Spreadsheet / `text/csv` |
 
-**Sources:** [orchestrator/modules/rag/ingestion/manager.py:62-71](), [orchestrator/modules/rag/ingestion/manager.py:131-155]()
+**Sources:** [orchestrator/modules/rag/ingestion/manager.py:62-71](), [orchestrator/api/documents.py:89-104]()
 
 ---
 
-## Stage 2: Text Extraction
+## Stage 2: Text and Multimodal Extraction
 
-Extraction is handled by the `DocumentProcessor` with specific logic for each format to ensure high-fidelity text recovery.
+Extraction is handled by the `DocumentProcessor` with specific logic for each format, augmented by a multimodal pipeline for complex documents.
 
 ### PDF Extraction
 The system uses a prioritized dual-parser approach [orchestrator/modules/rag/ingestion/manager.py:157-194]():
-1.  **pdfplumber**: Primary extractor used for high-quality text and layout preservation. It includes cleaning logic to remove null characters and fix double-character extraction artifacts [orchestrator/modules/rag/ingestion/manager.py:162-171]().
-2.  **PyPDF2**: Fallback parser used if `pdfplumber` fails to initialize or extract content [orchestrator/modules/rag/ingestion/manager.py:178-186]().
+1.  **pdfplumber**: Primary extractor for high-quality text and layout preservation. Includes cleaning logic to remove null characters and fix double-character artifacts [orchestrator/modules/rag/ingestion/manager.py:162-171]().
+2.  **PyPDF2**: Fallback parser used if `pdfplumber` fails [orchestrator/modules/rag/ingestion/manager.py:178-186]().
 
-### DOCX & Code Extraction
--   **DOCX**: Uses `python-docx` to iterate through paragraph objects [orchestrator/modules/rag/ingestion/manager.py:196-203]().
--   **Code/Structured**: Specialized handling for `.py`, `.json`, and `.csv` files to preserve structural semantics [orchestrator/modules/rag/ingestion/manager.py:143-150]().
+### Multimodal Processing
+The `create_multimodal_processor` handles non-text elements within documents [orchestrator/api/knowledge_multimodal.py:37-43]():
+- **Tables**: `TableExtraction` recovers structured data from PDFs and DOCX [orchestrator/api/knowledge_multimodal.py:40]().
+- **Images**: `ImageExtraction` generates AI descriptions for embedded visuals [orchestrator/api/knowledge_multimodal.py:41]().
+- **Formulas**: `FormulaExtraction` converts mathematical notation to LaTeX [orchestrator/api/knowledge_multimodal.py:42]().
 
 ---
 
 ## Stage 3: Semantic Chunking
 
-Unlike basic character-count splitters, the `SemanticChunker` implements multiple advanced strategies to preserve context boundaries [orchestrator/modules/rag/service.py:187-195]().
+The `SemanticChunker` splits documents based on mathematical optimization and structural boundaries [orchestrator/modules/rag/chunking/semantic_chunker.py:52-70]().
 
 ### Chunking Strategies
-The `SemanticChunker` (imported in [orchestrator/modules/rag/ingestion/manager.py:45]()) supports:
-- **Adaptive**: Dynamically adjusts based on content density.
-- **Hierarchical**: Preserves document structure (H1, H2, H3) to maintain parent-child context.
-- **Similarity**: Groups sentences based on embedding proximity.
+| Strategy | Implementation Logic |
+|----------|----------------------|
+| `SEMANTIC_SIMILARITY` | Groups sentences based on cosine similarity thresholds using `VectorOperations` [orchestrator/modules/rag/chunking/semantic_chunker.py:107-130](). |
+| `INFORMATION_DENSITY` | Uses `InformationTheory` to finalize chunks when entropy reaches a specific threshold [orchestrator/modules/rag/chunking/semantic_chunker.py:154-182](). |
+| `HIERARCHICAL` | Preserves document structure (H1, H2, H3) to maintain parent-child context expansion [orchestrator/modules/rag/ingestion/manager.py:101-111](). |
 
-### Context Expansion
-Chunks are enriched with `parent_content` and `headers` metadata to allow for context expansion during retrieval [orchestrator/modules/rag/ingestion/manager.py:100-101]().
-
-**Sources:** [orchestrator/modules/rag/ingestion/manager.py:94-111](), [orchestrator/modules/rag/service.py:187-195]()
+**Sources:** [orchestrator/modules/rag/chunking/semantic_chunker.py:22-29](), [orchestrator/modules/rag/chunking/semantic_chunker.py:71-75]()
 
 ---
 
-## Stage 4: Embedding Generation
+## Stage 4: Embedding and Entity Extraction
 
-The pipeline has been migrated to a high-dimension embedding standard (4096 dimensions) using OpenRouter's Qwen3-8B model [orchestrator/core/database/migrations/010_vector_dimensions_4096.sql:11-13]().
+The pipeline generates both vector embeddings and structured entity metadata.
 
--   **Provider**: `openrouter` [orchestrator/core/database/migrations/010_vector_dimensions_4096.sql:76-77]()
--   **Model**: `qwen/qwen3-embedding-8b` [orchestrator/core/database/migrations/010_vector_dimensions_4096.sql:79-80]()
--   **Dimension**: `4096` [orchestrator/core/database/migrations/010_vector_dimensions_4096.sql:71-73]()
+- **Embedding Generation**: Managed by the `DocumentManager` which calculates vectors for each `DocumentChunk` [orchestrator/modules/rag/ingestion/manager.py:94-111]().
+- **Entity Extraction**: The `EntityExtractor` uses a hybrid approach of regex patterns and LLM analysis to identify technologies, organizations, and concepts [orchestrator/modules/search/services/entity_extractor.py:40-63](). It generates `ExtractedEntity` and `ExtractedRelationship` objects for the Knowledge Graph [orchestrator/modules/search/services/entity_extractor.py:18-38]().
+
+**Sources:** [orchestrator/modules/search/services/entity_extractor.py:123-146](), [orchestrator/modules/search/services/entity_extractor.py:185-190]()
 
 ---
 
-## Stage 5: Vector Storage (S3 Vectors)
+## Stage 5: Storage and Vector Databases
 
-The system utilizes `S3VectorsBackend` for large-scale document storage. Each workspace receives its own isolated bucket: `automatos-vectors-{workspace_id}` [orchestrator/modules/search/vector_store/backends/s3_vectors_backend.py:8-9]().
+The system utilizes a dual-storage strategy: PostgreSQL for metadata/relational data and pluggable vector backends.
 
 ### Storage Logic and Entity Association
-This diagram bridges the Natural Language concept of "Cloud Sync" to the specific code entities that handle the vector storage.
+This diagram bridges the Natural Language concept of "Knowledge Storage" to the specific code entities and database tables used.
 
 ```mermaid
 sequenceDiagram
-    participant CS as "CloudSyncService"
+    participant API as "api/documents.py"
     participant DM as "DocumentManager"
-    participant SV as "S3VectorsBackend"
-    participant AWS as "AWS S3 Vectors API"
+    participant CS as "CloudSyncService"
+    participant DB as "PostgreSQL (Document/CloudDocument)"
+    participant VS as "VectorStore (S3/pgvector)"
 
-    CS->>DM: ingest_document(file_path)
-    DM->>DM: chunk_text()
-    DM->>SV: add_documents(chunks, embeddings)
-    SV->>SV: _ensure_setup()
-    SV->>AWS: create_vector_bucket(bucket_name)
-    SV->>AWS: create_index(index_name)
-    SV->>AWS: query_vectors(query_embedding)
+    Note over API, VS: Direct Upload Flow
+    API->>DM: handle_request()
+    DM->>DB: INSERT INTO documents (content_hash, status)
+    DM->>VS: upsert_embeddings()
+    
+    Note over API, VS: Cloud Sync Flow
+    CS->>DB: INSERT INTO cloud_sync_jobs (status='running')
+    CS->>DB: INSERT INTO cloud_documents (external_file_id, sync_status='synced')
+    CS->>VS: get_vector_store(backend='s3_vectors')
 ```
 
-**Sources:** [orchestrator/modules/search/vector_store/backends/s3_vectors_backend.py:24-37](), [orchestrator/modules/search/vector_store/backends/s3_vectors_backend.py:177-181]()
+**Sources:** [orchestrator/api/documents.py:158-166](), [orchestrator/modules/rag/services/cloud_sync_service.py:167-191](), [orchestrator/modules/rag/ingestion/manager.py:77-86]()
 
 ---
 
-## Cloud Sync Orchestration
+## Cloud Storage Integration
 
-The `CloudSyncService` manages the lifecycle of documents from external providers like Google Drive [orchestrator/modules/rag/services/cloud_sync_service.py:38-48]().
+The `CloudSyncService` orchestrates document retrieval from external providers via the Composio API [orchestrator/modules/rag/services/cloud_sync_service.py:38-48]().
 
-### Download Layers
-The `CloudFileDownloader` implements a two-layer strategy to handle provider-specific limitations [orchestrator/modules/rag/services/cloud_file_downloader.py:60-66]():
-1.  **Layer 1 (REST API)**: Primary method for Dropbox, OneDrive, and Box using the `Composio` v3 API [orchestrator/modules/rag/services/cloud_file_downloader.py:95-96]().
-2.  **Layer 2 (SDK Fallback)**: Specifically for Google Drive, which often truncates REST API content. The SDK saves the full file to the container disk [orchestrator/modules/rag/services/cloud_file_downloader.py:99-107]().
+- **Discovery**: `list_folders` and `list_files` use `ComposioToolExecutor` to browse remote filesystems [orchestrator/modules/rag/services/cloud_sync_service.py:59-95]().
+- **Downloading**: `CloudFileDownloader` implements a multi-layer strategy (REST API with SDK fallback) to handle large files and provider-specific truncation (e.g., Google Drive) [orchestrator/modules/rag/services/cloud_file_downloader.py:60-118]().
+- **S3 Vectors**: Cloud-synced documents often bypass local storage, pointing directly to `S3VectorsBackend` for vector indexing [orchestrator/modules/rag/services/cloud_sync_service.py:25]().
 
-### Sync Metadata Tracking
-The `CloudDocument` model tracks the relationship between cloud IDs and the internal vector store [orchestrator/modules/rag/services/cloud_sync_service.py:167-177]().
-
-| Field | Purpose |
-|-------|---------|
-| `external_file_id` | Unique ID from provider (e.g., Google Drive ID) [orchestrator/modules/rag/services/cloud_sync_service.py:168](). |
-| `sync_status` | Status of ingestion (`pending`, `syncing`, `synced`, `error`) [orchestrator/modules/rag/services/cloud_sync_service.py:183](). |
-| `chunk_count` | Number of chunks generated from the document [orchestrator/modules/rag/services/cloud_sync_service.py:184](). |
-
-**Sources:** [orchestrator/modules/rag/services/cloud_sync_service.py:167-192](), [orchestrator/modules/rag/services/cloud_file_downloader.py:60-143]()
+**Sources:** [orchestrator/modules/rag/services/cloud_sync_service.py:116-153](), [orchestrator/modules/rag/services/cloud_file_downloader.py:30-45]()
 
 ---
 
-## Team-Scoped Retrieval
+## Security and Multi-Tenancy
 
-Document access is governed by the `team_access` system, ensuring that agents only retrieve information relevant to their assigned team [orchestrator/api/widgets/docs.py:5-8]().
+The pipeline strictly enforces workspace isolation.
 
-- **Filtering**: All queries to the `documents` table apply a `TEAM_FILTER_CLAUSE` [orchestrator/api/widgets/docs.py:72-80]().
-- **Search**: The `/api/widgets/docs/search` endpoint performs ILIKE matching on titles and content while enforcing workspace and team isolation [orchestrator/api/widgets/docs.py:87-116]().
-- **Result Formatting**: The `ToolResultFormatter` cleans filenames and extracts snippets for consistent display in the UI [orchestrator/modules/tools/formatting/result_formatter.py:18-67]().
+- **Workspace Scoping**: Every `DocumentManager` and `CloudSyncService` instance is scoped to a specific `workspace_id` [orchestrator/api/documents.py:77-86](), [orchestrator/modules/rag/services/cloud_sync_service.py:80-81]().
+- **Data Isolation**: Database operations for documents and knowledge items include `workspace_id` filters to ensure multi-tenant safety [orchestrator/api/documents.py:158](), [orchestrator/api/knowledge_multimodal.py:160]().
+- **Access Control**: The pipeline utilizes `get_request_context_hybrid` to validate JWT or API Key credentials before any ingestion begins [orchestrator/api/documents.py:108](), [orchestrator/api/knowledge_multimodal.py:135]().
 
-**Sources:** [orchestrator/api/widgets/docs.py:87-128](), [orchestrator/modules/tools/formatting/result_formatter.py:18-67]()
+**Sources:** [orchestrator/api/documents.py:77-86](), [orchestrator/api/knowledge_multimodal.py:143-160]()
 
 ---

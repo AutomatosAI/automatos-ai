@@ -6,43 +6,27 @@
 The following files were used as context for generating this wiki page:
 
 - [README.md](README.md)
-- [docker-compose.yml](docker-compose.yml)
+- [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)
 - [docs/README.md](docs/README.md)
-- [frontend/.dockerignore](frontend/.dockerignore)
-- [frontend/Dockerfile](frontend/Dockerfile)
-- [orchestrator/Dockerfile](orchestrator/Dockerfile)
-- [orchestrator/alembic/versions/prd123_checkpoint_count.py](orchestrator/alembic/versions/prd123_checkpoint_count.py)
-- [orchestrator/api/cloud_documents.py](orchestrator/api/cloud_documents.py)
-- [orchestrator/api/missions.py](orchestrator/api/missions.py)
+- [frontend/tsconfig.tsbuildinfo](frontend/tsconfig.tsbuildinfo)
 - [orchestrator/config.py](orchestrator/config.py)
-- [orchestrator/core/context_guard.py](orchestrator/core/context_guard.py)
-- [orchestrator/core/models/orchestration.py](orchestrator/core/models/orchestration.py)
-- [orchestrator/core/models/orchestration_enums.py](orchestrator/core/models/orchestration_enums.py)
-- [orchestrator/core/redis/client.py](orchestrator/core/redis/client.py)
+- [orchestrator/consumers/__init__.py](orchestrator/consumers/__init__.py)
+- [orchestrator/consumers/chatbot/__init__.py](orchestrator/consumers/chatbot/__init__.py)
 - [orchestrator/main.py](orchestrator/main.py)
-- [orchestrator/modules/coordination/dispatcher.py](orchestrator/modules/coordination/dispatcher.py)
-- [orchestrator/modules/coordination/planner.py](orchestrator/modules/coordination/planner.py)
-- [orchestrator/modules/coordination/reconciler.py](orchestrator/modules/coordination/reconciler.py)
 - [orchestrator/modules/memory/context_router.py](orchestrator/modules/memory/context_router.py)
 - [orchestrator/modules/memory/unified_memory_service.py](orchestrator/modules/memory/unified_memory_service.py)
-- [orchestrator/modules/tools/discovery/action_registry.py](orchestrator/modules/tools/discovery/action_registry.py)
-- [orchestrator/modules/tools/execution/concurrency.py](orchestrator/modules/tools/execution/concurrency.py)
+- [orchestrator/modules/tools/__init__.py](orchestrator/modules/tools/__init__.py)
 - [orchestrator/modules/tools/services/__init__.py](orchestrator/modules/tools/services/__init__.py)
-- [orchestrator/requirements.txt](orchestrator/requirements.txt)
-- [orchestrator/services/checkpoint_service.py](orchestrator/services/checkpoint_service.py)
-- [orchestrator/services/coordinator_service.py](orchestrator/services/coordinator_service.py)
-- [orchestrator/services/orchestration_state.py](orchestrator/services/orchestration_state.py)
-- [orchestrator/tests/test_budget_gate.py](orchestrator/tests/test_budget_gate.py)
-- [orchestrator/tests/test_dispatcher_parallel.py](orchestrator/tests/test_dispatcher_parallel.py)
 - [orchestrator/tests/test_unified_memory.py](orchestrator/tests/test_unified_memory.py)
 - [scripts/ralph/IMPLEMENTATION_PLAN.md](scripts/ralph/IMPLEMENTATION_PLAN.md)
+- [scripts/ralph/prd.json](scripts/ralph/prd.json)
 - [scripts/ralph/progress.txt](scripts/ralph/progress.txt)
 
 </details>
 
 
 
-This document defines the core terminology and data structures used throughout Automatos AI. Understanding these concepts is essential for working with any part of the system.
+This document defines the core terminology and data structures used throughout Automatos AI. Understanding these concepts is essential for working with any part of the system, from agent creation to multi-agent orchestration.
 
 For system architecture details, see **1.2 System Architecture**. For specific implementation guides, see the respective sections: **5. Agents**, **6. Workflows & Recipes**, **3. Memory System**, and **8. Tools & Integrations**.
 
@@ -60,7 +44,7 @@ graph TB
         PersonaModel["Persona<br/>personas table<br/>PersonasRouter"]
         SkillModel["Skill<br/>skills table<br/>SkillLoader service"]
         ToolAssignment["AgentAppAssignment<br/>agent_app_assignments<br/>UnifiedToolExecutor"]
-        PluginAssignment["AgentAssignedPlugin<br/>agent_assigned_plugins<br/>PluginContentCache"]
+        SystemPrompt["SystemPrompt<br/>system_prompts table<br/>PromptRegistry"]
     end
     
     subgraph "Execution Units"
@@ -73,13 +57,13 @@ graph TB
         AgentRouter["agents_router<br/>/api/agents"]
         RecipeRouter["workflow_recipes_router<br/>/api/workflow-recipes"]
         MissionRouter["missions_router<br/>/api/missions"]
-        MarketplaceRouter["marketplace_router<br/>/api/marketplace"]
+        AdminPromptRouter["admin_prompts_router<br/>/api/admin/prompts"]
     end
     
     PersonaModel --> AgentModel
     SkillModel --> AgentModel
     ToolAssignment --> AgentModel
-    PluginAssignment --> AgentModel
+    SystemPrompt --> AgentModel
     
     AgentModel --> RecipeModel
     AgentModel --> MissionModel
@@ -88,10 +72,9 @@ graph TB
     AgentRouter --> AgentModel
     RecipeRouter --> RecipeModel
     MissionRouter --> MissionModel
-    MarketplaceRouter --> AgentModel
-    MarketplaceRouter --> RecipeModel
+    AdminPromptRouter --> SystemPrompt
 ```
-**Sources:** [orchestrator/services/coordinator_service.py:31-37](), [orchestrator/modules/tools/discovery/action_registry.py:27-42](), [orchestrator/main.py:36-41]()
+**Sources:** [orchestrator/main.py:36-41](), [orchestrator/modules/tools/execution.py:30-32](), [orchestrator/main.py:86-88](), [orchestrator/main.py:92-93]()
 
 ---
 
@@ -100,86 +83,82 @@ graph TB
 An **Agent** is an AI-powered entity that can execute tasks using a configured LLM, personality profile, skills, tools, and plugins. Agents are the fundamental execution units in the system.
 
 ### Agent Structure
-An Agent is instantiated by `AgentFactory.activate_agent()`, which loads configuration from the database and creates an `AgentRuntime` instance with all capabilities.
+An Agent is instantiated by the `AgentFactory`, which loads configuration from the database. Each agent is scoped to a `workspace_id` for multi-tenancy.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | integer | Primary Key |
-| `workspace_id` | UUID | Foreign Key to workspace |
-| `slug` | string | Unique identifier |
-| `model_config` | JSONB | LLM provider and model settings |
-| `persona_id` | UUID | FK to predefined persona |
-| `configuration` | JSONB | General agent settings including heartbeat [orchestrator/config.py:114-114]() |
+| `id` | integer | Primary Key for the agent record. |
+| `workspace_id` | UUID | Foreign Key for multi-tenant isolation. |
+| `slug` | string | Per-workspace unique identifier used for routing. |
+| `model_config` | JSONB | LLM provider and model settings (model name, temperature, etc.). |
+| `agent_type` | string | Defines role and behavior profile. |
 
-**Sources:** [orchestrator/core/models/core.py:30-30](), [orchestrator/modules/coordination/agent_matcher.py:41-41]()
+**Sources:** [orchestrator/main.py:36-36](), [orchestrator/main.py:92-93](), [orchestrator/config.py:21-22]()
 
 ---
 
-## Missions & Multi-Agent Coordination
+## Workflows & Recipes
 
-Automatos AI uses a "Mission" system for complex, multi-step agent orchestration. This replaces legacy sequential workflows with dynamic, dependency-aware execution.
+Automatos AI distinguishes between static "Recipes" and dynamic "Workflows".
 
-### Mission Lifecycle
-The `CoordinatorService` manages the lifecycle of an `OrchestrationRun` through a 5-second tick loop [orchestrator/services/coordinator_service.py:78-86]().
+### Recipes
+A **Recipe** (`WorkflowRecipe`) is a predefined sequence of steps. It is often used for repeatable business processes. The execution is handled by `execute_recipe_direct`, which manages step loops and agent activation.
 
-1.  **PLANNING**: The `MissionPlanner` decomposes a goal into a Directed Acyclic Graph (DAG) of `OrchestrationTask` entities [orchestrator/modules/coordination/planner.py:1-15]().
-2.  **DISPATCHING**: The `MissionDispatcher` claims queued tasks using optimistic locking (`version_id`) and assigns them to the best-fit agents via `AgentMatcher` [orchestrator/modules/coordination/dispatcher.py:120-178]().
-3.  **EXECUTION**: Agents execute tasks, potentially using tools or generating LLM content.
-4.  **VERIFICATION**: The `VerificationService` assesses task outputs against success criteria [orchestrator/services/coordinator_service.py:55-55]().
+### Workflow Pipeline
+Modern workflows utilize the `WorkflowStageTracker`, which supports a dynamic 5-phase pipeline:
+1.  **PLAN**: Task decomposition and agent selection.
+2.  **PREPARE**: Context engineering and prompt optimization.
+3.  **EXECUTE**: Agent execution and inter-agent coordination.
+4.  **EVALUATE**: Result aggregation and quality assessment.
+5.  **LEARN**: Memory storage and response generation.
 
-### Shared Mission Context (PRD-108)
-Missions utilize a shared vector field (often Qdrant) that acts as a "blackboard" for agents to share intermediate results and maintain state across the DAG [orchestrator/services/coordinator_service.py:107-151]().
-
-**Sources:** [orchestrator/services/coordinator_service.py:5-17](), [orchestrator/core/models/orchestration_enums.py:29-40](), [orchestrator/modules/coordination/dispatcher.py:76-81]()
+**Sources:** [orchestrator/main.py:39-39](), [scripts/ralph/IMPLEMENTATION_PLAN.md:51-51]()
 
 ---
 
 ## Memory System (5-Layer Stack)
 
-Automatos AI implements a 5-layer memory architecture managed by the `UnifiedMemoryService`. This provides a single entry point for all memory operations [orchestrator/modules/memory/unified_memory_service.py:1-21]().
+The system uses a 5-layer memory architecture managed by the `UnifiedMemoryService` to maintain context across different temporal and semantic scales.
 
-### Memory Tiers
 | Tier | Name | Implementation | Purpose |
 |------|------|----------------|---------|
-| **L0** | Focus | Context Window | Immediate conversation tokens. |
-| **L1** | Working | Redis | Session cache per conversation (24h TTL) [orchestrator/modules/memory/unified_memory_service.py:123-138](). |
-| **L2** | Short-term | Postgres | Time-based decay (Ebbinghaus) and daily logs [orchestrator/config.py:100-105](). |
-| **L3** | Long-term | Mem0 | Fact extraction and cross-session recall [orchestrator/modules/memory/unified_memory_service.py:178-182](). |
-| **L4** | Knowledge | RAG/Tools | Organizational knowledge and document search. |
+| **L0** | Focus | Context Window | Immediate conversation tokens managed during prompt assembly. |
+| **L1** | Working | Redis | Session cache (`SessionMemory`) per conversation with a 24-hour TTL [orchestrator/modules/memory/unified_memory_service.py:124-130](). |
+| **L2** | Short-term | Postgres | Persistent history with Ebbinghaus decay [orchestrator/config.py:98-103](). |
+| **L3** | Long-term | Mem0 | Cross-session fact extraction and agent-specific memories [orchestrator/modules/memory/unified_memory_service.py:56-58](). |
+| **L4** | Knowledge | RAG/Tools | Organizational knowledge, document vector search, and Graphify knowledge graphs [orchestrator/modules/memory/unified_memory_service.py:13-13](). |
 
-### Memory Namespace Resolution
-The `MemoryNamespace` class ensures standardized, scoped keys for memory storage to prevent cross-tenant data leaks [orchestrator/modules/memory/unified_memory_service.py:38-46]().
-
-```python
-# Example namespace resolution
-namespace = MemoryNamespace(workspace_id="ws-123")
-agent_key = namespace.agent(agent_id=45) # "mem:ws-123:agent:45"
-session_key = namespace.session(conv_id="chat-88") # "mem:session:ws-123:chat-88"
-```
-
-**Sources:** [orchestrator/modules/memory/unified_memory_service.py:52-117](), [orchestrator/config.py:82-117]()
+**Sources:** [orchestrator/modules/memory/unified_memory_service.py:8-13](), [orchestrator/modules/memory/unified_memory_service.py:39-46](), [orchestrator/config.py:82-123]()
 
 ---
 
-## Tools & Platform Actions
+## Context Assembly & Routing
 
-### Tool Execution
-Tools are external application integrations (via Composio) or internal capabilities. The system uses a unified execution chain to handle permissions and routing.
+### Context Router
+The `ContextRouter` acts as an intelligent pre-LLM layer. It performs **Signal Detection** via regex to identify user intent (temporal, personal facts, etc.) and performs **Context Assembly** to fetch relevant data from memory layers within a token budget.
 
-### Platform Actions (PRD-64)
-**Platform Actions** are specialized tools that allow agents to manage the Automatos platform itself (e.g., `platform_create_agent`).
-*   **Action Registry**: Central catalog of all platform operations [orchestrator/modules/tools/discovery/action_registry.py:55-65]().
-*   **Promoted Actions**: High-value actions (like agent management) that are exposed as first-class OpenAI tool schemas instead of generic dispatchers [orchestrator/modules/tools/discovery/action_registry.py:119-134]().
-*   **Permission Gating**: Actions are categorized by `permission_level` (read, write, destructive) and can be restricted to admins only [orchestrator/modules/tools/discovery/action_registry.py:28-42]().
-*   **Admin Enforcement**: Admin-only actions (e.g., `platform_query_loki_logs`) require the caller to have an `admin` or `owner` role in the `caller_context` [scripts/ralph/progress.txt:21-31]().
+### Universal Router
+The `UniversalRouter` handles message distribution using a 7-tier strategy, ranging from simple cache lookups to LLM-based classification, ensuring the most appropriate agent or workflow is activated for a given input.
 
-**Sources:** [scripts/ralph/IMPLEMENTATION_PLAN.md:1-20](), [scripts/ralph/progress.txt:3-10](), [orchestrator/modules/tools/discovery/action_registry.py:136-157]()
+**Sources:** [orchestrator/modules/memory/context_router.py:5-12](), [orchestrator/modules/memory/context_router.py:41-56](), [orchestrator/main.py:82-82]()
+
+---
+
+## Tools & Workspaces
+
+### Tools & Composio
+The system utilizes a `UnifiedToolExecutor` to route agent requests to various tool providers. Integration with **Composio** provides access to thousands of third-party apps. Tools are assigned via `AgentAppAssignment`.
+
+### Workspace Execution
+Agents operate within sandboxed environments. The `WorkspaceWorker` handles file operations, command execution, and GitHub integration (cloning and repo management) to ensure safe and isolated task completion.
+
+**Sources:** [orchestrator/modules/tools/__init__.py:30-32](), [orchestrator/modules/tools/services/__init__.py:11-12](), [orchestrator/main.py:138-141]()
 
 ---
 
 ## System Interaction Diagram
 
-This diagram bridges the Natural Language space (User Input) to the Code Entity space (System Services).
+This diagram bridges the Natural Language space (User Input) to the Code Entity space (System Services and Models).
 
 ```mermaid
 graph TD
@@ -187,23 +166,20 @@ graph TD
     
     subgraph "Code Entity Space"
         Router["UniversalRouter<br/>(api/routing.py)"]
-        Complexity["AutoBrain<br/>(ComplexityAssessment)"]
-        Coordinator["CoordinatorService<br/>(coordinator_service.py)"]
-        MemService["UnifiedMemoryService<br/>(unified_memory_service.py)"]
-        Factory["AgentFactory<br/>(agent_factory.py)"]
-        ActionReg["ActionRegistry<br/>(action_registry.py)"]
-        Exec["UnifiedToolExecutor<br/>(unified_executor.py)"]
+        ChatService["StreamingChatService<br/>(consumers/chatbot)"]
+        MemorySvc["UnifiedMemoryService<br/>(modules/memory/unified_memory_service.py)"]
+        ContextRtr["ContextRouter<br/>(modules/memory/context_router.py)"]
+        AgentModel["Agent<br/>(agents table)"]
+        ToolExecutor["UnifiedToolExecutor<br/>(modules/tools/execution.py)"]
     end
     
-    User --> Router
-    Router --> Complexity
-    Complexity --> Coordinator
-    Coordinator --> MemService
-    Coordinator --> Factory
-    Factory --> Exec
-    Exec --> ActionReg
-    Exec -->|"ComposioToolExecutor"| External["External Apps<br/>(GitHub/Slack)"]
+    User --> ChatService
+    ChatService --> ContextRtr
+    ContextRtr --> MemorySvc
+    ChatService --> Router
+    Router --> AgentModel
+    AgentModel --> ToolExecutor
 ```
-**Sources:** [orchestrator/services/coordinator_service.py:78-86](), [orchestrator/modules/tools/discovery/action_registry.py:55-65](), [orchestrator/modules/memory/unified_memory_service.py:154-161]()
+**Sources:** [orchestrator/main.py:82-82](), [orchestrator/modules/memory/unified_memory_service.py:154-161](), [orchestrator/modules/memory/context_router.py:5-12](), [orchestrator/modules/tools/execution.py:30-32]()
 
 ---

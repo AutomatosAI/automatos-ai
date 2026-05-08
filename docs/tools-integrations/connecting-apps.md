@@ -11,26 +11,18 @@ The following files were used as context for generating this wiki page:
 - [docs/PRDS/61-NL2SQL-V2-COMPETITIVE-UPGRADE.md](docs/PRDS/61-NL2SQL-V2-COMPETITIVE-UPGRADE.md)
 - [docs/PRDS/62-CODEGRAPH-V2-COMPETITIVE-UPGRADE.md](docs/PRDS/62-CODEGRAPH-V2-COMPETITIVE-UPGRADE.md)
 - [frontend/app/tools/callback/page.tsx](frontend/app/tools/callback/page.tsx)
+- [frontend/components/agents/agent-management.tsx](frontend/components/agents/agent-management.tsx)
+- [frontend/components/agents/skills/skill-editor-modal.tsx](frontend/components/agents/skills/skill-editor-modal.tsx)
+- [frontend/components/agents/skills/workspace-skills-tab.tsx](frontend/components/agents/skills/workspace-skills-tab.tsx)
 - [frontend/components/composio/app-connection-button.tsx](frontend/components/composio/app-connection-button.tsx)
-- [frontend/components/marketplace/marketplace-agents-tab.tsx](frontend/components/marketplace/marketplace-agents-tab.tsx)
-- [frontend/components/marketplace/marketplace-homepage.tsx](frontend/components/marketplace/marketplace-homepage.tsx)
-- [frontend/components/marketplace/marketplace-tools-tab.tsx](frontend/components/marketplace/marketplace-tools-tab.tsx)
-- [frontend/components/shared/stats-bar.tsx](frontend/components/shared/stats-bar.tsx)
+- [frontend/components/documents/document-management.tsx](frontend/components/documents/document-management.tsx)
+- [frontend/components/knowledge/memory-tab.tsx](frontend/components/knowledge/memory-tab.tsx)
 - [frontend/components/tools/composio-apps-section.tsx](frontend/components/tools/composio-apps-section.tsx)
 - [frontend/components/tools/tool-config-modal.tsx](frontend/components/tools/tool-config-modal.tsx)
 - [frontend/components/tools/tools-dashboard.tsx](frontend/components/tools/tools-dashboard.tsx)
-- [frontend/components/workflows/active-workflows-panel.tsx](frontend/components/workflows/active-workflows-panel.tsx)
-- [frontend/components/workflows/execution-kitchen.tsx](frontend/components/workflows/execution-kitchen.tsx)
-- [frontend/components/workflows/workflow-management.tsx](frontend/components/workflows/workflow-management.tsx)
-- [frontend/lib/tooltips.json](frontend/lib/tooltips.json)
-- [orchestrator/api/composio.py](orchestrator/api/composio.py)
-- [orchestrator/api/recipe_executor.py](orchestrator/api/recipe_executor.py)
-- [orchestrator/api/routing.py](orchestrator/api/routing.py)
-- [orchestrator/api/workflow_recipes.py](orchestrator/api/workflow_recipes.py)
+- [frontend/hooks/use-skills-api.ts](frontend/hooks/use-skills-api.ts)
+- [orchestrator/api/workspace_skills.py](orchestrator/api/workspace_skills.py)
 - [orchestrator/core/composio/entity_manager.py](orchestrator/core/composio/entity_manager.py)
-- [orchestrator/modules/learning/tests/conftest.py](orchestrator/modules/learning/tests/conftest.py)
-- [orchestrator/modules/learning/tests/test_learning_system.py](orchestrator/modules/learning/tests/test_learning_system.py)
-- [orchestrator/scripts/setup_jira_trigger.py](orchestrator/scripts/setup_jira_trigger.py)
 
 </details>
 
@@ -88,8 +80,7 @@ graph TD
 ```
 
 **Sources:**
-- [frontend/components/tools/tools-dashboard.tsx:116-163]()
-- [frontend/components/marketplace/marketplace-tools-tab.tsx:163-188]()
+- [frontend/components/tools/tools-dashboard.tsx:61-67]()
 - [orchestrator/api/composio.py:120-170]()
 - [orchestrator/core/composio/entity_manager.py:41-69]()
 - [frontend/app/tools/callback/page.tsx:23-60]()
@@ -116,17 +107,27 @@ The `EntityManager` class in `orchestrator/core/composio/entity_manager.py` hand
 ```python
 def get_connected_apps(self, workspace_id: UUID) -> List[str]:
     entity = self.get_entity_by_workspace(workspace_id)
-    if not entity: return []
+    if not entity:
+        return []
     conns = self.get_entity_connections(str(entity["id"]))
     result = []
     for c in conns:
         status = (c.get("status") or "").lower()
+        app = (c.get("app_name") or "").upper()
+        if not app:
+            continue
         if status == "active":
-            result.append(c["app_name"])
+            result.append(app)
         elif status == "pending" and c.get("connection_id"):
-            # Lazy upgrade to active if connection_id exists
-            self.update_connection_status(entity["id"], c["app_name"], status="active")
-            result.append(c["app_name"])
+            # OAuth completed on Composio side but our callback missed —
+            # treat as connected and lazily upgrade status to 'active'.
+            self.update_connection_status(
+                entity_id=str(entity["id"]),
+                app_name=app,
+                status="active",
+                connection_id=c["connection_id"],
+            )
+            result.append(app)
     return result
 ```
 
@@ -141,10 +142,10 @@ def get_connected_apps(self, workspace_id: UUID) -> List[str]:
 ### 1. OAuth Popup Flow
 Used for apps like Google, Slack, and GitHub. The frontend opens a centered popup to prevent losing the application state.
 
-1. **Initiate**: `useInitiateConnection` hook calls `POST /api/composio/connect/{app_name}` [frontend/hooks/use-composio-api.ts]().
-2. **Redirect**: Backend returns a Composio-generated OAuth URL via `InitiateConnectionResponse` [orchestrator/api/composio.py:84-88]().
-3. **Callback**: The `ComposioCallbackPage` in `frontend/app/tools/callback/page.tsx` receives the `connection_id` and `status`.
-4. **Synchronization**: The callback page sends a `postMessage` of type `COMPOSIO_CONNECTED` to the parent window and notifies the backend to mark the app as `ACTIVE`.
+1. **Initiate**: `useInitiateConnection` hook calls `POST /api/composio/connect/{app_name}` via `orchestrator/api/composio.py`.
+2. **Redirect**: Backend returns a Composio-generated OAuth URL via `InitiateConnectionResponse`.
+3. **Callback**: The `ComposioCallbackPage` in `frontend/app/tools/callback/page.tsx` receives the `connection_id` and `status` [frontend/app/tools/callback/page.tsx:12-15]().
+4. **Synchronization**: The callback page sends a `postMessage` of type `COMPOSIO_CONNECTED` to the parent window and notifies the backend to mark the app as `ACTIVE` [frontend/app/tools/callback/page.tsx:33-46]().
 
 [frontend/app/tools/callback/page.tsx:43-50]()
 ```typescript
@@ -153,29 +154,41 @@ if (status === 'success' || status === 'active' || connected) {
         const trustedOrigin = window.location.origin
         window.opener.postMessage({ type: 'COMPOSIO_CONNECTED', status, connectionId }, trustedOrigin)
         window.close()
+    } else {
+        router.push('/tools')
     }
 }
 ```
 
 ### 2. NO_AUTH Instant Activation
-Some tools (e.g., Calculator, Weather) do not require credentials. These are activated instantly by the `EntityManager` by creating a record with `status="active"` immediately upon request. This is often handled during the "Add to Workspace" phase for these specific app types.
+Some tools (e.g., Calculator, Weather) do not require credentials. These are activated instantly. The `AppConnectionButton` detects if a `redirect_url` is missing from the initiation result, signifying a `NO_AUTH` app that can be used immediately.
+
+[frontend/components/composio/app-connection-button.tsx:42-47]()
+```typescript
+// NO_AUTH apps are activated immediately — no OAuth redirect needed
+if (!result.redirect_url) {
+    setIsConnecting(false)
+    onConnected?.()
+    return
+}
+```
 
 ### 3. API Key / Manual Configuration
-For tools requiring static keys, the `ToolConfigModal` renders a configuration interface. Users provide the necessary credentials which are then securely transmitted to the Composio backend via the orchestrator.
+For tools requiring static keys, the `ToolConfigModal` renders a configuration interface. The modal attempts to resolve the `credentialType` based on tool metadata (e.g., `credential_type` or `auto_enable_on_credential`) [frontend/components/tools/tool-config-modal.tsx:201-205]().
 
 **Sources:**
-- [frontend/components/tools/tool-config-modal.tsx:176-210]()
+- [frontend/components/tools/tool-config-modal.tsx:148-178]()
 - [frontend/app/tools/callback/page.tsx:8-40]()
-- [orchestrator/api/composio.py:208-230]()
+- [frontend/components/composio/app-connection-button.tsx:33-60]()
 
 ---
 
 ## UI Components
 
 ### ToolsDashboard
-The primary entry point for managing connections within a workspace. It uses the `useTools` hook to fetch both available and enabled tools from the database cache.
+The primary entry point for managing connections. It uses the `useTools` hook to fetch both available and enabled tools from the database cache. It supports a full cache sync via `apiClient.syncToolsCache('full')` [frontend/components/tools/tools-dashboard.tsx:174-180]().
 
-[frontend/components/tools/tools-dashboard.tsx:153-169]()
+[frontend/components/tools/tools-dashboard.tsx:153-163]()
 ```typescript
 const {
     data: toolsData,
@@ -190,25 +203,16 @@ const {
   })
 ```
 
-### MarketplaceToolsTab
-A specialized view within the `MarketplaceHomepage` [frontend/components/marketplace/marketplace-homepage.tsx:162-164]() that allows users to discover and connect new applications from the global Composio catalog. It uses `apiClient.get('/api/tools/marketplace')` to fetch a fast, DB-cached list of available apps [frontend/components/marketplace/marketplace-tools-tab.tsx:112-115]().
-
 ### ToolConfigModal
-A multi-tab modal used to configure specific tool settings and view available actions once connected. It checks the connection status for the specific tool before allowing configuration.
+A multi-tab modal used to configure credentials and view available actions. It checks connection status via `useConnectedApps` [frontend/components/tools/tool-config-modal.tsx:90-96](). If connected, it can list specific `appActions` using `useAppActions` [frontend/components/tools/tool-config-modal.tsx:97]().
 
-[frontend/components/tools/tool-config-modal.tsx:83-93]()
-```typescript
-const isComposioApp = !!(tool?.composio_app_name || tool?.metadata?.composio_app_name || tool?.source === 'composio')
-const { data: connections = [] } = useConnectedApps({ enabled: open && isComposioApp })
-const isConnected = connections.some(
-  (c) => c.app_name.toUpperCase() === composioAppName.toUpperCase() && c.status === 'active'
-)
-```
+### WorkspaceSkillsTab
+While not for external apps, this tab manages internal "Skills" which follow a similar enablement pattern. It uses `listWorkspaceSkills` to show enabled marketplace skills and workspace-owned (forked) skills [frontend/components/agents/skills/workspace-skills-tab.tsx:91-97]().
 
 **Sources:**
 - [frontend/components/tools/tools-dashboard.tsx:116-152]()
-- [frontend/components/marketplace/marketplace-tools-tab.tsx:66-135]()
-- [frontend/components/tools/tool-config-modal.tsx:24-62]()
+- [frontend/components/tools/tool-config-modal.tsx:83-98]()
+- [frontend/components/agents/skills/workspace-skills-tab.tsx:65-90]()
 
 ---
 
@@ -218,27 +222,26 @@ This diagram tracks how a successful OAuth callback is propagated back to the sy
 
 ```mermaid
 sequenceDiagram
-    participant B as Browser (Callback Page)
-    participant API as FastAPI (Composio Router)
-    participant EM as EntityManager
-    participant DB as Postgres (entity_connections)
-    participant UI as ToolsDashboard (Parent Window)
+    participant B as "Browser (Callback Page)"
+    participant API as "FastAPI (orchestrator/api/composio.py)"
+    participant EM as "EntityManager (core/composio/entity_manager.py)"
+    participant DB as "Postgres (ComposioConnection)"
+    participant UI as "ToolsDashboard (frontend/components/tools/tools-dashboard.tsx)"
 
-    B->>API: POST /api/composio/connect/{app}/callback?status=active
-    API->>EM: update_connection_status(entity_id, app, "active")
-    EM->>DB: UPDATE status='active', connected_at=now()
-    DB-->>EM: OK
-    EM-->>API: True
-    API-->>B: 200 OK
-    B->>UI: window.postMessage({type: 'COMPOSIO_CONNECTED'})
-    UI->>UI: queryClient.invalidateQueries(['tools'])
-    UI->>UI: queryClient.invalidateQueries(['workspace-tools'])
+    B->>API: "POST /api/composio/connect/{app}/callback?status=active"
+    API->>EM: "update_connection_status(entity_id, app, 'active')"
+    EM->>DB: "UPDATE status='active', connected_at=now()"
+    DB-->>EM: "OK"
+    EM-->>API: "True"
+    API-->>B: "200 OK"
+    B->>UI: "window.postMessage({type: 'COMPOSIO_CONNECTED'})"
+    UI->>UI: "queryClient.invalidateQueries(['tools'])"
+    UI->>UI: "queryClient.invalidateQueries(['tools', 'stats'])"
 ```
 
 **Sources:**
 - [frontend/app/tools/callback/page.tsx:23-47]()
 - [orchestrator/core/composio/entity_manager.py:163-186]()
-- [frontend/components/tools/tools-dashboard.tsx:174-194]()
-- [frontend/components/marketplace/marketplace-tools-tab.tsx:151-160]()
+- [frontend/components/tools/tools-dashboard.tsx:174-184]()
 
 ---

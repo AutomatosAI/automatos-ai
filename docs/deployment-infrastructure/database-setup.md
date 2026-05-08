@@ -5,17 +5,23 @@
 
 The following files were used as context for generating this wiki page:
 
-- [README.md](README.md)
-- [docker-compose.yml](docker-compose.yml)
-- [docs/README.md](docs/README.md)
-- [frontend/.dockerignore](frontend/.dockerignore)
-- [frontend/Dockerfile](frontend/Dockerfile)
-- [frontend/components/workflows/execution-theater/communication-log.tsx](frontend/components/workflows/execution-theater/communication-log.tsx)
-- [orchestrator/Dockerfile](orchestrator/Dockerfile)
-- [orchestrator/api/cloud_documents.py](orchestrator/api/cloud_documents.py)
-- [orchestrator/core/redis/client.py](orchestrator/core/redis/client.py)
-- [orchestrator/modules/tools/services/__init__.py](orchestrator/modules/tools/services/__init__.py)
-- [orchestrator/requirements.txt](orchestrator/requirements.txt)
+- [frontend/hooks/use-database-knowledge.ts](frontend/hooks/use-database-knowledge.ts)
+- [orchestrator/api/admin_prompts.py](orchestrator/api/admin_prompts.py)
+- [orchestrator/api/credentials.py](orchestrator/api/credentials.py)
+- [orchestrator/api/database_knowledge.py](orchestrator/api/database_knowledge.py)
+- [orchestrator/api/document_generation.py](orchestrator/api/document_generation.py)
+- [orchestrator/api/generated_images.py](orchestrator/api/generated_images.py)
+- [orchestrator/api/system_settings.py](orchestrator/api/system_settings.py)
+- [orchestrator/core/database/database.py](orchestrator/core/database/database.py)
+- [orchestrator/core/database/load_seed_data.py](orchestrator/core/database/load_seed_data.py)
+- [orchestrator/core/models/system_prompts.py](orchestrator/core/models/system_prompts.py)
+- [orchestrator/core/seeds/seed_personas.py](orchestrator/core/seeds/seed_personas.py)
+- [orchestrator/core/seeds/seed_plugin_categories.py](orchestrator/core/seeds/seed_plugin_categories.py)
+- [orchestrator/core/seeds/seed_system_prompts.py](orchestrator/core/seeds/seed_system_prompts.py)
+- [orchestrator/core/services/audit_service.py](orchestrator/core/services/audit_service.py)
+- [orchestrator/core/services/prompt_registry.py](orchestrator/core/services/prompt_registry.py)
+- [orchestrator/modules/documents/generation_service.py](orchestrator/modules/documents/generation_service.py)
+- [orchestrator/modules/nl2sql/service.py](orchestrator/modules/nl2sql/service.py)
 
 </details>
 
@@ -23,7 +29,7 @@ The following files were used as context for generating this wiki page:
 
 ## Purpose and Scope
 
-This document covers the PostgreSQL database configuration, initialization, and management for Automatos AI. It details the Docker-based deployment, pgvector extension setup, schema initialization, and the seeding process for system defaults.
+This document covers the PostgreSQL database configuration, initialization, and management for Automatos AI. It details the connection management using SQLAlchemy, schema initialization via Alembic migrations, and the extensive seeding process for system defaults, credential types, and LLM-facing prompts.
 
 For application-level data models and ORM patterns, see [Backend Architecture](18.3). For complete environment variable reference, see [Environment Variables](20.3).
 
@@ -31,60 +37,48 @@ For application-level data models and ORM patterns, see [Backend Architecture](1
 
 ## PostgreSQL with pgvector
 
-Automatos AI uses **PostgreSQL 16** with the **pgvector extension** for vector similarity search in the RAG system. The `pgvector/pgvector:pg16` Docker image provides both the database engine and native vector operations [docker-compose.yml:23-23]().
+Automatos AI uses **PostgreSQL** as its primary relational store, augmented with the **pgvector** extension for vector similarity search. The system relies on native vector operations for semantic routing, RAG (Retrieval-Augmented Generation), and memory retrieval.
 
 ### Key Features
 
 | Feature | Purpose | Implementation |
 |---------|---------|----------------|
-| **pgvector Extension** | Vector embeddings for RAG | `pgvector==0.2.4` in requirements [orchestrator/requirements.txt:11-11]() |
-| **Connection Pooling** | Max 200 concurrent connections | `max_connections=200` in `POSTGRES_INITDB_ARGS` [docker-compose.yml:30-30]() |
-| **Shared Buffers** | Memory optimization | `shared_buffers=256MB` for query performance [docker-compose.yml:30-30]() |
-| **SQLAlchemy ORM** | Python database abstraction | `sqlalchemy==2.0.23` [orchestrator/requirements.txt:7-7]() |
-| **Alembic Migrations** | Schema versioning | `alembic==1.12.1` [orchestrator/requirements.txt:8-8]() |
+| **pgvector Extension** | Vector embeddings for RAG and Semantic Routing | Enabled via initialization scripts to support `vector` types in models. |
+| **SQLAlchemy ORM** | Python database abstraction | Centralized `SessionLocal` and `get_db` dependency [orchestrator/core/database/database.py:94-111](). |
+| **Connection Pooling** | Performance and resource management | Configured with `pool_size=10` and `max_overflow=20` [orchestrator/core/database/database.py:83-91](). |
+| **Credential-Based URL** | Secure connection resolution | Tries to resolve DB params via the internal `CredentialResolver` before falling back to env vars [orchestrator/core/database/database.py:23-40](). |
 
-**Sources:** [docker-compose.yml:22-43](), [orchestrator/requirements.txt:7-11]()
+**Sources:** [orchestrator/core/database/database.py:23-111]()
 
 ---
 
-## Schema Initialization and Seed Data
+## Schema Initialization and Migrations
 
 ### Database Bootstrapping Flow
 
-The system initializes in two phases: structural creation via SQL scripts and content population via Python seeders. The `backend` service depends on a healthy `postgres` container before starting [docker-compose.yml:85-87]().
+The system initializes in three phases: structural creation, version control via Alembic, and comprehensive seeding of platform defaults.
 
 ```mermaid
 flowchart TD
-    subgraph "Phase 1: Structure (Postgres Container)"
-        A["Docker Start"] --> B["init_complete_schema.sql"]
-        B --> C["CREATE EXTENSION vector"]
-        C --> D["Create Tables & Indexes"]
+    subgraph "Phase 1: Engine & Tables"
+        [get_database_url] --> [create_engine]
+        [create_engine] --> [create_tables]
+        [create_tables] --> [Base.metadata.create_all]
     end
 
-    subgraph "Phase 2: Content (Backend Startup)"
-        D --> E["Load Credential Types"]
-        E --> F["Seed System Settings"]
-        F --> G["Seed LLM Models"]
-        G --> H["Seed Personas & Skills"]
+    subgraph "Phase 2: Migrations (Alembic)"
+        [Base.metadata.create_all] --> [Alembic_Upgrade]
+        [Alembic_Upgrade] --> [Schema_Versioning]
     end
 
-    subgraph "Phase 3: Readiness"
-        H --> I["Database Ready"]
+    subgraph "Phase 3: Seeding"
+        [Schema_Versioning] --> [load_seed_data.py]
+        [load_seed_data.py] --> [seed_system_settings]
+        [load_seed_data.py] --> [seed_models]
+        [load_seed_data.py] --> [seed_system_prompts]
     end
 ```
-**Sources:** [docker-compose.yml:35-35](), [docker-compose.yml:85-87]()
-
-### Seed Data Loader
-
-The system populates essential platform data during the initialization phase.
-
-1.  **Credential Types**: Loads definitions into the `credential_types` table to support multi-provider auth.
-2.  **System Settings**: Establishes core platform defaults for the workspace.
-3.  **LLM Models**: Populates supported models (OpenAI, Anthropic, Gemini) into the database [orchestrator/requirements.txt:71-75]().
-4.  **Personas**: Seeds global agent personas (e.g., Senior Engineer, QA Engineer) [README.md:33-35]().
-5.  **Plugin Categories**: Sets up marketplace categories like "Code Review" and "DevOps" [README.md:43-45]().
-
-**Sources:** [orchestrator/requirements.txt:71-75](), [README.md:33-45]()
+**Sources:** [orchestrator/core/database/database.py:69-130](), [orchestrator/core/database/load_seed_data.py:25-54](), [orchestrator/core/database/load_seed_data.py:121-154]()
 
 ---
 
@@ -92,109 +86,83 @@ The system populates essential platform data during the initialization phase.
 
 This section bridges conceptual data requirements with specific code implementations.
 
-### Persona and Category Mapping
+### Credential and Database Knowledge Mapping
 
-The system uses specific identifiers in the database to represent agent roles and marketplace categories.
+When a user adds a "Database Source" via natural language, the system maps this to encrypted credentials and introspected schema metadata.
 
 ```mermaid
 graph LR
     subgraph "Natural Language Space"
-        P1["'I need a Senior Engineer agent'"]
-        P2["'I want to browse DevOps tools'"]
+        ["'Connect my production Postgres DB'"]
+        ["'What is the schema of our sales table?'"]
     end
 
     subgraph "Code Entity Space"
-        E1["Persona (slug: 'senior-engineer')"]
-        E2["PluginCategory (slug: 'deployment')"]
-        S1["AgentLifecycle"]
-        S2["ComposioConnection"]
+        ["DatabaseKnowledgeSource"]
+        ["DatabaseKnowledgeService.add_database_source()"]
+        ["CredentialStore.create_credential()"]
+        ["DatabaseIntrospectionService"]
     end
 
-    P1 --> E1
-    E1 -.-> S1
-    P2 --> E2
-    E2 -.-> S2
+    ["'Connect my production Postgres DB'"] --> ["DatabaseKnowledgeService.add_database_source()"]
+    ["DatabaseKnowledgeService.add_database_source()"] -.-> ["CredentialStore.create_credential()"]
+    ["'What is the schema of our sales table?'"] --> ["DatabaseIntrospectionService"]
+    ["DatabaseIntrospectionService"] -.-> ["DatabaseKnowledgeSource"]
 ```
-**Sources:** [README.md:33-35](), [orchestrator/api/cloud_documents.py:20-21]()
+**Sources:** [orchestrator/api/database_knowledge.py:118-141](), [orchestrator/modules/nl2sql/service.py:112-140](), [orchestrator/core/credentials/service.py:130-131]()
 
-### Execution Logging Mapping
+### Prompt Registry Mapping
 
-The frontend `CommunicationLog` component maps execution events from the database and real-time streams to visual log entries [frontend/components/workflows/execution-theater/communication-log.tsx:37-47]().
+System prompts are resolved from a hierarchy of sources to ensure the platform can bootstrap even without a fully populated database.
 
 ```mermaid
 graph TD
     subgraph "Natural Language Space"
-        L1["'Agent started a tool call'"]
-        L2["'Memory was updated'"]
-        L3["'Orchestrator assigned a task'"]
+        ["'The AI should be technical'"]
+        ["'Use the standard routing logic'"]
     end
 
     subgraph "Code Entity Space"
-        T1["LogEntry.type = 'tool_call'"]
-        T2["LogEntry.type = 'memory_operation'"]
-        T3["LogEntry.type = 'orchestrator'"]
-        C1["CommunicationLog component"]
+        ["PromptRegistry.get('chatbot-technical')"]
+        ["SystemPromptVersion (status='active')"]
+        ["_HARDCODED_DEFAULTS"]
+        ["seed_system_prompts.py"]
     end
 
-    L1 --> T1
-    L2 --> T2
-    L3 --> T3
-    T1 -.-> C1
-    T2 -.-> C1
-    T3 -.-> C1
+    ["'The AI should be technical'"] --> ["PromptRegistry.get('chatbot-technical')"]
+    ["PromptRegistry.get('chatbot-technical')"] -.-> ["SystemPromptVersion (status='active')"]
+    ["SystemPromptVersion (status='active')"] -- "Fallback" --> ["_HARDCODED_DEFAULTS"]
+    ["'Use the standard routing logic'"] --> ["seed_system_prompts.py"]
 ```
-**Sources:** [frontend/components/workflows/execution-theater/communication-log.tsx:37-47](), [frontend/components/workflows/execution-theater/communication-log.tsx:205-216]()
+**Sources:** [orchestrator/core/services/prompt_registry.py:59-76](), [orchestrator/core/services/prompt_registry.py:93-115](), [orchestrator/core/seeds/seed_system_prompts.py:23-43]()
 
 ---
 
-## Connection Configuration
+## Seeding and Defaults
 
-### Environment Variables
+The platform uses an idempotent seeding strategy to ensure essential data is present across all environments.
 
-The database connection is configured via environment variables. The `DATABASE_URL` is the primary string used by SQLAlchemy [docker-compose.yml:97-97]().
+### 1. System Settings (PRD-25)
+Replaces static `.env` files with database-backed settings. This allows admins to modify platform behavior (e.g., LLM timeouts, feature flags) via the `SystemSettingsAPI` without restarting services [orchestrator/api/system_settings.py:1-18]().
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `POSTGRES_DB` | `orchestrator_db` | Database name [docker-compose.yml:27-27]() |
-| `POSTGRES_USER` | `postgres` | Superuser account [docker-compose.yml:28-28]() |
-| `POSTGRES_PASSWORD` | **(required)** | Master password [docker-compose.yml:29-29]() |
-| `POSTGRES_HOST` | `postgres` | Hostname in Docker network [docker-compose.yml:95-95]() |
-| `POSTGRES_PORT` | `5432` | Standard PostgreSQL port [docker-compose.yml:96-96]() |
+### 2. Credential Types
+The `load_seed_data.py` script populates over 400 credential types from `credential_types_seed.json`. This enables dynamic form generation in the UI for connecting external services [orchestrator/core/database/load_seed_data.py:60-108]().
 
-**Sources:** [docker-compose.yml:26-32](), [docker-compose.yml:91-97]()
-
-### Docker Compose Service
-
-The PostgreSQL service is defined with health checks to ensure availability before dependent services (like the FastAPI `backend`) start:
-
-```yaml
-postgres:
-  image: pgvector/pgvector:pg16
-  container_name: automatos_postgres
-  environment:
-    POSTGRES_DB: ${POSTGRES_DB:-orchestrator_db}
-    POSTGRES_USER: ${POSTGRES_USER:-postgres}
-    POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-  volumes:
-    - postgres_data:/var/lib/postgresql/data
-    - ./orchestrator/database/init_complete_schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
-  healthcheck:
-    test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
-    interval: 10s
-    timeout: 5s
-    retries: 5
-```
-**Sources:** [docker-compose.yml:22-43]()
+### 3. System Prompts (PRD-58)
+The `seed_system_prompts.py` manifest defines the core "personalities" and "orchestrator" logic. These are stored in `SystemPrompt` and `SystemPromptVersion` tables, allowing for versioning, rollback, and A/B testing via the Admin Prompts API [orchestrator/api/admin_prompts.py:1-12](), [orchestrator/core/seeds/seed_system_prompts.py:23-102]().
 
 ---
 
-## Real-Time Update Integration
+## Key Database Functions and Services
 
-While PostgreSQL stores the source of truth, real-time execution events are broadcast via Redis Pub/Sub to the frontend [orchestrator/core/redis/client.py:2-6]().
+| Function / Service | File Path | Purpose |
+|----------|-----------|---------|
+| `get_db` | `core/database/database.py` | FastAPI dependency for yielding database sessions [orchestrator/core/database/database.py:105-111](). |
+| `DatabaseKnowledgeService` | `modules/nl2sql/service.py` | Manages schema introspection and SQL generation for external DB sources [orchestrator/modules/nl2sql/service.py:75-96](). |
+| `CredentialStore` | `core/credentials/service.py` | Handles encrypted storage and retrieval of sensitive keys [orchestrator/api/credentials.py:52-54](). |
+| `PromptRegistry` | `core/services/prompt_registry.py` | Singleton service for resolving system prompts with a 60-second TTL cache [orchestrator/core/services/prompt_registry.py:35-53](). |
+| `DocumentTemplateService` | `modules/documents/template_service.py` | Manages Jinja2 templates for PDF/DOCX generation [orchestrator/api/document_generation.py:83-85](). |
 
-*   **Workflow Events**: `publish_workflow_event` sends subtask updates to specific channels [orchestrator/core/redis/client.py:91-119]().
-*   **Async Delivery**: WebSocket endpoints use `get_async_pubsub` for non-blocking message delivery to the UI [orchestrator/core/redis/client.py:48-64]().
-
-**Sources:** [orchestrator/core/redis/client.py:48-64](), [orchestrator/core/redis/client.py:91-119]()
+**Sources:** [orchestrator/core/database/database.py:105-111](), [orchestrator/modules/nl2sql/service.py:75-96](), [orchestrator/core/services/prompt_registry.py:35-53](), [orchestrator/api/document_generation.py:83-85]()
 
 ---

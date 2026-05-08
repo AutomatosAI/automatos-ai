@@ -5,25 +5,12 @@
 
 The following files were used as context for generating this wiki page:
 
-- [.env.example](.env.example)
 - [frontend/components/knowledge/BusinessGraphPanel.tsx](frontend/components/knowledge/BusinessGraphPanel.tsx)
-- [frontend/components/knowledge/BusinessGraphVisualization.tsx](frontend/components/knowledge/BusinessGraphVisualization.tsx)
-- [frontend/components/knowledge/CodeGraphPanel.tsx](frontend/components/knowledge/CodeGraphPanel.tsx)
-- [frontend/components/knowledge/CodeGraphVisualization.tsx](frontend/components/knowledge/CodeGraphVisualization.tsx)
-- [frontend/components/knowledge/GraphDiffBanner.tsx](frontend/components/knowledge/GraphDiffBanner.tsx)
+- [frontend/components/workflows/execution-kitchen.tsx](frontend/components/workflows/execution-kitchen.tsx)
 - [frontend/lib/api-client.ts](frontend/lib/api-client.ts)
-- [orchestrator/api/codegraph.py](orchestrator/api/codegraph.py)
 - [orchestrator/api/knowledge_graph.py](orchestrator/api/knowledge_graph.py)
-- [orchestrator/api/system.py](orchestrator/api/system.py)
-- [orchestrator/modules/codegraph/analysis/__init__.py](orchestrator/modules/codegraph/analysis/__init__.py)
-- [orchestrator/modules/codegraph/analysis/architecture_analyzer.py](orchestrator/modules/codegraph/analysis/architecture_analyzer.py)
-- [orchestrator/modules/codegraph/codegraph_service.py](orchestrator/modules/codegraph/codegraph_service.py)
-- [orchestrator/modules/codegraph/ranking/__init__.py](orchestrator/modules/codegraph/ranking/__init__.py)
-- [orchestrator/modules/codegraph/ranking/pagerank_ranker.py](orchestrator/modules/codegraph/ranking/pagerank_ranker.py)
-- [orchestrator/modules/codegraph/search/__init__.py](orchestrator/modules/codegraph/search/__init__.py)
-- [orchestrator/modules/codegraph/search/nl_code_search.py](orchestrator/modules/codegraph/search/nl_code_search.py)
+- [orchestrator/api/workflows.py](orchestrator/api/workflows.py)
 - [orchestrator/modules/context/sections/graph_context.py](orchestrator/modules/context/sections/graph_context.py)
-- [orchestrator/modules/knowledge/__init__.py](orchestrator/modules/knowledge/__init__.py)
 - [orchestrator/modules/knowledge/graph_extraction.py](orchestrator/modules/knowledge/graph_extraction.py)
 - [orchestrator/modules/knowledge/graph_service.py](orchestrator/modules/knowledge/graph_service.py)
 - [orchestrator/modules/tools/discovery/actions_graph.py](orchestrator/modules/tools/discovery/actions_graph.py)
@@ -35,151 +22,191 @@ The following files were used as context for generating this wiki page:
 
 ## Purpose and Scope
 
-The Knowledge Graph & Entity Extraction system provides structured intelligence across two primary domains: unstructured documentation and structured codebases. It extracts entities (technologies, concepts, symbols) and identifies semantic or structural relationships to enable advanced retrieval, architecture analysis, and context-aware suggestions.
+The Knowledge Graph & Entity Extraction system provides structured intelligence across three primary domains: unstructured documentation, agent-generated reports, and structured codebases. It extracts entities (concepts, processes, metrics, symbols) and identifies semantic, structural, or causal relationships to enable advanced retrieval, impact analysis, and context-aware reasoning.
 
 Key capabilities include:
-- **Business Knowledge Graph**: Automated extraction of concepts, processes, metrics, and rules from workspace documents using `GraphifyService` [orchestrator/modules/knowledge/graph_service.py:1-24]().
-- **CodeGraph Indexing**: Static analysis of repositories using `tree-sitter` to build a structural graph of functions, classes, and imports [orchestrator/modules/codegraph/codegraph_service.py:93-105]().
-- **Multi-Layer Extraction**: Hybrid approach combining deterministic regex, deterministic mappers, and LLM-based extraction for high-fidelity graphs [orchestrator/modules/knowledge/graph_extraction.py:5-10]().
-- **Structural Ranking & Analysis**: PageRank-based importance scoring and automated detection of hotspots and modular clusters [orchestrator/modules/codegraph/codegraph_service.py:79-89]().
-- **Team-Scoped Security**: Visibility filtering (PRD-124) ensuring agents only see graph nodes authorized for their specific team [orchestrator/modules/knowledge/graph_service.py:85-102]().
+- **Business Graph Extraction**: LLM-powered extraction of concepts, entities, and processes from business documents and agent reports. [orchestrator/modules/knowledge/graph_extraction.py:99-185]()
+- **Graphify Pipeline**: A multi-stage lifecycle (collect → extract → merge → cluster → export) that builds NetworkX graphs for each workspace. [orchestrator/modules/knowledge/graph_service.py:9-22]()
+- **Team-Scoped Filtering**: PRD-124 compliant visibility rules ensuring agents only see graph nodes they have permission to access. [orchestrator/modules/knowledge/graph_service.py:85-118]()
+- **CodeGraph Indexing**: Static analysis of repositories to build a structural graph of functions, classes, and imports for technical reasoning. [orchestrator/modules/agents/services/agent_platform_tools.py:98-100]()
+- **Interactive Visualization**: Real-time graph exploration via the `BusinessGraphPanel` and `BusinessGraphVisualization`. [frontend/components/knowledge/BusinessGraphPanel.tsx:59-73]()
 
 ---
 
 ## System Architecture
 
-The system bridges the "Natural Language Space" (documentation and chat) with the "Code Entity Space" (source code and symbols).
+The architecture bridges "Natural Language Space" (documentation) with "Code Entity Space" (source code) through a unified `GraphifyService` layer and `PlatformActionExecutor` handlers.
 
-### Unified Extraction & Search Flow
+### Knowledge Graph Lifecycle
 
 ```mermaid
-graph TB
-    subgraph "Natural Language Space (Business Graph)"
+graph TD
+    subgraph "Data_Sources"
         Docs["DocumentManager<br/>(PDF, MD, DOCX)"]
-        BGP["BusinessGraphPanel<br/>(frontend)"]
-        GraphJSON["graph.json<br/>(NetworkX Link Data)"]
+        Reports["Agent Reports<br/>(Task Outputs)"]
+        Code["CodeGraphService<br/>(Repo Indexing)"]
     end
 
-    subgraph "Code Entity Space (CodeGraph)"
-        Repo["GitHub Repository"]
-        Symbols["codegraph_symbols Table<br/>(Functions, Classes)"]
-        Rels["codegraph_relationships<br/>(calls, imports, inherits)"]
+    subgraph "Extraction_&_Build"
+        GE["graph_extraction.py<br/>(LLM + Mappers)"]
+        GS["GraphifyService<br/>(NetworkX Build)"]
+        Cluster["graphify.cluster<br/>(Community Detection)"]
     end
 
-    subgraph "Extraction & Build Services"
-        GS["GraphifyService<br/>(Build/Cluster/Export)"]
-        GE["graph_extraction.py<br/>(LLM Extraction)"]
-        CGS["CodeGraphService<br/>(Tree-sitter Parser)"]
+    subgraph "Storage_&_Workspace_Files"
+        GJSON["/graph/graph.json"]
+        Meta["/graph/meta.json"]
+        Comm["/graph/communities.json"]
     end
 
     Docs --> GE
+    Reports --> GE
+    Code --> GE
     GE --> GS
-    GS --> GraphJSON
-    BGP --> GS
-    
-    Repo --> CGS
-    CGS --> Symbols
-    CGS --> Rels
-    
-    subgraph "Interface Layer (Tools)"
-        QueryTool["platform_query_graph"]
-        ImpactTool["platform_graph_impact"]
+    GS --> Cluster
+    Cluster --> GJSON
+    Cluster --> Meta
+    Cluster --> Comm
+
+    subgraph "Consumption"
+        UI["BusinessGraphPanel.tsx"]
+        Agent["handle_query_graph"]
+        Prompt["GraphSection.render"]
     end
 
-    QueryTool --> GS
-    ImpactTool --> GS
-    GraphJSON --> BGP
-
-    style GS fill:#f9f9f9
-    style CGS fill:#f9f9f9
-    style GE fill:#f9f9f9
+    GJSON --> UI
+    GS --> Agent
+    GS --> Prompt
 ```
 
-**Sources**: [orchestrator/modules/knowledge/graph_service.py:9-21](), [orchestrator/modules/codegraph/codegraph_service.py:66-105](), [frontend/components/knowledge/BusinessGraphPanel.tsx:191-217]()
+**Sources**: [orchestrator/modules/knowledge/graph_service.py:9-22](), [orchestrator/modules/knowledge/graph_extraction.py:5-10](), [frontend/components/knowledge/BusinessGraphPanel.tsx:190-217](), [orchestrator/modules/context/sections/graph_context.py:39-44]()
 
 ---
 
-## Business Knowledge Graph
+## Business Graph Extraction
 
-The `GraphifyService` manages the lifecycle of the business knowledge graph, turning workspace documents into a navigable network of ideas.
+The system uses `graph_extraction.py` to convert unstructured text into a formal graph schema consisting of nodes, edges, and hyperedges.
 
-### Pipeline and Implementation
-The pipeline follows a strict sequence: collect sources → extract → merge → build → cluster → analyze → export [orchestrator/modules/knowledge/graph_service.py:9-12]().
+### LLM Extraction Prompts
+The system employs specialized prompts for different source types:
+- **Document Extraction**: Focuses on Concepts, Entities, Processes, Metrics, and Rules. [orchestrator/modules/knowledge/graph_extraction.py:99-143]()
+- **Report Extraction**: Focuses on Entities, Actions, Outcomes, and Issues generated during agent execution. [orchestrator/modules/knowledge/graph_extraction.py:145-185]()
 
-| Component | Role | File Reference |
-|-----------|------|----------------|
-| `GraphifyService` | Main orchestrator for graph lifecycle and caching | [orchestrator/modules/knowledge/graph_service.py:126-136]() |
-| `graph_extraction` | LLM-powered extraction of concepts, rules, and metrics | [orchestrator/modules/knowledge/graph_extraction.py:90-134]() |
-| `build_graph` | Executes the full pipeline and generates NetworkX artifacts | [orchestrator/modules/knowledge/graph_service.py:145-194]() |
-| `team_filtered_view`| Filters the graph based on `team_access` attributes | [orchestrator/modules/knowledge/graph_service.py:105-118]() |
+### Data Schema
+| Entity Type | Description | Confidence Levels |
+| :--- | :--- | :--- |
+| **Nodes** | Unique entities with `snake_case` IDs and labels. | `EXTRACTED` |
+| **Edges** | Directed relationships between two nodes. | `EXTRACTED`, `INFERRED`, `AMBIGUOUS` |
+| **Hyperedges** | Relationships where 3+ nodes participate in a shared pattern. | `EXTRACTED`, `INFERRED` |
 
-### Artifact Storage
-Graphs are exported to the workspace filesystem under `/graph/` as several JSON files:
-- `graph.json`: The core NetworkX node-link data [orchestrator/modules/knowledge/graph_service.py:66]().
-- `meta.json`: Summary statistics (node/edge counts) [orchestrator/modules/knowledge/graph_service.py:67]().
-- `communities.json`: Community labels and member lists [orchestrator/modules/knowledge/graph_service.py:68]().
-
-**Sources**: [orchestrator/modules/knowledge/graph_service.py:65-74](), [orchestrator/modules/knowledge/graph_extraction.py:101-112]()
+**Sources**: [orchestrator/modules/knowledge/graph_extraction.py:38-83](), [orchestrator/modules/knowledge/graph_extraction.py:112-121]()
 
 ---
 
-## CodeGraph: Structural Knowledge Graph
+## Graphify Service Implementation
 
-The `CodeGraphService` indexes GitHub repositories by parsing source code into a graph of symbols and relationships.
+The `GraphifyService` acts as the singleton manager for workspace graphs, handling caching via an `LRUCache` and incremental builds. [orchestrator/modules/knowledge/graph_service.py:128-143]()
 
-### Multi-Language Parsing (PRD-62)
-The service utilizes a `TreeSitterParser` to support 14+ languages, extracting `CodeSymbol` (functions, classes) and `CodeRelationship` (calls, imports) objects.
+### Pipeline Stages
+1. **Build Pipeline**: Initiated via `build_graph`, it executes an unlocked build process with a 10-minute timeout. [orchestrator/modules/knowledge/graph_service.py:171-183]()
+2. **Clustering**: Uses `graphify.cluster` to identify communities (modules) within the graph. [orchestrator/modules/knowledge/graph_service.py:46]()
+3. **Analysis**: Runs `god_nodes` (centrality) and `surprising_connections` detection to find non-obvious insights. [orchestrator/modules/knowledge/graph_service.py:44]()
+4. **Export**: Saves artifacts to the workspace `/graph/` directory, including `graph.json`, `meta.json`, and `communities.json`. [orchestrator/modules/knowledge/graph_service.py:66-70]()
 
-- **`CodeSymbol`**: Represents a specific code entity with its signature, docstring, and snippet [orchestrator/modules/codegraph/codegraph_service.py:34-45]().
-- **`CodeRelationship`**: Tracks how symbols interact (calls, imports, extends) [orchestrator/modules/codegraph/codegraph_service.py:48-53]().
-- **`EnhancedVectorStore`**: Provides centralized semantic search across indexed symbols [orchestrator/modules/codegraph/codegraph_service.py:79-89]().
+### Team Filtering (PRD-124)
+Visibility is strictly enforced at the service level via `node_is_visible`. [orchestrator/modules/knowledge/graph_service.py:87-104]()
+- **team_access == []**: Visible to all.
+- **agent_team is None**: Agent sees everything (e.g. System Admin).
+- **agent_team in team_access**: Visible to specific team.
 
-**Sources**: [orchestrator/modules/codegraph/codegraph_service.py:66-127]()
-
----
-
-## Graph-Based Platform Actions
-
-Agents interact with the knowledge graph through specialized platform tools defined in the `ActionRegistry`.
-
-| Action Name | Purpose | Implementation Handler |
-|-------------|---------|------------------------|
-| `platform_query_graph` | Natural language traversal (BFS/DFS) of the graph | `handle_query_graph` [orchestrator/modules/tools/discovery/handlers_graph.py:98]() |
-| `platform_graph_neighbors` | Finds direct connections for a specific concept | `handle_graph_neighbors` [orchestrator/modules/tools/discovery/handlers_graph.py:184]() |
-| `platform_graph_impact` | Analyzes downstream dependency ripple effects | `handle_graph_impact` [orchestrator/modules/tools/discovery/handlers_graph.py:270]() |
-| `platform_graph_communities`| Lists auto-detected business domain clusters | `handle_graph_communities` [orchestrator/modules/tools/discovery/handlers_graph.py:233]() |
-
-**Sources**: [orchestrator/modules/tools/discovery/actions_graph.py:9-160](), [orchestrator/modules/tools/discovery/handlers_graph.py:1-30]()
+**Sources**: [orchestrator/modules/knowledge/graph_service.py:126-160](), [orchestrator/modules/knowledge/graph_service.py:105-118]()
 
 ---
 
-## Visualization and UI
+## Platform Actions & Context Injection
 
-The system provides interactive visualizations for both business and code graphs.
+The system exposes graph intelligence to agents through both explicit tools and implicit prompt context.
 
-### Business Graph Visualization
-The `BusinessGraphPanel` fetches graph data from the workspace files using the `apiClient`.
-- **Querying**: Uses `useQuery` with keys like `business-graph`, `data`, and `wsId` [frontend/components/knowledge/BusinessGraphPanel.tsx:52-55]().
-- **Interaction**: Allows filtering by confidence scores and selecting specific communities [frontend/components/knowledge/BusinessGraphPanel.tsx:64-72]().
+### Graph Platform Actions
+Defined in `actions_graph.py` and handled in `handlers_graph.py`.
 
-### CodeGraph Visualization
-The `CodeGraphVisualization` component uses `reactflow` to render structural code dependencies.
-- **View Modes**: Supports `default` (calls), `clusters` (modules), and `heatmap` (risk/hotspots) [frontend/components/knowledge/CodeGraphVisualization.tsx:97-99]().
-- **Hotspots**: High-risk nodes are identified by `fan_out` and `betweenness` metrics [frontend/components/knowledge/CodeGraphVisualization.tsx:40-46]().
+| Action Name | Purpose | Implementation |
+| :--- | :--- | :--- |
+| `platform_query_graph` | Natural language querying of the Business Graph using BFS/DFS. | [orchestrator/modules/tools/discovery/handlers_graph.py:98-177]() |
+| `platform_graph_neighbors` | Retrieve direct connections for a specific concept. | [orchestrator/modules/tools/discovery/handlers_graph.py:184-210]() |
+| `platform_graph_communities` | List auto-detected business domains and clusters. | [orchestrator/modules/tools/discovery/actions_graph.py:105-136]() |
+| `platform_graph_impact` | Analyze ripple effects of changing a concept (dependency tracing). | [orchestrator/modules/tools/discovery/actions_graph.py:138-164]() |
 
-**Sources**: [frontend/components/knowledge/BusinessGraphPanel.tsx:190-217](), [frontend/components/knowledge/CodeGraphVisualization.tsx:86-113]()
+### Automated Context: GraphSection
+The `GraphSection` (Priority 45) automatically injects relevant subgraphs into agent prompts. [orchestrator/modules/context/sections/graph_context.py:35-37]()
+1. **Message Extraction**: Identifies the latest user intent. [orchestrator/modules/context/sections/graph_context.py:102-111]()
+2. **Relevance Scoring**: Scores nodes by term overlap with the message. [orchestrator/modules/context/sections/graph_context.py:114-135]()
+3. **Subgraph Expansion**: Performs a BFS (depth=2) from top-scoring nodes. [orchestrator/modules/context/sections/graph_context.py:80-88]()
+4. **Prompt Injection**: Appends the formatted subgraph to the "Business Context" section. [orchestrator/modules/context/sections/graph_context.py:100]()
+
+**Sources**: [orchestrator/modules/tools/discovery/handlers_graph.py:122-172](), [orchestrator/modules/context/sections/graph_context.py:28-44]()
 
 ---
 
-## API Reference
+## Visualization & UI
 
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/api/knowledge/graph/import` | POST | Upload a JSON graph file to a workspace | [frontend/components/knowledge/BusinessGraphPanel.tsx:102]() |
-| `/api/code-graph/index/github`| POST | Trigger background indexing of a repository | [orchestrator/api/codegraph.py:112]() |
-| `/api/code-graph/search/semantic`| GET | Semantic search across code symbols | [orchestrator/api/codegraph.py:181]() |
-| `/api/knowledge/entities` | GET | List all extracted entities with importance scores | [orchestrator/api/knowledge_graph.py:84]() |
+The frontend provides an interactive environment for exploring the extracted knowledge structure.
 
-**Sources**: [orchestrator/api/codegraph.py:24-215](), [orchestrator/api/knowledge_graph.py:1-140](), [frontend/lib/api-client.ts:25-36]()
+### Business Graph Panel
+The `BusinessGraphPanel` manages the visualization state and data fetching.
+- **Data Loading**: Uses `useQuery` to fetch `graph/graph.json` via `apiClient.getWorkspaceFileContent`. [frontend/components/knowledge/BusinessGraphPanel.tsx:208-223]()
+- **Build Trigger**: Users can manually trigger a graph rebuild via `apiClient.buildBusinessGraph()`. [frontend/components/knowledge/BusinessGraphPanel.tsx:174-186]()
+- **Import**: Supports manual JSON graph imports to `/api/knowledge/graph/import`. [frontend/components/knowledge/BusinessGraphPanel.tsx:102]()
+
+### Component Interaction
+
+```mermaid
+graph LR
+    subgraph "Frontend_UI"
+        BGP["BusinessGraphPanel.tsx"]
+        BGV["BusinessGraphVisualization.tsx"]
+    end
+
+    subgraph "API_Client"
+        AC["apiClient.ts"]
+        WSF["getWorkspaceFileContent"]
+        BBG["buildBusinessGraph"]
+    end
+
+    subgraph "Backend_API"
+        KG_API["api/knowledge_graph.py"]
+        GS_API["GraphifyService"]
+    end
+
+    BGP --> AC
+    AC --> WSF
+    AC --> BBG
+    WSF --> KG_API
+    BBG --> GS_API
+    BGP --> BGV
+```
+
+**Sources**: [frontend/components/knowledge/BusinessGraphPanel.tsx:190-217](), [frontend/lib/api-client.ts:179](), [orchestrator/api/knowledge_graph.py:22]()
+
+---
+
+## Data Models
+
+### GraphNode
+Used in frontend visualization and backend extraction. [frontend/components/knowledge/BusinessGraphPanel.tsx:20-29]()
+- `id`: Unique identifier (snake_case).
+- `label`: Display name.
+- `file_type`: Category (concept, entity, process, metric, rule, action, outcome, issue).
+- `source_file`: Originating document path.
+- `community`: Cluster ID assigned by community detection.
+
+### GraphEdge
+Represents a relationship between two nodes. [frontend/components/knowledge/BusinessGraphPanel.tsx:30-36]()
+- `source`: Originating node ID.
+- `target`: Destination node ID.
+- `relation`: Relationship type (e.g., `depends_on`, `triggers`).
+- `confidence_score`: Float (0.0 - 1.0) representing extraction certainty.
+
+**Sources**: [frontend/components/knowledge/BusinessGraphPanel.tsx:20-41](), [orchestrator/modules/knowledge/graph_extraction.py:49-94]()
 
 ---

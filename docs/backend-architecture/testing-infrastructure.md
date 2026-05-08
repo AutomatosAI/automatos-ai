@@ -6,161 +6,144 @@
 The following files were used as context for generating this wiki page:
 
 - [docs/PRDS/71-UNIFIED-SKILLS-ARCHITECTURE.md](docs/PRDS/71-UNIFIED-SKILLS-ARCHITECTURE.md)
-- [docs/PRDS/78-AUTONOMOUS-TEST-COVERAGE-QUALITY-MESH.md](docs/PRDS/78-AUTONOMOUS-TEST-COVERAGE-QUALITY-MESH.md)
-- [orchestrator/core/llm/clients/azure_client.py](orchestrator/core/llm/clients/azure_client.py)
-- [orchestrator/core/llm/clients/grok_client.py](orchestrator/core/llm/clients/grok_client.py)
-- [orchestrator/core/llm/clients/openai_client.py](orchestrator/core/llm/clients/openai_client.py)
-- [orchestrator/core/llm/clients/openrouter_client.py](orchestrator/core/llm/clients/openrouter_client.py)
 - [orchestrator/tests/test_memory_fixes.py](orchestrator/tests/test_memory_fixes.py)
-- [tests/RECIPE_RUNNERS.md](tests/RECIPE_RUNNERS.md)
-- [tests/api/__init__.py](tests/api/__init__.py)
-- [tests/api/helpers.py](tests/api/helpers.py)
-- [tests/api/test_agents.py](tests/api/test_agents.py)
-- [tests/api/test_analytics.py](tests/api/test_analytics.py)
 - [tests/api/test_channels.py](tests/api/test_channels.py)
-- [tests/api/test_chat.py](tests/api/test_chat.py)
-- [tests/api/test_health.py](tests/api/test_health.py)
-- [tests/api/test_heartbeat.py](tests/api/test_heartbeat.py)
 - [tests/api/test_llm_config.py](tests/api/test_llm_config.py)
 - [tests/api/test_recipes.py](tests/api/test_recipes.py)
 - [tests/api/test_user_journeys.py](tests/api/test_user_journeys.py)
 - [tests/audit_suite.py](tests/audit_suite.py)
-- [tests/run_gap_finder.py](tests/run_gap_finder.py)
-- [tests/run_health_regression.py](tests/run_health_regression.py)
 - [tests/run_nightly.py](tests/run_nightly.py)
 
 </details>
 
 
 
-The Automatos AI testing infrastructure is a multi-layered validation system designed to ensure the reliability of autonomous agents, multi-agent orchestration, and API integrity. As of March 2026, the suite consists of over 370 tests categorized into fast deterministic logic checks, API integration journeys, and regression pins [docs/PRDS/78-AUTONOMOUS-TEST-COVERAGE-QUALITY-MESH.md:17-17]().
+The Automatos AI testing infrastructure is a multi-layered validation system designed to ensure the reliability of autonomous agent capabilities, multi-agent orchestration, and API integrity. It transitions from deterministic logic checks to live API "Journeys" and autonomous quality audits, supporting a "Quality Mesh" where AI agents can consume test artifacts to perform self-healing and bug fixing.
 
-## Overview and Test Runners
+## Overview and Nightly Runner
 
-The infrastructure provides three primary entry points for test execution, each serving a distinct operational cadence [docs/PRDS/78-AUTONOMOUS-TEST-COVERAGE-QUALITY-MESH.md:47-50]():
+The core of the infrastructure is the **Nightly API Test Runner** [tests/run_nightly.py:1-21](). This runner orchestrates a suite of approximately 376 tests, producing machine-readable JSON artifacts specifically structured for consumption by downstream "Bug Fixer" and "QA Engineer" agents.
 
-1.  **Nightly Self-Test Suite (`tests/run_nightly.py`)**: Runs the full broad suite of API, regression, and contract tests [tests/run_nightly.py:1-21]().
-2.  **Health Regression Suite (`tests/run_health_regression.py`)**: A curated, high-signal subset of tests used for rapid environment validation and "smoke" checks [tests/run_health_regression.py:1-10]().
-3.  **Gap Finder (`tests/run_gap_finder.py`)**: An audit tool that inventories the suite to detect functional domains lacking coverage [docs/PRDS/78-AUTONOMOUS-TEST-COVERAGE-QUALITY-MESH.md:23-23]().
+### Key Components
+*   **API Integration Suite**: Located in `tests/api/`, these tests verify backend route contracts and stateful user journeys [tests/run_nightly.py:37-37]().
+*   **Regression Pins**: Located in `tests/regressions/`, these are high-signal tests targeting specific historical bugs to prevent recurrence [tests/run_nightly.py:38-38]().
+*   **Contract Tests**: Located in `tests/contracts/`, these validate that API responses adhere to expected schemas [tests/run_nightly.py:39-39]().
+*   **Artifact Generation**: The runner produces `test-report.json` (full pytest output) and `test-summary.json` (a compact ~2KB summary for LLMs) [tests/run_nightly.py:4-15]().
 
 ### Test Execution Data Flow
 
-The runners use `pytest` with the `pytest-json-report` plugin to generate machine-readable artifacts. These artifacts are consumed by "Bug Fixer" agents to automate platform maintenance [tests/run_nightly.py:4-15]().
+The runner utilizes `pytest-json-report` to capture execution metadata, which is then processed into a structured summary containing failure node IDs, truncated tracebacks, and extracted assertion messages [tests/run_nightly.py:140-191]().
 
-**Automated Testing and Bug-Fixing Pipeline**
+**Test Execution and Agent Handoff Flow**
 ```mermaid
 graph TD
     subgraph "Execution_Layer"
-        NIGHTLY["tests/run_nightly.py"]
-        HEALTH["tests/run_health_regression.py"]
-        PYTEST["pytest-json-report"]
+        RUNNER["tests/run_nightly.py"]
+        PYTEST["pytest --json-report"]
     end
 
-    subgraph "Test_Targets"
+    subgraph "Target_Suites"
         API["tests/api/"]
         REGR["tests/regressions/"]
         CONT["tests/contracts/"]
-        CORE_REGR["orchestrator/tests/test_memory_fixes.py"]
+        MEM_FIX["orchestrator/tests/test_memory_fixes.py"]
     end
 
-    subgraph "Artifact_Generation"
-        FULL_REP["test-report.json"]
-        SUMM_REP["test-summary.json"]
-        QA_REP["qa-report.json"]
+    subgraph "Artifact_Processing"
+        RAW_JSON["test-report.json"]
+        BUILDER["build_summary()"]
+        COMPACT_JSON["test-summary.json"]
     end
 
-    NIGHTLY -->|"subprocess.run()"| PYTEST
-    HEALTH -->|"subprocess.run()"| PYTEST
+    RUNNER -->|"subprocess.run()"| PYTEST
     PYTEST --> API
     PYTEST --> REGR
     PYTEST --> CONT
-    PYTEST --> CORE_REGR
+    PYTEST --> MEM_FIX
 
-    PYTEST -->|"Generates"| FULL_REP
-    FULL_REP -->|"build_summary()"| SUMM_REP
-    FULL_REP -->|"build_qa_report()"| QA_REP
-    
-    SUMM_REP -->|"Read by"| AGENT["Recipe: Bug Fixer Agent"]
-    QA_REP -->|"Read by"| JIRA["Recipe: Jira Admin Agent"]
+    PYTEST -->|"generates"| RAW_JSON
+    RAW_JSON --> BUILDER
+    BUILDER -->|"extracts tracebacks"| COMPACT_JSON
+    COMPACT_JSON -->|"input to"| AGENT["Bug-Fixer Agent"]
 ```
-Sources: [tests/run_nightly.py:71-99](), [tests/run_nightly.py:140-191](), [tests/run_health_regression.py:143-183]()
+Sources: [tests/run_nightly.py:71-99](), [tests/run_nightly.py:140-191]()
 
-## Regression Pins and Health Suites
+## Health Regression Suite
 
-"Regression Pins" are specialized tests designed to prevent the recurrence of specific, documented bugs. These tests are high-signal and often include explicit references to the source code file and line number where the original bug occurred [tests/api/test_llm_config.py:19-27]().
+The testing suite provides a curated, high-signal subset of tests used for rapid environment validation and "API Health Check" recipes. It categorizes failures by functional domain (e.g., `auth`, `chat`, `memory`) to facilitate automated ticket creation and self-healing [tests/run_nightly.py:140-191]().
 
-### Key Regression Pins
-| Test Function | Target Domain | Bug Description | Source Reference |
-| :--- | :--- | :--- | :--- |
-| `test_llm_settings_categories_exist` | LLM Config | Prevents silent fallback degradation when categories like `complexity_assessor` are missing. | `manager.py:104` [tests/api/test_llm_config.py:16-40]() |
-| `test_create_recipe_with_null_created_by` | Workflows | Fixes `500` errors when the frontend sends `created_by: null`. | `workflow_recipes.py:452` [tests/api/test_recipes.py:43-78]() |
-| `test_channel_analytics_source_query` | Channels | Detects SQL errors caused by querying non-existent `source_channel` column. | `channels.py:326` [tests/api/test_channels.py:45-71]() |
+### Regression Pins and Fix Hints
+Regression tests are explicitly designed to guard against known issues identified in PRDs and past incidents. They often contain detailed comments pointing to the exact line of code where a bug was previously found.
 
-Sources: [tests/api/test_llm_config.py:16-40](), [tests/api/test_recipes.py:43-78](), [tests/api/test_channels.py:45-71]()
+| Test Name | File Path | Bug Reference / Logic |
+| :--- | :--- | :--- |
+| `test_llm_settings_categories_exist` | `tests/api/test_llm_config.py` | Guards against `ValueError` in `manager.py:104` [tests/api/test_llm_config.py:19-27]() |
+| `test_create_recipe_with_null_created_by` | `tests/api/test_recipes.py` | Prevents NOT NULL violations in `workflow_recipes.py:452` [tests/api/test_recipes.py:43-53]() |
+| `test_channel_analytics_source_query` | `tests/api/test_channels.py` | Fixes incorrect column name `source_channel` in `channels.py:326` [tests/api/test_channels.py:45-58]() |
+| `test_mem0_search_sends_search_query` | `orchestrator/tests/test_memory_fixes.py` | Validates correct parameter naming for Mem0 search [orchestrator/tests/test_memory_fixes.py:45-84]() |
 
-## Running Tests Against a Live API
+Sources: [tests/api/test_llm_config.py:16-40](), [tests/api/test_recipes.py:43-78](), [tests/api/test_channels.py:45-71](), [orchestrator/tests/test_memory_fixes.py:45-84]()
 
-The infrastructure is designed for "Live API" testing rather than isolated unit mocks. This ensures that database constraints, Redis pub/sub, and LLM provider integrations are validated in a real-world state [docs/PRDS/78-AUTONOMOUS-TEST-COVERAGE-QUALITY-MESH.md:140-145]().
+## Coverage Gap Finder
 
-### Environment Configuration
-Tests load configuration from `tests/.env`. Key variables include:
-*   `API_URL`: Target backend endpoint [tests/run_nightly.py:67-68]().
-*   `API_KEY`: Authentication credential for the hybrid auth layer [tests/run_nightly.py:67-68]().
-*   `WORKSPACE_ID`: Scopes the test run to a specific tenant [tests/run_nightly.py:67-68]().
+The infrastructure includes an automated audit tool, `tests/audit_suite.py`, which inventories the test suite against 60+ functional domains defined in the system's "Quality Mesh" [tests/audit_suite.py:20-66]().
 
-### Result Artifacts
-*   **`test-report.json`**: The full raw output from pytest [tests/run_nightly.py:64-64]().
-*   **`test-summary.json`**: A compact (~2KB) version containing `failures` with truncated error messages and `source_files` extracted from tracebacks via regex [tests/run_nightly.py:111-124](), [tests/run_nightly.py:140-191]().
-*   **`qa-report.json`**: Generated by `run_health_regression.py`, this includes severity classification (P0-P3) based on keywords like `auth`, `security`, or `500` [tests/run_health_regression.py:101-109]().
+### Audit Implementation
+The audit system uses the Python `ast` module to perform static analysis on test files, extracting:
+1.  **Journey Identification**: Detects "Journey" keywords in module docstrings [tests/audit_suite.py:85-85]().
+2.  **Test Density**: Counts individual test functions per domain [tests/audit_suite.py:76-77]().
+3.  **Domain Mapping**: Associates filenames (e.g., `test_chat.py`) with platform capabilities [tests/audit_suite.py:79-79]().
 
-## Test Journeys
-
-Tests are grouped into "Journeys" to simulate end-to-end user interactions.
-
-| Journey ID | Domain | Key Test File | Core Logic Validated |
-| :--- | :--- | :--- | :--- |
-| **01** | System Health | `test_health.py` | Basic `/health` and `/api/system/health` endpoints [tests/api/test_health.py:9-29]() |
-| **02** | Chatbot | `test_chat.py` | SSE streaming, chat history, and message threading [tests/api/test_chat.py:1-11]() |
-| **08** | Channels | `test_channels.py` | Channel CRUD and SQL-heavy analytics queries [tests/api/test_channels.py:12-44]() |
-| **10** | Heartbeat | `test_heartbeat.py` | Proactive assistant scheduling and status checks [tests/api/test_heartbeat.py:1-31]() |
-| **13** | Recipes | `test_recipes.py` | Workflow template creation and step-by-step validation [tests/api/test_recipes.py:1-42]() |
-| **17** | LLM Configuration | `test_llm_config.py` | Multi-tier provider/model settings and fallbacks [tests/api/test_llm_config.py:1-13]() |
-
-Sources: [tests/api/test_health.py:1-1](), [tests/api/test_chat.py:1-1](), [tests/api/test_channels.py:1-1](), [tests/api/test_heartbeat.py:1-1](), [tests/api/test_recipes.py:1-1](), [tests/api/test_llm_config.py:1-5]()
-
-## LLM Provider Testing
-
-Because the platform relies heavily on LLMs, the testing infrastructure includes specific checks for provider clients to ensure they handle tool-calling and image extraction correctly.
-
-**LLM Provider Class Structure**
+**Coverage Mapping Class Diagram**
 ```mermaid
 classDiagram
-    class BaseLLMProvider {
-        <<abstract>>
-        +generate_response(messages, tools)
-        #_sanitize_tools(tools)
+    class AuditSuite {
+        +EXPECTED_DOMAINS: Set
+        +build_summary()
     }
-    class OpenAIProvider {
-        +client: OpenAI
-        +generate_response()
+    class ModuleScanner {
+        +file_path: Path
+        +_module_info()
     }
-    class OpenRouterProvider {
-        +client: OpenAI
-        +generate_response()
-        #_extract_images()
+    class TestMetadata {
+        +test_count: int
+        +is_journey_file: bool
+        +domain: str
     }
-    class GrokProvider {
-        +client: OpenAI
-        +generate_response()
-    }
-    BaseLLMProvider <|-- OpenAIProvider
-    BaseLLMProvider <|-- OpenRouterProvider
-    BaseLLMProvider <|-- GrokProvider
+    AuditSuite --> ModuleScanner : "invokes"
+    ModuleScanner --> TestMetadata : "produces"
+    ModuleScanner ..> AST_Parser : "uses ast.parse()"
 ```
-Sources: [orchestrator/core/llm/clients/openai_client.py:21-21](), [orchestrator/core/llm/clients/openrouter_client.py:26-26](), [orchestrator/core/llm/clients/grok_client.py:22-22]()
+Sources: [tests/audit_suite.py:20-66](), [tests/audit_suite.py:69-88](), [tests/audit_suite.py:91-128]()
 
-### Key Provider Logic
-*   **Tool Choice Logic**: Providers like OpenAI and OpenRouter dynamically set `tool_choice` to `required` if the system prompt contains "You MUST call", otherwise defaulting to `auto` [orchestrator/core/llm/clients/openai_client.py:87-91](), [orchestrator/core/llm/clients/openrouter_client.py:81-85]().
-*   **OpenRouter Image Extraction**: Handles non-standard image formats returned by models like Gemini via OpenRouter's `images` field [orchestrator/core/llm/clients/openrouter_client.py:143-164]().
+## Live API Testing and User Journeys
+
+Tests run against a live API environment configured via `tests/.env` [tests/run_nightly.py:67-68](). This ensures that the entire stack—including Redis, PostgreSQL, and LLM providers—is validated through stateful "Journeys" [tests/api/test_user_journeys.py:1-15]().
+
+### Stateful Journey Validation
+The `tests/api/test_user_journeys.py` suite validates cross-service interactions:
+*   **Model Config Round-Trip**: Create agent -> update model settings -> verify persistence [tests/api/test_user_journeys.py:18-61]().
+*   **Execution Handles**: Execute agent -> verify `execution_id` metadata [tests/api/test_user_journeys.py:63-79]().
+*   **Chat Lifecycle**: Create chat -> rename -> verify title [tests/api/test_user_journeys.py:81-115]().
+*   **Workflow Status**: Trigger workflow -> poll status endpoint [tests/api/test_user_journeys.py:117-144]().
+
+### Unified Skills Validation
+Following **PRD-71**, the testing infrastructure ensures that Skills and Plugins are no longer mutually exclusive [docs/PRDS/71-UNIFIED-SKILLS-ARCHITECTURE.md:20-33](). Tests verify that `AgentFactory` correctly loads all assigned skills without runtime keyword matching [docs/PRDS/71-UNIFIED-SKILLS-ARCHITECTURE.md:121-127]().
+
+Sources: [tests/api/test_user_journeys.py:1-160](), [docs/PRDS/71-UNIFIED-SKILLS-ARCHITECTURE.md:48-115]()
+
+## Test Taxonomy (Journeys)
+
+Tests are organized into numbered "Journeys" to track end-to-end feature coverage.
+
+| ID | Domain | File | Purpose |
+| :--- | :--- | :--- | :--- |
+| **08** | Channels | `test_channels.py` | External platform (Slack/Discord) integration [tests/api/test_channels.py:1-44]() |
+| **13** | Recipes | `test_recipes.py` | Workflow template creation and discovery [tests/api/test_recipes.py:1-42]() |
+| **17** | LLM Config | `test_llm_config.py` | Service-to-model mapping and fallback logic [tests/api/test_llm_config.py:1-13]() |
+| **N/A** | User Journeys | `test_user_journeys.py` | Multi-step stateful flows across services [tests/api/test_user_journeys.py:1-15]() |
+| **N/A** | Memory Fixes | `test_memory_fixes.py` | Regression pins for memory integration [orchestrator/tests/test_memory_fixes.py:1-10]() |
+
+Sources: [tests/api/test_channels.py:1-1](), [tests/api/test_recipes.py:1-1](), [tests/api/test_llm_config.py:1-5](), [tests/api/test_user_journeys.py:1-1](), [orchestrator/tests/test_memory_fixes.py:1-11]()
 
 ---

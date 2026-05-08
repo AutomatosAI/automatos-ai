@@ -5,26 +5,15 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/app/chat/page.tsx](frontend/app/chat/page.tsx)
-- [frontend/components/widgets/CodingCanvasWidget/RepoSelector.tsx](frontend/components/widgets/CodingCanvasWidget/RepoSelector.tsx)
-- [frontend/next-env.d.ts](frontend/next-env.d.ts)
-- [orchestrator/alembic/versions/20260202_add_workspace_id_to_skills_patterns_models.py](orchestrator/alembic/versions/20260202_add_workspace_id_to_skills_patterns_models.py)
-- [orchestrator/api/context.py](orchestrator/api/context.py)
-- [orchestrator/api/main.py](orchestrator/api/main.py)
-- [orchestrator/api/tasks.py](orchestrator/api/tasks.py)
-- [orchestrator/api/widgets/cors.py](orchestrator/api/widgets/cors.py)
-- [orchestrator/api/widgets/rate_limit.py](orchestrator/api/widgets/rate_limit.py)
-- [orchestrator/api/workflows.py](orchestrator/api/workflows.py)
-- [orchestrator/api/workspace_files.py](orchestrator/api/workspace_files.py)
-- [orchestrator/api/workspace_github.py](orchestrator/api/workspace_github.py)
-- [orchestrator/core/llm/clients/openai_embedding.py](orchestrator/core/llm/clients/openai_embedding.py)
-- [orchestrator/core/llm/rerank_manager.py](orchestrator/core/llm/rerank_manager.py)
-- [orchestrator/core/services/__init__.py](orchestrator/core/services/__init__.py)
-- [orchestrator/core/workspace_client.py](orchestrator/core/workspace_client.py)
-- [orchestrator/modules/tools/discovery/workspace_actions.py](orchestrator/modules/tools/discovery/workspace_actions.py)
-- [services/workspace-worker/executor.py](services/workspace-worker/executor.py)
-- [services/workspace-worker/main.py](services/workspace-worker/main.py)
-- [services/workspace-worker/workspace_manager.py](services/workspace-worker/workspace_manager.py)
+- [frontend/tsconfig.tsbuildinfo](frontend/tsconfig.tsbuildinfo)
+- [orchestrator/config.py](orchestrator/config.py)
+- [orchestrator/main.py](orchestrator/main.py)
+- [orchestrator/modules/memory/context_router.py](orchestrator/modules/memory/context_router.py)
+- [orchestrator/modules/memory/unified_memory_service.py](orchestrator/modules/memory/unified_memory_service.py)
+- [orchestrator/tests/test_unified_memory.py](orchestrator/tests/test_unified_memory.py)
+- [scripts/ralph/IMPLEMENTATION_PLAN.md](scripts/ralph/IMPLEMENTATION_PLAN.md)
+- [scripts/ralph/prd.json](scripts/ralph/prd.json)
+- [scripts/ralph/progress.txt](scripts/ralph/progress.txt)
 
 </details>
 
@@ -32,152 +21,148 @@ The following files were used as context for generating this wiki page:
 
 ## Purpose and Scope
 
-This document describes the organization and structure of FastAPI routers in the backend orchestrator application. It covers router registration, URL prefix patterns, authentication dependencies, endpoint conventions, and the coordination between the API layer and the core service execution paths.
+This document describes the organization and structure of FastAPI routers in the Automatos AI backend orchestrator. It covers router registration, URL prefix patterns, authentication dependencies, and the coordination between the API layer and core service modules such as the Unified Memory System and Universal Router.
 
-For authentication and workspace isolation mechanisms, see [Authentication Flow](17.1). For database models referenced by routers, see [Database Models](18.3). For the main FastAPI application setup, see [FastAPI Application](18.1).
+For authentication mechanisms, see [Authentication Flow](17.1). For database models, see [Database Models](18.3). For the main application setup, see [FastAPI Application](18.1).
 
 ---
 
 ## Router Organization Overview
 
-The Automatos AI backend organizes API endpoints into **domain-based routers**, each responsible for a specific feature area. Routers are modular Python files in the `orchestrator/api/` directory that define related endpoints using FastAPI's `APIRouter`.
+The Automatos AI backend organizes API endpoints into **domain-based routers**, modularly defined in the `orchestrator/api/` directory. These routers are mounted to the main application in `main.py` [orchestrator/main.py:35-170]().
 
-### Router Categories
+### Router Categories and Prefixes
 
-| Category | Routers | Primary Purpose |
-|----------|---------|-----------------|
-| **Core Agents** | `agents.py`, `agent_endpoints.py` | Agent lifecycle, configuration, and execution [orchestrator/api/main.py:33-77]() |
-| **Workflows & Recipes** | `workflows.py`, `workflow_templates.py` | Multi-agent orchestration, sequential recipes, and live stage tracking [orchestrator/api/main.py:34-35]() |
-| **Tools & Skills** | `tools.py`, `skills.py` | External integrations (500+ apps), skill sources, and tool discovery [orchestrator/api/main.py:54-57]() |
-| **Marketplace** | `marketplace.py` | Plugin discovery and community item installation [orchestrator/api/main.py:59]() |
-| **Context & Memory** | `context.py`, `memory.py`, `documents.py` | Context assembly, memory layers (L0-L4), and document management [orchestrator/api/main.py:36-51]() |
-| **Knowledge** | `knowledge.py`, `knowledge_graph.py`, `codegraph.py` | Knowledge base, graph retrieval, and code analysis [orchestrator/api/main.py:47-68]() |
-| **Analytics** | `analytics.py`, `statistics.py` | Usage tracking, cost analysis, and system metrics [orchestrator/api/main.py:40-55]() |
-| **System Admin** | `system.py`, `system_settings.py`, `credentials.py` | System configuration, BYOK keys, and global settings [orchestrator/api/main.py:37-53]() |
-| **Workspaces** | `workspaces.py`, `workspace_files.py`, `workspace_github.py`, `tasks.py` | Multi-tenancy, file browser, GitHub integration, and task queues [orchestrator/api/main.py:85-95]() |
-| **Routing & Chat** | `chatbot_llm.py`, `chat_voice.py` | Universal routing, streaming chat (AI SDK), and voice profiles [orchestrator/api/main.py:76-107]() |
+| Category | Key Router Modules | Prefix Example | Purpose |
+|----------|--------------------|----------------|---------|
+| **Agents** | `agents.py`, `personas.py`, `agent_plugins.py` | `/api/agents` | Agent lifecycle, personas, and capability assignment [orchestrator/main.py:36]() |
+| **Workflows** | `workflows.py`, `workflow_recipes.py`, `tasks.py` | `/api/workflows` | Multi-agent orchestration and task queue management [orchestrator/main.py:37-39]() |
+| **Memory** | `memory.py`, `widget_memory.py`, `memory_stats.py` | `/api/memory` | Unified memory access across L1-L4 layers [orchestrator/main.py:50-51]() |
+| **Knowledge** | `knowledge.py`, `knowledge_graph.py`, `codegraph.py` | `/api/knowledge` | RAG, Graphify knowledge graphs, and code indexing [orchestrator/main.py:56,151-153]() |
+| **Tools** | `tools.py`, `composio.py`, `skills.py` | `/api/tools` | Composio integrations and custom skill resolution [orchestrator/main.py:63,68,78]() |
+| **Analytics** | `analytics.py`, `analytics_api.py`, `statistics.py` | `/api/analytics` | LLM usage, cost tracking, and system performance [orchestrator/main.py:52,147,76]() |
+| **System** | `system.py`, `system_settings.py`, `credentials.py` | `/api/system` | Global config, BYOK management, and health checks [orchestrator/main.py:48,61-62]() |
+| **Notifications**| `notifications.py` | `/api/notifications` | Unified dispatching for tasks and missions [orchestrator/main.py:95-98]() |
 
-Sources: [orchestrator/api/main.py:33-109]()
+Sources: [orchestrator/main.py:35-170]()
 
 ---
 
-## Router Architecture
+## Router Architecture & Data Flow
 
-The system follows a tiered request flow: the `main.py` entry point mounts routers, which then use `RequestContext` to enforce workspace isolation before calling specialized services or proxying to workers.
+The API layer follows a standardized tiered flow: request reception via FastAPI, context injection for multi-tenancy, and delegation to singleton services.
 
-### API Registration and Request Flow
+### Request Flow to Service Layer
 "Code Entity Space"
 ```mermaid
 graph TB
-    subgraph "main.py - FastAPI Application"
-        App["FastAPI Instance"]
-        Lifespan["@asynccontextmanager lifespan"]
-        CORS["CORSMiddleware"]
-        
-        App --> Lifespan
-        App --> CORS
+    subgraph "FastAPI Entry (main.py)"
+        App["FastAPI App Instance"]
+        HybridAuth["get_request_context_hybrid()"]
     end
     
-    subgraph "Router Registration Examples"
-        App --> AgentsRouter["agents_router<br/>(/api/agents)"]
-        App --> WorkflowsRouter["workflows_router<br/>(/api/workflows)"]
-        App --> WorkspaceRouter["workspace_files_router<br/>(/api/workspaces/{id})"]
+    subgraph "Router Layer (orchestrator/api/)"
+        AgentsRouter["agents.py"]
+        MemoryRouter["memory.py"]
+        ChatRouter["chat.py"]
     end
     
-    subgraph "Implementation Pattern"
-        WorkflowsAPI["api/workflows.py"]
-        WorkflowDef["router = APIRouter(prefix='/api/workflows')"]
-        WorkflowHandler["@router.get('/{id}/stream')"]
-        
-        WorkflowsAPI --> WorkflowDef
-        WorkflowDef --> WorkflowHandler
+    subgraph "Service Layer (orchestrator/modules/)"
+        UMS["UnifiedMemoryService<br/>(L1-L4 Management)"]
+        CR["ContextRouter<br/>(Signal Analysis)"]
+        AF["AgentFactory<br/>(Execution)"]
+    end
+
+    App --> HybridAuth
+    HybridAuth --> AgentsRouter
+    HybridAuth --> MemoryRouter
+    HybridAuth --> ChatRouter
+    
+    MemoryRouter --> UMS
+    ChatRouter --> CR
+    ChatRouter --> AF
+    
+    subgraph "Data Layer"
+        Redis["Redis (L1/Cache)"]
+        Postgres["PostgreSQL (L2/Core)"]
+        Mem0["Mem0 API (L3)"]
     end
     
-    WorkflowsRouter -.->|"points to"| WorkflowsAPI
-    
-    subgraph "Execution Layer"
-        Tracker["orchestrator/api/workflows.py<br/>WorkflowStageTracker"]
-        TaskRunner["core/task_runner.py<br/>get_task_runner()"]
-        DB["PostgreSQL<br/>WorkflowExecution table"]
-        
-        WorkflowHandler --> Tracker
-        WorkflowHandler --> TaskRunner
-        Tracker --> DB
-    end
+    UMS --> Redis
+    UMS --> Postgres
+    UMS --> Mem0
 ```
-Sources: [orchestrator/api/main.py:147-168](), [orchestrator/api/workflows.py:34-73](), [orchestrator/api/workflows.py:183-186]()
+Sources: [orchestrator/main.py:17,35-60](), [orchestrator/modules/memory/unified_memory_service.py:154-188](), [orchestrator/modules/memory/context_router.py:1-24]()
 
 ---
 
-## Workflow and Stage Tracking
+## Memory & Context Routing
 
-The `workflows.py` router implements a sophisticated tracking system for multi-agent executions, supporting both legacy and dynamic phase models.
+The `memory.py` and `context.py` routers interface with the **Unified Memory Service** to provide a consistent view of agent knowledge.
 
-### WorkflowStageTracker
-The `WorkflowStageTracker` class manages real-time telemetry for executions [orchestrator/api/workflows.py:37-70]().
-- **Legacy Stages**: 9 fixed stages including Task Decomposition, Agent Selection, and Memory Storage [orchestrator/api/workflows.py:41-51]().
-- **Dynamic Phases (PRD-59)**: Maps execution into high-level phases: `PLAN`, `PREPARE`, `EXECUTE`, `EVALUATE`, and `LEARN` [orchestrator/api/workflows.py:62-68]().
-- **Event Emission**: Uses `_emit` to broadcast events to both Redis Pub/Sub and SSE stream managers [orchestrator/api/workflows.py:161-179]().
+### Memory Tier Resolution
+When a request hits the memory API, it uses the `MemoryNamespace` helper to ensure workspace isolation across different storage backends [orchestrator/modules/memory/unified_memory_service.py:39-48]().
 
-Sources: [orchestrator/api/workflows.py:37-179]()
+| Memory Layer | Backend | Router/Service Logic |
+|--------------|---------|----------------------|
+| **L1 (Working)** | Redis | `MemoryNamespace.session()` key with 24h TTL [orchestrator/modules/memory/unified_memory_service.py:78-80,85]() |
+| **L2 (Short-term)**| Postgres| Time-based Ebbinghaus decay [orchestrator/config.py:98-103]() |
+| **L3 (Long-term)** | Mem0 | `MemoryNamespace.workspace()` fact extraction [orchestrator/modules/memory/unified_memory_service.py:52-54]() |
+| **L4 (Knowledge)** | RAG/Graph | Graphify and CodeGraph retrieval [orchestrator/main.py:56,153]() |
+
+### Context Signal Analysis
+The `ContextRouter` (invoked by chat routers) performs regex-based signal detection to determine which memory layers to fetch before LLM execution [orchestrator/modules/memory/context_router.py:8-12]().
+
+- **Temporal Signals**: Detects "last week", "yesterday" to trigger L2/L3 temporal retrieval [orchestrator/modules/memory/context_router.py:85-105]().
+- **Personal Facts**: Detects "my preference", "I like" to trigger L3 Mem0 fact lookup [orchestrator/modules/memory/context_router.py:108-121]().
+- **Knowledge Queries**: Detects "find the policy", "search docs" to trigger L4 RAG retrieval [orchestrator/modules/memory/context_router.py:140-153]().
+
+Sources: [orchestrator/modules/memory/unified_memory_service.py:39-117](), [orchestrator/modules/memory/context_router.py:82-172](), [orchestrator/config.py:84-115]()
 
 ---
 
-## Workspace Subsystem Routing
+## Agent and Tool Routing
 
-The workspace subsystem utilizes a proxy pattern where the API router forwards requests to a specialized `workspace-worker` service or manages GitHub integration via Composio.
+The `agents.py` router manages the mapping between high-level agent definitions and low-level tool capabilities.
 
-### Workspace Interaction
+### Agent Lifecycle & Resolution
 "Natural Language Space" to "Code Entity Space"
 ```mermaid
 graph LR
     subgraph "Natural Language Space"
-        User["'List the files in my workspace'"]
+        User["'Update Auto agent's tools'"]
     end
 
     subgraph "Code Entity Space"
-        Router["api/workspace_files.py<br/>@router.get('/files')"]
-        Client["core/workspace_client.py<br/>WorkspaceClient.list_dir()"]
-        Worker["services/workspace-worker/main.py<br/>WorkspaceWorker (HTTP)"]
-        FS["Persistent Volume<br/>/workspaces/{workspace_id}"]
+        Router["api/agents.py<br/>PUT /{id}"]
+        Resolver["core/utils/agent_resolver.py<br/>resolve_agent_id()"]
+        ToolMap["api/agents.py<br/>_resolve_tool_ids_to_app_names()"]
+        DB["PostgreSQL<br/>agents table"]
     end
 
     User --> Router
-    Router --> Client
-    Client --> Worker
-    Worker --> FS
+    Router --> Resolver
+    Router --> ToolMap
+    ToolMap --> DB
 ```
-Sources: [orchestrator/api/workspace_files.py:34-51](), [orchestrator/core/workspace_client.py:96-108](), [services/workspace-worker/main.py:58-86]()
+Sources: [orchestrator/api/agents.py:97-102](), [orchestrator/core/utils/agent_resolver.py:17-49]()
 
-### Key Workspace Endpoints
+### Tool Hinting and Graph Routing
+Advanced tool routing (PRD-139) is integrated into the context assembly path. The `GraphRouter` ranks tool chains based on execution telemetry [scripts/ralph/progress.txt:92-112]().
+- **Entry Node Selection**: Uses `ActionSemanticIndex` to pick the top 5 relevant tools [scripts/ralph/progress.txt:102]().
+- **Chain Expansion**: Traverses the graph (depth 2) to suggest sequences like `read_file` -> `write_file` [scripts/ralph/progress.txt:103,69-70]().
+- **Telemetry Seeding**: Synthetic telemetry (e.g., from Agents 9001, 9002) is used to bootstrap these routing edges [scripts/ralph/progress.txt:64-67]().
 
-| Method | Path | Implementation | Purpose |
-|--------|------|----------------|---------|
-| GET | `/api/workspaces/{id}/files` | `workspace_files.py` | Directory listing via `WorkspaceClient` [orchestrator/api/workspace_files.py:34]() |
-| POST | `/api/workspaces/{id}/exec` | `workspace_files.py` | Shell command execution in sandbox [orchestrator/api/workspace_files.py:86]() |
-| GET | `/api/workspaces/{id}/github/repos` | `workspace_github.py` | Lists repos via `Composio` entity [orchestrator/api/workspace_github.py:97]() |
-| POST | `/api/workspaces/{id}/github/clone` | `workspace_github.py` | Clones repo into workspace volume [orchestrator/api/workspace_github.py:167]() |
-
-### Security & Sandboxing
-Command execution through the `/exec` endpoint is heavily restricted by the `WorkspaceToolExecutor` [services/workspace-worker/executor.py:108-114]():
-- **Binary Whitelist**: Only approved tools like `git`, `python`, `ls`, and `npm` are allowed [services/workspace-worker/executor.py:35-73]().
-- **Pattern Blocking**: Prevents dangerous patterns like `rm -rf /` or `sudo` via regex filters [services/workspace-worker/executor.py:76-98]().
-- **Path Containment**: All operations are resolved against a safe root using `resolve_safe_path` [services/workspace-worker/executor.py:147]().
-
-Sources: [orchestrator/api/workspace_files.py:1-108](), [orchestrator/api/workspace_github.py:1-182](), [services/workspace-worker/executor.py:31-158]()
+Sources: [scripts/ralph/progress.txt:7-22, 92-112](), [orchestrator/modules/context/sections/platform_actions.py:130-140]()
 
 ---
 
-## Response Model Patterns
+## Response Normalization Patterns
 
-### Request Validation
-Routers use Pydantic models to validate incoming payloads. For example, `CloneRequest` validates that Git URLs use HTTPS and point to allowed hosts like GitHub or GitLab [orchestrator/api/workspace_github.py:65-79]().
+Routers utilize shared utility functions to maintain data integrity:
+- **Tag Normalization**: `_normalize_tags` ensures all agent and workflow tags are lower-cased and deduplicated [orchestrator/api/agents.py:146-171]().
+- **Agent Response Construction**: `_build_agent_response` joins model metadata from `LLMModel` and tool assignments from `AgentAppAssignment` into a unified schema [orchestrator/api/agents.py:174-205]().
 
-### Common Response Structures
-- **Context Stats**: Returns real-time RAG metrics including `retrievalSuccess`, `vectorEmbeddings`, and `avgResponseTime` [orchestrator/api/context.py:84-101]().
-- **SSE Streams**: Used by `workflows.py` to broadcast `phase_start`, `stage_start`, and `stage_complete` events with millisecond durations [orchestrator/api/workflows.py:108-159]().
-- **Worker Proxy**: Responses from `WorkspaceClient` include a `success` flag and standardized error parsing [orchestrator/core/workspace_client.py:47-53]().
-
-Sources: [orchestrator/api/workspace_github.py:65-79](), [orchestrator/api/context.py:84-101](), [orchestrator/api/workflows.py:108-159](), [orchestrator/core/workspace_client.py:47-53]()
+Sources: [orchestrator/api/agents.py:146-205](), [orchestrator/core/models/core.py:43-91]()
 
 ---

@@ -5,20 +5,14 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/components/marketplace/marketplace-plugin-detail-modal.tsx](frontend/components/marketplace/marketplace-plugin-detail-modal.tsx)
-- [frontend/components/marketplace/marketplace-plugins-tab.tsx](frontend/components/marketplace/marketplace-plugins-tab.tsx)
-- [frontend/components/marketplace/marketplace-skills-tab.tsx](frontend/components/marketplace/marketplace-skills-tab.tsx)
-- [frontend/hooks/use-marketplace-api.ts](frontend/hooks/use-marketplace-api.ts)
-- [orchestrator/api/admin_plugins.py](orchestrator/api/admin_plugins.py)
-- [orchestrator/api/agent_plugins.py](orchestrator/api/agent_plugins.py)
+- [frontend/components/agents/org-chart-tab.tsx](frontend/components/agents/org-chart-tab.tsx)
+- [orchestrator/api/composio_analytics.py](orchestrator/api/composio_analytics.py)
 - [orchestrator/api/marketplace.py](orchestrator/api/marketplace.py)
-- [orchestrator/api/marketplace_plugins.py](orchestrator/api/marketplace_plugins.py)
-- [orchestrator/api/workspace_skills.py](orchestrator/api/workspace_skills.py)
-- [orchestrator/core/services/marketplace_s3.py](orchestrator/core/services/marketplace_s3.py)
-- [orchestrator/core/services/plugin_upload_service.py](orchestrator/core/services/plugin_upload_service.py)
-- [orchestrator/modules/coordination/__init__.py](orchestrator/modules/coordination/__init__.py)
-- [orchestrator/modules/coordination/agent_matcher.py](orchestrator/modules/coordination/agent_matcher.py)
-- [orchestrator/modules/coordination/templates.py](orchestrator/modules/coordination/templates.py)
+- [orchestrator/api/workflow_recipes.py](orchestrator/api/workflow_recipes.py)
+- [orchestrator/core/seeds/platform-management-skill.md](orchestrator/core/seeds/platform-management-skill.md)
+- [orchestrator/scripts/seed_agent_personas_v2.py](orchestrator/scripts/seed_agent_personas_v2.py)
+- [orchestrator/scripts/seed_marketplace_agents_v2.py](orchestrator/scripts/seed_marketplace_agents_v2.py)
+- [orchestrator/scripts/seed_recipes_marketplace_v2.py](orchestrator/scripts/seed_recipes_marketplace_v2.py)
 
 </details>
 
@@ -30,7 +24,7 @@ The Marketplace Backend provides the infrastructure for discovering, installing,
 
 ## Architecture Overview
 
-The marketplace is implemented across several specialized routers, primarily `orchestrator/api/marketplace.py` for core items (Agents/Recipes) and `orchestrator/api/marketplace_plugins.py` for the plugin ecosystem.
+The marketplace is implemented across several specialized routers, primarily `orchestrator/api/marketplace.py` for core items (Agents/Recipes) and `orchestrator/api/workflow_recipes.py` for the workflow ecosystem.
 
 ### Data Isolation & Ownership
 The system distinguishes between public marketplace assets and private workspace clones using the `owner_type` field.
@@ -42,7 +36,7 @@ The system distinguishes between public marketplace assets and private workspace
 | `is_approved` | `BOOLEAN` (Admin gated) | Always `TRUE` |
 | `install_count` | `INTEGER` (Global counter) | `NULL` or `0` |
 
-**Sources:** [orchestrator/api/marketplace.py:154-158](), [orchestrator/api/marketplace.py:255-260](), [orchestrator/api/agent_plugins.py:148-151]()
+**Sources:** [orchestrator/api/marketplace.py:154-158](), [orchestrator/api/marketplace.py:255-260](), [orchestrator/api/workflow_recipes.py:181-185]()
 
 ### Code Entity Mapping
 The following diagram maps high-level marketplace concepts to their specific implementation classes and database models.
@@ -50,36 +44,36 @@ The following diagram maps high-level marketplace concepts to their specific imp
 **Marketplace Entity Mapping**
 ```mermaid
 graph TD
-    subgraph "Natural Language Space"
+    subgraph "NaturalLanguageSpace" ["Natural Language Space"]
         MA["Marketplace Agent"]
         MR["Marketplace Recipe"]
-        MP["Marketplace Plugin"]
+        MT["Marketplace Tool"]
         MS["Marketplace Skill"]
     end
 
-    subgraph "Code Entity Space (SQLAlchemy Models)"
+    subgraph "CodeEntitySpace" ["Code Entity Space (SQLAlchemy Models)"]
         ModelAgent["Agent (owner_type='marketplace')"]
         ModelRecipe["WorkflowTemplate (owner_type='marketplace')"]
-        ModelPlugin["MarketplacePlugin"]
+        ModelTool["ComposioApp (via composio_apps_cache)"]
         ModelSkill["Skill (workspace_id=None)"]
     end
 
     MA --> ModelAgent
     MR --> ModelRecipe
-    MP --> ModelPlugin
+    MT --> ModelTool
     MS --> ModelSkill
 
-    subgraph "Logic Controllers"
-        InstallLogic["install_item()"]
-        PluginLogic["update_agent_plugins()"]
-        SkillLogic["enable_skill()"]
+    subgraph "LogicControllers" ["Logic Controllers"]
+        InstallLogic["marketplace.py:install_item"]
+        RecipeLogic["workflow_recipes.py:list_workflow_recipes"]
+        ToolLogic["api_client.getToolCategories"]
     end
 
     ModelAgent -.-> InstallLogic
-    ModelPlugin -.-> PluginLogic
-    ModelSkill -.-> SkillLogic
+    ModelRecipe -.-> RecipeLogic
+    ModelTool -.-> ToolLogic
 ```
-**Sources:** [orchestrator/api/marketplace.py:25-26](), [orchestrator/api/marketplace.py:468-480](), [orchestrator/api/agent_plugins.py:130-140](), [orchestrator/api/workspace_skills.py:190-206]()
+**Sources:** [orchestrator/api/marketplace.py:25-28](), [orchestrator/api/marketplace.py:468-480](), [orchestrator/api/workflow_recipes.py:25-28](), [orchestrator/api/marketplace.py:193-198]()
 
 ---
 
@@ -88,135 +82,102 @@ graph TD
 When an item is "installed," the backend performs a deep clone of the marketplace template into the target workspace.
 
 ### The Cloning Sequence
-1. **Validation**: The system verifies the item exists and is approved (for non-admins) [orchestrator/api/marketplace.py:482-495]().
-2. **Duplication**: A new record is created in the same table (e.g., `Agent`) but with `owner_type="workspace"` and the current `workspace_id` [orchestrator/api/marketplace.py:500-515]().
+1. **Validation**: The system verifies the item exists and is approved (for non-admins) via `is_approved` check [orchestrator/api/marketplace.py:156-158]().
+2. **Duplication**: A new record is created in the same table (e.g., `Agent`) but with `owner_type="workspace"` and the current `workspace_id` [orchestrator/api/marketplace.py:485-500]().
 3. **Dependency Resolution**:
-    - For **Agents**: The system copies tool assignments from `agent_tool_assignments` and skill assignments from `agent_skills` [orchestrator/api/marketplace.py:536-570]().
-    - For **Recipes**: The system attempts to map marketplace `agent_id` references to existing agents in the user's workspace or warns if dependencies are missing [orchestrator/api/marketplace.py:660-685]().
+    - **Agents**: The system copies tool assignments and skill assignments from the template to the new workspace instance [orchestrator/api/marketplace.py:510-525]().
+    - **Recipes**: The system clones the `WorkflowTemplate`, mapping internal step logic to the user's workspace context and ensuring any required agents are also referenced or cloned [orchestrator/api/marketplace.py:645-660]().
 4. **Telemetry**: The `install_count` on the source marketplace item is incremented atomically [orchestrator/api/marketplace.py:530-534]().
 
 **Agent Installation Data Flow**
 ```mermaid
 sequenceDiagram
-    participant U as User (Frontend)
-    participant API as marketplace.py:install_item
-    participant DB as PostgreSQL
+    participant U as "User (Frontend)"
+    participant API as "marketplace.py:install_item"
+    participant DB as "PostgreSQL (SQLAlchemy)"
 
     U->>API: POST /api/marketplace/install {item_id}
-    API->>DB: SELECT * FROM agents WHERE id={item_id} AND owner_type='marketplace'
-    DB-->>API: Marketplace Template
-    API->>API: Create Agent Copy (owner_type='workspace', workspace_id=ctx.ws)
-    API->>DB: INSERT INTO agents (cloned_from_id={item_id})
+    API->>DB: SELECT FROM agents WHERE id={item_id} AND owner_type='marketplace'
+    DB-->>API: Agent Template Row
+    API->>API: clone_agent(workspace_id=ctx.workspace_id)
+    API->>DB: INSERT INTO agents (owner_type='workspace', ...)
     API->>DB: UPDATE agents SET install_count = install_count + 1 WHERE id={item_id}
-    API-->>U: 200 OK (cloned_items list)
+    API-->>U: 200 OK (InstallResponse)
 ```
-**Sources:** [orchestrator/api/marketplace.py:468-580](), [orchestrator/api/marketplace.py:645-696](), [frontend/hooks/use-marketplace-api.ts:138-160]()
+**Sources:** [orchestrator/api/marketplace.py:468-580](), [orchestrator/api/marketplace.py:645-696](), [orchestrator/api/marketplace.py:530-534]()
 
 ---
 
-## Plugin & Skill Marketplace
+## Tool Integration & Discovery
 
-Plugins represent a higher-order grouping of capabilities (Skills, Commands, Hooks). Unlike simple agents, plugins require a two-stage activation:
-1. **Workspace Enablement**: A plugin is enabled for a workspace via `WorkspaceEnabledPlugin` [orchestrator/api/agent_plugins.py:165-178]().
-2. **Agent Assignment**: Enabled plugins are assigned to specific agents via `AgentAssignedPlugin` [orchestrator/api/agent_plugins.py:186-193]().
-
-### Skill Materialization
-When a plugin is assigned to an agent, the backend automatically "materializes" the associated skills. This involves looking up the `Skill` records linked to that plugin and creating entries in the `agent_skills` join table [orchestrator/api/agent_plugins.py:195-200]().
-
-**Plugin Assignment Implementation**
-```python
-# From orchestrator/api/agent_plugins.py
-# 1. Remove existing assignments
-db.query(AgentAssignedPlugin).filter(
-    AgentAssignedPlugin.agent_id == agent_id,
-).delete(synchronize_session="fetch")
-
-# 2. Create new assignments with priority
-for priority, plugin_id in enumerate(unique_plugin_ids):
-    assignment = AgentAssignedPlugin(
-        agent_id=agent_id,
-        plugin_id=plugin_id,
-        priority=priority,
-    )
-    db.add(assignment)
-```
-**Sources:** [orchestrator/api/agent_plugins.py:181-193](), [orchestrator/api/workspace_skills.py:190-206]()
-
----
-
-## Plugin Ingestion & Security
-
-Marketplace Plugins follow a strict ingestion pipeline managed by `PluginUploadService`.
-
-### Upload & Scanning Pipeline
-1. **Extraction**: Zip files are validated for `manifest.json` and extracted to S3 (or local storage in dev) [orchestrator/core/services/plugin_upload_service.py:134-153]().
-2. **Auto-Categorization**: The `_auto_categorise` helper matches keywords in the description/tags against `_CATEGORY_KEYWORDS` [orchestrator/core/services/plugin_upload_service.py:59-78]().
-3. **Security Scan**: `PluginScanService` performs static analysis and LLM-based risk assessment [orchestrator/core/services/plugin_upload_service.py:88]().
-4. **Approval**: Admins use `approve_plugin` to move items from `pending` to `approved` [orchestrator/api/admin_plugins.py:203-222]().
-
-**Plugin Ingestion Path**
-```mermaid
-graph LR
-    subgraph "Admin Upload"
-        Zip["Plugin .zip"]
-    end
-    subgraph "Ingestion Service"
-        UplSvc["PluginUploadService"]
-        ScanSvc["PluginScanService"]
-    end
-    subgraph "Storage"
-        S3["MarketplaceS3Service"]
-        DB["PostgreSQL (MarketplacePlugin)"]
-    end
-
-    Zip --> UplSvc
-    UplSvc --> ScanSvc
-    ScanSvc -- "Risk Score" --> UplSvc
-    UplSvc --> S3
-    UplSvc --> DB
-```
-**Sources:** [orchestrator/core/services/plugin_upload_service.py:80-103](), [orchestrator/core/services/plugin_upload_service.py:134-179](), [orchestrator/api/admin_plugins.py:137-180]()
-
----
-
-## Tool Integration (Composio)
-
-Tools in the marketplace are primarily sourced from the **Composio** integration. The backend maintains a local cache of these tools to allow fast browsing and category filtering.
+Tools in the marketplace are primarily managed via the **Composio** ecosystem, supplemented by platform-specific actions.
 
 ### Marketplace Tools Sync
-The frontend fetches from `/api/marketplace/items?type=tool`, which leverages the `composio_apps_cache` to resolve metadata like logos and categories [orchestrator/api/marketplace.py:193-198]().
+The backend leverages the `composio_apps_cache` to resolve metadata like logos and categories. When browsing the marketplace, the `list_items` endpoint can enrich agent cards with tool icons by joining `agent_tool_assignments` with the apps cache [orchestrator/api/marketplace.py:193-198]().
 
-**Sources:** [orchestrator/api/marketplace.py:193-198](), [frontend/components/marketplace/marketplace-plugins-tab.tsx:157-170]()
+### Platform Management Skills
+A specialized `platform-management` skill provides agents with the ability to browse and install items autonomously. This includes tools like `platform_browse_marketplace_agents` and `platform_install_skill` [orchestrator/core/seeds/platform-management-skill.md:8-17]().
+
+**Sources:** [orchestrator/api/marketplace.py:193-198](), [orchestrator/core/seeds/platform-management-skill.md:8-17]()
+
+---
+
+## Workflow & Recipe Execution
+
+Recipes (Playbooks) installed from the marketplace are executed using the `RecipeDirectExecutor`. This provides a simplified, sequential execution path that aligns with the chatbot's component stack.
+
+### Execution Components
+- **ContextService**: Uses `ContextMode.RECIPE` to build system prompts including step instructions and previous outputs.
+- **AgentFactory**: Activates the specific agent assigned to the recipe step.
+- **RecipeScratchpad**: Provides inter-step data sharing, allowing subsequent steps to access previous outputs.
+- **Trigger Management**: For event-driven recipes, `_auto_register_trigger` handles Composio webhook subscriptions [orchestrator/api/workflow_recipes.py:50-105]().
+
+**Recipe Execution Logic**
+```mermaid
+graph TD
+    subgraph "ExecutionKitchen" ["Execution Kitchen"]
+        Trigger["User Trigger / Cron / Webhook"]
+        Executor["recipe_executor.py: _execute_step"]
+    end
+
+    subgraph "CoreServices" ["Core Services"]
+        Factory["AgentFactory: activate_agent"]
+        CtxSvc["ContextService: build_context"]
+        ToolRouter["tool_router: execute_and_format"]
+    end
+
+    Trigger --> Executor
+    Executor --> Factory
+    Executor --> CtxSvc
+    Executor --> ToolRouter
+    ToolRouter --> Executor
+    Executor -->|Store Result| Scratchpad["RecipeScratchpad"]
+```
+**Sources:** [orchestrator/api/workflow_recipes.py:50-105](), [orchestrator/api/workflow_recipes.py:140-174](), [orchestrator/api/marketplace.py:72-76]()
 
 ---
 
 ## Admin Approval & Moderation
 
-Items submitted to the marketplace are not public by default. They enter a "Pending" state where `is_approved = FALSE` [orchestrator/api/marketplace.py:157]().
+Items submitted to the marketplace are not public by default. They enter a "Pending" state where `is_approved = FALSE`.
 
-### Approval Endpoints
-- **Approve Agent/Recipe**: `POST /api/marketplace/items/{id}/approve` sets `is_approved = TRUE` [orchestrator/api/marketplace.py:720-750]().
-- **Approve Plugin**: `POST /api/admin/plugins/{plugin_id}/approve` updates the `approval_status` [orchestrator/api/admin_plugins.py:203-222]().
-- **Feature**: `POST /api/marketplace/items/{id}/feature` toggles the `is_featured` flag for high-visibility placement [orchestrator/api/marketplace.py:753-780]().
+### Administrative Actions
+- **Approval**: `POST /api/marketplace/items/{id}/approve` transitions an item to public status [orchestrator/api/marketplace.py:720-740]().
+- **Featuring**: `POST /api/marketplace/items/{id}/feature` toggles the `is_featured` flag, which is used as a filter in the `list_items` endpoint [orchestrator/api/marketplace.py:170-171]().
+- **Deletion**: Admins can remove items via `DELETE /api/marketplace/items/{id}` [orchestrator/api/marketplace.py:780-790]().
 
-**Sources:** [orchestrator/api/marketplace.py:720-750](), [orchestrator/api/admin_plugins.py:203-222](), [frontend/components/marketplace/marketplace-plugin-detail-modal.tsx:156-169]()
+**Sources:** [orchestrator/api/marketplace.py:170-171](), [orchestrator/api/marketplace.py:720-740](), [orchestrator/api/marketplace.py:780-790]()
 
 ---
 
 ## Analytics & Tracking
 
-The marketplace tracks usage via the `install_count` field on primary entities.
+The marketplace tracks global popularity and per-workspace usage to inform the "Featured" algorithm.
 
-### Install Count Increment
-The increment happens atomically during the installation transaction to ensure data consistency.
-```python
-# From orchestrator/api/marketplace.py:530
-# Update install count on original item
-db.execute(
-    text("UPDATE agents SET install_count = install_count + 1 WHERE id = :id"),
-    {"id": item_id}
-)
-```
-**Sources:** [orchestrator/api/marketplace.py:530-534](), [orchestrator/api/marketplace.py:645-696]()
+### Usage Telemetry
+- **Install Count**: Incremented atomically during the `install_item` flow [orchestrator/api/marketplace.py:530-534]().
+- **Composio Analytics**: Aggregated views of tool usage across the workspace, tracking which marketplace-sourced tools are most active [orchestrator/api/composio_analytics.py:132-151]().
+
+**Sources:** [orchestrator/api/marketplace.py:530-534](), [orchestrator/api/composio_analytics.py:132-151]()
 
 ---

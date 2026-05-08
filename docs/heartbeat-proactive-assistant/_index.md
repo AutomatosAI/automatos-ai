@@ -5,42 +5,14 @@
 
 The following files were used as context for generating this wiki page:
 
-- [docs/PRDS/55-AUTONOMOUS-ASSISTANT-PLATFORM.md](docs/PRDS/55-AUTONOMOUS-ASSISTANT-PLATFORM.md)
-- [frontend/components/agents/agent-configuration-modal.tsx](frontend/components/agents/agent-configuration-modal.tsx)
-- [frontend/components/agents/agent-configuration.tsx](frontend/components/agents/agent-configuration.tsx)
-- [frontend/components/agents/agent-details-modal.tsx](frontend/components/agents/agent-details-modal.tsx)
-- [frontend/components/agents/agent-management.tsx](frontend/components/agents/agent-management.tsx)
-- [frontend/components/agents/agent-performance.tsx](frontend/components/agents/agent-performance.tsx)
-- [frontend/components/agents/agent-roster.tsx](frontend/components/agents/agent-roster.tsx)
-- [frontend/components/agents/agent-skills.tsx](frontend/components/agents/agent-skills.tsx)
-- [frontend/components/agents/agent-status-control-modal.tsx](frontend/components/agents/agent-status-control-modal.tsx)
-- [frontend/components/agents/create-agent-modal.tsx](frontend/components/agents/create-agent-modal.tsx)
-- [frontend/components/agents/create-skill-modal.tsx](frontend/components/agents/create-skill-modal.tsx)
-- [frontend/components/agents/skill-configuration-modal.tsx](frontend/components/agents/skill-configuration-modal.tsx)
-- [frontend/components/auth/sign-up-form.tsx](frontend/components/auth/sign-up-form.tsx)
-- [frontend/components/documents/analytics-tab.tsx](frontend/components/documents/analytics-tab.tsx)
-- [frontend/components/documents/processing-tab.tsx](frontend/components/documents/processing-tab.tsx)
-- [frontend/hooks/use-agent-api.ts](frontend/hooks/use-agent-api.ts)
-- [frontend/hooks/use-document-api.ts](frontend/hooks/use-document-api.ts)
-- [orchestrator/alembic/versions/20260215_add_heartbeat_and_channels.py](orchestrator/alembic/versions/20260215_add_heartbeat_and_channels.py)
-- [orchestrator/api/agents.py](orchestrator/api/agents.py)
-- [orchestrator/api/channels.py](orchestrator/api/channels.py)
-- [orchestrator/api/heartbeat.py](orchestrator/api/heartbeat.py)
-- [orchestrator/channels/base.py](orchestrator/channels/base.py)
-- [orchestrator/channels/discord_adapter.py](orchestrator/channels/discord_adapter.py)
-- [orchestrator/channels/google_chat_adapter.py](orchestrator/channels/google_chat_adapter.py)
-- [orchestrator/channels/line_adapter.py](orchestrator/channels/line_adapter.py)
-- [orchestrator/channels/manager.py](orchestrator/channels/manager.py)
-- [orchestrator/channels/slack_adapter.py](orchestrator/channels/slack_adapter.py)
-- [orchestrator/consumers/chatbot/smart_memory.py](orchestrator/consumers/chatbot/smart_memory.py)
-- [orchestrator/core/models/__init__.py](orchestrator/core/models/__init__.py)
-- [orchestrator/core/models/channels.py](orchestrator/core/models/channels.py)
-- [orchestrator/core/models/core.py](orchestrator/core/models/core.py)
-- [orchestrator/core/services/plugin_security_scanner.py](orchestrator/core/services/plugin_security_scanner.py)
-- [orchestrator/modules/agents/__init__.py](orchestrator/modules/agents/__init__.py)
-- [orchestrator/modules/agents/factory/__init__.py](orchestrator/modules/agents/factory/__init__.py)
-- [orchestrator/modules/memory/integrations/mem0_client.py](orchestrator/modules/memory/integrations/mem0_client.py)
+- [orchestrator/alembic/versions/wave3_escalation_level.py](orchestrator/alembic/versions/wave3_escalation_level.py)
+- [orchestrator/core/services/escalation.py](orchestrator/core/services/escalation.py)
+- [orchestrator/modules/tools/discovery/actions_reports.py](orchestrator/modules/tools/discovery/actions_reports.py)
+- [orchestrator/modules/tools/discovery/actions_workspace.py](orchestrator/modules/tools/discovery/actions_workspace.py)
+- [orchestrator/modules/tools/discovery/handlers_reports.py](orchestrator/modules/tools/discovery/handlers_reports.py)
+- [orchestrator/modules/tools/discovery/handlers_workspace.py](orchestrator/modules/tools/discovery/handlers_workspace.py)
 - [orchestrator/services/heartbeat_service.py](orchestrator/services/heartbeat_service.py)
+- [orchestrator/services/report_service.py](orchestrator/services/report_service.py)
 
 </details>
 
@@ -50,9 +22,9 @@ The following files were used as context for generating this wiki page:
 
 The Heartbeat & Proactive Assistant system enables scheduled, autonomous checks for both workspace-level orchestrator health and individual agent task completion. This system transforms Automatos from reactive to proactive, allowing agents to monitor assigned work and the orchestrator to perform periodic workspace health assessments and autonomous actions.
 
-For multi-channel message handling that enables heartbeat notifications, see [Channel Integrations](#12). For agent execution details, see [Agents](#5). For tool execution used during heartbeat ticks, see [Tools & Integrations](#8).
+For multi-channel message handling that enables heartbeat notifications, see [Channel Integrations](#12). For agent execution details, see [Agents](#5). For tool execution used during heartbeat ticks, see [Tools & Integrations](#8). For the unified notification pipeline used to alert users of heartbeat completions, see [Unified Notification System](#24).
 
-**Sources:** [orchestrator/services/heartbeat_service.py:1-10](), [docs/PRDS/55-AUTONOMOUS-ASSISTANT-PLATFORM.md:1-15]()
+**Sources:** [orchestrator/services/heartbeat_service.py:1-10](), [orchestrator/services/heartbeat_service.py:24-31]()
 
 ---
 
@@ -107,18 +79,20 @@ graph TB
         HeartbeatResults["heartbeat_results table"]
         NotificationDelivery["_deliver_notification()"]
         ChannelManager["ChannelManager<br/>Multi-channel delivery"]
+        ReportSvc["ReportService<br/>platform_submit_report"]
         
         OrchestratorTick --> HeartbeatResults
         AgentTick --> HeartbeatResults
         OrchestratorTick --> NotificationDelivery
         NotificationDelivery --> ChannelManager
+        AgentTick --> ReportSvc
     end
     
     Scheduler -->|"schedule_orchestrator_heartbeat()"| OrchestratorTick
     Scheduler -->|"schedule_agent_heartbeat()"| AgentTick
 ```
 
-**Sources:** [orchestrator/services/heartbeat_service.py:24-91](), [orchestrator/services/heartbeat_service.py:163-222]()
+**Sources:** [orchestrator/services/heartbeat_service.py:24-91](), [orchestrator/services/heartbeat_service.py:173-222](), [orchestrator/services/report_service.py:149-172]()
 
 ---
 
@@ -132,7 +106,7 @@ The `HeartbeatService` class manages all heartbeat scheduling and execution. It 
 |--------|---------|
 | `start(scheduler)` | Initialize scheduler, load configs, schedule daily summary [orchestrator/services/heartbeat_service.py:43-84]() |
 | `stop()` | Remove heartbeat jobs, shutdown owned scheduler [orchestrator/services/heartbeat_service.py:85-91]() |
-| `_load_heartbeat_configs()` | Query database for active heartbeat settings [orchestrator/services/heartbeat_service.py:96-123]() |
+| `_load_heartbeat_configs()` | Query database for active heartbeat settings [orchestrator/services/heartbeat_service.py:96-133]() |
 
 The service supports both standalone mode (creates its own scheduler with `RedisJobStore`) and shared mode where it integrates with a system-wide scheduler.
 
@@ -158,7 +132,7 @@ graph LR
     Convert -->|"'0 9 * * *'"| Output
 ```
 
-**Sources:** [orchestrator/services/heartbeat_service.py:129-162]()
+**Sources:** [orchestrator/services/heartbeat_service.py:139-171]()
 
 ---
 
@@ -198,7 +172,7 @@ sequenceDiagram
     HB->>DB: store_heartbeat_result()
 ```
 
-**Sources:** [orchestrator/services/heartbeat_service.py:382-546](), [orchestrator/core/llm/manager.py:39-41]()
+**Sources:** [orchestrator/services/heartbeat_service.py:382-546]()
 
 ### Tool Loop Implementation
 
@@ -230,15 +204,30 @@ graph TB
         StatusDone["Update status: 'done'"]
     end
     
+    subgraph "Output Handling"
+        ReportSvc["ReportService.create_report()"]
+        PlatformAction["platform_submit_report"]
+    end
+    
     Trigger --> ActiveHours
     ActiveHours -->|Yes| Query
     Query --> TaskContext
     TaskContext --> StatusInProgress
     StatusInProgress --> ExecutePrompt
     ExecutePrompt --> StatusDone
+    StatusDone --> PlatformAction
+    PlatformAction --> ReportSvc
 ```
 
-**Sources:** [orchestrator/services/heartbeat_service.py:591-735](), [orchestrator/modules/agents/factory/agent_factory.py:155-192]()
+**Sources:** [orchestrator/services/heartbeat_service.py:591-735](), [orchestrator/modules/tools/discovery/handlers_reports.py:14-92]()
+
+### Escalation and Reporting
+During heartbeat runs, agents use `platform_submit_report` to persist findings. These reports are classified using an `EscalationLevel` (L0-L4) to determine triage priority.
+- **L0 (FYI):** Informational standups.
+- **L2 (APPROVAL):** Recommendations requiring human decision.
+- **L3 (URGENT):** Critical errors or budget exceeded.
+
+**Sources:** [orchestrator/core/services/escalation.py:26-31](), [orchestrator/modules/tools/discovery/actions_reports.py:29-38]()
 
 ---
 
@@ -248,60 +237,27 @@ Heartbeat configurations are stored as JSON blobs within the `agents` and `works
 
 | Scope | Storage Location |
 |-------|-----------------|
-| Orchestrator | `workspaces.settings['orchestrator']['heartbeat']` [orchestrator/services/heartbeat_service.py:107-111]() |
-| Agent | `agents.configuration['heartbeat']` [orchestrator/services/heartbeat_service.py:116-121]() |
-
-### Frontend Integration
-
-The `AgentConfigurationModal` provides a dedicated UI for managing these settings, including interval selection, active hours, and autonomous action toggles.
-
-```mermaid
-graph LR
-    subgraph "UI Layer"
-        Modal["AgentConfigurationModal"]
-        HBState["heartbeatConfig state"]
-        Modal --> HBState
-    end
-
-    subgraph "API Layer"
-        Hook["useUpdateAgentConfig"]
-        API["PUT /api/agents/{id}"]
-        HBState --> Hook
-        Hook --> API
-    end
-
-    subgraph "Backend Service"
-        DB["PostgreSQL<br/>agents.configuration"]
-        Svc["HeartbeatService"]
-        API --> DB
-        DB -->|"load_heartbeat_configs"| Svc
-    end
-```
-
-**Sources:** [frontend/components/agents/agent-configuration-modal.tsx:155-167](), [orchestrator/api/agents.py:382-410]()
+| Orchestrator | `workspaces.settings['orchestrator']['heartbeat']` [orchestrator/services/heartbeat_service.py:116-121]() |
+| Agent | `agents.configuration['heartbeat']` [orchestrator/services/heartbeat_service.py:126-131]() |
 
 ### Scheduling API
 
 The `HeartbeatService` provides methods to dynamically schedule or remove jobs when configurations change via the UI:
-- `schedule_orchestrator_heartbeat(workspace_id, hb_config)` [orchestrator/services/heartbeat_service.py:163-189]()
-- `schedule_agent_heartbeat(agent_id, workspace_id, hb_config)` [orchestrator/services/heartbeat_service.py:190-222]()
+- `schedule_orchestrator_heartbeat(workspace_id, hb_config)` [orchestrator/services/heartbeat_service.py:173-199]()
+- `schedule_agent_heartbeat(agent_id, workspace_id, hb_config)` [orchestrator/services/heartbeat_service.py:200-232]()
 
 ---
 
 ## Heartbeat API Reference
 
-The heartbeat API (`/api/heartbeat`) provides endpoints for managing configurations, triggering manual runs, and monitoring execution history.
-
-### Key Endpoints
+The heartbeat API provides endpoints for managing configurations, triggering manual runs, and monitoring execution history.
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/agents/{agent_id}/config` | GET/PUT | Manage agent heartbeat settings [orchestrator/api/heartbeat.py:58-126]() |
-| `/agents/{agent_id}/last` | GET | Get most recent result for an agent [orchestrator/api/heartbeat.py:129-161]() |
-| `/orchestrator/run` | POST | Trigger immediate orchestrator tick [orchestrator/api/heartbeat.py:165-178]() |
-| `/orchestrator/history` | GET | List recent orchestrator results [orchestrator/api/heartbeat.py:180-205]() |
-
-**Sources:** [orchestrator/api/heartbeat.py:1-205]()
+| `/api/agents/{agent_id}/config` | GET/PUT | Manage agent heartbeat settings |
+| `/api/agents/{agent_id}/last` | GET | Get most recent result for an agent |
+| `/api/orchestrator/run` | POST | Trigger immediate orchestrator tick |
+| `/api/orchestrator/history` | GET | List recent orchestrator results |
 
 ---
 
@@ -311,12 +267,12 @@ The heartbeat API (`/api/heartbeat`) provides endpoints for managing configurati
 
 All executions store detailed telemetry in the `heartbeat_results` table, including `findings` (the LLM's analysis), `actions_taken` (tools called), and financial metrics like `cost` and `tokens_used`.
 
-**Sources:** [orchestrator/api/heartbeat.py:138-160](), [orchestrator/alembic/versions/20260215_add_heartbeat_and_channels.py:13-50]()
+**Sources:** [orchestrator/services/heartbeat_service.py:346-380]()
 
 ### Notification Delivery
 
-The `_deliver_notification()` method routes results to configured destinations. It supports internal orchestrator logging, direct webhooks, or external channels like Slack and Telegram via the `ChannelManager`.
+The `_deliver_notification()` method routes results to configured destinations. It supports internal orchestrator logging, direct webhooks, or external channels like Slack and Telegram via the `ChannelManager`. It also triggers the `NotificationDispatcher` for in-app alerts.
 
-**Sources:** [orchestrator/services/heartbeat_service.py:737-780](), [orchestrator/api/channels.py:24-42]()
+**Sources:** [orchestrator/services/heartbeat_service.py:737-780]()
 
 ---

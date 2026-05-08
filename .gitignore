@@ -1,6 +1,9 @@
 # MCP config (contains API keys)
 .mcp.json
 
+# Claude Code agent worktrees (per-project, not for VCS)
+.claude/worktrees/
+
 # Node.js
 node_modules/
 .next/

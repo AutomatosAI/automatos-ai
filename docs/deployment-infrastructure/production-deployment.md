@@ -5,185 +5,190 @@
 
 The following files were used as context for generating this wiki page:
 
-- [docs/PRDS/33-MCP-GATEWAY-INTEGRATION.md](docs/PRDS/33-MCP-GATEWAY-INTEGRATION.md)
-- [docs/PRDS/34-UNIFIED-INTEGRATIONS-ADAPTER.md](docs/PRDS/34-UNIFIED-INTEGRATIONS-ADAPTER.md)
-- [docs/PRDS/35-TOOL-CATALOG-REGISTRY-ARCHITECTURE.md](docs/PRDS/35-TOOL-CATALOG-REGISTRY-ARCHITECTURE.md)
-- [frontend/pages/_document.tsx](frontend/pages/_document.tsx)
-- [infrastructure/.env.example](infrastructure/.env.example)
-- [infrastructure/docker-compose.core.yml](infrastructure/docker-compose.core.yml)
-- [infrastructure/docker-compose.data.yml](infrastructure/docker-compose.data.yml)
-- [infrastructure/docker-compose.landing.yml](infrastructure/docker-compose.landing.yml)
-- [infrastructure/docker-compose.memory.yml](infrastructure/docker-compose.memory.yml)
-- [infrastructure/docker-compose.monitoring.yml](infrastructure/docker-compose.monitoring.yml)
-- [infrastructure/docker-compose.voice.yml](infrastructure/docker-compose.voice.yml)
-- [infrastructure/docker-compose.yml](infrastructure/docker-compose.yml)
-- [infrastructure/railway-manifest.json](infrastructure/railway-manifest.json)
-- [orchestrator/.dockerignore](orchestrator/.dockerignore)
-- [orchestrator/.python-version](orchestrator/.python-version)
-- [orchestrator/.railway-watch.json](orchestrator/.railway-watch.json)
-- [orchestrator/core/credentials/encryption.py](orchestrator/core/credentials/encryption.py)
-- [orchestrator/start.sh](orchestrator/start.sh)
+- [orchestrator/core/database/boot_lock.py](orchestrator/core/database/boot_lock.py)
 - [railway.json](railway.json)
 
 </details>
 
 
 
-This page covers production deployment strategies for Automatos AI, focusing on the Railway-optimized topology, scaling strategies, worker profiles, and the integrated monitoring stack.
+This page covers production deployment strategies for Automatos AI, focusing on scaling, worker profiles, monitoring, and state management. The platform uses a modular architecture mirroring a 19-service Railway production topology.
 
 ---
 
-## Railway Production Topology
+## Deployment Architecture
 
-Automatos AI is deployed as a distributed system consisting of 19 services organized into 6 functional groups. This modular architecture ensures high availability and independent scaling of critical components.
+Automatos AI is designed as a distributed system of specialized containers. In production, these services are orchestrated across functional groups (Core, Voice, Memory, Monitoring, Data, and Landing) to handle high-concurrency agent executions and real-time streaming.
 
-### Service Group Architecture
+### Production Service Map
 
 ```mermaid
-graph TD
-    subgraph "Core Group (AutomatosAI/automatos-ai)"
-        API["automatos-ai-api<br/>(FastAPI)"]
-        UI["automotas-ai-frontend<br/>(Next.js)"]
-        WW["agent-workspace-worker<br/>(Task Execution)"]
-        AOW["agent-opt-worker<br/>(Optimization)"]
+graph TB
+    subgraph "Public Cloud / VPC (Railway)"
+        LB["Load Balancer / Ingress"]
+        
+        subgraph "Core Service Group"
+            FE["automotas-ai-frontend<br/>(Next.js)"]
+            BE["automatos-ai-api<br/>(FastAPI)"]
+            WW["agent-workspace-worker<br/>(Task Execution)"]
+            AOW["agent-opt-worker<br/>(FutureAGI)"]
+        end
+        
+        subgraph "Data & Memory Group"
+            PG[("automatos-ai-pgvector<br/>(Main DB)")]
+            RD[("Redis<br/>(Task Queue & Pub/Sub)")]
+            QD[("Qdrant<br/>(Vector DB)")]
+            MS["mem0-server<br/>(Long-term Memory)"]
+        end
+
+        subgraph "Monitoring Stack"
+            PROM["Prometheus"]
+            GRAF["Grafana"]
+            LOKI["Loki"]
+            LR["log-relay"]
+        end
     end
 
-    subgraph "Data Group (Infrastructure)"
-        PG[("automatos-ai-pgvector<br/>(Main DB)")]
-        RD[("Redis<br/>(Cache/Queue)")]
-        QD[("Qdrant<br/>(Vector Store)")]
-    end
-
-    subgraph "Monitoring Group (AutomatosAI/automatos-monitoring)"
-        PROM["Prometheus<br/>(Metrics)"]
-        GRAF["Grafana<br/>(Dashboards)"]
-        LOKI["Loki<br/>(Logs)"]
-        LR["log-relay<br/>(Log Drain)"]
-    end
-
-    subgraph "Voice Group (AutomatosAI/automatos-voice)"
-        VS["voice-service<br/>(TTS/STT)"]
-        VP["voice-pipeline<br/>(WebSocket)"]
-    end
-
-    subgraph "Memory Group (AutomatosAI/automatos-mem0)"
-        MS["mem0-server<br/>(L3 Memory)"]
-        MPG[("mem0-pgvector<br/>(Memory DB)")]
-    end
-
-    subgraph "Landing Group"
-        LP["automatos-ai-landing<br/>(Marketing)"]
-    end
-
-    UI --> API
-    API --> PG
-    API --> RD
-    API --> QD
-    API --> MS
-    API --> VS
+    LB --> FE
+    LB --> BE
+    BE --> RD
+    BE --> PG
+    BE --> QD
+    BE --> MS
     WW --> RD
-    LR --> LOKI
-    GRAF --> PROM
-    GRAF --> LOKI
+    AOW --> BE
+    
+    %% Monitoring Flow
+    BE -.-> LR
+    LR -.-> LOKI
+    LOKI -.-> GRAF
+    PROM -.-> GRAF
+    
+    style BE stroke-width:4px
+    style WW stroke-width:4px
 ```
 
-**Service Definitions:**
-- **Core**: The primary application logic, frontend, and specialized workers [infrastructure/railway-manifest.json:15-19]().
-- **Data**: High-performance persistence layer including PostgreSQL with `pgvector` [infrastructure/docker-compose.data.yml:19-45]().
-- **Monitoring**: Full observability stack for real-time system health [infrastructure/docker-compose.monitoring.yml:1-14]().
-- **Voice**: Dedicated services for Whisper STT and Chatterbox TTS [infrastructure/docker-compose.voice.yml:1-10]().
-- **Memory**: Isolated long-term memory server using the Mem0 protocol [infrastructure/docker-compose.memory.yml:1-10]().
+**Key Production Components:**
+- **automatos-ai-api**: Handles API requests, routing via `UniversalRouter`, and agent lifecycle management.
+- **agent-workspace-worker**: Executes sandboxed file operations and shell commands using persistent volumes at `/workspaces`.
+- **Monitoring Stack**: A dedicated group for observability including `log-relay` for Railway log drain webhooks and `Grafana` for visualization.
 
-Sources: [infrastructure/railway-manifest.json:14-44](), [infrastructure/docker-compose.yml:31-38]()
+### Railway Build Configuration
+The platform uses a `railway.json` configuration for production builds, targeting the `production` stage in the multi-stage `Dockerfile` [railway.json:3-6](). It implements a robust restart policy that allows up to 10 retries on failure [railway.json:9-10]().
+
+Sources: [railway.json:1-12]()
 
 ---
 
 ## Scaling Strategies & Worker Profiles
 
-Production performance is scaled by adjusting the concurrency and resource allocation of specific worker types.
+Production performance is scaled by adjusting the concurrency of specific worker types based on workload.
 
 ### Worker Profiles
 
-| Service | Scaling Strategy | Resource Profile | Code Reference |
+| Worker Type | Primary Responsibility | Scaling Metric | Code Entity / Service |
 | :--- | :--- | :--- | :--- |
-| `automatos-ai-api` | Horizontal (Replicas) | High CPU/RAM | [infrastructure/railway-manifest.json:47-57]() |
-| `agent-workspace-worker` | Vertical (Concurrency) | High RAM (Sandboxing) | [infrastructure/railway-manifest.json:123-134]() |
-| `voice-service` | GPU Acceleration | High GPU/RAM | [infrastructure/docker-compose.voice.yml:35-38]() |
-| `agent-opt-worker` | Horizontal (Job-based) | Moderate CPU | [infrastructure/railway-manifest.json:146-156]() |
+| **API Worker** | FastAPI request handling | Request Latency | `automatos-ai-api` |
+| **Workspace Worker** | Sandboxed tool execution | Queue Depth | `agent-workspace-worker` |
+| **Optimization Worker** | LLM prompt refinement | Job Backlog | `agent-opt-worker` |
 
-### Deployment Configuration
-The system uses `railway.json` to define build parameters, targeting the `production` stage in the Dockerfile [railway.json:1-7](). Deployment stability is maintained via an `ON_FAILURE` restart policy with 10 retries [railway.json:8-11]().
-
-Sources: [railway.json:1-12](), [infrastructure/railway-manifest.json:46-167]()
-
----
-
-## Monitoring Stack (Prometheus/Grafana/Loki)
-
-Automatos AI features a native observability stack to monitor LLM costs, agent performance, and system health.
-
-### Data Flow for Observability
+### Bootstrap Concurrency Control
+When scaling the API service to multiple workers (e.g., using `uvicorn` with multiple processes), the system uses a PostgreSQL advisory lock to prevent race conditions during database seeding.
 
 ```mermaid
 sequenceDiagram
-    participant App as "API/Workers"
-    participant LR as "Log Relay (Port 8080)"
-    participant LOKI as "Loki (Port 3100)"
-    participant PROM as "Prometheus (Port 9090)"
-    participant GRAF as "Grafana (Port 3000)"
-
-    App->>LR: Railway Log Drain (HTTP Post)
-    LR->>LOKI: Push formatted logs
-    App->>PROM: Metrics Scrape (Exporters)
-    GRAF->>PROM: Query Metrics
-    GRAF->>LOKI: Query Logs
-    GRAF-->>User: Unified Dashboard
+    participant W1 as Worker 1
+    participant W2 as Worker 2
+    participant DB as PostgreSQL (pg_advisory_lock)
+    
+    W1->>DB: SELECT pg_try_advisory_lock(47111)
+    DB-->>W1: true (acquired)
+    W2->>DB: SELECT pg_try_advisory_lock(47111)
+    DB-->>W2: false (denied)
+    
+    Note over W1: Executes run_seeds()
+    Note over W2: Skips seeding
+    
+    W1->>DB: SELECT pg_advisory_unlock(47111)
+    Note over W1,W2: Both workers start serving requests
 ```
 
-**Monitoring Components:**
-- **Prometheus**: Scrapes metrics from `postgres-exporter` (Port 9187) and `redis-exporter` (Port 9121) [infrastructure/docker-compose.monitoring.yml:153-182]().
-- **Loki**: Aggregates logs via the `log-relay` service, which acts as a bridge for Railway's log drain webhooks [infrastructure/docker-compose.monitoring.yml:106-124]().
-- **Grafana**: Pre-configured with Loki and Prometheus datasources for visualization [infrastructure/docker-compose.monitoring.yml:48-74]().
+The `boot_leader_lock` context manager uses the unique ID `47111` (0xB007) to ensure only one "leader" worker performs initialization tasks [orchestrator/core/database/boot_lock.py:21-45](). This lock is session-scoped and automatically releases if the connection is lost [orchestrator/core/database/boot_lock.py:8-9]().
 
-Sources: [infrastructure/docker-compose.monitoring.yml:1-193](), [infrastructure/.env.example:170-184]()
+Sources: [orchestrator/core/database/boot_lock.py:1-55]()
 
 ---
 
-## Security & Credential Management
+## Monitoring & Observability Stack
 
-Production environments secure sensitive data using a multi-tier encryption and isolation strategy.
+The platform implements a comprehensive monitoring stack to track LLM costs, system health, and logs.
 
-### Encryption Implementation
-The `EncryptionService` handles sensitive LLM keys using Fernet (AES-128-CBC) [orchestrator/core/credentials/encryption.py:34-35]().
+### Metrics and Logs Data Flow
 
-1. **Primary Key**: Loaded from `CREDENTIAL_ENCRYPTION_KEY` environment variable [orchestrator/core/credentials/encryption.py:61-76]().
-2. **Fallback**: Persistent file `.credential_key` [orchestrator/core/credentials/encryption.py:79-90]().
-3. **Internal Auth**: `WORKER_INTERNAL_TOKEN` secures communication between the API and Workspace Workers [infrastructure/.env.example:58]().
+```mermaid
+graph LR
+    subgraph "Sources"
+        API["automatos-ai-api"]
+        DB["automatos-ai-pgvector"]
+        RED["Redis"]
+    end
 
-### Network Isolation
-All services communicate over a private external network named `automatos_network` [infrastructure/docker-compose.data.yml:109-111](). Databases like `pgvector` and `Redis` are configured with strong passwords and restricted access [infrastructure/docker-compose.data.yml:31-34, 58-60]().
+    subgraph "Collectors"
+        P_EXP["postgres-exporter"]
+        R_EXP["redis-exporter"]
+        LR["log-relay"]
+    end
 
-Sources: [orchestrator/core/credentials/encryption.py:24-184](), [infrastructure/docker-compose.data.yml:1-112](), [infrastructure/.env.example:52-59]()
+    subgraph "Storage"
+        PROM["prometheus"]
+        LOKI["loki"]
+    end
+
+    API -- "Logs" --> LR
+    DB -- "Metrics" --> P_EXP
+    RED -- "Metrics" --> R_EXP
+    
+    P_EXP --> PROM
+    R_EXP --> PROM
+    LR --> LOKI
+    
+    PROM --> GRAF["grafana"]
+    LOKI --> GRAF
+```
+
+- **log-relay**: Receives Railway log drain webhooks and bridges them to Loki.
+- **Exporters**: Dedicated containers for `postgres-exporter` and `redis-exporter` translate service-specific metrics for Prometheus consumption.
+- **Grafana**: Configured with admin security and custom data source UIDs for Loki and Prometheus.
 
 ---
 
-## Backup & Persistence Strategies
+## Data Infrastructure & Memory Tiers
 
-### Data Volume Management
-The production topology utilizes 9 distinct persistent volumes to ensure data durability across container restarts:
+Production data is partitioned to ensure performance and isolation of memory workloads.
 
-| Volume Name | Service | Mount Path | Purpose |
-| :--- | :--- | :--- | :--- |
-| `pgvector_data` | `pgvector` | `/var/lib/postgresql/data/` | Main application database [infrastructure/docker-compose.data.yml:37]() |
-| `redis_data` | `redis` | `/data` | Task queue and cache persistence [infrastructure/docker-compose.data.yml:68]() |
-| `qdrant_data` | `qdrant` | `/qdrant/storage` | Vector embeddings [infrastructure/docker-compose.data.yml:90]() |
-| `agent-workspace-data` | `workspace-worker` | `/workspaces` | Agent filesystem (50GB) [infrastructure/railway-manifest.json:135-137]() |
-| `prometheus_data` | `prometheus` | `/prometheus` | Historical metrics [infrastructure/docker-compose.monitoring.yml:33]() |
+### Database Allocation
+1. **Main Database**: `automatos-ai-pgvector` (PostgreSQL 18) handles core relational data and agent metadata.
+2. **Memory Database**: `mem0-pgvector` is a dedicated instance for `mem0-server` to isolate heavy embedding vector workloads from the main API.
+3. **Vector Cache**: `Qdrant` provides high-performance vector search for RAG and document ingestion.
 
-### Recovery Procedures
-- **Database**: Standard PostgreSQL WAL-based backups should be configured on the `pgvector` service.
-- **State**: Redis is configured with `save 60 1` (save every 60 seconds if 1 key changed) to minimize data loss in the task queue [infrastructure/docker-compose.data.yml:59]().
+### Redis Configuration
+Redis is tuned for high-throughput with specific memory policies:
+- **Max Memory**: 256MB.
+- **Eviction Policy**: `allkeys-lru`.
+- **Persistence**: Aggressive saving to ensure task queue durability.
 
-Sources: [infrastructure/docker-compose.data.yml:100-107](), [infrastructure/docker-compose.monitoring.yml:184-193](), [infrastructure/railway-manifest.json:135-137]()
+---
+
+## Backup & Recovery
+
+### Data Persistence
+- **Main DB**: Standard PostgreSQL volume at `/var/lib/postgresql/data/`.
+- **Persistent Volumes**: Production workers map directories for workspaces (`/workspaces`) with a 50GB size allocation.
+- **Monitoring Data**: Prometheus, Grafana, Loki, and Alertmanager all utilize dedicated named volumes to ensure observability history is not lost on container restart.
+
+### Advisory Lock Safety
+The use of `pg_advisory_unlock` in a `finally` block ensures that even if a seed operation fails, the lock is released for subsequent attempts or other processes [orchestrator/core/database/boot_lock.py:49-54]().
+
+Sources: [orchestrator/core/database/boot_lock.py:47-54](), [railway.json:1-12]()
 
 ---

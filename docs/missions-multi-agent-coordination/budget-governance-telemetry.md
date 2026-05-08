@@ -5,67 +5,56 @@
 
 The following files were used as context for generating this wiki page:
 
-- [docs/PRDS/82C-PARALLEL-EXECUTION-BUDGET-DECOMPOSITION.md](docs/PRDS/82C-PARALLEL-EXECUTION-BUDGET-DECOMPOSITION.md)
-- [orchestrator/alembic/versions/prd123_checkpoint_count.py](orchestrator/alembic/versions/prd123_checkpoint_count.py)
+- [frontend/components/missions/create-mission-modal.tsx](frontend/components/missions/create-mission-modal.tsx)
+- [frontend/components/missions/human-review-panel.tsx](frontend/components/missions/human-review-panel.tsx)
+- [frontend/components/missions/mission-results-panel.tsx](frontend/components/missions/mission-results-panel.tsx)
+- [frontend/types/missions.ts](frontend/types/missions.ts)
+- [orchestrator/alembic/versions/prd139_tool_routing_graph.py](orchestrator/alembic/versions/prd139_tool_routing_graph.py)
+- [orchestrator/alembic/versions/prd139_tool_routing_telemetry.py](orchestrator/alembic/versions/prd139_tool_routing_telemetry.py)
 - [orchestrator/api/missions.py](orchestrator/api/missions.py)
-- [orchestrator/config.py](orchestrator/config.py)
-- [orchestrator/core/context_guard.py](orchestrator/core/context_guard.py)
-- [orchestrator/core/models/orchestration.py](orchestrator/core/models/orchestration.py)
-- [orchestrator/core/models/orchestration_enums.py](orchestrator/core/models/orchestration_enums.py)
-- [orchestrator/main.py](orchestrator/main.py)
-- [orchestrator/modules/coordination/dispatcher.py](orchestrator/modules/coordination/dispatcher.py)
+- [orchestrator/core/models/__init__.py](orchestrator/core/models/__init__.py)
+- [orchestrator/core/models/tool_routing.py](orchestrator/core/models/tool_routing.py)
+- [orchestrator/core/services/mission_memory_service.py](orchestrator/core/services/mission_memory_service.py)
 - [orchestrator/modules/coordination/planner.py](orchestrator/modules/coordination/planner.py)
 - [orchestrator/modules/coordination/reconciler.py](orchestrator/modules/coordination/reconciler.py)
-- [orchestrator/modules/memory/context_router.py](orchestrator/modules/memory/context_router.py)
-- [orchestrator/modules/memory/unified_memory_service.py](orchestrator/modules/memory/unified_memory_service.py)
-- [orchestrator/modules/tools/discovery/action_registry.py](orchestrator/modules/tools/discovery/action_registry.py)
-- [orchestrator/modules/tools/execution/concurrency.py](orchestrator/modules/tools/execution/concurrency.py)
-- [orchestrator/services/checkpoint_service.py](orchestrator/services/checkpoint_service.py)
+- [orchestrator/modules/coordination/verification.py](orchestrator/modules/coordination/verification.py)
+- [orchestrator/modules/tools/discovery/graph_router.py](orchestrator/modules/tools/discovery/graph_router.py)
+- [orchestrator/modules/tools/execution/exec_composio.py](orchestrator/modules/tools/execution/exec_composio.py)
+- [orchestrator/modules/tools/execution/telemetry.py](orchestrator/modules/tools/execution/telemetry.py)
 - [orchestrator/services/coordinator_service.py](orchestrator/services/coordinator_service.py)
 - [orchestrator/services/orchestration_state.py](orchestrator/services/orchestration_state.py)
-- [orchestrator/tests/test_budget_gate.py](orchestrator/tests/test_budget_gate.py)
-- [orchestrator/tests/test_dispatcher_parallel.py](orchestrator/tests/test_dispatcher_parallel.py)
-- [orchestrator/tests/test_unified_memory.py](orchestrator/tests/test_unified_memory.py)
-- [scripts/ralph/IMPLEMENTATION_PLAN.md](scripts/ralph/IMPLEMENTATION_PLAN.md)
-- [scripts/ralph/PROMPT_build.md](scripts/ralph/PROMPT_build.md)
-- [scripts/ralph/archive/2026-03-21-82b-mission-intelligence/prd.json](scripts/ralph/archive/2026-03-21-82b-mission-intelligence/prd.json)
-- [scripts/ralph/archive/2026-03-21-82b-mission-intelligence/progress.txt](scripts/ralph/archive/2026-03-21-82b-mission-intelligence/progress.txt)
-- [scripts/ralph/archive/2026-03-24-prd-82c-parallel-budget/IMPLEMENTATION_PLAN.md](scripts/ralph/archive/2026-03-24-prd-82c-parallel-budget/IMPLEMENTATION_PLAN.md)
-- [scripts/ralph/archive/2026-03-24-prd-82c-parallel-budget/prd.json](scripts/ralph/archive/2026-03-24-prd-82c-parallel-budget/prd.json)
-- [scripts/ralph/archive/2026-03-24-prd-82c-parallel-budget/progress.txt](scripts/ralph/archive/2026-03-24-prd-82c-parallel-budget/progress.txt)
-- [scripts/ralph/loop.sh](scripts/ralph/loop.sh)
-- [scripts/ralph/prd.json](scripts/ralph/prd.json)
-- [scripts/ralph/progress.txt](scripts/ralph/progress.txt)
+- [orchestrator/tests/test_graph_router.py](orchestrator/tests/test_graph_router.py)
+- [orchestrator/tests/test_prd139_telemetry.py](orchestrator/tests/test_prd139_telemetry.py)
+- [orchestrator/tests/test_seed_telemetry.py](orchestrator/tests/test_seed_telemetry.py)
+- [orchestrator/tests/test_tool_routing_models.py](orchestrator/tests/test_tool_routing_models.py)
 
 </details>
 
 
 
-The Budget Governance and Telemetry system provides the economic and observational guardrails for autonomous mission execution. It implements a cost-denominated token bucket for admission control, granular usage attribution to specific mission tasks, and a hybrid telemetry storage model that combines denormalized state with an append-only event log.
+The Budget Governance and Telemetry system provides the economic and observational guardrails for autonomous mission execution. It implements a cost-denominated token bucket for admission control, granular usage attribution to specific mission tasks, and a hybrid telemetry storage model that combines denormalized state with an append-only event log and graph-based tool routing telemetry.
 
 ## 1. Budget Governance & Admission Control
 
-The platform implements a governance layer to prevent runaway costs during autonomous loops. This is managed via the `budget_config` and `budget_spent` fields on the `OrchestrationRun` model [[orchestrator/core/models/orchestration.py:114-116]]().
+The platform implements a governance layer to prevent runaway costs during autonomous loops. This is managed via the `budget_config` and `budget_spent` fields on the `OrchestrationRun` model [orchestrator/core/models/orchestration.py:114-116]().
 
-### 1.1 Token Bucket & Cost Tracking
-Budgets are tracked at both the Mission Run (`OrchestrationRun`) and the individual Task (`OrchestrationTask`) levels. 
+### 1.1 Mission Power Modes
+The `CoordinatorService` defines "Power Modes" that apply per-mission caps on model selection, token usage, and tool iterations [orchestrator/services/coordinator_service.py:76-80]().
 
-*   **Budget Configuration:** The `budget_config` JSONB field stores limits such as `max_cost`, `max_tokens`, and `alert_at_pct` [[orchestrator/core/models/orchestration.py:115-115]]().
-*   **Spent Tracking:** The `budget_spent` field provides a live counter of `cost`, `tokens`, and `api_calls` [[orchestrator/core/models/orchestration.py:116-116]]().
-*   **Hard Rejection:** If a mission exceeds its allocated budget, the system can trigger a `RUN_BUDGET_EXCEEDED` state transition [[orchestrator/core/models/orchestration_enums.py:77-77]]().
-*   **Soft Budget Tracking:** The `CoordinatorService` performs soft budget tracking and emits warning events when thresholds are approached [[orchestrator/services/coordinator_service.py:13-15]]().
+| Mode | Max Tokens | Max Tool Iterations | LLM Tier |
+| :--- | :--- | :--- | :--- |
+| `light` | 2,000 | 5 | `system_llm` [orchestrator/services/coordinator_service.py:77]() |
+| `standard` | 4,000 | 10 | Agent Default [orchestrator/services/coordinator_service.py:78]() |
+| `max` | 16,000 | 50 | `orchestrator_llm` [orchestrator/services/coordinator_service.py:79]() |
 
-### 1.2 Usage Attribution
-Usage is attributed using a `mission_task_id` context. The system tracks consumption at the task level to enable granular ROI analysis.
+### 1.2 Admission Control (Budget Gate)
+Before a mission is approved, the `MissionPlanner` estimates the required token budget by summing the expected costs of each task's complexity tier [orchestrator/modules/coordination/planner.py:124-130]().
 
-| Entity | Field | Purpose |
-| :--- | :--- | :--- |
-| `OrchestrationRun` | `token_budget_estimate` | Initial estimate for the entire mission [[orchestrator/core/models/orchestration.py:97-97]]() |
-| `OrchestrationRun` | `tokens_used` | Aggregate tokens consumed across all tasks [[orchestrator/core/models/orchestration.py:98-98]]() |
-| `OrchestrationTask` | `tokens_used` | Specific consumption for one task attempt [[orchestrator/core/models/orchestration.py:240-240]]() |
-| `OrchestrationRun` | `budget_spent` | JSONB breakdown of costs, tokens, and API calls [[orchestrator/core/models/orchestration.py:116-116]]() |
+*   **Complexity Detection:** The system scores goals based on word count, deliverable keywords (e.g., "report", "pipeline"), and domain breadth to assign a `ComplexityTier` [orchestrator/modules/coordination/planner.py:184-210]().
+*   **Token Allocation:** Each tier (e.g., `SMALL`, `MEDIUM`, `LARGE`) maps to a specific token budget defined in `COMPLEXITY_TOKEN_BUDGET` [orchestrator/modules/coordination/planner.py:124-130]().
+*   **User Overrides:** Users can manually override the `token_budget_override` during the mission approval phase via `POST /api/missions/{id}/approve` [orchestrator/api/missions.py:100-102]().
 
-**Sources:** [[orchestrator/core/models/orchestration.py:94-116]](), [[orchestrator/services/coordinator_service.py:13-15]](), [[orchestrator/core/models/orchestration_enums.py:76-78]]().
+**Sources:** [orchestrator/services/coordinator_service.py:76-80](), [orchestrator/modules/coordination/planner.py:124-210](), [orchestrator/api/missions.py:95-102]().
 
 ---
 
@@ -74,14 +63,13 @@ Usage is attributed using a `mission_task_id` context. The system tracks consump
 Automatos uses a hybrid storage pattern for telemetry, ensuring high-performance querying for the UI while maintaining a full audit trail.
 
 ### 2.1 Hybrid Data Model
-1.  **Denormalized State (Task Rows):** Current state, output excerpts, and failure codes are stored on `OrchestrationTask` [[orchestrator/core/models/orchestration.py:153-245]]().
-2.  **Append-only Event Log (`orchestration_events`):** Every transition is recorded as an immutable event in the `OrchestrationEvent` table [[orchestrator/core/models/orchestration.py:276-322]]().
-3.  **Mission History API:** Telemetry is exposed via endpoints like `/api/missions/{id}/events` and `/api/missions/{id}/cost` for detailed breakdowns [[orchestrator/api/missions.py:13-14]]().
+1.  **Denormalized State (Task Rows):** Current state, output excerpts, and failure codes are stored on `OrchestrationTask` [orchestrator/core/models/orchestration.py:153-245]().
+2.  **Append-only Event Log (`orchestration_events`):** Every transition is recorded as an immutable event in the `OrchestrationEvent` table [orchestrator/core/models/orchestration.py:276-322]().
+3.  **Tool Routing Telemetry:** The system captures `used_after` signals between tool executions to build a probabilistic tool routing graph [orchestrator/core/models/tool_routing.py:53-75]().
 
 ### 2.2 Event Schema
-The `OrchestrationEvent` table captures the "Who, When, and Why" of every mission step.
+The `OrchestrationEvent` table captures the "Who, When, and Why" of every mission step using the `EventType` and `ActorType` enums [orchestrator/core/models/orchestration_enums.py:67-138]().
 
-Title: Mission Event Telemetry Schema
 ```mermaid
 classDiagram
     class "OrchestrationEvent" {
@@ -98,75 +86,83 @@ classDiagram
     }
     class "EventType" {
         <<enumeration>>
-        "RUN_BUDGET_WARNING"
-        "TASK_CREATED"
-        "TASK_COMPLETED"
-        "TASK_VERIFICATION_FAILED"
+        TASK_STARTED
+        TASK_OUTPUT_SUBMITTED
+        RUN_BUDGET_WARNING
+        STALL_DETECTED
+    }
+    class "ActorType" {
+        <<enumeration>>
+        COORDINATOR
+        AGENT
+        VERIFIER
+        HUMAN
     }
     "OrchestrationEvent" ..> "EventType" : "stores"
+    "OrchestrationEvent" ..> "ActorType" : "attributes to"
 ```
 
-**Sources:** [[orchestrator/core/models/orchestration.py:276-322]](), [[orchestrator/core/models/orchestration_enums.py:66-113]](), [[orchestrator/api/missions.py:154-193]]().
+**Sources:** [orchestrator/core/models/orchestration.py:276-322](), [orchestrator/core/models/orchestration_enums.py:67-138](), [orchestrator/core/models/tool_routing.py:53-75]().
 
 ---
 
-## 3. Ephemeral Contractor Agents
+## 3. Ephemeral Contractor Agents & Cost Optimization
 
-For mission tasks that require specific models or isolated environments, the system utilizes ephemeral "Contractor" configurations.
+For mission tasks that require specific capabilities, the system utilizes ephemeral configurations and model overrides to optimize for cost and speed.
 
-### 3.1 Contractor Lifecycle & Diversity
-*   **Model Selection:** The `MissionPlanner` can assign specific `agent_role` requirements to tasks [[orchestrator/core/models/orchestration.py:195-195]]().
-*   **Agent Matching:** The `MissionDispatcher` uses an `AgentMatcher` to select the best active agent for a task role [[orchestrator/modules/coordination/dispatcher.py:41-41]]().
-*   **Cognitive Diversity:** Verification criteria are stored in `OrchestrationTask.verification_criteria` [[orchestrator/core/models/orchestration.py:219-219]](), allowing the `VerificationService` to use different models for execution vs. verification.
+### 3.1 Synthesis Model Overrides
+The `CoordinatorService` implements a "Synthesis Override" pattern. Since synthesis tasks consolidate prior outputs and don't require premium reasoning, the system biases toward fast, cheap models (e.g., Gemini Flash or Claude Haiku) [orchestrator/services/coordinator_service.py:86-97]().
 
-**Sources:** [[orchestrator/core/models/orchestration.py:195-219]](), [[orchestrator/modules/coordination/dispatcher.py:41-41]]().
+*   **Resolution:** `_resolve_synthesis_model` checks for active models in the global registry or workspace before applying an override [orchestrator/services/coordinator_service.py:99-113]().
+*   **Runtime Mutation:** The `agent_runtime.llm_manager.config` is temporarily mutated for the duration of the task and restored afterward to prevent cache pollution [orchestrator/services/coordinator_service.py:157-185]().
+
+### 3.2 Verification Guardrails
+The `VerificationService` implements a cross-model review process. To maintain objectivity, it selects a verifier model from a different family than the executor (e.g., if the agent used GPT-4, the verifier might use Claude) [orchestrator/modules/coordination/verification.py:101-140]().
+
+**Sources:** [orchestrator/services/coordinator_service.py:86-185](), [orchestrator/modules/coordination/verification.py:101-140]().
 
 ---
 
-## 4. Data Flow: Budget & Telemetry Integration
+## 4. Data Flow: Coordination & Telemetry Integration
 
-The `CoordinatorService` and `MissionDispatcher` collaborate to update telemetry and enforce budget gates.
+The coordination loop integrates state transitions with event emission. The `transition_task` and `transition_run` functions implement a dual-write pattern where the row update and event log append happen in the same transaction [orchestrator/services/orchestration_state.py:84-98]().
 
-Title: Mission Execution & Budget Flow
 ```mermaid
 sequenceDiagram
-    participant "CoordinatorService" as CS
-    participant "MissionDispatcher" as MD
-    participant "AgentFactory" as AF
-    participant "PostgreSQL" as DB
+    participant CS as "CoordinatorService"
+    participant MR as "MissionReconciler"
+    participant OS as "orchestration_state.py"
+    participant DB as "PostgreSQL (orchestration_events)"
+    participant MS as "MissionMemoryService"
 
-    CS->>MD: "dispatch_ready(db, run, agents)"
-    MD->>MD: "count_active_tasks(db, run_id)"
-    MD->>DB: "claim_task(db, task, agent_id)"
-    Note over MD,DB: "Optimistic lock via version_id"
+    CS->>MR: "reconcile(run)"
+    MR->>OS: "transition_task(TASK_VERIFIED)" [orchestrator/modules/coordination/reconciler.py:150]
+    OS->>DB: "INSERT OrchestrationEvent" [orchestrator/services/orchestration_state.py:149]
+    OS->>DB: "UPDATE OrchestrationTask" [orchestrator/services/orchestration_state.py:131]
     
-    MD->>AF: "execute_with_prompt(agent, task_prompt)"
-    AF-->>MD: "ExecutionResult (output, tokens)"
-    
-    MD->>DB: "transition_task(COMPLETED)"
-    MD->>DB: "Update OrchestrationRun.tokens_used"
-    MD->>DB: "Update OrchestrationRun.budget_spent"
-    MD->>DB: "emit_event(TASK_COMPLETED)"
+    Note over MR,MS: "Failure Capture"
+    MR->>MS: "store_task_failure(task)" [orchestrator/modules/coordination/reconciler.py:67]
+    MS->>DB: "Log outcome telemetry"
 ```
 
-**Sources:** [[orchestrator/modules/coordination/dispatcher.py:76-180]](), [[orchestrator/services/coordinator_service.py:78-86]](), [[orchestrator/core/models/orchestration.py:133-136]]().
+**Sources:** [orchestrator/services/orchestration_state.py:84-185](), [orchestrator/modules/coordination/reconciler.py:63-180](), [orchestrator/core/services/mission_memory_service.py:1-50]().
 
 ---
 
 ## 5. Key Implementation Classes
 
-### `CoordinatorService`
-Main orchestration service running a 5s tick loop. It manages the mission lifecycle, handles parallel dispatch via the `MissionDispatcher`, and performs budget tracking [[orchestrator/services/coordinator_service.py:5-17]]().
+### `OrchestrationRun`
+The central state record for a mission. It tracks `RunState`, `budget_spent` (JSONB), and `tokens_used` for the entire mission lifecycle [orchestrator/core/models/orchestration.py:39-136]().
 
-### `MissionDispatcher`
-Handles the atomic claiming of tasks using optimistic locking (`version_id`) and tracks token usage per task and per run [[orchestrator/modules/coordination/dispatcher.py:9-17]]().
+### `OrchestrationTask`
+Individual unit of work within a mission. It attributes costs (`tokens_used`) and records failure codes (e.g., `STALL`, `LLM_ERROR`) for granular telemetry [orchestrator/core/models/orchestration.py:153-245]().
 
-### `MissionPlanner`
-Decomposes goals into a task DAG. It attempts template matching first before falling back to LLM-based decomposition [[orchestrator/modules/coordination/planner.py:7-12]]().
+### `MissionReconciler`
+Stateless service that runs on every coordinator tick to detect stalled tasks and verify completions. It triggers the state transitions that generate telemetry events [orchestrator/modules/coordination/reconciler.py:116-140]().
 
-### `ActionRegistry`
-Central registry for platform actions. It manages `ActionDefinition` objects which include metadata for `permission_level`, `admin_only` status, and whether an action is `promoted` to a first-class schema [[orchestrator/modules/tools/discovery/action_registry.py:2-13]]().
+### `UsageTracker` (via Tool Routing)
+While not a single class, the `tool_routing_edges` and `tool_routing_affinities` tables act as a telemetry sink for tool usage patterns, tracking `sample_count` and `confidence` of tool chains [orchestrator/core/models/tool_routing.py:53-118]().
 
-**Sources:** [[orchestrator/services/coordinator_service.py:78-86]](), [[orchestrator/modules/coordination/dispatcher.py:76-81]](), [[orchestrator/modules/coordination/planner.py:1-15]](), [[orchestrator/modules/tools/discovery/action_registry.py:27-42]]().
+**Sources:** [orchestrator/core/models/orchestration.py:39-245](), [orchestrator/modules/coordination/reconciler.py:116-140](), [orchestrator/core/models/tool_routing.py:53-118]().
 
 ---

@@ -5,210 +5,170 @@
 
 The following files were used as context for generating this wiki page:
 
-- [README.md](README.md)
 - [docker-compose.yml](docker-compose.yml)
-- [docs/README.md](docs/README.md)
 - [frontend/.dockerignore](frontend/.dockerignore)
 - [frontend/Dockerfile](frontend/Dockerfile)
-- [infrastructure/.env.example](infrastructure/.env.example)
-- [infrastructure/docker-compose.core.yml](infrastructure/docker-compose.core.yml)
-- [infrastructure/docker-compose.data.yml](infrastructure/docker-compose.data.yml)
-- [infrastructure/docker-compose.landing.yml](infrastructure/docker-compose.landing.yml)
-- [infrastructure/docker-compose.memory.yml](infrastructure/docker-compose.memory.yml)
-- [infrastructure/docker-compose.monitoring.yml](infrastructure/docker-compose.monitoring.yml)
-- [infrastructure/docker-compose.voice.yml](infrastructure/docker-compose.voice.yml)
-- [infrastructure/docker-compose.yml](infrastructure/docker-compose.yml)
-- [infrastructure/railway-manifest.json](infrastructure/railway-manifest.json)
 - [orchestrator/Dockerfile](orchestrator/Dockerfile)
 - [orchestrator/api/cloud_documents.py](orchestrator/api/cloud_documents.py)
 - [orchestrator/core/redis/client.py](orchestrator/core/redis/client.py)
-- [orchestrator/modules/tools/services/__init__.py](orchestrator/modules/tools/services/__init__.py)
 - [orchestrator/requirements.txt](orchestrator/requirements.txt)
 
 </details>
 
 
 
-This page documents the Docker Compose orchestration for Automatos AI, covering service definitions, dependencies, health checks, volumes, networks, and modular deployment strategies. For individual Dockerfile details, see [Docker Containerization](20.1). For environment variable configuration, see [Environment Variables](20.3).
+This page documents the Docker Compose orchestration for Automatos AI, covering service definitions, dependencies, health checks, volumes, networks, and deployment profiles. The setup mirrors a 19-service production topology used in Railway deployments, organized into modular functional groups.
 
 ## Purpose and Scope
 
-The Automatos AI platform uses a modular Docker Compose architecture to support environments ranging from local development to full-scale production clusters. The setup is divided into a unified `docker-compose.yml` for quick starts and a suite of specialized infrastructure files for granular control.
+The Docker Compose configuration orchestrates all services required to run Automatos AI in a containerized environment. It defines:
 
-- **Unified Composition**: A single entry point that includes all service groups (data, core, monitoring, voice, memory, landing) [infrastructure/docker-compose.yml:31-37]().
-- **Core Services**: FastAPI backend, Next.js frontend, and task workers [infrastructure/docker-compose.core.yml:14-167]().
-- **Data Infrastructure**: PostgreSQL with pgvector, Redis for caching/queues, and Qdrant for vector storage [infrastructure/docker-compose.data.yml:13-98]().
-- **Observability Stack**: Prometheus, Grafana, Loki, and exporters for system health monitoring [infrastructure/docker-compose.monitoring.yml:16-183]().
-- **Specialized Services**: Voice (TTS/STT) [infrastructure/docker-compose.voice.yml:12-85]() and Memory (Mem0) [infrastructure/railway-manifest.json:25-29]().
+- **Core Services**: PostgreSQL, Redis, FastAPI backend, Next.js frontend [docker-compose.yml:18-170]().
+- **Data Infrastructure**: Dedicated pgvector and Redis instances [docker-compose.yml:22-73]().
+- **Worker Services**: `workspace-worker` for isolated task execution and `agent-opt-worker` for prompt optimization [docker-compose.yml:178-217]().
+- **Support Services**: Gotenberg for document generation (PRD-63) [docker-compose.yml:109]().
 
-Sources: [infrastructure/docker-compose.yml:1-38](), [infrastructure/railway-manifest.json:14-44]()
+Sources: [docker-compose.yml:1-217](), [orchestrator/Dockerfile:1-141](), [frontend/Dockerfile:1-115]()
 
 ---
 
-## Service Architecture Overview
+## Modular Architecture
 
-The platform is architected into 6 functional service groups. This modularity allows developers to spin up only the necessary components (e.g., just the data layer) during development.
+The system uses a unified `docker-compose.yml` with profiles to manage service groups, allowing for both minimal local development and full-scale worker deployments.
 
-**Service Dependency and Data Flow**
+### Service Grouping
+
+| Group | Service Name | Role |
+|-------|--------------|------|
+| **Database** | `postgres` | Primary storage with `pgvector` [docker-compose.yml:22-43]() |
+| **Cache** | `redis` | Pub/Sub hub and session store [docker-compose.yml:48-73]() |
+| **API** | `backend` | FastAPI orchestrator [docker-compose.yml:78-138]() |
+| **UI** | `frontend` | Next.js dashboard [docker-compose.yml:146-170]() |
+| **Workers** | `workspace-worker` | Isolated agent task execution [docker-compose.yml:178-202]() |
+| **Optimization**| `agent-opt-worker` | FutureAGI prompt scoring/optimization [docker-compose.yml:204-217]() |
+
+**System Data Flow & Networking**
 
 ```mermaid
 graph TB
-    subgraph "Data Group"
-        pg["pgvector<br/>(PostgreSQL 18)"]
-        redis["redis<br/>(Redis 8.2.1)"]
-        qdrant["qdrant<br/>(Vector DB)"]
-    end
-    
-    subgraph "Core Group"
-        api["automatos-ai-api<br/>(FastAPI)"]
-        ui["automotas-ai-frontend<br/>(Next.js)"]
-        ww["workspace-worker<br/>(Task Exec)"]
-    end
-    
-    subgraph "Monitoring Group"
-        prom["prometheus"]
-        graf["grafana"]
-        loki["loki"]
+    subgraph "Public Entrypoints"
+        LB_API["localhost:8000"]
+        LB_UI["localhost:3000"]
     end
 
-    pg --> api
-    redis --> api
-    qdrant --> api
-    api --> ui
-    redis --> ww
-    pg --> ww
+    subgraph "Core Group"
+        API["automatos_backend<br/>(FastAPI)"]
+        UI["automatos_frontend<br/>(Next.js)"]
+    end
+
+    subgraph "Worker Group (Profile: workers)"
+        WS_WORKER["workspace_worker<br/>(ARQ/Redis)"]
+        OPT_WORKER["agent_opt_worker<br/>(FutureAGI)"]
+    end
+
+    subgraph "Data Group"
+        PG["postgres<br/>(pgvector)"]
+        RD["redis<br/>(Cache/PubSub)"]
+    end
+
+    LB_API --> API
+    LB_UI --> UI
     
-    api -.->|"metrics"| prom
-    prom --> graf
-    api -.->|"logs"| loki
+    API --> PG
+    API --> RD
+    WS_WORKER --> RD
+    WS_WORKER --> PG
+    OPT_WORKER --> API
 ```
 
-**Service Startup Sequence**
-1. **Infrastructure**: `pgvector`, `redis`, and `qdrant` start first. Health checks verify readiness [infrastructure/docker-compose.data.yml:38-43](), [infrastructure/docker-compose.data.yml:69-74]().
-2. **Backend**: `automatos-ai-api` waits for `pgvector` and `redis` to be healthy [infrastructure/docker-compose.core.yml:113-117]().
-3. **Frontend**: `automotas-ai-frontend` waits for the API [infrastructure/docker-compose.core.yml:156-158]().
-4. **Workers**: `workspace-worker` starts to consume task queues from Redis [infrastructure/docker-compose.core.yml:169-170]().
-
-Sources: [infrastructure/docker-compose.core.yml:14-167](), [infrastructure/docker-compose.data.yml:13-112]()
+Sources: [docker-compose.yml:18-217](), [orchestrator/core/redis/client.py:141-197]()
 
 ---
 
-## Core Services
+## Core Infrastructure Implementation
 
-### Backend API (FastAPI)
-The backend is the central orchestrator, managing agent lifecycles, tool execution, and database interactions.
+### Backend (FastAPI)
+The backend service is built using a multi-stage `Dockerfile` targeting `python:3.11-slim` [orchestrator/Dockerfile:13](). It includes system dependencies for OCR (`tesseract-ocr`), document processing (`ghostscript`), and PDF generation (`libpango`) [orchestrator/Dockerfile:18-32]().
 
-| Property | Value | Purpose |
-|----------|-------|---------|
-| Image | `production` stage | Optimized image without dev tools [orchestrator/Dockerfile:90]() |
-| Port | 8000 | Primary API and WebSocket endpoint [infrastructure/docker-compose.core.yml:27]() |
-| Health Check | `/health` | Verifies FastAPI app is responsive [infrastructure/docker-compose.core.yml:118-123]() |
-
-**Key Environment Integrations**:
-- **Database**: Connects via `DATABASE_URL` using SQLAlchemy [infrastructure/docker-compose.core.yml:30]().
-- **Task Runner**: Configurable backend (defaulting to Redis) for async jobs [infrastructure/docker-compose.core.yml:112]().
-- **External Services**: Links to `VOICE_SERVICE_URL`, `MEM0_API_URL`, and `AGENT_OPT_WORKER_URL` [infrastructure/docker-compose.core.yml:68-71]().
-
-Sources: [infrastructure/docker-compose.core.yml:19-126](), [orchestrator/Dockerfile:88-130]()
+- **Entrypoint**: Runs `alembic upgrade heads` before starting `uvicorn` to ensure schema synchronization [orchestrator/Dockerfile:140]().
+- **Hot Reload**: In development mode, the `./orchestrator` directory is mounted to `/app` [docker-compose.yml:126]().
 
 ### Frontend (Next.js)
-The frontend uses Next.js standalone mode for production, reducing image size by including only necessary node_modules [frontend/Dockerfile:83-114]().
+The frontend uses a multi-stage build that outputs a standalone Node.js server for production efficiency [frontend/Dockerfile:83-114]().
 
-**Build Arguments**:
-Next.js bakes `NEXT_PUBLIC_*` variables into the client bundle at build time. These must be provided during the Docker build process [frontend/Dockerfile:58-71]().
+- **Environment Injection**: `NEXT_PUBLIC_API_URL` and Clerk keys are baked into the client bundle during the build stage [frontend/Dockerfile:58-71]().
+- **Security**: Runs as a non-root `nextjs` user [frontend/Dockerfile:93-101]().
 
-Sources: [frontend/Dockerfile:53-81](), [infrastructure/docker-compose.core.yml:131-166]()
+### Redis Pub/Sub & Task Queue
+Redis is the central nervous system for real-time updates. The `RedisClient` class manages connection pools and async pub/sub for WebSocket streaming [orchestrator/core/redis/client.py:14-64]().
 
----
+- **Workflow Events**: The `publish_workflow_event` method routes execution updates to channels like `workflow:{id}:execution:{id}` [orchestrator/core/redis/client.py:110-119]().
+- **Security**: The `redis` service renames dangerous commands like `FLUSHALL` and `FLUSHDB` to prevent accidental data loss [docker-compose.yml:59-61]().
 
-## Data Infrastructure
-
-### PostgreSQL with pgvector
-Uses `pgvector/pgvector:pg18` to support high-performance vector similarity searches for RAG and memory [infrastructure/docker-compose.data.yml:20]().
-
-**Optimization Parameters**:
-The service is tuned for agentic workloads with increased connection limits and memory buffers [infrastructure/docker-compose.data.yml:23-28]():
-- `max_connections=200`
-- `shared_buffers=256MB`
-
-### Redis Cache & Pub/Sub
-Redis 8.2.1 acts as the message broker for real-time updates and the task queue for `workspace-worker` [infrastructure/docker-compose.data.yml:48-51]().
-
-**Security Hardening**:
-To prevent accidental data loss in production, dangerous commands are renamed to empty strings [docker-compose.yml:52-61]():
-- `FLUSHDB` and `FLUSHALL` are disabled [docker-compose.yml:59-60]().
-- `DEBUG` is disabled [docker-compose.yml:61]().
-
-Sources: [infrastructure/docker-compose.data.yml:19-76](), [docker-compose.yml:48-73]()
+Sources: [orchestrator/Dockerfile:1-141](), [frontend/Dockerfile:1-115](), [orchestrator/core/redis/client.py:1-197](), [docker-compose.yml:48-73]()
 
 ---
 
-## Monitoring and Observability
+## Code Entity to Service Mapping
 
-The platform includes a comprehensive monitoring stack to track LLM costs, agent performance, and system health [infrastructure/docker-compose.monitoring.yml:1-14]().
-
-**Metrics and Logs Pipeline**:
-1. **Exporters**: `postgres-exporter` and `redis-exporter` scrape metrics from the data layer [infrastructure/docker-compose.monitoring.yml:156-183]().
-2. **Prometheus**: Aggregates metrics from exporters and the FastAPI `/metrics` endpoint [infrastructure/docker-compose.monitoring.yml:22-42]().
-3. **Loki & Log-Relay**: Collects logs via a relay that bridges Railway log drains to Loki [infrastructure/docker-compose.monitoring.yml:77-124]().
-4. **Grafana**: Provides the visualization layer for the Unified Analytics dashboard [infrastructure/docker-compose.monitoring.yml:48-74]().
-
-Sources: [infrastructure/docker-compose.monitoring.yml:16-183]()
-
----
-
-## Code-to-Container Mapping
-
-The following diagram bridges the source code entities to their respective Docker services.
+This diagram maps specific Python modules and frontend components to their containerized environments.
 
 ```mermaid
 graph LR
-    subgraph "Source Code (Entity Space)"
-        fastapi_app["orchestrator/main.py"]
-        next_app["frontend/server.js"]
-        worker_app["services/workspace-worker/main.py"]
-        redis_lib["orchestrator/core/redis/client.py"]
+    subgraph "Codebase Modules"
+        main["orchestrator/main.py"]
+        redis_client["core/redis/client.py"]
+        cloud_api["api/cloud_documents.py"]
+        fe_app["frontend/app/"]
     end
 
-    subgraph "Docker Compose (Service Space)"
-        api_svc["[Service] automatos-ai-api"]
-        ui_svc["[Service] automotas-ai-frontend"]
-        ww_svc["[Service] workspace-worker"]
-        redis_svc["[Service] redis"]
+    subgraph "Docker Containers"
+        svc_api["[backend]<br/>automatos_backend"]
+        svc_redis["[redis]<br/>automatos_redis"]
+        svc_ui["[frontend]<br/>automatos_frontend"]
     end
 
-    fastapi_app -->|"entrypoint"| api_svc
-    next_app -->|"entrypoint"| ui_svc
-    worker_app -->|"entrypoint"| ww_svc
-    redis_lib -->|"connects to"| redis_svc
+    main -.->|"FastAPI App"| svc_api
+    redis_client -.->|"Pub/Sub"| svc_redis
+    cloud_api -.->|"Boto3/S3"| svc_api
+    fe_app -.->|"Next.js"| svc_ui
 ```
 
-Sources: [orchestrator/Dockerfile:129](), [frontend/Dockerfile:114](), [infrastructure/docker-compose.core.yml:19-170](), [orchestrator/core/redis/client.py:17-31]()
+Sources: [orchestrator/main.py:1-50](), [orchestrator/core/redis/client.py:14-31](), [orchestrator/api/cloud_documents.py:25](), [frontend/Dockerfile:114]()
 
 ---
 
-## Deployment Configuration
+## Data Persistence & Volumes
 
-### Volumes and Persistence
-The setup utilizes named volumes to ensure data persists across container restarts and updates.
+The setup uses named volumes to ensure state is preserved across container lifecycles.
 
-| Volume Name | Service | Path | Purpose |
-|-------------|---------|------|---------|
-| `automatos_pgvector_data` | `pgvector` | `/var/lib/postgresql/data/` | DB Persistence [infrastructure/docker-compose.data.yml:102]() |
-| `automatos_redis_data` | `redis` | `/data` | Cache Persistence [infrastructure/docker-compose.data.yml:104]() |
-| `automatos_qdrant_data` | `qdrant` | `/qdrant/storage` | Vector Persistence [infrastructure/docker-compose.data.yml:106]() |
-| `agent-workspace-data` | `workspace-worker` | `/workspaces` | Agent files (50GB) [infrastructure/railway-manifest.json:136]() |
+| Volume Name | Service | Mount Path | Purpose |
+|-------------|---------|------------|---------|
+| `postgres_data` | `postgres` | `/var/lib/postgresql/data` | Persistent SQL & Vector data [docker-compose.yml:34]() |
+| `redis_data` | `redis` | `/data` | Cache and session persistence [docker-compose.yml:65]() |
+| `workspace_data` | `backend`, `worker` | `/workspaces` | Shared agent filesystems (RO for API, RW for Worker) [docker-compose.yml:130]() |
+| `backend_logs` | `backend` | `/app/logs` | Centralized application logs [docker-compose.yml:128]() |
 
-### Network Configuration
-A shared external network `automatos_network` is required to allow communication between modular compose files [infrastructure/docker-compose.yml:21]().
+Sources: [docker-compose.yml:34](), [docker-compose.yml:65](), [docker-compose.yml:128-130]()
 
-```yaml
-networks:
-  automatos:
-    name: automatos_network
-    external: true
-```
+---
 
-Sources: [infrastructure/docker-compose.data.yml:100-112](), [infrastructure/docker-compose.yml:21]()
+## Environment Configuration
+
+A `.env` file is mandatory for initialization. Key required variables include:
+
+- **Database**: `POSTGRES_PASSWORD` [docker-compose.yml:29]().
+- **Redis**: `REDIS_PASSWORD` [docker-compose.yml:56]().
+- **Security**: `API_KEY` for backend authentication [docker-compose.yml:116]().
+- **Auth**: `CLERK_SECRET_KEY` and `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` [docker-compose.yml:119-121]().
+- **LLM Keys**: Optional at startup; can be configured via the UI [docker-compose.yml:105-106]().
+
+### Launching the Stack
+
+- **Standard Development**: `docker-compose up --build` [docker-compose.yml:6]().
+- **With Workers**: `docker-compose --profile workers up --build` [docker-compose.yml:184]().
+- **Production Mode**: Build using the `production` target in Dockerfiles to exclude dev dependencies like `pytest`, `black`, and `isort` [orchestrator/Dockerfile:110-114]().
+
+Sources: [docker-compose.yml:1-16](), [orchestrator/Dockerfile:95-141](), [frontend/Dockerfile:85-115]()
 
 ---

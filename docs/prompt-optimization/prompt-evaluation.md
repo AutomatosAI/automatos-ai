@@ -14,11 +14,8 @@ The following files were used as context for generating this wiki page:
 - [services/agent-opt-worker/requirements.txt](services/agent-opt-worker/requirements.txt)
 - [services/shared/automatos_logging.py](services/shared/automatos_logging.py)
 - [services/shared/automatos_metrics.py](services/shared/automatos_metrics.py)
-- [services/workspace-worker/Dockerfile](services/workspace-worker/Dockerfile)
 - [services/workspace-worker/automatos_logging.py](services/workspace-worker/automatos_logging.py)
 - [services/workspace-worker/automatos_metrics.py](services/workspace-worker/automatos_metrics.py)
-- [services/workspace-worker/entrypoint.sh](services/workspace-worker/entrypoint.sh)
-- [services/workspace-worker/requirements.txt](services/workspace-worker/requirements.txt)
 
 </details>
 
@@ -52,45 +49,43 @@ The system is split between the main orchestrator (which handles database persis
 
 ### System Component Interaction
 
-The diagram below shows how the frontend triggers evaluations through the orchestrator's `FutureAGIService`, which then communicates with the `agent-opt-worker`.
-
 ```mermaid
 graph TB
     subgraph "Frontend (Next.js)"
-        SystemPromptsTab["SystemPromptsTab.tsx"]
-        TriggerButtons["Trigger Buttons:<br/>Score Quality, Optimize, Safety Scan"]
+        ["SystemPromptsTab.tsx"]
+        ["Trigger Buttons:<br/>Score Quality, Optimize, Safety Scan"]
     end
     
     subgraph "Orchestrator API (FastAPI)"
-        AdminPromptsAPI["admin_prompts.py<br/>/api/admin/prompts/{prompt_id}/assess"]
-        FutureAGIService["FutureAGIService<br/>futureagi_service.py"]
-        DB["PostgreSQL<br/>SystemPromptEvalRun table"]
+        ["admin_prompts.py<br/>/api/admin/prompts/{prompt_id}/assess"]
+        ["FutureAGIService<br/>futureagi_service.py"]
+        ["PostgreSQL DB<br/>SystemPromptEvalRun table"]
     end
     
     subgraph "Worker Service (Isolated Container)"
-        WorkerMain["main.py<br/>FastAPI App"]
-        AssessEndpoint["/assess<br/>Quality metrics"]
-        SafetyEndpoint["/safety<br/>Security checks"]
-        ScoreEndpoint["/score<br/>Live traffic"]
-        SDKEval["fi.evals.Evaluator<br/>FutureAGI SDK"]
+        ["agent-opt-worker main.py"]
+        ["/assess Endpoint"]
+        ["/safety Endpoint"]
+        ["/score Endpoint"]
+        ["fi.evals.Evaluator<br/>FutureAGI SDK"]
     end
     
-    SystemPromptsTab -->|"POST /api/admin/prompts/{id}/assess"| AdminPromptsAPI
-    AdminPromptsAPI -->|"Create SystemPromptEvalRun"| DB
-    AdminPromptsAPI -->|"background_tasks.add_task"| FutureAGIService
+    ["SystemPromptsTab.tsx"] -->|"POST /api/admin/prompts/{id}/assess"| ["admin_prompts.py<br/>/api/admin/prompts/{prompt_id}/assess"]
+    ["admin_prompts.py<br/>/api/admin/prompts/{prompt_id}/assess"] -->|"Create SystemPromptEvalRun"| ["PostgreSQL DB<br/>SystemPromptEvalRun table"]
+    ["admin_prompts.py<br/>/api/admin/prompts/{prompt_id}/assess"] -->|"background_tasks.add_task"| ["FutureAGIService<br/>futureagi_service.py"]
     
-    FutureAGIService -->|"HTTP POST<br/>payload: {prompt_content, metrics}"| WorkerMain
-    WorkerMain --> AssessEndpoint
-    WorkerMain --> SafetyEndpoint
-    WorkerMain --> ScoreEndpoint
+    ["FutureAGIService<br/>futureagi_service.py"] -->|"HTTP POST<br/>payload: {prompt_content, metrics}"| ["agent-opt-worker main.py"]
+    ["agent-opt-worker main.py"] --> ["/assess Endpoint"]
+    ["agent-opt-worker main.py"] --> ["/safety Endpoint"]
+    ["agent-opt-worker main.py"] --> ["/score Endpoint"]
     
-    AssessEndpoint -->|"evaluator.evaluate"| SDKEval
+    ["/assess Endpoint"] -->|"evaluator.evaluate"| ["fi.evals.Evaluator<br/>FutureAGI SDK"]
     
-    SDKEval -.->|"results: {score, passed, reason}"| AssessEndpoint
-    AssessEndpoint -.->|"HTTP 200"| FutureAGIService
+    ["fi.evals.Evaluator<br/>FutureAGI SDK"] -.->|"results: {score, passed, reason}"| ["/assess Endpoint"]
+    ["/assess Endpoint"] -.->|"HTTP 200"| ["FutureAGIService<br/>futureagi_service.py"]
     
-    FutureAGIService -->|"Update status='completed'<br/>Store scores JSONB"| DB
-    DB -.->|"Poll every 3s"| SystemPromptsTab
+    ["FutureAGIService<br/>futureagi_service.py"] -->|"Update status='completed'<br/>Store scores JSONB"| ["PostgreSQL DB<br/>SystemPromptEvalRun table"]
+    ["PostgreSQL DB<br/>SystemPromptEvalRun table"] -.->|"Poll every 3s"| ["SystemPromptsTab.tsx"]
 ```
 
 **Sources:** [orchestrator/core/services/futureagi_service.py:45-73](), [services/agent-opt-worker/main.py:9-16](), [frontend/components/settings/SystemPromptsTab.tsx:166-173]()
@@ -103,13 +98,11 @@ The `/assess` endpoint scores prompt quality using configurable metrics. Each me
 
 ### Request Flow
 
-The `FutureAGIService` pulls real I/O from live traffic using `_collect_optimization_dataset(limit=1)` to ensure scoring is meaningful rather than based on synthetic data.
-
 ```mermaid
 sequenceDiagram
-    participant Admin as Admin UI (SystemPromptsTab)
+    participant Admin as Admin UI (SystemPromptsTab.tsx)
     participant Service as FutureAGIService (Orchestrator)
-    participant Worker as agent-opt-worker (FastAPI)
+    participant Worker as agent-opt-worker (main.py)
     participant SDK as fi.evals.Evaluator (SDK)
     
     Admin->>Service: Trigger Assessment Run
@@ -146,7 +139,7 @@ The worker maintains a `TEMPLATE_CONFIG` dictionary mapping metric names to thei
 
 ### Concurrent Scoring Implementation
 
-All metrics are evaluated concurrently using `ThreadPoolExecutor` to minimize the latency of the evaluation job. The worker service submits each metric as a separate thread task using `_run_single_template` and collects results as they complete via `as_completed`.
+All metrics are evaluated concurrently using `ThreadPoolExecutor` to minimize the latency of the evaluation job. The worker submits each metric as a separate thread task and collects results as they complete.
 
 ```python
 # services/agent-opt-worker/main.py:226-238
@@ -169,7 +162,7 @@ with ThreadPoolExecutor(max_workers=len(metrics)) as pool:
 
 ### Result Normalization
 
-The SDK returns varied output formats (e.g., "Passed"/"Failed" strings or float scores). The `agent-opt-worker` normalizes these into a consistent schema (`score`, `passed`, `reason`) for the orchestrator.
+The SDK returns varied output formats (e.g., "Passed"/"Failed" strings or float scores). The worker normalizes these into a consistent schema for the orchestrator.
 
 ```python
 # services/agent-opt-worker/main.py:95-121
@@ -200,14 +193,14 @@ elif isinstance(output, str):
 ### Observability and Monitoring
 
 The evaluation worker includes standard observability hooks used across the platform:
-* **Logging:** Uses `automatos_logging` for structured JSON log relay [services/agent-opt-worker/automatos_logging.py:5-26]().
+* **Logging:** Uses `automatos_logging` for structured JSON log relay [services/agent-opt-worker/main.py:34](), [services/agent-opt-worker/automatos_logging.py:132-161]().
 * **Metrics:** Exposes Prometheus metrics via `add_fastapi_metrics` [services/agent-opt-worker/main.py:40](), including request duration histograms and total request counters [services/agent-opt-worker/automatos_metrics.py:49-66]().
 
 ---
 
 ## Database Integration: SystemPromptEvalRun
 
-The orchestrator tracks every evaluation attempt in the `SystemPromptEvalRun` table. The frontend `SystemPromptsTab` component polls these runs to provide real-time feedback to admins.
+The orchestrator tracks every evaluation attempt in the `SystemPromptEvalRun` table. The frontend polls these runs to provide real-time feedback to admins.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -234,7 +227,7 @@ The `agent-opt-worker` is a standalone service defined by its own `Dockerfile` a
 
 ### Orchestrator Connection
 
-The `FutureAGIService` acts as a thin HTTP client to the worker, managing timeouts (default 120s for assessment via `WORKER_TIMEOUT`) and handling connection failures gracefully.
+The `FutureAGIService` acts as a thin HTTP client to the worker, managing timeouts (default 120s for assessment) and handling connection failures gracefully.
 
 ```python
 # orchestrator/core/services/futureagi_service.py:79-89
