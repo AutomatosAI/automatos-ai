@@ -329,6 +329,22 @@ _PLATFORM_KEYWORDS = {
         "disable heartbeat", "heartbeat interval", "set active hours",
         "heartbeat config",
     ],
+    "platform_get_agent_heartbeat": [
+        "show heartbeat", "read heartbeat", "view heartbeat",
+        "what's the heartbeat", "show agent heartbeat", "current heartbeat",
+        "heartbeat for agent", "is heartbeat enabled",
+    ],
+    "platform_unassign_skill_from_agent": [
+        "unassign skill from agent", "remove skill from agent",
+        "drop skill from agent", "detach skill from agent",
+        "take skill off agent", "delete skill assignment",
+    ],
+    "platform_unassign_tool_from_agent": [
+        "unassign tool from agent", "remove tool from agent",
+        "drop tool from agent", "detach tool from agent",
+        "take tool off agent", "deactivate tool on agent",
+        "remove app from agent", "unassign app from agent",
+    ],
     "platform_create_agent": [
         "create agent", "create an agent", "build agent", "build an agent",
         "make agent", "make an agent", "set up agent", "setup agent",
