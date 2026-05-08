@@ -53,6 +53,25 @@ export interface ApprovalGatesData {
   period: string
 }
 
+export interface DecisionsNeededItem {
+  kind: 'report' | 'mission'
+  id: string
+  title: string
+  summary: string | null
+  status: string | null
+  escalation_level: number | null
+  agent_name?: string | null
+  created_at: string | null
+  updated_at?: string | null
+}
+
+export interface DecisionsNeededData {
+  total: number
+  reports_count: number
+  missions_count: number
+  items: DecisionsNeededItem[]
+}
+
 // ============= QUERY KEYS =============
 
 export const kpiQueryKeys = {
@@ -61,6 +80,7 @@ export const kpiQueryKeys = {
   agentPerformance: (period: string) => ['kpi', 'agent-performance', period] as const,
   playbookMetrics: (period: string) => ['kpi', 'playbook-metrics', period] as const,
   approvalGates: (period: string) => ['kpi', 'approval-gates', period] as const,
+  decisionsNeeded: (limit: number) => ['kpi', 'decisions-needed', limit] as const,
 }
 
 // ============= HOOKS =============
@@ -96,6 +116,15 @@ export function useApprovalGates(period: string = '30d') {
   return useQuery<ApprovalGatesData>({
     queryKey: kpiQueryKeys.approvalGates(period),
     queryFn: () => apiClient.request<ApprovalGatesData>(`/api/kpi/approval-gates?period=${period}`),
+    staleTime: 15_000,
+    refetchInterval: 30_000,
+  })
+}
+
+export function useDecisionsNeeded(limit: number = 10) {
+  return useQuery<DecisionsNeededData>({
+    queryKey: kpiQueryKeys.decisionsNeeded(limit),
+    queryFn: () => apiClient.request<DecisionsNeededData>(`/api/kpi/decisions-needed?limit=${limit}`),
     staleTime: 15_000,
     refetchInterval: 30_000,
   })

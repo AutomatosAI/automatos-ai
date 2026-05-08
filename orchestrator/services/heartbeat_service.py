@@ -489,10 +489,15 @@ class HeartbeatService:
         if checklist and checklist.strip():
             checklist_block = f"\n\nChecklist to review:\n{checklist}"
 
+        # Wave 4 — opt-in cadence loops (Daily Brief / Weekly Review /
+        # Monday HARNESS / Post-change / Incident review). Default off.
+        from core.services.auto_cadence import build_cadence_block
+        cadence_block = build_cadence_block(hb_config)
+
         task_description = (
             f"Perform a scheduled health check for this workspace.\n"
             f"Personality: {personality_mode}.\n\n"
-            f"Analyze your workspace using the tools provided.{checklist_block}\n\n"
+            f"Analyze your workspace using the tools provided.{checklist_block}{cadence_block}\n\n"
             f"{level_instruction}{style_suffix}\n\n"
             f"Reply with a SHORT plain-text summary (max 500 chars). No markdown."
         )
