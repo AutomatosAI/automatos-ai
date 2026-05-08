@@ -96,7 +96,7 @@ export function MainLayout({ children }: MainLayoutProps) {
       }>
         <Header onMenuClick={handleMenuClick} />
 
-        <main className="p-3 md:p-4 lg:p-6">
+        <main className="px-4 py-4 md:px-6 md:py-6 lg:px-10 lg:py-8 xl:px-12">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
