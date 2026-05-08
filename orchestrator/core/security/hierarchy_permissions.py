@@ -30,6 +30,22 @@ logger = logging.getLogger(__name__)
 # ----------------------------------------------------------------- constants
 
 
+# Target-type string constants used by callers (platform_executor,
+# core.security.__init__, tests). These are the public API for the
+# ``target_type`` argument of :func:`can_actor_modify`. Kept as plain
+# strings so they survive JSON round-trips through the dispatcher.
+#
+# Currently can_actor_modify only enforces hierarchy on TARGET_AGENT;
+# the other target types fall through to default-deny (intentional —
+# tightening will land per-target in follow-ups).
+TARGET_AGENT          = "agent"
+TARGET_HEARTBEAT      = "heartbeat"
+TARGET_PLAYBOOK       = "playbook"
+TARGET_TASK           = "task"
+TARGET_SKILL          = "skill"
+TARGET_TOOL_ASSIGNMENT = "tool_assignment"
+
+
 # Narrowed bypass allowlist — these specific named actors may bypass the
 # hierarchy. Adding to this list is a security-sensitive change. ``Auto``
 # is the workspace orchestrator (slug auto-{workspace_id}); the others are
