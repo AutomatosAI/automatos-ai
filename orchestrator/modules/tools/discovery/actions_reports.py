@@ -171,6 +171,66 @@ def register_report_actions(registry: ActionRegistry) -> None:
         ],
     ))
 
+    # Wave 3 — operating-signal lifecycle tools
+
+    registry.register(ActionDefinition(
+        name="platform_acknowledge_report",
+        description=(
+            "Mark a report as acknowledged (read + actioned) by the calling agent "
+            "or a named user. Stamps acknowledged_by/acknowledged_at so the "
+            "'Decisions Needed' queue can drop the row. Use after Auto has "
+            "summarised the report for Gerard or routed its action_items into "
+            "board tasks."
+        ),
+        category="reports",
+        parameters={
+            "type": "object",
+            "properties": {
+                "report_id": {
+                    "type": "string",
+                    "description": "UUID of the report to acknowledge.",
+                },
+                "user_id": {
+                    "type": "integer",
+                    "description": "Optional user id to attribute. Defaults to the workspace owner when omitted.",
+                },
+            },
+            "required": ["report_id"],
+        },
+        permission_level="write",
+        requires_confirmation=False,
+        tags=["reports", "ack", "decisions", "queue"],
+        examples=[
+            "acknowledge the latest HARNESS audit",
+            "mark report xyz as actioned",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_link_report_to_task",
+        description=(
+            "Add a board-task id to a report's linked_task_ids. Use when Auto "
+            "promotes a report's action_items into actual board tasks — keeps "
+            "the trail from finding → ask → ticket intact."
+        ),
+        category="reports",
+        parameters={
+            "type": "object",
+            "properties": {
+                "report_id": {"type": "string"},
+                "task_id": {"type": "integer"},
+            },
+            "required": ["report_id", "task_id"],
+        },
+        permission_level="write",
+        requires_confirmation=False,
+        tags=["reports", "tasks", "linkage"],
+        examples=[
+            "link this report to task 42",
+            "tie the audit findings to the new ticket",
+        ],
+    ))
+
     registry.register(ActionDefinition(
         name="platform_get_latest_report",
         description=(

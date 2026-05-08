@@ -147,7 +147,25 @@ async def store_memory(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
     if not content:
         return {"success": False, "error": "Missing required parameter: content"}
 
+    valid_source_types = {"platform_verified", "claude_reports", "current_status", "inference"}
+    source_type = params.get("source_type", "inference")
+    if source_type not in valid_source_types:
+        return {
+            "success": False,
+            "error": f"source_type must be one of: {', '.join(sorted(valid_source_types))}",
+        }
+
+    confidence = params.get("confidence")
+    if confidence is not None:
+        try:
+            confidence = float(confidence)
+            if not 0.0 <= confidence <= 1.0:
+                raise ValueError
+        except (TypeError, ValueError):
+            return {"success": False, "error": "confidence must be a number between 0 and 1"}
+
     try:
+        from datetime import datetime, timezone
         from modules.memory.unified_memory_service import get_unified_memory_service
 
         service = get_unified_memory_service()
@@ -159,11 +177,24 @@ async def store_memory(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
         # Cast to int if provided (may come as string from tool params)
         agent_id_int = int(agent_id) if agent_id else None
 
+        # Wave 3 — provenance keys travel with the memory metadata so
+        # future readers can tell verified facts from inference.
+        metadata: Dict[str, Any] = {
+            "workspace_id": ws_id,
+            "source": "platform_tool",
+            "source_type": source_type,
+            "verified_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if confidence is not None:
+            metadata["confidence"] = confidence
+        if params.get("evidence_uri"):
+            metadata["evidence_uri"] = params["evidence_uri"]
+
         result = await service.store_long_term(
             workspace_id=ws_id,
             content=content,
             agent_id=agent_id_int,
-            metadata={"workspace_id": ws_id, "source": "platform_tool"},
+            metadata=metadata,
         )
 
         if result.get("error"):

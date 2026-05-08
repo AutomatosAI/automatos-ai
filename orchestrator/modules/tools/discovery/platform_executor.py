@@ -109,6 +109,8 @@ from modules.tools.discovery.handlers_reports import (
     submit_report,
     get_latest_report,
     browse_reports,
+    acknowledge_report,
+    link_report_to_task,
 )
 from modules.tools.discovery.handlers_harness import (
     harness_status,
@@ -269,6 +271,9 @@ class PlatformActionExecutor:
             "platform_submit_report": submit_report,
             "platform_get_latest_report": get_latest_report,
             "platform_browse_reports": browse_reports,
+            # Wave 3 — operating-signal lifecycle
+            "platform_acknowledge_report": acknowledge_report,
+            "platform_link_report_to_task": link_report_to_task,
             # PRD-72: Board Tasks
             "platform_create_task": create_board_task,
             "platform_list_tasks": list_board_tasks,
