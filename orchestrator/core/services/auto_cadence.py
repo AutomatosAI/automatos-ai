@@ -33,6 +33,11 @@ CADENCE_DEFAULTS: Dict[str, Dict[str, Any]] = {
     "harness_review": {"enabled": False, "day": "mon"},
     "post_change_validation": {"enabled": False},
     "incident_review": {"enabled": False},
+    # PRD-140 Phase 1 — team-lead weekly review (Advisor only, no apply).
+    # Fires on the configured day for agents whose ``team_lead_enabled``
+    # flag is True. The block is injected into the team-lead's own
+    # heartbeat (via _agent_tick), not Auto's orchestrator heartbeat.
+    "team_review": {"enabled": False, "day": "mon"},
 }
 
 
@@ -89,12 +94,37 @@ Triggered after a failure pattern (failed HARNESS run, repeated agent_error even
 File an incident report with type=incident, status=warning|critical, action_items populated."""
 
 
+# PRD-140 Phase 1 — Advisor-only team review.
+# Fires inside a team-lead agent's own heartbeat. Read + diagnose + report;
+# NEVER apply. Edits to team agents/playbooks/heartbeats route as
+# action_items + linked_task_ids on the report; Auto/Gerard decide.
+_TEAM_REVIEW = """## Team Review (Advisor — no edits)
+You manage a team. Today is your review day. Read first, recommend second, never edit:
+1. `platform_browse_reports period=7d agent_team=<your team>` — pull every report your team filed this week.
+2. For each member, surface: did they hit their objective (`heartbeat_results.objective_met`)? are they over/under-tasked? any errors?
+3. `platform_list_tasks` — check open tasks assigned to your team. Flag stalls, missed deadlines, gaps.
+4. Compare with last week — what got better, what got worse? (Pull the previous team-review report.)
+5. Identify gaps — missing skills, overdue work, agents drifting from their job_title.
+6. `platform_submit_report report_type=summary` with these fields populated:
+     - title:           "<Your team> Weekly Review — <YYYY-MM-DD>"
+     - status:          ok|warning|critical
+     - recommendations: structured list of suggested changes (target agent, change_type, reason, risk_tier)
+     - action_items:    concrete next steps with owner agent_id
+     - escalation_level: 0..4 (use 2=APPROVAL when changes need Gerard, 0=FYI when team is healthy)
+     - requires_approval: true when any action_item is non-trivial
+7. For each action_item that maps to existing work, `platform_create_task` for the owning agent INSIDE YOUR SUBTREE only.
+   Cross-team or out-of-subtree actions go in recommendations with escalation_target=auto.
+8. NEVER call platform_update_agent / platform_update_playbook / platform_update_skill / platform_assign_*
+   in Advisor mode. The hierarchy gate will reject those anyway. Recommend, don't apply."""
+
+
 _PROMPT_MAP: Dict[str, str] = {
     "daily_brief": _DAILY_BRIEF,
     "weekly_org_review": _WEEKLY_ORG_REVIEW,
     "harness_review": _HARNESS_REVIEW,
     "post_change_validation": _POST_CHANGE_VALIDATION,
     "incident_review": _INCIDENT_REVIEW,
+    "team_review": _TEAM_REVIEW,
 }
 
 
@@ -136,7 +166,7 @@ def build_cadence_block(
             blocks.append(_PROMPT_MAP[key])
 
     # Day-gated cadences
-    for key in ("weekly_org_review", "harness_review"):
+    for key in ("weekly_org_review", "harness_review", "team_review"):
         cfg = cadence[key]
         if cfg.get("enabled") and cfg.get("day", "mon") == today_code:
             blocks.append(_PROMPT_MAP[key])
