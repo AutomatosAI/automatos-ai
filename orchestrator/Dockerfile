@@ -82,10 +82,12 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 ENTRYPOINT ["docker-entrypoint.sh"]
 
 # Default command — apply pending alembic migrations before starting,
-# so the deployed code and the live schema can never drift. If a
-# migration fails, the container fails to boot (loud is better than
-# silent UndefinedColumn errors at request time).
-CMD sh -c "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+# so the deployed code and the live schema can never drift. ``heads``
+# (plural) is required because the migration tree currently has
+# multiple unmerged heads; ``head`` (singular) errors out. If any
+# migration fails the container fails to boot — loud is better than
+# silent UndefinedColumn errors at request time.
+CMD sh -c "alembic upgrade heads && uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
 
 # =============================================================================
 # Production Stage - Optimized & Minimal
@@ -128,9 +130,11 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 ENTRYPOINT ["docker-entrypoint.sh"]
 
 # Production command — apply pending alembic migrations before starting,
-# so deploys can't ship a model change ahead of the schema. ``&&`` ensures
-# uvicorn never starts if a migration fails (visible deploy failure beats
-# silent UndefinedColumn errors at request time). Concurrent replicas
-# serialise via alembic's row lock — second runner sees no pending
-# migrations and continues.
-CMD sh -c "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 4"
+# so deploys can't ship a model change ahead of the schema. ``heads``
+# (plural) is required because the migration tree currently has multiple
+# unmerged heads; ``head`` (singular) errors with "Multiple head
+# revisions are present". ``&&`` ensures uvicorn never starts if a
+# migration fails (visible deploy failure beats silent UndefinedColumn
+# errors at request time). Concurrent replicas serialise via alembic's
+# row lock — second runner sees no pending migrations and continues.
+CMD sh -c "alembic upgrade heads && uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 4"
