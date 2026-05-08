@@ -81,8 +81,11 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 # Set entrypoint
 ENTRYPOINT ["docker-entrypoint.sh"]
 
-# Default command - can be overridden in docker-compose
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+# Default command — apply pending alembic migrations before starting,
+# so the deployed code and the live schema can never drift. If a
+# migration fails, the container fails to boot (loud is better than
+# silent UndefinedColumn errors at request time).
+CMD sh -c "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
 
 # =============================================================================
 # Production Stage - Optimized & Minimal
@@ -124,6 +127,10 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 # Set entrypoint
 ENTRYPOINT ["docker-entrypoint.sh"]
 
-# Production command - use PORT env var (Railway provides this)
-# Default to 8000 if PORT not set
-CMD sh -c "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 4"
+# Production command — apply pending alembic migrations before starting,
+# so deploys can't ship a model change ahead of the schema. ``&&`` ensures
+# uvicorn never starts if a migration fails (visible deploy failure beats
+# silent UndefinedColumn errors at request time). Concurrent replicas
+# serialise via alembic's row lock — second runner sees no pending
+# migrations and continues.
+CMD sh -c "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 4"
