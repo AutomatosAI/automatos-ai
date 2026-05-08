@@ -346,3 +346,112 @@ async def get_approval_gates(
             "recent_count": 0,
             "period": period,
         }
+
+
+# ── Decisions Needed (Wave 5) ────────────────────────────────
+
+
+@router.get("/decisions-needed")
+async def get_decisions_needed(
+    limit: int = Query(10, ge=1, le=50),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Aggregate things that need Gerard's call but aren't already on the kanban.
+
+    Specifically: reports flagged ``requires_approval=True`` and not yet
+    acknowledged, plus orchestration runs in a BLOCKED state with
+    escalation_level >= APPROVAL (or any blocked run when level is unset).
+
+    Tasks themselves (priority urgent/high) are intentionally excluded —
+    the kanban already surfaces those. Approval gates have their own widget.
+    """
+    from sqlalchemy import text
+
+    try:
+        # 1. Reports requiring approval that haven't been acknowledged.
+        report_rows = db.execute(
+            text(
+                """
+                SELECT id::text, title, summary, status, escalation_level,
+                       agent_name, created_at, requires_approval
+                  FROM agent_reports
+                 WHERE workspace_id = :ws
+                   AND requires_approval = TRUE
+                   AND acknowledged_at IS NULL
+              ORDER BY COALESCE(escalation_level, 0) DESC, created_at ASC
+                 LIMIT :limit
+                """
+            ),
+            {"ws": str(ctx.workspace_id), "limit": limit},
+        ).fetchall()
+
+        reports = [
+            {
+                "kind": "report",
+                "id": r.id,
+                "title": r.title,
+                "summary": r.summary,
+                "status": r.status,
+                "escalation_level": r.escalation_level,
+                "agent_name": r.agent_name,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in report_rows
+        ]
+
+        # 2. Missions blocked / awaiting human review.
+        run_rows = (
+            db.query(OrchestrationRun)
+            .filter(
+                OrchestrationRun.workspace_id == ctx.workspace_id,
+                OrchestrationRun.state_type == "BLOCKED",
+            )
+            .order_by(OrchestrationRun.updated_at.desc())
+            .limit(limit)
+            .all()
+        )
+
+        missions = [
+            {
+                "kind": "mission",
+                "id": str(r.id),
+                "title": (r.goal[:120] if r.goal else "(no goal)"),
+                "summary": r.stop_detail or r.stop_reason or "blocked",
+                "status": r.state,
+                "escalation_level": getattr(r, "escalation_level", None),
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+            }
+            for r in run_rows
+        ]
+
+        merged = reports + missions
+        merged.sort(
+            key=lambda item: (
+                -(item.get("escalation_level") or 0),
+                item.get("created_at") or "",
+            )
+        )
+        # Trim before counting — sub-queries each LIMIT independently, so
+        # raw counts could double up. The widget's "total" must match the
+        # number of rows it actually shows.
+        items = merged[:limit]
+        reports_in_items = sum(1 for i in items if i["kind"] == "report")
+        missions_in_items = sum(1 for i in items if i["kind"] == "mission")
+
+        return {
+            "total": len(items),
+            "reports_count": reports_in_items,
+            "missions_count": missions_in_items,
+            "items": items,
+        }
+
+    except Exception as e:
+        logger.error("KPI decisions-needed failed: %s", e, exc_info=True)
+        return {
+            "total": 0,
+            "reports_count": 0,
+            "missions_count": 0,
+            "items": [],
+        }

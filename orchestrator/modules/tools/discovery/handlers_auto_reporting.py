@@ -48,6 +48,12 @@ async def update_auto_reporting_prefs(
         return {"success": False, "error": str(exc)}
 
 
+_VALID_SEVERITIES: frozenset[str] = frozenset(
+    {"info", "task", "approval", "urgent", "security"}
+)
+_VALID_STATUSES: frozenset[str] = frozenset({"ok", "warning", "error", "info"})
+
+
 async def send_notification(
     db: Session, workspace_id: UUID, params: Dict[str, Any]
 ) -> Dict[str, Any]:
@@ -67,6 +73,20 @@ async def send_notification(
             "error": f"event_type must be one of: {', '.join(sorted(VALID_EVENT_TYPES))}",
         }
 
+    severity = params.get("severity")
+    if severity is not None and severity not in _VALID_SEVERITIES:
+        return {
+            "success": False,
+            "error": f"severity must be one of: {', '.join(sorted(_VALID_SEVERITIES))}",
+        }
+
+    status = params.get("status", "ok")
+    if status not in _VALID_STATUSES:
+        return {
+            "success": False,
+            "error": f"status must be one of: {', '.join(sorted(_VALID_STATUSES))}",
+        }
+
     dispatcher = NotificationDispatcher(db, workspace_id)
     try:
         result = await dispatcher.dispatch(
@@ -77,8 +97,8 @@ async def send_notification(
             link_id=params.get("link_id"),
             agent_id=params.get("_agent_id"),
             agent_name=params.get("_agent_name"),
-            status=params.get("status", "ok"),
-            severity=params.get("severity"),
+            status=status,
+            severity=severity,
         )
         db.commit()
         return {"success": True, "data": result}

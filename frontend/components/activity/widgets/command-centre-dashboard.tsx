@@ -5,7 +5,7 @@ import {
   Settings2, RotateCcw, GripVertical, Eye, EyeOff,
   Play, PieChart as PieChartIcon, Calendar, BarChart3,
   Activity, Layers, FileText, Users,
-  DollarSign, TrendingUp, BookOpen, ShieldCheck,
+  DollarSign, TrendingUp, BookOpen, ShieldCheck, AlertTriangle,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -21,6 +21,7 @@ import { CostTrackerWidget } from './cost-tracker-widget'
 import { AgentPerformanceWidget } from './agent-performance-widget'
 import { PlaybookMetricsWidget } from './playbook-metrics-widget'
 import { ApprovalGatesWidget } from './approval-gates-widget'
+import { DecisionsNeededWidget } from './decisions-needed-widget'
 import { cn } from '@/lib/utils'
 
 // ── Widget Registry ─────────────────────────────────────────
@@ -48,6 +49,8 @@ interface WidgetDef {
 }
 
 const WIDGET_REGISTRY: WidgetDef[] = [
+  // Wave 5 — surface things only Gerard can resolve (kanban handles tasks).
+  { id: 'decisions-needed',    label: 'Decisions Needed',    icon: <AlertTriangle className="w-3.5 h-3.5" />, defaultVisible: true,  size: 'half',  height: 'min-h-[320px]' },
   { id: 'active-now',          label: 'Active Now',          icon: <Play className="w-3.5 h-3.5" />,          defaultVisible: true,  size: 'half',  height: 'min-h-[320px]' },
   { id: 'status-overview',     label: 'Status Overview',     icon: <PieChartIcon className="w-3.5 h-3.5" />,  defaultVisible: true,  size: 'half',  height: 'min-h-[320px]' },
   { id: 'schedule',            label: 'Schedule',            icon: <Calendar className="w-3.5 h-3.5" />,      defaultVisible: true,  size: 'half',  height: 'min-h-[320px]' },
@@ -257,6 +260,8 @@ export function CommandCentreDashboard({ period, onViewAllActivity, onViewCalend
         return <PlaybookMetricsWidget period={period} />
       case 'approval-gates':
         return <ApprovalGatesWidget period={period} />
+      case 'decisions-needed':
+        return <DecisionsNeededWidget />
       default:
         return null
     }
