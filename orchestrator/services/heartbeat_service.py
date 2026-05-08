@@ -770,9 +770,16 @@ class HeartbeatService:
                         task_err,
                     )
 
+                # PRD-140 Phase 1 — opt-in cadence blocks (e.g. team_review
+                # when this agent has team_lead_enabled=True). Same module as
+                # Auto's cadence so we don't run two parallel mechanisms.
+                from core.services.auto_cadence import build_cadence_block
+                cadence_block = build_cadence_block(hb_config)
+
                 prompt = (
                     f"Scheduled heartbeat check. {heartbeat_prompt}\n"
-                    "Use your tools to check. Reply with a SHORT plain-text summary (max 500 chars), no markdown.\n"
+                    + (cadence_block + "\n\n" if cadence_block else "")
+                    + "Use your tools to check. Reply with a SHORT plain-text summary (max 500 chars), no markdown.\n"
                     + (
                         "You may take action if needed."
                         if auto_act
