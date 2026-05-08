@@ -165,6 +165,10 @@ class ReportService:
         metrics: Optional[Dict[str, Any]] = None,
         attachments: Optional[List[Dict[str, Any]]] = None,
         heartbeat_result_id: Optional[int] = None,
+        recommendations: Optional[List[Dict[str, Any]]] = None,
+        action_items: Optional[List[Dict[str, Any]]] = None,
+        linked_task_ids: Optional[List[int]] = None,
+        requires_approval: bool = False,
     ) -> Dict[str, Any]:
         """Create a report: write file to workspace + insert DB row."""
 
@@ -212,12 +216,18 @@ class ReportService:
                         (workspace_id, agent_id, agent_name, heartbeat_result_id,
                          report_type, title, summary, status,
                          file_path, file_type, file_size_bytes,
-                         metrics, attachments, created_at, updated_at)
+                         metrics, attachments,
+                         recommendations, action_items, linked_task_ids,
+                         requires_approval,
+                         created_at, updated_at)
                     VALUES
                         (:workspace_id, :agent_id, :agent_name, :heartbeat_result_id,
                          :report_type, :title, :summary, :status,
                          :file_path, :file_type, :file_size_bytes,
-                         :metrics, :attachments, NOW(), NOW())
+                         :metrics, :attachments,
+                         :recommendations, :action_items, :linked_task_ids,
+                         :requires_approval,
+                         NOW(), NOW())
                     RETURNING id
                 """),
                 {
@@ -234,6 +244,10 @@ class ReportService:
                     "file_size_bytes": file_size,
                     "metrics": json.dumps(metrics or {}),
                     "attachments": json.dumps(attachments or []),
+                    "recommendations": json.dumps(recommendations or []),
+                    "action_items": json.dumps(action_items or []),
+                    "linked_task_ids": json.dumps(linked_task_ids or []),
+                    "requires_approval": bool(requires_approval),
                 },
             )
             row = result.fetchone()

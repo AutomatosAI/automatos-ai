@@ -180,7 +180,6 @@ class Agent(Base):
     public_id = Column(UUID(as_uuid=True), default=uuid4, unique=True, nullable=True, index=True)
     name = Column(String(255), nullable=False)
     description = Column(Text)
-    job_title = Column(String(120), nullable=True)  # Short role label shown on cards (e.g. "Lead Intelligence")
     agent_type = Column(String(100), nullable=False)  # 'custom', 'system', 'specialized'
     status = Column(String(50), default='active')  # 'active', 'inactive', 'training'
     configuration = Column(JSON)  # Agent-specific config
@@ -229,6 +228,7 @@ class Agent(Base):
     team = Column(String(100), nullable=True)       # Department/team name (e.g., "Engineering", "Marketing")
     job_title = Column(String(200), nullable=True)  # Human-readable role (e.g., "Lead Developer", "SEO Analyst")
     reports_to_id = Column(Integer, ForeignKey('agents.id', ondelete='SET NULL'), nullable=True)
+    responsibilities = Column(JSONB, default=list, server_default='[]', nullable=False)  # Wave 1.A: structured ownership list
 
     # PRD-64: Semantic routing embedding
     semantic_embedding = Column(JSONB, nullable=True)       # 2048-float vector for cosine similarity

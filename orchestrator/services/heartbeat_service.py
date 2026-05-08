@@ -996,10 +996,12 @@ class HeartbeatService:
                         """
                         INSERT INTO heartbeat_results
                             (source_type, source_id, workspace_id, status,
-                             findings, actions_taken, tokens_used, created_at)
+                             findings, actions_taken, tokens_used,
+                             objective_met, evidence_ref, created_at)
                         VALUES
                             (:source_type, :source_id, :workspace_id, :status,
-                             :findings, :actions_taken, :tokens_used, NOW())
+                             :findings, :actions_taken, :tokens_used,
+                             :objective_met, :evidence_ref, NOW())
                         RETURNING id
                         """
                     ),
@@ -1011,6 +1013,8 @@ class HeartbeatService:
                         "findings": json.dumps(result["findings"]),
                         "actions_taken": json.dumps(result["actions_taken"]),
                         "tokens_used": result.get("tokens_used", 0),
+                        "objective_met": self._infer_objective_met(result),
+                        "evidence_ref": result.get("evidence_ref"),
                     },
                 ).fetchone()
                 db.commit()
@@ -1022,6 +1026,32 @@ class HeartbeatService:
         except Exception as e:
             logger.error("[Heartbeat] Failed to store result: %s", e)
             return None
+
+    @staticmethod
+    def _infer_objective_met(result: dict) -> Optional[bool]:
+        """Best-effort objective completion classifier — Wave 1.B.
+
+        ``True``  — status=success and there is observable output (actions
+                    taken, findings recorded, or an explicit evidence_ref).
+        ``False`` — status indicates failure (error / failed / timeout).
+        ``None``  — cannot be determined (silent success with no output).
+
+        Callers may override by setting ``result["objective_met"]`` directly
+        before persistence.
+        """
+        if "objective_met" in result:
+            return result.get("objective_met")
+        status = (result.get("status") or "").lower()
+        if status in {"error", "failed", "timeout"}:
+            return False
+        if status == "success":
+            has_output = bool(
+                result.get("actions_taken")
+                or result.get("findings")
+                or result.get("evidence_ref")
+            )
+            return True if has_output else None
+        return None
 
     # ------------------------------------------------------------------
     # Notification delivery (PRD-128: unified dispatcher)

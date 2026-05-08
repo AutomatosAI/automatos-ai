@@ -73,6 +73,10 @@ async def submit_report(db: Session, workspace_id: UUID, params: Dict[str, Any])
         metrics=params.get("metrics"),
         attachments=params.get("attachments"),
         heartbeat_result_id=params.get("_heartbeat_result_id"),
+        recommendations=params.get("recommendations"),
+        action_items=params.get("action_items"),
+        linked_task_ids=params.get("linked_task_ids"),
+        requires_approval=bool(params.get("requires_approval", False)),
     )
 
     # PRD-126: Trigger knowledge graph update on report submission
