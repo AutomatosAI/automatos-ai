@@ -92,6 +92,107 @@ async def submit_report(db: Session, workspace_id: UUID, params: Dict[str, Any])
     return result
 
 
+async def acknowledge_report(
+    db: Session, workspace_id: UUID, params: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Wave 3 — mark a report as actioned. Stamps acknowledged_by/at."""
+    report_id = params.get("report_id")
+    if not report_id:
+        return {"success": False, "error": "report_id is required"}
+
+    user_id = params.get("user_id")
+    try:
+        result = db.execute(
+            text(
+                """
+                UPDATE agent_reports
+                   SET acknowledged_by = COALESCE(:user_id, acknowledged_by),
+                       acknowledged_at = NOW(),
+                       updated_at      = NOW()
+                 WHERE id = :report_id
+                   AND workspace_id = :workspace_id
+                 RETURNING id
+                """
+            ),
+            {
+                "report_id": report_id,
+                "workspace_id": str(workspace_id),
+                "user_id": user_id,
+            },
+        ).fetchone()
+        if result is None:
+            return {"success": False, "error": "report not found in this workspace"}
+        db.commit()
+        return {"success": True, "data": {"report_id": str(result[0])}}
+    except Exception as exc:
+        logger.error("[acknowledge_report] failed: %s", exc, exc_info=True)
+        db.rollback()
+        return {"success": False, "error": str(exc)}
+
+
+async def link_report_to_task(
+    db: Session, workspace_id: UUID, params: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Wave 3 — append a task_id to a report's linked_task_ids JSONB array."""
+    report_id = params.get("report_id")
+    task_id = params.get("task_id")
+    if not report_id or task_id is None:
+        return {"success": False, "error": "report_id and task_id are required"}
+
+    try:
+        task_id_int = int(task_id)
+    except (TypeError, ValueError):
+        return {"success": False, "error": "task_id must be an integer"}
+
+    try:
+        result = db.execute(
+            text(
+                """
+                UPDATE agent_reports
+                   SET linked_task_ids = COALESCE(linked_task_ids, '[]'::jsonb)
+                                         || to_jsonb(:task_id::int),
+                       updated_at = NOW()
+                 WHERE id = :report_id
+                   AND workspace_id = :workspace_id
+                   AND NOT (linked_task_ids @> to_jsonb(:task_id::int))
+                 RETURNING id, linked_task_ids
+                """
+            ),
+            {
+                "report_id": report_id,
+                "workspace_id": str(workspace_id),
+                "task_id": task_id_int,
+            },
+        ).fetchone()
+        if result is None:
+            existing = db.execute(
+                text(
+                    "SELECT linked_task_ids FROM agent_reports "
+                    "WHERE id = :id AND workspace_id = :ws"
+                ),
+                {"id": report_id, "ws": str(workspace_id)},
+            ).fetchone()
+            if existing is None:
+                return {"success": False, "error": "report not found in this workspace"}
+            return {
+                "success": True,
+                "data": {
+                    "report_id": report_id,
+                    "linked_task_ids": existing[0],
+                    "already_linked": True,
+                },
+            }
+        db.commit()
+        return {
+            "success": True,
+            "data": {"report_id": str(result[0]), "linked_task_ids": result[1]},
+        }
+    except Exception as exc:
+        logger.error("[link_report_to_task] failed: %s", exc, exc_info=True)
+        db.rollback()
+        return {"success": False, "error": str(exc)}
+
+
 async def get_latest_report(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Get the most recent report from a specific agent."""
     from services.report_service import ReportService

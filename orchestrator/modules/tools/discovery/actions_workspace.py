@@ -63,7 +63,10 @@ def register_workspace_actions_defs(registry: ActionRegistry) -> None:
             "Store a curated fact in workspace long-term memory for future conversations. "
             "Use for: user facts, confirmed decisions, workspace patterns, user corrections. "
             "Do NOT use for: task artifacts, raw tool outputs, volatile data. "
-            "Keep under 200 chars. For searching stored memories, use platform_search_memory."
+            "Keep under 200 chars. For searching stored memories, use platform_search_memory.\n\n"
+            "Wave 3 — provenance: when you set ``source_type``, future readers can tell "
+            "platform_verified facts from claude_reports / current_status / inference. "
+            "Always set ``source_type`` honestly; default is 'inference' when unsure."
         ),
         category="memory",
         parameters={
@@ -73,16 +76,34 @@ def register_workspace_actions_defs(registry: ActionRegistry) -> None:
                     "type": "string",
                     "description": "The information to remember.",
                 },
+                "source_type": {
+                    "type": "string",
+                    "enum": ["platform_verified", "claude_reports", "current_status", "inference"],
+                    "description": (
+                        "Provenance: platform_verified (queried + confirmed via tools), "
+                        "claude_reports (the assistant's claim, unverified), current_status "
+                        "(transient state read from a live source), inference (pattern-based)."
+                    ),
+                },
+                "confidence": {
+                    "type": "number",
+                    "description": "0.0-1.0 confidence in the claim. 1.0 = verified.",
+                },
+                "evidence_uri": {
+                    "type": "string",
+                    "description": "Optional pointer to the source — workspace file path, report id, run id, etc.",
+                },
             },
             "required": ["content"],
         },
         permission_level="write",
         promoted=True,
         requires_confirmation=False,
-        tags=["memory", "store", "write"],
+        tags=["memory", "store", "write", "provenance"],
         examples=[
             "remember that our deploy day is Thursday",
             "store this: API key rotates every 90 days",
+            "store with source_type=platform_verified after running the check",
         ],
     ))
 
