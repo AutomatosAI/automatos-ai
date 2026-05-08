@@ -97,13 +97,10 @@ async def _auto_create_playbook_report(
     total_tokens: int,
     final_output: Any,
     success: bool,
-    scratchpad=None,
 ) -> None:
     """Persist an agent_reports row summarising a playbook execution.
 
     File path: reports/playbook-{slug}/{date}_{exec_id}.md
-    Includes scratchpad exports so the report is self-sufficient — no
-    dependency on a flaky synthesis step.
     Always non-blocking — never raises.
     """
     try:
@@ -111,26 +108,6 @@ async def _auto_create_playbook_report(
 
         recipe_name = getattr(recipe, "name", None) or f"playbook-{recipe.id}"
         report_agent_name = f"playbook-{recipe_name}"
-
-        # Pull all scratchpad exports so the report has the synthesis data
-        # even if the agent's synthesis step never wrote a file.
-        exports: Dict[str, Any] = {}
-        if scratchpad is not None:
-            try:
-                raw_exports = scratchpad.get_exports()
-                for k, v in (raw_exports or {}).items():
-                    if isinstance(v, str):
-                        try:
-                            exports[k] = json.loads(v)
-                        except (ValueError, TypeError):
-                            exports[k] = v
-                    else:
-                        exports[k] = v
-            except Exception as e:
-                logger.warning(
-                    "[recipe_direct] scratchpad.get_exports failed for %s: %s",
-                    recipe_execution_id, e,
-                )
 
         # Roll up cost/model/duration across every LLM call in this execution
         exec_metrics = compute_execution_metrics(
@@ -197,20 +174,6 @@ async def _auto_create_playbook_report(
             for m in models_used:
                 lines.append(f"- {m}")
 
-        if exports:
-            lines.append("")
-            lines.append("## Step Exports (scratchpad)")
-            for key in sorted(exports.keys()):
-                value = exports[key]
-                lines.append("")
-                lines.append(f"### `{key}`")
-                lines.append("```json")
-                try:
-                    lines.append(json.dumps(value, indent=2, default=str))
-                except (TypeError, ValueError):
-                    lines.append(str(value))
-                lines.append("```")
-
         if final_output:
             preview = str(final_output)[:500]
             if len(str(final_output)) > 500:
@@ -246,18 +209,7 @@ async def _auto_create_playbook_report(
             summary=summary,
             metrics=exec_metrics,
         )
-        if report_result.get("success"):
-            logger.info(
-                "[recipe_direct] Playbook auto-report created %s for %s "
-                "(exports=%d, model=%s, cost=$%.4f, dur=%dms)",
-                report_result.get("report_id"),
-                recipe_execution_id,
-                len(exports),
-                exec_metrics.get("model") or "unknown",
-                exec_metrics.get("cost_usd", 0),
-                exec_metrics.get("duration_ms", 0),
-            )
-        else:
+        if not report_result.get("success"):
             logger.warning(
                 "[recipe_direct] Playbook auto-report DB insert failed for %s: %s",
                 recipe_execution_id, report_result.get("error"),
@@ -1514,7 +1466,6 @@ async def _execute_recipe_inner(
                 total_tokens=total_tokens,
                 final_output=final_output,
                 success=True,
-                scratchpad=scratchpad,
             )
         except Exception as report_err:
             logger.warning(
