@@ -51,7 +51,7 @@ async def _auto_create_task_report(
     Always non-blocking: never raises, just warns on failure.
     """
     try:
-        from services.report_service import ReportService
+        from services.report_service import ReportService, compute_execution_metrics
 
         agent_name = "Unknown Agent"
         if task.assigned_agent_id:
@@ -70,12 +70,31 @@ async def _auto_create_task_report(
             or ""
         )
 
-        usage = exec_result.get("usage") or {}
-        tokens = (
-            usage.get("total_tokens")
-            or exec_result.get("tokens_used")
-            or 0
+        # Pull cost/model/duration rollup from llm_usage (window = task started→completed)
+        exec_metrics = compute_execution_metrics(
+            db,
+            workspace_id,
+            agent_id=task.assigned_agent_id,
+            execution_id=getattr(task, "execution_id", None),
+            started_at=getattr(task, "started_at", None),
+            completed_at=getattr(task, "completed_at", None),
+            extra={
+                "task_id": task.id,
+                "task_status": task.status,
+                "trigger": "task",
+            },
         )
+
+        # Honour upstream-supplied tokens if the rollup found nothing
+        if not exec_metrics.get("tokens_used"):
+            usage = exec_result.get("usage") or {}
+            fallback_tokens = (
+                usage.get("total_tokens")
+                or exec_result.get("tokens_used")
+                or 0
+            )
+            if fallback_tokens:
+                exec_metrics["tokens_used"] = fallback_tokens
 
         report_status = "ok" if task.status in ("done", "review") else "warning"
         if task.error_message:
@@ -96,9 +115,16 @@ async def _auto_create_task_report(
             lines.append("## Result")
             lines.append(str(llm_text))
             lines.append("")
-        lines.append("## Metrics")
-        lines.append(f"- Tokens used: {tokens}")
-        lines.append(f"- Duration: {task.duration_seconds() if hasattr(task, 'duration_seconds') else 'n/a'}")
+        lines.append("## Execution Metrics")
+        lines.append(f"- Model: {exec_metrics.get('model') or 'unknown'}")
+        lines.append(f"- LLM calls: {exec_metrics.get('llm_calls', 0)}")
+        lines.append(f"- Tokens (in/out/total): "
+                     f"{exec_metrics.get('input_tokens', 0)} / "
+                     f"{exec_metrics.get('output_tokens', 0)} / "
+                     f"{exec_metrics.get('tokens_used', 0)}")
+        lines.append(f"- Cost: ${exec_metrics.get('cost_usd', 0):.4f}")
+        if exec_metrics.get("duration_ms") is not None:
+            lines.append(f"- Duration: {exec_metrics['duration_ms']} ms")
         content = "\n".join(lines)
 
         # Summary is the first non-empty body line — same convention as heartbeat reports.
@@ -118,11 +144,7 @@ async def _auto_create_task_report(
             report_type="task",
             status=report_status,
             summary=summary,
-            metrics={
-                "tokens_used": tokens,
-                "task_id": task.id,
-                "task_status": task.status,
-            },
+            metrics=exec_metrics,
         )
         if not report_result.get("success"):
             logger.warning(

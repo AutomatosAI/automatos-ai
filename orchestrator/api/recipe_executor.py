@@ -83,6 +83,146 @@ async def _dispatch_playbook_event(
 
 
 # ---------------------------------------------------------------------------
+# Auto-report on playbook completion (mirrors heartbeat & task auto-reports)
+# ---------------------------------------------------------------------------
+async def _auto_create_playbook_report(
+    *,
+    db: Session,
+    workspace_id: str,
+    recipe,
+    recipe_execution_id: str,
+    execution,
+    step_results: List[dict],
+    total_duration_ms: int,
+    total_tokens: int,
+    final_output: Any,
+    success: bool,
+) -> None:
+    """Persist an agent_reports row summarising a playbook execution.
+
+    File path: reports/playbook-{slug}/{date}_{exec_id}.md
+    Always non-blocking — never raises.
+    """
+    try:
+        from services.report_service import ReportService, compute_execution_metrics
+
+        recipe_name = getattr(recipe, "name", None) or f"playbook-{recipe.id}"
+        report_agent_name = f"playbook-{recipe_name}"
+
+        # Roll up cost/model/duration across every LLM call in this execution
+        exec_metrics = compute_execution_metrics(
+            db,
+            workspace_id,
+            execution_id=recipe_execution_id,
+            started_at=getattr(execution, "started_at", None),
+            completed_at=getattr(execution, "completed_at", None),
+            extra={
+                "recipe_id": getattr(recipe, "id", None),
+                "recipe_name": recipe_name,
+                "recipe_execution_id": recipe_execution_id,
+                "steps_count": len(step_results),
+                "trigger": "playbook",
+            },
+        )
+        # Honour totals computed by the executor when llm_usage rollup is sparse
+        if not exec_metrics.get("tokens_used"):
+            exec_metrics["tokens_used"] = total_tokens
+        if exec_metrics.get("duration_ms") is None:
+            exec_metrics["duration_ms"] = total_duration_ms
+
+        report_status = "ok" if success else ("warning" if step_results else "critical")
+        any_failed = any(
+            s.get("status") in ("failed", "error") for s in step_results
+        )
+        if any_failed and report_status == "ok":
+            report_status = "warning"
+
+        # Markdown body
+        lines = [
+            f"# {recipe_name} — Playbook Report",
+            f"**Execution:** {recipe_execution_id}",
+            f"**Status:** {'completed' if success else 'failed'}",
+            "",
+            "## Execution Metrics",
+            f"- Primary model: {exec_metrics.get('model') or 'unknown'}",
+            f"- LLM calls: {exec_metrics.get('llm_calls', 0)}",
+            f"- Tokens (in/out/total): "
+            f"{exec_metrics.get('input_tokens', 0)} / "
+            f"{exec_metrics.get('output_tokens', 0)} / "
+            f"{exec_metrics.get('tokens_used', 0)}",
+            f"- Cost: ${exec_metrics.get('cost_usd', 0):.4f}",
+            f"- Duration: {exec_metrics.get('duration_ms', 0)} ms",
+            f"- Steps: {len(step_results)}",
+            "",
+            "## Steps",
+        ]
+        for step in step_results:
+            order = step.get("order") or step.get("step_order") or "?"
+            name = step.get("name") or step.get("agent_name") or "(unnamed)"
+            status = step.get("status", "?")
+            duration = step.get("duration_ms")
+            tokens = step.get("tokens_used", 0)
+            duration_str = f"{duration} ms" if duration is not None else "n/a"
+            lines.append(
+                f"- **#{order} {name}** — {status} · {tokens} tokens · {duration_str}"
+            )
+
+        models_used = exec_metrics.get("models_used") or []
+        if models_used:
+            lines.append("")
+            lines.append("## Models Used")
+            for m in models_used:
+                lines.append(f"- {m}")
+
+        if final_output:
+            preview = str(final_output)[:500]
+            if len(str(final_output)) > 500:
+                preview += "…"
+            lines.append("")
+            lines.append("## Final Output (preview)")
+            lines.append("```")
+            lines.append(preview)
+            lines.append("```")
+
+        content = "\n".join(lines)
+
+        first_step_summary = next(
+            (s.get("output_preview") for s in step_results if s.get("output_preview")),
+            None,
+        )
+        summary = (
+            f"{len(step_results)} steps · "
+            f"${exec_metrics.get('cost_usd', 0):.4f} · "
+            f"{exec_metrics.get('duration_ms', 0)} ms"
+        )
+        if first_step_summary:
+            summary = f"{summary} · {str(first_step_summary)[:100]}"
+
+        svc = ReportService(db, workspace_id)
+        report_result = await svc.create_report(
+            agent_id=None,
+            agent_name=report_agent_name,
+            title=f"Playbook: {recipe_name}",
+            content=content,
+            report_type="summary",
+            status=report_status,
+            summary=summary,
+            metrics=exec_metrics,
+        )
+        if not report_result.get("success"):
+            logger.warning(
+                "[recipe_direct] Playbook auto-report DB insert failed for %s: %s",
+                recipe_execution_id, report_result.get("error"),
+            )
+    except Exception:
+        logger.error(
+            "[recipe_direct] _auto_create_playbook_report raised for %s",
+            recipe_execution_id,
+            exc_info=True,
+        )
+
+
+# ---------------------------------------------------------------------------
 # Per-workspace execution semaphore — allows bounded concurrent recipe
 # execution within a workspace.  Keys are workspace_id strings; values are
 # asyncio.Semaphores created on first access.  The dict itself is
@@ -1358,6 +1498,26 @@ async def _execute_recipe_inner(
             f"{len(step_results)} steps, {total_duration}ms, {total_tokens} tokens"
         )
 
+        # --- Auto-report (mirrors heartbeat / task auto-report) ---
+        try:
+            await _auto_create_playbook_report(
+                db=db,
+                workspace_id=workspace_id,
+                recipe=recipe,
+                recipe_execution_id=recipe_execution_id,
+                execution=execution,
+                step_results=step_results,
+                total_duration_ms=total_duration,
+                total_tokens=total_tokens,
+                final_output=final_output,
+                success=True,
+            )
+        except Exception as report_err:
+            logger.warning(
+                "[recipe_direct] Playbook auto-report failed (non-blocking) for %s: %s",
+                recipe_execution_id, report_err,
+            )
+
         # --- Post-execution: update agent performance_metrics ---
         _update_agent_performance_metrics(db, step_results, success=True)
 
@@ -1582,6 +1742,34 @@ async def _fail_execution(
             logger.info(f"[recipe_direct] Execution {execution_id} marked FAILED: {error_message}")
             # Update agent performance_metrics for failure
             _update_agent_performance_metrics(db, step_results or [], success=False)
+
+            # Auto-report on failure too — system admin needs to see these
+            try:
+                recipe = db.query(WorkflowRecipe).filter(WorkflowRecipe.id == execution.recipe_id).first()
+                if recipe:
+                    duration_ms = 0
+                    if execution.started_at and execution.completed_at:
+                        duration_ms = int(
+                            (execution.completed_at - execution.started_at).total_seconds() * 1000
+                        )
+                    total_tokens = sum((s.get("tokens_used", 0) for s in (step_results or [])))
+                    await _auto_create_playbook_report(
+                        db=db,
+                        workspace_id=str(execution.workspace_id),
+                        recipe=recipe,
+                        recipe_execution_id=execution_id,
+                        execution=execution,
+                        step_results=step_results or [],
+                        total_duration_ms=duration_ms,
+                        total_tokens=total_tokens,
+                        final_output=error_message,
+                        success=False,
+                    )
+            except Exception as rep_err:
+                logger.warning(
+                    "[recipe_direct] Failure auto-report skipped for %s: %s",
+                    execution_id, rep_err,
+                )
 
             # Capture failure context into memory so future runs can learn from it
             try:

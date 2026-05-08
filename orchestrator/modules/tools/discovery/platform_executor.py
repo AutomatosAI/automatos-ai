@@ -99,6 +99,7 @@ from modules.tools.discovery.handlers_scheduling import (
 from modules.tools.discovery.handlers_reports import (
     submit_report,
     get_latest_report,
+    browse_reports,
 )
 from modules.tools.discovery.handlers_harness import (
     harness_status,
@@ -245,6 +246,7 @@ class PlatformActionExecutor:
             # PRD-76: Agent Reports
             "platform_submit_report": submit_report,
             "platform_get_latest_report": get_latest_report,
+            "platform_browse_reports": browse_reports,
             # PRD-72: Board Tasks
             "platform_create_task": create_board_task,
             "platform_list_tasks": list_board_tasks,

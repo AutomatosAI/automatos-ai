@@ -76,6 +76,68 @@ def register_report_actions(registry: ActionRegistry) -> None:
     ))
 
     registry.register(ActionDefinition(
+        name="platform_browse_reports",
+        description=(
+            "List agent reports across the workspace with optional filters. "
+            "Use this to analyse cost / model / duration patterns across agents, "
+            "tasks and playbooks — the system admin agent uses this to recommend "
+            "model swaps and cost savings. For a single agent's most-recent report, "
+            "use platform_get_latest_report instead."
+        ),
+        category="reports",
+        parameters={
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "integer",
+                    "description": "Optional agent filter.",
+                },
+                "agent_name": {
+                    "type": "string",
+                    "description": "Optional agent name filter (substring match).",
+                },
+                "report_type": {
+                    "type": "string",
+                    "enum": ["standup", "research", "incident", "summary", "delivery", "audit", "task"],
+                    "description": "Optional report type filter.",
+                },
+                "status": {
+                    "type": "string",
+                    "enum": ["ok", "warning", "critical", "info"],
+                    "description": "Optional status filter.",
+                },
+                "trigger": {
+                    "type": "string",
+                    "enum": ["heartbeat", "task", "playbook"],
+                    "description": "Optional trigger filter — matches metrics.trigger field.",
+                },
+                "model": {
+                    "type": "string",
+                    "description": "Optional model filter — matches metrics.model field (e.g. 'openai/gpt-5').",
+                },
+                "period": {
+                    "type": "string",
+                    "enum": ["1d", "7d", "30d", "90d", "all"],
+                    "description": "Time window. Default 7d.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max rows to return (default 50, max 200).",
+                },
+            },
+            "required": [],
+        },
+        permission_level="read",
+        tags=["reports", "read", "analytics", "monitoring"],
+        examples=[
+            "list reports from the last 7 days",
+            "show me playbook reports that ran on opus-4.7",
+            "list critical reports across the workspace",
+            "show task reports for agent FORGE this month",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
         name="platform_get_latest_report",
         description=(
             "Read the most recent report from a specific agent. Use to check another "
