@@ -20,7 +20,7 @@ import asyncio
 import logging
 import re
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
 from sqlalchemy import and_
@@ -78,6 +78,111 @@ _POWER_MODE_CAPS: Dict[str, Dict[str, Any]] = {
     "standard": {"max_tokens": 4_000,  "max_tool_iterations": 10, "force_llm_tier": None},
     "max":      {"max_tokens": 16_000, "max_tool_iterations": 50, "force_llm_tier": "orchestrator_llm"},
 }
+
+
+# ---------------------------------------------------------------------------
+# Synthesis model override (Fix 1)
+# ---------------------------------------------------------------------------
+# Synthesis tasks consolidate prior step outputs and don't need premium
+# reasoning. We bias toward fast, cheap models (Gemini Flash → Haiku → agent
+# default). Order: try primary → try fallback → leave untouched.
+#
+# A model is "available" if it's globally active in llm_models OR installed
+# in the workspace (workspace_models). The agent's existing model is always
+# considered available so the override never makes things worse.
+#
+# Telemetry: the LLM call itself logs the OVERRIDE model_id under the
+# original agent_id, so cost/latency rolls up to the right model while task
+# ownership stays with the assigned agent (Auto / specialist).
+# ---------------------------------------------------------------------------
+
+def _resolve_synthesis_model(
+    db: Session,
+    workspace_id: Optional[Any],
+    current_model_id: str,
+) -> Optional[str]:
+    """Return the model_id to use for synthesis, or None to leave unchanged.
+
+    Picks the first override from (primary, fallback) that:
+      - is not the current agent model (no-op overrides skipped),
+      - is active in the global llm_models registry, OR
+      - is installed in this workspace.
+
+    Returns None if synthesis override is disabled or no valid candidate
+    is available — caller should leave the agent's model in place.
+    """
+    if not Config.COORDINATOR_SYNTHESIS_MODEL_OVERRIDE_ENABLED:
+        return None
+
+    candidates = [
+        Config.COORDINATOR_SYNTHESIS_MODEL_PRIMARY,
+        Config.COORDINATOR_SYNTHESIS_MODEL_FALLBACK,
+    ]
+    candidates = [c for c in candidates if c and c != current_model_id]
+    if not candidates:
+        return None
+
+    try:
+        from core.models.core import LLMModel, WorkspaceModel
+        from sqlalchemy import or_
+
+        global_active = {
+            row[0] for row in db.query(LLMModel.model_id).filter(
+                LLMModel.model_id.in_(candidates),
+                LLMModel.status == "active",
+            ).all()
+        }
+        ws_installed: set = set()
+        if workspace_id is not None:
+            ws_installed = {
+                row[0] for row in db.query(LLMModel.model_id)
+                .join(WorkspaceModel, WorkspaceModel.model_id == LLMModel.id)
+                .filter(
+                    LLMModel.model_id.in_(candidates),
+                    WorkspaceModel.workspace_id == workspace_id,
+                    WorkspaceModel.is_active.is_(True),
+                ).all()
+            }
+        available = global_active | ws_installed
+    except Exception:
+        logger.exception("Synthesis model availability lookup failed; leaving model unchanged")
+        return None
+
+    for candidate in candidates:
+        if candidate in available:
+            return candidate
+    return None
+
+
+def _apply_synthesis_override(
+    agent_runtime: Any,
+    target_model_id: str,
+    task_id: Any,
+    agent_id: int,
+) -> Optional[Tuple[str, str]]:
+    """Mutate agent_runtime.llm_manager.config to use the override model.
+
+    Returns the previous (provider, model) tuple so the caller can restore
+    afterwards (avoids polluting the factory cache for the next task on
+    this agent).
+    """
+    if not (agent_runtime and hasattr(agent_runtime, "llm_manager")):
+        return None
+    cfg = agent_runtime.llm_manager.config
+    previous = (getattr(cfg.provider, "value", str(cfg.provider)), cfg.model)
+
+    # OpenRouter slash-format models route through OpenRouter; let the
+    # provider resolver sort out the rest. Both gemini-2.5-flash and
+    # claude-haiku-4.5 ship as openrouter/<vendor>/<model> in this codebase.
+    from core.llm.clients.base import LLMProvider
+    cfg.provider = LLMProvider.OPENROUTER
+    cfg.model = target_model_id
+
+    logger.info(
+        "Task %s: synthesis model override applied — agent=%d %s/%s → openrouter/%s",
+        task_id, agent_id, previous[0], previous[1], target_model_id,
+    )
+    return previous
 
 
 # ---------------------------------------------------------------------------
@@ -887,7 +992,9 @@ class CoordinatorService:
                 agent_coros = [
                     self._run_agent_io(p["factory"], p["agent_id"], p["prompt"],
                                        p["task"], p["attachment_ids"],
-                                       run_config=p.get("run_config"))
+                                       run_config=p.get("run_config"),
+                                       agent_runtime=p.get("agent_runtime"),
+                                       synthesis_override_previous=p.get("synthesis_override_previous"))
                     for p in prepared
                 ]
                 results = await asyncio.gather(*agent_coros, return_exceptions=True)
@@ -1214,13 +1321,34 @@ class CoordinatorService:
                 mode_caps["max_tokens"],
             )
 
+        # Synthesis model override (Fix 1): consolidate-style tasks bias
+        # toward fast cheap models. Original (provider, model) is captured
+        # so we can restore in _run_agent_io's finally — keeps the factory
+        # cache pristine for the next task on this agent.
+        synthesis_override_previous: Optional[Tuple[str, str]] = None
+        if is_synthesis and agent_runtime and hasattr(agent_runtime, "llm_manager"):
+            workspace_id = getattr(run, "workspace_id", None)
+            current_model = agent_runtime.llm_manager.config.model
+            target = _resolve_synthesis_model(db, workspace_id, current_model)
+            if target:
+                synthesis_override_previous = _apply_synthesis_override(
+                    agent_runtime, target, task.id, agent_id,
+                )
+            else:
+                logger.info(
+                    "Task %s: synthesis override skipped (disabled or no available model) — using agent default %s",
+                    task.id, current_model,
+                )
+
         return {
             "task": task,
             "agent_id": agent_id,
+            "agent_runtime": agent_runtime,
             "prompt": prompt,
             "factory": factory,
             "attachment_ids": task_attachment_ids,
             "run_config": run_config,
+            "synthesis_override_previous": synthesis_override_previous,
         }
 
     async def _run_agent_io(
@@ -1231,19 +1359,29 @@ class CoordinatorService:
         task: Any,
         attachment_ids: List[str],
         run_config: Optional[Dict[str, Any]] = None,
+        agent_runtime: Optional[Any] = None,
+        synthesis_override_previous: Optional[Tuple[str, str]] = None,
     ) -> Dict[str, Any]:
         """Execute agent I/O — safe to run concurrently via asyncio.gather().
 
         No DB access here — only the LLM + tool loop.
+
+        ``synthesis_override_previous``: when set, the agent_runtime's LLM
+        config was mutated for a synthesis task. Restore it in finally so
+        the next task on the same cached agent gets the original model.
         """
         power_mode = (run_config or {}).get("power_mode", "standard")
         mode_caps = _POWER_MODE_CAPS.get(power_mode, _POWER_MODE_CAPS["standard"])
         max_iters = mode_caps["max_tool_iterations"]
 
+        # Pass runtime directly when we have it so cache lookups can't replace
+        # a synthesis-overridden runtime with a stale cached one.
+        agent_arg: Any = agent_runtime if agent_runtime is not None else agent_id
+
         try:
             result = await asyncio.wait_for(
                 factory.execute_with_prompt(
-                    agent=agent_id,
+                    agent=agent_arg,
                     prompt=prompt,
                     max_retries=0,
                     max_tool_iterations=max_iters,
@@ -1270,6 +1408,19 @@ class CoordinatorService:
                 exc_info=True,
             )
             result = {"status": "error", "error": str(exc)}
+        finally:
+            if synthesis_override_previous and agent_runtime is not None and hasattr(agent_runtime, "llm_manager"):
+                from core.llm.clients.base import LLMProvider
+                prev_provider, prev_model = synthesis_override_previous
+                try:
+                    agent_runtime.llm_manager.config.provider = LLMProvider(prev_provider)
+                except ValueError:
+                    pass  # Stick with whatever the override set; safer than crashing.
+                agent_runtime.llm_manager.config.model = prev_model
+                logger.debug(
+                    "Task %s: synthesis override restored (agent=%d → %s/%s)",
+                    task.id, agent_id, prev_provider, prev_model,
+                )
         return result
 
     async def _record_task_result(
