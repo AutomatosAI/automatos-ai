@@ -365,9 +365,11 @@ class HarnessService:
         from core.models import Agent
         from sqlalchemy import text
 
+        # Agent has no `is_active` column — use the canonical `status` field
+        # (matches semantic_indexer + AgentService throughout the codebase).
         agent_count = (
             db.query(Agent)
-            .filter(Agent.workspace_id == workspace_id, Agent.is_active.is_(True))
+            .filter(Agent.workspace_id == workspace_id, Agent.status == "active")
             .count()
         )
 
