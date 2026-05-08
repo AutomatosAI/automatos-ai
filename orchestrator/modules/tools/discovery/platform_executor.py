@@ -432,17 +432,28 @@ class PlatformActionExecutor:
                 "params": params,
             }
 
-        # Rate limit write/destructive actions
+        # Rate limit write/destructive actions — scoped per (workspace, agent)
+        # so a chatty Auto session doesn't starve mission tasks of headroom.
         if action_def and action_def.permission_level in ("write", "destructive"):
             try:
-                from core.security.rate_limiter import check_rate_limit
-                await check_rate_limit(str(self.workspace_id), "platform_write")
+                from core.security.rate_limiter import check_rate_limit, DEFAULT_LIMITS
+                _agent_id = params.get("_agent_id") if isinstance(params, dict) else None
+                subject = str(_agent_id) if _agent_id else None
+                await check_rate_limit(
+                    str(self.workspace_id),
+                    "platform_write",
+                    subject_id=subject,
+                )
             except HTTPException as e:
                 if e.status_code == 429:
+                    limit, window = DEFAULT_LIMITS.get("platform_write", (60, 60))
                     return {
                         "success": False,
                         "rate_limited": True,
-                        "error": "Rate limit exceeded: max 10 write actions per minute. Try again shortly.",
+                        "error": (
+                            f"Rate limit exceeded: max {limit} write actions per "
+                            f"{window}s. Try again shortly."
+                        ),
                     }
                 raise
             except Exception as exc:

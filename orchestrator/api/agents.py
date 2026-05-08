@@ -576,11 +576,13 @@ async def get_org_chart(
         # Auto CTO defensively (slug=auto-cto is supposed to be workspace_id=NULL
         # but stale data has leaked in the past — keep this filter even if
         # the data is correct, so a future drift doesn't surface it again).
+        # NOTE: most workspace agents have slug=NULL, and `slug != 'auto-cto'`
+        # excludes NULLs in SQL three-valued logic. The OR clause keeps them in.
         agents = (
             db.query(Agent)
             .filter(Agent.workspace_id == ctx.workspace_id)
             .filter(Agent.status == "active")
-            .filter(Agent.slug != "auto-cto")
+            .filter(or_(Agent.slug.is_(None), Agent.slug != "auto-cto"))
             .all()
         )
 
