@@ -732,6 +732,31 @@ export function useSkillsApi() {
     }
   }, [toast]);
 
+  const disableWorkspaceSkill = useCallback(async (
+    workspaceId: string,
+    skillId: number,
+  ): Promise<boolean> => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetchWithAuth(`${getWorkspaceSkillsBase(workspaceId)}/${skillId}`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Failed to remove skill from workspace');
+      }
+      toast({ title: 'Skill removed from workspace' });
+      return true;
+    } catch (err: any) {
+      setError(err.message);
+      toast({ title: 'Remove failed', description: err.message, variant: 'destructive' });
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  }, [toast]);
+
   return {
     loading,
     error,
@@ -759,5 +784,6 @@ export function useSkillsApi() {
     createWorkspaceSkill,
     updateWorkspaceSkill,
     deleteWorkspaceSkill,
+    disableWorkspaceSkill,
   };
 }
