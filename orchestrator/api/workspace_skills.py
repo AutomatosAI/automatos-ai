@@ -221,7 +221,20 @@ async def list_workspace_skills(
                 assigned_agent_count=assigned_count_by_skill.get(skill.id, 0),
             ))
 
-        return {"items": [item.model_dump() for item in items]}
+        # Marketplace catalogue size — total active skills with workspace_id IS NULL.
+        # Shipped so the UI can render "Marketplace (Enabled) X of Y" instead of
+        # the misleading bare count that suggests the workspace's enabled set IS
+        # the catalogue.
+        marketplace_total = (
+            db.query(Skill)
+            .filter(Skill.workspace_id.is_(None), Skill.is_active == True)
+            .count()
+        )
+
+        return {
+            "items": [item.model_dump() for item in items],
+            "marketplace_total": marketplace_total,
+        }
 
     except HTTPException:
         raise

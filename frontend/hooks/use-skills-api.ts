@@ -602,19 +602,23 @@ export function useSkillsApi() {
       throw new Error(detail || 'Failed to load workspace skills');
     }
     const json = await response.json();
-    return (json.items ?? []) as Array<{
-      skill_id: number;
-      name: string;
-      description: string | null;
-      category: string | null;
-      skill_version: string | null;
-      tags: string[] | null;
-      estimated_tokens: number;
-      skill_source: string | null;
-      enabled_at: string | null;
-      origin: 'marketplace' | 'workspace';
-      forked_from_skill_id: number | null;
-    }>;
+    return {
+      items: (json.items ?? []) as Array<{
+        skill_id: number;
+        name: string;
+        description: string | null;
+        category: string | null;
+        skill_version: string | null;
+        tags: string[] | null;
+        estimated_tokens: number;
+        skill_source: string | null;
+        enabled_at: string | null;
+        origin: 'marketplace' | 'workspace';
+        forked_from_skill_id: number | null;
+        assigned_agent_count: number;
+      }>,
+      marketplace_total: (json.marketplace_total ?? 0) as number,
+    };
   }, []);
 
   const getWorkspaceSkillContent = useCallback(async (
