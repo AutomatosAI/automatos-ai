@@ -730,10 +730,13 @@ class SkillLoader:
                     logger.warning(f"Skipping {skill_name} - contains dangerous patterns: {dangerous_matches}")
                     continue
                 
-                # Check if skill exists
+                # Check if skill exists. Git-imported skills are marketplace-only
+                # (workspace_id IS NULL); without this scope a re-import would match
+                # workspace forks of the same name and corrupt them.
                 existing_skill = db.query(Skill).filter(
                     Skill.name == skill_name,
-                    Skill.skill_source == str(source_id)
+                    Skill.skill_source == str(source_id),
+                    Skill.workspace_id.is_(None),
                 ).first()
                 
                 if existing_skill:
