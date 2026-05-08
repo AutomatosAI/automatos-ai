@@ -329,7 +329,7 @@ export function Message({
       data-testid={isUser ? 'msg-user' : 'msg-assistant'}
       className={`group/msg flex ${isUser ? 'justify-end' : 'justify-start'}`}
     >
-      <div className={`flex items-start space-x-3 max-w-[85%] min-w-0 ${isUser ? 'flex-row-reverse space-x-reverse' : ''}`}>
+      <div className={`flex items-start space-x-3 max-w-[92%] min-w-0 ${isUser ? 'flex-row-reverse space-x-reverse' : ''}`}>
         {/* Avatar */}
         <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
           isUser
