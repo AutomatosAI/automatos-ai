@@ -108,7 +108,6 @@ def register_skills_actions(registry: ActionRegistry) -> None:
             "required": ["name", "content"],
         },
         permission_level="write",
-        promoted=True,
         tags=["skills", "create", "workspace", "draft", "fork"],
         examples=[
             "create a new skill called daily-standup",
@@ -165,7 +164,6 @@ def register_skills_actions(registry: ActionRegistry) -> None:
             "required": ["skill_id", "content"],
         },
         permission_level="write",
-        promoted=True,
         tags=["skills", "update", "edit", "fork", "workspace"],
         examples=[
             "edit the VECTOR skill",
