@@ -75,15 +75,14 @@ class ChannelManager:
         workspace_id: str,
         platform: str,
         config: dict,
-    ):
-        """Start (or restart) a specific adapter."""
-        # Stop existing instance if already running
+    ) -> bool:
+        """Start (or restart) a specific adapter. Returns True on success."""
         if connection_id in self._adapters:
             await self._adapters[connection_id].stop()
 
         adapter = self._create_adapter(connection_id, workspace_id, platform, config)
         if adapter is None:
-            return
+            return False
 
         try:
             await adapter.start()
@@ -93,8 +92,10 @@ class ChannelManager:
                 platform,
                 connection_id,
             )
+            return True
         except Exception as e:
             logger.error("[ChannelManager] Failed to start %s: %s", platform, e)
+            return False
 
     async def stop_adapter(self, connection_id: str):
         """Stop a specific adapter by connection ID."""

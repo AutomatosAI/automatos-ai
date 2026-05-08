@@ -27,7 +27,7 @@ class TelegramAdapter(BaseChannelAdapter):
     async def start(self):
         """Start the Telegram bot."""
         try:
-            from telegram.ext import ApplicationBuilder, MessageHandler, filters
+            from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters
 
             token = self.config.get("bot_token", "")
             if not token:
@@ -35,7 +35,7 @@ class TelegramAdapter(BaseChannelAdapter):
 
             self._app = ApplicationBuilder().token(token).build()
 
-            # Register message handler — text, photos, and documents
+            self._app.add_handler(CommandHandler(["start", "help"], self._on_command))
             self._app.add_handler(
                 MessageHandler(
                     (filters.TEXT | filters.PHOTO | filters.Document.ALL) & ~filters.COMMAND,
@@ -43,7 +43,6 @@ class TelegramAdapter(BaseChannelAdapter):
                 )
             )
 
-            # Start polling in background
             await self._app.initialize()
             await self._app.start()
             self._task = asyncio.create_task(self._app.updater.start_polling())
@@ -99,12 +98,61 @@ class TelegramAdapter(BaseChannelAdapter):
         except Exception as e:
             return {"status": "error", "detail": str(e)}
 
+    async def _on_command(self, update, context):
+        """Handle /start and /help — captures chat_id and confirms wiring."""
+        if not update.effective_chat:
+            return
+        chat_id = str(update.effective_chat.id)
+        self._persist_default_chat_id(chat_id)
+        try:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=(
+                    "✅ Connected. This chat is now your default for Automatos "
+                    "notifications. Send any message to talk to your agents."
+                ),
+            )
+        except Exception as e:
+            logger.warning("[Telegram:%s] Failed to ack /start: %s", self.connection_id, e)
+
+    def _persist_default_chat_id(self, chat_id: str) -> None:
+        """Store chat_id in workspace.settings.integrations.telegram_default_chat_id."""
+        try:
+            from core.database.database import SessionLocal
+            from core.models.workspaces import Workspace
+            from sqlalchemy.orm.attributes import flag_modified
+
+            db = SessionLocal()
+            try:
+                ws = db.query(Workspace).get(self.workspace_id)
+                if not ws:
+                    return
+                settings = dict(ws.settings or {})
+                integrations = dict(settings.get("integrations", {}))
+                if integrations.get("telegram_default_chat_id") == chat_id:
+                    return
+                integrations["telegram_default_chat_id"] = chat_id
+                settings["integrations"] = integrations
+                ws.settings = settings
+                flag_modified(ws, "settings")
+                db.commit()
+                logger.info(
+                    "[Telegram:%s] Persisted telegram_default_chat_id=%s for ws=%s",
+                    self.connection_id, chat_id, self.workspace_id,
+                )
+            finally:
+                db.close()
+        except Exception as e:
+            logger.warning("[Telegram:%s] Failed to persist chat_id: %s", self.connection_id, e)
+
     async def _on_message(self, update, context):
         """Handle incoming Telegram message (text, photos, documents)."""
         if not update.message:
             return
 
-        # Must have text, photo, or document
+        if update.effective_chat:
+            self._persist_default_chat_id(str(update.effective_chat.id))
+
         has_text = bool(update.message.text or update.message.caption)
         has_photo = bool(update.message.photo)
         has_document = bool(update.message.document)
@@ -113,7 +161,6 @@ class TelegramAdapter(BaseChannelAdapter):
             return
 
         try:
-            # Send typing indicator
             await context.bot.send_chat_action(
                 chat_id=update.effective_chat.id, action="typing"
             )
