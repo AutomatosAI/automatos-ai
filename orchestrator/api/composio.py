@@ -263,30 +263,29 @@ async def list_connections(
 
 
 @router.get("/linkedin/test-upload-init")
-async def test_linkedin_upload_init(
-    workspace_id: Optional[str] = Query(None),
-    db: Session = Depends(get_db),
-):
-    """Smoke test: call LINKEDIN_INITIALIZE_IMAGE_UPLOAD via execute_action.
-    Verifies auth+version headers work without running a full playbook."""
-    client = get_composio_client()
-    if not workspace_id:
-        workspace_id = "ae8320bc-95e1-4de1-bbe9-396bef19cbf8"
-    entity_manager = EntityManager(db)
-    entity = entity_manager.get_entity_by_workspace(workspace_id)
-    if not entity:
-        return {"ok": False, "error": "No Composio entity for workspace"}
-
-    entity_id = entity["composio_entity_id"]
-    result = client.execute_action(
-        "LINKEDIN_INITIALIZE_IMAGE_UPLOAD",
-        {"owner": "urn:li:organization:108072660"},
-        entity_id,
+async def test_linkedin_upload_init():
+    """Smoke test: call LinkedIn initializeUpload directly (no Composio).
+    Verifies credential store + OAuth token + API version work."""
+    import httpx as _httpx
+    from core.composio.linkedin_image_workaround import (
+        _get_access_token, _initialize_image_upload, _load_linkedin_credentials,
     )
-    return {
-        "ok": result.get("success", False),
-        "result": result,
-    }
+
+    try:
+        creds = _load_linkedin_credentials()
+        org_urn = creds.get("organization_urn", "")
+        async with _httpx.AsyncClient(timeout=15) as http:
+            token = await _get_access_token(http)
+            upload_url, image_urn = await _initialize_image_upload(http, token, org_urn)
+            return {
+                "ok": bool(upload_url and image_urn),
+                "upload_url": (upload_url or "")[:80] + "..." if upload_url else None,
+                "image_urn": image_urn,
+                "org_urn": org_urn,
+                "credential_found": True,
+            }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 

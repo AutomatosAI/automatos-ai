@@ -319,6 +319,32 @@ async def _boot_phase_1_core():
         except Exception as e:
             logger.warning("System settings seed: %s", e)
 
+        # Seed credential types (schema changes ship with code)
+        try:
+            from core.database.load_seed_data import load_seed_data
+            load_seed_data(load_credentials=True, load_platform_defaults=False)
+        except Exception as e:
+            logger.warning("Credential types seed: %s", e)
+
+        # Update LinkedIn credential type schema (direct SQL — seed upsert may not fire)
+        try:
+            import json as _json
+            _li_schema = _json.dumps([
+                {"displayName": "Client ID", "name": "client_id", "type": "string", "required": True, "description": "OAuth2 Client ID from LinkedIn Developer Portal"},
+                {"displayName": "Client Secret", "name": "client_secret", "type": "password", "required": True, "description": "OAuth2 Client Secret"},
+                {"displayName": "Access Token", "name": "access_token", "type": "password", "required": True, "description": "OAuth2 access token"},
+                {"displayName": "Refresh Token", "name": "refresh_token", "type": "password", "required": False, "description": "OAuth2 refresh token for automatic renewal"},
+                {"displayName": "Organization URN", "name": "organization_urn", "type": "string", "required": True, "description": "e.g. urn:li:organization:108072660"},
+            ])
+            with engine.connect() as conn:
+                conn.execute(
+                    text("UPDATE credential_types SET schema_definition = :schema, category = 'social', description = 'LinkedIn Community Management API — posts images to organization pages' WHERE name = 'linkedInCommunityManagementOAuth2Api'"),
+                    {"schema": _li_schema},
+                )
+                conn.commit()
+        except Exception as e:
+            logger.warning("LinkedIn credential type update: %s", e)
+
         logger.info("Boot seeds completed (leader worker)")
 
 
