@@ -115,6 +115,11 @@ from modules.tools.discovery.handlers_harness import (
     harness_trigger,
     harness_history,
 )
+from modules.tools.discovery.handlers_auto_reporting import (
+    get_auto_reporting_prefs,
+    update_auto_reporting_prefs,
+    send_notification,
+)
 from modules.tools.discovery.handlers_assignments import (
     assign_tool_to_agent,
     assign_skill_to_agent,
@@ -316,6 +321,10 @@ class PlatformActionExecutor:
             "platform_harness_status": harness_status,
             "platform_harness_trigger": harness_trigger,
             "platform_harness_history": harness_history,
+            # Wave 2: Auto reporting preferences + send-notification wrapper
+            "platform_get_auto_reporting_prefs": get_auto_reporting_prefs,
+            "platform_update_auto_reporting_prefs": update_auto_reporting_prefs,
+            "platform_send_notification": send_notification,
             # PRD-126: Knowledge Graph
             "platform_query_graph": handle_query_graph,
             "platform_graph_neighbors": handle_graph_neighbors,
