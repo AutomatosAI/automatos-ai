@@ -210,7 +210,7 @@ async def execute_workspace_action(
             "workspace_grep", "workspace_list_dir",
         )
         # Paths starting with these prefixes are workspace-root relative, not repo-relative
-        _WORKSPACE_ROOT_PREFIXES = ("repos/", "artifacts/", "content/", "reports/", "logs/", "deliverables/")
+        _WORKSPACE_ROOT_PREFIXES = ("repos/", "artifacts/", "content/", "reports/", "logs/", "deliverables/", "analytics/")
         param_path = parameters.get("path", "")
         param_cwd = parameters.get("cwd", "")
         path_is_workspace_root = any(param_path.startswith(p) for p in _WORKSPACE_ROOT_PREFIXES)
