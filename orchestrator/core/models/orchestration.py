@@ -115,6 +115,12 @@ class OrchestrationRun(Base):
     budget_config = Column(JSONB, nullable=True)   # {max_cost, max_tokens, alert_at_pct}
     budget_spent = Column(JSONB, nullable=True, server_default=text("'{}'"))  # {cost, tokens, api_calls}
 
+    # Wave 1.D: Auto operating contract — mission lifecycle
+    linked_prd = Column(Text, nullable=True)  # e.g. "PRD-121"
+    completion_evidence = Column(JSONB, nullable=False, server_default=text("'[]'"))  # proof of done
+    deadline = Column(DateTime(timezone=True), nullable=True)
+    risks = Column(JSONB, nullable=False, server_default=text("'[]'"))
+
     # Timestamps
     started_at = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
