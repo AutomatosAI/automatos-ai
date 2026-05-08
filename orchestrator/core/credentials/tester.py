@@ -105,7 +105,8 @@ class CredentialTester:
             'oauth2_token': self._test_oauth2_token,
             'http_basic_auth': self._test_http_basic_auth,
             's3_credentials': self._test_s3,
-            'xai_api': self._test_xai
+            'xai_api': self._test_xai,
+            'linkedInCommunityManagementOAuth2Api': self._test_linkedin_community,
         }
         
         if credential_type not in test_methods:
@@ -693,6 +694,47 @@ class CredentialTester:
     async def _test_s3(self, data: Dict[str, Any]) -> Dict[str, Any]:
         return {'success': False, 'message': 'S3 credential testing not yet implemented'}
     
+    async def _test_linkedin_community(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Test LinkedIn Community Management API credentials"""
+        access_token = data.get('access_token')
+        organization_urn = data.get('organization_urn')
+
+        if not access_token:
+            return {'success': False, 'message': 'Access token is required'}
+        if not organization_urn:
+            return {'success': False, 'message': 'Organization URN is required'}
+
+        headers = {
+            'Authorization': f'Bearer {access_token}',
+            'LinkedIn-Version': '202601',
+            'X-Restli-Protocol-Version': '2.0.0',
+        }
+
+        async with self.session.get(
+            'https://api.linkedin.com/rest/me',
+            headers=headers,
+        ) as response:
+            if response.status == 200:
+                profile = await response.json()
+                name = profile.get('localizedFirstName', '')
+                return {
+                    'success': True,
+                    'message': f'LinkedIn API connection successful. Authenticated as {name}.',
+                    'details': {'organization_urn': organization_urn},
+                }
+            elif response.status == 401:
+                return {
+                    'success': False,
+                    'message': 'Access token is invalid or expired. Generate a new one from LinkedIn Developer Portal.',
+                    'details': {'status': 401},
+                }
+            else:
+                return {
+                    'success': False,
+                    'message': f'LinkedIn API error: {response.status}',
+                    'details': {'status': response.status},
+                }
+
     async def _test_xai(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Test xAI/Grok API credentials"""
         api_key = data.get('api_key')
