@@ -384,7 +384,11 @@ class HeartbeatService:
             return {"status": "skipped", "reason": "outside_active_hours"}
 
         interval_minutes = hb_config.get("interval_minutes", 30)
-        if await self._was_recently_executed("orchestrator", workspace_id, interval_minutes):
+        # Manual UI triggers (run_orchestrator_heartbeat) set force_run=True to
+        # bypass the cooldown — clicking "Run Now" should always execute.
+        if not hb_config.get("force_run") and await self._was_recently_executed(
+            "orchestrator", workspace_id, interval_minutes
+        ):
             return {"status": "skipped", "reason": "already_ran_this_period"}
 
         self._running_ticks[tick_key] = True
@@ -687,7 +691,12 @@ class HeartbeatService:
             return {"status": "skipped", "reason": "outside_active_hours"}
 
         interval_minutes = hb_config.get("interval_minutes", 60)
-        if await self._was_recently_executed("agent", str(agent_id), interval_minutes):
+        # Manual UI triggers (run_agent_heartbeat) set force_run=True to bypass
+        # the cooldown — without this, daily-interval agents could only be
+        # tested once a day. Scheduled ticks never set force_run.
+        if not hb_config.get("force_run") and await self._was_recently_executed(
+            "agent", str(agent_id), interval_minutes
+        ):
             return {"status": "skipped", "reason": "already_ran_this_period"}
 
         self._running_ticks[tick_key] = True
@@ -1342,12 +1351,14 @@ class HeartbeatService:
         finally:
             db.close()
 
-        # Force run regardless of active hours
+        # Force run regardless of active hours AND cooldown — clicking Run
+        # Now from the UI should always trigger a tick.
         hb_config_override = {
             **hb_config,
             "active_hours_start": "00:00",
             "active_hours_end": "23:59",
             "inherit_active_hours": False,  # manual runs always execute
+            "force_run": True,
         }
         return await self._orchestrator_tick(workspace_id, hb_config_override)
 
@@ -1371,6 +1382,7 @@ class HeartbeatService:
             "active_hours_start": "00:00",
             "active_hours_end": "23:59",
             "inherit_active_hours": False,  # manual runs always execute
+            "force_run": True,             # bypass cooldown so daily agents are testable
         }
         return await self._agent_tick(agent_id, workspace_id, hb_config_override)
 
