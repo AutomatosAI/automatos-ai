@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from config import config
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db
@@ -234,7 +235,7 @@ async def upload_cover_image(
     image_id = await store.save_image(b64, mime_type=content_type, workspace_id=str(ctx.workspace_id))
     return {
         "image_id": image_id,
-        "cover_image_url": f"/api/generated-images/{image_id}",
+        "cover_image_url": f"{config.BACKEND_URL.rstrip('/')}/api/generated-images/{image_id}",
         "size_bytes": len(body_bytes),
         "content_type": content_type,
     }
