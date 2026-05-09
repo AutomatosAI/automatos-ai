@@ -25,6 +25,7 @@ router = APIRouter(prefix="/api/api-keys", tags=["API Keys"])
 
 VALID_PERMISSIONS = [
     "chat",
+    "blog",
     "documents:read",
     "documents:write",
     "data:query",
