@@ -77,6 +77,7 @@ from api.statistics import router as statistics_router
 from api.permissions import router as permissions_router
 from api.skills import router as skills_router
 from api.templates import router as templates_router
+from api.blog import router as blog_router
 from api.context_summarization import router as context_summarization_router  # Context Engineering 2.0
 from api.team import router as team_router, public_router as team_public_router  # PRD-37: Team Management
 from api.routing import router as routing_router  # PRD-50: Universal Orchestrator Router
@@ -965,6 +966,7 @@ if shopify_router is not None:
     app.include_router(shopify_router)  # Shopify App Store provisioning & webhook forwarding
 app.include_router(document_generation_router)  # PRD-63: Must be BEFORE documents_router (has /templates, /generated specific routes that would otherwise be caught by documents_router's /{document_id} catch-all → 422)
 app.include_router(documents_router)
+app.include_router(blog_router)  # Authenticated blog management (Deliverables → Blogs)
 app.include_router(cache_router)  # Cache management and monitoring
 app.include_router(system_router)
 app.include_router(context_engineering_router)
