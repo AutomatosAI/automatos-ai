@@ -122,6 +122,7 @@ from modules.tools.discovery.handlers_auto_reporting import (
     update_auto_reporting_prefs,
     send_notification,
 )
+from modules.tools.discovery.handlers_notifications import notify_owner
 from modules.tools.discovery.handlers_assignments import (
     assign_tool_to_agent,
     assign_skill_to_agent,
@@ -325,6 +326,8 @@ class PlatformActionExecutor:
             "platform_get_agent_heartbeat": get_agent_heartbeat,
             "platform_unassign_skill_from_agent": unassign_skill_from_agent,
             "platform_unassign_tool_from_agent": unassign_tool_from_agent,
+            # Owner escalation channel
+            "platform_notify_owner": notify_owner,
             # PRD-76: Agent Reports
             "platform_submit_report": submit_report,
             "platform_get_latest_report": get_latest_report,
