@@ -58,49 +58,12 @@ CONTENT_AGENTS = [
             "- Tie topics back to AI automation, agents, or orchestration when possible"
         ),
     },
-    {
-        "name": "CANVAS",
-        "agent_type": "custom",
-        "description": (
-            "Cover art agent. Generates cover images for blog drafts via the "
-            "platform_generate_cover_image tool — one tool call handles "
-            "Gemini Nano Banana generation, image storage, and post attachment."
-        ),
-        "category": "Content Creation",
-        "tags": ["blog", "design", "cover-image", "image-generation"],
-        "tools": [],
-        # mistral-small is cheap and supports tool use. CANVAS doesn't generate
-        # the image itself — it calls platform_generate_cover_image which wraps
-        # Gemini Nano Banana Pro server-side.
-        "model_id": "mistralai/mistral-small-3.1-24b-instruct",
-        "skills": [],
-        "system_prompt": (
-            "You are CANVAS, a cover art agent for Automatos AI blog posts. You "
-            "do NOT generate images yourself. You build a strong image prompt and "
-            "call platform_generate_cover_image, which wraps Gemini Nano Banana "
-            "Pro server-side and handles generation, storage, and attachment in "
-            "a single tool call.\n\n"
-            "## Workflow\n"
-            "1. Use platform_list_blog_posts(status=draft) to find the latest draft.\n"
-            "2. Use platform_get_blog_post to read its title, excerpt, and category.\n"
-            "3. Build a vivid image-direction prompt that captures the post's "
-            "concept. Keep it abstract — no embedded text, no literal scenes.\n"
-            "4. Call platform_generate_cover_image(post_id=<draft post UUID>, "
-            "prompt=<your prompt>). This is the only call you need to make — the "
-            "tool generates the image, saves it, and attaches it to the post.\n"
-            "5. Confirm success in your final response. Do NOT call "
-            "platform_update_blog_post — the cover tool already updated the post.\n\n"
-            "## Image Prompt Guidelines\n"
-            "- 16:9 aspect ratio is enforced server-side; you don't need to "
-            "include dimensions.\n"
-            "- Abstract/conceptual imagery — geometric shapes, gradients, tech "
-            "motifs, atmospheric scenes. NO embedded text.\n"
-            "- Modern, clean aesthetic. Match the Automatos brand "
-            "(intelligent, technical, polished).\n"
-            "- 1-2 sentences is enough — the tool wraps your prompt with framing "
-            "instructions before sending to the image model."
-        ),
-    },
+    # CANVAS is a general-purpose image agent — used in chat, social posts,
+    # blog covers, and any other on-demand image creation. It is NOT seeded
+    # by this blog-specific script. The blog playbook uses the
+    # platform_generate_cover_image tool directly (no agent role-binding) so
+    # CANVAS stays free for general use without being coupled to the blog
+    # pipeline.
 ]
 
 
@@ -112,10 +75,11 @@ BLOG_PLAYBOOK = {
     "name": "Blog Pipeline",
     "template_id": "daily-blog-pipeline",
     "description": (
-        "Mission-powered blog pipeline. QUILL scouts a trending topic and launches "
-        "a research mission that handles deep research, writing, and editing via "
-        "multiple agents. CANVAS generates cover art. Finally, a review task is "
-        "created with a one-click publish approval gate. Runs Tue/Fri at 09:00 UTC."
+        "Mission-powered blog pipeline. QUILL scouts a trending topic and "
+        "calls platform_create_blog_post — the tool fires a mission that "
+        "handles research, writing, editing, cover image generation (via "
+        "the configured BLOG_COVER_MODEL), and a human-review board task. "
+        "Runs Tue/Fri at 09:00 UTC."
     ),
     "category": "Content Creation",
     "tags": ["blog", "content", "mission", "autonomous", "writing", "scheduled"],
@@ -359,13 +323,12 @@ def seed_blog_playbook():
                         })
                         print("    Created new playbook in workspace")
 
-                    # Both agents use cheap tool-capable text models. CANVAS does
-                    # not generate images directly — it calls platform_generate_cover_image
-                    # which wraps Gemini Nano Banana Pro server-side. So CANVAS only
-                    # needs a model that can call tools.
+                    # QUILL stays on a cheap tool-capable text model (topic
+                    # scouting + topic selection is text-only). CANVAS is left
+                    # alone — operators may have customized it for general
+                    # image creation use cases beyond blog covers.
                     for name, model in [
                         ("QUILL", "mistralai/mistral-small-3.1-24b-instruct"),
-                        ("CANVAS", "mistralai/mistral-small-3.1-24b-instruct"),
                     ]:
                         if name in agent_map:
                             db.execute(text(

@@ -365,10 +365,13 @@ async def generate_cover_image(
     )
 
     try:
+        from config import config
+
+        cover_model = config.BLOG_COVER_MODEL
         llm = create_llm_manager(
             service_name="blog_cover_gen",
             provider="openrouter",
-            model="google/gemini-3-pro-image-preview",
+            model=cover_model,
             workspace_id=str(workspace_id),
             request_type="cover_image",
         )
