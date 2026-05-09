@@ -1818,8 +1818,8 @@ export function AgentConfigurationModal({
                             >
                               <SelectTrigger><SelectValue /></SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="orchestrator">Orchestrator (DB only)</SelectItem>
-                                <SelectItem value="direct">Direct (Chat)</SelectItem>
+                                <SelectItem value="orchestrator">DB only</SelectItem>
+                                <SelectItem value="auto">Auto (assign task)</SelectItem>
                                 {connectedIntegrations.map((i) => (
                                   <SelectItem key={i.key} value={i.platform}>
                                     {i.platform.charAt(0).toUpperCase() + i.platform.slice(1)}
@@ -1829,8 +1829,8 @@ export function AgentConfigurationModal({
                               </SelectContent>
                             </Select>
                             <p className="text-xs text-muted-foreground">
-                              {heartbeatConfig.report_to === 'orchestrator' && 'Results stored in database, visible in analytics'}
-                              {heartbeatConfig.report_to === 'direct' && 'Results appear in agent chat'}
+                              {heartbeatConfig.report_to === 'orchestrator' && 'Results stored in DB. Auto only sees them if asked.'}
+                              {heartbeatConfig.report_to === 'auto' && 'Creates a board task assigned to Auto. Auto picks it up on its next tick.'}
                               {heartbeatConfig.report_to === 'telegram' && 'Results sent to your Telegram chat'}
                               {heartbeatConfig.report_to === 'slack' && 'Results sent to your Slack channel'}
                               {heartbeatConfig.report_to === 'webhook' && 'Results POSTed as JSON to your URL'}

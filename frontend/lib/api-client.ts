@@ -1075,8 +1075,14 @@ class ApiClient {
   }
 
   // ===== AGENT ENDPOINTS =====
-  async getAgents(skip = 0, limit = 100) {
-    return this.request(`/api/agents/?skip=${skip}&limit=${limit}`)
+  async getAgents(
+    skip = 0,
+    limit = 100,
+    options: { includeWorkspaceSystem?: boolean } = {},
+  ) {
+    const params = new URLSearchParams({ skip: String(skip), limit: String(limit) })
+    if (options.includeWorkspaceSystem) params.set('include_workspace_system', 'true')
+    return this.request(`/api/agents/?${params.toString()}`)
   }
 
   async getAgent(id: string) {

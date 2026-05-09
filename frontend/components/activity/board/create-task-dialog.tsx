@@ -13,7 +13,7 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { useAgents } from '@/hooks/use-agent-api'
+import { useAssignableAgents } from '@/hooks/use-agent-api'
 import { useCreateTask, usePlanTask, useRefineTask } from '@/hooks/use-board-tasks-api'
 import type { CreateTaskPayload, PlanResponse, RefineResponse } from '@/hooks/use-board-tasks-api'
 import type { TaskPriority, ReviewMode } from '@/types/board'
@@ -59,7 +59,7 @@ export function CreateTaskDialog({ open, onOpenChange }: CreateTaskDialogProps) 
   const [answers, setAnswers] = useState<Record<string, number>>({})
   const [refinedData, setRefinedData] = useState<RefineResponse | null>(null)
 
-  const { data: agents = [] } = useAgents()
+  const { data: agents = [] } = useAssignableAgents()
   const createTask = useCreateTask()
   const planTask = usePlanTask()
   const refineTask = useRefineTask()

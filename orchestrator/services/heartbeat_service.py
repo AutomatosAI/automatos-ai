@@ -1105,9 +1105,10 @@ class HeartbeatService:
                 ]
                 message_body = "\n".join(details) if details else "No findings."
 
-            # Resolve agent metadata (agent tick only)
+            # Resolve agent metadata + per-agent report_to override (agent tick only)
             agent_id: Optional[int] = None
             agent_name: Optional[str] = None
+            agent_hb_config: dict = {}
             if source_type == "agent":
                 try:
                     agent_id = int(result.get("source_id"))
@@ -1120,6 +1121,8 @@ class HeartbeatService:
 
                         agent = db_lookup.query(Agent).get(agent_id)
                         agent_name = agent.name if agent else f"agent-{agent_id}"
+                        if agent and agent.configuration:
+                            agent_hb_config = (agent.configuration or {}).get("heartbeat", {}) or {}
                     finally:
                         db_lookup.close()
                 title = f"{agent_name or 'Agent'} Heartbeat"
@@ -1128,6 +1131,39 @@ class HeartbeatService:
                 title = "Orchestrator Heartbeat"
 
             link_id = result.get("_heartbeat_result_id")
+
+            # Per-agent ``report_to`` overrides the workspace dispatch path.
+            #   - "auto"     → assign a board task to the workspace's Auto, so
+            #                  Auto picks it up on its next tick (PRD-72 loop).
+            #   - "webhook"  → POST directly to the agent's stored webhook_url,
+            #                  bypassing workspace prefs.
+            #   - anything else (orchestrator/telegram/slack/empty) falls
+            #                  through to the workspace-level NotificationDispatcher.
+            report_to = (agent_hb_config.get("report_to") or "").strip().lower()
+
+            if report_to == "auto" and source_type == "agent":
+                await self._route_heartbeat_to_auto(
+                    workspace_id=workspace_id,
+                    source_agent_id=agent_id,
+                    source_agent_name=agent_name,
+                    title=title,
+                    message=message_body,
+                    link_id=link_id,
+                    status=dispatch_status,
+                )
+                return
+
+            if report_to == "webhook" and agent_hb_config.get("webhook_url"):
+                await self._route_heartbeat_to_webhook(
+                    webhook_url=agent_hb_config["webhook_url"],
+                    title=title,
+                    message=message_body,
+                    agent_id=agent_id,
+                    agent_name=agent_name,
+                    link_id=link_id,
+                    status=dispatch_status,
+                )
+                return
 
             db = SessionLocal()
             try:
@@ -1157,6 +1193,131 @@ class HeartbeatService:
             logger.error(
                 "[Heartbeat] Notification dispatch failed for ws=%s: %s",
                 workspace_id, e, exc_info=True,
+            )
+
+    # ------------------------------------------------------------------
+    # report_to routing — per-agent overrides (PRD-72 follow-up)
+    # ------------------------------------------------------------------
+
+    async def _route_heartbeat_to_auto(
+        self,
+        *,
+        workspace_id: str,
+        source_agent_id: Optional[int],
+        source_agent_name: Optional[str],
+        title: str,
+        message: str,
+        link_id: Optional[Any],
+        status: str,
+    ) -> None:
+        """Create a BoardTask for Auto to pick up on its next tick.
+
+        ``report_to=auto`` means "the manager should look at this." Auto's
+        heartbeat already scans assigned board tasks
+        (heartbeat_service:730-765) and ingests them as priority work, so
+        creating a task here is enough — no new scheduler, no notification.
+        """
+        from core.database.database import SessionLocal
+        from core.models import Agent
+        from core.models.core import BoardTask
+
+        db = SessionLocal()
+        try:
+            auto = (
+                db.query(Agent)
+                .filter(
+                    Agent.workspace_id == workspace_id,
+                    Agent.is_system_agent.is_(True),
+                    Agent.name == "Auto",
+                )
+                .first()
+            )
+            if not auto:
+                logger.warning(
+                    "[Heartbeat] report_to=auto but no canonical Auto found for ws=%s — "
+                    "falling back to silent (DB only).",
+                    workspace_id,
+                )
+                return
+
+            summary_line = (message or "").strip().splitlines()[0] if message else ""
+            summary_line = summary_line[:200] or "no findings"
+
+            description = (
+                f"{source_agent_name or 'Agent'} heartbeat completed (status={status}).\n\n"
+                f"Findings:\n{(message or '(no findings)')[:2000]}\n\n"
+                f"Read the full report with `platform_get_latest_report` "
+                f"(agent_name=\"{source_agent_name}\")."
+            )
+
+            priority = "high" if status in ("error", "critical") else "medium"
+
+            task = BoardTask(
+                workspace_id=workspace_id,
+                title=f"Review {source_agent_name or 'agent'} heartbeat — {summary_line}"[:500],
+                description=description,
+                status="assigned",
+                priority=priority,
+                assigned_agent_id=auto.id,
+                created_by_type="agent",
+                created_by_id=str(source_agent_id) if source_agent_id else None,
+                source_type="heartbeat",
+                source_id=str(link_id) if link_id is not None else None,
+            )
+            db.add(task)
+            db.commit()
+            logger.info(
+                "[Heartbeat] report_to=auto: created BoardTask id=%s assigned to Auto "
+                "(agent_id=%s) for source_agent=%s",
+                task.id, auto.id, source_agent_id,
+            )
+        except Exception as e:
+            db.rollback()
+            logger.error(
+                "[Heartbeat] _route_heartbeat_to_auto failed for ws=%s: %s",
+                workspace_id, e, exc_info=True,
+            )
+        finally:
+            db.close()
+
+    async def _route_heartbeat_to_webhook(
+        self,
+        *,
+        webhook_url: str,
+        title: str,
+        message: str,
+        agent_id: Optional[int],
+        agent_name: Optional[str],
+        link_id: Optional[Any],
+        status: str,
+    ) -> None:
+        """POST the heartbeat result directly to a per-agent webhook URL.
+
+        Bypasses the workspace-level NotificationDispatcher because the
+        agent has its own destination. Failure is logged but never raised
+        — heartbeat completion isn't blocked by a flaky downstream URL.
+        """
+        try:
+            import httpx
+            payload = {
+                "event": "heartbeat_complete",
+                "title": title,
+                "message": (message or "")[:4000],
+                "agent_id": agent_id,
+                "agent_name": agent_name,
+                "status": status,
+                "report_id": str(link_id) if link_id is not None else None,
+            }
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(webhook_url, json=payload)
+                logger.info(
+                    "[Heartbeat] report_to=webhook: POST %s → %s (agent=%s)",
+                    webhook_url, resp.status_code, agent_id,
+                )
+        except Exception as e:
+            logger.warning(
+                "[Heartbeat] Per-agent webhook delivery failed for agent=%s: %s",
+                agent_id, e,
             )
 
     # ------------------------------------------------------------------
