@@ -175,10 +175,13 @@ def register_blog_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_generate_cover_image",
         description=(
-            "Generate a cover image for an existing blog post via Gemini Nano "
-            "Banana Pro and attach it. Single tool call: generates the image, "
-            "saves it to the platform image store, and updates the post's "
-            "cover_image_url. Use this after a draft is published (status=draft)."
+            "Generate and attach a cover image to an existing blog post. "
+            "Single tool call: builds an image using the configured "
+            "BLOG_COVER_MODEL (default Gemini Nano Banana Pro, overridable "
+            "per-deployment), saves it to the platform image store, and "
+            "updates the post's cover_image_url. Use this after a draft has "
+            "been created via platform_publish_blog_post — the resulting "
+            "post_id is the input here."
         ),
         category="blog",
         parameters={
