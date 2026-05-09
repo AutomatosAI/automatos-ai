@@ -495,6 +495,14 @@ async def list_agents(
     agent_type: Optional[AgentType] = None,
     priority_level: Optional[PriorityLevel] = None,
     search: Optional[str] = None,
+    include_workspace_system: bool = Query(
+        False,
+        description=(
+            "When true, include the workspace's system agents (e.g. Auto) in "
+            "the result set. Used by task assignee pickers so Auto can be "
+            "assigned work without being shown in the main Roster."
+        ),
+    ),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
@@ -522,12 +530,17 @@ async def list_agents(
             db.query(Agent)
             .options(joinedload(Agent.skills), subqueryload(Agent.assigned_plugins))
             .filter(scope_filter)
-            # Hide per-workspace Auto agents from the Roster — they are managed
-            # in Settings > Orchestrator, not in the agent list.  Global system
-            # agents (CTO, workspace_id=None) remain visible to admins.
-            .filter(~and_(Agent.is_system_agent.is_(True), Agent.workspace_id.isnot(None)))
             .filter(Agent.agent_type != "ephemeral")  # Hide Mission Zero ephemeral clones
         )
+
+        # By default hide per-workspace system agents (Auto) from the Roster —
+        # they are managed in Settings > Orchestrator. Assignee pickers pass
+        # ``include_workspace_system=true`` so Auto is selectable as a task
+        # owner without being listed alongside regular agents.
+        if not include_workspace_system:
+            query = query.filter(
+                ~and_(Agent.is_system_agent.is_(True), Agent.workspace_id.isnot(None))
+            )
 
         # Apply filters uniformly to all agents (workspace + system)
         if status:
