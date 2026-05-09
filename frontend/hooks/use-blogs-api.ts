@@ -172,3 +172,32 @@ export function useUpdatePost() {
     },
   })
 }
+
+export interface BlogMissionResult {
+  success: boolean
+  mission_id: number
+  state: string
+  topic: string
+  category: string
+  task_count: number
+  message: string
+}
+
+export function useCreateBlogMission() {
+  const queryClient = useQueryClient()
+
+  return useMutation<BlogMissionResult, Error, { topic: string; category?: string }>({
+    mutationFn: (data) =>
+      apiClient.request<BlogMissionResult>('/api/blog/missions', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: blogQueryKeys.all })
+      toast.success(`Blog mission started — ${result.task_count} tasks queued`)
+    },
+    onError: (error) => {
+      toast.error(error.message || 'Failed to start blog mission')
+    },
+  })
+}

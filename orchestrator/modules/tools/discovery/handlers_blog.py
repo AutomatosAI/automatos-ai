@@ -221,3 +221,200 @@ async def update_blog_post(db: Session, workspace_id: UUID, params: Dict[str, An
         "slug": post.slug,
         "status": post.status,
     }
+
+
+# ---------------------------------------------------------------------------
+# Standardized blog mission goal — used by platform_create_blog_post so every
+# call site (UI button, scheduled playbook, agent suggestion) produces the same
+# pipeline. Encodes the content quality bar and the cover-image substep.
+# ---------------------------------------------------------------------------
+
+_BLOG_MISSION_GOAL_TEMPLATE = (
+    "Research and write a high-quality blog post about: {topic}\n\n"
+    "Category: {category}\n"
+    "Target length: 1000-2000 words\n"
+    "Audience: technical professionals\n\n"
+    "The mission MUST complete ALL of these steps:\n"
+    "1. Research the topic thoroughly from multiple angles, with real-world examples, "
+    "data points, and expert perspectives.\n"
+    "2. Write the FULL blog post draft as polished prose — actual paragraphs, "
+    "headings, examples, and conclusions. NOT an outline, summary, or bracketed "
+    "placeholder.\n"
+    "3. Edit and SEO-review for accuracy, clarity, and readability.\n"
+    "4. Publish the draft via platform_publish_blog_post — IMPORTANT: pass the "
+    "FULL article body (1000-2000 words of actual writing) as the `content` "
+    "argument. Do NOT pass placeholder text — the server validates content and "
+    "will reject anything that looks like a stub. Required args: title, content "
+    "(full article), excerpt (under 300 chars), tags (array), category: "
+    "'{category}', publish_immediately: false. Save the returned post_id.\n"
+    "5. Generate and attach a cover image: call "
+    "platform_generate_cover_image(post_id=<from step 4>, prompt=<a vivid 16:9 "
+    "abstract/conceptual image prompt based on the post topic>). The tool "
+    "generates the image via Gemini Nano Banana Pro, saves it, and attaches it "
+    "to the post — one tool call handles everything.\n"
+    "6. Create a board task for human review via platform_create_task with "
+    "title: 'Review & Publish: <post title>', approval_action: "
+    "{type: publish_blog, post_id: <post UUID>}, priority: high, "
+    "auto_approve: true, tags: ['blog', 'approval']."
+)
+
+
+async def create_blog_post_from_topic(
+    db: Session, workspace_id: UUID, params: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Single entry point for blog creation. Builds a standardized mission goal from
+    the topic + category, then dispatches it to the mission coordinator. Used by
+    the 'Create Blog' UI button, scheduled playbooks, and agents that suggest
+    topics. All paths converge on the same pipeline.
+    """
+    topic = (params.get("topic") or "").strip()
+    if not topic:
+        return {"success": False, "error": "topic is required"}
+
+    category = (params.get("category") or "AI & Automation").strip()
+    goal = _BLOG_MISSION_GOAL_TEMPLATE.format(topic=topic, category=category)
+    created_by = str(params.get("_agent_id") or params.get("_user_id") or "system")
+
+    try:
+        from services.coordinator_service import CoordinatorService
+
+        coordinator = CoordinatorService()
+        run = await coordinator.create_mission(
+            db=db,
+            workspace_id=workspace_id,
+            goal=goal,
+            created_by=created_by,
+            config=params.get("config") or {},
+        )
+
+        plan = run.plan or {}
+        tasks = plan.get("tasks", [])
+        return {
+            "success": True,
+            "mission_id": run.id,
+            "state": run.state,
+            "topic": topic,
+            "category": category,
+            "task_count": len(tasks),
+            "message": (
+                f"Blog mission {run.id} created for topic '{topic}'. "
+                f"{len(tasks)} tasks queued — research, write, publish, cover image, review."
+            ),
+        }
+
+    except Exception as e:
+        logger.error("create_blog_post_from_topic failed: %s", e, exc_info=True)
+        return {"success": False, "error": f"Failed to create blog mission: {str(e)[:300]}"}
+
+
+# ---------------------------------------------------------------------------
+# platform_generate_cover_image — wraps Gemini Nano Banana Pro server-side.
+# Generates → uploads via image_store → updates blog_posts.cover_image_url.
+# CANVAS (or any agent) calls this with a single tool call.
+# ---------------------------------------------------------------------------
+
+_DATA_URL_RE = re.compile(
+    r"data:(image/(?:png|jpeg|jpg|webp|gif));base64,([A-Za-z0-9+/=\n\r]+)"
+)
+
+
+def _extract_image_from_response(content: str) -> Optional[tuple]:
+    """Find the first base64 image in an LLM response. Returns (mime, b64) or None."""
+    if not content:
+        return None
+    match = _DATA_URL_RE.search(content)
+    if not match:
+        return None
+    mime = match.group(1)
+    # Strip whitespace/newlines from the base64 chunk
+    b64 = re.sub(r"\s+", "", match.group(2))
+    return mime, b64
+
+
+async def generate_cover_image(
+    db: Session, workspace_id: UUID, params: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Generate a blog cover image via Gemini Nano Banana Pro and attach it to the
+    post in one tool call. Saves the image to the standard image_store (S3 or
+    local) and updates blog_posts.cover_image_url.
+    """
+    from core.services.blog_service import BlogService
+    from core.services.image_store import get_image_store
+    from core.llm import create_llm_manager
+
+    post_id = params.get("post_id")
+    prompt = (params.get("prompt") or "").strip()
+    if not post_id or not prompt:
+        return {"success": False, "error": "post_id and prompt are required"}
+
+    svc = BlogService(db, workspace_id)
+    try:
+        post = svc.get_post(UUID(str(post_id)))
+    except (ValueError, AttributeError):
+        return {"success": False, "error": "Invalid post_id"}
+    if not post:
+        return {"success": False, "error": f"Post {post_id} not found"}
+
+    full_prompt = (
+        f"Generate a 16:9 cover image for a blog post titled: '{post.title}'. "
+        f"Image direction: {prompt}. "
+        "Style: abstract/conceptual, modern and clean, no embedded text "
+        "(title overlay handled by CSS). Output the image only."
+    )
+
+    try:
+        llm = create_llm_manager(
+            service_name="blog_cover_gen",
+            provider="openrouter",
+            model="google/gemini-3-pro-image-preview",
+            workspace_id=str(workspace_id),
+            request_type="cover_image",
+        )
+        response = await llm.generate_response(
+            messages=[{"role": "user", "content": full_prompt}],
+        )
+    except Exception as e:
+        logger.error("Cover image LLM call failed: %s", e, exc_info=True)
+        return {"success": False, "error": f"Image generation failed: {str(e)[:200]}"}
+
+    extracted = _extract_image_from_response(getattr(response, "content", "") or "")
+    if not extracted:
+        logger.warning(
+            "Cover image generation returned no image data | post_id=%s | content_len=%d",
+            post_id, len(getattr(response, "content", "") or ""),
+        )
+        return {
+            "success": False,
+            "error": "Image model did not return base64 image data — try a clearer prompt",
+        }
+    mime, b64 = extracted
+
+    try:
+        store = get_image_store()
+        image_id = await store.save_image(b64, mime_type=mime, workspace_id=str(workspace_id))
+    except Exception as e:
+        logger.error("Image store save failed: %s", e, exc_info=True)
+        return {"success": False, "error": f"Image upload failed: {str(e)[:200]}"}
+
+    cover_url = f"/api/generated-images/{image_id}"
+
+    try:
+        updated = await svc.update_post(post.id, cover_image_url=cover_url)
+    except Exception as e:
+        logger.error("Update post cover failed: %s", e, exc_info=True)
+        return {"success": False, "error": f"Cover saved but post update failed: {str(e)[:200]}"}
+
+    if not updated:
+        return {"success": False, "error": "Post not found during cover attach"}
+
+    return {
+        "success": True,
+        "post_id": str(updated.id),
+        "title": updated.title,
+        "slug": updated.slug,
+        "cover_image_url": cover_url,
+        "image_id": image_id,
+        "message": f"Cover image generated and attached to post '{updated.title}'.",
+    }

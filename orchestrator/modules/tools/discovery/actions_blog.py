@@ -131,6 +131,86 @@ def register_blog_actions(registry: ActionRegistry) -> None:
     ))
 
     registry.register(ActionDefinition(
+        name="platform_create_blog_post",
+        description=(
+            "Create a complete blog post from a topic. Builds a standardized "
+            "research-write-publish-cover mission and dispatches it to the "
+            "coordinator. Same mission fires whether triggered by a UI button, "
+            "a scheduled playbook, or an agent suggesting a topic. Returns "
+            "mission_id for progress tracking. Use this whenever you have a "
+            "topic and want a complete blog post produced end-to-end."
+        ),
+        category="blog",
+        parameters={
+            "type": "object",
+            "properties": {
+                "topic": {
+                    "type": "string",
+                    "description": (
+                        "Specific topic for the blog post (e.g. 'Multi-agent AI for "
+                        "Shopify stores'). Be concrete — not just a category."
+                    ),
+                },
+                "category": {
+                    "type": "string",
+                    "description": (
+                        "Broad content category (e.g. 'AI & Automation', 'Engineering', "
+                        "'Research'). Defaults to 'AI & Automation'."
+                    ),
+                },
+            },
+            "required": ["topic"],
+        },
+        permission_level="write",
+        requires_confirmation=False,
+        tags=["blog", "write", "create", "mission", "content"],
+        examples=[
+            "create a blog post about multi-agent AI",
+            "write a new blog on Shopify automation",
+            "create blog post topic: AI agents for SaaS",
+            "start a blog mission about LLM observability",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_generate_cover_image",
+        description=(
+            "Generate a cover image for an existing blog post via Gemini Nano "
+            "Banana Pro and attach it. Single tool call: generates the image, "
+            "saves it to the platform image store, and updates the post's "
+            "cover_image_url. Use this after a draft is published (status=draft)."
+        ),
+        category="blog",
+        parameters={
+            "type": "object",
+            "properties": {
+                "post_id": {
+                    "type": "string",
+                    "description": "UUID of the blog post to generate a cover for.",
+                },
+                "prompt": {
+                    "type": "string",
+                    "description": (
+                        "Image direction — describe the visual concept. Will be "
+                        "wrapped with framing instructions (16:9, abstract, no "
+                        "embedded text) before being sent to the image model."
+                    ),
+                },
+            },
+            "required": ["post_id", "prompt"],
+        },
+        permission_level="write",
+        requires_confirmation=False,
+        tags=["blog", "image", "cover", "design", "content"],
+        examples=[
+            "generate a cover image for the latest draft",
+            "create cover art for post abc123",
+            "make a blog cover image",
+            "add a cover image to my blog post",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
         name="platform_update_blog_post",
         description=(
             "Update an existing blog post. Only updates the fields you provide — "

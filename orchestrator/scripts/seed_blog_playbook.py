@@ -62,41 +62,43 @@ CONTENT_AGENTS = [
         "name": "CANVAS",
         "agent_type": "custom",
         "description": (
-            "Cover art designer agent. Generates cover images for blog posts and "
-            "persists them to workspace storage. Image-generation focus only — does "
-            "NOT attach images to posts; that is done by a downstream tool-capable "
-            "agent that reads the URL from field memory."
+            "Cover art agent. Generates cover images for blog drafts via the "
+            "platform_generate_cover_image tool — one tool call handles "
+            "Gemini Nano Banana generation, image storage, and post attachment."
         ),
         "category": "Content Creation",
         "tags": ["blog", "design", "cover-image", "image-generation"],
         "tools": [],
-        # gemini-2.5-flash supports tool use AND multi-modal output, so CANVAS can
-        # both call workspace_write_file to persist and (when wired) generate images.
-        "model_id": "google/gemini-2.5-flash",
+        # mistral-small is cheap and supports tool use. CANVAS doesn't generate
+        # the image itself — it calls platform_generate_cover_image which wraps
+        # Gemini Nano Banana Pro server-side.
+        "model_id": "mistralai/mistral-small-3.1-24b-instruct",
         "skills": [],
         "system_prompt": (
-            "You are CANVAS, a cover art designer for Automatos AI blog posts. Your job "
-            "is to generate a cover image and persist it to workspace storage. A separate "
-            "downstream step attaches the image URL to the blog post — DO NOT call "
-            "platform_update_blog_post yourself.\n\n"
+            "You are CANVAS, a cover art agent for Automatos AI blog posts. You "
+            "do NOT generate images yourself. You build a strong image prompt and "
+            "call platform_generate_cover_image, which wraps Gemini Nano Banana "
+            "Pro server-side and handles generation, storage, and attachment in "
+            "a single tool call.\n\n"
             "## Workflow\n"
-            "1. Use platform_list_blog_posts(status=draft) to find the latest draft\n"
-            "2. Use platform_get_blog_post to read its title, excerpt, slug, and category\n"
-            "3. Generate a cover image (16:9, abstract/conceptual, no embedded text). "
-            "Use composio_execute to call an image-generation action (DALL-E, "
-            "Stability, Replicate, or Gemini) — pick whichever is installed in this "
-            "workspace. If the workflow has an image_prompt input, use that.\n"
-            "4. Persist the generated image to the workspace at "
-            "`content/blog/images/{slug}.png` using workspace_write_file (binary).\n"
-            "5. Get the public URL via workspace_get_public_url for that path.\n"
-            "6. Output a single line of JSON to your final response: "
-            "`{\"post_id\": \"<uuid>\", \"cover_image_url\": \"<public_url>\"}` so the "
-            "downstream attach step can read it from field memory.\n\n"
-            "## Design Guidelines\n"
-            "- 16:9 aspect ratio, abstract/conceptual imagery\n"
-            "- No embedded text (title overlay is handled by CSS at render time)\n"
-            "- Modern, clean aesthetic that matches Automatos brand\n"
-            "- Prefer geometric shapes, gradients, and tech motifs over literal scenes"
+            "1. Use platform_list_blog_posts(status=draft) to find the latest draft.\n"
+            "2. Use platform_get_blog_post to read its title, excerpt, and category.\n"
+            "3. Build a vivid image-direction prompt that captures the post's "
+            "concept. Keep it abstract — no embedded text, no literal scenes.\n"
+            "4. Call platform_generate_cover_image(post_id=<draft post UUID>, "
+            "prompt=<your prompt>). This is the only call you need to make — the "
+            "tool generates the image, saves it, and attaches it to the post.\n"
+            "5. Confirm success in your final response. Do NOT call "
+            "platform_update_blog_post — the cover tool already updated the post.\n\n"
+            "## Image Prompt Guidelines\n"
+            "- 16:9 aspect ratio is enforced server-side; you don't need to "
+            "include dimensions.\n"
+            "- Abstract/conceptual imagery — geometric shapes, gradients, tech "
+            "motifs, atmospheric scenes. NO embedded text.\n"
+            "- Modern, clean aesthetic. Match the Automatos brand "
+            "(intelligent, technical, polished).\n"
+            "- 1-2 sentences is enough — the tool wraps your prompt with framing "
+            "instructions before sending to the image model."
         ),
     },
 ]
@@ -142,44 +144,26 @@ BLOG_PLAYBOOK = {
             "order": 1,
             "agent_name": "QUILL",
             "prompt_template": (
-                "Find a fresh, trending topic in the '{input.category}' category for our blog.\n\n"
-                "1. Check platform_search_memory and platform_list_blog_posts to see what "
-                "we've already covered — avoid duplicates.\n"
-                "2. Pick a specific, compelling topic with a clear angle.\n"
-                "3. Launch a mission using platform_create_mission with a goal that covers "
-                "the ENTIRE pipeline end-to-end:\n\n"
-                "   Goal template:\n"
-                "   'Research and write a high-quality blog post about [TOPIC]. "
-                "   Investigate [2-3 specific angles]. Include real-world examples, "
-                "   data points, and expert perspectives. The post should be 1000-2000 words, "
-                "   written for technical professionals.\n\n"
-                "   The mission MUST complete ALL of these steps:\n"
-                "   1. Research the topic thoroughly from multiple angles.\n"
-                "   2. Write the FULL blog post draft as polished prose — actual paragraphs, "
-                "headings, examples, and conclusions. NOT an outline, summary, or "
-                "bracketed placeholder.\n"
-                "   3. Edit and SEO-review for accuracy, clarity, and readability.\n"
-                "   4. Publish the draft via platform_publish_blog_post — IMPORTANT: pass the "
-                "FULL article body (1000-2000 words of actual writing) as the `content` "
-                "argument. Do NOT pass placeholder text like \"[blog content here]\" or a "
-                "summary — the server validates content and will reject anything that "
-                "looks like a placeholder. Required args: title, content (full article), "
-                "excerpt (under 300 chars), tags (array), category: {input.category}, "
-                "publish_immediately: false. Save the returned post_id — it is needed for "
-                "the next steps.\n"
-                "   5. Generate a cover image: dispatch a CANVAS task that produces the "
-                "image and persists it to workspace storage. CANVAS will write its output "
-                "to field memory as JSON: {\"post_id\":\"...\",\"cover_image_url\":\"...\"}.\n"
-                "   6. Attach the cover: read CANVAS output from field memory, then call "
-                "platform_update_blog_post(post_id=<from step 4>, cover_image_url=<from "
-                "CANVAS>). This step needs a tool-capable agent (NOT the image-gen "
-                "model) — assign it to QUILL or any role with a text LLM.\n"
-                "   7. Create a board task for human review via platform_create_task with "
-                "title: Review & Publish: [post title], approval_action: "
-                "{type: publish_blog, post_id: [the post UUID]}, priority: high, "
-                "auto_approve: true, tags: [blog, approval]'\n\n"
-                "The mission handles EVERYTHING — research, writing, images, attaching, "
-                "and publishing."
+                "Pick a fresh, compelling topic in the '{input.category}' "
+                "category for the blog and dispatch a full-pipeline mission to "
+                "write it.\n\n"
+                "## Steps\n"
+                "1. Check platform_search_memory and platform_list_blog_posts to "
+                "see what topics we've already covered. Avoid duplicates.\n"
+                "2. Pick ONE specific, timely topic with a clear angle. Be "
+                "concrete (e.g. 'Multi-agent orchestration for Shopify stores' "
+                "— not 'AI in e-commerce').\n"
+                "3. Call platform_create_blog_post(topic=<your chosen topic>, "
+                "category='{input.category}'). That's it. The tool fires a "
+                "mission that handles research, writing, publishing, cover "
+                "image, and the human-review board task — all server-side.\n\n"
+                "## What you do NOT need to do\n"
+                "- Do NOT call platform_create_mission directly.\n"
+                "- Do NOT build the goal template by hand.\n"
+                "- Do NOT call platform_publish_blog_post — the mission does it.\n"
+                "- Do NOT pick a sub-topic for cover art — the cover step is "
+                "auto-included.\n\n"
+                "Your job is topic selection. The platform handles the rest."
             ),
             "max_iterations": 15,
             "error_handling": "stop",
@@ -375,15 +359,13 @@ def seed_blog_playbook():
                         })
                         print("    Created new playbook in workspace")
 
-                    # Update agent models. QUILL stays on a cheap text model (topic
-                    # scouting + writing is text-heavy). CANVAS uses gemini-2.5-flash
-                    # which is multi-modal AND tool-capable — so it can call image-gen
-                    # actions via composio_execute and persist via workspace_write_file.
-                    # Do NOT use gemini-3-pro-image-preview here — it does not support
-                    # tool use, so the agent cannot save its output anywhere.
+                    # Both agents use cheap tool-capable text models. CANVAS does
+                    # not generate images directly — it calls platform_generate_cover_image
+                    # which wraps Gemini Nano Banana Pro server-side. So CANVAS only
+                    # needs a model that can call tools.
                     for name, model in [
                         ("QUILL", "mistralai/mistral-small-3.1-24b-instruct"),
-                        ("CANVAS", "google/gemini-2.5-flash"),
+                        ("CANVAS", "mistralai/mistral-small-3.1-24b-instruct"),
                     ]:
                         if name in agent_map:
                             db.execute(text(
