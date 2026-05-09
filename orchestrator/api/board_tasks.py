@@ -545,6 +545,38 @@ async def approve_task(
                     "url": f"/api/widgets/blog/posts/{post.slug}?workspace_id={ctx.workspace_id}",
                 }
                 logger.info("[BoardTasks] Approved: published blog post %s (%s)", post.id, post.title)
+            elif action_type == "create_blog":
+                # Used by VECTOR (and any agent) to suggest a blog topic for
+                # founder approval. On approve, fire the standard blog mission.
+                from modules.tools.discovery.handlers_blog import (
+                    create_blog_post_from_topic,
+                )
+                topic = approval_action.get("topic")
+                category = approval_action.get("category") or "AI & Automation"
+                if not topic:
+                    raise HTTPException(status_code=422, detail="approval_action missing topic")
+                user_id = ctx.user.clerk_user_id if ctx.user else None
+                result = await create_blog_post_from_topic(
+                    db,
+                    ctx.workspace_id,
+                    {"topic": topic, "category": category, "_user_id": user_id},
+                )
+                if not result.get("success"):
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Blog mission start failed: {result.get('error', 'unknown')}",
+                    )
+                action_result = {
+                    "type": "create_blog",
+                    "mission_id": result.get("mission_id"),
+                    "topic": topic,
+                    "category": category,
+                    "task_count": result.get("task_count", 0),
+                }
+                logger.info(
+                    "[BoardTasks] Approved: created blog mission %s for topic '%s'",
+                    result.get("mission_id"), topic,
+                )
             else:
                 logger.warning("[BoardTasks] Unknown approval_action type: %s", action_type)
                 action_result = {"type": action_type, "warning": "Unknown action type, task approved without side-effect"}
