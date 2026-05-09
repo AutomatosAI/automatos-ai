@@ -61,6 +61,7 @@ interface OrchestratorConfig {
   communication_style: string
   proactive_level: string
   thinking_level: string
+  preferred_channel: string
   llm?: LLMConfig
   heartbeat: {
     enabled: boolean
@@ -206,6 +207,7 @@ export default function SystemLLMSettingsTab({
           communication_style: 'balanced',
           proactive_level: 'notify',
           thinking_level: 'medium',
+          preferred_channel: 'in_app',
           heartbeat: {
             enabled: false,
             interval_minutes: 30,
@@ -772,6 +774,35 @@ export default function SystemLLMSettingsTab({
                     </Select>
                     <p className="text-xs text-muted-foreground">
                       Controls what the orchestrator does when its heartbeat finds something
+                    </p>
+                  </div>
+
+                  {/* Preferred Channel — where Auto reaches the owner for approvals */}
+                  <div className="space-y-3">
+                    <Label className="flex items-center gap-1">
+                      <MessageSquare className="h-4 w-4" />
+                      Preferred Channel for Approvals
+                    </Label>
+                    <Select
+                      value={orchConfig.preferred_channel || 'in_app'}
+                      onValueChange={(v) => handleOrchChange('preferred_channel', v)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="in_app">In-App Notification</SelectItem>
+                        {connectedChannels.map((ch) => (
+                          <SelectItem key={ch.key} value={ch.platform}>
+                            {ch.platform.charAt(0).toUpperCase() + ch.platform.slice(1)}
+                          </SelectItem>
+                        ))}
+                        <SelectItem value="webhook">Webhook URL</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      Where Auto sends approval requests, decision asks, and urgent escalations.
+                      A board task is always created as a backup record.
                     </p>
                   </div>
 
