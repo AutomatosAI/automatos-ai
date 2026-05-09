@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo } from 'react'
-import { Brain, Zap, TrendingDown, Eye, Users, Activity, Clock, BarChart3 } from 'lucide-react'
+import { Brain, Zap, TrendingDown, Eye, Users, Activity, Clock, BarChart3, AlertTriangle, ServerCrash } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useMissionField } from '@/hooks/use-missions-api'
 import type { FieldPattern } from '@/hooks/use-missions-api'
@@ -134,7 +134,11 @@ export function MissionFieldPanel({ missionId, className }: MissionFieldPanelPro
     )
   }
 
-  if (!data?.field_id) {
+  // Derive a fallback status if the API didn't return one (back-compat)
+  const status = data?.status
+    ?? (!data?.field_id ? 'not_created' : (data.patterns?.length ? 'active' : 'empty'))
+
+  if (status === 'not_created') {
     return (
       <div className={cn('flex flex-col items-center justify-center h-full gap-3 p-6', className)}>
         <Brain className="w-10 h-10 text-muted-foreground/30" />
@@ -145,6 +149,40 @@ export function MissionFieldPanel({ missionId, className }: MissionFieldPanelPro
         </div>
       </div>
     )
+  }
+
+  if (status === 'missing') {
+    return (
+      <div className={cn('flex flex-col items-center justify-center h-full gap-3 p-6', className)}>
+        <AlertTriangle className="w-10 h-10 text-warning/60" />
+        <div className="text-sm text-foreground text-center font-medium">
+          Field collection missing
+        </div>
+        <div className="text-xs text-muted-foreground text-center max-w-xs leading-relaxed">
+          The mission references field <code className="text-[10px] font-mono">{data?.field_id?.slice(0, 8)}…</code> but the underlying collection was destroyed.
+          <br />
+          <span className="text-warning/80">The coordinator will recreate it on the next tick.</span>
+        </div>
+      </div>
+    )
+  }
+
+  if (status === 'unavailable') {
+    return (
+      <div className={cn('flex flex-col items-center justify-center h-full gap-3 p-6', className)}>
+        <ServerCrash className="w-10 h-10 text-destructive/60" />
+        <div className="text-sm text-foreground text-center font-medium">
+          Field backend unavailable
+        </div>
+        <div className="text-xs text-muted-foreground text-center max-w-xs">
+          The shared-context backend (Qdrant) is unreachable.
+        </div>
+      </div>
+    )
+  }
+
+  if (!data) {
+    return null
   }
 
   const { patterns, stability, metrics } = data
