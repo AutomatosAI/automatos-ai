@@ -436,6 +436,23 @@ async def _execute_step(
     response = None
 
     for iteration in range(max_iterations):
+        if recipe_execution_id:
+            db.expire_all()
+            cancel_status = db.query(RecipeExecution.status).filter(
+                RecipeExecution.execution_id == recipe_execution_id
+            ).scalar()
+            if cancel_status == "cancelled":
+                logger.info(
+                    "[recipe_direct] Step %d cancelled mid-flight at iteration %d (execution=%s)",
+                    step_order, iteration, recipe_execution_id,
+                )
+                return {
+                    "status": "cancelled",
+                    "result": "Cancelled by user",
+                    "error": "Cancelled by user",
+                    "execution": {"tool_calls": all_tool_calls, "messages": messages, "tokens_used": 0},
+                }
+
         response = await llm.generate_response(messages=messages, tools=tools)
 
         if not response or not response.tool_calls:
@@ -1017,6 +1034,17 @@ async def _execute_recipe_inner(
         execution_start = time.time()
 
         for idx, step in enumerate(steps):
+            # Cancellation check — re-read execution row to detect external cancel
+            db.expire(execution)
+            db.refresh(execution)
+            if execution.status == "cancelled":
+                logger.info(
+                    "[recipe_direct] Cancelled before step %d (execution=%s)",
+                    idx + 1, recipe_execution_id,
+                )
+                _persist_step_results(db, execution, step_results)
+                return
+
             # Total timeout check
             elapsed = time.time() - execution_start
             if elapsed > total_timeout_sec:
@@ -1332,6 +1360,20 @@ async def _execute_recipe_inner(
                         ),
                         timeout=step_timeout_sec,
                     )
+
+                    if result.get("status") == "cancelled":
+                        logger.info(
+                            "[recipe_direct] Step %d returned cancelled — halting execution %s",
+                            step_order, recipe_execution_id,
+                        )
+                        step_result["status"] = "cancelled"
+                        step_result["error"] = "Cancelled by user"
+                        step_result["duration_ms"] = int((time.time() - step_start) * 1000)
+                        step_result["completed_at"] = datetime.now(timezone.utc).isoformat()
+                        step_results.append(_build_compact_step_result(step_result))
+                        _persist_step_results(db, execution, step_results)
+                        # Cancel endpoint already wrote status='cancelled' + completed_at
+                        return
 
                     if result.get("status") == "success":
                         step_result["status"] = "completed"
