@@ -993,6 +993,17 @@ async def get_mission_field(
 
     Returns all patterns with decayed strengths, stability metrics,
     and instrumentation data for the field visualizer.
+
+    `status` values:
+      - `not_created` — mission has no field_id (mission is queued or
+        was created before PRD-108 shipped)
+      - `missing` — field_id present but the underlying Qdrant
+        collection is gone (stale id; coordinator will recreate on
+        next tick if mission is still running — see PR #312)
+      - `empty` — collection exists but no patterns injected yet
+      - `active` — collection exists with patterns
+      - `unavailable` — shared context backend is down (Qdrant
+        unreachable, etc)
     """
     try:
         run = _get_run_for_workspace(db, mission_id, ctx.workspace_id)
@@ -1000,6 +1011,7 @@ async def get_mission_field(
 
         if not field_id:
             return {
+                "status": "not_created",
                 "field_id": None,
                 "backend": None,
                 "patterns": [],
@@ -1011,7 +1023,23 @@ async def get_mission_field(
 
         field = get_shared_context()
         if not field:
-            raise HTTPException(status_code=503, detail="Shared context backend unavailable")
+            return {
+                "status": "unavailable",
+                "field_id": field_id,
+                "backend": None,
+                "patterns": [],
+                "stability": {"stability": 0.0, "pattern_count": 0},
+                "metrics": None,
+            }
+
+        # Detect stale field_id (collection destroyed). PR #312 auto-heals
+        # on next coordinator tick; the panel surfaces this state in the UI.
+        collection_missing = False
+        if hasattr(field, "context_exists"):
+            try:
+                collection_missing = not await field.context_exists(field_id)
+            except Exception:
+                pass
 
         # Get patterns and stability from the inner (unwrapped) backend
         inner = field._inner
@@ -1023,6 +1051,17 @@ async def get_mission_field(
         if hasattr(inner, "measure_stability"):
             stability = await inner.measure_stability(field_id)
 
+        # measure_stability marks {"missing": True} on collection 404.
+        if stability.get("missing"):
+            collection_missing = True
+
+        if collection_missing:
+            status = "missing"
+        elif patterns:
+            status = "active"
+        else:
+            status = "empty"
+
         # Get instrumentation metrics if available
         metrics_data = None
         metrics = field.get_metrics(field_id)
@@ -1030,6 +1069,7 @@ async def get_mission_field(
             metrics_data = metrics.to_dict()
 
         return {
+            "status": status,
             "field_id": field_id,
             "backend": field._backend_name,
             "patterns": patterns,

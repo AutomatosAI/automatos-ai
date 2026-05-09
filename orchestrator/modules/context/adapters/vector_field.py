@@ -245,7 +245,13 @@ class VectorFieldSharedContext(SharedContextPort):
         organization = 1 - (stddev / mean) if mean > 0
         """
         collection = f"field_{context_id}"
-        points, _ = await self._client.scroll(collection, limit=10000)
+        try:
+            points, _ = await self._client.scroll(collection, limit=10000)
+        except Exception:
+            # Missing collection → return zero stats rather than crashing
+            # the field-viewer endpoint. PR #312 covers automatic recovery.
+            logger.debug("[Field] measure_stability: collection %s missing", collection, exc_info=True)
+            return {"stability": 0.0, "pattern_count": 0, "avg_strength": 0.0, "missing": True}
 
         if not points:
             return {"stability": 0.0, "pattern_count": 0, "avg_strength": 0.0}
@@ -289,6 +295,7 @@ class VectorFieldSharedContext(SharedContextPort):
         try:
             points, _ = await self._client.scroll(collection, limit=10000)
         except Exception:
+            logger.debug("[Field] get_patterns: collection %s missing or unreachable", collection, exc_info=True)
             return []
 
         now = datetime.now(timezone.utc)
