@@ -250,11 +250,11 @@ _BLOG_MISSION_GOAL_TEMPLATE = (
     "5. Generate and attach a cover image: call "
     "platform_generate_cover_image(post_id=<from step 4>, prompt=<a vivid 16:9 "
     "abstract/conceptual image prompt based on the post topic>). The tool "
-    "generates the image via Gemini Nano Banana Pro, saves it, and attaches it "
-    "to the post — one tool call handles everything.\n"
+    "generates the image via the configured cover model, saves it, and attaches "
+    "it to the post — one tool call handles everything.\n"
     "6. Create a board task for human review via platform_create_task with "
     "title: 'Review & Publish: <post title>', approval_action: "
-    "{type: publish_blog, post_id: <post UUID>}, priority: high, "
+    "{{type: publish_blog, post_id: <post UUID>}}, priority: high, "
     "auto_approve: true, tags: ['blog', 'approval']."
 )
 
