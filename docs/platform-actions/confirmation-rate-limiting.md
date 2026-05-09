@@ -5,60 +5,58 @@
 
 The following files were used as context for generating this wiki page:
 
-- [orchestrator/modules/tools/discovery/actions_agents.py](orchestrator/modules/tools/discovery/actions_agents.py)
-- [orchestrator/modules/tools/discovery/actions_assignments.py](orchestrator/modules/tools/discovery/actions_assignments.py)
-- [orchestrator/modules/tools/discovery/actions_documents.py](orchestrator/modules/tools/discovery/actions_documents.py)
-- [orchestrator/modules/tools/discovery/actions_marketplace.py](orchestrator/modules/tools/discovery/actions_marketplace.py)
-- [orchestrator/modules/tools/discovery/actions_missions.py](orchestrator/modules/tools/discovery/actions_missions.py)
-- [orchestrator/modules/tools/discovery/actions_monitoring.py](orchestrator/modules/tools/discovery/actions_monitoring.py)
-- [orchestrator/modules/tools/discovery/actions_playbooks.py](orchestrator/modules/tools/discovery/actions_playbooks.py)
-- [orchestrator/modules/tools/discovery/actions_reports.py](orchestrator/modules/tools/discovery/actions_reports.py)
-- [orchestrator/modules/tools/discovery/actions_scheduling.py](orchestrator/modules/tools/discovery/actions_scheduling.py)
-- [orchestrator/modules/tools/discovery/actions_search.py](orchestrator/modules/tools/discovery/actions_search.py)
-- [orchestrator/modules/tools/discovery/actions_workspace.py](orchestrator/modules/tools/discovery/actions_workspace.py)
-- [orchestrator/modules/tools/discovery/handlers_agents.py](orchestrator/modules/tools/discovery/handlers_agents.py)
-- [orchestrator/modules/tools/discovery/handlers_reports.py](orchestrator/modules/tools/discovery/handlers_reports.py)
+- [orchestrator/consumers/chatbot/auto.py](orchestrator/consumers/chatbot/auto.py)
+- [orchestrator/core/security/rate_limiter.py](orchestrator/core/security/rate_limiter.py)
+- [orchestrator/core/services/auto_reporting.py](orchestrator/core/services/auto_reporting.py)
+- [orchestrator/core/services/notification_dispatcher.py](orchestrator/core/services/notification_dispatcher.py)
+- [orchestrator/modules/tools/discovery/actions_auto_reporting.py](orchestrator/modules/tools/discovery/actions_auto_reporting.py)
+- [orchestrator/modules/tools/discovery/handlers_auto_reporting.py](orchestrator/modules/tools/discovery/handlers_auto_reporting.py)
+- [orchestrator/modules/tools/discovery/platform_actions.py](orchestrator/modules/tools/discovery/platform_actions.py)
+- [orchestrator/modules/tools/discovery/platform_executor.py](orchestrator/modules/tools/discovery/platform_executor.py)
+- [orchestrator/tests/test_prd128_notification_dispatcher.py](orchestrator/tests/test_prd128_notification_dispatcher.py)
 
 </details>
 
 
 
-This page documents the confirmation workflow and rate limiting mechanisms for platform actions (PRD-64), which provide safety guardrails when agents attempt to modify workspace resources. For general information about platform actions, see [13.1 Platform Action System](). For the action catalog, see [13.2 Action Categories]().
+This page documents the confirmation workflow, permission enforcement, and rate limiting mechanisms for platform actions. These systems provide safety guardrails when agents attempt to modify workspace resources or access sensitive infrastructure tools.
 
 ---
 
 ## Overview
 
-When an agent attempts to execute a write or destructive platform action (such as `platform_create_agent`, `platform_delete_document`, or `platform_delete_memory`), the system applies two layers of protection:
+Platform actions (PRD-64) are protected by a multi-layered security and governance stack. When an agent attempts to execute an action, the system evaluates it against four primary gates:
 
-1.  **Confirmation Gate**: Actions marked with `requires_confirmation=True` return a special response prompting the user for approval instead of executing immediately.
-2.  **Rate Limiting**: All write/destructive actions are throttled to prevent abuse (default: 10 actions per minute per workspace).
+1.  **Admin Enforcement**: Gating infrastructure-level tools (e.g., log querying, system health) to users with `admin` or `owner` roles.
+2.  **Confirmation Gate**: Actions marked with `requires_confirmation=True` return a special response prompting the user for approval via the UI.
+3.  **Rate Limiting**: Write and destructive actions are throttled to **60 actions per minute** per subject (agent) to prevent autonomous loops from exhausting resources.
+4.  **Hierarchy Permissions**: A recursive check ensuring an agent has the authority to modify a specific target (e.g., another agent or a playbook).
 
-This fail-safe design ensures agents cannot make unintended changes to the platform without user oversight, while still allowing autonomous operation for read-only queries and explicitly approved write operations.
-
-**Sources:** [orchestrator/modules/tools/discovery/actions_workspace.py:123-141](), [orchestrator/modules/tools/discovery/actions_agents.py:73-150]()
+**Sources:** [orchestrator/modules/tools/discovery/platform_executor.py:1-9](), [orchestrator/modules/tools/discovery/platform_actions.py:1-10](), [orchestrator/core/security/rate_limiter.py:52-57]()
 
 ---
 
-## Permission Levels
+## Permission & Access Control
 
-Platform actions are categorized into three permission tiers that determine confirmation requirements and rate limiting behavior. These are defined within the `ActionDefinition` objects stored in the `ActionRegistry`.
+### Permission Levels
+Actions are categorized into tiers within their `ActionDefinition` [orchestrator/modules/tools/discovery/platform_actions.py:12-35](). This categorization determines whether the execution requires explicit user confirmation or is subject to rate limiting.
 
-| Permission Level | Description | Requires Confirmation | Rate Limited | Examples |
-| :--- | :--- | :--- | :--- | :--- |
-| `read` | Read-only queries | No | No | `platform_list_agents`, `platform_get_workspace_info`, `platform_browse_memories` |
-| `write` | Modifies workspace resources | Configurable (default: No) | Yes | `platform_create_agent`, `platform_store_memory`, `platform_submit_report` |
-| `destructive` | Deletes or irreversibly modifies data | Configurable (default: Yes) | Yes | `platform_delete_memory`, `platform_delete_document` |
+| Permission Level | Description | Confirmation | Rate Limited |
+| :--- | :--- | :--- | :--- |
+| `read` | Non-mutating queries (e.g., `platform_list_agents`) | No | No |
+| `write` | Resource modification (e.g., `platform_create_agent`) | Configurable | Yes |
+| `destructive` | Data deletion (e.g., `platform_delete_document`) | **Mandatory** | Yes |
 
-The `requires_confirmation` flag on each `ActionDefinition` controls whether the action triggers the confirmation workflow. For example, `platform_store_memory` is a `write` action but has `requires_confirmation=False` to allow agents to learn from conversations autonomously [orchestrator/modules/tools/discovery/actions_workspace.py:60-87]().
+### Hierarchy Permissions (PRD-140)
+The system implements a `_HIERARCHY_TARGETS` map that associates mutating actions with specific target types such as `TARGET_AGENT`, `TARGET_PLAYBOOK`, or `TARGET_TASK` [orchestrator/modules/tools/discovery/platform_executor.py:209-226](). The `can_actor_modify` utility is called to ensure that the calling agent has sufficient hierarchy depth to perform the operation.
 
-**Sources:** [orchestrator/modules/tools/discovery/actions_workspace.py:123-141](), [orchestrator/modules/tools/discovery/actions_agents.py:11-38](), [orchestrator/modules/tools/discovery/actions_reports.py:9-76]()
+**Sources:** [orchestrator/modules/tools/discovery/platform_executor.py:182-207](), [orchestrator/modules/tools/discovery/platform_actions.py:85-86]()
 
 ---
 
 ## Confirmation Flow Architecture
 
-The following diagram illustrates how the `PlatformActionExecutor` intercepts requests before they reach domain-specific handlers like `create_agent` or `submit_report`.
+The `PlatformActionExecutor` intercepts requests before they reach domain handlers. If an action requires confirmation (defined in `ActionDefinition.requires_confirmation`), it halts execution and returns a structured request for user intervention.
 
 ### Platform Action Safety Sequence
 ```mermaid
@@ -66,125 +64,109 @@ sequenceDiagram
     participant Agent as "AgentFactory/Runtime"
     participant PAE as "PlatformActionExecutor"
     participant Reg as "ActionRegistry"
-    participant User as "Chat UI / User"
+    participant RL as "RateLimiter"
     participant Handler as "handlers_agents.py"
 
-    Agent->>PAE: "execute('platform_update_agent', params)"
-    PAE->>Reg: "get_action_registry().get('platform_update_agent')"
-    Reg-->>PAE: "ActionDefinition(requires_confirmation=True)"
+    Agent->>PAE: "execute('platform_delete_agent', params, context)"
+    PAE->>Reg: "get_action_definition('platform_delete_agent')"
     
     alt "requires_confirmation == True"
-        PAE-->>Agent: "{"success": false, "requires_confirmation": true, "message": "...", "params": {...}}"
-        Agent->>User: "Display confirmation prompt in Chat UI"
-        User-->>Agent: "User clicks 'Approve'"
-        Agent->>PAE: "execute_confirmed('platform_update_agent', params)"
-    else "requires_confirmation == False"
-        PAE->>PAE: "Proceed to rate limit check"
+        PAE-->>Agent: "HTTP 200 {success: false, requires_confirmation: true}"
+        Note over Agent: "UI displays Approval Modal to User"
     end
     
-    PAE->>PAE: "check_rate_limit(workspace_id, 'platform_write')"
+    Note over Agent: "User Approves Action"
+    Agent->>PAE: "execute(..., confirmed=True)"
     
-    alt "Rate limit exceeded"
-        PAE-->>Agent: "{"success": false, "rate_limited": true, "error": 'Rate limit exceeded'}"
-    else "Within rate limit"
-        PAE->>Handler: "await update_agent(params)"
-        Handler-->>PAE: "Success"
-        PAE-->>Agent: "{"success": true, "message": 'Agent updated'}"
+    PAE->>RL: "check_rate_limit(workspace_id, 'platform_write', subject_id=agent_id)"
+    
+    alt "Within Rate Limit (60/min)"
+        PAE->>Handler: "await delete_agent(params)"
+        Handler-->>PAE: "Success Response"
+        PAE-->>Agent: "JSON {success: true}"
+    else "Rate Exceeded"
+        PAE-->>Agent: "Error {success: false, reason: 'rate_limited'}"
     end
 ```
 
-**Confirmation Response Format**
-When an action requires confirmation, the executor returns a special response structure:
-
-```json
-{
-  "success": false,
-  "requires_confirmation": true,
-  "action": "platform_delete_memory",
-  "permission_level": "destructive",
-  "message": "This action (destructive) requires confirmation. Action: platform_delete_memory — Permanently delete a specific memory by ID...",
-  "params": {
-    "memory_id": "abc-123"
-  }
-}
-```
-
-**Sources:** [orchestrator/modules/tools/discovery/actions_workspace.py:123-141](), [orchestrator/modules/tools/discovery/actions_agents.py:152-180]()
+**Sources:** [orchestrator/modules/tools/discovery/platform_executor.py:5-28](), [orchestrator/core/security/rate_limiter.py:72-85](), [orchestrator/modules/tools/discovery/actions_auto_reporting.py:85-86]()
 
 ---
 
-## Rate Limiting Implementation
+## Rate Limiting & Loop Prevention
 
-### Rate Limit Configuration
-The rate limiter enforces a **10 actions per minute** ceiling for write/destructive platform actions, scoped by `workspace_id`. This prevents agents from exhausting resources or making rapid destructive changes during autonomous operation.
+### Per-Subject Throttling
+The system uses Redis sliding window counters to enforce limits. While the legacy behavior was workspace-wide, the current implementation supports `subject_id` scoping (typically the `agent_id`) [orchestrator/core/security/rate_limiter.py:19-21]().
 
-| Limit Type | Scope | Threshold | Window | Enforcement |
-| :--- | :--- | :--- | :--- | :--- |
-| `platform_write` | Per workspace | 10 requests | 60 seconds | `HTTP 429` / Error JSON |
+*   **Platform Write Limit**: Defaulted to **60 requests per 60 seconds** [orchestrator/core/security/rate_limiter.py:56-57]().
+*   **Implementation**: Uses Redis sorted sets (`zadd`, `zremrangebyscore`, `zcard`) to track request timestamps within the window [orchestrator/core/security/rate_limiter.py:101-110]().
+*   **Fail-Open**: If Redis is unavailable, the system logs a warning but allows the request to proceed to ensure high availability [orchestrator/core/security/rate_limiter.py:130-133]().
 
-### Execution Logic in PlatformActionExecutor
-The `PlatformActionExecutor` class handles the logic for dispatching actions and enforcing limits.
+### Complexity Assessment (AutoBrain)
+The `AutoBrain` service performs a 3-tier assessment of incoming messages to determine complexity levels (ATOM to ORGANISM) [orchestrator/consumers/chatbot/auto.py:14-17](). This prevents simple "chitchat" from triggering expensive tool-heavy workflows.
+*   **Tier 1**: Redis cache lookup [orchestrator/consumers/chatbot/auto.py:15]().
+*   **Tier 2**: Regex fast-paths for greetings and platform keywords [orchestrator/consumers/chatbot/auto.py:16](), [orchestrator/consumers/chatbot/auto.py:92-114]().
+*   **Tier 3**: LLM classification [orchestrator/consumers/chatbot/auto.py:17]().
 
+**Sources:** [orchestrator/core/security/rate_limiter.py:45-57](), [orchestrator/consumers/chatbot/auto.py:5-22]()
+
+---
+
+## Code Entity Mapping
+
+### Tool Discovery & Permission Filtering
 ```mermaid
-flowchart TD
-    Start["PlatformActionExecutor.execute(action_name, params)"] --> GetHandler["handler = self._handlers.get(action_name)"]
-    GetHandler --> CheckHandler{"Handler exists?"}
-    CheckHandler -->|No| ReturnError["return {success: false, error: 'Unknown action'}"]
-    CheckHandler -->|Yes| GetActionDef["action_def = get_action_registry().get(action_name)"]
+classDiagram
+    class ActionRegistry {
+        +register(definition)
+        +get_action(name)
+    }
+    class ActionDefinition {
+        +name: str
+        +permission_level: str
+        +requires_confirmation: bool
+        +parameters: dict
+    }
+    class PlatformActionExecutor {
+        +execute(action_name, params, context)
+        -_HIERARCHY_TARGETS: dict
+    }
     
-    GetActionDef --> CheckConfirmation{"requires_confirmation?"}
-    CheckConfirmation -->|Yes| ReturnConfirm["return {success: false, requires_confirmation: true, ...}"]
-    CheckConfirmation -->|No| CheckPermission{"permission_level in ['write', 'destructive']?"}
-    
-    CheckPermission -->|No| ExecuteHandler["await handler(db, workspace_id, params)"]
-    CheckPermission -->|Yes| RateLimit["await check_rate_limit(workspace_id, 'platform_write')"]
-    
-    RateLimit --> RateLimitCheck{"Rate limit OK?"}
-    RateLimitCheck -->|No| Return429["return {success: false, rate_limited: true, error: 'Rate limit exceeded'}"]
-    RateLimitCheck -->|Yes| ExecuteHandler
-    
-    ExecuteHandler --> ExecuteOK{"Success?"}
-    ExecuteOK -->|Yes| ReturnSuccess["return {success: true, ...}"]
-    ExecuteOK -->|No| Rollback["self.db.rollback()"]
-    Rollback --> ReturnFail["return {success: false, error: '...'}"]
+    PlatformActionExecutor --> ActionRegistry : "fetches definitions"
+    ActionRegistry "1" *-- "many" ActionDefinition : "contains"
 ```
+**Sources:** [orchestrator/modules/tools/discovery/platform_actions.py:38-66](), [orchestrator/modules/tools/discovery/platform_executor.py:209-226]()
 
-**Sources:** [orchestrator/modules/tools/discovery/actions_workspace.py:137-138](), [orchestrator/modules/tools/discovery/actions_documents.py:53-55]()
-
----
-
-## Implementation Details
-
-### Confirmation Check (Fail-Closed)
-The system is **fail-closed**: if registry lookup fails or an action is unknown, the platform assumes confirmation is required or returns an error rather than allowing unrestricted execution. Actions like `platform_delete_memory` [orchestrator/modules/tools/discovery/actions_workspace.py:138]() and `platform_delete_document` [orchestrator/modules/tools/discovery/actions_documents.py:55]() explicitly set `requires_confirmation=True`.
-
-### Rate Limiting (Write/Destructive Only)
-Read actions bypass rate limiting entirely, enabling agents to query workspace state (e.g., `platform_list_agents` [orchestrator/modules/tools/discovery/actions_agents.py:12-38]()) without throttling. Write actions like `platform_create_agent` [orchestrator/modules/tools/discovery/actions_agents.py:74-150]() or `platform_submit_report` [orchestrator/modules/tools/discovery/actions_reports.py:9-76]() are subject to the `platform_write` quota.
-
----
-
-## ActionDefinition Schema
-
-Each platform action is registered with an `ActionDefinition` that specifies its permission level and confirmation requirements. These definitions are registered in various `register_*_actions` functions.
-
-**Key Fields:**
-*   `permission_level`: One of `"read"`, `"write"`, or `"destructive"`.
-*   `requires_confirmation`: Boolean flag.
-*   `category`: Logical grouping (e.g., `"agents"`, `"memory"`, `"reports"`, `"missions"`).
-
-**Sources:** [orchestrator/modules/tools/discovery/actions_workspace.py:15-34](), [orchestrator/modules/tools/discovery/actions_missions.py:9-50](), [orchestrator/modules/tools/discovery/actions_playbooks.py:11-38]()
+### Execution Guardrail Logic
+```mermaid
+stateDiagram-v2
+    [*] --> "PlatformActionExecutor.execute"
+    "PlatformActionExecutor.execute" --> HierarchyCheck: "Verify can_actor_modify"
+    HierarchyCheck --> CheckConfirmation: "Authorized"
+    HierarchyCheck --> Denied: "Permission Denied"
+    
+    CheckConfirmation --> ReturnConfirmation: "requires_confirmation=True AND confirmed=False"
+    CheckConfirmation --> CheckRateLimit: "confirmed=True"
+    
+    CheckRateLimit --> ExecuteHandler: "Within 60/min per agent"
+    CheckRateLimit --> RateLimited: "429 Too Many Requests"
+    
+    ExecuteHandler --> [*]
+```
+**Sources:** [orchestrator/modules/tools/discovery/platform_executor.py:182-207](), [orchestrator/core/security/rate_limiter.py:72-127]()
 
 ---
 
-## Summary Table
+## Technical Summary
 
-| Component | Purpose | Key Behavior |
+| Logic Step | Code Entity | File Reference |
 | :--- | :--- | :--- |
-| `PlatformActionExecutor` | Main entry point for action execution | Checks confirmation → rate limit → handler |
-| `ActionRegistry` | Metadata store for actions | Stores `requires_confirmation` and `permission_level` |
-| `handlers_reports.py` | Logic for report actions | Implements `submit_report` [orchestrator/modules/tools/discovery/handlers_reports.py:13-87]() |
-| `handlers_agents.py` | Logic for agent CRUD | Implements `create_agent` [orchestrator/modules/tools/discovery/handlers_agents.py:120-206]() |
+| **Complexity Check** | `AutoBrain` | [orchestrator/consumers/chatbot/auto.py:2-22]() |
+| **Tool Dispatch** | `PlatformActionExecutor` | [orchestrator/modules/tools/discovery/platform_executor.py:5-9]() |
+| **Rate Limiting** | `check_rate_limit` | [orchestrator/core/security/rate_limiter.py:72-78]() |
+| **Action Definition** | `ActionDefinition` | [orchestrator/modules/tools/discovery/action_registry.py:1-20]() |
+| **Hierarchy Check** | `can_actor_modify` | [orchestrator/modules/tools/discovery/platform_executor.py:199-207]() |
 
-**Sources:** [orchestrator/modules/tools/discovery/handlers_reports.py:13-106](), [orchestrator/modules/tools/discovery/handlers_agents.py:13-117]()
+**Sources:** [orchestrator/modules/tools/discovery/platform_executor.py:1-226](), [orchestrator/core/security/rate_limiter.py:45-57](), [orchestrator/consumers/chatbot/auto.py:59-84]()
 
 ---

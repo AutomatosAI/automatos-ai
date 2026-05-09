@@ -5,96 +5,68 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/components/activity/activity-memory.tsx](frontend/components/activity/activity-memory.tsx)
 - [frontend/components/activity/memory-card.tsx](frontend/components/activity/memory-card.tsx)
 - [frontend/components/activity/memory/health-banner.tsx](frontend/components/activity/memory/health-banner.tsx)
 - [frontend/components/activity/memory/index.ts](frontend/components/activity/memory/index.ts)
 - [frontend/components/activity/memory/memory-sidebar.tsx](frontend/components/activity/memory/memory-sidebar.tsx)
-- [frontend/components/activity/memory/memory-viewer.tsx](frontend/components/activity/memory/memory-viewer.tsx)
 - [frontend/components/activity/projects/index.ts](frontend/components/activity/projects/index.ts)
-- [frontend/components/activity/projects/project-card.tsx](frontend/components/activity/projects/project-card.tsx)
 - [frontend/components/shared/global-search.tsx](frontend/components/shared/global-search.tsx)
-- [frontend/hooks/use-global-search.ts](frontend/hooks/use-global-search.ts)
 - [frontend/hooks/use-memory-explorer-api.ts](frontend/hooks/use-memory-explorer-api.ts)
-- [orchestrator/alembic/versions/prd123_checkpoint_count.py](orchestrator/alembic/versions/prd123_checkpoint_count.py)
+- [frontend/tsconfig.tsbuildinfo](frontend/tsconfig.tsbuildinfo)
 - [orchestrator/api/memory_stats.py](orchestrator/api/memory_stats.py)
-- [orchestrator/api/missions.py](orchestrator/api/missions.py)
-- [orchestrator/api/widget_memory.py](orchestrator/api/widget_memory.py)
 - [orchestrator/config.py](orchestrator/config.py)
-- [orchestrator/core/context_guard.py](orchestrator/core/context_guard.py)
-- [orchestrator/core/models/orchestration.py](orchestrator/core/models/orchestration.py)
-- [orchestrator/core/models/orchestration_enums.py](orchestrator/core/models/orchestration_enums.py)
 - [orchestrator/main.py](orchestrator/main.py)
-- [orchestrator/modules/coordination/dispatcher.py](orchestrator/modules/coordination/dispatcher.py)
-- [orchestrator/modules/coordination/planner.py](orchestrator/modules/coordination/planner.py)
-- [orchestrator/modules/coordination/reconciler.py](orchestrator/modules/coordination/reconciler.py)
 - [orchestrator/modules/memory/context_router.py](orchestrator/modules/memory/context_router.py)
 - [orchestrator/modules/memory/unified_memory_service.py](orchestrator/modules/memory/unified_memory_service.py)
-- [orchestrator/modules/tools/discovery/action_registry.py](orchestrator/modules/tools/discovery/action_registry.py)
-- [orchestrator/modules/tools/execution/concurrency.py](orchestrator/modules/tools/execution/concurrency.py)
-- [orchestrator/services/checkpoint_service.py](orchestrator/services/checkpoint_service.py)
-- [orchestrator/services/coordinator_service.py](orchestrator/services/coordinator_service.py)
-- [orchestrator/services/orchestration_state.py](orchestrator/services/orchestration_state.py)
-- [orchestrator/tests/test_budget_gate.py](orchestrator/tests/test_budget_gate.py)
-- [orchestrator/tests/test_dispatcher_parallel.py](orchestrator/tests/test_dispatcher_parallel.py)
 - [orchestrator/tests/test_unified_memory.py](orchestrator/tests/test_unified_memory.py)
 - [scripts/ralph/IMPLEMENTATION_PLAN.md](scripts/ralph/IMPLEMENTATION_PLAN.md)
+- [scripts/ralph/prd.json](scripts/ralph/prd.json)
 - [scripts/ralph/progress.txt](scripts/ralph/progress.txt)
 
 </details>
 
 
 
-This page documents the programmatic interfaces for interacting with the 5-layer memory system in Automatos AI. It covers Python class methods, data structures, and REST endpoints exposed by the memory subsystem.
-
-For architectural overview and layer descriptions, see [3.1. Five-Layer Memory Architecture](). For service implementation details, see [3.2. UnifiedMemoryService]() and [3.3. Context Router]().
+This page documents the programmatic interfaces for interacting with the 5-layer memory system in Automatos AI. It covers Python class methods, data structures, and REST endpoints exposed by the memory subsystem, including real-time statistics, semantic search, and context routing.
 
 ---
 
 ## Overview
 
-The memory API is exposed through three primary service classes and a set of REST endpoints:
+The memory API is exposed through three primary service classes and a set of REST routers:
 
-- **`UnifiedMemoryService`** — Singleton service managing all memory operations across L1/L2/L3 layers. [orchestrator/modules/memory/unified_memory_service.py:154-188]()
-- **`MemoryNamespace`** — Helper for building scoped user IDs to prevent memory leakage. [orchestrator/modules/memory/unified_memory_service.py:38-48]()
-- **`SessionMemory`** — Data structure for L1 working memory stored in Redis. [orchestrator/modules/memory/unified_memory_service.py:123-149]()
-- **`ContextRouter`** — Signal-based query analyzer determining which memory layers to fetch. [orchestrator/config.py:90-97]()
+- **`UnifiedMemoryService`**: Singleton service managing all memory operations across L1/L2/L3 layers. [orchestrator/modules/memory/unified_memory_service.py:154-161]()
+- **`MemoryNamespace`**: Helper for building standardized, scoped user IDs to prevent memory leakage between workspaces and agents. [orchestrator/modules/memory/unified_memory_service.py:38-48]()
+- **`ContextRouter`**: Intelligent pre-LLM layer that analyzes queries to decide which memory layers to fetch. [orchestrator/modules/memory/context_router.py:5-12]()
+- **`MemoryItem`**: SQLAlchemy model for vector-based storage in the `memory_items` table. [orchestrator/modules/memory/storage/knowledge_system.py:55-73]()
 
-All memory operations are asynchronous and designed to be non-blocking. Redis and Mem0 failures are caught and logged without breaking the caller. [orchestrator/api/memory_stats.py:139-141]()
+All memory operations are asynchronous. Failures in external integrations like Mem0 are caught to allow graceful fallbacks to local PostgreSQL storage. [orchestrator/api/memory_stats.py:4-6](), [orchestrator/api/memory_stats.py:139-141]()
 
-**Sources:** [orchestrator/modules/memory/unified_memory_service.py:1-188](), [orchestrator/api/memory_stats.py:139-141](), [orchestrator/config.py:82-118]()
+**Sources:** [orchestrator/modules/memory/unified_memory_service.py:1-48](), [orchestrator/modules/memory/context_router.py:5-12](), [orchestrator/api/memory_stats.py:139-141]()
 
 ---
 
 ## MemoryNamespace
 
 ### Purpose
-
-`MemoryNamespace` is a frozen dataclass that builds standardized user ID strings for Mem0 and Redis keys. **All memory consumers must use this helper** to prevent inconsistencies in `user_id` formats. [orchestrator/modules/memory/unified_memory_service.py:38-48]()
+`MemoryNamespace` is a frozen dataclass that builds standardized user ID strings for Mem0 and Redis keys. **All memory consumers must use this helper** to maintain consistency in `user_id` formats and prevent cross-tenant data leaks. [orchestrator/modules/memory/unified_memory_service.py:38-48]()
 
 ### Class Definition
-
 ```python
 @dataclass(frozen=True)
 class MemoryNamespace:
     workspace_id: str
 ```
+[orchestrator/modules/memory/unified_memory_service.py:38-41]()
 
-**Sources:** [orchestrator/modules/memory/unified_memory_service.py:38-48]()
-
-### Methods
-
-| Method | Returns | Description |
-|--------|---------|-------------|
-| `workspace()` | `str` | Workspace-wide facts (L3 global): `mem:{workspace_id}`. [orchestrator/modules/memory/unified_memory_service.py:52-54]() |
-| `agent(agent_id)` | `str` | Agent-specific memories (L3 per-agent): `mem:{workspace_id}:agent:{agent_id}`. [orchestrator/modules/memory/unified_memory_service.py:56-58]() |
-| `recipe(recipe_id)` | `str` | Recipe learnings (L3 per-recipe): `mem:{workspace_id}:recipe:{recipe_id}`. [orchestrator/modules/memory/unified_memory_service.py:60-62]() |
-| `recipe_agent(recipe_id, agent_id)` | `str` | Per-agent step within recipe: `mem:{workspace_id}:recipe:{recipe_id}:agent:{agent_id}`. [orchestrator/modules/memory/unified_memory_service.py:64-66]() |
-| `workflow(workflow_id)` | `str` | Workflow execution memories: `mem:{workspace_id}:workflow:{workflow_id}`. [orchestrator/modules/memory/unified_memory_service.py:68-70]() |
-| `daily()` | `str` | Daily activity logs (L2): `mem:{workspace_id}:daily`. [orchestrator/modules/memory/unified_memory_service.py:72-74]() |
-| `session(conversation_id)` | `str` | Session cache key (L1 Redis): `mem:session:{workspace_id}:{conversation_id}`. [orchestrator/modules/memory/unified_memory_service.py:78-80]() |
-| `cache_key(agent_id, query_hash)` | `str` | L3 Mem0 search cache (Redis): `mem:cache:{workspace_id}:{scope}:{query_hash}`. [orchestrator/modules/memory/unified_memory_service.py:84-87]() |
-| `resolve(agent_id)` | `str` | Auto-resolve to agent or workspace namespace based on `agent_id`. [orchestrator/modules/memory/unified_memory_service.py:107-117]() |
+### Key Scopes
+| Method | Format | Description |
+|--------|--------|-------------|
+| `workspace()` | `mem:{workspace_id}` | Workspace-wide facts (L3 global). [orchestrator/modules/memory/unified_memory_service.py:52-54]() |
+| `agent(id)` | `mem:{ws_id}:agent:{id}` | Agent-specific memories (L3 per-agent). [orchestrator/modules/memory/unified_memory_service.py:56-58]() |
+| `daily()` | `mem:{workspace_id}:daily` | Daily activity logs (L2). [orchestrator/modules/memory/unified_memory_service.py:72-74]() |
+| `session(id)` | `mem:session:{ws_id}:{id}` | Session cache key (L1 Redis). [orchestrator/modules/memory/unified_memory_service.py:78-80]() |
+| `cache_key(id, hash)` | `mem:cache:{ws_id}:{scope}:{hash}` | Cache for L3 Mem0 search results. [orchestrator/modules/memory/unified_memory_service.py:84-87]() |
 
 **Sources:** [orchestrator/modules/memory/unified_memory_service.py:50-117]()
 
@@ -102,131 +74,140 @@ class MemoryNamespace:
 
 ## Memory API Reference (REST)
 
-### 1. Memory Stats API
+### 1. Real Memory Stats API
 **Prefix:** `/api/v1/memory` [orchestrator/api/memory_stats.py:25]()
 
 #### `GET /stats/real`
-Fetches memory statistics, prioritizing Mem0 data with a local DB fallback. [orchestrator/api/memory_stats.py:121-125]()
-- **Implementation:** Calls `_fetch_all_scoped_memories` to aggregate global, agent, and daily scopes. [orchestrator/api/memory_stats.py:66-118]()
-- **Response:** Includes `total_memories`, `hit_rate` (calculated from `memory_access_log`), and counts by type/level. [orchestrator/api/memory_stats.py:146-190]()
+Fetches memory statistics, prioritizing Mem0 data via `UnifiedMemoryService` with a local DB fallback. [orchestrator/api/memory_stats.py:121-125]()
+- **Implementation**: Aggregates "global", "agent", and "daily" scopes via `_fetch_all_scoped_memories`. [orchestrator/api/memory_stats.py:133-137](), [orchestrator/api/memory_stats.py:83-101]()
+- **Response**: Includes `total_memories`, `hit_rate` (calculated from `memory_access_log`), and counts by type/level. [orchestrator/api/memory_stats.py:146-190]()
 
-**Sources:** [orchestrator/api/memory_stats.py:25-190]()
+#### `GET /health`
+Returns a health report including `mem0_available`, `search_effectiveness`, and `health_status` (healthy, degraded, or unavailable). [frontend/hooks/use-memory-explorer-api.ts:44-56]()
+
+#### `GET /browse`
+Browses or searches memories with optional `query`, `limit`, and `tier` (l2/l3) filters. [frontend/hooks/use-memory-explorer-api.ts:106-122]()
+
+**Sources:** [orchestrator/api/memory_stats.py:25-190](), [frontend/hooks/use-memory-explorer-api.ts:36-122]()
 
 ### 2. Widget Memory API
-**Prefix:** `/api/memory` [orchestrator/main.py:46-47]()
+**Prefix:** `/api/memory` [orchestrator/api/widget_memory.py:26]()
 
-Provides simple CRUD for the workspace-scoped memory panel.
+Provides simple CRUD for the workspace-scoped memory panel. [orchestrator/api/widget_memory.py:5-10]()
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/` | `GET` | List memories for the current workspace. |
-| `/search` | `GET` | Semantic search (Mem0) or substring fallback. |
-| `/` | `POST` | Create a new memory record (e.g., via `platform_store_memory`). [scripts/ralph/progress.txt:68-73]() |
+| `/` | `GET` | List memories for the current workspace. [orchestrator/api/widget_memory.py:157-162]() |
+| `/search` | `GET` | Semantic search (Mem0) or substring fallback. [orchestrator/api/widget_memory.py:192-198]() |
+| `/` | `POST` | Create a new memory record with `content`, `metadata`, and `tags`. [orchestrator/api/widget_memory.py:38-42]() |
+| `/{id}` | `DELETE` | Remove a memory by ID. [orchestrator/api/widget_memory.py:69-73]() |
 
-**Sources:** [orchestrator/main.py:46-47](), [scripts/ralph/progress.txt:68-73]()
-
-### 3. Missions Memory Integration
-**Prefix:** `/api/missions` [orchestrator/api/missions.py:74]()
-
-Missions (Orchestration Runs) use a specialized shared memory field (PRD-108) for inter-agent coordination. [orchestrator/services/coordinator_service.py:82-86]()
-
-- **Shared Context:** `CoordinatorService` initializes a vector field for every mission goal. [orchestrator/services/coordinator_service.py:107-151]()
-- **Task Injection:** Outputs from individual tasks are injected into the mission's shared field upon completion. [orchestrator/services/coordinator_service.py:176-200]()
-
-**Sources:** [orchestrator/services/coordinator_service.py:82-200](), [orchestrator/api/missions.py:74-204]()
+**Sources:** [orchestrator/api/widget_memory.py:26-198]()
 
 ---
 
 ## Frontend Integration
 
 ### Hooks (`use-memory-explorer-api.ts`)
-The frontend uses React Query to interact with memory endpoints. [orchestrator/api/memory_stats.py:121-125]()
+The frontend uses React Query to interact with memory endpoints. [frontend/hooks/use-memory-explorer-api.ts:1-4]()
 
-- `useMemoryExplorerStats()`: Fetches real-time memory counts and hit rates from `/api/v1/memory/stats/real`. [orchestrator/api/memory_stats.py:121-125]()
-- `useGlobalSearch()`: Provides unified search across workspace documents and memory items. [orchestrator/api/memory_stats.py:86-93]()
+- `useMemoryBrowse(filters)`: Searches `/api/v1/memory/browse`. [frontend/hooks/use-memory-explorer-api.ts:106-122]()
+- `useConsolidateMemories()`: POSTs to `/api/v1/memory/consolidate` to merge multiple memories using `merge` or `summarise` strategies. [frontend/hooks/use-memory-explorer-api.ts:176-197]()
+- `useDeleteMemory()`: Deletes a memory via `DELETE /api/v1/memory/{id}`. [frontend/hooks/use-memory-explorer-api.ts:153-171]()
 
-**Sources:** [orchestrator/api/memory_stats.py:25-190]()
+**Sources:** [frontend/hooks/use-memory-explorer-api.ts:83-197]()
 
-### Activity Feed Memory
-The `ActivityMemory` components visualize memory interactions within the system. `platform_search_memory` and `platform_store_memory` are promoted actions that appear in the tool loop. [scripts/ralph/progress.txt:68-73](), [scripts/ralph/progress.txt:92-93]()
+### UI Components
+- **`MemoryCard`**: Renders individual memory items with `score` badges, `tier` labels, and metadata such as `agent_name`. [frontend/components/activity/memory-card.tsx:35-142]()
+- **`MemorySidebar`**: Provides a grouped list (Today, Yesterday, etc.) and filter chips (Transcripts, Missions, Failures, Facts). [frontend/components/activity/memory/memory-sidebar.tsx:57-152]()
 
-**Sources:** [scripts/ralph/progress.txt:68-93]()
+**Sources:** [frontend/components/activity/memory-card.tsx:35-142](), [frontend/components/activity/memory/memory-sidebar.tsx:9-152]()
 
 ---
 
 ## Implementation Diagrams
 
 ### Data Flow: Context Retrieval
-This diagram bridges the `UnifiedMemoryService` call to the underlying storage and namespace logic.
+This diagram bridges the `retrieve_context` function call to the underlying storage entities and signal detection logic.
 
 ```mermaid
 sequenceDiagram
-    participant App as "Agent/Chatbot"
+    participant App as "SmartChatOrchestrator"
     participant UMS as "UnifiedMemoryService"
+    participant CR as "ContextRouter"
     participant NS as "MemoryNamespace"
-    participant Redis as "Redis (L1/Cache)"
-    participant Mem0 as "Mem0 (L3)"
-    participant DB as "Postgres (L2)"
+    participant L1 as "Redis (L1 Session)"
+    participant L2 as "Postgres (memory_items)"
+    participant L3 as "Mem0 (Long-term)"
 
-    App->>UMS: "search_long_term(workspace_id, query)"
+    App->>CR: "retrieve_context(query, workspace_id, agent_id)"
+    CR->>CR: "analyze_query(query)"
+    Note over CR: Detects is_temporal, is_personal_fact, etc.
+    CR->>UMS: "Parallel fetch based on signals"
     UMS->>NS: "resolve(agent_id)"
-    NS-->>UMS: "user_id: 'mem:ws_123:agent:456'"
     
-    UMS->>Redis: "get(ns.cache_key())"
-    alt Cache Hit
-        Redis-->>UMS: "cached_results"
-    else Cache Miss
-        UMS->>Mem0: "search(user_id, query)"
-        Mem0-->>UMS: "memory_list"
-        UMS->>Redis: "setex(ns.cache_key(), 300, results)"
+    par Parallel Fetch
+        UMS->>L1: "get_session_memory(conversation_id)"
+        UMS->>L2: "search_short_term() if is_temporal"
+        UMS->>L3: "search_long_term() if is_personal_fact"
     end
     
-    UMS-->>App: "List[MemoryResult]"
+    UMS-->>CR: "Assembled Memory Layers"
+    CR-->>App: "ContextBundle"
 ```
 
-**Sources:** [orchestrator/modules/memory/unified_memory_service.py:154-205](), [orchestrator/modules/memory/unified_memory_service.py:38-117](), [orchestrator/config.py:88-89]()
+**Sources:** [orchestrator/modules/memory/unified_memory_service.py:1292-1484](), [orchestrator/modules/memory/context_router.py:5-24](), [orchestrator/modules/memory/context_router.py:40-78]()
 
-### Code Entity Space: Memory Hierarchy
-Mapping of internal classes to database and cache entities.
+### Code Entity Space: Memory API Hierarchy
+Mapping of internal classes to API routes and storage providers.
 
 ```mermaid
 graph TD
-    UMS["UnifiedMemoryService"]
-    NS["MemoryNamespace"]
-    SM["SessionMemory (L1)"]
-    MI["MemoryItem (L2)"]
-    M0["Mem0Client (L3)"]
-    
-    subgraph "Redis Storage"
-        R_SESS["'mem:session:*' (TTL 86400s)"]
-        R_CACHE["'mem:cache:*' (TTL 300s)"]
-    end
-    
-    subgraph "PostgreSQL"
-        DB_MI["memory_items Table"]
-        DB_AL["memory_access_log Table"]
+    subgraph "API Layer"
+        MR["memory_router (/api/v1/memory)"]
+        WMR["widget_memory_router (/api/memory)"]
     end
 
-    UMS -->|"uses"| NS
-    UMS -->|"manages"| SM
-    UMS -->|"queries"| M0
-    SM -->|"stored in"| R_SESS
-    UMS -->|"caches in"| R_CACHE
-    MI -->|"stored in"| DB_MI
-    UMS -->|"logs hits to"| DB_AL
+    subgraph "Service Layer"
+        UMS["UnifiedMemoryService (Singleton)"]
+        CR["ContextRouter"]
+        NS["MemoryNamespace"]
+    end
+
+    subgraph "Storage Layer"
+        M0C["Mem0Client (L3)"]
+        RC["RedisClient (L1/Cache)"]
+        DB[("PostgreSQL (memory_items)")]
+    end
+
+    MR --> UMS
+    WMR --> UMS
+    UMS --> NS
+    UMS --> M0C
+    UMS --> RC
+    UMS --> DB
+    CR --> UMS
+    
+    subgraph "Frontend Hooks"
+        UMB["useMemoryBrowse"]
+        UMS_H["useMemoryExplorerStats"]
+    end
+    
+    UMB --> MR
+    UMS_H --> MR
 ```
 
-**Sources:** [orchestrator/modules/memory/unified_memory_service.py:1-188](), [orchestrator/config.py:84-89](), [orchestrator/api/memory_stats.py:143-183]()
+**Sources:** [orchestrator/main.py:50-51](), [orchestrator/modules/memory/unified_memory_service.py:154-188](), [frontend/hooks/use-memory-explorer-api.ts:94-146]()
 
 ---
 
 ## Error Handling & Fallbacks
 
-The system implements a multi-tier fallback strategy:
-1. **Mem0 to Local DB:** `get_real_memory_stats` attempts to query Mem0 via `UnifiedMemoryService`; if it fails, it defaults to the `memory_items` table in Postgres. [orchestrator/api/memory_stats.py:126-141]()
-2. **Fail-Closed Permissions:** The `PlatformActionExecutor` rejects memory operations if the `caller_context` is missing, ensuring data isolation. [scripts/ralph/progress.txt:21-31]()
-3. **Redis Resilience:** `UnifiedMemoryService._get_redis()` returns `None` if Redis is unreachable; the service is designed to continue execution (chat must never break due to cache failure). [orchestrator/modules/memory/unified_memory_service.py:198-205]()
+The system implements a multi-tier fallback strategy to ensure chat functionality is never blocked by memory infrastructure failures:
+1. **Mem0 to Local DB**: `get_real_memory_stats` attempts to query Mem0; if it fails or is unconfigured, it defaults to the `memory_items` table in Postgres. [orchestrator/api/memory_stats.py:126-141]()
+2. **Redis Graceful Failure**: `UnifiedMemoryService._get_redis()` returns `None` if Redis is unavailable, and callers are required to handle this to prevent breaking chat sessions. [orchestrator/modules/memory/unified_memory_service.py:198-204]()
+3. **Substring Search Fallback**: If Mem0 is unconfigured, the Widget Memory API falls back to a naive substring search against the local database. [orchestrator/api/widget_memory.py:131-141]()
 
-**Sources:** [orchestrator/api/memory_stats.py:126-141](), [scripts/ralph/progress.txt:21-31](), [orchestrator/modules/memory/unified_memory_service.py:198-205]()
+**Sources:** [orchestrator/api/memory_stats.py:126-141](), [orchestrator/modules/memory/unified_memory_service.py:198-204](), [orchestrator/api/widget_memory.py:131-141]()
 
 ---

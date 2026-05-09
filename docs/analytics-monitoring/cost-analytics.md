@@ -9,21 +9,20 @@ The following files were used as context for generating this wiki page:
 - [frontend/app/analytics/page.tsx](frontend/app/analytics/page.tsx)
 - [frontend/components/analytics/analytics-admin.tsx](frontend/components/analytics/analytics-admin.tsx)
 - [frontend/components/analytics/analytics-agents.tsx](frontend/components/analytics/analytics-agents.tsx)
-- [frontend/components/analytics/analytics-composio.tsx](frontend/components/analytics/analytics-composio.tsx)
+- [frontend/components/analytics/analytics-costs.tsx](frontend/components/analytics/analytics-costs.tsx)
 - [frontend/components/analytics/analytics-documents.tsx](frontend/components/analytics/analytics-documents.tsx)
 - [frontend/components/analytics/analytics-memory.tsx](frontend/components/analytics/analytics-memory.tsx)
 - [frontend/components/analytics/analytics-openrouter-credits.tsx](frontend/components/analytics/analytics-openrouter-credits.tsx)
 - [frontend/components/analytics/analytics-overview.tsx](frontend/components/analytics/analytics-overview.tsx)
+- [frontend/components/analytics/analytics-page.tsx](frontend/components/analytics/analytics-page.tsx)
 - [frontend/components/analytics/analytics-pandas-chart.tsx](frontend/components/analytics/analytics-pandas-chart.tsx)
 - [frontend/components/analytics/analytics-plan-usage.tsx](frontend/components/analytics/analytics-plan-usage.tsx)
 - [frontend/components/analytics/analytics-recommendations.tsx](frontend/components/analytics/analytics-recommendations.tsx)
 - [frontend/components/analytics/analytics-workflows.tsx](frontend/components/analytics/analytics-workflows.tsx)
-- [frontend/components/context/context-engineering.tsx](frontend/components/context/context-engineering.tsx)
 - [frontend/components/dashboard/widgets/system-health-widget.tsx](frontend/components/dashboard/widgets/system-health-widget.tsx)
 - [frontend/components/knowledge/QueryTemplatesGrid.tsx](frontend/components/knowledge/QueryTemplatesGrid.tsx)
-- [frontend/components/team/team-management.tsx](frontend/components/team/team-management.tsx)
+- [frontend/components/system/rag-configuration.tsx](frontend/components/system/rag-configuration.tsx)
 - [frontend/hooks/use-unified-analytics.ts](frontend/hooks/use-unified-analytics.ts)
-- [frontend/tsconfig.tsbuildinfo](frontend/tsconfig.tsbuildinfo)
 - [orchestrator/api/llm_analytics.py](orchestrator/api/llm_analytics.py)
 - [orchestrator/core/llm/openrouter_analytics.py](orchestrator/core/llm/openrouter_analytics.py)
 
@@ -37,27 +36,27 @@ This document covers the **cost analytics subsystem** that tracks, analyzes, and
 
 ## Cost Tracking Data Model
 
-All LLM API calls are logged to the `LLMUsage` table with cost attribution. Each row captures:
+All LLM API calls are logged to the `LLMUsage` table with cost attribution. Each row captures detailed metadata for granular reporting.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `workspace_id` | UUID | Workspace scope for multi-tenancy |
-| `agent_id` | Integer | Optional agent that initiated the request |
-| `model_id` | String | Model identifier (e.g., `openai/gpt-4o`) |
-| `provider` | String | Provider name (`openai`, `anthropic`, `openrouter`) |
-| `tier` | String | Model tier (`fast`, `smart`, `aggregator`) |
-| `input_tokens` | Integer | Prompt tokens consumed |
-| `output_tokens` | Integer | Completion tokens generated |
-| `total_tokens` | Integer | Sum of input + output |
-| `input_cost` | Float | Cost for input tokens |
-| `output_cost` | Float | Cost for output tokens |
-| `total_cost` | Float | Sum of input + output costs |
-| `is_byok` | Boolean | True if user provided their own API key |
-| `latency_ms` | Float | Request duration |
-| `status` | String | `success` or `error` |
-| `created_at` | Timestamp | When the request occurred |
+| `workspace_id` | UUID | Workspace scope for multi-tenancy [orchestrator/api/llm_analytics.py:95-96]() |
+| `agent_id` | Integer | Optional agent that initiated the request [orchestrator/api/llm_analytics.py:103-103]() |
+| `model_id` | String | Model identifier (e.g., `openai/gpt-4o`) [orchestrator/api/llm_analytics.py:101-101]() |
+| `provider` | String | Provider name (`openai`, `anthropic`, `openrouter`) [orchestrator/api/llm_analytics.py:102-102]() |
+| `tier` | String | Model tier (`fast`, `smart`, `aggregator`) [orchestrator/api/llm_analytics.py:104-104]() |
+| `input_tokens` | Integer | Prompt tokens consumed [orchestrator/api/llm_analytics.py:114-114]() |
+| `output_tokens` | Integer | Completion tokens generated [orchestrator/api/llm_analytics.py:115-115]() |
+| `total_tokens` | Integer | Sum of input + output [orchestrator/api/llm_analytics.py:116-116]() |
+| `input_cost` | Float | Cost for input tokens [orchestrator/api/llm_analytics.py:168-168]() |
+| `output_cost` | Float | Cost for output tokens [orchestrator/api/llm_analytics.py:169-169]() |
+| `total_cost` | Float | Sum of input + output costs [orchestrator/api/llm_analytics.py:117-117]() |
+| `is_byok` | Boolean | True if user provided their own API key [orchestrator/api/llm_analytics.py:105-105]() |
+| `latency_ms` | Float | Request duration [orchestrator/api/llm_analytics.py:215-215]() |
+| `status` | String | `success` or `error` [orchestrator/api/llm_analytics.py:219-219]() |
+| `created_at` | Timestamp | When the request occurred [orchestrator/api/llm_analytics.py:121-121]() |
 
-Sources: `[orchestrator/api/llm_analytics.py:21-21]()`, `[orchestrator/api/llm_analytics.py:100-107]()`, `[orchestrator/core/llm/openrouter_analytics.py:118-136]()`
+Sources: [orchestrator/api/llm_analytics.py:21-21](), [orchestrator/api/llm_analytics.py:100-121]()
 
 ---
 
@@ -65,53 +64,53 @@ Sources: `[orchestrator/api/llm_analytics.py:21-21]()`, `[orchestrator/api/llm_a
 
 ### Frontend to Backend Flow
 
-The analytics dashboard utilizes a series of React Query hooks defined in `use-unified-analytics.ts` to fetch aggregated data from the FastAPI backend. It employs a workspace-scoping function `wsScope()` to ensure data isolation between tenants.
+The analytics dashboard utilizes a series of React Query hooks defined in `use-unified-analytics.ts` to fetch aggregated data from the FastAPI backend. All queries are scoped using `wsScope()` to ensure workspace isolation by calling `getAdminWorkspaceOverride()` [frontend/hooks/use-unified-analytics.ts:12-14]().
 
 Title: Cost Analytics Data Flow
 ```mermaid
 graph TB
-    subgraph "Frontend Components"
+    subgraph "Frontend - [analytics-costs.tsx]"
         CostsUI["AnalyticsCosts Component"]
-        OverviewUI["AnalyticsOverview Component"]
-        AdminUI["AnalyticsAdmin Component"]
+        CostHooks["useCostAnalyticsUnified<br/>useCostProjections<br/>useModelComparison<br/>useDailyCostByModel"]
     end
     
-    subgraph "React Query Hooks - [frontend/hooks/use-unified-analytics.ts]"
-        wsScope["wsScope() -> getAdminWorkspaceOverride()"]
-        CostHooks["useAnalyticsOverview<br/>useAgentAnalytics<br/>useAdminDashboard<br/>useAdminCostAnalytics"]
+    subgraph "API Client & Hooks - [use-unified-analytics.ts]"
+        QueryKeys["unifiedAnalyticsKeys.costs(days)<br/>unifiedAnalyticsKeys.costProjections(period)<br/>unifiedAnalyticsKeys.modelComparison(modelIds, period)"]
+        APIClient["apiClient.request()"]
     end
     
-    subgraph "Backend API - [orchestrator/api/llm_analytics.py]"
+    subgraph "Backend - [llm_analytics.py]"
         UsageEndpoint["GET /api/analytics/llm/usage"]
         CostsEndpoint["GET /api/analytics/llm/costs"]
         SummaryEndpoint["GET /api/analytics/llm/summary"]
-        AdminDashboard["GET /api/admin/analytics/dashboard"]
+        ProjectionsEndpoint["GET /api/analytics/llm/projections"]
+        ComparisonEndpoint["GET /api/analytics/llm/comparison"]
     end
     
     subgraph "Database Layer - [core/models/core.py]"
-        LLMUsageTable[("LLMUsage Table<br/>workspace_id foreign key")]
+        LLMUsageTable[("LLMUsage Table<br/>workspace_id scoped")]
         Aggregations["SQLAlchemy aggregations:<br/>func.sum(total_cost)<br/>func.count()<br/>func.avg()<br/>group_by model/provider/agent"]
     end
     
     CostsUI --> CostHooks
-    OverviewUI --> CostHooks
-    AdminUI --> CostHooks
-    
-    CostHooks --> wsScope
-    CostHooks --> UsageEndpoint
-    CostHooks --> CostsEndpoint
-    CostHooks --> SummaryEndpoint
-    CostHooks --> AdminDashboard
+    CostHooks --> QueryKeys
+    QueryKeys --> APIClient
+    APIClient --> UsageEndpoint
+    APIClient --> CostsEndpoint
+    APIClient --> SummaryEndpoint
+    APIClient --> ProjectionsEndpoint
+    APIClient --> ComparisonEndpoint
     
     UsageEndpoint --> Aggregations
     CostsEndpoint --> Aggregations
     SummaryEndpoint --> Aggregations
-    AdminDashboard --> Aggregations
+    ProjectionsEndpoint --> Aggregations
+    ComparisonEndpoint --> Aggregations
     
     Aggregations --> LLMUsageTable
 ```
 
-Sources: `[frontend/hooks/use-unified-analytics.ts:12-43]()`, `[orchestrator/api/llm_analytics.py:28-29]()`, `[frontend/components/analytics/analytics-overview.tsx:33-36]()`, `[frontend/components/analytics/analytics-admin.tsx:168-170]()`
+Sources: [orchestrator/api/llm_analytics.py:28-30](), [orchestrator/api/llm_analytics.py:87-191](), [frontend/components/analytics/analytics-costs.tsx:44-50](), [frontend/hooks/use-unified-analytics.ts:18-43]()
 
 ---
 
@@ -119,10 +118,10 @@ Sources: `[frontend/hooks/use-unified-analytics.ts:12-43]()`, `[orchestrator/api
 
 ### Usage by Dimension
 
-The `get_usage` endpoint in `llm_analytics.py` aggregates tokens and costs by a specified dimension using SQLAlchemy's `group_by`.
+The `get_usage` endpoint in `llm_analytics.py` aggregates tokens and costs by a specified dimension using SQLAlchemy's `group_by`. Supported dimensions include `model`, `provider`, `agent`, and `tier` [orchestrator/api/llm_analytics.py:90-90]().
 
 ```python
-# Available grouping dimensions in orchestrator/api/llm_analytics.py
+# Available grouping dimensions
 group_col_map = {
     "model": LLMUsage.model_id,
     "provider": LLMUsage.provider,
@@ -133,24 +132,20 @@ group_col_map = {
 }
 ```
 
-Response schema is defined by the `UsageGroup` Pydantic model:
-- `key`: The dimension value (e.g., model name)
-- `request_count`: Total API calls
-- `total_tokens`: Sum of input + output
-- `total_cost`: Total cost in USD
+Response schema is defined by the `UsageGroup` Pydantic model, providing a unified structure for charts and tables [orchestrator/api/llm_analytics.py:34-41]().
 
-Sources: `[orchestrator/api/llm_analytics.py:34-41]()`, `[orchestrator/api/llm_analytics.py:87-138]()`
+Sources: [orchestrator/api/llm_analytics.py:34-41](), [orchestrator/api/llm_analytics.py:87-138]()
 
 ---
 
 ### Summary Endpoint
 
-The `get_summary` function provides dashboard-level aggregates, including top models and cost trends. It calculates an `error_rate` by filtering for rows where `LLMUsage.status == "error"`.
+The `get_summary` function provides dashboard-level aggregates, including top models and cost trends over a period (e.g., `7d`, `30d`) [orchestrator/api/llm_analytics.py:194-204]().
 
 Title: Summary Aggregation Logic
 ```mermaid
 graph LR
-    subgraph "GET /api/analytics/llm/summary - [orchestrator/api/llm_analytics.py]"
+    subgraph "GET /api/analytics/llm/summary - [llm_analytics.py]"
         Query["SQLAlchemy Query:<br/>filter(workspace_id, created_at >= since)"]
         
         subgraph "Aggregates"
@@ -161,7 +156,7 @@ graph LR
             ErrorRate["COUNT(status='error') / Total"]
         end
         
-        TopModels["Top models by cost:<br/>GROUP BY model_id<br/>ORDER BY SUM(total_cost) DESC"]
+        TopModels["Top 5 models by cost:<br/>GROUP BY model_id<br/>ORDER BY SUM(total_cost) DESC"]
         CostTrend["Daily cost trend:<br/>GROUP BY DATE(created_at)"]
     end
     
@@ -174,7 +169,7 @@ graph LR
     Query --> CostTrend
 ```
 
-Sources: `[orchestrator/api/llm_analytics.py:194-261]()`
+Sources: [orchestrator/api/llm_analytics.py:194-261]()
 
 ---
 
@@ -183,24 +178,23 @@ Sources: `[orchestrator/api/llm_analytics.py:194-261]()`
 The platform includes deep integration with OpenRouter for credit management and activity synchronization.
 
 ### Activity Sync Pipeline
-The `OpenRouterAnalyticsService` fetches usage data from OpenRouter's `/activity` endpoint and upserts it into the local `LLMUsage` table. This is deduplicated by checking for existing rows with the same `workspace_id`, `model_id`, and `created_at` timestamp.
+The `OpenRouterAnalyticsService` fetches usage data from OpenRouter's `/activity` endpoint and upserts it into the local `LLMUsage` table. This is deduplicated by `workspace_id`, `model_id`, and `created_at` [orchestrator/core/llm/openrouter_analytics.py:97-106]().
 
 Title: OpenRouter Sync Architecture
 ```mermaid
 graph TB
-    subgraph "OpenRouter API"
+    subgraph "OpenRouter Cloud"
         OR_Activity["/api/v1/activity"]
         OR_Credits["/api/v1/credits"]
-        OR_Key["/api/v1/key"]
     end
 
-    subgraph "Backend Service - [orchestrator/core/llm/openrouter_analytics.py]"
+    subgraph "Orchestrator Backend - [openrouter_analytics.py]"
         OR_Service["OpenRouterAnalyticsService"]
-        SyncTask["sync_activity(api_key, workspace_id)"]
-        DB_Upsert["_upsert_activity_rows(rows, workspace_id)"]
+        SyncTask["sync_activity()"]
+        DB_Upsert["_upsert_activity_rows()"]
     end
 
-    subgraph "Database Models - [orchestrator/core/models/core.py]"
+    subgraph "Data Store - [core/models/core.py]"
         UsageTable[("LLMUsage Table")]
     end
 
@@ -209,33 +203,44 @@ graph TB
     SyncTask --> DB_Upsert
     DB_Upsert --> UsageTable
     OR_Credits --> OR_Service
-    OR_Key --> OR_Service
 ```
 
-Sources: `[orchestrator/core/llm/openrouter_analytics.py:27-148]()`, `[orchestrator/core/llm/openrouter_analytics.py:154-180]()`, `[orchestrator/core/llm/openrouter_analytics.py:185-191]()`
+Sources: [orchestrator/core/llm/openrouter_analytics.py:27-148](), [orchestrator/api/llm_analytics.py:668-689]()
 
 ---
 
-## Frontend Implementation
+## Plan Usage and Projections
 
-### Agent-Specific Cost Breakdown
-The `AnalyticsAgents` component provides an expanded panel for each agent, displaying total requests, average tokens per request, total tokens, and total cost. This data is derived from the `useAgentAnalytics` hook, which merges data from `apiClient.getAgents()` and `apiClient.getSystemAgentStatistics()`.
+The system monitors workspace resource consumption against defined plan limits.
 
-Sources: `[frontend/components/analytics/analytics-agents.tsx:103-133]()`, `[frontend/hooks/use-unified-analytics.ts:120-143]()`
+- **Plan Usage Tracking**: The `AnalyticsPlanUsage` component visualizes consumption for agents, storage, and API calls [frontend/components/analytics/analytics-plan-usage.tsx:73-112]().
+- **Projections**: The `useCostProjections` hook retrieves forecasted spending based on current consumption rates [frontend/hooks/use-unified-analytics.ts:40-40]().
+- **Model Comparison**: Allows users to compare costs and performance across multiple model IDs over a specific period [frontend/hooks/use-unified-analytics.ts:39-39]().
 
-### Admin Analytics
-For platform administrators, the `AnalyticsAdmin` component provides a cross-workspace view of total platform cost and plan distribution. It utilizes `useAdminDashboard` and `useAdminCostAnalytics` to fetch global data and supports sorting by cost, requests, or agent count.
+Sources: [frontend/components/analytics/analytics-plan-usage.tsx:9-116](), [frontend/hooks/use-unified-analytics.ts:38-41]()
 
-Sources: `[frontend/components/analytics/analytics-admin.tsx:164-205]()`, `[frontend/hooks/use-unified-analytics.ts:42-42]()`, `[frontend/components/analytics/analytics-admin.tsx:173-178]()`
+---
 
-### Recommendations
-The `AnalyticsRecommendations` component displays AI-driven insights such as "cost_optimization" or "quota_warning" based on usage patterns. These recommendations are fetched via the `useRecommendations` hook and can be dismissed by the user.
+## Admin Analytics
 
-Sources: `[frontend/components/analytics/analytics-recommendations.tsx:18-37]()`, `[frontend/components/analytics/analytics-recommendations.tsx:74-123]()`, `[orchestrator/api/llm_analytics.py:61-67]()`
+Super admins have access to a platform-wide dashboard via `AnalyticsAdmin`, providing visibility into cross-workspace costs and plan distribution.
 
-### AI Chart Generation (Pandas Chart)
-The `AnalyticsPandasChart` component allows for dynamic visualization of analytics data. It uses a query-based system (resolved via `useChartPresets`) and a mutation hook `useAnalyticsChart` to generate chart images (base64) and natural language summaries from the backend.
+- **Cross-Workspace Stats**: Aggregates costs, requests, and agent counts across all workspaces [frontend/components/analytics/analytics-admin.tsx:183-194]().
+- **Plan Distribution**: Visualizes the breakdown of workspaces across `starter`, `pilot`, `pro`, and `enterprise` tiers [frontend/components/analytics/analytics-admin.tsx:199-206]().
+- **Top Spenders**: A sortable table identifying the highest-cost workspaces [frontend/components/analytics/analytics-admin.tsx:173-178]().
 
-Sources: `[frontend/components/analytics/analytics-pandas-chart.tsx:15-39]()`, `[frontend/components/analytics/analytics-pandas-chart.tsx:121-140]()`
+Sources: [frontend/components/analytics/analytics-admin.tsx:164-210](), [frontend/hooks/use-unified-analytics.ts:42-42]()
+
+---
+
+## Recommendations and Optimization
+
+The `AnalyticsRecommendations` system analyzes usage patterns to suggest cost-saving measures.
+
+- **Recommendation Types**: Includes `cost`, `performance`, `document`, and `quota` optimizations [frontend/components/analytics/analytics-recommendations.tsx:21-21]().
+- **Impact Assessment**: Quantifies the potential benefit of an action (e.g., "Switch Agent X to a cheaper LLM") [frontend/components/analytics/analytics-recommendations.tsx:24-24]().
+- **Potential Savings**: The backend `Recommendation` model specifically tracks `potential_savings` to prioritize optimizations [orchestrator/api/llm_analytics.py:65-65]().
+
+Sources: [orchestrator/api/llm_analytics.py:61-68](), [frontend/components/analytics/analytics-recommendations.tsx:19-169]()
 
 ---

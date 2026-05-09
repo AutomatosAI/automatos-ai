@@ -5,46 +5,31 @@
 
 The following files were used as context for generating this wiki page:
 
-- [docs/PRDS/55-AUTONOMOUS-ASSISTANT-PLATFORM.md](docs/PRDS/55-AUTONOMOUS-ASSISTANT-PLATFORM.md)
-- [docs/reviews/COMPOSIO-TOOL-REGRESSION-REVIEW.md](docs/reviews/COMPOSIO-TOOL-REGRESSION-REVIEW.md)
-- [frontend/components/auth/sign-up-form.tsx](frontend/components/auth/sign-up-form.tsx)
-- [orchestrator/alembic/versions/20260215_add_heartbeat_and_channels.py](orchestrator/alembic/versions/20260215_add_heartbeat_and_channels.py)
-- [orchestrator/api/channels.py](orchestrator/api/channels.py)
+- [docs/PRDS/137-AUTO-CHATBOT-RECOVERY.md](docs/PRDS/137-AUTO-CHATBOT-RECOVERY.md)
+- [frontend/app/api/chat/route.ts](frontend/app/api/chat/route.ts)
+- [frontend/components/chatbot/chat.tsx](frontend/components/chatbot/chat.tsx)
+- [frontend/components/chatbot/mission-suggestion-card.tsx](frontend/components/chatbot/mission-suggestion-card.tsx)
+- [frontend/lib/chat/hooks.ts](frontend/lib/chat/hooks.ts)
+- [frontend/stores/mission-store.ts](frontend/stores/mission-store.ts)
 - [orchestrator/api/chat.py](orchestrator/api/chat.py)
-- [orchestrator/api/chat_voice.py](orchestrator/api/chat_voice.py)
-- [orchestrator/api/heartbeat.py](orchestrator/api/heartbeat.py)
-- [orchestrator/channels/base.py](orchestrator/channels/base.py)
-- [orchestrator/channels/discord_adapter.py](orchestrator/channels/discord_adapter.py)
-- [orchestrator/channels/google_chat_adapter.py](orchestrator/channels/google_chat_adapter.py)
-- [orchestrator/channels/line_adapter.py](orchestrator/channels/line_adapter.py)
-- [orchestrator/channels/manager.py](orchestrator/channels/manager.py)
-- [orchestrator/channels/slack_adapter.py](orchestrator/channels/slack_adapter.py)
-- [orchestrator/consumers/chatbot/auto.py](orchestrator/consumers/chatbot/auto.py)
-- [orchestrator/consumers/chatbot/intent_classifier.py](orchestrator/consumers/chatbot/intent_classifier.py)
-- [orchestrator/consumers/chatbot/personality.py](orchestrator/consumers/chatbot/personality.py)
+- [orchestrator/api/recipe_executor.py](orchestrator/api/recipe_executor.py)
+- [orchestrator/consumers/chatbot/integration.py](orchestrator/consumers/chatbot/integration.py)
+- [orchestrator/consumers/chatbot/prompt_analyzer.py](orchestrator/consumers/chatbot/prompt_analyzer.py)
 - [orchestrator/consumers/chatbot/service.py](orchestrator/consumers/chatbot/service.py)
 - [orchestrator/consumers/chatbot/smart_memory.py](orchestrator/consumers/chatbot/smart_memory.py)
-- [orchestrator/consumers/chatbot/smart_tool_router.py](orchestrator/consumers/chatbot/smart_tool_router.py)
-- [orchestrator/core/llm/manager.py](orchestrator/core/llm/manager.py)
-- [orchestrator/core/models/channels.py](orchestrator/core/models/channels.py)
-- [orchestrator/core/routing/engine.py](orchestrator/core/routing/engine.py)
-- [orchestrator/core/services/plugin_security_scanner.py](orchestrator/core/services/plugin_security_scanner.py)
-- [orchestrator/modules/agents/__init__.py](orchestrator/modules/agents/__init__.py)
-- [orchestrator/modules/agents/factory/__init__.py](orchestrator/modules/agents/factory/__init__.py)
+- [orchestrator/consumers/chatbot/smart_orchestrator.py](orchestrator/consumers/chatbot/smart_orchestrator.py)
+- [orchestrator/modules/agents/factory/agent_factory.py](orchestrator/modules/agents/factory/agent_factory.py)
+- [orchestrator/modules/agents/queries.py](orchestrator/modules/agents/queries.py)
+- [orchestrator/modules/context/sections/identity.py](orchestrator/modules/context/sections/identity.py)
+- [orchestrator/modules/context/sections/skills.py](orchestrator/modules/context/sections/skills.py)
+- [orchestrator/modules/context/sections/task_context.py](orchestrator/modules/context/sections/task_context.py)
 - [orchestrator/modules/memory/integrations/mem0_client.py](orchestrator/modules/memory/integrations/mem0_client.py)
-- [orchestrator/modules/orchestrator/service.py](orchestrator/modules/orchestrator/service.py)
-- [orchestrator/modules/tools/discovery/actions_analytics_enhanced.py](orchestrator/modules/tools/discovery/actions_analytics_enhanced.py)
-- [orchestrator/modules/tools/discovery/handlers_analytics_enhanced.py](orchestrator/modules/tools/discovery/handlers_analytics_enhanced.py)
-- [orchestrator/modules/tools/discovery/handlers_search.py](orchestrator/modules/tools/discovery/handlers_search.py)
-- [orchestrator/modules/tools/discovery/platform_actions.py](orchestrator/modules/tools/discovery/platform_actions.py)
-- [orchestrator/modules/tools/discovery/platform_executor.py](orchestrator/modules/tools/discovery/platform_executor.py)
-- [orchestrator/modules/tools/tool_router.py](orchestrator/modules/tools/tool_router.py)
 
 </details>
 
 
 
-This page documents how the chat interface integrates with the 5-layer memory system during message processing. It covers memory retrieval (pre-LLM context assembly), storage (post-response persistence), and the flow of data between `StreamingChatService`, `ContextService`, and `UnifiedMemoryService`.
+This page documents how the chat interface integrates with the 5-layer memory system during message processing. It covers memory retrieval (pre-LLM context assembly), storage (post-response persistence), and the flow of data between `SmartChatOrchestrator`, `ContextService`, and `UnifiedMemoryService`.
 
 For the broader memory architecture and L0-L4 layer definitions, see **3. Memory System**. For context assembly mechanics and token budgets, see **4. Context Service**.
 
@@ -54,120 +39,158 @@ For the broader memory architecture and L0-L4 layer definitions, see **3. Memory
 
 Memory integration in the chat interface operates in two phases:
 
-1.  **Retrieval Phase** — Before the LLM call, relevant memories are fetched and injected into the system prompt via `MemorySection`. The `AutoBrain` complexity assessor determines if memory is needed based on the task type (e.g., `ATOM` tasks skip memory, while `CELL` and above require it) [orchestrator/consumers/chatbot/auto.py:7-22]().
-2.  **Storage Phase** — After the LLM response completes, the user-assistant exchange is stored across multiple layers: L1 Redis session, L2 Postgres short-term, and L3 Mem0 long-term. Platform actions like `platform_store_memory` allow agents to explicitly persist facts during execution [orchestrator/modules/tools/discovery/platform_executor.py:53-54]().
+1.  **Retrieval Phase** — Before the LLM call, relevant memories are fetched and injected into the system prompt via `MemorySection` or `SmartMemoryManager`. The `SmartChatOrchestrator` analyzes the query and complexity to determine if memory is required [orchestrator/consumers/chatbot/smart_orchestrator.py:169-183]().
+2.  **Storage Phase** — After the LLM response completes, the user-assistant exchange is stored across multiple layers: L1 Redis session, L2 Postgres short-term, and L3 Mem0 long-term. `SmartMemoryManager` uses a classification logic to determine if a memory is `global` (user identity) or `agent` specific (tool usage patterns) [orchestrator/consumers/chatbot/smart_memory.py:92-106]().
 
-**Sources:** [orchestrator/consumers/chatbot/service.py:1-13](), [orchestrator/consumers/chatbot/auto.py:1-22](), [orchestrator/modules/memory/integrations/mem0_client.py:1-11]()
+**Sources:** [orchestrator/consumers/chatbot/service.py:1-13](), [orchestrator/consumers/chatbot/smart_orchestrator.py:113-124](), [orchestrator/consumers/chatbot/smart_memory.py:50-60]()
 
 ---
 
 ## Memory Retrieval Architecture
 
-### Complexity-Aware Retrieval
+### Dual-Path Retrieval Strategy
 
-The chat system uses `AutoBrain` to assess message complexity. This assessment includes a `needs_memory` flag which informs the `StreamingChatService` whether to invoke the memory retrieval pipeline [orchestrator/consumers/chatbot/auto.py:69-72]().
+The chat system uses a prioritized retrieval path through the `ContextService`. The `SmartChatOrchestrator` coordinates this by checking `intent_result.requires_memory` and potentially overriding it based on the `ComplexityAssessment` from AutoBrain [orchestrator/consumers/chatbot/smart_orchestrator.py:169-183]().
 
 **Diagram: Memory Retrieval Data Flow**
 ```mermaid
 graph TB
-    ChatAPI["api/chat.py"]
-    StreamingChatService["StreamingChatService"]
-    AutoBrain["AutoBrain.assess()"]
+    ChatRequest["Chat Request"]
+    PrepareRequest["SmartChatOrchestrator.prepare_request()"]
+    MemoryDecision{"Should fetch<br/>memory?"}
     
     ContextService["ContextService.build_context()"]
     MemorySection["MemorySection.render()"]
     
-    UnifiedMemoryService["UnifiedMemoryService"]
-    Mem0Client["Mem0Client.search()"]
-    PostgresL2["Postgres (L2 Short-term)"]
+    TryContextRouter["Try Context Router"]
+    RouterSuccess{"Router<br/>available?"}
     
-    ChatAPI --> StreamingChatService
-    StreamingChatService --> AutoBrain
-    AutoBrain -->|ComplexityAssessment| StreamingChatService
+    ContextRouter["ContextRouter.retrieve_context()"]
+    AnalyzeQuery["analyze_query()<br/>→ ContextSignals"]
+    FetchLayers["Fetch L1/L2/L3<br/>based on signals"]
+    ContextBundle["ContextBundle"]
     
-    StreamingChatService -->|needs_memory=True| ContextService
+    SmartMemoryFallback["SmartMemoryManager<br/>retrieve_memories()"]
+    TwoTierSearch["Two-tier search:<br/>global + agent-specific"]
+    
+    ChatRequest --> PrepareRequest
+    PrepareRequest --> MemoryDecision
+    MemoryDecision -->|Yes| ContextService
+    MemoryDecision -->|No, skip_memory=True| SkipMemory["Empty memory context"]
+    
     ContextService --> MemorySection
-    MemorySection --> UnifiedMemoryService
+    MemorySection --> TryContextRouter
+    TryContextRouter --> RouterSuccess
     
-    UnifiedMemoryService --> Mem0Client
-    UnifiedMemoryService --> PostgresL2
+    RouterSuccess -->|Yes| ContextRouter
+    ContextRouter --> AnalyzeQuery
+    AnalyzeQuery --> FetchLayers
+    FetchLayers --> ContextBundle
     
-    Mem0Client -->|Vector Results| MemorySection
-    PostgresL2 -->|Recent History| MemorySection
+    RouterSuccess -->|No/Error| SmartMemoryFallback
+    SmartMemoryFallback --> TwoTierSearch
     
-    MemorySection -->|Formatted Context| FinalPrompt["Final System Prompt"]
+    ContextBundle --> FormatForPrompt["Format for system prompt"]
+    TwoTierSearch --> FormatForPrompt
+    FormatForPrompt --> InjectToLLM["Inject to LLM context"]
 ```
 
-**Sources:** [orchestrator/api/chat.py:18-20](), [orchestrator/consumers/chatbot/auto.py:59-84](), [orchestrator/modules/memory/integrations/mem0_client.py:143-154]()
+**Sources:** [orchestrator/consumers/chatbot/smart_orchestrator.py:169-194](), [orchestrator/consumers/chatbot/smart_memory.py:174-181]()
 
 ---
 
 ## ContextService Integration
 
-When `ContextService` is invoked, memory retrieval is encapsulated in the `MemorySection` class. It manages the token budget and formatting for the LLM.
+When `ContextService` is invoked (the unified path), memory retrieval is encapsulated in the `MemorySection` class.
 
 ### MemorySection Render Flow
 
-The `MemorySection` handles the complexity of coordinating with the `UnifiedMemoryService`.
+The `MemorySection` handles the complexity of checking for `skip_memory` flags (often set by `ComplexityAssessment` in **9.2**) and coordinating with the `UnifiedMemoryService`.
 
 **Key Behaviors:**
-*   **Intent-Based Filtering**: The `SmartToolRouter` can influence memory usage by mapping intents like `MEMORY_RECALL` to specific memory tool categories [orchestrator/consumers/chatbot/smart_tool_router.py:121]().
-*   **Platform Integration**: Agents can search or browse memories using `platform_search_memory` and `platform_browse_memories` handlers, which interface directly with the memory storage layer [orchestrator/modules/tools/discovery/platform_executor.py:65-66]().
-*   **Stashing**: Stashed memory context is often used to provide transparency to the user in the chat UI regarding what "facts" the AI is currently recalling.
+*   **Skip Logic**: If `skip_memory=True` is passed to the context builder, the section returns an empty string immediately.
+*   **Token Budget**: Memory is assigned a specific priority (P6). If the total prompt exceeds the token limit, `TokenBudgetManager` may trim this section before higher priority ones like `Identity` (P1) or `Tools` (P3) [orchestrator/modules/context/sections/identity.py:68-69]().
+*   **Stashing**: The raw memory text is stashed in the context's `kwargs` as `_memory_context` so it can be sent to the frontend via SSE data streams for transparency.
 
-**Sources:** [orchestrator/consumers/chatbot/smart_tool_router.py:111-125](), [orchestrator/modules/tools/discovery/platform_executor.py:198-200]()
+**Sources:** [orchestrator/consumers/chatbot/smart_orchestrator.py:191-195](), [orchestrator/modules/context/sections/identity.py:55-69]()
+
+---
+
+## Two-Tier Memory Retrieval
+
+`SmartMemoryManager` implements a parallel fetching strategy to separate general user facts from agent-specific context.
+
+**Diagram: Two-Tier Search Implementation**
+```mermaid
+graph TB
+    Retrieve["SmartMemoryManager.retrieve_memories()"]
+    WidgetCheck{"widget_mode?"}
+    
+    AgentOnly["Agent-only retrieval:<br/>mem:ws:agent:ID"]
+    
+    TwoTier["Two-tier parallel fetch"]
+    GlobalTask["search_long_term(agent_id=None)<br/>→ mem:ws namespace"]
+    AgentTask["search_long_term(agent_id=42)<br/>→ mem:ws:agent:42"]
+    
+    Gather["asyncio.gather(global_task, agent_task)"]
+    Merge["Merge: global first, agent second"]
+    
+    Format["_format_memories_for_llm()"]
+    GlobalSection["## About this user:<br/>global facts"]
+    AgentSection["## With this agent specifically:<br/>agent-specific patterns"]
+    
+    Retrieve --> WidgetCheck
+    WidgetCheck -->|True| AgentOnly
+    WidgetCheck -->|False| TwoTier
+    
+    TwoTier --> GlobalTask
+    TwoTier --> AgentTask
+    GlobalTask --> Gather
+    AgentTask --> Gather
+    
+    Gather --> Merge
+    AgentOnly --> Format
+    Merge --> Format
+    
+    Format --> GlobalSection
+    Format --> AgentSection
+```
+
+**Widget Mode Isolation**: When `widget_mode` is active, the system strictly isolates memory to the agent-specific namespace to prevent leaking sensitive workspace-wide information into public-facing widgets [orchestrator/consumers/chatbot/smart_memory.py:180-181]().
+
+**Sources:** [orchestrator/consumers/chatbot/smart_memory.py:174-200](), [orchestrator/consumers/chatbot/smart_orchestrator.py:107-108]()
 
 ---
 
 ## Memory Storage Flow
 
-After a successful LLM response, the system initiates a multi-layered persistence pipeline. This is handled both automatically by the chat orchestrator and explicitly via platform tools.
+After a successful LLM response, the system initiates a multi-layered persistence pipeline.
 
 ### Storage Pipeline Implementation
 
-1.  **L3 Long-Term (Mem0)**: The `Mem0Client` performs fact extraction and vector storage. It accepts a list of messages, converts them to a text string, and sends them to the Mem0 server [orchestrator/modules/memory/integrations/mem0_client.py:143-165]().
-2.  **L2 Short-Term (Postgres)**: Messages are persisted to the database via `ChatService.save_message` [orchestrator/consumers/chatbot/service.py:184-188]().
-3.  **Explicit Storage**: Agents can use the `platform_store_memory` tool to save specific information. This routes through `PlatformActionExecutor` to the `store_memory` handler [orchestrator/modules/tools/discovery/platform_executor.py:53-54]().
+1.  **L3 Long-Term (Mem0)**: The `Mem0Client` performs fact extraction and vector storage. It accepts a list of messages and a `user_id` [orchestrator/modules/memory/integrations/mem0_client.py:176-187]().
+2.  **L2 Short-Term (Postgres)**: Exchanges are persisted to the database via the `ChatService` or the orchestrator's session logic.
+3.  **L1 Working (Redis)**: `UnifiedMemoryService` updates the current session state [orchestrator/consumers/chatbot/smart_orchestrator.py:118-119]().
+4.  **Classification Logic**: `SmartMemoryManager._classify_memory_tier` determines if a message contains `personal_keywords` (Global) or `tool_keywords` (Agent) [orchestrator/consumers/chatbot/smart_memory.py:92-106]().
 
-**Diagram: Memory Storage Implementation**
-```mermaid
-graph LR
-    subgraph "Agent Tools"
-        StoreTool["platform_store_memory"]
-    end
-    
-    subgraph "Chat Service"
-        SaveMsg["ChatService.save_message()"]
-    end
-    
-    subgraph "Memory Handlers"
-        Handler["handlers_workspace.store_memory()"]
-    end
-    
-    subgraph "Storage Layers"
-        Postgres["Postgres (Messages)"]
-        Mem0["Mem0 (L3 Long-term)"]
-    end
-    
-    SaveMsg --> Postgres
-    StoreTool --> Handler
-    Handler --> Mem0
-    SaveMsg -.->|Async Extraction| Mem0
-```
+**Storage Tier Classification Rules:**
+*   **Agent Tier**: Keywords like "slack", "github", "jira", "database", or "repository" [orchestrator/consumers/chatbot/smart_memory.py:113-126]().
+*   **Global Tier**: Personal keywords like "my name", "i am", "i work at", "i live" [orchestrator/consumers/chatbot/smart_memory.py:129-135]().
+*   **Both**: Preference keywords like "prefer", "favorite", "like to" trigger storage in both tiers [orchestrator/consumers/chatbot/smart_memory.py:138-141]().
 
-**Sources:** [orchestrator/modules/memory/integrations/mem0_client.py:143-176](), [orchestrator/consumers/chatbot/service.py:161-186](), [orchestrator/modules/tools/discovery/platform_executor.py:193-194]()
+**Sources:** [orchestrator/modules/memory/integrations/mem0_client.py:176-200](), [orchestrator/consumers/chatbot/smart_memory.py:92-168](), [orchestrator/consumers/chatbot/smart_orchestrator.py:113-124]()
 
 ---
 
 ## Error Handling & Circuit Breaking
 
-Memory operations, particularly those involving the external `Mem0` service, are protected by a **Circuit Breaker** to prevent latency in the memory tier from degrading the overall chat experience [orchestrator/modules/memory/integrations/mem0_client.py:27-63]().
+Memory operations are designed to be resilient. The `Mem0Client` includes a **Circuit Breaker** to prevent external API latency from blocking chat threads [orchestrator/modules/memory/integrations/mem0_client.py:25-60]().
 
-*   **Failure Threshold**: 5 consecutive failures will "open" the circuit [orchestrator/modules/memory/integrations/mem0_client.py:21]().
-*   **Cooldown**: The circuit stays open for 60 seconds before allowing a "probe" request [orchestrator/modules/memory/integrations/mem0_client.py:22]().
-*   **Retries**: The client implements a single retry with exponential backoff (1.5s) for connection errors and timeouts [orchestrator/modules/memory/integrations/mem0_client.py:24-127]().
-*   **Timeout**: Requests to Mem0 are capped at 15 seconds [orchestrator/modules/memory/integrations/mem0_client.py:23]().
+*   **Failure Threshold**: 3 consecutive failures (configurable via `MEM0_CIRCUIT_THRESHOLD`) [orchestrator/modules/memory/integrations/mem0_client.py:29-33]().
+*   **Cooldown**: 300 seconds before retrying [orchestrator/modules/memory/integrations/mem0_client.py:34]().
+*   **Retries**: One retry with exponential backoff (1.5s) [orchestrator/modules/memory/integrations/mem0_client.py:22, 143-148]().
+*   **Timeout**: 3.0 seconds default to ensure Mem0 is enrichment, not a critical path blocker [orchestrator/modules/memory/integrations/mem0_client.py:86]().
 
-**Sources:** [orchestrator/modules/memory/integrations/mem0_client.py:20-63](), [orchestrator/modules/memory/integrations/mem0_client.py:111-140]()
+**Sources:** [orchestrator/modules/memory/integrations/mem0_client.py:20-60](), [orchestrator/modules/memory/integrations/mem0_client.py:107-140]()
 
 ---

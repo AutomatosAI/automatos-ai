@@ -5,24 +5,16 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/app/tools/page.tsx](frontend/app/tools/page.tsx)
-- [frontend/components/layout/main-layout.tsx](frontend/components/layout/main-layout.tsx)
-- [frontend/components/layout/mobile-sidebar.tsx](frontend/components/layout/mobile-sidebar.tsx)
-- [frontend/components/layout/sidebar.tsx](frontend/components/layout/sidebar.tsx)
-- [frontend/components/marketplace/marketplace-app-details-modal.tsx](frontend/components/marketplace/marketplace-app-details-modal.tsx)
-- [frontend/components/tools/my-tools-dashboard.tsx](frontend/components/tools/my-tools-dashboard.tsx)
-- [infrastructure/.env.example](infrastructure/.env.example)
-- [infrastructure/docker-compose.core.yml](infrastructure/docker-compose.core.yml)
-- [infrastructure/docker-compose.data.yml](infrastructure/docker-compose.data.yml)
-- [infrastructure/docker-compose.landing.yml](infrastructure/docker-compose.landing.yml)
-- [infrastructure/docker-compose.memory.yml](infrastructure/docker-compose.memory.yml)
-- [infrastructure/docker-compose.monitoring.yml](infrastructure/docker-compose.monitoring.yml)
-- [infrastructure/docker-compose.voice.yml](infrastructure/docker-compose.voice.yml)
-- [infrastructure/docker-compose.yml](infrastructure/docker-compose.yml)
-- [infrastructure/railway-manifest.json](infrastructure/railway-manifest.json)
-- [orchestrator/alembic/versions/board_blocked_sla.py](orchestrator/alembic/versions/board_blocked_sla.py)
-- [orchestrator/core/services/analytics_engine.py](orchestrator/core/services/analytics_engine.py)
-- [orchestrator/core/services/monitoring_service.py](orchestrator/core/services/monitoring_service.py)
+- [.env.example](.env.example)
+- [frontend/components/agents/model-selector.tsx](frontend/components/agents/model-selector.tsx)
+- [frontend/hooks/use-model-api.ts](frontend/hooks/use-model-api.ts)
+- [orchestrator/api/agent_endpoints.py](orchestrator/api/agent_endpoints.py)
+- [orchestrator/api/analytics.py](orchestrator/api/analytics.py)
+- [orchestrator/api/analytics_real.py](orchestrator/api/analytics_real.py)
+- [orchestrator/api/execution_history.py](orchestrator/api/execution_history.py)
+- [orchestrator/api/workflow_history.py](orchestrator/api/workflow_history.py)
+- [orchestrator/core/database/boot_lock.py](orchestrator/core/database/boot_lock.py)
+- [railway.json](railway.json)
 
 </details>
 
@@ -30,144 +22,140 @@ The following files were used as context for generating this wiki page:
 
 ## Purpose and Scope
 
-System Health Monitoring in Automatos AI provides real-time visibility into the operational status of the platform's distributed architecture. This subsystem manages component status tracking, hardware metrics aggregation, and provides the data foundation for the Prometheus/Grafana/Loki observability stack used in production. [orchestrator/core/services/analytics_engine.py:2-4]()
-
-The monitoring infrastructure is integrated into the `AnalyticsEngine`, which calculates metrics for the frontend dashboard and ensures multi-tenant isolation through workspace-scoped queries. [orchestrator/core/services/analytics_engine.py:25-28]()
+System Health Monitoring in Automatos AI provides real-time visibility into the operational status of all platform components, including agents, workflows, and infrastructure. The system tracks metrics ranging from hardware utilization to high-level agent success rates and LLM token costs. Monitoring is integrated into the core API via the `analytics` and `system` routers, supporting both automated dashboards and agent-initiated introspection. [orchestrator/api/analytics_real.py:32](), [orchestrator/api/analytics.py:25]()
 
 ---
 
-## Production Observability Stack
+## Health Monitoring Architecture
 
-In production environments, Automatos AI employs a multi-layered observability stack defined in the infrastructure topology. [infrastructure/railway-manifest.json:30-34]()
+The monitoring architecture bridges internal state tracking with external observability providers. It is designed to provide visibility into three distinct layers:
+1. **Component Health**: Status of PostgreSQL, Redis, and background workers. [orchestrator/core/database/boot_lock.py:11-21]()
+2. **System Metrics**: Real-time hardware stats (CPU, Memory) and system load trends via `psutil`. [orchestrator/api/analytics_real.py:24-25](), [orchestrator/api/analytics_real.py:38]()
+3. **Execution Performance**: Tracking success rates, completion times, and costs for both legacy Workflows and modern Missions. [orchestrator/api/analytics_real.py:53-75](), [orchestrator/api/analytics.py:77-123]()
 
-### Component Topology
+### Monitoring Data Flow
 
-| Service | Role | Source/Image |
-| :--- | :--- | :--- |
-| **Prometheus** | Time-series metrics collection and storage | `prom/prometheus` [infrastructure/docker-compose.monitoring.yml:22-26]() |
-| **Grafana** | Visualization, dashboards, and alerting UI | `grafana/grafana` [infrastructure/docker-compose.monitoring.yml:48-52]() |
-| **Loki** | Log aggregation and indexing | `grafana/loki` [infrastructure/docker-compose.monitoring.yml:81-85]() |
-| **Log-Relay** | Bridge for Railway log drains to Loki | Custom Service [infrastructure/docker-compose.monitoring.yml:106-110]() |
-| **Exporters** | Postgres and Redis metric translation | `prometheuscommunity/postgres-exporter` [infrastructure/docker-compose.monitoring.yml:156-158]() |
-
-### Data Flow: Natural Language to Code Entities
-
-The following diagram bridges the user's request for "System Health" to the underlying code entities and infrastructure services.
+The diagram below illustrates how health and performance data are aggregated from the database and system resources to serve the frontend and monitoring handlers.
 
 ```mermaid
-graph TD
+graph TB
+    subgraph "Data Sources"
+        DB_Metrics["SystemMetrics / LLMUsage Table"]
+        OS_Stats["psutil (CPU/RAM)"]
+        Exec_Logs["WorkflowExecution / OrchestrationRun"]
+    end
+
+    subgraph "Aggregation Layer [orchestrator/api/analytics_real.py]"
+        SuccessCalc["get_agent_success_rate [line 53]"]
+        TimeCalc["get_avg_task_completion_time [line 112]"]
+        ResourceCalc["get_dashboard_metrics"]
+    end
+    
+    subgraph "Consumers"
+        DashboardUI["Next.js Analytics Dashboard"]
+        AgentIntrospect["PlatformActionExecutor"]
+    end
+
+    DB_Metrics --> ResourceCalc
+    OS_Stats --> ResourceCalc
+    Exec_Logs --> SuccessCalc
+    Exec_Logs --> TimeCalc
+    
+    ResourceCalc --> DashboardUI
+    SuccessCalc --> DashboardUI
+    TimeCalc --> DashboardUI
+    
+    SuccessCalc --> AgentIntrospect
+```
+
+**Sources:** [orchestrator/api/analytics_real.py:53-160](), [orchestrator/api/analytics.py:29-154](), [orchestrator/api/analytics_real.py:24-42]()
+
+---
+
+## Key Metrics and Performance Tracking
+
+### Execution Success Rates
+The system calculates success rates by performing a `UNION` query across legacy `WorkflowExecution` and modern `OrchestrationRun` (Missions) tables. [orchestrator/api/analytics_real.py:55-75](). It compares current performance against a 7-day trend to detect regressions. [orchestrator/api/analytics_real.py:77-97]()
+
+### LLM Usage and Cost Monitoring
+The platform tracks token consumption and financial costs per workspace. This data is aggregated from:
+* **Workflow Metadata**: Analytics stored within the `metadata` JSONB field of `WorkflowExecution`. [orchestrator/api/analytics.py:105-109]()
+* **Mission Usage**: The `tokens_used` field in the `OrchestrationRun` model. [orchestrator/api/analytics.py:112-117]()
+* **LLMUsage Table**: Centralized tracking for all LLM provider calls. [orchestrator/api/analytics_real.py:20]()
+
+### Resource Utilization
+Hardware monitoring is performed via `psutil` to track system load trends and resource utilization efficiency. [orchestrator/api/analytics_real.py:38-41](). This data is exposed through the `DashboardMetrics` Pydantic model. [orchestrator/api/analytics_real.py:35-41]()
+
+**Sources:** [orchestrator/api/analytics_real.py:53-110](), [orchestrator/api/analytics.py:77-123](), [orchestrator/api/analytics_real.py:35-41]()
+
+---
+
+## Health Check and Monitoring Endpoints
+
+The API provides several endpoints for the frontend and external tools to verify system integrity.
+
+| Endpoint | Function | Data Source |
+|----------|----------|-------------|
+| `/api/analytics/dashboard/success-rate` | Combined success % for workflows and missions. | `WorkflowExecution`, `OrchestrationRun` |
+| `/api/analytics/dashboard/task-completion-time` | Average duration of completed tasks. | `extract('epoch', completed_at - started_at)` |
+| `/api/analytics/dashboard/summary` | High-level overview of active agents, workflows, and costs. | Multi-table aggregation |
+| `/api/execution-history/execution/{id}/stages` | 9-stage pipeline health for a specific run. | `WorkflowExecution.input_data` |
+
+**Sources:** [orchestrator/api/analytics_real.py:53-112](), [orchestrator/api/analytics.py:29-35](), [orchestrator/api/execution_history.py:98-101]()
+
+---
+
+## Infrastructure Monitoring (Railway & Docker)
+
+The system is designed for deployment on Railway, utilizing its native monitoring stack. [railway.json:1-12]().
+
+### Service Health and Lifecycle
+* **Bootstrap Guard**: To prevent race conditions during multi-worker startup, the system uses `pg_try_advisory_lock` (ID `47111`) to ensure only one worker runs database seeds. [orchestrator/core/database/boot_lock.py:21-40]()
+* **Restart Policy**: The `railway.json` configuration defines an `ON_FAILURE` restart policy with a maximum of 10 retries to ensure service availability. [railway.json:8-11]()
+
+### Natural Language to Code Entity Mapping
+
+This diagram maps how user-facing analytics terms translate to specific backend models and functions.
+
+```mermaid
+graph LR
     subgraph "Natural Language Space"
-        UserReq["'Show me system health'"]
-        AdminReq["'Are the workers overloaded?'"]
+        UserReq1["'What is my agent success rate?'"]
+        UserReq2["'How much did I spend today?'"]
+        UserReq3["'Is the database locked?'"]
     end
 
-    subgraph "Code Entity Space [orchestrator/core/services/]"
-        Analytics["AnalyticsEngine.get_dashboard_overview()"]
-        HealthCheck["AnalyticsEngine._get_system_health()"]
-        DBCheck["AnalyticsEngine._check_database_health()"]
-        RedisCheck["AnalyticsEngine._check_redis_health()"]
+    subgraph "Code Entity Space: Models & API"
+        SuccessFunc["get_agent_success_rate [analytics_real.py:53]"]
+        UsageTable["LLMUsage [core/models/core.py]"]
+        LockLogic["boot_leader_lock [boot_lock.py:25]"]
     end
 
-    subgraph "Infrastructure Space [infrastructure/]"
-        PSUtil["psutil (CPU/Mem/Disk)"]
-        PromSvc["Prometheus Service"]
-        GrafanaSvc["Grafana Dashboard"]
-        LokiSvc["Loki Log Aggregator"]
+    subgraph "Database Entities"
+        RunTable["OrchestrationRun [core/models/orchestration.py]"]
+        WFTable["WorkflowExecution [core/models/core.py]"]
+        AdvisoryLock["pg_try_advisory_lock(47111)"]
     end
 
-    UserReq --> Analytics
-    AdminReq --> Analytics
-    Analytics --> HealthCheck
-    HealthCheck --> DBCheck
-    HealthCheck --> RedisCheck
-    HealthCheck --> PSUtil
-    
-    PSUtil -.-> PromSvc
-    PromSvc --> GrafanaSvc
-    LokiSvc --> GrafanaSvc
+    UserReq1 --> SuccessFunc
+    UserReq2 --> UsageTable
+    UserReq3 --> LockLogic
+
+    SuccessFunc --> RunTable
+    SuccessFunc --> WFTable
+    LockLogic --> AdvisoryLock
 ```
 
-**Sources:** [orchestrator/core/services/analytics_engine.py:47-53](), [orchestrator/core/services/analytics_engine.py:80-101](), [infrastructure/docker-compose.monitoring.yml:1-14]()
+**Sources:** [orchestrator/api/analytics_real.py:53-75](), [orchestrator/core/database/boot_lock.py:21-40](), [orchestrator/api/analytics.py:101-117]()
 
 ---
 
-## Health Check Implementation
+## Agent-Level Monitoring
 
-The `AnalyticsEngine` performs real-time validation of core dependencies. These checks are non-blocking and return a status of "healthy" or "unhealthy" based on active connectivity tests. [orchestrator/core/services/analytics_engine.py:89-92]()
+Individual agents track their own performance metrics, which are surfaced via the factory API. [orchestrator/api/agent_endpoints.py:188-194]().
+* **Learning State**: Agents can enter a `LEARNING` state during feedback processing, which is reflected in their lifecycle status. [orchestrator/api/agent_endpoints.py:161-169]()
+* **Performance Metrics**: Real-time retrieval of agent-specific performance from the `agents.performance_metrics` database table. [orchestrator/api/agent_endpoints.py:201-205]()
 
-### Core Health Functions
-
-1.  **System Resource Monitoring**: Uses `psutil` to capture CPU percentage, virtual memory usage, and disk usage for the root partition. [orchestrator/core/services/analytics_engine.py:84-86]()
-2.  **Database Connectivity**: Validates the SQLAlchemy session by attempting a lightweight query against the `Agent` or `SystemMetrics` tables. [orchestrator/core/services/analytics_engine.py:89-90]()
-3.  **Redis Readiness**: Pings the centralized Redis client to ensure the task queue and cache layers are responsive. [orchestrator/core/services/analytics_engine.py:92-93]()
-
-### Dashboard Metrics Mapping
-
-The frontend `Dashboard` component maps to the following navigation item, providing administrators with high-level health insights. [frontend/components/layout/sidebar.tsx:109-115]()
-
-| Metric | Code Source | Implementation |
-| :--- | :--- | :--- |
-| **CPU Usage** | `psutil.cpu_percent` | Captured with 1s interval [orchestrator/core/services/analytics_engine.py:84]() |
-| **Memory Usage** | `psutil.virtual_memory().percent` | Real-time RAM utilization [orchestrator/core/services/analytics_engine.py:85]() |
-| **Uptime** | `_get_system_uptime()` | Calculated from process start time [orchestrator/core/services/analytics_engine.py:100]() |
-
-**Sources:** [orchestrator/core/services/analytics_engine.py:80-105](), [frontend/components/layout/sidebar.tsx:109-115]()
-
----
-
-## Service Connectivity and Health Checks
-
-The platform uses Docker Compose health checks to manage service orchestration and dependencies during deployment. [infrastructure/docker-compose.core.yml:118-123]()
-
-### Dependency Graph and Health Validation
-
-```mermaid
-graph BT
-    subgraph "Application Layer"
-        API["automatos-ai-api (FastAPI)"]
-        Frontend["automotas-ai-frontend (Next.js)"]
-        Workspace["agent-workspace-worker"]
-    end
-
-    subgraph "Data Layer"
-        PG["pgvector (PostgreSQL)"]
-        RD["Redis (Cache/Queue)"]
-        QD["Qdrant (Vector DB)"]
-    end
-
-    subgraph "Voice/Memory Layer"
-        VS["voice-service"]
-        VP["voice-pipeline"]
-        M0["mem0-server"]
-    end
-
-    API -- "depends_on: service_healthy" --> PG
-    API -- "depends_on: service_healthy" --> RD
-    Frontend -- "depends_on: service_healthy" --> API
-    VP -- "depends_on: service_healthy" --> VS
-    
-    PG -.-> Health1["pg_isready -U postgres"]
-    RD -.-> Health2["redis-cli ping"]
-    API -.-> Health3["curl /health"]
-```
-
-**Sources:** [infrastructure/docker-compose.core.yml:113-125](), [infrastructure/docker-compose.data.yml:38-43](), [infrastructure/docker-compose.data.yml:69-74](), [infrastructure/docker-compose.voice.yml:75-83]()
-
----
-
-## Metrics Aggregation Logic
-
-The `AnalyticsEngine` aggregates data from multiple sources to provide a unified health view. This includes legacy `WorkflowExecution` stats and the newer `OrchestrationRun` (Missions) metrics. [orchestrator/core/services/analytics_engine.py:131-152]()
-
-### Success Rate Calculation
-The system calculates a "Combined Success Rate" by merging legacy workflow executions with verified mission tasks:
-*   **Total Executions**: `total_executions + total_mission_tasks` [orchestrator/core/services/analytics_engine.py:155]()
-*   **Successful Executions**: `successful_executions + verified_mission_tasks` [orchestrator/core/services/analytics_engine.py:156]()
-*   **Rate**: `round((combined_success / combined_total * 100), 2)` [orchestrator/core/services/analytics_engine.py:168]()
-
-### Multi-Tenant Isolation
-All health and performance metrics are filtered using the `wsScope` pattern in the frontend and `workspace_id` filters in the backend to ensure users only see health data relevant to their authorized environment. [frontend/components/layout/main-layout.tsx:29-42]()
-
-**Sources:** [orchestrator/core/services/analytics_engine.py:128-174](), [frontend/components/layout/main-layout.tsx:29-49]()
+**Sources:** [orchestrator/api/agent_endpoints.py:161-176](), [orchestrator/api/agent_endpoints.py:188-211]()
 
 ---

@@ -5,22 +5,18 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/app/chat/page.tsx](frontend/app/chat/page.tsx)
-- [frontend/components/documents/document-management.tsx](frontend/components/documents/document-management.tsx)
-- [frontend/components/documents/local-storage-browser.tsx](frontend/components/documents/local-storage-browser.tsx)
-- [frontend/next-env.d.ts](frontend/next-env.d.ts)
-- [orchestrator/alembic/versions/20260202_add_workspace_id_to_skills_patterns_models.py](orchestrator/alembic/versions/20260202_add_workspace_id_to_skills_patterns_models.py)
-- [orchestrator/api/context.py](orchestrator/api/context.py)
-- [orchestrator/api/documents.py](orchestrator/api/documents.py)
-- [orchestrator/api/widgets/docs.py](orchestrator/api/widgets/docs.py)
-- [orchestrator/api/workflows.py](orchestrator/api/workflows.py)
-- [orchestrator/core/llm/clients/openai_embedding.py](orchestrator/core/llm/clients/openai_embedding.py)
-- [orchestrator/core/llm/rerank_manager.py](orchestrator/core/llm/rerank_manager.py)
-- [orchestrator/core/services/__init__.py](orchestrator/core/services/__init__.py)
-- [orchestrator/core/team_access.py](orchestrator/core/team_access.py)
-- [orchestrator/modules/agents/services/agent_platform_tools.py](orchestrator/modules/agents/services/agent_platform_tools.py)
-- [orchestrator/modules/rag/service.py](orchestrator/modules/rag/service.py)
-- [orchestrator/modules/tools/formatting/result_formatter.py](orchestrator/modules/tools/formatting/result_formatter.py)
+- [docs/PRDS/53-WEBHOOK-TRIGGER-SYSTEM-PRD.md](docs/PRDS/53-WEBHOOK-TRIGGER-SYSTEM-PRD.md)
+- [frontend/app/globals.css](frontend/app/globals.css)
+- [frontend/app/layout.tsx](frontend/app/layout.tsx)
+- [frontend/components/providers.tsx](frontend/components/providers.tsx)
+- [frontend/components/settings/WebhooksSettingsTab.tsx](frontend/components/settings/WebhooksSettingsTab.tsx)
+- [frontend/components/ui/theme-toggle.tsx](frontend/components/ui/theme-toggle.tsx)
+- [frontend/components/workspace-provider.tsx](frontend/components/workspace-provider.tsx)
+- [orchestrator/alembic/versions/20260213_add_workspace_webhook_key.py](orchestrator/alembic/versions/20260213_add_workspace_webhook_key.py)
+- [orchestrator/api/webhooks.py](orchestrator/api/webhooks.py)
+- [orchestrator/core/auth/hybrid.py](orchestrator/core/auth/hybrid.py)
+- [orchestrator/core/routing/ingestors/webhook.py](orchestrator/core/routing/ingestors/webhook.py)
+- [orchestrator/tests/test_invitation_routing.py](orchestrator/tests/test_invitation_routing.py)
 
 </details>
 
@@ -32,6 +28,8 @@ Data isolation ensures that resources belonging to one workspace cannot be acces
 
 Automatos AI implements a multi-layered isolation strategy encompassing database foreign keys, request-scoped context injection, standardized memory namespacing, and cache prefixing.
 
+**Sources:** [orchestrator/core/auth/hybrid.py:21-36](), [orchestrator/core/auth/dependencies.py:1-10]()
+
 ---
 
 ## RequestContext as the Isolation Boundary
@@ -42,45 +40,50 @@ Every API endpoint receives a `RequestContext` from the `get_request_context_hyb
 
 The following diagram illustrates how an incoming request is associated with a specific workspace before reaching the business logic.
 
+Title: Authentication and Workspace Resolution Pipeline
 ```mermaid
 graph TB
-    subgraph "Natural_Language_Space"
+    subgraph "Natural Language Space"
         User["User / Agent Request"]
         WS_Header["'x-workspace-id' Header"]
+        Webhook_URL["Webhook URL with Key"]
     end
 
-    subgraph "Code_Entity_Space"
+    subgraph "Code Entity Space"
         AuthDep["get_request_context_hybrid()"]
-        ClerkAuth["Clerk JWT Verification"]
-        APIKeyAuth["API Key Validation"]
+        ClerkAuth["get_clerk_auth()"]
         WS_Resolver["_get_workspace_id_from_request()"]
+        WS_Verify["_user_has_workspace_access()"]
         RequestContext["RequestContext<br/>workspace_id: UUID<br/>user: UserContext"]
         Endpoint["FastAPI Route Handler"]
     end
 
     User --> AuthDep
     WS_Header --> WS_Resolver
+    Webhook_URL --> WS_Resolver
     AuthDep --> ClerkAuth
-    AuthDep --> APIKeyAuth
-    ClerkAuth --> WS_Resolver
-    APIKeyAuth --> WS_Resolver
+    AuthDep --> WS_Resolver
+    ClerkAuth --> WS_Verify
+    WS_Verify --> RequestContext
     WS_Resolver --> RequestContext
     RequestContext --> Endpoint
 
     style RequestContext stroke-dasharray: 5 5
 ```
-**Sources:** [orchestrator/api/documents.py:35-36](), [orchestrator/api/documents.py:107-108](), [orchestrator/api/workflows.py:29-31]()
+
+**Sources:** [orchestrator/core/auth/hybrid.py:47-86](), [orchestrator/core/auth/hybrid.py:144-163](), [orchestrator/core/auth/dependencies.py:15-18]()
 
 The `RequestContext` is constructed after resolving the workspace through multiple strategies:
-1. **Explicit workspace ID** from `x-workspace-id` header or `workspace_id` query parameter.
-2. **User's workspace** from Clerk organization or personal workspace.
-3. **API Key association** where the key is linked to a specific `workspace_id`.
+1.  **Explicit workspace ID** from `x-workspace-id` or `x-workspace` headers [orchestrator/core/auth/hybrid.py:65-72]().
+2.  **Query parameters** using `workspace_id` [orchestrator/core/auth/hybrid.py:74-76]().
+3.  **Environment defaults** such as `config.WORKSPACE_ID` or `config.DEFAULT_WORKSPACE_ID` [orchestrator/core/auth/hybrid.py:78-84]().
+4.  **Membership verification** via `_user_has_workspace_access` to ensure the Clerk user owns or is a member of the requested workspace [orchestrator/core/auth/hybrid.py:144-163]().
 
 ---
 
 ## Database Query Filtering Patterns
 
-All workspace-scoped resources are filtered by `workspace_id` in their database queries. This is enforced at the service and repository layers.
+All workspace-scoped resources are filtered by `workspace_id` in their database queries. This is enforced at the service and repository layers through SQLAlchemy filters.
 
 ### Standard Model Isolation
 
@@ -88,82 +91,84 @@ The base models in the system include a `workspace_id` field to maintain a stric
 
 | Entity | Model Class | Workspace Field | Source |
 | :--- | :--- | :--- | :--- |
-| Documents | `Document` | `workspace_id` | [orchestrator/api/documents.py:158]() |
-| Workflows | `Workflow` | `workspace_id` | [orchestrator/api/workflows.py:21-23]() |
-| RAG Configs | `RAGConfiguration` | `workspace_id` | [orchestrator/api/context.py:19-20]() |
-| Agents | `Agent` | `workspace_id` | [orchestrator/api/workflows.py:22]() |
+| Workspaces | `Workspace` | `id` (Primary Key) | [orchestrator/core/models/workspaces.py:26]() |
+| Agents | `Agent` | `workspace_id` | [orchestrator/core/models/workspaces.py:126]() |
+| Members | `WorkspaceMember` | `workspace_id` | [orchestrator/core/models/workspaces.py:126]() |
+| Webhook Key | `Workspace.webhook_key` | `webhook_key` (Unique) | [orchestrator/alembic/versions/20260213_add_workspace_webhook_key.py:25]() |
 
-### Implementation Example: Document Management
+### Implementation Example: Access Verification
 
-When a document is uploaded or queried, the system strictly enforces the `workspace_id` filter. For instance, during upload, the system checks for duplicates *only within that workspace*, ensuring that identical files uploaded by different tenants do not conflict or leak metadata.
+The system prevents "workspace spoofing" by checking that the authenticated user is an active member of the target workspace.
 
 ```python
-# Check for duplicate within the workspace boundary
-existing = db.query(Document).filter(
-    Document.content_hash == content_hash, 
-    Document.workspace_id == ctx.workspace_id
-).first()
+def _user_is_workspace_member(db, workspace_id: UUID, clerk_user_id: Optional[str]) -> bool:
+    # Joins users and workspace_members to verify active membership
+    row = db.execute(
+        text(
+            "SELECT 1 FROM workspace_members wm "
+            "JOIN users u ON wm.user_id = u.id "
+            "WHERE wm.workspace_id = :workspace_id "
+            "AND u.clerk_user_id = :clerk_user_id "
+            "AND wm.is_active = true "
+            "LIMIT 1"
+        ),
+        {"workspace_id": str(workspace_id), "clerk_user_id": clerk_user_id},
+    ).fetchone()
+    return bool(row)
 ```
-**Sources:** [orchestrator/api/documents.py:158-159]()
 
-Similarly, when fetching document statistics or RAG performance, the `workspace_id` is passed into the `DocumentManager` or `RAGService` to scope the SQL queries.
-
-**Sources:** [orchestrator/api/documents.py:77-86](), [orchestrator/api/context.py:151-157]()
+**Sources:** [orchestrator/core/auth/hybrid.py:126-141]()
 
 ---
 
-## Memory and Cache Isolation
+## Webhook Isolation (URL-as-Secret)
 
-Data isolation extends beyond the relational database into the memory tiers (Redis, Vector DBs, and S3).
+For external integrations where standard JWT authentication is not feasible (e.g., GitHub webhooks, Jira triggers), Automatos AI uses a **URL-as-secret** pattern. 
 
-### Memory Tier Isolation (L1-L4)
+### General Workspace Webhook
+Every workspace is assigned a unique, 128-bit random `webhook_key` (UUID4 hex) upon creation [orchestrator/alembic/versions/20260213_add_workspace_webhook_key.py:31]().
 
-| Layer | Technology | Isolation Mechanism | Reference |
-| :--- | :--- | :--- | :--- |
-| **L1 (Working)** | Redis | Key prefixing using `workspace_id` | [orchestrator/api/workflows.py:173-176]() |
-| **L2/L3 (Short/Long)** | Postgres | Row-level filtering by `workspace_id` | [orchestrator/api/documents.py:158]() |
-| **L4 (Knowledge)** | Vector DB / S3 | Path prefixing: `s3://{bucket}/{workspace_id}/` | [orchestrator/api/documents.py:79-86]() |
-
-### RAG and Vector Search Isolation
-
-The `RAGService` and `DocumentManager` are instantiated with a mandatory `workspace_id`. This ID is used to filter vector similarity searches so that an agent in Workspace A never retrieves chunks from Workspace B.
-
+Title: Webhook Data Flow and Isolation
 ```mermaid
 graph LR
-    subgraph "Retrieval_Request"
-        Query["User Query"]
-        WS_ID["ctx.workspace_id"]
+    subgraph "External Space"
+        Ext["External Service"]
     end
 
-    subgraph "RAG_Service_Logic"
-        RAG["RAGService"]
-        Filter["SQL/Vector Filter: workspace_id = WS_ID"]
+    subgraph "Ingress Layer"
+        Router["/api/webhooks/ws/{workspace_key}"]
+        WS_Lookup["Workspace.webhook_key Lookup"]
     end
 
-    subgraph "Storage_Engines"
-        PGV["Postgres pgvector"]
-        S3V["S3 Vectors"]
+    subgraph "Isolated Processing"
+        Ingestor["WebhookIngestor"]
+        UniRouter["UniversalRouter"]
+        Agent["Target Agent"]
     end
 
-    Query --> RAG
-    WS_ID --> RAG
-    RAG --> Filter
-    Filter --> PGV
-    Filter --> S3V
+    Ext -- "POST" --> Router
+    Router --> WS_Lookup
+    WS_Lookup -- "workspace_id" --> Ingestor
+    Ingestor -- "RequestEnvelope" --> UniRouter
+    UniRouter -- "Scoped Query" --> Agent
 ```
-**Sources:** [orchestrator/api/documents.py:77-86](), [orchestrator/modules/rag/service.py:151-157]()
+
+**Sources:** [orchestrator/api/webhooks.py:6-8](), [orchestrator/core/routing/ingestors/webhook.py:25-30](), [docs/PRDS/53-WEBHOOK-TRIGGER-SYSTEM-PRD.md:33]()
+
+### HMAC Signature Verification
+For increased security, webhooks can be further isolated using HMAC-SHA256 signature verification. The system checks headers like `X-Hub-Signature-256` or `X-Composio-Signature` against a configured secret [orchestrator/api/webhooks.py:44-84]().
 
 ---
 
-## Team-Based Access Control (Sub-Isolation)
+## Frontend Workspace Context
 
-Within a single workspace, further isolation is provided via `team_access`. This allows large organizations to partition data so that only specific teams (e.g., "Engineering" vs "HR") can see certain documents.
+The React frontend maintains isolation by wrapping the application in a `WorkspaceProvider`. This provider fetches the current workspace context from `/api/workspaces/current` and stores it in state [frontend/components/workspace-provider.tsx:73-81]().
 
-*   **Column Filtering:** The `documents` table contains a `team_access` column (array of strings).
-*   **Query Enforcement:** The `TEAM_FILTER_CLAUSE` is appended to SQL queries to ensure users only see documents tagged for their specific team or public workspace documents.
-*   **Widget Isolation:** External widgets use a `WidgetAuthContext` to enforce these team boundaries.
+1.  **Token Injection:** Every request to the backend includes a Bearer token from Clerk [frontend/components/workspace-provider.tsx:77]().
+2.  **State Persistence:** The `last_active_workspace` is stored in `localStorage` to maintain consistency across sessions [frontend/components/workspace-provider.tsx:121-123]().
+3.  **Automatic Redirection:** If a user has a pending invitation, the provider intercepts the 409 Conflict response and redirects them to the invitation acceptance flow, preventing them from accidentally creating a new personal workspace [frontend/components/workspace-provider.tsx:83-101]().
 
-**Sources:** [orchestrator/api/widgets/docs.py:72-80](), [orchestrator/api/widgets/docs.py:103-114]()
+**Sources:** [frontend/components/workspace-provider.tsx:52-155](), [orchestrator/tests/test_invitation_routing.py:124-139]()
 
 ---
 
@@ -171,13 +176,12 @@ Within a single workspace, further isolation is provided via `team_access`. This
 
 | Component | Isolation Technique | Primary Code Reference |
 | :--- | :--- | :--- |
-| **API Layer** | `RequestContext` Dependency | [orchestrator/api/documents.py:108]() |
-| **Database** | Foreign Key (`workspace_id`) | [orchestrator/api/documents.py:158]() |
-| **Knowledge Base** | `DocumentManager` Scoping | [orchestrator/api/documents.py:77-86]() |
-| **RAG Retrieval** | `RAGService` Initialization | [orchestrator/modules/rag/service.py:151-157]() |
-| **External Widgets** | `WidgetAuthContext` & `team_access` | [orchestrator/api/widgets/docs.py:88-95]() |
-| **Workflows** | `WorkflowStageTracker` Execution ID | [orchestrator/api/workflows.py:70-73]() |
+| **Auth Layer** | Hybrid JWT/API Key Resolution | [orchestrator/core/auth/hybrid.py:47]() |
+| **Database** | `webhook_key` Unique Index | [orchestrator/alembic/versions/20260213_add_workspace_webhook_key.py:38]() |
+| **Routing** | `WebhookIngestor` workspace scoping | [orchestrator/core/routing/ingestors/webhook.py:29]() |
+| **Frontend** | `WorkspaceProvider` Context | [frontend/components/workspace-provider.tsx:42]() |
+| **Invitations** | Pending Invitation Gate | [orchestrator/core/auth/hybrid.py:166-172]() |
 
-**Sources:** [orchestrator/api/documents.py](), [orchestrator/api/workflows.py](), [orchestrator/modules/rag/service.py](), [orchestrator/api/widgets/docs.py]()
+**Sources:** [orchestrator/core/auth/hybrid.py](), [orchestrator/api/webhooks.py](), [frontend/components/workspace-provider.tsx]()
 
 ---

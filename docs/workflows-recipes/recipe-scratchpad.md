@@ -5,19 +5,15 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/components/marketplace/marketplace-agents-tab.tsx](frontend/components/marketplace/marketplace-agents-tab.tsx)
-- [frontend/components/marketplace/marketplace-homepage.tsx](frontend/components/marketplace/marketplace-homepage.tsx)
-- [frontend/components/marketplace/marketplace-tools-tab.tsx](frontend/components/marketplace/marketplace-tools-tab.tsx)
-- [frontend/components/shared/stats-bar.tsx](frontend/components/shared/stats-bar.tsx)
-- [frontend/components/tools/tools-dashboard.tsx](frontend/components/tools/tools-dashboard.tsx)
-- [frontend/components/workflows/active-workflows-panel.tsx](frontend/components/workflows/active-workflows-panel.tsx)
-- [frontend/components/workflows/execution-kitchen.tsx](frontend/components/workflows/execution-kitchen.tsx)
-- [frontend/components/workflows/workflow-management.tsx](frontend/components/workflows/workflow-management.tsx)
-- [frontend/lib/tooltips.json](frontend/lib/tooltips.json)
+- [frontend/app/api/chat/route.ts](frontend/app/api/chat/route.ts)
+- [frontend/components/chatbot/chat.tsx](frontend/components/chatbot/chat.tsx)
+- [frontend/components/chatbot/mission-suggestion-card.tsx](frontend/components/chatbot/mission-suggestion-card.tsx)
+- [frontend/lib/chat/hooks.ts](frontend/lib/chat/hooks.ts)
+- [frontend/stores/mission-store.ts](frontend/stores/mission-store.ts)
+- [orchestrator/api/chat.py](orchestrator/api/chat.py)
 - [orchestrator/api/recipe_executor.py](orchestrator/api/recipe_executor.py)
-- [orchestrator/api/workflow_recipes.py](orchestrator/api/workflow_recipes.py)
-- [orchestrator/modules/learning/tests/conftest.py](orchestrator/modules/learning/tests/conftest.py)
-- [orchestrator/modules/learning/tests/test_learning_system.py](orchestrator/modules/learning/tests/test_learning_system.py)
+- [orchestrator/consumers/chatbot/service.py](orchestrator/consumers/chatbot/service.py)
+- [orchestrator/modules/agents/factory/agent_factory.py](orchestrator/modules/agents/factory/agent_factory.py)
 
 </details>
 
@@ -25,15 +21,15 @@ The following files were used as context for generating this wiki page:
 
 ## Purpose and Scope
 
-The Recipe Scratchpad is a structured, inter-step data sharing system designed for multi-step recipe executions. It replaces verbose full-text output dumps between steps with auto-extracted key-value summaries and explicit agent exports, achieving 80-90% token savings while preserving essential context [orchestrator/api/recipe_executor.py:14-19](). The scratchpad is integrated into the `_execute_step` function to facilitate data flow between sequential steps of a `WorkflowTemplate` (aliased as `WorkflowRecipe`) [orchestrator/api/workflow_recipes.py:25-27]().
+The Recipe Scratchpad is a structured, inter-step data sharing system designed for multi-step recipe executions. It replaces verbose full-text output dumps between steps with auto-extracted key-value summaries and explicit agent exports, achieving 80-90% token savings while preserving essential context [orchestrator/api/recipe_executor.py:14-19](). The scratchpad is integrated into the `execute_recipe_direct` flow to facilitate data flow between sequential steps of a `WorkflowTemplate` (aliased as `WorkflowRecipe`) [orchestrator/api/recipe_executor.py:36-37]().
 
-This system allows agents in later steps to access specific outputs (like IDs, URLs, or status strings) from previous steps without re-processing the entire conversation history of those steps.
+This system ensures that agents executing downstream steps have access to critical data produced by upstream agents without exceeding context window limits, utilizing the same component path as the standard chatbot for architectural alignment [orchestrator/api/recipe_executor.py:5-12]().
 
 ---
 
 ## Architecture and Data Flow
 
-The scratchpad is managed during the execution loop of a recipe. The `_execute_step` function in the recipe executor initializes and interacts with the scratchpad to maintain state across the workflow lifecycle [orchestrator/api/recipe_executor.py:66-79]().
+The scratchpad is managed during the execution loop of a recipe. The executor initializes and interacts with the scratchpad to maintain state across the workflow lifecycle. It leverages `StreamingChatService` and `ToolExecutionTracker` to handle the actual LLM interaction and tool loops for each step [orchestrator/consumers/chatbot/service.py:12-13](), [orchestrator/consumers/chatbot/service.py:83-90]().
 
 ### Natural Language to Code Entity Mapping
 
@@ -48,22 +44,22 @@ graph TD
         AgentReasoning["Agent Reasoning & Tool Output"]
     end
 
-    subgraph "Code Entity Space"
-        Executor["orchestrator/api/recipe_executor.py<br/>_execute_step()"]
+    subgraph "Code Entity Space (orchestrator/)"
+        Executor["api/recipe_executor.py<br/>execute_recipe_direct()"]
         RecipeModel["core/models/core.py<br/>RecipeExecution"]
-        ToolHandler["orchestrator/api/recipe_executor.py<br/>handle_scratchpad_write()"]
-        ContextSvc["modules/context/context_service.py<br/>ContextService(RECIPE)"]
-        AgentFactory["modules/agents/factory/agent_factory.py<br/>AgentFactory"]
+        AgentFactory["modules/agents/factory/agent_factory.py<br/>AgentFactory.execute_with_prompt()"]
+        StreamingSvc["consumers/chatbot/service.py<br/>StreamingChatService"]
+        ToolTracker["consumers/chatbot/service.py<br/>ToolExecutionTracker"]
     end
 
     UserTrigger -->|"input_data"| Executor
-    StepInstruction -->|"recipe_step_dict"| ContextSvc
-    AgentReasoning -->|"scratchpad_write tool"| ToolHandler
-    ToolHandler -->|"Persist to Scratchpad"| Executor
+    StepInstruction -->|"step_logic"| AgentFactory
+    AgentReasoning -->|"scratchpad_write tool"| ToolTracker
+    ToolTracker -->|"Deduplication/Limit"| StreamingSvc
     Executor -->|"Update DB"| RecipeModel
-    Executor -->|"activate_agent"| AgentFactory
+    Executor -->|"Stream Results"| StreamingSvc
 ```
-**Sources:** [orchestrator/api/recipe_executor.py:66-79](), [orchestrator/api/recipe_executor.py:118-119](), [orchestrator/api/recipe_executor.py:143-149](), [orchestrator/api/workflow_recipes.py:25-27]()
+**Sources:** [orchestrator/api/recipe_executor.py:5-19](), [orchestrator/api/recipe_executor.py:36-37](), [orchestrator/consumers/chatbot/service.py:83-111](), [orchestrator/modules/agents/factory/agent_factory.py:1-11]()
 
 ---
 
@@ -73,76 +69,69 @@ The system utilizes a tiered storage approach to manage recipe data based on its
 
 | Tier | Storage Target | Entity / Model | Purpose |
 | :--- | :--- | :--- | :--- |
-| **Tier 1: Ephemeral** | In-Memory Object | `scratchpad` instance | High-speed context sharing between steps during a single run [orchestrator/api/recipe_executor.py:71](). |
-| **Tier 2: Compact** | PostgreSQL | `RecipeExecution.step_results` | Permanent summary for UI display and history [orchestrator/api/workflow_recipes.py:27-28](). |
-| **Tier 3: Cold** | S3 / Blob Storage | `step_{N}.json` | Full verbose logs (messages, raw tool results) for debugging [orchestrator/api/recipe_executor.py:17-18](). |
+| **Tier 1: Ephemeral** | Redis / Memory | `RecipeScratchpad` | High-speed context sharing between steps during execution [orchestrator/api/recipe_executor.py:15](). |
+| **Tier 2: Compact** | PostgreSQL | `RecipeExecution.step_results` | Permanent summary for UI display and history [orchestrator/api/recipe_executor.py:95-100](). |
+| **Tier 3: Cold** | S3 / Blob | `step_logs` | Full verbose logs (messages, raw tool results) for debugging [orchestrator/api/recipe_executor.py:17-18](). |
 
-### Context Assembly
+### Context Assembly and Reporting
 
-The scratchpad context is injected into the `ContextService` using `ContextMode.RECIPE` [orchestrator/api/recipe_executor.py:143-148](). This ensures that the agent performing the current step has access to:
-*   **Previous Outputs**: Formatted summaries from all preceding steps retrieved via `scratchpad.format_context_for_step(step_order)` [orchestrator/api/recipe_executor.py:130-134]().
-*   **Step Metadata**: Current step number and total steps for situational awareness [orchestrator/api/recipe_executor.py:135-141]().
+The scratchpad context is used to generate final reports upon completion. The `_auto_create_playbook_report` function rolls up metrics and step results into a Markdown summary [orchestrator/api/recipe_executor.py:88-105]().
+
+*   **Execution Metrics**: Roll up cost, model usage, and duration across every LLM call in the execution [orchestrator/api/recipe_executor.py:112-118]().
+*   **Step Summaries**: Captures the `output_preview` and status of each step for the final report [orchestrator/api/recipe_executor.py:159-169]().
+*   **Final Output**: Includes a preview of the final data produced by the recipe [orchestrator/api/recipe_executor.py:177-185]().
 
 **Title: Scratchpad Context Resolution**
 ```mermaid
 graph LR
     subgraph "Execution State"
-        StepResults["Step Results (Postgres)"]
+        StepResults["Step Results (List[dict])"]
         TriggerData["Input Data (Dict)"]
-        ScratchpadObj["RecipeScratchpad Instance"]
+        Metrics["Execution Metrics"]
     end
 
-    subgraph "Code Entity Components"
-        Executor["orchestrator/api/recipe_executor.py"]
-        ContextService["modules/context/context_service.py"]
-        RecipeSection["RecipeContextSection"]
+    subgraph "Reporting Components"
+        ReportSvc["services/report_service.py"]
+        AutoReport["_auto_create_playbook_report"]
+        NotificationSvc["core/services/notification_dispatcher.py"]
     end
 
-    TriggerData --> Executor
-    ScratchpadObj -->|"format_context_for_step"| Executor
-    StepResults --> Executor
-    Executor -->|"recipe_step metadata"| ContextService
-    ContextService --> RecipeSection
-    RecipeSection -->|"System Prompt Injection"| LLM["Agent LLM Manager"]
+    TriggerData --> AutoReport
+    StepResults --> AutoReport
+    Metrics --> ReportSvc
+    AutoReport -->|"Markdown Body"| ReportSvc
+    AutoReport -->|"Event Dispatch"| NotificationSvc
+    NotificationSvc -->|"UI Feedback"| User["End User"]
 ```
-**Sources:** [orchestrator/api/recipe_executor.py:130-149](), [orchestrator/api/workflow_recipes.py:140-172]()
+**Sources:** [orchestrator/api/recipe_executor.py:45-55](), [orchestrator/api/recipe_executor.py:88-126](), [orchestrator/api/recipe_executor.py:141-158]()
 
 ---
 
-## Tool Integration: `scratchpad_write`
+## Tool Integration and Safety
 
-Agents can explicitly export structured data using the `scratchpad_write` tool. This is particularly useful for passing specific IDs, URLs, or structured objects that downstream steps must consume [orchestrator/api/recipe_executor.py:108-115]().
+Agents interact with the scratchpad and other tools through a unified execution layer. To prevent infinite loops during complex recipe steps, the `ToolExecutionTracker` is employed [orchestrator/consumers/chatbot/service.py:50-51]().
 
-### Implementation Details
-1.  **Tool Definition**: The tools are defined as `SCRATCHPAD_WRITE_TOOL_DEF` and `SCRATCHPAD_READ_TOOL_DEF` [orchestrator/api/recipe_executor.py:108-111]().
-2.  **Execution**: When an agent calls the tool, the `handle_scratchpad_write` or `handle_scratchpad_read` function is invoked [orchestrator/api/recipe_executor.py:113-114]().
-3.  **Namespace**: The tool is identified as `SCRATCHPAD_TOOL_NAME` in the tool registry [orchestrator/api/recipe_executor.py:111]().
+### Tool Loop Prevention
+1.  **Exact Deduplication**: Prevents the same tool from being called with identical arguments multiple times [orchestrator/consumers/chatbot/service.py:87-87]().
+2.  **Semantic Deduplication**: Uses string similarity to detect redundant search queries [orchestrator/consumers/chatbot/service.py:62-71]().
+3.  **Retry Limits**: Enforces specific limits per tool type (e.g., `write_file` is limited to 5 calls per turn) [orchestrator/consumers/chatbot/service.py:98-111]().
 
-**Sources:** [orchestrator/api/recipe_executor.py:102-116]()
+### Scratchpad Tooling
+*   **`scratchpad_write`**: Injected tool for explicit agent exports of structured data [orchestrator/api/recipe_executor.py:16]().
+*   **Platform Actions**: Agents can use `platform_execute` to introspect the system, with limits counted by the inner action name [orchestrator/consumers/chatbot/service.py:122-133]().
 
----
-
-## Step Scope and Isolation
-
-To prevent agents from "hallucinating" or wandering into tasks belonging to other steps, the `RecipeExecutor` injects a strict `scope_instruction` into the message history [orchestrator/api/recipe_executor.py:154-162]().
-
-*   **Focus**: Forces the agent to focus ONLY on the task described in the current step [orchestrator/api/recipe_executor.py:156-157]().
-*   **Action Restriction**: Explicitly forbids performing actions (like sending notifications or creating PRs) unless required by the specific current step [orchestrator/api/recipe_executor.py:158-160]().
-*   **Tool Filtering**: Encourages the use of external app actions only if relevant to the current task [orchestrator/api/recipe_executor.py:160-161]().
-
-**Sources:** [orchestrator/api/recipe_executor.py:153-162]()
+**Sources:** [orchestrator/api/recipe_executor.py:15-16](), [orchestrator/consumers/chatbot/service.py:83-111](), [orchestrator/consumers/chatbot/service.py:150-161]()
 
 ---
 
-## Context Injection Flow
+## Notification and Event Dispatch
 
-Before executing a step, the `RecipeExecutor` performs the following assembly [orchestrator/api/recipe_executor.py:117-150]():
+The `RecipeExecutor` integrates with the `NotificationDispatcher` to provide real-time updates to the frontend during execution [orchestrator/api/recipe_executor.py:45-55]().
 
-1.  **Agent Activation**: The `AgentFactory` activates the specific agent assigned to the recipe step [orchestrator/api/recipe_executor.py:118-119]().
-2.  **Scratchpad Retrieval**: If it is not the first step (`step_order > 1`), previous step outputs are formatted as context [orchestrator/api/recipe_executor.py:130-134]().
-3.  **Context Building**: `ContextService.build_context` is called with `mode=ContextMode.RECIPE`, passing the `recipe_step_dict` which contains instructions and previous outputs [orchestrator/api/recipe_executor.py:143-148]().
-4.  **System Message**: The resulting `system_prompt` is placed at the top of the message stack as a `system` role message [orchestrator/api/recipe_executor.py:150]().
+1.  **Playbook Events**: Events are fired for step completion and final recipe results [orchestrator/api/recipe_executor.py:66-75]().
+2.  **Non-blocking**: Notification failures are logged but do not halt the execution of the recipe [orchestrator/api/recipe_executor.py:59-61]().
+3.  **UI Integration**: Notifications are linked to the specific `recipe_execution_id` for easy navigation [orchestrator/api/recipe_executor.py:70-71]().
 
-**Sources:** [orchestrator/api/recipe_executor.py:117-150](), [orchestrator/api/workflow_recipes.py:140-172]()
+**Sources:** [orchestrator/api/recipe_executor.py:45-83](), [orchestrator/api/recipe_executor.py:101-105]()
 
 ---

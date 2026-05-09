@@ -5,30 +5,15 @@
 
 The following files were used as context for generating this wiki page:
 
-- [docs/reviews/COMPOSIO-TOOL-REGRESSION-REVIEW.md](docs/reviews/COMPOSIO-TOOL-REGRESSION-REVIEW.md)
+- [frontend/app/api/chat/route.ts](frontend/app/api/chat/route.ts)
+- [frontend/components/chatbot/chat.tsx](frontend/components/chatbot/chat.tsx)
+- [frontend/components/chatbot/mission-suggestion-card.tsx](frontend/components/chatbot/mission-suggestion-card.tsx)
+- [frontend/lib/chat/hooks.ts](frontend/lib/chat/hooks.ts)
+- [frontend/stores/mission-store.ts](frontend/stores/mission-store.ts)
 - [orchestrator/api/chat.py](orchestrator/api/chat.py)
-- [orchestrator/api/chat_voice.py](orchestrator/api/chat_voice.py)
-- [orchestrator/consumers/chatbot/auto.py](orchestrator/consumers/chatbot/auto.py)
-- [orchestrator/consumers/chatbot/intent_classifier.py](orchestrator/consumers/chatbot/intent_classifier.py)
-- [orchestrator/consumers/chatbot/personality.py](orchestrator/consumers/chatbot/personality.py)
+- [orchestrator/api/recipe_executor.py](orchestrator/api/recipe_executor.py)
 - [orchestrator/consumers/chatbot/service.py](orchestrator/consumers/chatbot/service.py)
-- [orchestrator/consumers/chatbot/smart_tool_router.py](orchestrator/consumers/chatbot/smart_tool_router.py)
-- [orchestrator/consumers/chatbot/streaming.py](orchestrator/consumers/chatbot/streaming.py)
-- [orchestrator/core/llm/manager.py](orchestrator/core/llm/manager.py)
-- [orchestrator/core/models/stream_events.py](orchestrator/core/models/stream_events.py)
-- [orchestrator/core/routing/engine.py](orchestrator/core/routing/engine.py)
-- [orchestrator/modules/orchestrator/service.py](orchestrator/modules/orchestrator/service.py)
-- [orchestrator/modules/tools/discovery/actions_analytics_enhanced.py](orchestrator/modules/tools/discovery/actions_analytics_enhanced.py)
-- [orchestrator/modules/tools/discovery/handlers_analytics_enhanced.py](orchestrator/modules/tools/discovery/handlers_analytics_enhanced.py)
-- [orchestrator/modules/tools/discovery/handlers_search.py](orchestrator/modules/tools/discovery/handlers_search.py)
-- [orchestrator/modules/tools/discovery/platform_actions.py](orchestrator/modules/tools/discovery/platform_actions.py)
-- [orchestrator/modules/tools/discovery/platform_executor.py](orchestrator/modules/tools/discovery/platform_executor.py)
-- [orchestrator/modules/tools/execution/exec_composio.py](orchestrator/modules/tools/execution/exec_composio.py)
-- [orchestrator/modules/tools/execution/exec_document.py](orchestrator/modules/tools/execution/exec_document.py)
-- [orchestrator/modules/tools/execution/exec_file_ops.py](orchestrator/modules/tools/execution/exec_file_ops.py)
-- [orchestrator/modules/tools/execution/exec_multimodal.py](orchestrator/modules/tools/execution/exec_multimodal.py)
-- [orchestrator/modules/tools/execution/exec_planning.py](orchestrator/modules/tools/execution/exec_planning.py)
-- [orchestrator/modules/tools/tool_router.py](orchestrator/modules/tools/tool_router.py)
+- [orchestrator/modules/agents/factory/agent_factory.py](orchestrator/modules/agents/factory/agent_factory.py)
 
 </details>
 
@@ -40,7 +25,7 @@ This document covers the **`/api/chat`** endpoint and its streaming response sys
 
 The implementation bridges high-level natural language requests to low-level code entities like `AgentFactory`, `UniversalRouter`, and `StreamingChatService`.
 
-**Sources:** [orchestrator/api/chat.py:1-26](), [orchestrator/consumers/chatbot/streaming.py:1-10]()
+**Sources:** [orchestrator/api/chat.py:1-26](), [orchestrator/consumers/chatbot/service.py:1-13]()
 
 ---
 
@@ -48,76 +33,77 @@ The implementation bridges high-level natural language requests to low-level cod
 
 ### Request Schema
 
-The chat API accepts POST requests at `/api/chat` with the following structure:
+The chat API accepts POST requests at `/api/chat`. The request body is processed by `POST /api/chat` which extracts the message and context for routing.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | `string?` | Chat session ID. If null, creates new chat [orchestrator/api/chat.py:202](). |
-| `message` | `object` | Current user message (role, parts) [orchestrator/api/chat.py:204](). |
-| `agentId` | `int?` | Explicit agent selection (bypasses AutoBrain/Router) [orchestrator/api/chat.py:206](). |
-| `selectedChatModel`| `string?` | Model hint (default: "gpt-4") [orchestrator/api/chat.py:208](). |
+| `id` | `string?` | Chat session ID. If null, a new `Chat` record is created [orchestrator/api/chat.py:188-192](). |
+| `message` | `ChatMessageRequest` | Contains `role` and `parts` (text, attachments) [orchestrator/api/chat.py:186-191](). |
+| `agentId` | `int?` | Explicit agent selection (Tier 0 override) [orchestrator/api/chat.py:192](). |
+| `selectedChatModel`| `string?` | Model hint used if no specific agent is targeted [orchestrator/api/chat.py:192](). |
+| `missionMode` | `boolean?` | Flag for conversational mission planning [orchestrator/api/chat.py:192](). |
 
-**Sources:** [orchestrator/api/chat.py:200-226]()
+**Sources:** [orchestrator/api/chat.py:176-197](), [frontend/lib/chat/hooks.ts:110-123]()
 
 ---
 
 ### Response Format: AI SDK Data Stream
 
-Responses use the Vercel AI SDK Data Stream format (`text/plain; charset=utf-8`) with line-prefixed events. The `StreamingHandler` class in `streaming.py` manages this formatting.
+Responses use the Vercel AI SDK Data Stream format (`text/plain; charset=utf-8`) with line-prefixed events. The `StreamingChatService` and `StreamingHandler` manage this formatting.
 
 | Prefix | Description | Example |
 |--------|-------------|---------|
-| `0:` | Text chunk (JSON string) | `0:"Hello"\n` [orchestrator/consumers/chatbot/streaming.py:105-108]() |
-| `d:` | Custom data (JSON) | `d:{"type":"chat-id","chatId":"..."}\n` [orchestrator/consumers/chatbot/streaming.py:117-119]() |
-| `e:` | Error event | `e:{"message":"LLM error"}\n` [orchestrator/consumers/chatbot/streaming.py:174-176]() |
+| `0:` | Text chunk (JSON string) | `0:"Hello"\n` [orchestrator/api/chat.py:171]() |
+| `d:` | Custom data (JSON) | `d:{"type":"workflow-update","status":"started"}\n` [orchestrator/api/chat.py:110]() |
+| `e:` | Error event | `e:{"message":"Workflow timeout"}\n` [orchestrator/api/chat.py:134]() |
 
-**Sources:** [orchestrator/consumers/chatbot/streaming.py:105-176]()
+**Sources:** [orchestrator/api/chat.py:110-172](), [orchestrator/consumers/chatbot/service.py:35]()
 
 ---
 
 ### Response Headers
 
-The API returns metadata about routing and complexity assessment in response headers:
+The API returns metadata about routing and complexity assessment in response headers. These are forwarded by the frontend proxy to the client.
 
 | Header | Description | Source |
 |--------|-------------|--------|
-| `x-routing-agent-id` | Selected agent ID | `UniversalRouter` [orchestrator/api/chat.py:506]() |
-| `x-routing-confidence`| Routing confidence (0.0-1.0) | `UniversalRouter` [orchestrator/api/chat.py:507]() |
-| `x-routing-type` | "agent", "workflow", or "orchestrate" | `UniversalRouter` [orchestrator/api/chat.py:508]() |
-| `x-auto-complexity` | "atom", "molecule", "cell", "organ", "organism" | `AutoBrain` [orchestrator/api/chat.py:512]() |
+| `x-routing-agent-id` | Selected agent ID from `UniversalRouter` | [frontend/app/api/chat/route.ts:80]() |
+| `x-routing-confidence`| Routing confidence (0.0-1.0) | [frontend/app/api/chat/route.ts:80]() |
+| `x-routing-type` | "agent", "workflow", or "orchestrate" | [frontend/app/api/chat/route.ts:80]() |
+| `x-auto-complexity` | "atom", "molecule", "cell", "organ", "organism" | [orchestrator/consumers/chatbot/auto.py:42-49]() |
 
-**Sources:** [orchestrator/api/chat.py:505-526]()
+**Sources:** [frontend/app/api/chat/route.ts:72-85](), [orchestrator/consumers/chatbot/auto.py:42-49]()
 
 ---
 
 ## Message Lifecycle
 
-The following diagram shows the complete flow from the frontend through the FastAPI backend to the final streamed response.
+The following diagram shows the complete flow from the API entry point through complexity assessment to the final streamed response.
 
-### Data Flow: Frontend to Backend
+### Data Flow: API Entry to Stream
 Title: Chat Request and Streaming Flow
 ```mermaid
 sequenceDiagram
-    participant UI as "Frontend useChat"
-    participant API as "POST /api/chat (api/chat.py)"
+    participant Proxy as "Next.js Proxy (route.ts)"
+    participant API as "POST /api/chat (chat.py)"
     participant Auto as "AutoBrain (auto.py)"
-    participant Router as "UniversalRouter (engine.py)"
+    participant Bridge as "_stream_workflow_bridge"
     participant Stream as "StreamingChatService (service.py)"
 
-    UI->>API: fetch('/api/chat')
-    API->>Auto: assess(message)
+    Proxy->>API: Forward POST Request
+    API->>Auto: assess(message_text)
     Auto-->>API: ComplexityAssessment
     
     alt Complexity >= ORGAN
-        API->>API: _stream_workflow_bridge()
+        API->>Bridge: Execute Workflow Pipeline
+        Bridge-->>API: Stream Stage Events (PLAN->EXEC)
     else Complexity < ORGAN
-        API->>Router: route(envelope)
-        Router-->>API: RoutingDecision
         API->>Stream: stream_response_with_agent()
-        Stream-->>UI: AI SDK Data Stream
+        Stream-->>API: AI SDK Data Stream
     end
+    API-->>Proxy: Stream Body + Routing Headers
 ```
-**Sources:** [orchestrator/api/chat.py:448-572](), [orchestrator/consumers/chatbot/service.py:12]()
+**Sources:** [orchestrator/api/chat.py:37-55](), [orchestrator/api/chat.py:218-235](), [frontend/app/api/chat/route.ts:57-90]()
 
 ---
 
@@ -135,8 +121,8 @@ graph TD
     T2 -- Miss --> T3["Tier 3: LLM Classification"]
     
     subgraph "Heuristic Patterns (Tier 2)"
-        P1["_ATOM_PATTERNS (Greetings)"]
-        P2["_PLATFORM_KEYWORDS (System Queries)"]
+        P1["_ATOM_PATTERNS (Greetings/Chitchat)"]
+        P2["_PLATFORM_KEYWORDS (System Actions)"]
     end
     
     T2 --> P1
@@ -150,76 +136,71 @@ graph TD
 
 ## Workflow Bridge (PRD-68 Phase 2)
 
-When `AutoBrain` detects **ORGAN** or **ORGANISM** complexity, the API invokes `_stream_workflow_bridge`. This function creates a transient workflow and execution record, then streams progress events using the AI SDK format.
+When `AutoBrain` detects **ORGAN** or **ORGANISM** complexity, the API invokes `_stream_workflow_bridge`. This function transitions the chat into a managed workflow execution.
 
-1. **Transient Workflow**: Created with `source="chat_generated"` [orchestrator/api/chat.py:112]().
-2. **Execution**: Initialized with `status="pending"` [orchestrator/api/chat.py:134]().
-3. **Progress Streaming**: Sends stage updates (PLAN → EXECUTE) to the chat UI [orchestrator/api/chat.py:143-150]().
+1. **Transient Workflow**: Created with `source="chat_generated"` and a goal derived from the message text [orchestrator/api/chat.py:68-84]().
+2. **Execution Record**: A `WorkflowExecution` is initialized to track the lifecycle [orchestrator/api/chat.py:92-105]().
+3. **Progress Streaming**: Stage updates (PLAN → PREPARE → EXECUTE) are yielded as `workflow-update` events in the AI SDK stream [orchestrator/api/chat.py:110-116]().
+4. **Timeout Safety**: Executions are wrapped in `asyncio.wait_for` with a 120s timeout [orchestrator/api/chat.py:123-126]().
 
-**Sources:** [orchestrator/api/chat.py:70-197]()
+**Sources:** [orchestrator/api/chat.py:37-173]()
 
 ---
 
 ## Tool Loop Prevention
 
-The `ToolExecutionTracker` class prevents infinite loops during agent execution by implementing semantic deduplication and retry limits.
+The `ToolExecutionTracker` prevents infinite loops and redundant processing during agent execution turns.
 
 | Feature | Implementation |
 |---------|----------------|
-| **Exact Deduplication** | Hashes `tool_args` to detect identical calls [orchestrator/consumers/chatbot/service.py:111-112](). |
-| **Semantic Deduplication** | Uses `SequenceMatcher` to detect similar search queries [orchestrator/consumers/chatbot/service.py:57-66](). |
-| **Retry Limits** | Limits tools like `read_file` to 3 attempts [orchestrator/consumers/chatbot/service.py:101](). |
+| **Exact Deduplication** | Hashes `tool_args` to detect identical calls [orchestrator/consumers/chatbot/service.py:163-166](). |
+| **Semantic Deduplication** | Uses `SequenceMatcher` to detect similar search queries for `SEARCH_TOOLS` [orchestrator/consumers/chatbot/service.py:62-71](). |
+| **Retry Limits** | Enforces per-tool limits (e.g., `composio_execute`: 5, `read_file`: 8) [orchestrator/consumers/chatbot/service.py:98-111](). |
 
-**Sources:** [orchestrator/consumers/chatbot/service.py:78-155]()
+**Sources:** [orchestrator/consumers/chatbot/service.py:83-176]()
 
 ---
 
-## Smart Tool Routing
+## Mission Suggestions (PRD-125)
 
-The `SmartToolRouter` determines which tools are relevant based on detected intent, preventing LLM context pollution.
+The frontend `Chat` component integrates with `AutoBrain` results to suggest high-complexity missions when appropriate.
 
-- **Core Tools**: Essential tools like `search_knowledge` and `smart_query_database` are prioritized [orchestrator/consumers/chatbot/smart_tool_router.py:54-62]().
-- **Semantic Ranking**: If enabled via `SEMANTIC_TOOL_ROUTING`, tools are ranked by cosine similarity to the user query [orchestrator/consumers/chatbot/smart_tool_router.py:181-185]().
-- **Intent Mapping**: Maps intents like `DATA_QUERY` to specific tool categories like `data` and `fields` [orchestrator/consumers/chatbot/smart_tool_router.py:112-121]().
+- **Trigger**: When `AutoBrain` detects `organ` or `organism` complexity [frontend/components/chatbot/chat.tsx:141-145]().
+- **UI Component**: `MissionSuggestionCard` allows users to launch a full multi-agent mission directly from the chat context [frontend/components/chatbot/mission-suggestion-card.tsx:19-40]().
+- **Data Flow**: Uses `useCreateMission` to persist a new mission and redirects the user to the mission planning view [frontend/components/chatbot/mission-suggestion-card.tsx:41-67]().
 
-**Sources:** [orchestrator/consumers/chatbot/smart_tool_router.py:39-183]()
+**Sources:** [frontend/components/chatbot/chat.tsx:141-153](), [frontend/components/chatbot/mission-suggestion-card.tsx:41-67]()
 
 ---
 
 ## Platform Actions & Tool Execution
 
-Agents can interact with the platform itself via `PlatformActionExecutor`. If `AutoBrain` detects system-related keywords (e.g., "list my agents"), it triggers specific platform tools.
+Agents can interact with the platform itself via `PlatformActionExecutor`. If `AutoBrain` detects system-related keywords (e.g., "list my agents"), it injects these as `tool_hints`.
 
 ### Code Entity Association: Tools
 Title: Natural Language to Platform Action Mapping
 ```mermaid
 graph LR
-    NL["'Search my memories'"] -- "AutoBrain Tier 2" --> Hint["platform_search_memory"]
-    Hint -- "Tool Discovery" --> Registry["get_tool_registry (registry.py)"]
-    Registry -- "Dispatch" --> Exec["UnifiedToolExecutor (execution.py)"]
-    Exec -- "Handler" --> H["search_memory (handlers_search.py)"]
+    NL["'List my agents'"] -- "AutoBrain Tier 2" --> Hint["platform_list_agents"]
+    Hint -- "Tool Router" --> Registry["PlatformActionExecutor (platform_executor.py)"]
+    Registry -- "Dispatch" --> Handler["list_agents (handlers_agents.py)"]
+    Handler -- "SQLAlchemy" --> DB["Agent Table (core/models)"]
 ```
-**Sources:** [orchestrator/consumers/chatbot/smart_tool_router.py:69](), [orchestrator/modules/tools/tool_router.py:27-28](), [orchestrator/modules/tools/discovery/platform_executor.py:200]()
+**Sources:** [orchestrator/consumers/chatbot/auto.py:117-120](), [orchestrator/modules/tools/discovery/platform_executor.py:173-176](), [orchestrator/modules/tools/discovery/handlers_agents.py:20]()
 
 ---
 
-## Personality & Prompt Generation
+## LLM Configuration & Key Resolution
 
-The `AutomatosPersonality` class generates system prompts based on workspace settings like `personality_mode` (friendly, professional, technical).
+The `LLMManager` handles the final execution of chat requests by resolving providers and API keys.
 
-- **Identity**: Defines the assistant name and greeting [orchestrator/consumers/chatbot/personality.py:153-157]().
-- **Prompt Registry**: Attempts to load custom prompts from `PromptRegistry` before falling back to hardcoded defaults [orchestrator/consumers/chatbot/personality.py:165-175]().
-- **Communication Style**: Appends suffixes for `concise` or `detailed` responses [orchestrator/consumers/chatbot/personality.py:112-116]().
+- **Service Scoping**: LLM settings are scoped by service (e.g., `chatbot`, `orchestrator`) [orchestrator/core/llm/manager.py:30-41]().
+- **Key Resolution**: Implements a 3-tier strategy: 
+    1. Explicit `credential_name` in system settings [orchestrator/core/llm/manager.py:158-164]().
+    2. Flexible lookup using `get_credential_resolver` [orchestrator/core/llm/manager.py:156-184]().
+    3. Fallback to environment variables [orchestrator/core/llm/manager.py:140]().
+- **System Settings**: Providers and models are fetched dynamically from the database `SystemSetting` table [orchestrator/core/llm/manager.py:68-81]().
 
-**Sources:** [orchestrator/consumers/chatbot/personality.py:119-180]()
-
----
-
-## Security & Auth
-
-- **Hybrid Auth**: Backend supports both Clerk JWT and API Keys via `get_request_context_hybrid` [orchestrator/api/chat.py:20-21]().
-- **Workspace Scoping**: All chat operations and tool executions are scoped to the `workspace_id` to ensure multi-tenant isolation [orchestrator/api/chat.py:214-215]().
-
-**Sources:** [orchestrator/api/chat.py:6-21]()
+**Sources:** [orchestrator/core/llm/manager.py:129-184](), [orchestrator/core/llm/manager.py:68-81]()
 
 ---

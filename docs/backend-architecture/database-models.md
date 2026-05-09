@@ -5,11 +5,26 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/components/workflows/execution-theater/communication-log.tsx](frontend/components/workflows/execution-theater/communication-log.tsx)
-- [orchestrator/alembic/versions/prd123_cost_tracking.py](orchestrator/alembic/versions/prd123_cost_tracking.py)
-- [orchestrator/core/models/composio_cache.py](orchestrator/core/models/composio_cache.py)
-- [orchestrator/scripts/prd_parity.py](orchestrator/scripts/prd_parity.py)
-- [orchestrator/services/tool_manifest_service.py](orchestrator/services/tool_manifest_service.py)
+- [frontend/components/agents/agent-configuration-modal.tsx](frontend/components/agents/agent-configuration-modal.tsx)
+- [frontend/components/agents/agent-configuration.tsx](frontend/components/agents/agent-configuration.tsx)
+- [frontend/components/agents/agent-details-modal.tsx](frontend/components/agents/agent-details-modal.tsx)
+- [frontend/components/agents/agent-roster.tsx](frontend/components/agents/agent-roster.tsx)
+- [frontend/components/agents/create-agent-modal.tsx](frontend/components/agents/create-agent-modal.tsx)
+- [frontend/components/documents/analytics-tab.tsx](frontend/components/documents/analytics-tab.tsx)
+- [frontend/components/documents/processing-tab.tsx](frontend/components/documents/processing-tab.tsx)
+- [frontend/lib/agent-constants.ts](frontend/lib/agent-constants.ts)
+- [orchestrator/alembic/versions/add_job_title_to_agents.py](orchestrator/alembic/versions/add_job_title_to_agents.py)
+- [orchestrator/alembic/versions/agent_public_id_and_slug_fix.py](orchestrator/alembic/versions/agent_public_id_and_slug_fix.py)
+- [orchestrator/alembic/versions/seed_auto_agents_existing_workspaces.py](orchestrator/alembic/versions/seed_auto_agents_existing_workspaces.py)
+- [orchestrator/alembic/versions/wave1a_agent_responsibilities.py](orchestrator/alembic/versions/wave1a_agent_responsibilities.py)
+- [orchestrator/alembic/versions/wave1b_heartbeat_completion.py](orchestrator/alembic/versions/wave1b_heartbeat_completion.py)
+- [orchestrator/alembic/versions/wave1c_report_signals.py](orchestrator/alembic/versions/wave1c_report_signals.py)
+- [orchestrator/alembic/versions/wave1d_mission_lifecycle.py](orchestrator/alembic/versions/wave1d_mission_lifecycle.py)
+- [orchestrator/api/agents.py](orchestrator/api/agents.py)
+- [orchestrator/core/models/core.py](orchestrator/core/models/core.py)
+- [orchestrator/core/models/orchestration.py](orchestrator/core/models/orchestration.py)
+- [orchestrator/core/models/orchestration_enums.py](orchestrator/core/models/orchestration_enums.py)
+- [orchestrator/core/utils/agent_resolver.py](orchestrator/core/utils/agent_resolver.py)
 
 </details>
 
@@ -19,7 +34,7 @@ This page documents the SQLAlchemy ORM models that define the database schema fo
 
 ## Model Organization
 
-Database models are organized in the `orchestrator/core/models/` directory as a modular package. The `__init__.py` file serves as the central hub, importing and exposing models to allow unified imports like `from core.models import Agent, LLMUsage, OrchestrationRun` [orchestrator/core/models/__init__.py:1-49]().
+Database models are organized in the `orchestrator/core/models/` directory as a modular package. The `__init__.py` file serves as the central hub, importing and exposing models to allow unified imports like `from core.models import Agent, LLMUsage, OrchestrationRun` [orchestrator/core/models/__init__.py:1-51]().
 
 ### Module Structure
 
@@ -48,14 +63,14 @@ graph TB
     Init --> ToolsPy
 ```
 
-**Sources:** [orchestrator/core/models/__init__.py:1-49](), [orchestrator/core/models/core.py:43-140](), [orchestrator/core/models/composio_cache.py:39-132]()
+**Sources:** [orchestrator/core/models/__init__.py:1-80](), [orchestrator/core/models/core.py:43-140](), [orchestrator/core/models/system_prompts.py:32-138]()
 
 ### Database Connection & Session Management
 
 The system uses SQLAlchemy with a PostgreSQL backend, utilizing `JSONB` for flexible configuration and `UUID` for multi-tenant identifiers [orchestrator/core/models/core.py:9-19]().
 
 **Session Lifecycle Pattern**
-The application follows a dependency injection pattern for database sessions. The `get_db` utility provides a scoped session per request, ensuring transactions are handled at the API level [orchestrator/api/missions.py:47]().
+The application follows a dependency injection pattern for database sessions. The `get_db` utility provides a scoped session per request, ensuring transactions are handled at the API level [orchestrator/api/agents.py:9]().
 
 ---
 
@@ -76,23 +91,24 @@ The system maintains a registry of available models and tracks their usage for a
 
 ### Agent & Skill Models
 
-Agents are the primary execution units, associated with skills and scoped to workspaces.
+Agents are the primary execution units. Recent migrations have introduced `public_id` (UUID) for secure external identification and per-workspace `slug` uniqueness [orchestrator/alembic/versions/agent_public_id_and_slug_fix.py:1-13](). Every workspace is automatically provisioned with a system "Auto" agent for orchestration [orchestrator/alembic/versions/seed_auto_agents_existing_workspaces.py:1-10]().
 
 ```mermaid
 erDiagram
     AGENTS ||--o{ AGENT_SKILLS : "possesses"
     SKILLS ||--o{ AGENT_SKILLS : "assigned_to"
     AGENTS }o--|| WORKSPACES : "belongs_to"
-    AGENTS ||--o{ BOARD_TASKS : "executes"
-    AGENTS ||--o{ AGENT_APP_ASSIGNMENTS : "uses_tools"
+    AGENTS ||--o{ AGENT_APP_ASSIGNMENTS : "has_tools"
     
     AGENTS {
         int id PK
+        uuid public_id UK
         uuid workspace_id FK
         varchar name
+        varchar slug
         jsonb configuration
         jsonb model_config
-        varchar status
+        boolean is_system_agent
     }
     
     SKILLS {
@@ -102,24 +118,31 @@ erDiagram
         uuid workspace_id FK
     }
     
-    BOARD_TASKS {
-        int id PK
-        uuid workspace_id FK
-        int assigned_agent_id FK
-        varchar status
-        varchar source_type
-    }
-
     AGENT_APP_ASSIGNMENTS {
         int id PK
         int agent_id FK
         varchar app_name
-        varchar app_type
         boolean is_active
     }
 ```
 
-**Sources:** [orchestrator/core/models/core.py:29-37](), [orchestrator/core/models/core.py:97](), [orchestrator/core/models/composio_cache.py:165-188]()
+**Sources:** [orchestrator/core/models/core.py:29-37](), [orchestrator/core/models/composio_cache.py:13](), [orchestrator/alembic/versions/agent_public_id_and_slug_fix.py:28-66](), [orchestrator/alembic/versions/seed_auto_agents_existing_workspaces.py:42-60]()
+
+---
+
+## System Prompt Management (PRD-58)
+
+The system includes a versioned prompt management layer that allows admins to manage system-wide prompts (e.g., routing logic, personality templates) with evaluation tracking [orchestrator/core/models/system_prompts.py:1-6]().
+
+### Prompt Schema
+
+| Class | Table | Role |
+|-------|-------|------|
+| `SystemPrompt` | `system_prompts` | The root prompt entity. Uses a `slug` as a stable identifier for code references (e.g., `routing-classifier`) [orchestrator/core/models/system_prompts.py:32-68](). |
+| `SystemPromptVersion` | `system_prompt_versions` | Immutable snapshots of prompt content. Only one version per prompt is marked as `active` [orchestrator/core/models/system_prompts.py:71-105](). |
+| `SystemPromptEvalRun` | `system_prompt_eval_runs` | Tracks FutureAGI evaluation, optimization, or safety check runs against a specific prompt version [orchestrator/core/models/system_prompts.py:108-138](). |
+
+**Sources:** [orchestrator/core/models/system_prompts.py:32-138]()
 
 ---
 
@@ -131,48 +154,14 @@ The Mission system (Sequential Mission Coordinator) uses a set of specialized mo
 
 | Class | Table | Role |
 |-------|-------|------|
-| `OrchestrationRun` | `orchestration_runs` | Represents a "Mission". Stores high-level goal, `budget_config`, `budget_spent`, and overall state (INITIAL, ACTIVE, TERMINAL) [orchestrator/core/models/orchestration.py:39-136](). |
-| `OrchestrationTask` | `orchestration_tasks` | A single step within a mission. Tracks assigned agent, input/output data, and execution state [orchestrator/core/models/orchestration.py:153-232](). |
-| `OrchestrationEvent` | `orchestration_events` | Audit log for mission transitions and system actions [orchestrator/core/models/orchestration.py:284-315](). |
-| `OrchestrationArchive` | `orchestration_archives` | Long-term storage for completed missions [orchestrator/core/models/orchestration.py:326-348](). |
+| `OrchestrationRun` | `orchestration_runs` | Represents a "Mission". Stores goal, plan, budget configuration, and state (PENDING, RUNNING, etc.) [orchestrator/core/models/orchestration.py:39-140](). |
+| `OrchestrationTask` | `orchestration_tasks` | A single step within a mission. Tracks assigned agent, verification criteria, and execution state [orchestrator/core/models/orchestration.py:159-230](). |
+| `OrchestrationEvent` | `orchestration_events` | Audit log for mission transitions and system actions [orchestrator/core/models/__init__.py:30](). |
 
-**Governance & Reliability**: 
-- **Optimistic Locking**: `OrchestrationRun` uses a `version_id` column for concurrency control [orchestrator/core/models/orchestration.py:134-136]().
-- **Checkpoints**: Missions track `checkpoint_count` to facilitate recovery from S3-backed session snapshots [orchestrator/core/models/orchestration.py:112](), [orchestrator/services/checkpoint_service.py:40-79]().
+**State Machine Logic**:
+Missions utilize `RunState` and `TaskState` enums. Notably, in `OrchestrationTask`, the `completed` state is NOT terminal; only `verified`, `failed`, or `skipped` are considered terminal [orchestrator/core/models/orchestration.py:166-168]().
 
-**Sources:** [orchestrator/core/models/orchestration.py:39-348](), [orchestrator/services/checkpoint_service.py:40-79]()
-
----
-
-## Tool & Integration Models
-
-The system caches external tool metadata (primarily from Composio) to enable local discovery and routing [orchestrator/core/models/composio_cache.py:1-14]().
-
-### Tool Cache Schema
-
-- **ComposioAppCache**: Stores application-level metadata like `app_slug`, `logo_url`, and `auth_schemes` [orchestrator/core/models/composio_cache.py:39-60]().
-- **ComposioActionCache**: Stores specific tool definitions, including `parameters` (JSON schema) and `response_schema` [orchestrator/core/models/composio_cache.py:86-110]().
-- **AgentAppAssignment**: Links agents to specific tools with an `is_active` toggle and `priority` weight [orchestrator/core/models/composio_cache.py:165-188]().
-
-**Natural Language to Code Entity Mapping**
-
-```mermaid
-graph LR
-    User["User (Marketplace)"] -- "Installs App" --> Sync["orchestrator/services/composio_sync.py"]
-    Sync -- "Populates" --> CAC["ComposioActionCache"]
-    Sync -- "Populates" --> CAP["ComposioAppCache"]
-    
-    subgraph "Database Entities"
-        CAP["ComposioAppCache"]
-        CAC["ComposioActionCache"]
-        AAA["AgentAppAssignment"]
-    end
-    
-    Agent["Agent Runtime"] -- "Queries Registry" --> AAA
-    AAA -- "References" --> CAC
-```
-
-**Sources:** [orchestrator/core/models/composio_cache.py:39-188]()
+**Sources:** [orchestrator/core/models/orchestration.py:39-230](), [orchestrator/core/models/orchestration_enums.py:18-60]()
 
 ---
 
@@ -180,24 +169,33 @@ graph LR
 
 ### Multi-Tenancy (Workspace ID)
 Multi-tenancy is strictly enforced via `workspace_id` foreign keys on nearly all models.
-- **Foreign Key**: `workspace_id = Column(UUID(as_uuid=True), ForeignKey('workspaces.id'))` [orchestrator/core/models/orchestration.py:59-64]().
-- **Isolation**: All queries are scoped to the `workspace_id` extracted from the request context [orchestrator/api/missions.py:197]().
+- **Foreign Key**: Models like `LLMModel`, `LLMUsage`, and `UserApiKey` include a `workspace_id` referencing the `workspaces` table [orchestrator/core/models/core.py:97](), [orchestrator/core/models/core.py:127](), [orchestrator/core/models/core.py:143]().
+- **Resolution**: The `resolve_agent_id` utility ensures that even when using `public_id` (UUID), the agent must belong to the caller's `workspace_id` [orchestrator/core/utils/agent_resolver.py:17-49]().
 
 ### JSONB Fields
-The codebase extensively uses `JSONB` for flexible schemas and governance data:
-- **Governance**: `budget_config` and `budget_spent` in `OrchestrationRun` [orchestrator/core/models/orchestration.py:115-116]().
-- **Tool Schemas**: `parameters` and `response_schema` in `ComposioActionCache` [orchestrator/core/models/composio_cache.py:96-97]().
-- **Metadata Aliasing**: To avoid clashes with SQLAlchemy's internal `metadata` attribute, several models map the physical `metadata` JSONB column to specialized names like `app_metadata`, `action_metadata`, or `job_metadata` [orchestrator/core/models/composio_cache.py:11-14](), [orchestrator/core/models/composio_cache.py:56](), [orchestrator/core/models/composio_cache.py:106](), [orchestrator/core/models/composio_cache.py:145]().
+The codebase extensively uses `JSONB` for flexibility:
+- **Capabilities**: `LLMModel.capabilities` stores model-specific features [orchestrator/core/models/core.py:57]().
+- **Configuration**: `Agent.model_config` and `Agent.configuration` store LLM parameters and proactive heartbeat settings [orchestrator/alembic/versions/seed_auto_agents_existing_workspaces.py:73-75]().
+- **Budget Tracking**: `OrchestrationRun` uses JSONB for `budget_config` and `budget_spent` tracking [orchestrator/core/models/orchestration.py:115-116]().
+- **Evaluation**: `SystemPromptVersion.eval_scores` and `SystemPromptEvalRun.scores` store complex metric objects [orchestrator/core/models/system_prompts.py:98](), [orchestrator/core/models/system_prompts.py:129]().
 
-### State Machine Pattern
-Missions and tasks follow a formal state machine defined in `orchestration_enums.py`. Transitions are managed by the `orchestration_state.py` service, which performs a **dual-write**: updating the entity row and appending an `OrchestrationEvent` in the same transaction [orchestrator/services/orchestration_state.py:84-185]().
+**Natural Language Space to Code Entity Mapping**
 
-### Cost and Execution Tracking
-Recent schema updates (PRD-123) have introduced specific columns for tracking tool execution efficiency and costs within the `tool_execution_logs` table:
-- `estimated_cost`: Tracks the LLM or API cost of a specific tool call [orchestrator/alembic/versions/prd123_cost_tracking.py:21]().
-- `execution_ms`: Records the latency of the tool execution [orchestrator/alembic/versions/prd123_cost_tracking.py:29]().
-- `rate_limit_remaining`: Provides visibility into provider limits [orchestrator/alembic/versions/prd123_cost_tracking.py:25]().
+```mermaid
+graph LR
+    User["User / Developer"] -- "References Agent" --> Resolver["orchestrator/core/utils/agent_resolver.py<br/>resolve_agent_id()"]
+    Resolver -- "Checks UUID" --> AgentTable["Agent Model (public_id)"]
+    Resolver -- "Validates Workspace" --> AgentTable["Agent Model (workspace_id)"]
+    
+    subgraph "Internal Resolution"
+        AgentTable
+        InternalID["Internal Integer ID"]
+    end
+    
+    Resolver -- "Returns" --> InternalID
+    InternalID -- "Used by" --> API["orchestrator/api/agents.py"]
+```
 
-**Sources:** [orchestrator/core/models/orchestration.py:39-232](), [orchestrator/services/orchestration_state.py:84-185](), [orchestrator/core/models/composio_cache.py:86-110](), [orchestrator/alembic/versions/prd123_cost_tracking.py:18-31]()
+**Sources:** [orchestrator/core/utils/agent_resolver.py:17-69](), [orchestrator/core/models/core.py:43-140](), [orchestrator/api/agents.py:1-31]()
 
 ---

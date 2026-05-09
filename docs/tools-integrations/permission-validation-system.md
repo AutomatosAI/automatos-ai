@@ -5,34 +5,41 @@
 
 The following files were used as context for generating this wiki page:
 
-- [orchestrator/core/services/intent_classifier.py](orchestrator/core/services/intent_classifier.py)
-- [orchestrator/modules/tools/discovery/actions_agents.py](orchestrator/modules/tools/discovery/actions_agents.py)
-- [orchestrator/modules/tools/discovery/actions_assignments.py](orchestrator/modules/tools/discovery/actions_assignments.py)
-- [orchestrator/modules/tools/discovery/actions_documents.py](orchestrator/modules/tools/discovery/actions_documents.py)
-- [orchestrator/modules/tools/discovery/actions_marketplace.py](orchestrator/modules/tools/discovery/actions_marketplace.py)
-- [orchestrator/modules/tools/discovery/actions_missions.py](orchestrator/modules/tools/discovery/actions_missions.py)
-- [orchestrator/modules/tools/discovery/actions_monitoring.py](orchestrator/modules/tools/discovery/actions_monitoring.py)
-- [orchestrator/modules/tools/discovery/actions_playbooks.py](orchestrator/modules/tools/discovery/actions_playbooks.py)
-- [orchestrator/modules/tools/discovery/actions_reports.py](orchestrator/modules/tools/discovery/actions_reports.py)
-- [orchestrator/modules/tools/discovery/actions_scheduling.py](orchestrator/modules/tools/discovery/actions_scheduling.py)
-- [orchestrator/modules/tools/discovery/actions_search.py](orchestrator/modules/tools/discovery/actions_search.py)
-- [orchestrator/modules/tools/discovery/actions_workspace.py](orchestrator/modules/tools/discovery/actions_workspace.py)
-- [orchestrator/modules/tools/discovery/handlers_agents.py](orchestrator/modules/tools/discovery/handlers_agents.py)
-- [orchestrator/modules/tools/discovery/handlers_reports.py](orchestrator/modules/tools/discovery/handlers_reports.py)
+- [docs/notes/andy-fuck-it-mode.md](docs/notes/andy-fuck-it-mode.md)
+- [frontend/app/admin/workspaces/page.tsx](frontend/app/admin/workspaces/page.tsx)
+- [frontend/contexts/role-context.tsx](frontend/contexts/role-context.tsx)
+- [orchestrator/alembic/versions/prd140_permission_bypass_log.py](orchestrator/alembic/versions/prd140_permission_bypass_log.py)
+- [orchestrator/api/admin_workspaces.py](orchestrator/api/admin_workspaces.py)
+- [orchestrator/consumers/chatbot/auto.py](orchestrator/consumers/chatbot/auto.py)
+- [orchestrator/core/auth/clerk.py](orchestrator/core/auth/clerk.py)
+- [orchestrator/core/security/__init__.py](orchestrator/core/security/__init__.py)
+- [orchestrator/core/security/bypass_audit.py](orchestrator/core/security/bypass_audit.py)
+- [orchestrator/core/security/hierarchy_permissions.py](orchestrator/core/security/hierarchy_permissions.py)
+- [orchestrator/core/security/rate_limiter.py](orchestrator/core/security/rate_limiter.py)
+- [orchestrator/core/security/url_validator.py](orchestrator/core/security/url_validator.py)
+- [orchestrator/core/services/auto_reporting.py](orchestrator/core/services/auto_reporting.py)
+- [orchestrator/core/services/notification_dispatcher.py](orchestrator/core/services/notification_dispatcher.py)
+- [orchestrator/modules/tools/discovery/actions_auto_reporting.py](orchestrator/modules/tools/discovery/actions_auto_reporting.py)
+- [orchestrator/modules/tools/discovery/handlers_auto_reporting.py](orchestrator/modules/tools/discovery/handlers_auto_reporting.py)
+- [orchestrator/modules/tools/discovery/platform_actions.py](orchestrator/modules/tools/discovery/platform_actions.py)
+- [orchestrator/modules/tools/discovery/platform_executor.py](orchestrator/modules/tools/discovery/platform_executor.py)
+- [orchestrator/services/workspace_purge.py](orchestrator/services/workspace_purge.py)
+- [orchestrator/tests/test_prd128_notification_dispatcher.py](orchestrator/tests/test_prd128_notification_dispatcher.py)
 
 </details>
 
 
 
-The Permission & Validation System in Automatos AI ensures that AI agents and workflows operate within safe boundaries, respecting multi-tenant isolation and functional capabilities. It bridges the gap between natural language intents and structured execution by validating actions against a defined taxonomy and workspace-scoped permissions.
+The Permission & Validation System in Automatos AI ensures that AI agents and workflows operate within safe boundaries, respecting multi-tenant isolation, administrative constraints, and functional capabilities. It bridges the gap between natural language intents and structured execution by validating actions against a defined taxonomy and workspace-scoped permissions.
 
 ## Core Components
 
-The system relies on three primary layers to validate and filter actions before they reach the execution engine:
+The system relies on four primary layers to validate and filter actions before they reach the execution engine:
 
-1.  **Complexity Assessment (AutoBrain)**: Determines the depth of the request and identifies necessary tool categories (tool hints). [orchestrator/consumers/chatbot/auto.py:5-21]()
-2.  **Action Capability Filter**: Maps natural language intents to specific platform capabilities and validates if the agent has the authority to perform them. [orchestrator/modules/tools/execution/unified_executor.py:44-51]()
-3.  **Workspace Isolation**: Ensures all database queries and tool executions are strictly scoped to the `workspace_id` provided in the request context. [orchestrator/modules/tools/discovery/handlers_agents.py:13-17]()
+1.  **Complexity Assessment (AutoBrain)**: Determines the depth of the request (Atom → Organism) and identifies necessary tool categories (`tool_hints`) to narrow the tool search space. [orchestrator/consumers/chatbot/auto.py:5-22]()
+2.  **Hierarchy Permissions (PRD-140)**: A service-layer chokepoint that validates if an actor (agent) has the right to modify a target entity (another agent, playbook, or skill) based on organizational reporting lines. [orchestrator/core/security/hierarchy_permissions.py:1-18]()
+3.  **Platform Action Executor**: A thin dispatcher that routes platform management requests to domain-specific handlers while enforcing workspace isolation and rate limits. [orchestrator/modules/tools/discovery/platform_executor.py:1-9]()
+4.  **Rate Limiting (PRD-70)**: Uses Redis sliding window counters to prevent abuse of security-sensitive operations (e.g., `git_clone`, `platform_write`) on a per-workspace or per-agent basis. [orchestrator/core/security/rate_limiter.py:1-21]()
 
 ### System Data Flow
 
@@ -46,114 +53,111 @@ graph TD
         AutoBrain["AutoBrain (ComplexityAssessment)"]
     end
 
-    subgraph "Validation Layer"
-        IntentClass["IntentClassifier (Regex/LLM)"]
-        CapFilter["ActionCapabilityFilter (Tool Hints)"]
-        PermissionCheck["Workspace Permission Check"]
+    subgraph "Validation & Discovery Layer"
+        PlatformEx["platform_executor.py"]
+        Hierarchy["hierarchy_permissions.can_actor_modify"]
+        RateLimit["rate_limiter.check_rate_limit"]
     end
 
-    subgraph "Code Entity Space"
-        PlatformExec["PlatformActionExecutor"]
-        ComposioExec["ComposioToolExecutor"]
+    subgraph "Execution & Enforcement"
+        UniExec["UnifiedToolExecutor"]
+        Handler["Domain Handlers (e.g., handlers_agents.py)"]
         DB["PostgreSQL (Workspace Scoped)"]
     end
 
     UserMsg --> AutoBrain
-    AutoBrain -->|Complexity + tool_hints| IntentClass
-    IntentClass --> CapFilter
-    CapFilter --> PermissionCheck
-    PermissionCheck -->|Validated Action| PlatformExec
-    PermissionCheck -->|Validated Tool| ComposioExec
-    PlatformExec --> DB
-    ComposioExec --> DB
+    AutoBrain -->|tool_hints| PlatformEx
+    PlatformEx --> RateLimit
+    RateLimit --> Hierarchy
+    Hierarchy -->|Allowed| Handler
+    Handler --> DB
 ```
 
-**Sources**: [orchestrator/consumers/chatbot/auto.py:59-82](), [orchestrator/modules/tools/execution/unified_executor.py:67-74](), [orchestrator/core/services/intent_classifier.py:135-145]()
+**Sources**: [orchestrator/consumers/chatbot/auto.py:59-83](), [orchestrator/modules/tools/discovery/platform_executor.py:209-226](), [orchestrator/core/security/hierarchy_permissions.py:88-122]()
 
 ---
 
-## Action Capability Taxonomy
+## Hierarchy Permissions (PRD-140)
 
-Platform actions are strictly categorized by domain and permission level using the `ActionDefinition` class. This taxonomy allows the system to filter available capabilities based on the agent's role and the user's intent.
+The hierarchy permission system ensures that agents cannot arbitrarily modify platform state unless they are the owner of the target or the target reports to them.
 
-### Permission Levels
-Each registered action specifies a `permission_level` that dictates the risk profile of the operation:
-*   **read**: Non-destructive data retrieval (e.g., `platform_list_agents`). [orchestrator/modules/tools/discovery/actions_agents.py:30]()
-*   **write**: Modifying existing state or creating new entities (e.g., `platform_create_agent`). [orchestrator/modules/tools/discovery/actions_agents.py:141]()
-*   **destructive**: Permanent removal of data (e.g., `platform_delete_memory`). [orchestrator/modules/tools/discovery/actions_workspace.py:137]()
+### Enforcement Logic
+The `can_actor_modify` function serves as the central enforcement point. It follows a strict "Default Deny" policy:
+*   **Workspace Boundary**: Cross-workspace mutations are always denied. [orchestrator/core/security/hierarchy_permissions.py:151-162]()
+*   **System Bypass**: Only a narrow allowlist of system actors (e.g., `Auto`, `HARNESS`, `platform-system`) can bypass hierarchy checks. [orchestrator/core/security/hierarchy_permissions.py:53-60]()
+*   **Target Types**: The system currently enforces hierarchy on `agent`, `heartbeat`, `playbook`, `task`, `skill`, and `tool_assignment`. [orchestrator/core/security/hierarchy_permissions.py:41-46]()
 
-### Action Categories
-Actions are grouped into functional categories to facilitate discovery and hint-based filtering:
+### Mutation Mapping
+The `platform_executor.py` maps specific platform actions to their target types and ID parameters to facilitate these checks. [orchestrator/modules/tools/discovery/platform_executor.py:209-231]()
 
-| Category | Key Actions | Purpose |
+| Action Name | Target Type | Param Key |
 | :--- | :--- | :--- |
-| `agents` | `platform_list_agents`, `platform_create_agent` | Lifecycle management of AI agents. [orchestrator/modules/tools/discovery/actions_agents.py:18-73]() |
-| `memory` | `platform_store_memory`, `platform_search_memory` | Long-term workspace knowledge management. [orchestrator/modules/tools/discovery/actions_workspace.py:38-92]() |
-| `playbooks` | `platform_list_playbooks`, `platform_create_playbook` | Workflow and automation control. [orchestrator/modules/tools/discovery/actions_playbooks.py:11-72]() |
-| `missions` | `platform_create_mission`, `platform_get_mission` | Multi-agent autonomous orchestration. [orchestrator/modules/tools/discovery/actions_missions.py:9-85]() |
-| `monitoring` | `platform_query_loki_logs`, `platform_get_alerts` | Infrastructure and health observability. [orchestrator/modules/tools/discovery/actions_monitoring.py:11-112]() |
+| `platform_update_agent` | `TARGET_AGENT` | `agent_id` |
+| `platform_assign_skill_to_agent` | `TARGET_TOOL_ASSIGNMENT` | `agent_id` |
+| `platform_update_playbook` | `TARGET_PLAYBOOK` | `playbook_id` |
+| `platform_create_workspace_skill` | `TARGET_SKILL` | `None` (Escalates) |
 
-**Sources**: [orchestrator/modules/tools/discovery/actions_workspace.py:1-193](), [orchestrator/modules/tools/discovery/actions_agents.py:1-150](), [orchestrator/modules/tools/discovery/actions_playbooks.py:1-155]()
-
----
-
-## Intent Validation
-
-Before an action is executed, the system uses the `IntentClassifier` to perform fast pattern matching against the user's query. This ensures the requested action aligns with the identified intent category and action type.
-
-### Intent Classification Logic
-The `IntentClassifier` uses pre-compiled regular expressions to categorize queries into domains like `EMAIL`, `CODE`, `DATABASE`, or `MEMORY`. [orchestrator/core/services/intent_classifier.py:40-95]()
-
-*   **Category Detection**: Matches keywords like "remember" or "recall" to the `MEMORY` category. [orchestrator/core/services/intent_classifier.py:91-94]()
-*   **Action Type Detection**: Distinguishes between `FETCH` (get/show), `CREATE` (add/new), and `DELETE` (remove/cancel). [orchestrator/core/services/intent_classifier.py:98-113]()
-
-### Complexity Levels (PRD-68)
-The `AutoBrain` assessment produces a `ComplexityAssessment` that restricts tool access based on the request's depth. [orchestrator/consumers/chatbot/auto.py:14-17]()
-
-| Level | Capability Scope | Validation Rule |
-| :--- | :--- | :--- |
-| **ATOM** | Chitchat, Greetings | Minimal tool access, no complex reasoning. |
-| **MOLECULE** | Single Tool Call | Requires specific `tool_hints` match. |
-| **CELL** | Memory + Reasoning | Enables `UnifiedMemoryService` and fact retrieval. |
-| **ORGANISM** | Multi-Agent Coordination | Triggers `MissionAction` or `PlaybookAction` execution. |
-
-**Sources**: [orchestrator/core/services/intent_classifier.py:149-196](), [orchestrator/consumers/chatbot/auto.py:42-49]()
+**Sources**: [orchestrator/core/security/hierarchy_permissions.py:71-85](), [orchestrator/modules/tools/discovery/platform_executor.py:182-208]()
 
 ---
 
-## Workspace & Multi-Tenant Isolation
+## Rate Limiting & Security Gates
 
-The most critical validation step is ensuring that every operation is scoped to the correct `workspace_id`. This is enforced at the handler level for all platform actions.
+To prevent platform exhaustion and recursive agent loops, the system implements per-operation rate limits.
 
-### Isolation Enforcement Diagram
+### Operation Limits
+Limits are defined in `DEFAULT_LIMITS` and can be overridden via environment variables. [orchestrator/core/security/rate_limiter.py:45-57]()
+*   **platform_write**: 60 actions per minute per agent (subject). This prevents a chatty agent from starving parallel mission tasks. [orchestrator/core/security/rate_limiter.py:56]()
+*   **git_clone**: 5 per hour per workspace. [orchestrator/core/security/rate_limiter.py:47]()
+*   **skill_import**: 3 per hour. [orchestrator/core/security/rate_limiter.py:50]()
 
-This diagram maps the internal code entities involved in maintaining workspace boundaries during execution.
+### Enforcement Mechanism
+The `check_rate_limit` function uses a Redis-backed sliding window. If the count exceeds the limit, it raises a `429 HTTPException`. [orchestrator/core/security/rate_limiter.py:72-127]()
+
+**Sources**: [orchestrator/core/security/rate_limiter.py:33-40](), [orchestrator/core/security/rate_limiter.py:90-110]()
+
+---
+
+## Admin Validation & Workspace Purge
+
+Administrative operations (e.g., pausing or deleting workspaces) require elevated `system_role` validation.
+
+### Admin Access Control
+The `_assert_admin` helper in `api/admin_workspaces.py` checks if the `RequestContext` contains a user with the `admin` role. [orchestrator/api/admin_workspaces.py:45-54]()
+
+### Hard-Delete (Purge) Sequence
+When an administrator triggers a workspace deletion, the `workspace_purge.py` service executes a destructive sequence to ensure GDPR compliance and resource cleanup:
+1.  **S3 Wipe**: Deletes all objects under `s3://{bucket}/workspaces/{id}/`. [orchestrator/services/workspace_purge.py:121-144]()
+2.  **Clerk Deletion**: Removes the owning user from the Clerk authentication provider. [orchestrator/services/workspace_purge.py:157-165]()
+3.  **Database Cascade**: Discovers all tables with a `workspace_id` column and deletes associated rows. [orchestrator/services/workspace_purge.py:51-70]()
+
+**Sources**: [orchestrator/api/admin_workspaces.py:38-41](), [orchestrator/services/workspace_purge.py:1-19](), [orchestrator/services/workspace_purge.py:167-181]()
+
+---
+
+## Workspace Isolation Sequence
+
+The following diagram maps the internal code entities involved in maintaining workspace boundaries during platform action execution.
 
 **Workspace Isolation Sequence**
 ```mermaid
 sequenceDiagram
-    participant Agent as "AgentFactory (Runtime)"
-    participant Exec as "PlatformActionExecutor"
-    participant Handler as "handlers_agents.py (list_agents)"
-    participant DB as "SQLAlchemy Session (db)"
+    participant Agent as "Agent Runtime"
+    participant PlatExec as "PlatformActionExecutor"
+    participant Handler as "handlers_agents.py"
+    participant Hierarchy as "HierarchyPermissions"
+    participant DB as "SQLAlchemy Session"
 
-    Agent->>Exec: execute("platform_list_agents", params)
-    Note over Exec: Context contains workspace_id
-    Exec->>Handler: list_agents(db, workspace_id, params)
+    Agent->>PlatExec: call(action_name, params, workspace_id)
+    PlatExec->>Hierarchy: can_actor_modify(actor_id, target_type, target_id, workspace_id)
+    Hierarchy-->>PlatExec: PermissionDecision(allowed=True)
+    PlatExec->>Handler: list_agents(db, workspace_id, params)
     Handler->>DB: query(Agent).filter(Agent.workspace_id == workspace_id)
-    DB-->>Handler: Filtered Agent Records
-    Handler-->>Exec: Result Dict (success=True)
-    Exec-->>Agent: Result JSON String
+    DB-->>Handler: Scoped Result Set
+    Handler-->>PlatExec: Success Data
+    PlatExec-->>Agent: Result
 ```
 
-**Sources**: [orchestrator/modules/tools/discovery/handlers_agents.py:13-17](), [orchestrator/modules/tools/discovery/handlers_reports.py:13-15](), [orchestrator/modules/tools/discovery/actions_agents.py:11-17]()
-
-### Handler Validation Examples
-Handlers perform secondary validation on parameters to ensure data integrity within the workspace:
-*   **Report Validation**: `submit_report` checks for required markdown sections and validates `report_type` against an allowed enum. [orchestrator/modules/tools/discovery/handlers_reports.py:25-43]()
-*   **Agent Lookup**: `get_agent` allows lookup by `agent_id` or `agent_name` but always filters by `workspace_id`. [orchestrator/modules/tools/discovery/handlers_agents.py:73-81]()
-*   **Assignment Safety**: `platform_assign_tool_to_agent` validates that the tool (Composio app) is assigned to the specific agent within the workspace context. [orchestrator/modules/tools/discovery/actions_assignments.py:9-35]()
-
-**Sources**: [orchestrator/modules/tools/discovery/handlers_reports.py:109-121](), [orchestrator/modules/tools/discovery/handlers_agents.py:120-156](), [orchestrator/modules/tools/discovery/actions_assignments.py:1-122]()
+**Sources**: [orchestrator/modules/tools/discovery/platform_executor.py:1-9](), [orchestrator/core/security/hierarchy_permissions.py:88-122](), [orchestrator/modules/tools/discovery/handlers_agents.py:19-28]()
 
 ---

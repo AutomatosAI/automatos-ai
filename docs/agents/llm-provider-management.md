@@ -5,21 +5,21 @@
 
 The following files were used as context for generating this wiki page:
 
-- [docs/PRDS/78-AUTONOMOUS-TEST-COVERAGE-QUALITY-MESH.md](docs/PRDS/78-AUTONOMOUS-TEST-COVERAGE-QUALITY-MESH.md)
-- [orchestrator/api/tools.py](orchestrator/api/tools.py)
-- [orchestrator/core/composio/client.py](orchestrator/core/composio/client.py)
-- [orchestrator/core/composio/tool_executor.py](orchestrator/core/composio/tool_executor.py)
+- [frontend/components/settings/GeneralSettingsTab.tsx](frontend/components/settings/GeneralSettingsTab.tsx)
+- [frontend/components/settings/OnboardingAgentsTab.tsx](frontend/components/settings/OnboardingAgentsTab.tsx)
+- [frontend/components/settings/SettingsPanel.tsx](frontend/components/settings/SettingsPanel.tsx)
+- [frontend/components/settings/SystemSettingsTab.tsx](frontend/components/settings/SystemSettingsTab.tsx)
+- [orchestrator/api/chatbot_llm.py](orchestrator/api/chatbot_llm.py)
+- [orchestrator/api/onboarding_agents.py](orchestrator/api/onboarding_agents.py)
 - [orchestrator/core/llm/clients/azure_client.py](orchestrator/core/llm/clients/azure_client.py)
+- [orchestrator/core/llm/clients/base.py](orchestrator/core/llm/clients/base.py)
 - [orchestrator/core/llm/clients/grok_client.py](orchestrator/core/llm/clients/grok_client.py)
 - [orchestrator/core/llm/clients/openai_client.py](orchestrator/core/llm/clients/openai_client.py)
 - [orchestrator/core/llm/clients/openrouter_client.py](orchestrator/core/llm/clients/openrouter_client.py)
-- [orchestrator/modules/agents/factory/agent_factory.py](orchestrator/modules/agents/factory/agent_factory.py)
-- [orchestrator/modules/tools/services/composio_hint_service.py](orchestrator/modules/tools/services/composio_hint_service.py)
-- [orchestrator/modules/tools/services/composio_tool_service.py](orchestrator/modules/tools/services/composio_tool_service.py)
-- [orchestrator/services/metadata_sync_service.py](orchestrator/services/metadata_sync_service.py)
-- [tests/RECIPE_RUNNERS.md](tests/RECIPE_RUNNERS.md)
-- [tests/run_gap_finder.py](tests/run_gap_finder.py)
-- [tests/run_health_regression.py](tests/run_health_regression.py)
+- [orchestrator/core/llm/manager.py](orchestrator/core/llm/manager.py)
+- [orchestrator/core/models/system_settings.py](orchestrator/core/models/system_settings.py)
+- [orchestrator/core/seeds/seed_system_settings.py](orchestrator/core/seeds/seed_system_settings.py)
+- [orchestrator/scripts/create_test_workspace.py](orchestrator/scripts/create_test_workspace.py)
 
 </details>
 
@@ -27,230 +27,134 @@ The following files were used as context for generating this wiki page:
 
 ## Purpose and Scope
 
-This document describes how Automatos AI manages LLM provider connections, credentials, and failover mechanisms through the `LLMManager` system. The LLM Manager abstracts multiple AI providers (OpenAI, Anthropic, Google, etc.) behind a unified interface, handles credential resolution with a 3-tier resolution strategy (BYOK, Credential Store, and Environment Variables), and provides automatic provider detection.
+This document describes how Automatos AI manages LLM provider connections, credentials, and configuration through the `LLMManager` system. Following the **PRD-136** consolidation, the system manages 12 legacy LLM silos into 3 primary tiers: **Auto** (reasoning/orchestration), **System** (high-volume internal tasks), and **Embeddings** (vectorization).
 
-The system ensures that every internal service—from the orchestrator to the complexity assessor—has access to optimized LLM resources while maintaining strict workspace isolation and cost tracking.
+The `LLMManager` abstracts multiple AI providers behind a unified interface, handles 3-tier API key resolution (BYOK, Credential Store, and Env), and provides automatic provider detection based on service identity.
 
-**Sources:** [orchestrator/core/llm/manager.py:1-7](), [orchestrator/core/llm/manager.py:29-41]()
+**Sources:** [orchestrator/core/llm/manager.py:1-7](), [orchestrator/core/llm/manager.py:29-32](), [orchestrator/core/seeds/seed_system_settings.py:7-8]()
 
 ---
 
 ## Architecture Overview
 
-The `LLMManager` serves as the central abstraction layer between services and AI providers. It loads configuration from system settings, resolves credentials through a multi-tier fallback strategy, and instantiates the appropriate provider client.
+The `LLMManager` serves as the central abstraction layer. It maps internal services to one of the three LLM tiers, loads configuration from the `SystemSetting` table, and instantiates provider-specific clients.
 
-### LLM Management Data Flow
+### LLM Tier Mapping and Flow
 
 ```mermaid
 graph TB
-    subgraph "Configuration & Credentials"
-        SystemSettings["SystemSetting Table<br/>(per-service LLM config)"]
-        CredStore["CredentialStore<br/>(encrypted API keys)"]
-        EnvVars["Environment Variables<br/>(fallback source)"]
+    subgraph "Tier 1: Auto (orchestrator_llm)"
+        Orchestrator["orchestrator"]
+        Heartbeat["heartbeat"]
     end
     
-    subgraph "LLM Manager Core"
-        LLMManager["LLMManager<br/>orchestrator/core/llm/manager.py"]
-        LLMConfig["LLMConfig<br/>(provider + model + params)"]
-        CredResolver["get_credential_data()<br/>(Multi-tier resolution)"]
+    subgraph "Tier 2: System (system_llm)"
+        Chatbot["chatbot"]
+        RAG["rag"]
+        Memory["memory_integration"]
+        Planner["planner"]
+        Verifier["verifier"]
     end
     
-    subgraph "Provider Clients"
-        OpenAIProvider["OpenAIProvider<br/>clients/openai_client.py"]
-        AnthropicProvider["AnthropicProvider<br/>clients/anthropic_client.py"]
-        GoogleProvider["GoogleProvider<br/>clients/google_client.py"]
-        AzureProvider["AzureProvider<br/>clients/azure_client.py"]
-        HFProvider["HuggingFaceProvider<br/>clients/huggingface_client.py"]
-        BedrockProvider["BedrockProvider<br/>clients/bedrock_client.py"]
-        GrokProvider["GrokProvider<br/>clients/grok_client.py"]
-        OpenRouterProvider["OpenRouterProvider<br/>clients/openrouter_client.py"]
+    subgraph "Tier 3: Embeddings"
+        Vector["embeddings"]
     end
+
+    TierMap["LLMManager.SERVICE_CATEGORY_MAP"]
     
-    subgraph "Consumer Services"
-        AgentFactory["AgentFactory<br/>(agent execution)"]
-        ChatService["StreamingChatService<br/>(chat responses)"]
-        HeartbeatService["HeartbeatService<br/>(periodic checks)"]
-        ComplexityAssessor["ComplexityAssessor<br/>(routing decisions)"]
-    end
-    
-    SystemSettings --> LLMManager
-    CredStore --> CredResolver
-    EnvVars --> CredResolver
-    CredResolver --> LLMManager
-    LLMManager --> LLMConfig
-    
-    LLMConfig --> OpenAIProvider
-    LLMConfig --> AnthropicProvider
-    LLMConfig --> GoogleProvider
-    LLMConfig --> AzureProvider
-    LLMConfig --> HFProvider
-    LLMConfig --> BedrockProvider
-    LLMConfig --> GrokProvider
-    LLMConfig --> OpenRouterProvider
-    
-    AgentFactory --> LLMManager
-    ChatService --> LLMManager
-    HeartbeatService --> LLMManager
-    ComplexityAssessor --> LLMManager
+    Orchestrator & Heartbeat --> TierMap
+    Chatbot & RAG & Memory & Planner & Verifier --> TierMap
+    Vector --> TierMap
+
+    TierMap --> Config["LLMConfig<br/>(Provider, Model, Params)"]
+    Config --> Clients["Provider Clients<br/>(OpenAI, Anthropic, OpenRouter, etc.)"]
 ```
 
-**Sources:** [orchestrator/core/llm/manager.py:17-26](), [orchestrator/modules/agents/factory/agent_factory.py:25-25](), [orchestrator/services/heartbeat_service.py:113-121]()
+**Sources:** [orchestrator/core/llm/manager.py:33-53](), [orchestrator/core/llm/clients/base.py:61-76](), [orchestrator/core/seeds/seed_system_settings.py:35-41]()
 
 ---
 
-## Supported Providers
+## LLM Tier Schema (PRD-136)
 
-Automatos AI supports a wide array of providers, each mapped to a specific client class that inherits from `BaseLLMProvider`.
+Every LLM tier (Auto, System, Embeddings) exposes a canonical set of parameters defined in `_llm_tier_settings`. This ensures consistent behavior across all internal services.
 
-| Provider | Enum Value | Client Class | Features |
-|----------|-----------|--------------|----------|
-| **OpenAI** | `LLMProvider.OPENAI` | `OpenAIProvider` | Native tool calling, context window protection [orchestrator/core/llm/clients/openai_client.py:21-22]() |
-| **Anthropic** | `LLMProvider.ANTHROPIC` | `AnthropicProvider` | Claude 3.5 Sonnet/Haiku |
-| **Google** | `LLMProvider.GOOGLE` | `GoogleProvider` | Gemini models |
-| **Azure OpenAI** | `LLMProvider.AZURE` | `AzureProvider` | Enterprise deployment support |
-| **HuggingFace** | `LLMProvider.HUGGINGFACE` | `HuggingFaceProvider` | TGI/Inference Endpoints |
-| **AWS Bedrock** | `LLMProvider.BEDROCK` | `BedrockProvider` | AWS hosted models |
-| **xAI Grok** | `LLMProvider.GROK` | `GrokProvider` | Grok-2 models via OpenAI-compatible API [orchestrator/core/llm/clients/grok_client.py:22-26]() |
-| **OpenRouter** | `LLMProvider.OPENROUTER` | `OpenRouterProvider` | Aggregator for 200+ models, image extraction [orchestrator/core/llm/clients/openrouter_client.py:26-27]() |
+| Parameter | Default (Auto) | Default (System) | Description |
+|-----------|----------------|------------------|-------------|
+| `provider` | `openrouter` | `openrouter` | Which LLM provider serves this tier [orchestrator/core/seeds/seed_system_settings.py:44-50](). |
+| `model` | `anthropic/claude-3.5-sonnet` | `google/gemini-2.0-flash-001` | Tier-specific model identifier [orchestrator/core/seeds/seed_system_settings.py:58-66](). |
+| `temperature` | `0.7` | `0.3` | Determinism vs. Creativity [orchestrator/core/seeds/seed_system_settings.py:71-77](). |
+| `timeout_seconds`| `120` | `60` | Request timeout before failover [orchestrator/core/seeds/seed_system_settings.py:135-141](). |
+| `max_retries` | `3` | `3` | Number of retries for transient failures [orchestrator/core/seeds/seed_system_settings.py:148-153](). |
 
-**Sources:** [orchestrator/core/llm/manager.py:18-26](), [orchestrator/core/llm/clients/openrouter_client.py:26-27](), [orchestrator/core/llm/clients/grok_client.py:22-26]()
-
----
-
-## Configuration System
-
-### Per-Service Configuration
-
-The system uses a canonical mapping from service names to settings categories, allowing granular control over which model performs which task.
-
-```python
-SERVICE_CATEGORY_MAP = {
-    "orchestrator": "orchestrator_llm",
-    "codegraph": "codegraph",
-    "document_processing": "document_processing",
-    "chatbot": "chatbot",
-    "rag": "rag",
-    "embeddings": "embeddings",
-    "memory_integration": "memory_integration",
-    "nl2sql": "nl2sql",
-    "heartbeat": "orchestrator_llm",
-    "complexity_assessor": "orchestrator_llm",
-}
-```
-
-**Sources:** [orchestrator/core/llm/manager.py:30-41]()
-
-### Configuration Resolution Logic
-
-When a service requests an LLM, the `LLMManager` performs the following lookups via `get_provider_and_model_from_settings`:
-1. **Provider/Model**: Fetches `llm_provider` and `llm_model` from the `SystemSetting` table for the specific service category [orchestrator/core/llm/manager.py:86-100]().
-2. **Settings Keys**: It checks both `llm_provider`/`llm_model` and legacy `provider`/`model` keys [orchestrator/core/llm/manager.py:102-110]().
-3. **No Defaults**: The system requires explicit configuration in settings; it will raise a `ValueError` if the provider or model is missing for a requested service [orchestrator/core/llm/manager.py:112-117]().
-
-**Sources:** [orchestrator/core/llm/manager.py:86-117]()
+**Sources:** [orchestrator/core/seeds/seed_system_settings.py:41-158](), [orchestrator/core/llm/manager.py:33-53]()
 
 ---
 
 ## 3-Tier API Key Resolution
 
-The `get_credential_data()` function implements a prioritized strategy to find API keys, ensuring that system-wide keys, workspace-specific keys, and environment variables are all resolved correctly.
+The `get_credential_data()` function implements a prioritized strategy to find API keys. This allows for global defaults while permitting workspace-specific overrides (BYOK).
 
 ### Resolution Hierarchy
 
-1.  **BYOK / Explicit Mapping**: Checks `SystemSetting` for an explicit credential name mapping (e.g., `orchestrator_llm.credential_name_openai`) [orchestrator/core/llm/manager.py:214-230]().
-2.  **Credential Store Lookup**: 
-    *   Tries pattern: `{environment}_{provider}_api` [orchestrator/core/llm/manager.py:232-237]().
-    *   Tries pattern: `{environment}_{provider}` [orchestrator/core/llm/manager.py:239-244]().
-    *   Tries lookup by `credential_type` (e.g., `openai_api`) [orchestrator/core/llm/manager.py:246-254]().
-3.  **Environment Variables**: Fallback to direct environment variables like `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` [orchestrator/core/llm/manager.py:257-292]().
+1.  **BYOK / Explicit Mapping**: Checks `SystemSetting` for an explicit credential name mapping for that provider (e.g., `orchestrator_llm.credential_name_openai`) [orchestrator/core/llm/manager.py:163-170]().
+2.  **Credential Store Pattern**: 
+    *   Tries `{environment}_{provider}_api` [orchestrator/core/llm/manager.py:188-192]().
+    *   Tries lookup by matching `credential_type` in the store [orchestrator/core/llm/manager.py:209-216]().
+3.  **Environment Variables**: Fallback to direct environment variables (e.g., `OPENAI_API_KEY`, `OPENROUTER_API_KEY`) if no store entry exists [orchestrator/core/llm/manager.py:243-264]().
 
 ```mermaid
 sequenceDiagram
     participant Manager as LLMManager
     participant Resolver as get_credential_data()
-    participant Settings as SystemSettings
-    participant Creds as CredentialResolver
-    participant Env as Environment Variables
+    participant DB as SystemSetting
+    participant Store as CredentialStore
+    participant Env as OS Environment
 
-    Manager->>Resolver: Resolve for "openai"
-    Resolver->>Settings: Tier 1: Check explicit mapping (credential_name_openai)
-    alt Mapping Found
-        Settings-->>Resolver: "my_prod_key"
-        Resolver->>Creds: Fetch "my_prod_key"
+    Manager->>Resolver: Resolve key for "anthropic"
+    Resolver->>DB: 1. Check explicit mapping
+    alt Found Mapping
+        DB-->>Resolver: "my_custom_anthropic_key"
+        Resolver->>Store: Fetch "my_custom_anthropic_key"
     else No Mapping
-        Resolver->>Creds: Tier 2: Flexible Lookup (Pattern & Type)
-        alt Not Found in Store
-            Resolver->>Env: Tier 3: Check OPENAI_API_KEY
+        Resolver->>Store: 2. Try pattern {env}_anthropic_api
+        alt Not in Store
+            Resolver->>Env: 3. Check ANTHROPIC_API_KEY
         end
     end
-    Resolver-->>Manager: Return API Key + Metadata
+    Resolver-->>Manager: Return API Key
 ```
 
-**Sources:** [orchestrator/core/llm/manager.py:124-180](), [orchestrator/core/llm/manager.py:199-254](), [orchestrator/core/llm/manager.py:257-292]()
+**Sources:** [orchestrator/core/llm/manager.py:135-220](), [orchestrator/core/llm/manager.py:243-264]()
 
 ---
 
-## Provider Auto-Detection
+## Provider Implementations
 
-The system supports automatic provider detection based on model IDs. The `AgentMetadata` class contains logic to infer the provider if only a `preferred_model` is provided:
-- **Anthropic**: Detected if "claude" is in the model name [orchestrator/modules/agents/factory/agent_factory.py:122-123]().
-- **HuggingFace**: Detected if "llama" or "mistral" is in the model name [orchestrator/modules/agents/factory/agent_factory.py:124-125]().
-- **OpenAI**: Default fallback for other model names [orchestrator/modules/agents/factory/agent_factory.py:121-121]().
+Providers inherit from `BaseLLMProvider` and implement `generate_response` and `_initialize_client`.
 
-**Sources:** [orchestrator/modules/agents/factory/agent_factory.py:120-131]()
+### OpenRouter Aggregator
+The `OpenRouterProvider` is the recommended default. It provides access to 200+ models via an OpenAI-compatible API. It includes custom logic for:
+*   **Image Extraction**: Extracts images from the `images` field used by Gemini models via OpenRouter [orchestrator/core/llm/clients/openrouter_client.py:151-163]().
+*   **Tool Sanitization**: Removes the `strict` field from tool definitions which many OpenRouter endpoints reject [orchestrator/core/llm/clients/openrouter_client.py:95-106]().
 
----
+### OpenAI Native
+The `OpenAIProvider` supports native tool calling and implements context window protection. It forces `tool_choice="required"` if the system prompt contains the string "You MUST call" [orchestrator/core/llm/clients/openai_client.py:95-99]().
 
-## Implementation in Agent Runtime
+### Grok (xAI)
+The `GrokProvider` uses an OpenAI-compatible client but targets the `https://api.x.ai/v1` endpoint [orchestrator/core/llm/clients/grok_client.py:22-26]().
 
-The `AgentFactory` utilizes the `LLMManager` to create the execution environment for agents.
-
-### Model Configuration
-Agents use a `ModelConfiguration` object that defines the provider, model ID, and sampling parameters (temperature, max_tokens, etc.) [orchestrator/modules/agents/factory/agent_factory.py:61-70]().
-
-```python
-@dataclass
-class ModelConfiguration:
-    provider: str
-    model_id: str
-    temperature: float = 0.7
-    max_tokens: int = 2000
-    fallback_model_id: Optional[str] = None
-```
-
-**Sources:** [orchestrator/modules/agents/factory/agent_factory.py:60-70]()
-
-### Agent Runtime State
-The `AgentRuntime` stores the initialized `llm_manager` and model metadata, ensuring that every tool execution or chat response is attributed to the correct model and workspace [orchestrator/modules/agents/factory/agent_factory.py:155-171]().
-
-```python
-@dataclass
-class AgentRuntime:
-    agent_id: int
-    metadata: AgentMetadata
-    llm_manager: LLMManager
-    lifecycle_state: AgentLifecycle
-    is_byok: bool = False
-    resolved_provider: str = ""
-    workspace_id: Optional[Any] = None
-```
-
-**Sources:** [orchestrator/modules/agents/factory/agent_factory.py:155-171]()
+**Sources:** [orchestrator/core/llm/clients/base.py:101-112](), [orchestrator/core/llm/clients/openrouter_client.py:26-51](), [orchestrator/core/llm/clients/openai_client.py:21-48](), [orchestrator/core/llm/clients/grok_client.py:22-48]()
 
 ---
 
-## Tool Integration and Sanitization
+## Management UI
 
-Each provider implementation handles tool calling specifically for its API. 
+Administrators manage these settings through the **System Settings** tab in the frontend.
 
-### OpenAI and Grok Tool Handling
-The `OpenAIProvider` and `GrokProvider` use `_sanitize_tools` to format tool definitions [orchestrator/core/llm/clients/openai_client.py:70-71](). They also implement logic to force tool usage (`tool_choice="required"`) if the system prompt contains the string "You MUST call" [orchestrator/core/llm/clients/openai_client.py:87-91]().
+*   **SystemSettingsTab**: The main container for managing database-backed settings [frontend/components/settings/SystemSettingsTab.tsx:42-49]().
+*   **LLMModelsSettingsTab**: Specifically handles the configuration for the three LLM tiers (Auto, System, Embeddings) [frontend/components/settings/SystemSettingsTab.tsx:29-29]().
+*   **OnboardingAgentsTab**: Provides granular control over the system agents (VOYAGER, BLUEPRINT, etc.) used during the Mission Zero onboarding flow, including their specific model assignments and temperatures [frontend/components/settings/OnboardingAgentsTab.tsx:51-60]().
 
-**Sources:** [orchestrator/core/llm/clients/openai_client.py:69-91](), [orchestrator/core/llm/clients/grok_client.py:69-72]()
-
-### OpenRouter Multi-modal Extraction
-The `OpenRouterProvider` includes specific logic to extract images from response payloads, supporting models like Gemini that return images via a separate `images` field or inline `image_url` parts [orchestrator/core/llm/clients/openrouter_client.py:143-164]().
-
-**Sources:** [orchestrator/core/llm/clients/openrouter_client.py:143-164]()
+**Sources:** [frontend/components/settings/SystemSettingsTab.tsx:1-16](), [frontend/components/settings/SettingsPanel.tsx:17-31](), [frontend/components/settings/OnboardingAgentsTab.tsx:20-42]()
 
 ---

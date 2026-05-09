@@ -14,11 +14,8 @@ The following files were used as context for generating this wiki page:
 - [services/agent-opt-worker/requirements.txt](services/agent-opt-worker/requirements.txt)
 - [services/shared/automatos_logging.py](services/shared/automatos_logging.py)
 - [services/shared/automatos_metrics.py](services/shared/automatos_metrics.py)
-- [services/workspace-worker/Dockerfile](services/workspace-worker/Dockerfile)
 - [services/workspace-worker/automatos_logging.py](services/workspace-worker/automatos_logging.py)
 - [services/workspace-worker/automatos_metrics.py](services/workspace-worker/automatos_metrics.py)
-- [services/workspace-worker/entrypoint.sh](services/workspace-worker/entrypoint.sh)
-- [services/workspace-worker/requirements.txt](services/workspace-worker/requirements.txt)
 
 </details>
 
@@ -59,8 +56,8 @@ graph TB
     end
     
     subgraph "Orchestrator: FutureAGIService"
-        EvalLive["eval_live_traffic()<br/>input_text, output_text, context_text"]
-        CheckAvailable["is_available property<br/>check AGENT_OPT_WORKER_URL"]
+        EvalLive["FutureAGIService.eval_live_traffic()<br/>input_text, output_text, context_text"]
+        CheckAvailable["is_available property<br/>check config.AGENT_OPT_WORKER_URL"]
         ExtractText["_extract_text()<br/>parse message parts"]
         QueryPrompts["db.query(SystemPrompt)<br/>.filter(futureagi_eval_enabled==True)"]
         CallWorker["_call_worker('/score', payload)<br/>timeout=120s"]
@@ -101,21 +98,21 @@ graph TB
     CreateRuns --> EvalRunsTable
 ```
 
-**Sources**: [orchestrator/core/services/futureagi_service.py:45-98](), [orchestrator/core/services/futureagi_service.py:234-301](), [services/agent-opt-worker/main.py:59-155](), [services/agent-opt-worker/main.py:298-331]()
+**Sources**: [orchestrator/core/services/futureagi_service.py:45-70](), [orchestrator/core/services/futureagi_service.py:234-301](), [services/agent-opt-worker/main.py:10-16](), [services/agent-opt-worker/main.py:298-331]()
 
 ---
 
 ## Enabling Live Scoring
 
-Live traffic scoring is controlled by the `futureagi_eval_enabled` flag on the `SystemPrompt` model. [frontend/components/settings/SystemPromptsTab.tsx:52]()
+Live traffic scoring is controlled by the `futureagi_eval_enabled` flag on the `SystemPrompt` model. [frontend/components/settings/SystemPromptsTab.tsx:53]()
 
 ### Database Model
 
 | Field | Type | Description |
 | :--- | :--- | :--- |
-| `futureagi_eval_enabled` | Boolean | When `true`, every chat interaction scores this prompt |
-| `slug` | String | Unique identifier (e.g., "chatbot-friendly") |
-| `category` | String | Grouping (personality, orchestrator, specialized) |
+| `futureagi_eval_enabled` | Boolean | When `true`, every chat interaction scores this prompt [frontend/components/settings/SystemPromptsTab.tsx:53]() |
+| `slug` | String | Unique identifier (e.g., "chatbot-friendly") [frontend/components/settings/SystemPromptsTab.tsx:47]() |
+| `category` | String | Grouping (personality, orchestrator, specialized) [frontend/components/settings/SystemPromptsTab.tsx:49]() |
 
 ### Frontend Toggle
 
@@ -136,7 +133,7 @@ sequenceDiagram
     UI-->>Admin: "Toggle state updated"
 ```
 
-**Sources**: [frontend/components/settings/SystemPromptsTab.tsx:44-59](), [frontend/components/settings/SystemPromptsTab.tsx:554-572]()
+**Sources**: [frontend/components/settings/SystemPromptsTab.tsx:52-59](), [frontend/components/settings/SystemPromptsTab.tsx:249-259](), [frontend/components/settings/SystemPromptsTab.tsx:554-572]()
 
 ---
 
@@ -177,13 +174,13 @@ graph LR
 
 ### Text Extraction
 
-Messages are stored as JSON arrays of parts. The `_extract_text()` helper extracts plain text from these complex structures. [orchestrator/core/services/futureagi_service.py:30-42]()
+Messages are stored as JSON arrays of parts. The `_extract_text()` helper extracts plain text from these complex structures by iterating through parts and filtering for `type: "text"`. [orchestrator/core/services/futureagi_service.py:30-42]()
 
 ### Worker Communication
 
-The orchestrator's `_call_worker()` method wraps HTTP communication with error handling, connection retries, and timeouts. [orchestrator/core/services/futureagi_service.py:79-98]()
+The orchestrator's `_call_worker()` method wraps HTTP communication with error handling, connection retries, and timeouts using `httpx.AsyncClient`. [orchestrator/core/services/futureagi_service.py:79-98]()
 
-**Request Schema** (`ScoreRequest`): [services/agent-opt-worker/main.py:177-182]()
+**Request Schema** (`ScoreRequest`): [services/agent-opt-worker/main.py:177-181]()
 
 | Field | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -192,7 +189,7 @@ The orchestrator's `_call_worker()` method wraps HTTP communication with error h
 | `context_text` | String | No | Additional context |
 | `metrics` | List[String] | No | Defaults to `["completeness", "is_helpful", "is_concise"]` |
 
-**Sources**: [orchestrator/core/services/futureagi_service.py:79-98](), [orchestrator/core/services/futureagi_service.py:258-272](), [services/agent-opt-worker/main.py:177-182](), [services/agent-opt-worker/main.py:303-331]()
+**Sources**: [orchestrator/core/services/futureagi_service.py:79-98](), [orchestrator/core/services/futureagi_service.py:258-272](), [services/agent-opt-worker/main.py:177-181](), [services/agent-opt-worker/main.py:303-331]()
 
 ---
 
@@ -219,7 +216,7 @@ graph TD
     Start["_run_single_template(template, inputs, model)"]
     GetKeys["_get_keys()<br/>os.getenv('FUTUREAGI_API_KEY')<br/>os.getenv('FUTUREAGI_SECRET_KEY')"]
     SetEnv["os.environ.setdefault()<br/>FI_API_KEY, FI_SECRET_KEY"]
-    CreateEval["Evaluator(fi_api_key, fi_secret_key)"]
+    CreateEval["fi.evals.Evaluator(fi_api_key, fi_secret_key)"]
     CallSDK["evaluator.evaluate(<br/>eval_templates=template,<br/>inputs=inputs,<br/>model_name=model,<br/>timeout=55)"]
     ParseResult["Parse result.eval_results[0]<br/>output, reason, score attrs"]
     ExtractScore["Convert output to score:<br/>- 'Passed' → 1.0<br/>- 'Failed' → 0.0<br/>- float → use directly"]
@@ -240,7 +237,7 @@ The worker's `_run_single_template()` function handles multiple output types fro
 
 ### Concurrent Execution
 
-All requested metrics run **concurrently** using Python's `ThreadPoolExecutor` to minimize total scoring latency. [services/agent-opt-worker/main.py:303-331]()
+All requested metrics run **concurrently** using Python's `ThreadPoolExecutor` within the worker service to minimize total scoring latency. [services/agent-opt-worker/main.py:313-316]()
 
 ---
 
@@ -266,7 +263,7 @@ Live traffic scoring builds the dataset used for prompt optimization by logging 
 
 ### Dataset Collection
 
-The `_collect_optimization_dataset()` method queries historical chat messages to build training data for the Meta-Prompting algorithms. [orchestrator/core/services/futureagi_service.py:308-344]()
+The `_collect_optimization_dataset()` method queries historical chat messages to build training data for the Meta-Prompting algorithms. It extracts text from message parts and pairs user messages with the subsequent assistant response. [orchestrator/core/services/futureagi_service.py:308-344]()
 
 **Sources**: [orchestrator/core/services/futureagi_service.py:30-42](), [orchestrator/core/services/futureagi_service.py:308-344]()
 
@@ -276,7 +273,7 @@ The `_collect_optimization_dataset()` method queries historical chat messages to
 
 ### Fire-and-Forget Pattern
 
-Live scoring is implemented as a fire-and-forget operation to ensure **zero user-facing latency**. The chat stream is closed before scoring begins. [orchestrator/core/services/futureagi_service.py:234-245]()
+Live scoring is implemented as a fire-and-forget operation to ensure **zero user-facing latency**. The orchestrator dispatches the task asynchronously after the chat stream is finalized. [orchestrator/core/services/futureagi_service.py:234-245]()
 
 ### Error Handling
 
@@ -290,15 +287,15 @@ The `eval_live_traffic()` method implements multiple layers of error handling to
 
 ### Assessment Runs Display
 
-The `SystemPromptsTab` admin UI displays live scoring results in the "Assessments" tab, allowing admins to see real-world performance. [frontend/components/settings/SystemPromptsTab.tsx:153-160]()
+The `SystemPromptsTab` admin UI displays live scoring results in the "Assessments" tab, allowing admins to see real-world performance. [frontend/components/settings/SystemPromptsTab.tsx:551-723]()
 
-**Sources**: [frontend/components/settings/SystemPromptsTab.tsx:153-160](), [frontend/components/settings/SystemPromptsTab.tsx:186]()
+**Sources**: [frontend/components/settings/SystemPromptsTab.tsx:551-723]()
 
 ### Score Rendering
 
-Each metric displays a color indicator, the metric name, score percentage, and a reason explanation derived from the worker's SDK response. [frontend/components/settings/SystemPromptsTab.tsx:41-42]()
+Each metric displays a color indicator, the metric name, score percentage, and a collapsible reason explanation derived from the worker's SDK response. [frontend/components/settings/SystemPromptsTab.tsx:617-635]()
 
-**Sources**: [frontend/components/settings/SystemPromptsTab.tsx:41-42](), [services/agent-opt-worker/main.py:122]()
+**Sources**: [frontend/components/settings/SystemPromptsTab.tsx:617-635]()
 
 ---
 
@@ -306,18 +303,18 @@ Each metric displays a color indicator, the metric name, score percentage, and a
 
 ### Environment Variables
 
-**Orchestrator** (`orchestrator/config.py`):
+**Orchestrator** (`config.py`):
 
 | Variable | Required | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `AGENT_OPT_WORKER_URL` | Yes | `http://agent-opt-worker.railway.internal:8080` | Worker service base URL |
+| `AGENT_OPT_WORKER_URL` | Yes | N/A | Worker service base URL [orchestrator/core/services/futureagi_service.py:25]() |
 
 **Worker Service** (`services/agent-opt-worker/main.py`):
 
 | Variable | Required | Description |
 | :--- | :--- | :--- |
-| `FUTUREAGI_API_KEY` | Yes | FutureAGI platform API key |
-| `FUTUREAGI_SECRET_KEY` | Yes | FutureAGI platform secret key |
+| `FUTUREAGI_API_KEY` | Yes | FutureAGI platform API key [services/agent-opt-worker/main.py:47]() |
+| `FUTUREAGI_SECRET_KEY` | Yes | FutureAGI platform secret key [services/agent-opt-worker/main.py:48]() |
 
 **Sources**: [orchestrator/core/services/futureagi_service.py:21-26](), [orchestrator/core/services/futureagi_service.py:63-69](), [services/agent-opt-worker/main.py:46-56]()
 

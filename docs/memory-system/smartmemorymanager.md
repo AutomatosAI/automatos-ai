@@ -5,40 +5,16 @@
 
 The following files were used as context for generating this wiki page:
 
-- [docs/PRDS/55-AUTONOMOUS-ASSISTANT-PLATFORM.md](docs/PRDS/55-AUTONOMOUS-ASSISTANT-PLATFORM.md)
-- [docs/reviews/COMPOSIO-TOOL-REGRESSION-REVIEW.md](docs/reviews/COMPOSIO-TOOL-REGRESSION-REVIEW.md)
-- [frontend/components/auth/sign-up-form.tsx](frontend/components/auth/sign-up-form.tsx)
-- [orchestrator/alembic/versions/20260215_add_heartbeat_and_channels.py](orchestrator/alembic/versions/20260215_add_heartbeat_and_channels.py)
-- [orchestrator/api/channels.py](orchestrator/api/channels.py)
-- [orchestrator/api/chat.py](orchestrator/api/chat.py)
-- [orchestrator/api/chat_voice.py](orchestrator/api/chat_voice.py)
-- [orchestrator/api/heartbeat.py](orchestrator/api/heartbeat.py)
-- [orchestrator/channels/base.py](orchestrator/channels/base.py)
-- [orchestrator/channels/discord_adapter.py](orchestrator/channels/discord_adapter.py)
-- [orchestrator/channels/google_chat_adapter.py](orchestrator/channels/google_chat_adapter.py)
-- [orchestrator/channels/line_adapter.py](orchestrator/channels/line_adapter.py)
-- [orchestrator/channels/manager.py](orchestrator/channels/manager.py)
-- [orchestrator/channels/slack_adapter.py](orchestrator/channels/slack_adapter.py)
-- [orchestrator/consumers/chatbot/auto.py](orchestrator/consumers/chatbot/auto.py)
-- [orchestrator/consumers/chatbot/intent_classifier.py](orchestrator/consumers/chatbot/intent_classifier.py)
-- [orchestrator/consumers/chatbot/personality.py](orchestrator/consumers/chatbot/personality.py)
-- [orchestrator/consumers/chatbot/service.py](orchestrator/consumers/chatbot/service.py)
+- [docs/PRDS/137-AUTO-CHATBOT-RECOVERY.md](docs/PRDS/137-AUTO-CHATBOT-RECOVERY.md)
+- [orchestrator/consumers/chatbot/integration.py](orchestrator/consumers/chatbot/integration.py)
+- [orchestrator/consumers/chatbot/prompt_analyzer.py](orchestrator/consumers/chatbot/prompt_analyzer.py)
 - [orchestrator/consumers/chatbot/smart_memory.py](orchestrator/consumers/chatbot/smart_memory.py)
-- [orchestrator/consumers/chatbot/smart_tool_router.py](orchestrator/consumers/chatbot/smart_tool_router.py)
-- [orchestrator/core/llm/manager.py](orchestrator/core/llm/manager.py)
-- [orchestrator/core/models/channels.py](orchestrator/core/models/channels.py)
-- [orchestrator/core/routing/engine.py](orchestrator/core/routing/engine.py)
-- [orchestrator/core/services/plugin_security_scanner.py](orchestrator/core/services/plugin_security_scanner.py)
-- [orchestrator/modules/agents/__init__.py](orchestrator/modules/agents/__init__.py)
-- [orchestrator/modules/agents/factory/__init__.py](orchestrator/modules/agents/factory/__init__.py)
+- [orchestrator/consumers/chatbot/smart_orchestrator.py](orchestrator/consumers/chatbot/smart_orchestrator.py)
+- [orchestrator/modules/agents/queries.py](orchestrator/modules/agents/queries.py)
+- [orchestrator/modules/context/sections/identity.py](orchestrator/modules/context/sections/identity.py)
+- [orchestrator/modules/context/sections/skills.py](orchestrator/modules/context/sections/skills.py)
+- [orchestrator/modules/context/sections/task_context.py](orchestrator/modules/context/sections/task_context.py)
 - [orchestrator/modules/memory/integrations/mem0_client.py](orchestrator/modules/memory/integrations/mem0_client.py)
-- [orchestrator/modules/orchestrator/service.py](orchestrator/modules/orchestrator/service.py)
-- [orchestrator/modules/tools/discovery/actions_analytics_enhanced.py](orchestrator/modules/tools/discovery/actions_analytics_enhanced.py)
-- [orchestrator/modules/tools/discovery/handlers_analytics_enhanced.py](orchestrator/modules/tools/discovery/handlers_analytics_enhanced.py)
-- [orchestrator/modules/tools/discovery/handlers_search.py](orchestrator/modules/tools/discovery/handlers_search.py)
-- [orchestrator/modules/tools/discovery/platform_actions.py](orchestrator/modules/tools/discovery/platform_actions.py)
-- [orchestrator/modules/tools/discovery/platform_executor.py](orchestrator/modules/tools/discovery/platform_executor.py)
-- [orchestrator/modules/tools/tool_router.py](orchestrator/modules/tools/tool_router.py)
 
 </details>
 
@@ -114,8 +90,7 @@ graph TB
 
 **Sources:**
 - [orchestrator/consumers/chatbot/smart_memory.py:50-80]()
-- [orchestrator/consumers/chatbot/service.py:161-165]()
-- [orchestrator/modules/memory/integrations/mem0_client.py:66-98]()
+- [orchestrator/modules/memory/integrations/mem0_client.py:77-105]()
 
 ---
 
@@ -199,21 +174,21 @@ sequenceDiagram
 ```
 
 **Sources:**
-- [orchestrator/consumers/chatbot/smart_memory.py:163-267]()
+- [orchestrator/consumers/chatbot/smart_memory.py:174-193]()
 - [orchestrator/modules/memory/integrations/mem0_client.py:215-240]()
 
 ### Widget Mode Isolation
 When `widget_mode` is enabled (e.g., for embedded customer support bots), the `SmartMemoryManager` strictly restricts retrieval to the **Agent Tier** only. This prevents a widget user from accessing global workspace memories.
 
 **Sources:**
-- [orchestrator/consumers/chatbot/smart_memory.py:169-170]()
-- [orchestrator/consumers/chatbot/smart_memory.py:201-219]()
+- [orchestrator/consumers/chatbot/smart_memory.py:180-181]()
+- [orchestrator/consumers/chatbot/smart_orchestrator.py:91-107]()
 
 ---
 
 ## Memory Storage Classification
 
-The `_classify_memory_tier()` method determines where a conversation exchange should be stored based on keyword analysis of the user's message.
+The `_classify_memory_tier()` method determines where a conversation exchange should be stored based on keyword analysis of the user's message. It ignores the assistant's response to prevent tool names mentioned in explanations from causing false positives.
 
 ### Tier Selection Rules
 
@@ -226,7 +201,7 @@ The `_classify_memory_tier()` method determines where a conversation exchange sh
 | **Mixed** | Personal + Tool keywords | `both` |
 
 **Sources:**
-- [orchestrator/consumers/chatbot/smart_memory.py:81-157]()
+- [orchestrator/consumers/chatbot/smart_memory.py:92-169]()
 
 ### Storage Process
 
@@ -244,51 +219,65 @@ graph LR
 ```
 
 **Sources:**
-- [orchestrator/consumers/chatbot/smart_memory.py:375-465]()
+- [orchestrator/consumers/chatbot/smart_memory.py:155-169]()
+- [orchestrator/consumers/chatbot/integration.py:106-129]()
 
 ---
 
 ## Daily Log System
 
-The `SmartMemoryManager` maintains a temporal record of activities using the "Daily Log" system.
+The `SmartMemoryManager` maintains a temporal record of activities using the "Daily Log" system, identifying topics and tools used during sessions.
 
 ### Extraction Logic
-The `_extract_summary_from_exchange()` function uses regex to identify topics, tools (platform actions or external apps), and decisions.
-
-### Log Storage and Retrieval
-Logs are stored in Mem0 using a date-based namespace: `mem:ws:{workspace_id}:daily:{YYYY-MM-DD}`. When the orchestrator prepares a request, it calls `get_daily_logs()`, which retrieves today's and yesterday's logs.
+The system uses regex to identify topics, tools (platform actions or external apps), and decisions. This is governed by system settings such as `memory_store_max_chars` (default 6000).
 
 **Sources:**
-- [orchestrator/consumers/chatbot/smart_memory.py:471-531]()
-- [orchestrator/consumers/chatbot/smart_memory.py:621-704]()
+- [orchestrator/consumers/chatbot/smart_memory.py:81-90]()
+- [docs/PRDS/137-AUTO-CHATBOT-RECOVERY.md:82-84]()
+
+### Log Storage and Retrieval
+Logs are stored in Mem0 using a date-based namespace: `mem:ws:{workspace_id}:daily:{YYYY-MM-DD}`. When the orchestrator prepares a request, it retrieves recent logs to provide temporal context.
+
+**Sources:**
+- [orchestrator/consumers/chatbot/smart_orchestrator.py:191-193]()
 
 ---
 
 ## Circuit Breaker and Resilience
 
-To prevent slow Mem0 responses from hanging the chat interface, the `Mem0Client` implements a circuit breaker.
+To prevent slow Mem0 responses from hanging the chat interface, the `Mem0Client` implements a circuit breaker and exponential backoff.
 
 ### Circuit Breaker Configuration
-*   **Failure Threshold**: 5 consecutive failures [orchestrator/modules/memory/integrations/mem0_client.py:21-21]().
-*   **Cooldown**: 60 seconds [orchestrator/modules/memory/integrations/mem0_client.py:22-22]().
-*   **Max Retries**: 1 retry with exponential backoff [orchestrator/modules/memory/integrations/mem0_client.py:24-24]().
+*   **Failure Threshold**: 3 consecutive failures (configurable via `MEM0_CIRCUIT_THRESHOLD`).
+*   **Cooldown**: 300 seconds (configurable via `MEM0_CIRCUIT_COOLDOWN_SECONDS`).
+*   **Max Retries**: 1 retry with exponential backoff.
+*   **Timeout**: 3.0 seconds (configurable via `MEM0_TIMEOUT_SECONDS`).
 
 **Sources:**
-- [orchestrator/modules/memory/integrations/mem0_client.py:20-63]()
-- [orchestrator/modules/memory/integrations/mem0_client.py:100-141]()
+- [orchestrator/modules/memory/integrations/mem0_client.py:22-44]()
+- [orchestrator/modules/memory/integrations/mem0_client.py:62-74]()
+- [orchestrator/modules/memory/integrations/mem0_client.py:82-87]()
+- [docs/PRDS/137-AUTO-CHATBOT-RECOVERY.md:68-68]()
 
 ---
 
-## Memory Stats and Monitoring
+## Configuration and Management
 
-The system provides a specialized API for monitoring memory health and usage across tiers.
+Memory behavior is configurable via the `ContextService` and system-wide LLM settings.
 
-### Memory Stats API
-The `GET /api/v1/memory/stats/real` endpoint queries the `UnifiedMemoryService` to aggregate counts and calculate a **Hit Rate** based on the `memory_access_log` table.
+### Key Settings
+
+| Setting | Key | Default | Description |
+| :--- | :--- | :--- | :--- |
+| **Max Chars** | `memory_store_max_chars` | 6000 | Characters sent to Mem0 for extraction |
+| **Circuit Threshold** | `MEM0_CIRCUIT_THRESHOLD` | 3 | Failures before opening the breaker |
+| **Circuit Cooldown** | `MEM0_CIRCUIT_COOLDOWN_SECONDS` | 300 | Time before retrying Mem0 after failure |
+| **API Timeout** | `MEM0_TIMEOUT_SECONDS` | 3.0 | Maximum time for a single Mem0 request |
 
 **Sources:**
-- [orchestrator/modules/tools/discovery/platform_executor.py:183-183]()
-- [orchestrator/modules/tools/discovery/platform_executor.py:51-51]()
+- [orchestrator/consumers/chatbot/smart_memory.py:81-90]()
+- [orchestrator/modules/memory/integrations/mem0_client.py:62-68]()
+- [orchestrator/modules/memory/integrations/mem0_client.py:86-87]()
 
 ---
 
@@ -296,15 +285,15 @@ The `GET /api/v1/memory/stats/real` endpoint queries the `UnifiedMemoryService` 
 
 | Component | File Path | Role |
 | :--- | :--- | :--- |
-| `SmartMemoryManager` | `orchestrator/consumers/chatbot/smart_memory.py` | Orchestration, Caching, Classification |
-| `Mem0Client` | `orchestrator/modules/memory/integrations/mem0_client.py` | Low-level API client, Circuit Breaker |
-| `ChatService` | `orchestrator/consumers/chatbot/service.py` | Database operations for chat/messages |
-| `PlatformActionExecutor` | `orchestrator/modules/tools/discovery/platform_executor.py` | Execution of platform memory tools |
+| `SmartMemoryManager` | `orchestrator/consumers/chatbot/smart_memory.py` | Orchestration, Caching, Classification [orchestrator/consumers/chatbot/smart_memory.py:50-68]() |
+| `Mem0Client` | `orchestrator/modules/memory/integrations/mem0_client.py` | Low-level API client, Circuit Breaker [orchestrator/modules/memory/integrations/mem0_client.py:77-105]() |
+| `SmartChatIntegration` | `orchestrator/consumers/chatbot/integration.py` | Drop-in replacement for scattered memory logic [orchestrator/consumers/chatbot/integration.py:33-47]() |
+| `SmartChatOrchestrator` | `orchestrator/consumers/chatbot/smart_orchestrator.py` | High-level coordinator for chat context [orchestrator/consumers/chatbot/smart_orchestrator.py:74-85]() |
 
 **Sources:**
 - [orchestrator/consumers/chatbot/smart_memory.py:50-68]()
-- [orchestrator/modules/memory/integrations/mem0_client.py:66-70]()
-- [orchestrator/consumers/chatbot/service.py:161-165]()
-- [orchestrator/modules/tools/discovery/platform_executor.py:164-168]()
+- [orchestrator/modules/memory/integrations/mem0_client.py:77-105]()
+- [orchestrator/consumers/chatbot/integration.py:33-47]()
+- [orchestrator/consumers/chatbot/smart_orchestrator.py:74-85]()
 
 ---

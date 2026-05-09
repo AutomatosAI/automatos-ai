@@ -5,204 +5,152 @@
 
 The following files were used as context for generating this wiki page:
 
-- [docs/reviews/COMPOSIO-TOOL-REGRESSION-REVIEW.md](docs/reviews/COMPOSIO-TOOL-REGRESSION-REVIEW.md)
+- [frontend/app/api/chat/route.ts](frontend/app/api/chat/route.ts)
 - [frontend/components/agents/agent-configuration-modal.tsx](frontend/components/agents/agent-configuration-modal.tsx)
 - [frontend/components/agents/agent-configuration.tsx](frontend/components/agents/agent-configuration.tsx)
 - [frontend/components/agents/agent-details-modal.tsx](frontend/components/agents/agent-details-modal.tsx)
-- [frontend/components/agents/agent-management.tsx](frontend/components/agents/agent-management.tsx)
-- [frontend/components/agents/agent-performance.tsx](frontend/components/agents/agent-performance.tsx)
 - [frontend/components/agents/agent-roster.tsx](frontend/components/agents/agent-roster.tsx)
-- [frontend/components/agents/agent-skills.tsx](frontend/components/agents/agent-skills.tsx)
-- [frontend/components/agents/agent-status-control-modal.tsx](frontend/components/agents/agent-status-control-modal.tsx)
 - [frontend/components/agents/create-agent-modal.tsx](frontend/components/agents/create-agent-modal.tsx)
-- [frontend/components/agents/create-skill-modal.tsx](frontend/components/agents/create-skill-modal.tsx)
-- [frontend/components/agents/skill-configuration-modal.tsx](frontend/components/agents/skill-configuration-modal.tsx)
+- [frontend/components/chatbot/chat.tsx](frontend/components/chatbot/chat.tsx)
+- [frontend/components/chatbot/mission-suggestion-card.tsx](frontend/components/chatbot/mission-suggestion-card.tsx)
 - [frontend/components/documents/analytics-tab.tsx](frontend/components/documents/analytics-tab.tsx)
 - [frontend/components/documents/processing-tab.tsx](frontend/components/documents/processing-tab.tsx)
-- [frontend/hooks/use-agent-api.ts](frontend/hooks/use-agent-api.ts)
-- [frontend/hooks/use-document-api.ts](frontend/hooks/use-document-api.ts)
+- [frontend/lib/agent-constants.ts](frontend/lib/agent-constants.ts)
+- [frontend/lib/chat/hooks.ts](frontend/lib/chat/hooks.ts)
+- [frontend/stores/mission-store.ts](frontend/stores/mission-store.ts)
+- [orchestrator/alembic/versions/add_job_title_to_agents.py](orchestrator/alembic/versions/add_job_title_to_agents.py)
+- [orchestrator/alembic/versions/agent_public_id_and_slug_fix.py](orchestrator/alembic/versions/agent_public_id_and_slug_fix.py)
+- [orchestrator/alembic/versions/seed_auto_agents_existing_workspaces.py](orchestrator/alembic/versions/seed_auto_agents_existing_workspaces.py)
 - [orchestrator/api/agents.py](orchestrator/api/agents.py)
 - [orchestrator/api/chat.py](orchestrator/api/chat.py)
-- [orchestrator/api/chat_voice.py](orchestrator/api/chat_voice.py)
-- [orchestrator/consumers/chatbot/auto.py](orchestrator/consumers/chatbot/auto.py)
-- [orchestrator/consumers/chatbot/intent_classifier.py](orchestrator/consumers/chatbot/intent_classifier.py)
-- [orchestrator/consumers/chatbot/personality.py](orchestrator/consumers/chatbot/personality.py)
+- [orchestrator/api/recipe_executor.py](orchestrator/api/recipe_executor.py)
 - [orchestrator/consumers/chatbot/service.py](orchestrator/consumers/chatbot/service.py)
-- [orchestrator/consumers/chatbot/smart_tool_router.py](orchestrator/consumers/chatbot/smart_tool_router.py)
-- [orchestrator/core/llm/manager.py](orchestrator/core/llm/manager.py)
-- [orchestrator/core/models/__init__.py](orchestrator/core/models/__init__.py)
 - [orchestrator/core/models/core.py](orchestrator/core/models/core.py)
-- [orchestrator/core/routing/engine.py](orchestrator/core/routing/engine.py)
-- [orchestrator/modules/orchestrator/service.py](orchestrator/modules/orchestrator/service.py)
-- [orchestrator/modules/tools/discovery/actions_analytics_enhanced.py](orchestrator/modules/tools/discovery/actions_analytics_enhanced.py)
-- [orchestrator/modules/tools/discovery/handlers_analytics_enhanced.py](orchestrator/modules/tools/discovery/handlers_analytics_enhanced.py)
-- [orchestrator/modules/tools/discovery/handlers_search.py](orchestrator/modules/tools/discovery/handlers_search.py)
-- [orchestrator/modules/tools/discovery/platform_actions.py](orchestrator/modules/tools/discovery/platform_actions.py)
-- [orchestrator/modules/tools/discovery/platform_executor.py](orchestrator/modules/tools/discovery/platform_executor.py)
-- [orchestrator/modules/tools/tool_router.py](orchestrator/modules/tools/tool_router.py)
-- [orchestrator/services/heartbeat_service.py](orchestrator/services/heartbeat_service.py)
+- [orchestrator/core/utils/agent_resolver.py](orchestrator/core/utils/agent_resolver.py)
+- [orchestrator/modules/agents/factory/agent_factory.py](orchestrator/modules/agents/factory/agent_factory.py)
 
 </details>
 
 
 
-This document provides a hands-on tutorial for getting started with Automatos AI. You will learn how to create your first agent, connect tools and plugins, execute a multi-step mission, and interact with agents through the chat interface.
+This document provides a hands-on tutorial for getting started with Automatos AI. You will learn how to create an agent, connect tools, run a streaming chat, and execute a workflow.
 
-**Prerequisites**: This tutorial assumes you have completed the installation and setup described in [Installation & Setup](2.1) and have the application running. For detailed configuration options, see [Configuration Guide](2.2).
-
----
-
-## Tutorial Overview
-
-```mermaid
-graph LR
-    "Step1[Step 1: Create Agent]" --> "Step2[Step 2: Build Mission]"
-    "Step2[Step 2: Build Mission]" --> "Step3[Step 3: Execute Workflow]"
-    "Step3[Step 3: Execute Workflow]" --> "Step4[Step 4: Use Chat]"
-    
-    "Step1[Step 1: Create Agent]" -. "creates" .-> "AgentEntity[Agent Entity]"
-    "Step2[Step 2: Build Mission]" -. "creates" .-> "MissionModel[Mission/Workflow Model]"
-    "Step3[Step 3: Execute Workflow]" -. "runs" .-> "ExecutionRecord[WorkflowExecution]"
-    "Step4[Step 4: Use Chat]" -. "interacts" .-> "ChatSession[Chat Session]"
-```
-
-**Sources**: [orchestrator/api/agents.py:174-230](), [orchestrator/api/chat.py:70-140](), [orchestrator/core/models/core.py:235-280]()
+**Prerequisites**: This tutorial assumes you have completed the installation described in [Installation & Setup](2.1) and have the application running.
 
 ---
 
 ## Step 1: Create Your First Agent
 
-Agents are the core execution units. They are defined by their persona, model configuration, and assigned capabilities (tools, plugins, and skills).
+Agents are the primary workers in Automatos AI. Creating an agent involves defining its persona, selecting an LLM provider, and assigning capabilities.
 
-### Agent Creation Architecture
-
-The following diagram bridges the frontend modal to the backend persistence layer.
-
-```mermaid
-graph TB
-    subgraph "Frontend Space (React)"
-        "CreateAgentModal[CreateAgentModal]" -- "POST /api/agents" --> "AgentAPI[Agent API Router]"
-        "AgentRoster[AgentRoster]" -- "renders" --> "AgentCard[Agent Card]"
-    end
-    
-    subgraph "Backend Space (FastAPI/SQLAlchemy)"
-        "AgentAPI[Agent API Router]" -- "calls" --> "CreateAgentFn[create_agent]"
-        "CreateAgentFn[create_agent]" -- "persists" --> "AgentModel[Agent DB Model]"
-        "CreateAgentFn[create_agent]" -- "triggers" --> "SemanticIndexer[Semantic Indexer]"
-    end
-    
-    subgraph "Data Space (Postgres/pgvector)"
-        "AgentModel[Agent DB Model]" --> "AgentsTable[(agents)]"
-        "SemanticIndexer[Semantic Indexer]" --> "AgentEmbeddings[(agent_embeddings)]"
-    end
-```
-
-**Sources**: [frontend/components/agents/create-agent-modal.tsx:1-200](), [orchestrator/api/agents.py:38-66](), [orchestrator/api/agents.py:174-230]()
-
-### Create Agent via UI
-
-1. Open the **Agents** roster [frontend/components/agents/agent-management.tsx:136]().
-2. Click **Create Agent** to open the `CreateAgentModal` [frontend/components/agents/agent-management.tsx:168-175]().
-3. **Identity**: Set Name and Category. The frontend maps categories to a database `agent_type` [frontend/components/agents/agent-configuration-modal.tsx:93]().
-4. **Persona**: Use the `AgentConfigurationModal` to select a predefined persona or enter a custom prompt [frontend/components/agents/agent-configuration-modal.tsx:136-149]().
-5. **Model**: Configure the LLM via the `ModelSelector`. The backend stores this in `agent.model_config` [orchestrator/api/agents.py:176-178](), [frontend/components/agents/agent-configuration-modal.tsx:56]().
-6. **Capabilities**:
-    - **Tools**: Toggle connected apps. The system uses `_stable_tool_id` to match frontend selections to backend tool names [orchestrator/api/agents.py:68-78]().
-    - **Plugins**: Assign workspace-enabled plugins via the `AgentAssignedPlugin` model [orchestrator/api/agents.py:15]().
-7. Click **Save**. The backend triggers `_reindex_agent_embedding` to enable semantic routing [orchestrator/api/agents.py:38-66]().
-
----
-
-## Step 2: Configure Heartbeats
-
-Heartbeats allow agents to perform autonomous checks or status updates without user prompts.
-
-1. Open the **Configuration** tab in `AgentConfigurationModal` [frontend/components/agents/agent-configuration-modal.tsx:156]().
-2. Enable **Heartbeat** and set an `interval_minutes` [orchestrator/services/heartbeat_service.py:168]().
-3. The `HeartbeatService` schedules this via `APScheduler` using a `CronTrigger` [orchestrator/services/heartbeat_service.py:129-161]().
-4. When the heartbeat fires, it executes the agent's logic through the `AgentFactory` [orchestrator/services/heartbeat_service.py:26]().
-
-**Sources**: [orchestrator/services/heartbeat_service.py:1-189](), [frontend/components/agents/agent-configuration-modal.tsx:156-171]()
-
----
-
-## Step 3: Execute with Workflow Bridge
-
-When a complex request is made in chat, the **Workflow Bridge** creates a transient workflow to handle the task.
-
-### The Execution Pipeline
-
-If triggered via chat (complexity assessment >= ORGAN), it follows the `_stream_workflow_bridge` path [orchestrator/api/chat.py:70-88]().
+### Implementation Detail: The Agent Creation Flow
+When you use the `CreateAgentModal`, the frontend collects metadata and sends a POST request to `/api/agents`. The backend uses the `AgentFactory` to initialize the agent's runtime state.
 
 ```mermaid
 sequenceDiagram
-    participant UI as Chat UI
-    participant AB as AutoBrain
-    participant WB as WorkflowBridge
-    participant WE as WorkflowEngine
-    
-    UI->>AB: "Generate a full security report"
-    AB->>AB: Assess Complexity (ORGAN)
-    AB->>WB: trigger _stream_workflow_bridge
-    WB->>WE: execute_workflow_with_progress(execution_id)
-    WE-->>UI: Stream AISDK Stage Events (type: workflow-update)
+    participant UI as CreateAgentModal
+    participant API as agents.py
+    participant DB as SQLAlchemy (Agent)
+    participant SI as SemanticIndexer
+
+    UI->>API: POST /api/agents (payload)
+    API->>API: _normalize_tags()
+    API->>DB: session.add(Agent)
+    API->>DB: session.commit()
+    API-->>SI: _reindex_agent_embedding() (Async)
+    API->>UI: 201 Created (AgentResponse)
 ```
 
-**Sources**: [orchestrator/api/chat.py:70-168](), [orchestrator/consumers/chatbot/auto.py:42-49]()
+**Key Actions**:
+1.  **Identity**: Provide a `name` and `category` (e.g., "DevOps", "Data Analysis"). The UI maps these categories to internal `agent_type` values via `CATEGORY_TO_DB_MAP` [frontend/components/agents/create-agent-modal.tsx:196]().
+2.  **Persona**: Choose a `PersonaMode`. You can select a predefined persona (e.g., "Code Architect") which injects a specific `system_prompt` [frontend/components/agents/create-agent-modal.tsx:144-152]().
+3.  **Model Config**: Select a provider (OpenAI, Anthropic, etc.) and model. This is stored in the `agent_model_configs` table [orchestrator/core/models/core.py:176-180]().
+
+**Sources**: [frontend/components/agents/create-agent-modal.tsx:176-210](), [orchestrator/api/agents.py:38-66](), [orchestrator/modules/agents/factory/agent_factory.py:105-146]()
 
 ---
 
-## Step 4: Run a Chat Session
+## Step 2: Connect Tools and Skills
 
-The chat interface is the primary way to interact with agents. It uses `StreamingChatService` to manage responses and tool execution [orchestrator/consumers/chatbot/service.py:12]().
+Tools allow agents to interact with the outside world (e.g., Slack, GitHub, Jira) via Composio.
 
-### Complexity Assessment (AutoBrain)
+### Tool Assignment Logic
+Tools are assigned to agents through the `agent_app_assignments` table. When an agent is executed, the `ToolRouter` fetches these assignments to build the available toolset for the LLM.
 
-Every message is intercepted by `AutoBrain` to determine the execution strategy [orchestrator/api/chat.py:19]().
+| Entity | Role | Code Reference |
+| :--- | :--- | :--- |
+| `AgentAppAssignment` | Links an Agent to a specific Composio App | [orchestrator/core/models/composio_cache.py:13-28]() |
+| `UnifiedToolExecutor` | Routes execution to Composio, Platform, or Workspace tools | [orchestrator/modules/agents/factory/agent_factory.py:42-45]() |
+| `get_tools_for_agent` | Single source of truth for an agent's tool schemas | [orchestrator/modules/agents/factory/agent_factory.py:9-11]() |
 
-| Complexity | Logic | Action |
-|---|---|---|
-| **ATOM** | Simple greetings/chitchat [orchestrator/consumers/chatbot/auto.py:92-114]() | `Action.RESPOND` (Direct text) |
-| **MOLECULE** | Needs a single tool [orchestrator/consumers/chatbot/auto.py:45]() | `Action.DELEGATE` (Tool call) |
-| **ORGAN** | Multi-agent coordination [orchestrator/consumers/chatbot/auto.py:47]() | `Action.MISSION` or Workflow Bridge |
+**How to connect**:
+- In the `AgentConfigurationModal`, navigate to the **Tools** tab.
+- Toggle active tools. The frontend calls `_resolve_tool_ids_to_app_names` on the backend to validate that the tools are authenticated for the current workspace [orchestrator/api/agents.py:97-143]().
 
-### Tool Loop Prevention
+**Sources**: [orchestrator/api/agents.py:180-200](), [orchestrator/modules/agents/factory/agent_factory.py:171-172]()
 
-To prevent infinite loops during autonomous tool usage, the `ToolExecutionTracker` enforces limits [orchestrator/consumers/chatbot/service.py:78]().
+---
 
-- **Max Retries**: Tools like `composio_execute` or `query_database` are limited to 2-3 retries per turn [orchestrator/consumers/chatbot/service.py:93-104]().
-- **Semantic Deduplication**: Prevents repeated search queries that are 75% similar [orchestrator/consumers/chatbot/service.py:57-66]().
+## Step 3: Run a Streaming Chat
 
-### Code Entity Bridge: Chat to Platform Actions
+The Chat interface uses the `useChat` hook to manage a Server-Sent Events (SSE) stream between the frontend and the `StreamingChatService`.
+
+### Data Flow: Chat Request to LLM Response
+When you send a message, the system performs a complexity assessment (AutoBrain) to determine if it should route to a single agent or trigger a multi-agent workflow.
 
 ```mermaid
-graph LR
-    subgraph "Natural Language Space"
-        "Input[List my agents]"
-    end
+graph TD
+    "UI[chat.tsx]" -- "sendMessage()" --> "API[/api/chat]"
+    "API[/api/chat]" -- "Analyze" --> "AB[AutoBrain]"
+    "AB[AutoBrain]" -- "Complexity: ATOM" --> "SCS[StreamingChatService]"
+    "AB[AutoBrain]" -- "Complexity: ORGANISM" --> "WB[WorkflowBridge]"
+    "SCS[StreamingChatService]" -- "Context" --> "CS[ContextService]"
+    "CS[ContextService]" -- "Prompt" --> "LLM[LLMManager]"
+    "LLM[LLMManager]" -- "Stream" --> "UI[chat.tsx]"
 
-    subgraph "Code Entity Space"
-        "Input[List my agents]" -- "Regex Match" --> "AutoBrain[_PLATFORM_KEYWORDS]"
-        "AutoBrain[_PLATFORM_KEYWORDS]" -- "Inject Tool Hint" --> "SmartToolRouter[platform_list_agents]"
-        "SmartToolRouter[platform_list_agents]" -- "Route to" --> "PlatformActionExecutor[list_agents handler]"
+    subgraph "Code Entities"
+        "AB[AutoBrain]" --> "orchestrator/consumers/chatbot/auto.py"
+        "SCS[StreamingChatService]" --> "orchestrator/consumers/chatbot/service.py"
+        "WB[WorkflowBridge]" --> "orchestrator/api/chat.py"
     end
 ```
 
-**Sources**: [orchestrator/consumers/chatbot/auto.py:116-120](), [orchestrator/consumers/chatbot/smart_tool_router.py:64-73](), [orchestrator/modules/tools/discovery/platform_executor.py:175]()
+**Key Features**:
+- **Tool Loop Prevention**: The `ToolExecutionTracker` monitors tool calls in a single turn to prevent infinite loops (max 10 iterations) [orchestrator/consumers/chatbot/service.py:83-112]().
+- **Routing Info**: The `UniversalRouter` attaches headers (e.g., `x-routing-agent-id`) to the response so the UI can display which agent is responding [frontend/lib/chat/hooks.ts:142-157]().
+
+**Sources**: [frontend/lib/chat/hooks.ts:55-125](), [orchestrator/api/chat.py:37-100](), [orchestrator/consumers/chatbot/service.py:150-176]()
 
 ---
 
-## Summary of Key Components
+## Step 4: Execute a Workflow (Recipe)
 
-| Component/Class | Role | File |
-|---|---|---|
-| `AgentConfigurationModal` | UI for agent settings, persona, and heartbeats | [frontend/components/agents/agent-configuration-modal.tsx:95]() |
-| `StreamingChatService` | Orchestrates SSE streaming and tool execution loops | [orchestrator/consumers/chatbot/service.py:12]() |
-| `ToolExecutionTracker` | Prevents redundant tool calls and infinite loops | [orchestrator/consumers/chatbot/service.py:78]() |
-| `SmartToolRouter` | Filters and prioritizes tools based on detected intent | [orchestrator/consumers/chatbot/smart_tool_router.py:39]() |
-| `PlatformActionExecutor` | Dispatches platform management commands to handlers | [orchestrator/modules/tools/discovery/platform_executor.py:164]() |
-| `HeartbeatService` | Manages periodic autonomous agent ticks | [orchestrator/services/heartbeat_service.py:24]() |
+Workflows (or "Recipes") are sequences of steps executed by one or more agents. For simple automation, the system uses the `RecipeDirectExecutor`.
 
-**Sources**: [orchestrator/api/agents.py:38](), [orchestrator/consumers/chatbot/service.py:12](), [orchestrator/consumers/chatbot/smart_tool_router.py:39](), [orchestrator/api/chat.py:70](), [orchestrator/services/heartbeat_service.py:24]()
+### Workflow Execution Lifecycle
+1.  **Context Assembly**: Uses `ContextService(RECIPE)` to build a system prompt containing the recipe's goal and current step instructions [orchestrator/api/recipe_executor.py:9-12]().
+2.  **Scratchpad**: Agents use a `RecipeScratchpad` to pass data between steps without bloating the context window [orchestrator/api/recipe_executor.py:15-16]().
+3.  **Notifications**: On completion, the `NotificationDispatcher` sends an event (e.g., `playbook_complete`) to the user's notification bell [orchestrator/api/recipe_executor.py:45-61]().
+
+### Automated Reporting
+Upon finishing a recipe, the `ReportService` generates a Markdown summary including:
+- **Metrics**: Total tokens used, cost in USD, and duration [orchestrator/api/recipe_executor.py:113-131]().
+- **Step Breakdown**: Status and output preview for every step [orchestrator/api/recipe_executor.py:159-168]().
+
+**Sources**: [orchestrator/api/recipe_executor.py:1-37](), [orchestrator/api/recipe_executor.py:88-140]()
+
+---
+
+## Summary Table: Quick Start Entities
+
+| Task | Key Class/Function | File Path |
+| :--- | :--- | :--- |
+| **Create Agent** | `AgentFactory.create_agent` | [orchestrator/modules/agents/factory/agent_factory.py]() |
+| **Route Chat** | `UniversalRouter.route` | [orchestrator/core/routing/engine.py]() |
+| **Execute Tool** | `UnifiedToolExecutor.execute` | [orchestrator/modules/tools/tool_router.py]() |
+| **Run Workflow** | `execute_recipe_direct` | [orchestrator/api/recipe_executor.py]() |
+| **Stream Response** | `StreamingChatService.stream` | [orchestrator/consumers/chatbot/service.py]() |
+
+**Sources**: [orchestrator/api/agents.py:31](), [orchestrator/api/chat.py:30](), [orchestrator/api/recipe_executor.py:1]()
 
 ---

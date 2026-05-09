@@ -5,36 +5,15 @@
 
 The following files were used as context for generating this wiki page:
 
-- [docs/reviews/COMPOSIO-TOOL-REGRESSION-REVIEW.md](docs/reviews/COMPOSIO-TOOL-REGRESSION-REVIEW.md)
-- [orchestrator/api/chat.py](orchestrator/api/chat.py)
-- [orchestrator/api/chat_voice.py](orchestrator/api/chat_voice.py)
 - [orchestrator/consumers/chatbot/auto.py](orchestrator/consumers/chatbot/auto.py)
-- [orchestrator/consumers/chatbot/intent_classifier.py](orchestrator/consumers/chatbot/intent_classifier.py)
-- [orchestrator/consumers/chatbot/personality.py](orchestrator/consumers/chatbot/personality.py)
-- [orchestrator/consumers/chatbot/service.py](orchestrator/consumers/chatbot/service.py)
-- [orchestrator/consumers/chatbot/smart_tool_router.py](orchestrator/consumers/chatbot/smart_tool_router.py)
-- [orchestrator/core/llm/manager.py](orchestrator/core/llm/manager.py)
-- [orchestrator/core/routing/engine.py](orchestrator/core/routing/engine.py)
-- [orchestrator/modules/orchestrator/service.py](orchestrator/modules/orchestrator/service.py)
-- [orchestrator/modules/tools/discovery/actions_agents.py](orchestrator/modules/tools/discovery/actions_agents.py)
-- [orchestrator/modules/tools/discovery/actions_analytics_enhanced.py](orchestrator/modules/tools/discovery/actions_analytics_enhanced.py)
-- [orchestrator/modules/tools/discovery/actions_assignments.py](orchestrator/modules/tools/discovery/actions_assignments.py)
-- [orchestrator/modules/tools/discovery/actions_documents.py](orchestrator/modules/tools/discovery/actions_documents.py)
-- [orchestrator/modules/tools/discovery/actions_marketplace.py](orchestrator/modules/tools/discovery/actions_marketplace.py)
-- [orchestrator/modules/tools/discovery/actions_missions.py](orchestrator/modules/tools/discovery/actions_missions.py)
-- [orchestrator/modules/tools/discovery/actions_monitoring.py](orchestrator/modules/tools/discovery/actions_monitoring.py)
-- [orchestrator/modules/tools/discovery/actions_playbooks.py](orchestrator/modules/tools/discovery/actions_playbooks.py)
-- [orchestrator/modules/tools/discovery/actions_reports.py](orchestrator/modules/tools/discovery/actions_reports.py)
-- [orchestrator/modules/tools/discovery/actions_scheduling.py](orchestrator/modules/tools/discovery/actions_scheduling.py)
-- [orchestrator/modules/tools/discovery/actions_search.py](orchestrator/modules/tools/discovery/actions_search.py)
-- [orchestrator/modules/tools/discovery/actions_workspace.py](orchestrator/modules/tools/discovery/actions_workspace.py)
-- [orchestrator/modules/tools/discovery/handlers_agents.py](orchestrator/modules/tools/discovery/handlers_agents.py)
-- [orchestrator/modules/tools/discovery/handlers_analytics_enhanced.py](orchestrator/modules/tools/discovery/handlers_analytics_enhanced.py)
-- [orchestrator/modules/tools/discovery/handlers_reports.py](orchestrator/modules/tools/discovery/handlers_reports.py)
-- [orchestrator/modules/tools/discovery/handlers_search.py](orchestrator/modules/tools/discovery/handlers_search.py)
+- [orchestrator/core/security/rate_limiter.py](orchestrator/core/security/rate_limiter.py)
+- [orchestrator/core/services/auto_reporting.py](orchestrator/core/services/auto_reporting.py)
+- [orchestrator/core/services/notification_dispatcher.py](orchestrator/core/services/notification_dispatcher.py)
+- [orchestrator/modules/tools/discovery/actions_auto_reporting.py](orchestrator/modules/tools/discovery/actions_auto_reporting.py)
+- [orchestrator/modules/tools/discovery/handlers_auto_reporting.py](orchestrator/modules/tools/discovery/handlers_auto_reporting.py)
 - [orchestrator/modules/tools/discovery/platform_actions.py](orchestrator/modules/tools/discovery/platform_actions.py)
 - [orchestrator/modules/tools/discovery/platform_executor.py](orchestrator/modules/tools/discovery/platform_executor.py)
-- [orchestrator/modules/tools/tool_router.py](orchestrator/modules/tools/tool_router.py)
+- [orchestrator/tests/test_prd128_notification_dispatcher.py](orchestrator/tests/test_prd128_notification_dispatcher.py)
 
 </details>
 
@@ -48,13 +27,13 @@ The following files were used as context for generating this wiki page:
 
 ## Overview
 
-Platform Actions enable agents to operate on workspace resources (agents, recipes, documents, tasks) directly through tool calls. Unlike external integrations that connect to third-party services via Composio, platform actions query and modify the Automatos database and internal services.
+Platform Actions enable agents to operate on workspace resources (agents, recipes, documents, tasks) directly through tool calls. Unlike external integrations that connect to third-party services via Composio, platform actions query and modify the Automatos database and internal services directly.
 
 **Key characteristics:**
-- **Self-awareness**: Agents can list other agents, inspect configurations, and understand workspace capabilities [orchestrator/modules/tools/discovery/platform_executor.py:175-184]().
-- **Write operations**: Agents can create/update resources, such as creating agents or updating recipes [orchestrator/modules/tools/discovery/platform_executor.py:186-194]().
-- **Multi-tenant isolation**: All actions are strictly scoped to the requesting `workspace_id` passed to the `PlatformActionExecutor` [orchestrator/modules/tools/discovery/platform_executor.py:170-172]().
-- **Domain-Specific Handlers**: Execution logic is decoupled into specialized handler modules (e.g., `handlers_agents.py`, `handlers_reports.py`, `handlers_analytics.py`) [orchestrator/modules/tools/discovery/platform_executor.py:19-159]().
+- **Self-awareness**: Agents can list other agents, inspect configurations, and understand workspace capabilities [orchestrator/modules/tools/discovery/platform_executor.py:20-101]().
+- **Write operations**: Agents can create/update resources, such as creating agents or updating recipes [orchestrator/modules/tools/discovery/platform_executor.py:22-40]().
+- **Multi-tenant isolation**: All actions are strictly scoped to the requesting `workspace_id` passed to the executor [orchestrator/modules/tools/discovery/platform_executor.py:8-9]().
+- **Domain-Specific Handlers**: Execution logic is decoupled into specialized handler modules (e.g., `handlers_agents.py`, `handlers_monitoring.py`, `handlers_auto_reporting.py`) [orchestrator/modules/tools/discovery/platform_executor.py:19-177]().
 
 ### Platform System Architecture
 The following diagram bridges the Natural Language queries handled by `AutoBrain` to the specific code entities in the `PlatformActionExecutor`.
@@ -62,108 +41,107 @@ The following diagram bridges the Natural Language queries handled by `AutoBrain
 ```mermaid
 graph TB
     subgraph "Natural Language Space"
-        UserQuery["'List my agents' / 'Create a report'"]
+        UserQuery["'List my agents' / 'Check system health'"]
         AutoBrain["AutoBrain (consumers/chatbot/auto.py)"]
-        Keywords["_PLATFORM_KEYWORDS"]
+        Keywords["_PLATFORM_KEYWORDS (auto.py)"]
     end
     
     subgraph "Code Entity Space"
         Executor["PlatformActionExecutor (modules/tools/discovery/platform_executor.py)"]
         Registry["ActionRegistry (modules/tools/discovery/action_registry.py)"]
         
-        subgraph "Domain Handlers"
+        subgraph "Domain Handlers (modules/tools/discovery/)"
             AgentH["handlers_agents.py"]
             RecipeH["handlers_playbooks.py"]
-            ReportH["handlers_reports.py"]
-            AnalyticsH["handlers_analytics.py"]
+            SearchH["handlers_search.py"]
+            MonitorH["handlers_monitoring.py"]
+            ReportH["handlers_auto_reporting.py"]
         end
     end
     
     UserQuery --> AutoBrain
     AutoBrain -->|"match keywords"| Keywords
-    Keywords -->|"tool_hints: ['platform']"| Executor
+    Keywords -->|"tool_hints: ['platform_*']"| Executor
     
     Executor -->|"lookup _handlers"| Registry
     Executor -->|"dispatch to"| AgentH
     Executor -->|"dispatch to"| RecipeH
+    Executor -->|"dispatch to"| SearchH
+    Executor -->|"dispatch to"| MonitorH
     Executor -->|"dispatch to"| ReportH
-    Executor -->|"dispatch to"| AnalyticsH
 
     style AutoBrain fill:none
     style Executor fill:none
 ```
-**Sources:** [orchestrator/consumers/chatbot/auto.py:5-22](), [orchestrator/modules/tools/discovery/platform_executor.py:173-225](), [orchestrator/modules/tools/discovery/platform_actions.py:36-57]()
+**Sources:** [orchestrator/consumers/chatbot/auto.py:116-180](), [orchestrator/modules/tools/discovery/platform_executor.py:19-177](), [orchestrator/modules/tools/discovery/platform_actions.py:38-66]()
 
 ---
 
 ## Platform Action System
-The core system consists of an `ActionRegistry` that stores `ActionDefinition` objects, and a `PlatformActionExecutor` that routes calls to specific handler modules. All actions are registered via `register_all_actions()` which aggregates definitions from domain-specific modules [orchestrator/modules/tools/discovery/platform_actions.py:36-61]().
+The core system consists of an `ActionRegistry` that stores `ActionDefinition` objects, and a `PlatformActionExecutor` that routes calls to specific handler modules. Definitions include metadata for categorization, parameter schemas, and permission levels.
 
-- **[Platform Action System](#13.1)**: Details on the registry architecture, definition schemas, and the thin dispatcher pattern used by the executor.
+- **[Platform Action System](#13.1)**: Details on the registry architecture, `ActionDefinition` metadata (including `permission_level` and `requires_confirmation` flags), and the `PlatformActionExecutor` dispatch logic.
+- **Hierarchy Permissions**: Mutating actions (e.g., `platform_update_agent`) are checked against a target-based hierarchy to ensure the actor has sufficient authority [orchestrator/modules/tools/discovery/platform_executor.py:209-225]().
 
-**Sources:** [orchestrator/modules/tools/discovery/platform_actions.py:1-10](), [orchestrator/modules/tools/discovery/platform_executor.py:1-9](), [orchestrator/modules/tools/discovery/platform_executor.py:164-173]()
+**Sources:** [orchestrator/modules/tools/discovery/platform_actions.py:1-12](), [orchestrator/modules/tools/discovery/platform_executor.py:1-9](), [orchestrator/modules/tools/discovery/action_registry.py:1-20]()
 
 ---
 
 ## Action Categories
-The platform supports over 47 distinct actions categorized by domain. These range from simple read operations to complex system management and governance.
+The platform supports over 47 distinct actions categorized by domain. These range from simple read operations to complex infrastructure monitoring and proactive notifications.
 
 | Category | Key Code Handlers | Example Actions |
 |----------|-------------------|-----------------|
 | **Agents** | `handlers_agents.py` | `platform_list_agents`, `platform_create_agent` |
-| **Recipes** | `handlers_playbooks.py` | `platform_execute_recipe`, `platform_update_recipe` |
-| **Analytics** | `handlers_analytics.py` | `platform_get_llm_usage`, `platform_workspace_stats` |
-| **Reports** | `handlers_reports.py` | `platform_submit_report`, `platform_get_latest_report` |
+| **Recipes** | `handlers_playbooks.py` | `platform_execute_recipe`, `platform_update_playbook` |
+| **Notifications**| `handlers_auto_reporting.py` | `platform_send_notification`, `platform_get_auto_reporting_prefs` |
 | **Monitoring** | `handlers_monitoring.py` | `platform_get_system_health`, `platform_query_loki_logs` |
-| **Marketplace** | `handlers_marketplace.py` | `platform_install_plugin`, `platform_browse_marketplace_skills` |
-| **Search** | `handlers_search.py` | `platform_search_chat_history`, `platform_search_memory` |
+| **Marketplace** | `handlers_marketplace.py` | `platform_browse_marketplace_agents`, `platform_install_skill` |
+| **Governance** | `handlers_governance.py` | `platform_check_budget`, `platform_validate_agent` |
 
-- **[Action Categories](#13.2)**: A complete breakdown of all 47+ actions and their specific parameters.
+- **[Action Categories](#13.2)**: A complete breakdown of all actions, including new proactive tools like `platform_send_notification` which interfaces with the `NotificationDispatcher` [orchestrator/modules/tools/discovery/actions_auto_reporting.py:95-154]().
 
-**Sources:** [orchestrator/modules/tools/discovery/platform_executor.py:173-225](), [orchestrator/modules/tools/discovery/platform_actions.py:14-33](), [orchestrator/consumers/chatbot/auto.py:116-180]()
+**Sources:** [orchestrator/modules/tools/discovery/platform_executor.py:19-177](), [orchestrator/modules/tools/discovery/actions_auto_reporting.py:11-154](), [orchestrator/core/services/notification_dispatcher.py:87-111]()
 
 ---
 
 ## Confirmation & Rate Limiting
-To prevent accidental destruction of resources or API abuse, the platform implements a tiered safety system.
+To prevent accidental destruction of resources or API abuse, the platform implements a tiered safety and permission system.
 
-- **Permission Levels**: Actions are categorized to distinguish between simple `read` operations and more sensitive `write` or `destructive` operations.
-- **User Confirmation**: The system can require explicit user confirmation for destructive actions before the `PlatformActionExecutor` proceeds with the handler call.
-- **Rate Limiting**: The platform enforces a rate limit (typically 10/min per workspace) to prevent infinite tool loops, managed by the `ToolExecutionTracker` which monitors exact and semantic deduplication [orchestrator/consumers/chatbot/service.py:78-104]().
+- **Rate Limiting**: Uses Redis sliding window counters. Standard `platform_write` operations are limited to 60 per minute per subject (agent) to prevent starvation of parallel tasks [orchestrator/core/security/rate_limiter.py:45-57]().
+- **Permission Levels**: Actions are categorized as `read`, `write`, or `destructive`. Destructive actions like `platform_delete_agent` require explicit confirmation [orchestrator/modules/tools/discovery/platform_executor.py:212-225]().
+- **Quiet Hours**: Proactive notifications via `platform_send_notification` respect workspace "quiet hours," funneling non-urgent traffic to in-app delivery only [orchestrator/core/services/auto_reporting.py:99-124]().
 
-- **[Confirmation & Rate Limiting](#13.3)**: Details on how the system intercepts sensitive calls and enforces quotas.
+- **[Confirmation & Rate Limiting](#13.3)**: Details on the `PlatformActionExecutor` gatekeeper logic and the interaction between permission levels and UI confirmation dialogs.
 
-**Sources:** [orchestrator/consumers/chatbot/service.py:114-139](), [orchestrator/modules/tools/discovery/platform_executor.py:164-168]()
+**Sources:** [orchestrator/core/security/rate_limiter.py:72-127](), [orchestrator/core/services/auto_reporting.py:99-124](), [orchestrator/modules/tools/discovery/actions_auto_reporting.py:86-147]()
 
 ---
 
 ## Platform Actions Discovery
-Discovery is the process by which the system determines if a user's natural language request should be handled by a platform action.
+Discovery is the process by which `AutoBrain` determines if a user's natural language request should be handled by a platform action based on complexity and keyword heuristics.
 
 ### Discovery Flow
-This diagram shows how `AutoBrain` detects intent via `_PLATFORM_KEYWORDS` and injects `tool_hints` to guide the agent toward using platform tools.
+This diagram shows how `AutoBrain` detects intent via `_PLATFORM_KEYWORDS` and triggers the complexity assessment.
 
 ```mermaid
 sequenceDiagram
     participant U as User
     participant AB as AutoBrain (auto.py)
-    participant UR as UniversalRouter (engine.py)
-    participant CS as ContextService (modules/context)
-    participant AG as Agent Execution
+    participant SO as SmartOrchestrator (smart_orchestrator.py)
+    participant PE as PlatformActionExecutor (platform_executor.py)
     
-    U->>AB: "How many tokens did I use today?"
-    AB->>AB: Match "token usage" in _PLATFORM_KEYWORDS
-    AB-->>UR: ComplexityAssessment(tool_hints=["platform_get_llm_usage"])
+    U->>AB: "How many agents do I have?"
+    AB->>AB: Match "list my agents" in _PLATFORM_KEYWORDS
+    AB-->>SO: ComplexityAssessment(tool_hints=["platform_list_agents"])
     
-    UR->>CS: build_context(mode=CHATBOT, tool_hints=["platform_get_llm_usage"])
-    CS->>CS: Inject platform_get_llm_usage into ToolsSection
-    CS-->>AG: Assembled Prompt with Platform Tools
-    
-    AG->>AG: Call platform_get_llm_usage via PlatformActionExecutor
+    SO->>SO: Inject tool_hints into Agent Context
+    SO->>PE: execute("platform_list_agents", workspace_id)
+    PE-->>U: JSON List of Agents
 ```
 
-- **[Platform Actions Discovery](#13.4)**: Explanation of `_PLATFORM_KEYWORDS` matching [orchestrator/consumers/chatbot/auto.py:116-180](), `AutoBrain` complexity assessment [orchestrator/consumers/chatbot/auto.py:59-72](), and how `tool_hints` are used during context assembly.
+- **[Platform Actions Discovery](#13.4)**: Explanation of the 3-tier assessment (Cache, Heuristics, LLM) and how `_PLATFORM_KEYWORDS` maps common phrases to specific tool hints [orchestrator/consumers/chatbot/auto.py:14-22, 116-180]().
 
-**Sources:** [orchestrator/consumers/chatbot/auto.py:116-181](), [orchestrator/core/routing/engine.py:129-158](), [orchestrator/modules/tools/discovery/platform_executor.py:1-9]()
+**Sources:** [orchestrator/consumers/chatbot/auto.py:116-180](), [orchestrator/modules/tools/discovery/platform_executor.py:179-181]()
 
 ---

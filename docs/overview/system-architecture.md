@@ -5,26 +5,22 @@
 
 The following files were used as context for generating this wiki page:
 
-- [README.md](README.md)
 - [docker-compose.yml](docker-compose.yml)
-- [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)
-- [docs/README.md](docs/README.md)
 - [frontend/.dockerignore](frontend/.dockerignore)
 - [frontend/Dockerfile](frontend/Dockerfile)
-- [infrastructure/.env.example](infrastructure/.env.example)
-- [infrastructure/docker-compose.core.yml](infrastructure/docker-compose.core.yml)
-- [infrastructure/docker-compose.data.yml](infrastructure/docker-compose.data.yml)
-- [infrastructure/docker-compose.landing.yml](infrastructure/docker-compose.landing.yml)
-- [infrastructure/docker-compose.memory.yml](infrastructure/docker-compose.memory.yml)
-- [infrastructure/docker-compose.monitoring.yml](infrastructure/docker-compose.monitoring.yml)
-- [infrastructure/docker-compose.voice.yml](infrastructure/docker-compose.voice.yml)
-- [infrastructure/docker-compose.yml](infrastructure/docker-compose.yml)
-- [infrastructure/railway-manifest.json](infrastructure/railway-manifest.json)
+- [frontend/tsconfig.tsbuildinfo](frontend/tsconfig.tsbuildinfo)
 - [orchestrator/Dockerfile](orchestrator/Dockerfile)
 - [orchestrator/api/cloud_documents.py](orchestrator/api/cloud_documents.py)
+- [orchestrator/config.py](orchestrator/config.py)
 - [orchestrator/core/redis/client.py](orchestrator/core/redis/client.py)
-- [orchestrator/modules/tools/services/__init__.py](orchestrator/modules/tools/services/__init__.py)
+- [orchestrator/main.py](orchestrator/main.py)
+- [orchestrator/modules/memory/context_router.py](orchestrator/modules/memory/context_router.py)
+- [orchestrator/modules/memory/unified_memory_service.py](orchestrator/modules/memory/unified_memory_service.py)
 - [orchestrator/requirements.txt](orchestrator/requirements.txt)
+- [orchestrator/tests/test_unified_memory.py](orchestrator/tests/test_unified_memory.py)
+- [scripts/ralph/IMPLEMENTATION_PLAN.md](scripts/ralph/IMPLEMENTATION_PLAN.md)
+- [scripts/ralph/prd.json](scripts/ralph/prd.json)
+- [scripts/ralph/progress.txt](scripts/ralph/progress.txt)
 
 </details>
 
@@ -37,25 +33,23 @@ This document provides a technical overview of the Automatos AI platform archite
 Automatos AI is designed as an "operating system for AI agents." This page describes the structural organization of the platform, including:
 
 - High-level system topology and service relationships.
-- Core backend services and their responsibilities.
-- Data layer architecture (PostgreSQL, Redis, S3, Qdrant).
-- The Workflow and Recipe execution engines.
-- Deployment and containerization strategy across multiple service groups.
-
-For configuration details, see [Configuration Guide](). For API endpoint documentation, see the respective API reference sections.
+- Core backend services and their responsibilities (FastAPI, Next.js).
+- Data layer architecture (PostgreSQL, Redis).
+- The 5-Layer Memory System implementation.
+- The Mission and Recipe execution engines.
+- Deployment and containerization strategy.
 
 ---
 
 ## High-Level System Topology
 
-The system follows a multi-tier architecture centered around a FastAPI orchestrator that manages communication between the user interface, persistent storage, and specialized worker services. In production, this topology expands into 19 distinct services across 6 functional groups.
+The system follows a multi-tier architecture centered around a FastAPI orchestrator that manages communication between the user interface, persistent storage, and specialized worker services.
 
 Title: Platform Service Topology
 ```mermaid
 graph TB
     subgraph "Client Layer"
         Browser["Next.js Frontend<br/>(frontend/)"]
-        Landing["Landing Page<br/>(Vite + Node)"]
     end
     
     subgraph "API Gateway"
@@ -65,131 +59,134 @@ graph TB
     subgraph "Core Logic"
         Router["UniversalRouter<br/>(api/routing.py)"]
         AgentFactory["AgentFactory<br/>(modules/agents/factory/)"]
-        RecipeExec["RecipeExecutor<br/>(api/recipe_executor.py)"]
+        Coordinator["CoordinatorService<br/>(services/coordinator_service.py)"]
         ContextSvc["ContextService<br/>(modules/context/)"]
+        MemorySvc["UnifiedMemoryService<br/>(modules/memory/)"]
     end
     
     subgraph "Data Layer"
         Postgres[("PostgreSQL + pgvector<br/>(core/models/)")]
         Redis[("Redis<br/>(core/redis/client.py)")]
-        Qdrant[("Qdrant Vector DB")]
+        Mem0["Mem0 Backend<br/>(L3 Long-term)"]
     end
     
     subgraph "Worker Services"
         WorkspaceWorker["Workspace Worker<br/>(services/workspace-worker/)"]
         AgentOpt["Agent-Opt Worker<br/>(FutureAGI SDK)"]
-        VoiceSvc["Voice Service<br/>(TTS/STT)"]
     end
     
     Browser --> FastAPI
     FastAPI --> Router
-    FastAPI --> RecipeExec
+    FastAPI --> Coordinator
     FastAPI --> AgentFactory
     AgentFactory --> ContextSvc
+    AgentFactory --> MemorySvc
     
     FastAPI --> Postgres
     FastAPI --> Redis
-    FastAPI --> Qdrant
+    MemorySvc --> Mem0
     
     FastAPI -.->|"Task Queue"| WorkspaceWorker
     FastAPI -.->|"Prompt Eval"| AgentOpt
-    FastAPI -.->|"Voice Pipeline"| VoiceSvc
     
     WorkspaceWorker --> Postgres
     WorkspaceWorker --> Redis
 ```
 
-**Sources**: [orchestrator/main.py:1-156](), [docker-compose.yml:1-217](), [README.md:110-121](), [infrastructure/railway-manifest.json:14-44]()
+**Sources**: [orchestrator/main.py:1-156](), [docker-compose.yml:18-217](), [orchestrator/modules/memory/unified_memory_service.py:154-188](), [orchestrator/requirements.txt:1-50]()
 
 ---
 
 ## Backend Application (FastAPI)
 
-The backend is a single FastAPI application that acts as the central hub. It is initialized in `orchestrator/main.py` and uses a modular router structure to handle different domain logic.
+The backend is a modular FastAPI application initialized in `orchestrator/main.py`. It serves as the primary integration point for all AI capabilities.
 
 ### Application Lifecycle
-The `lifespan` context manager in `main.py` handles the following:
+The application utilizes a `lifespan` manager and modular routing:
 1. **Database Initialization**: Runs `init_database` and sets up SQLAlchemy sessions [orchestrator/main.py:32-34]().
-2. **Modular Routing**: Includes over 50 specialized routers covering agents, workflows, marketplace, and system settings [orchestrator/main.py:36-156]().
-3. **CORS & Middleware**: Configures `CORSMiddleware` to allow frontend communication and `get_request_context_hybrid` for Clerk/API Key authentication [orchestrator/main.py:14-17]().
+2. **Modular Routing**: Includes over 80 specialized routers. Key routers include `agents_router`, `workflows_router`, `memory_router`, and `routing_router` [orchestrator/main.py:36-156]().
+3. **Configuration**: Centralized in `Config` class, enforcing SSL for production database connections and managing Redis/Postgres URLs [orchestrator/config.py:28-58]().
 
-### Core Models and Schemas
-The data layer is defined using SQLAlchemy models in `core/models/`.
-
+### Core Data Models
 | Class Name | Table Name | Purpose |
 |:---|:---|:---|
-| `Agent` | `agents` | Core agent configuration, persona, and skills [orchestrator/api/recipe_executor.py:35](). |
-| `WorkflowTemplate` | `workflow_templates` | Blueprint for multi-agent recipes [orchestrator/api/workflow_recipes.py:25](). |
-| `RecipeExecution` | `recipe_executions` | Tracking instance for a running recipe [orchestrator/api/recipe_executor.py:36](). |
-| `TriggerSubscription` | `trigger_subscriptions` | Webhook and Composio trigger mappings [orchestrator/api/workflow_recipes.py:28](). |
+| `Agent` | `agents` | Core agent configuration and capabilities [orchestrator/main.py:36](). |
+| `OrchestrationRun` | `orchestration_runs` | Tracks a multi-agent Mission [scripts/ralph/IMPLEMENTATION_PLAN.md:51-51](). |
+| `BoardTask` | `board_tasks` | Individual tasks executed by agents [scripts/ralph/IMPLEMENTATION_PLAN.md:51-51](). |
+| `SessionMemory` | N/A (Redis) | L1 working memory for active conversations [orchestrator/modules/memory/unified_memory_service.py:123-137](). |
 
-**Sources**: [orchestrator/main.py:1-156](), [orchestrator/api/recipe_executor.py:21-38](), [orchestrator/api/workflow_recipes.py:1-31]()
+**Sources**: [orchestrator/main.py:1-156](), [orchestrator/config.py:28-80](), [orchestrator/modules/memory/unified_memory_service.py:123-149]()
 
 ---
 
-## Bridge: Recipe to Execution
+## Bridge: Natural Language to Execution
 
-The system translates high-level "Recipes" (blueprints) into sequential agent executions. This bridges the "Natural Language Space" (instructions) to "Code Entity Space" (LLM managers and tool routers).
+The platform translates user intent into specific code entities and tool executions via a structured routing and assembly pipeline.
 
-Title: Recipe Execution Flow
+Title: Request to Code Entity Bridge
 ```mermaid
 graph LR
     subgraph "Natural Language Space"
-        Step["Recipe Step<br/>(Prompt Template)"]
+        UserQuery["User Query<br/>(query_text)"]
+        Signals["ContextSignals<br/>(ContextRouter.analyze_query)"]
     end
 
     subgraph "Code Entity Space"
-        AgentRuntime["AgentRuntime<br/>(AgentFactory.activate_agent)"]
-        Context["ContextService<br/>(ContextMode.RECIPE)"]
-        ToolRouter["UnifiedToolExecutor<br/>(tool_router.execute)"]
+        Router["UniversalRouter<br/>(api/routing.py)"]
+        AgentRuntime["AgentFactory<br/>(execute_with_prompt)"]
+        MemSvc["UnifiedMemoryService<br/>(get_instance)"]
+        ToolGraph["GraphRouter<br/>(rank_chains)"]
     end
 
-    Step -->|"_execute_step"| AgentRuntime
-    AgentRuntime -->|"build_context"| Context
-    Context -->|"LLM Call"| ToolRouter
-    ToolRouter -->|"Result"| Step
+    UserQuery --> Signals
+    Signals --> Router
+    Router --> AgentRuntime
+    AgentRuntime --> MemSvc
+    AgentRuntime --> ToolGraph
 ```
 
-**Implementation Details**:
-- **`AgentFactory.activate_agent`**: Hydrates an agent's configuration and prepares its specific LLM provider [orchestrator/api/recipe_executor.py:118-125]().
-- **`ContextService(RECIPE)`**: Builds the system prompt using `RECIPE` mode, which injects `recipe_step_dict` containing instructions and previous step outputs [orchestrator/api/recipe_executor.py:143-149]().
-- **`RecipeScratchpad`**: Replaces verbose text dumps with a structured inter-step memory, reducing token usage by up to 90% [orchestrator/api/recipe_executor.py:15-19]().
+### Implementation Details
+- **`ContextRouter`**: Uses regex patterns like `_TEMPORAL_PATTERNS` and `_PERSONAL_FACT_PATTERNS` to detect intent signals (e.g., `is_temporal`) before LLM invocation [orchestrator/modules/memory/context_router.py:40-56](), [orchestrator/modules/memory/context_router.py:85-121]().
+- **`UnifiedMemoryService`**: Acts as a singleton provider for the 5-layer memory stack, resolving `MemoryNamespace` for workspace-scoped data [orchestrator/modules/memory/unified_memory_service.py:38-75](), [orchestrator/modules/memory/unified_memory_service.py:154-176]().
+- **`GraphRouter`**: Specialized tool discovery service that expands entry nodes through `tool_routing_edges` to provide multi-action sequence hints to agents [scripts/ralph/progress.txt:98-112]().
 
-**Sources**: [orchestrator/api/recipe_executor.py:66-163](), [orchestrator/api/workflows.py:40-71]()
+**Sources**: [orchestrator/modules/memory/context_router.py:1-170](), [orchestrator/modules/memory/unified_memory_service.py:1-118](), [scripts/ralph/progress.txt:92-122]()
 
 ---
 
-## Workflow Orchestration Architecture
+## 5-Layer Memory Architecture
 
-Workflows utilize a multi-stage tracking system that supports both legacy pipelines and dynamic phases.
+The `UnifiedMemoryService` implements a tiered memory strategy to manage context density and relevance.
 
-### WorkflowStageTracker
-The `WorkflowStageTracker` manages execution state and emits real-time updates via SSE (Server-Sent Events) [orchestrator/api/workflows.py:40-42]().
+| Layer | Type | Implementation | Purpose |
+|:---|:---|:---|:---|
+| **L0** | Focus | Context Window | Immediate token-based context. |
+| **L1** | Working | Redis | Active session state and conversation summaries [orchestrator/modules/memory/unified_memory_service.py:123-130](). |
+| **L2** | Short-term | Postgres | Historical exchanges with Ebbinghaus decay logic [orchestrator/modules/memory/unified_memory_service.py:11-11](). |
+| **L3** | Long-term | Mem0 | Extracted facts and semantic preferences [orchestrator/modules/memory/unified_memory_service.py:178-182](). |
+| **L4** | Knowledge | RAG/Graph | Organizational documents and Business Knowledge Graphs [orchestrator/modules/memory/unified_memory_service.py:13-13](). |
 
-- **Legacy 9-Stage Pipeline**: Includes Task Decomposition, Agent Selection, Context Engineering, etc. [orchestrator/api/workflows.py:44-54]().
-- **PRD-59 Dynamic Phases**: Groups stages into five major phases: `PLAN`, `PREPARE`, `EXECUTE`, `EVALUATE`, and `LEARN` [orchestrator/api/workflows.py:65-71]().
-
-**Sources**: [orchestrator/api/workflows.py:40-110](), [frontend/components/workflows/execution-kitchen.tsx:74-84]()
+**Sources**: [orchestrator/modules/memory/unified_memory_service.py:1-21](), [orchestrator/config.py:82-123]()
 
 ---
 
 ## Infrastructure and Deployment
 
-The platform is containerized using Docker and orchestrated via a modular Docker Compose strategy.
+Automatos AI uses a multi-stage Docker configuration to support development and production environments.
 
-### Service Definition
-| Service Group | Role | Primary Technology |
+### Service Stack
+| Service | Technology | Role |
 |:---|:---|:---|
-| `core` | API, Frontend, Workers | FastAPI, Next.js, Python [infrastructure/docker-compose.core.yml:14-167]() |
-| `data` | Persistent Storage | PostgreSQL 18, Redis 8.2, Qdrant [infrastructure/docker-compose.data.yml:13-98]() |
-| `voice` | Audio Processing | TTS (Chatterbox), STT (Whisper) [infrastructure/docker-compose.voice.yml:12-85]() |
-| `monitoring` | Observability | Prometheus, Grafana, Loki [infrastructure/docker-compose.monitoring.yml:16-183]() |
+| `backend` | Python 3.11-slim | FastAPI API server with Alembic for migrations [orchestrator/Dockerfile:13-90](). |
+| `frontend` | Node 20-alpine | Next.js 14 application with standalone build optimization [frontend/Dockerfile:14-115](). |
+| `postgres` | pgvector/pgvector:pg16 | Vector-enabled relational database [docker-compose.yml:22-43](). |
+| `redis` | redis:7-alpine | Caching, session store, and Pub/Sub [docker-compose.yml:48-73](). |
+| `workspace-worker` | Python 3.11 | Isolated agent task execution environment [docker-compose.yml:178-200](). |
 
-### Security and Sandboxing
-- **Workspace Isolation**: Agents execute code in physical workspace directories managed by `agent-workspace-worker`. The `backend` mounts these directories as read-only for the Code Viewer widget [docker-compose.yml:129-130](), [infrastructure/railway-manifest.json:123-144]().
-- **Redis Hardening**: Dangerous commands like `FLUSHALL` and `FLUSHDB` are renamed to empty strings to prevent accidental data loss [docker-compose.yml:59-60]().
-- **Non-Root Users**: Both backend and frontend containers run as non-privileged users (`automatos` and `nextjs`) to ensure host security [orchestrator/Dockerfile:112-113](), [frontend/Dockerfile:93-94]().
+### Deployment Security
+- **Production Migrations**: Containers run `alembic upgrade heads` on startup to ensure schema alignment [orchestrator/Dockerfile:132-140]().
+- **Redis Hardening**: Dangerous commands like `FLUSHALL` are renamed/disabled in the `docker-compose.yml` configuration [docker-compose.yml:54-61]().
 
-**Sources**: [docker-compose.yml:1-217](), [orchestrator/Dockerfile:1-130](), [frontend/Dockerfile:1-115](), [infrastructure/railway-manifest.json:1-44]()
+**Sources**: [orchestrator/Dockerfile:1-141](), [frontend/Dockerfile:1-115](), [docker-compose.yml:1-217]()
 
 ---

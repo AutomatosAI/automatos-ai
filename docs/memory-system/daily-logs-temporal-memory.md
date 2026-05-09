@@ -5,36 +5,15 @@
 
 The following files were used as context for generating this wiki page:
 
-- [docs/PRDS/55-AUTONOMOUS-ASSISTANT-PLATFORM.md](docs/PRDS/55-AUTONOMOUS-ASSISTANT-PLATFORM.md)
-- [frontend/components/activity/activity-memory.tsx](frontend/components/activity/activity-memory.tsx)
-- [frontend/components/activity/memory-card.tsx](frontend/components/activity/memory-card.tsx)
-- [frontend/components/activity/memory/health-banner.tsx](frontend/components/activity/memory/health-banner.tsx)
-- [frontend/components/activity/memory/index.ts](frontend/components/activity/memory/index.ts)
-- [frontend/components/activity/memory/memory-sidebar.tsx](frontend/components/activity/memory/memory-sidebar.tsx)
-- [frontend/components/activity/memory/memory-viewer.tsx](frontend/components/activity/memory/memory-viewer.tsx)
-- [frontend/components/activity/projects/index.ts](frontend/components/activity/projects/index.ts)
-- [frontend/components/activity/projects/project-card.tsx](frontend/components/activity/projects/project-card.tsx)
-- [frontend/components/auth/sign-up-form.tsx](frontend/components/auth/sign-up-form.tsx)
-- [frontend/components/shared/global-search.tsx](frontend/components/shared/global-search.tsx)
-- [frontend/hooks/use-global-search.ts](frontend/hooks/use-global-search.ts)
-- [frontend/hooks/use-memory-explorer-api.ts](frontend/hooks/use-memory-explorer-api.ts)
-- [orchestrator/alembic/versions/20260215_add_heartbeat_and_channels.py](orchestrator/alembic/versions/20260215_add_heartbeat_and_channels.py)
-- [orchestrator/api/channels.py](orchestrator/api/channels.py)
-- [orchestrator/api/heartbeat.py](orchestrator/api/heartbeat.py)
-- [orchestrator/api/memory_stats.py](orchestrator/api/memory_stats.py)
-- [orchestrator/api/widget_memory.py](orchestrator/api/widget_memory.py)
-- [orchestrator/channels/base.py](orchestrator/channels/base.py)
-- [orchestrator/channels/discord_adapter.py](orchestrator/channels/discord_adapter.py)
-- [orchestrator/channels/google_chat_adapter.py](orchestrator/channels/google_chat_adapter.py)
-- [orchestrator/channels/line_adapter.py](orchestrator/channels/line_adapter.py)
-- [orchestrator/channels/manager.py](orchestrator/channels/manager.py)
-- [orchestrator/channels/slack_adapter.py](orchestrator/channels/slack_adapter.py)
-- [orchestrator/consumers/chatbot/smart_memory.py](orchestrator/consumers/chatbot/smart_memory.py)
-- [orchestrator/core/models/channels.py](orchestrator/core/models/channels.py)
-- [orchestrator/core/services/plugin_security_scanner.py](orchestrator/core/services/plugin_security_scanner.py)
-- [orchestrator/modules/agents/__init__.py](orchestrator/modules/agents/__init__.py)
-- [orchestrator/modules/agents/factory/__init__.py](orchestrator/modules/agents/factory/__init__.py)
-- [orchestrator/modules/memory/integrations/mem0_client.py](orchestrator/modules/memory/integrations/mem0_client.py)
+- [frontend/tsconfig.tsbuildinfo](frontend/tsconfig.tsbuildinfo)
+- [orchestrator/config.py](orchestrator/config.py)
+- [orchestrator/main.py](orchestrator/main.py)
+- [orchestrator/modules/memory/context_router.py](orchestrator/modules/memory/context_router.py)
+- [orchestrator/modules/memory/unified_memory_service.py](orchestrator/modules/memory/unified_memory_service.py)
+- [orchestrator/tests/test_unified_memory.py](orchestrator/tests/test_unified_memory.py)
+- [scripts/ralph/IMPLEMENTATION_PLAN.md](scripts/ralph/IMPLEMENTATION_PLAN.md)
+- [scripts/ralph/prd.json](scripts/ralph/prd.json)
+- [scripts/ralph/progress.txt](scripts/ralph/progress.txt)
 
 </details>
 
@@ -42,200 +21,139 @@ The following files were used as context for generating this wiki page:
 
 ## Purpose and Scope
 
-This page documents the daily log system that provides time-indexed activity tracking for workspaces. Daily logs enable agents to answer temporal queries like "what did we work on earlier today?" or "what happened yesterday?" by maintaining a structured journal of activities extracted from chat exchanges, heartbeat ticks, and workflow executions.
+Daily logs provide time-indexed activity tracking for workspaces, enabling agents to answer temporal queries such as "what did we work on earlier today?" or "what happened last week?". This system maintains a structured journal of activities extracted from chat exchanges, heartbeat ticks, and workflow executions. It bridges the gap between raw conversation history and semantic facts by providing a chronological narrative of workspace progress.
 
-Daily logs are stored in both L3 (Mem0 long-term) and L2 (PostgreSQL short-term) memory tiers as part of the 5-layer memory architecture. For the overall memory architecture, see [Memory System](). For the unified service that manages storage, see [UnifiedMemoryService]().
+Daily logs are primarily managed by the `UnifiedMemoryService` [orchestrator/modules/memory/unified_memory_service.py:154-161]() and are categorized as part of the L2 (Short-term/Postgres) and L3 (Long-term/Mem0) memory tiers.
 
 ---
 
 ## Architecture Overview
 
-The system uses rule-based extraction to generate concise summaries, stores them in both L3 and L2 for redundancy and performance, and retrieves them with date filtering and token budget management.
+The temporal memory system uses the `ContextRouter` [orchestrator/modules/memory/context_router.py:2-12]() to detect time-based signals in user queries and the `UnifiedMemoryService` to manage the storage and retrieval of these logs across tiered storage.
 
-**Daily Log Pipeline Architecture**
+**Daily Log & Temporal Retrieval Flow**
 
 ```mermaid
-graph TB
-    subgraph "InputSources"
-        ChatExchange["ChatExchange<br/>(user + assistant)"]
-        HeartbeatTick["HeartbeatTick<br/>(agent/orchestrator)"]
-        RecipeExec["RecipeExecution<br/>(workflow summary)"]
+graph TD
+    subgraph "Query Analysis"
+        UserQuery["User Query"] --> CR["ContextRouter.analyze_query()"]
+        CR --> Signals["ContextSignals<br/>(is_temporal=True)"]
     end
     
-    subgraph "ExtractionLayer"
-        RuleExtract["_extract_summary_from_exchange()<br/>Rule-based pattern matching"]
-        
-        ChatExchange --> RuleExtract
-        HeartbeatTick --> RuleExtract
-        RecipeExec --> RuleExtract
+    subgraph "Temporal Window Calculation"
+        Signals --> TW["_compute_temporal_window()<br/>Regex-based date parsing"]
+        TW --> Range["(start_date, end_date)"]
     end
     
-    subgraph "StorageLayer"
-        L3["L3_Mem0_Storage<br/>type=daily_log_entry"]
-        L2["L2_PostgreSQL_Storage<br/>memory_type=heartbeat_log"]
-        
-        RuleExtract --> L3
-        RuleExtract --> L2
+    subgraph "Unified Retrieval"
+        Range --> UMS["UnifiedMemoryService.get_daily_logs()"]
+        UMS --> L2["L2 Storage<br/>PostgreSQL memory_items"]
+        UMS --> L3["L3 Storage<br/>Mem0 daily namespace"]
     end
     
-    subgraph "RetrievalLayer"
-        GetDaily["get_daily_logs()<br/>Fetch today + yesterday"]
-        Filter["DateFiltering<br/>Target dates only"]
-        Truncate["TokenBudgetTruncation<br/>Max 2000 chars"]
-        
-        L3 --> GetDaily
-        GetDaily --> Filter
-        Filter --> Truncate
-    end
-    
-    subgraph "ContextInjection"
-        MemSection["MemorySection_P6<br/>System prompt injection"]
-        
-        Truncate --> MemSection
+    subgraph "Prompt Assembly"
+        L2 --> Bundle["ContextBundle"]
+        L3 --> Bundle
+        Bundle --> Context["ContextService<br/>DatetimeSection + MemorySection"]
     end
 ```
-Sources: [orchestrator/consumers/chatbot/smart_memory.py:51-60](), [orchestrator/api/memory_stats.py:72-101]()
+Sources: [orchestrator/modules/memory/context_router.py:5-24](), [orchestrator/modules/memory/unified_memory_service.py:38-46]()
 
 ---
 
-## Dual-Tier Storage Strategy
+## Data Model & Namespacing
 
-Daily logs are stored in **two memory tiers** to balance durability with retrieval performance:
+The system enforces strict namespacing to isolate temporal logs from general semantic memories. The `MemoryNamespace` class provides standardized user ID strings for Mem0 and Redis keys to prevent data leakage between workspaces and memory types [orchestrator/modules/memory/unified_memory_service.py:38-48]().
 
-| Tier | Technology | Purpose | Retention | Query Pattern |
-|------|------------|---------|-----------|---------------|
-| **L3** | Mem0 (OpenMemory) | Long-term semantic storage | Configurable (7d default) | Semantic search by date metadata |
-| **L2** | PostgreSQL `memory_items` | Fast temporal queries | Ebbinghaus decay | SQL WHERE date range |
+### Temporal Namespaces
+*   **Daily Logs**: `mem:{workspace_id}:daily` [orchestrator/modules/memory/unified_memory_service.py:72-74]()
+*   **Session Cache**: `mem:session:{workspace_id}:{conversation_id}` [orchestrator/modules/memory/unified_memory_service.py:78-80]()
 
-### L3 Mem0 Storage
+### Storage Tiers
 
-Daily logs are stored in Mem0 with structured metadata. The `Mem0Client` handles the actual transmission to the OpenMemory server, which processes extraction and vector storage.
+| Tier | Logic | Code Entity |
+| :--- | :--- | :--- |
+| **L1 (Working)** | Ephemeral session state (24h TTL) | `SessionMemory` [orchestrator/modules/memory/unified_memory_service.py:123-130]() |
+| **L2 (Short-term)** | Time-decayed logs in Postgres | `UnifiedMemoryService.search_short_term` |
+| **L3 (Long-term)** | Permanent daily summaries in Mem0 | `UnifiedMemoryService.search_long_term` |
 
-```python
-# Payload structure for Mem0 storage
-payload: Dict[str, Any] = {
-    "text": text,           # Extracted summary string
-    "user_id": user_id,     # Format: mem:ws_{workspace_id}:daily_logs
-}
-if metadata:
-    payload["metadata"] = metadata # Includes type="daily_log_entry"
-```
-Sources: [orchestrator/modules/memory/integrations/mem0_client.py:143-176](), [orchestrator/api/memory_stats.py:78-81]()
-
-### L2 PostgreSQL Storage
-
-The system tracks memories in a local `memory_items` table as a secondary source. This table provides the foundation for the "Real Memory Stats" dashboard.
-
-```python
-# Querying local DB stats for the dashboard
-ws_filter = MemoryItem.workspace_id == ctx.workspace_id
-local_total = db.query(func.count(MemoryItem.id)).filter(ws_filter).scalar() or 0
-```
-Sources: [orchestrator/api/memory_stats.py:142-144](), [orchestrator/api/memory_stats.py:149-157]()
+Sources: [orchestrator/modules/memory/unified_memory_service.py:8-13](), [orchestrator/modules/memory/unified_memory_service.py:84-87]()
 
 ---
 
-## Entry Format and Structure
+## Signal Detection & Temporal Windows
 
-### Timestamped Summary Format
+The `ContextRouter` uses a series of compiled regex patterns to identify when a user is asking about past events. 
 
-Each daily log entry follows this format:
-`[HH:MM] Discussed: <topic>. Tools: <TOOL1, TOOL2>. Actions: <action1; action2>`
+### Temporal Patterns
+The system recognizes relative time references like "yesterday", "last week", "a few days ago", and "recently" [orchestrator/modules/memory/context_router.py:85-105]().
 
-### Extraction Logic
+### Window Calculation
+The `_compute_temporal_window` function converts these relative strings into absolute `datetime` ranges [orchestrator/modules/memory/context_router.py:177-186](). For example:
+*   **"yesterday"**: Generates a window from `now - 1 day` at 00:00 to `now` at 00:00 [orchestrator/modules/memory/context_router.py:189-192]().
+*   **"last week"**: Generates a 7-day window ending at the start of the current day [orchestrator/modules/memory/context_router.py:202-205]().
 
-The `SmartMemoryManager` classifies messages to determine if they contain personal facts, tool usage, or general preferences to guide storage scoping.
-
-| Logic Category | Keywords (Partial List) | Target Tier |
-|-----------|----------------|---------|
-| **Tool/Workflow** | slack, github, jira, database, sql | `agent` |
-| **Personal Facts** | my name, i work at, i live, founder | `global` |
-| **Preferences** | prefer, favorite, my style, i want | `both` |
-
-Sources: [orchestrator/consumers/chatbot/smart_memory.py:102-130](), [orchestrator/consumers/chatbot/smart_memory.py:144-157]()
+Sources: [orchestrator/modules/memory/context_router.py:85-105](), [orchestrator/modules/memory/context_router.py:177-205]()
 
 ---
 
-## Retrieval and Analytics
+## Daily Log Consolidation
 
-### Temporal Retrieval Pipeline
+Daily logs are not just raw chat logs; they are consolidated summaries. This process is governed by the `UnifiedMemoryService` and scheduled background jobs.
 
-The system fetches memories from all scopes (workspace, agent, and daily logs) and deduplicates them by ID.
-
-**Memory Retrieval Flow**
+**Memory Lifecycle: L1 to L2 Consolidation**
 
 ```mermaid
 sequenceDiagram
-    participant UI as "MemoryExplorer (Frontend)"
-    participant API as "memory_stats.py"
-    participant UMS as "UnifiedMemoryService"
-    participant Mem0 as "Mem0Client"
+    participant Redis as "L1 (Redis)"
+    participant Job as "Consolidation Job"
+    participant DB as "L2 (Postgres)"
+    participant Mem0 as "L3 (Mem0)"
 
-    UI->>API: GET /api/v1/memory/stats/real
-    API->>UMS: _fetch_all_scoped_memories()
-    UMS->>Mem0: search_long_term_scoped(ns.daily(), query)
-    Mem0-->>UMS: List[MemoryItem]
-    UMS-->>API: List[Tuple[label, memory]]
-    API->>API: Deduplicate by memory.id
-    API-->>UI: { system_stats, access_metrics }
+    Note over Redis: Session ends or TTL expires
+    Job->>Redis: Fetch SessionMemory (summary, decisions)
+    Job->>DB: INSERT INTO memory_items (level=L2)
+    Note over DB: Apply Ebbinghaus Decay
+    DB->>Mem0: Promote if Importance > 0.7
 ```
-Sources: [orchestrator/api/memory_stats.py:66-118](), [orchestrator/api/memory_stats.py:121-140]()
+Sources: [orchestrator/modules/memory/unified_memory_service.py:123-137](), [orchestrator/config.py:98-107]()
 
-### Memory Health and Hit Rates
+### Configuration Parameters
+The behavior of temporal memory is tuned via `config.py`:
+*   **`MEMORY_SESSION_TTL_SECONDS`**: 86,400s (24 hours) for active session memory [orchestrator/config.py:85]().
+*   **`MEMORY_DECAY_RATE`**: 0.1 (Ebbinghaus forgetting curve speed) [orchestrator/config.py:99]().
+*   **`CONTEXT_BUDGET_TEMPORAL`**: 600 tokens allocated specifically for temporal results in the context window [orchestrator/config.py:93]().
 
-The platform monitors the effectiveness of temporal retrieval by tracking "hits" in the `memory_access_log`. A hit is recorded when a semantic search for context successfully returns relevant results.
+---
+
+## Implementation Details
+
+### Session Memory Structure
+The `SessionMemory` class tracks the current state of a conversation before it is archived into daily logs [orchestrator/modules/memory/unified_memory_service.py:123-137]().
 
 ```python
-# Hit rate calculation from access logs
-access_stats = db.execute(
-    text("""
-        SELECT
-            COUNT(*) as total_searches,
-            SUM(CASE WHEN had_results THEN 1 ELSE 0 END) as hits
-        FROM memory_access_log
-        WHERE workspace_id = :ws_id
-    """),
-    {"ws_id": str(ctx.workspace_id)},
-).fetchone()
+@dataclass
+class SessionMemory:
+    summary: str = ""
+    decisions: List[str] = field(default_factory=list)
+    action_items: List[str] = field(default_factory=list)
+    exchange_count: int = 0
+    ended: bool = False
 ```
-Sources: [orchestrator/api/memory_stats.py:171-180](), [frontend/hooks/use-memory-explorer-api.ts:36-40]()
+Sources: [orchestrator/modules/memory/unified_memory_service.py:132-137]()
+
+### UnifiedMemoryService Singleton
+The service maintains a shared `Mem0Client` and a Redis client getter to ensure consistent memory access across the application [orchestrator/modules/memory/unified_memory_service.py:154-188](). It provides methods like `store_long_term` and `search_long_term` which automatically handle the namespacing for daily logs [orchestrator/modules/memory/unified_memory_service.py:18-20]().
 
 ---
 
-## Management & Cleanup
+## Maintenance & Cleanup
 
-### Frontend Explorer
+The system includes background jobs for memory health:
+1.  **Decay Job**: Periodically reduces the "importance" score of L2 memories. Items falling below `MEMORY_DECAY_ARCHIVE_THRESHOLD` (default 0.3) are archived [orchestrator/config.py:99-101]().
+2.  **Promotion Job**: Memories with high access counts or importance scores are promoted from L2 to L3 [orchestrator/config.py:104-107]().
+3.  **Archival Job**: A monthly job (PRD-131d) that folds aged L2/L3 memories into the workspace knowledge graph [orchestrator/config.py:116-123]().
 
-Users can manage temporal and semantic memories through the Memory Explorer UI. This allows for manual deletion and consolidation of daily log entries.
-
-*   **Browse/Search:** `useMemoryBrowse` hook provides access to `GET /api/v1/memory/browse`.
-*   **Consolidation:** `useConsolidateMemories` allows merging multiple entries using 'merge' or 'summarise' strategies.
-*   **Deletion:** `useDeleteMemory` removes entries from the system permanently.
-
-Sources: [frontend/hooks/use-memory-explorer-api.ts:88-102](), [frontend/hooks/use-memory-explorer-api.ts:156-177](), [frontend/components/activity/activity-memory.tsx:84-97]()
-
-### Circuit Breaker Protection
-
-The `Mem0Client` includes a circuit breaker to ensure that failures in the external memory service (OpenMemory/Mem0) do not stall the orchestrator.
-
-*   **Failure Threshold:** 5 consecutive failures opens the circuit.
-*   **Cooldown:** 60 seconds before a probe request is allowed.
-*   **Timeout:** 15 seconds per request to allow for LLM fact extraction.
-
-Sources: [orchestrator/modules/memory/integrations/mem0_client.py:21-23](), [orchestrator/modules/memory/integrations/mem0_client.py:27-59]()
-
----
-
-## Code Entity Reference
-
-| Entity | Location | Purpose |
-|--------|----------|---------|
-| `SmartMemoryManager` | [orchestrator/consumers/chatbot/smart_memory.py:50-62]() | Manages intent-based memory classification and caching. |
-| `Mem0Client` | [orchestrator/modules/memory/integrations/mem0_client.py:66-70]() | Wrapper for OpenMemory API with circuit breaker and retries. |
-| `MemoryItem` | [orchestrator/api/memory_stats.py:19]() | SQLAlchemy model for local L2 memory storage. |
-| `_fetch_all_scoped_memories` | [orchestrator/api/memory_stats.py:66-72]() | Aggregates memories from global, agent, and daily scopes. |
-| `useMemoryBrowse` | [frontend/hooks/use-memory-explorer-api.ts:88]() | React Query hook for the memory explorer interface. |
-
-Sources: [orchestrator/consumers/chatbot/smart_memory.py](), [orchestrator/modules/memory/integrations/mem0_client.py](), [orchestrator/api/memory_stats.py](), [frontend/hooks/use-memory-explorer-api.ts]()
+Sources: [orchestrator/config.py:98-123](), [orchestrator/modules/memory/unified_memory_service.py:8-13]()
 
 ---

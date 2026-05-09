@@ -5,28 +5,28 @@
 
 The following files were used as context for generating this wiki page:
 
+- [.env.example](.env.example)
 - [frontend/components/agents/agent-configuration-modal.tsx](frontend/components/agents/agent-configuration-modal.tsx)
 - [frontend/components/agents/agent-configuration.tsx](frontend/components/agents/agent-configuration.tsx)
 - [frontend/components/agents/agent-details-modal.tsx](frontend/components/agents/agent-details-modal.tsx)
-- [frontend/components/agents/agent-management.tsx](frontend/components/agents/agent-management.tsx)
-- [frontend/components/agents/agent-performance.tsx](frontend/components/agents/agent-performance.tsx)
 - [frontend/components/agents/agent-roster.tsx](frontend/components/agents/agent-roster.tsx)
-- [frontend/components/agents/agent-skills.tsx](frontend/components/agents/agent-skills.tsx)
-- [frontend/components/agents/agent-status-control-modal.tsx](frontend/components/agents/agent-status-control-modal.tsx)
 - [frontend/components/agents/create-agent-modal.tsx](frontend/components/agents/create-agent-modal.tsx)
-- [frontend/components/agents/create-skill-modal.tsx](frontend/components/agents/create-skill-modal.tsx)
-- [frontend/components/agents/skill-configuration-modal.tsx](frontend/components/agents/skill-configuration-modal.tsx)
+- [frontend/components/agents/model-selector.tsx](frontend/components/agents/model-selector.tsx)
 - [frontend/components/documents/analytics-tab.tsx](frontend/components/documents/analytics-tab.tsx)
 - [frontend/components/documents/processing-tab.tsx](frontend/components/documents/processing-tab.tsx)
-- [frontend/components/workflows/execution-theater/orchestrator-control.tsx](frontend/components/workflows/execution-theater/orchestrator-control.tsx)
-- [frontend/hooks/use-agent-api.ts](frontend/hooks/use-agent-api.ts)
-- [frontend/hooks/use-document-api.ts](frontend/hooks/use-document-api.ts)
-- [frontend/hooks/use-workflow-websocket.ts](frontend/hooks/use-workflow-websocket.ts)
+- [frontend/hooks/use-model-api.ts](frontend/hooks/use-model-api.ts)
+- [frontend/lib/agent-constants.ts](frontend/lib/agent-constants.ts)
+- [orchestrator/alembic/versions/add_job_title_to_agents.py](orchestrator/alembic/versions/add_job_title_to_agents.py)
+- [orchestrator/alembic/versions/agent_public_id_and_slug_fix.py](orchestrator/alembic/versions/agent_public_id_and_slug_fix.py)
+- [orchestrator/alembic/versions/seed_auto_agents_existing_workspaces.py](orchestrator/alembic/versions/seed_auto_agents_existing_workspaces.py)
 - [orchestrator/api/agent_endpoints.py](orchestrator/api/agent_endpoints.py)
 - [orchestrator/api/agents.py](orchestrator/api/agents.py)
-- [orchestrator/core/models/__init__.py](orchestrator/core/models/__init__.py)
+- [orchestrator/api/analytics.py](orchestrator/api/analytics.py)
+- [orchestrator/api/analytics_real.py](orchestrator/api/analytics_real.py)
+- [orchestrator/api/execution_history.py](orchestrator/api/execution_history.py)
+- [orchestrator/api/workflow_history.py](orchestrator/api/workflow_history.py)
 - [orchestrator/core/models/core.py](orchestrator/core/models/core.py)
-- [orchestrator/services/heartbeat_service.py](orchestrator/services/heartbeat_service.py)
+- [orchestrator/core/utils/agent_resolver.py](orchestrator/core/utils/agent_resolver.py)
 
 </details>
 
@@ -36,19 +36,20 @@ This page provides a complete technical reference for agent management endpoints
 
 ## Overview
 
-The Agent API provides REST endpoints for managing AI agents. All endpoints require authentication via Clerk JWT and workspace isolation via the `X-Workspace-ID` header. The backend implementation is distributed across several key routers in the orchestrator.
+The Agent API provides REST endpoints for managing AI agents. All endpoints require authentication via Clerk JWT or API Key, and enforce workspace isolation via the `X-Workspace-ID` header or JWT claims. The backend implementation is distributed across several key routers in the orchestrator.
 
 | Router | Prefix | Purpose | Key File |
 |--------|--------|---------|----------|
 | `agents_router` | `/api/agents` | Core CRUD and relationship management | [orchestrator/api/agents.py:31]() |
-| `agent_plugins_router` | `/api/agents/{id}/plugins` | Plugin assignment and context assembly | [orchestrator/api/agent_plugins.py:33]() |
+| `agent_plugins_router` | `/api/agents/{id}/plugins` | Plugin assignment and context assembly | [orchestrator/api/agents.py:31]() |
 | `agent_endpoints_router` | `/api/agents` | Specialized creation and performance metrics | [orchestrator/api/agent_endpoints.py:26]() |
+| `analytics_router` | `/api/analytics` | Success rates and task completion times | [orchestrator/api/analytics_real.py:32]() |
 
-Sources: [orchestrator/api/agents.py:31](), [orchestrator/api/agent_plugins.py:33](), [orchestrator/api/agent_endpoints.py:26]()
+**Sources:** [orchestrator/api/agents.py:31](), [orchestrator/api/agent_endpoints.py:26](), [orchestrator/api/analytics_real.py:32]()
 
 ---
 
-## Authentication & Headers
+## Authentication & Workspace Resolution
 
 The API uses a hybrid authentication strategy to support both frontend users (Clerk) and programmatic access.
 
@@ -57,9 +58,12 @@ Authorization: Bearer <clerk_jwt_token>
 X-Workspace-ID: <workspace_uuid>
 ```
 
-The `get_request_context_hybrid` dependency validates the token and injects a `RequestContext` containing the `user_id` and `workspace_id`.
+The `get_request_context_hybrid` dependency validates the token and injects a `RequestContext` containing the `user_id` and `workspace_id` [orchestrator/api/agents.py:26-27](). For external identification, the system uses a `public_id` (UUID) to avoid ID guessing in public widgets [orchestrator/core/models/core.py:202-205]().
 
-Sources: [orchestrator/api/agents.py:26](), [orchestrator/api/agent_endpoints.py:22-23]()
+**Agent ID Resolution:**
+The utility `resolve_agent_id` is used to handle both legacy integer IDs and new UUID `public_id` strings while strictly enforcing workspace ownership [orchestrator/core/utils/agent_resolver.py:17-34]().
+
+**Sources:** [orchestrator/api/agents.py:26-27](), [orchestrator/core/utils/agent_resolver.py:17-34](), [orchestrator/core/models/core.py:202-205]()
 
 ---
 
@@ -67,44 +71,40 @@ Sources: [orchestrator/api/agents.py:26](), [orchestrator/api/agent_endpoints.py
 
 The following diagram bridges the frontend UI components to the backend API entities and database models.
 
-Title: "Agent Management Architecture"
+Title: Frontend-to-Backend Entity Mapping
 ```mermaid
 graph TB
     subgraph "Frontend Layer (React/Next.js)"
-        UI_Roster["AgentRoster Component"]
-        UI_Config["AgentConfigurationModal"]
-        UI_Create["CreateAgentModal"]
-        Hook_Agent["useAgent Hook"]
+        UI_Roster["AgentRoster"]
+        UI_ModelSel["ModelSelector"]
+        Hook_Model["useWorkspaceModels"]
+        Hook_Agent["useAgent"]
     end
     
     subgraph "API Layer (FastAPI)"
         R_Agents["/api/agents (GET/POST)"]
-        R_Config["/api/agents/{id} (GET/PUT)"]
-        R_Plugins["/api/agents/{id}/plugins"]
-        R_Skills["/api/agents/{id}/skills"]
+        R_Model["/api/marketplace/llm/installed"]
+        R_Analytics["/api/analytics/dashboard/success-rate"]
     end
     
     subgraph "Code Entities & Models"
         M_Agent["core.models.Agent"]
-        M_ModelCfg["Agent.model_config (JSONB)"]
+        M_LLM["core.models.LLMModel"]
+        M_Usage["core.models.LLMUsage"]
         M_AppAssign["AgentAppAssignment"]
-        M_AssignedPlugin["AgentAssignedPlugin"]
     end
 
-    UI_Roster --> Hook_Agent
+    UI_Roster --> R_Agents
+    UI_ModelSel --> Hook_Model
+    Hook_Model --> R_Model
     Hook_Agent --> R_Agents
-    UI_Config --> R_Config
-    UI_Config --> R_Plugins
-    UI_Create --> R_Agents
-    
     R_Agents --> M_Agent
-    R_Config --> M_ModelCfg
-    R_Plugins --> M_AssignedPlugin
-    R_Skills --> M_Agent
+    R_Model --> M_LLM
+    R_Analytics --> M_Usage
     M_Agent --> M_AppAssign
 ```
 
-Sources: [frontend/components/agents/agent-roster.tsx:47](), [frontend/components/agents/agent-configuration-modal.tsx:110-112](), [orchestrator/api/agents.py:31](), [orchestrator/api/agent_plugins.py:33]()
+**Sources:** [frontend/hooks/use-model-api.ts:93-104](), [frontend/components/agents/model-selector.tsx:38](), [orchestrator/api/agents.py:31](), [orchestrator/core/models/core.py:138-140]()
 
 ---
 
@@ -117,141 +117,94 @@ Returns a list of agents for the current workspace. The response is enriched wit
 
 **Implementation Details:**
 - Uses `_build_agent_response` to join `AgentAppAssignment` and `ComposioAppCache` [orchestrator/api/agents.py:174-205]().
+- Includes `model_config` details (provider, model_id, temperature) [orchestrator/api/agents.py:177-178]().
 - Normalizes tags from CSV strings or JSON arrays [orchestrator/api/agents.py:146-171]().
+- Integrates `getAgentRoleLine` to compose card subtitles as `{Category} · {Job Title}` [frontend/lib/agent-constants.ts:137-141]().
 
-Sources: [orchestrator/api/agents.py:174-205](), [orchestrator/api/agents.py:213-240]()
+**Sources:** [orchestrator/api/agents.py:174-205](), [orchestrator/api/agents.py:146-171](), [frontend/lib/agent-constants.ts:137-141]()
 
 ### Create Specialized Agent
 `POST /api/agents/create-specialized`
 
-A high-level endpoint used by the `AgentFactory` to create agents with verified LLM connections [orchestrator/api/agent_endpoints.py:65-87]().
+A high-level endpoint used by the `AgentFactory` to create agents with verified LLM connections [orchestrator/api/agent_endpoints.py:81-87]().
 
-**Request Body:**
-```json
-{
-  "name": "Security Bot",
-  "type": "security_expert",
-  "skills": ["vulnerability_scanning"],
-  "model": {
-    "provider": "openai",
-    "name": "gpt-4",
-    "temperature": 0.5
-  }
-}
-```
+**Workflow:**
+1. Extracts `name`, `type`, and `model_config` [orchestrator/api/agent_endpoints.py:68-72]().
+2. Calls `factory.create_agent` to initialize runtime [orchestrator/api/agent_endpoints.py:81-87]().
+3. **Knowledge Graph:** Schedules an incremental update to the workspace knowledge graph to include the new agent in the "roster" [orchestrator/api/agent_endpoints.py:93-98]().
 
-Sources: [orchestrator/api/agent_endpoints.py:40-63]()
+**Sources:** [orchestrator/api/agent_endpoints.py:40-106]()
 
-### Update Agent Configuration
-`PUT /api/agents/{agent_id}`
+---
 
-Updates agent metadata and model settings. If the agent name or description changes, a background task `_reindex_agent_embedding` is triggered to update the semantic router [orchestrator/api/agents.py:38-65]().
+## Model Configuration & Analytics
 
-Sources: [orchestrator/api/agents.py:38-65](), [orchestrator/api/agents.py:302-315]()
+### LLM Model Selection
+Agents are configured with specific models from the `llm_models` registry [orchestrator/core/models/core.py:43-48](). The `ModelSelector` component groups these by tier: `direct`, `aggregator`, or `byok` [orchestrator/core/models/core.py:81-83]().
+
+**Usage Tracking:**
+Every LLM request is logged in the `llm_usage` table, capturing `input_tokens`, `output_tokens`, and `total_cost` [orchestrator/core/models/core.py:138-161]().
+
+### Performance Analytics
+`GET /api/analytics/dashboard/success-rate`
+
+Calculates the success rate by performing a `UNION` query across legacy `WorkflowExecution` and new `OrchestrationRun` (Missions) [orchestrator/api/analytics_real.py:53-75]().
+
+**Metrics Provided:**
+- `agent_success_rate`: Combined completion percentage.
+- `avg_task_completion_time`: Weighted average of workflow and mission durations [orchestrator/api/analytics_real.py:112-159]().
+- `total_cost`: Aggregated from `llm_usage` records [orchestrator/core/models/core.py:161]().
+
+**Sources:** [orchestrator/api/analytics_real.py:53-159](), [orchestrator/core/models/core.py:138-161]()
 
 ---
 
 ## Tool & Plugin Assignment
 
-Agents interact with the world via Tools (Composio) and Plugins (Marketplace).
-
 ### Tool Assignment
 The system uses "Stable IDs" (negative integers) to map frontend tool selections to backend `app_name` strings [orchestrator/api/agents.py:68-78]().
 
-- **Endpoint:** `PUT /api/agents/{agent_id}` (updates `tool_ids` field).
 - **Logic:** `_resolve_tool_ids_to_app_names` validates that the requested tools are actually connected in the current workspace using the `EntityManager` [orchestrator/api/agents.py:97-143]().
+- **Persistence:** Assignments are stored in the `agent_app_assignments` table [orchestrator/api/agents.py:182-186]().
 
-Sources: [orchestrator/api/agents.py:68-78](), [orchestrator/api/agents.py:97-143](), [orchestrator/api/agents.py:107-108]()
-
-### Plugin Assignment
-Plugins provide structured skills and commands.
-
-- **List Plugins:** `GET /api/agents/{agent_id}/plugins` [orchestrator/api/agent_plugins.py:69-125]().
-- **Update Plugins:** `PUT /api/agents/{agent_id}/plugins` [orchestrator/api/agent_plugins.py:127-209]().
-- **Validation:** Ensures requested plugins are enabled for the workspace in `workspace_enabled_plugins`.
-
-Sources: [orchestrator/api/agent_plugins.py:69-125](), [orchestrator/api/agent_plugins.py:127-209]()
+**Sources:** [orchestrator/api/agents.py:68-78](), [orchestrator/api/agents.py:97-143](), [orchestrator/api/agents.py:182-186]()
 
 ---
 
-## Assembled Context Assembly
+## Agent Learning & Feedback
 
-The `assembled-context` endpoint is the "brain" of the agent runtime. It constructs the final system prompt by merging identity, skills, and tool definitions.
-
-Title: "Assembled Context Generation Flow"
-```mermaid
-sequenceDiagram
-    participant AF as AgentFactory
-    participant API as assembled-context API
-    participant PS as PluginContextService
-    participant DB as PostgreSQL
-    
-    AF->>API: GET /api/agents/{id}/assembled-context
-    API->>DB: Load Agent & Persona
-    API->>DB: Load Assigned Plugins
-    API->>PS: build_tier1_summary()
-    PS-->>API: Compact Plugin List
-    API->>PS: build_tier2_content()
-    PS-->>API: Full Skill/Command Docs
-    API->>DB: Load Composio Tools
-    API->>API: Merge into System Prompt
-    API-->>AF: AssembledContextOut
-```
-
-**Assembly Logic:**
-1. **Identity:** Loads `Persona` or `custom_persona_prompt`.
-2. **Tier 1:** A compact list of loaded plugins for high-level awareness.
-3. **Tier 2:** Full documentation of plugin skills/commands for execution detail.
-4. **Tools:** JSON-schema definitions for Composio actions.
-
-Sources: [orchestrator/api/agent_plugins.py:211-338]()
-
----
-
-## Performance & Monitoring
-
-### Agent Performance Metrics
-`GET /api/agents/{agent_id}/performance`
-
-Returns real-time and historical metrics from the `Agent` model's `performance_metrics` and `model_usage_stats` JSONB fields [orchestrator/api/agent_endpoints.py:205-223]().
-
-**Response Data:**
-- `success_rate`: Percentage of tasks completed successfully.
-- `avg_response_time`: Latency in seconds.
-- `total_tokens`: Cumulative token usage.
-- `cost_estimate`: Calculated cost based on model pricing.
-
-Sources: [orchestrator/api/agent_endpoints.py:188-223]()
-
-### Learning Feedback
 `POST /api/agents/{agent_id}/learn`
 
-Allows users or system evaluators to provide feedback. This sets the agent's `lifecycle_state` to `AgentLifecycle.LEARNING` and stores corrections in the agent's memory [orchestrator/api/agent_endpoints.py:116-171]().
+Allows users to provide feedback on agent performance.
 
-Sources: [orchestrator/api/agent_endpoints.py:116-171]()
+**Execution Flow:**
+1. Validates the agent is active in the `AgentFactory` [orchestrator/api/agent_endpoints.py:139-144]().
+2. Appends a `learning_entry` to the agent's runtime memory containing `quality_score` and `improvements` [orchestrator/api/agent_endpoints.py:150-158]().
+3. Transitions `lifecycle_state` to `LEARNING` during processing [orchestrator/api/agent_endpoints.py:161-169]().
 
----
-
-## Heartbeat Configuration
-
-Agents can be configured for autonomous "ticks" via the `HeartbeatService`.
-
-- **Scheduling:** Uses `APScheduler` to trigger `_agent_tick` [orchestrator/services/heartbeat_service.py:17, 193-214]().
-- **Interval:** Configurable in minutes, converted to cron triggers [orchestrator/services/heartbeat_service.py:129-161]().
-- **API Control:** `POST /api/heartbeat/agent/{agent_id}/run` allows manual triggering of a heartbeat cycle.
-
-Sources: [orchestrator/services/heartbeat_service.py:17](), [orchestrator/services/heartbeat_service.py:129-161](), [orchestrator/services/heartbeat_service.py:193-214]()
+**Sources:** [orchestrator/api/agent_endpoints.py:116-186]()
 
 ---
 
-## Data Models (Backend)
+## Data Models
 
 ### Agent Model
-Defined in `core.models.Agent`. Key fields include:
-- `configuration`: JSONB store for heartbeat and resource limits [frontend/components/agents/agent-configuration-modal.tsx:76-90]().
-- `model_config`: JSONB store for provider, model_id, and temperature [orchestrator/api/agents.py:177-178]().
-- `status`: `active`, `idle`, or `maintenance` [frontend/components/agents/agent-roster.tsx:162-166]().
+The `Agent` model [orchestrator/core/models/core.py:188-251]() includes:
+- `public_id`: UUID for public-facing identification [orchestrator/core/models/core.py:202]().
+- `is_system_agent`: Boolean flag for orchestrators like the "Auto" agent [orchestrator/core/models/core.py:223]().
+- `model_config`: JSONB configuration for the LLM [orchestrator/core/models/core.py:229]().
+- `job_title`: User-defined role description used in UI roster cards [orchestrator/core/models/core.py:207]().
 
-Sources: [orchestrator/api/agents.py:11](), [orchestrator/api/agents.py:13](), [orchestrator/api/agents.py:177-178](), [orchestrator/core/models/core.py:143-169]()
+### LLMUsage Model
+Tracks granular execution data for billing and analytics [orchestrator/core/models/core.py:138-169]().
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `workspace_id` | UUID | Isolation boundary |
+| `model_id` | String | Model identifier (e.g., gpt-4) |
+| `input_tokens` | Integer | Prompt token count |
+| `total_cost` | Float | Calculated cost in USD |
+
+**Sources:** [orchestrator/core/models/core.py:138-169](), [orchestrator/core/models/core.py:188-251]()
 
 ---

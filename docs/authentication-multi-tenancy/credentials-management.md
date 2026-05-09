@@ -7,23 +7,21 @@ The following files were used as context for generating this wiki page:
 
 - [.gitignore](.gitignore)
 - [docs/PRDS/126-BUSINESS-KNOWLEDGE-GRAPH.md](docs/PRDS/126-BUSINESS-KNOWLEDGE-GRAPH.md)
+- [graphify-out/snapshots/bucket-1-pre-drop.sql](graphify-out/snapshots/bucket-1-pre-drop.sql)
 - [orchestrator/.env.example](orchestrator/.env.example)
-- [orchestrator/api/admin_prompts.py](orchestrator/api/admin_prompts.py)
-- [orchestrator/api/credentials.py](orchestrator/api/credentials.py)
-- [orchestrator/api/database_knowledge.py](orchestrator/api/database_knowledge.py)
-- [orchestrator/api/document_generation.py](orchestrator/api/document_generation.py)
-- [orchestrator/api/generated_images.py](orchestrator/api/generated_images.py)
-- [orchestrator/api/system_settings.py](orchestrator/api/system_settings.py)
+- [orchestrator/alembic/versions/prd135_drop_bucket_1.py](orchestrator/alembic/versions/prd135_drop_bucket_1.py)
+- [orchestrator/api/composio.py](orchestrator/api/composio.py)
+- [orchestrator/api/tools.py](orchestrator/api/tools.py)
+- [orchestrator/core/composio/client.py](orchestrator/core/composio/client.py)
+- [orchestrator/core/composio/linkedin_image_workaround.py](orchestrator/core/composio/linkedin_image_workaround.py)
+- [orchestrator/core/composio/tool_executor.py](orchestrator/core/composio/tool_executor.py)
 - [orchestrator/core/credentials/service.py](orchestrator/core/credentials/service.py)
-- [orchestrator/core/database/database.py](orchestrator/core/database/database.py)
+- [orchestrator/core/credentials/tester.py](orchestrator/core/credentials/tester.py)
+- [orchestrator/core/credentials/types.py](orchestrator/core/credentials/types.py)
+- [orchestrator/core/database/credential_types_seed.json](orchestrator/core/database/credential_types_seed.json)
 - [orchestrator/core/models/credentials.py](orchestrator/core/models/credentials.py)
-- [orchestrator/core/models/system_prompts.py](orchestrator/core/models/system_prompts.py)
-- [orchestrator/core/seeds/seed_system_prompts.py](orchestrator/core/seeds/seed_system_prompts.py)
-- [orchestrator/core/services/audit_service.py](orchestrator/core/services/audit_service.py)
 - [orchestrator/core/services/plugin_cache.py](orchestrator/core/services/plugin_cache.py)
-- [orchestrator/core/services/prompt_registry.py](orchestrator/core/services/prompt_registry.py)
-- [orchestrator/modules/documents/generation_service.py](orchestrator/modules/documents/generation_service.py)
-- [orchestrator/modules/nl2sql/service.py](orchestrator/modules/nl2sql/service.py)
+- [orchestrator/services/metadata_sync_service.py](orchestrator/services/metadata_sync_service.py)
 
 </details>
 
@@ -39,7 +37,7 @@ This document describes the credential management system in Automatos AI, which 
 
 ## System Architecture
 
-The credentials management system consists of four primary components:
+The credentials management system consists of four primary components that bridge the gap between user-provided secrets and secure agent execution.
 
 ### Credential Entity Relationship Diagram
 
@@ -72,7 +70,6 @@ graph TB
     CredModel --> DB
     
     style Store stroke-width:2px
-    style TypeModel stroke-width:2px
     style CredModel stroke-width:2px
 ```
 
@@ -93,11 +90,11 @@ graph TB
 
 ## Credential Types
 
-Credential types define schemas for different categories of credentials. Each type specifies required fields, UI presentation (icons/logos), and test logic. The system supports over 400 credential type definitions for dynamic form generation [orchestrator/api/credentials.py:82-85]().
+Credential types define schemas for different categories of credentials. Each type specifies required fields, UI presentation (icons/logos), and test logic. The system supports a wide range of types via a seeding mechanism.
 
 ### Type Schema Structure
 
-The system seeds several system-defined types including `openai_api`, `anthropic_api`, and `postgres_credentials`. These are defined in a centralized registry and seeded into the database.
+The system seeds several system-defined types including `openai_api`, `anthropic_api`, and `postgres_credentials`.
 
 **Credential Type Attributes:**
 
@@ -108,27 +105,13 @@ The system seeds several system-defined types including `openai_api`, `anthropic
 | `test_endpoint` | Configuration for connection testing | [orchestrator/core/models/credentials.py:47-47]() |
 | `category` | Classification (ai, database, infrastructure) | [orchestrator/core/models/credentials.py:36-36]() |
 
-**Sources:** [orchestrator/core/models/credentials.py:25-58](), [orchestrator/api/credentials.py:82-85]()
-
-### Field Type Definitions
-
-Credential schemas support multiple field types defined in the `CredentialFieldType` enum, allowing for dynamic form generation in the frontend:
-
-| Field Type | Description |
-|------------|-------------|
-| `string` | Standard text input. |
-| `password` | Masked in UI and encrypted at rest. |
-| `number` | Numeric values (e.g., ports). |
-| `boolean` | Toggle switches. |
-| `options` | Dropdown selections. |
-
-**Sources:** [orchestrator/core/models/credentials.py:137-145]()
+**Sources:** [orchestrator/core/models/credentials.py:25-58](), [orchestrator/core/database/credential_types_seed.json:1-131]()
 
 ---
 
 ## Credential Storage & Multi-Tenancy
 
-Credentials are workspace-scoped. Every `Credential` record must have a `workspace_id` to ensure data isolation. The `CredentialStore` enforces Broken Object Level Authorization (BOLA) protection by verifying workspace ownership during retrieval [orchestrator/api/credentials.py:65-68]().
+Credentials are workspace-scoped. Every `Credential` record must have a `workspace_id` to ensure data isolation and protection against Broken Object Level Authorization (BOLA).
 
 ### Credential Data Flow
 
@@ -158,11 +141,11 @@ graph LR
 ```
 
 **Database Schema Constraints:**
-- **Workspace Isolation:** `workspace_id` is a required UUID foreign key to the `workspaces` table, preventing cross-tenant access [orchestrator/core/models/credentials.py:69-69]().
+- **Workspace Isolation:** `workspace_id` is a required UUID foreign key to the `workspaces` table [orchestrator/core/models/credentials.py:69-69]().
 - **Encryption:** Values are stored in the `encrypted_data` text column after encryption [orchestrator/core/models/credentials.py:74-74]().
 - **Environment:** Supports `production`, `staging`, or `dev` tags for environment-specific keys [orchestrator/core/models/credentials.py:76-76]().
 
-**Sources:** [orchestrator/core/models/credentials.py:60-103](), [orchestrator/core/credentials/service.py:101-185](), [orchestrator/api/credentials.py:65-68]()
+**Sources:** [orchestrator/core/models/credentials.py:60-103](), [orchestrator/core/credentials/service.py:101-185]()
 
 ---
 
@@ -171,45 +154,61 @@ graph LR
 The system uses the `cryptography` library's Fernet implementation for AES-256-CBC encryption to protect sensitive data at rest.
 
 ### Key Management
-The encryption key is typically loaded from environment variables or a local `.credential_key` file. In production, it is critical that the encryption key is stable; loss of the key renders all stored credentials unrecoverable. Files matching `*.credential_key` are explicitly ignored by version control to prevent leaks [./.gitignore:110-114]().
+The encryption key is typically loaded from environment variables or a local `.credential_key` file. The system ignores these keys in version control to prevent leaks.
 
 **Encryption Implementation:**
 - `encrypt_dict`: Serializes a dictionary to JSON and then encrypts the string using the `encryption_service` [orchestrator/core/credentials/service.py:147-147]().
-- `decrypt_dict`: Decrypts the ciphertext and deserializes the JSON back into a Python dictionary for use in agent execution [orchestrator/core/credentials/service.py:433-433]().
+- `decrypt_dict`: Decrypts the ciphertext and deserializes the JSON back into a Python dictionary [orchestrator/core/credentials/service.py:433-433]().
 
-**Sources:** [orchestrator/core/credentials/encryption.py:1-26](), [orchestrator/core/credentials/service.py:145-150](), [./.gitignore:110-114]()
+**Sources:** [orchestrator/core/credentials/encryption.py:1-26](), [orchestrator/core/credentials/service.py:145-150](), [.gitignore:110-114]()
 
 ---
 
-## Credential Testing (BYOK Overrides)
+## Credential Resolution (BYOK Overrides)
 
-The `CredentialTester` class allows users to verify their "Bring Your Own Key" (BYOK) configurations or database connections before saving.
+The system determines which credentials to use for a given operation through a prioritized resolution logic. This is critical for services like `LLMManager` and platform integrations.
+
+### Resolution Priority
+1. **Agent/Workspace Override:** Specific credentials assigned to an agent or workspace in the database.
+2. **Credential Store:** Resolving by `credential_id` stored in service configurations.
+3. **Environment Variables:** System-level fallbacks defined in `.env`.
+
+**Special Handling: LinkedIn Image Workaround**
+Due to limitations in the Composio SDK for LinkedIn image uploads, the platform uses a direct bypass that resolves credentials from the `CredentialStore`. It specifically looks for a credential of type `linkedInCommunityManagementOAuth2Api` [orchestrator/core/composio/linkedin_image_workaround.py:61-110]().
+
+**Sources:** [orchestrator/core/composio/linkedin_image_workaround.py:43-110](), [orchestrator/core/credentials/service.py:191-205]()
+
+---
+
+## Credential Testing
+
+The `CredentialTester` class allows users to verify their configurations (e.g., database connections) before saving.
 
 ### Supported Providers & Methods
-The `test_credential` method routes requests based on the `credential_type` to specific private test methods [orchestrator/core/credentials/tester.py:69-119]().
+The `test_credential` method routes requests based on the `credential_type` to specific test methods [orchestrator/core/credentials/tester.py:69-126]().
 
 | Type | Test Logic |
 |------|------------|
-| `openai_api` | Calls `https://api.openai.com/v1/models` to verify key validity [orchestrator/core/credentials/tester.py:128-160](). |
-| `anthropic_api` | Calls `/v1/messages` with a minimal payload to check API access [orchestrator/core/credentials/tester.py:162-180](). |
-| `postgres` | Attempts an `asyncpg` connection to the provided host/port [orchestrator/core/credentials/tester.py:75-77](). |
-| `redis` | Performs a `ping()` command using the `redis` python client [orchestrator/core/credentials/tester.py:78-79](). |
+| `openai_api` | Calls OpenAI `/models` endpoint to verify key validity [orchestrator/core/credentials/tester.py:129-161](). |
+| `anthropic_api` | Calls Anthropic `/v1/messages` endpoint [orchestrator/core/credentials/tester.py:163-173](). |
+| `postgres` | Attempts an `asyncpg` connection [orchestrator/core/credentials/tester.py:75-77](). |
+| `linkedin` | Tests LinkedIn Community Management API [orchestrator/core/credentials/tester.py:109-109](). |
 
 ### Security: SSRF Protection
-The tester includes `_validate_url_not_ssrf` to prevent Server-Side Request Forgery (SSRF). This blocks users from using credential tests to probe internal network infrastructure by preventing access to private/reserved IP ranges [orchestrator/core/credentials/tester.py:27-53]().
+The tester includes validation to prevent Server-Side Request Forgery (SSRF) by blocking access to private/reserved IP ranges during connection tests [orchestrator/core/credentials/tester.py:27-53]().
 
-**Sources:** [orchestrator/core/credentials/tester.py:27-180]()
+**Sources:** [orchestrator/core/credentials/tester.py:27-173]()
 
 ---
 
 ## Audit Logging
 
-Every lifecycle event (creation, update, deletion, access, and testing) generates a `CredentialAuditLog` entry for security monitoring and compliance.
+Every lifecycle event (creation, update, deletion, access, and testing) generates a `CredentialAuditLog` entry.
 
 **Audit Data Points:**
-- **Action:** Tracks the operation type: `created`, `updated`, `deleted`, `accessed`, `tested` [orchestrator/core/models/credentials.py:115-115]().
-- **Actor:** Records the `user_id` and `ip_address` of the requester [orchestrator/core/models/credentials.py:116-117]().
-- **Context:** Stores metadata about the operation (e.g., success status, error messages), excluding sensitive plaintext [orchestrator/core/models/credentials.py:121-121]().
+- **Action:** Tracks operation type: `created`, `updated`, `deleted`, `accessed`, `tested` [orchestrator/core/models/credentials.py:115-115]().
+- **Actor:** Records the `user_id` and `ip_address` [orchestrator/core/models/credentials.py:116-117]().
+- **Context:** Stores metadata about the operation (success/failure) [orchestrator/core/models/credentials.py:121-121]().
 
 **Sources:** [orchestrator/core/models/credentials.py:105-131](), [orchestrator/core/credentials/service.py:172-179]()
 
@@ -218,14 +217,16 @@ Every lifecycle event (creation, update, deletion, access, and testing) generate
 ## Configuration Reference
 
 ### Environment Variables
-Credential management relies on the following variables in the `.env` file for default settings and system-level access. The database configuration itself can also be resolved via the credential system, attempting to fetch `postgres_connection_params` before falling back to environment variables [orchestrator/core/database/database.py:23-37]().
+Credential management relies on the following variables in the `.env` file for default settings:
 
 | Variable | Purpose |
 |----------|---------|
-| `OPENAI_API_KEY` | Default system-wide key if no BYOK is provided [orchestrator/.env.example:19-19](). |
-| `ANTHROPIC_API_KEY` | Default system-wide key for Claude models [orchestrator/.env.example:20-20](). |
-| `API_KEY` | Secure key for authenticating requests to the orchestrator API [orchestrator/.env.example:16-16](). |
+| `OPENAI_API_KEY` | Default system-wide OpenAI key [orchestrator/.env.example:19-19](). |
+| `ANTHROPIC_API_KEY` | Default system-wide Anthropic key [orchestrator/.env.example:20-20](). |
+| `POSTGRES_PASSWORD` | Default DB password if not using credential store [orchestrator/.env.example:6-6](). |
+| `REDIS_PASSWORD` | Default Redis password [orchestrator/.env.example:11-11](). |
+| `API_KEY` | System-level API authentication [orchestrator/.env.example:16-16](). |
 
-**Sources:** [orchestrator/.env.example:1-21](), [orchestrator/core/database/database.py:23-37]()
+**Sources:** [orchestrator/.env.example:1-21]()
 
 ---

@@ -5,13 +5,24 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/components/context/configure-rag-modal.tsx](frontend/components/context/configure-rag-modal.tsx)
-- [frontend/components/workflows/create-workflow-modal.tsx](frontend/components/workflows/create-workflow-modal.tsx)
-- [frontend/components/workflows/edit-workflow-modal.tsx](frontend/components/workflows/edit-workflow-modal.tsx)
-- [frontend/components/workflows/json-schema-editor.tsx](frontend/components/workflows/json-schema-editor.tsx)
-- [frontend/components/workflows/live-progress-panel.tsx](frontend/components/workflows/live-progress-panel.tsx)
-- [frontend/components/workflows/run-workflow-modal.tsx](frontend/components/workflows/run-workflow-modal.tsx)
-- [orchestrator/api/cache.py](orchestrator/api/cache.py)
+- [frontend/components/activity/memory/memory-viewer.tsx](frontend/components/activity/memory/memory-viewer.tsx)
+- [frontend/components/activity/projects/project-card.tsx](frontend/components/activity/projects/project-card.tsx)
+- [frontend/components/agents/org-chart-tab.tsx](frontend/components/agents/org-chart-tab.tsx)
+- [frontend/components/assignments/assignments-playbooks-grid.tsx](frontend/components/assignments/assignments-playbooks-grid.tsx)
+- [frontend/components/composio/feature-card.tsx](frontend/components/composio/feature-card.tsx)
+- [frontend/components/documents/upload-provider-modal.tsx](frontend/components/documents/upload-provider-modal.tsx)
+- [frontend/components/marketplace/marketplace-playbooks-tab.tsx](frontend/components/marketplace/marketplace-playbooks-tab.tsx)
+- [frontend/components/workflows/playbook-execution-config.tsx](frontend/components/workflows/playbook-execution-config.tsx)
+- [frontend/components/workflows/playbook-preview-panel.tsx](frontend/components/workflows/playbook-preview-panel.tsx)
+- [frontend/components/workflows/playbook-schedule-config.tsx](frontend/components/workflows/playbook-schedule-config.tsx)
+- [frontend/components/workflows/playbook-step-builder.tsx](frontend/components/workflows/playbook-step-builder.tsx)
+- [frontend/components/workflows/playbook-step-progress.tsx](frontend/components/workflows/playbook-step-progress.tsx)
+- [frontend/components/workflows/playbooks-tab.tsx](frontend/components/workflows/playbooks-tab.tsx)
+- [frontend/components/workflows/view-playbook-modal.tsx](frontend/components/workflows/view-playbook-modal.tsx)
+- [orchestrator/api/marketplace.py](orchestrator/api/marketplace.py)
+- [orchestrator/api/workflow_recipes.py](orchestrator/api/workflow_recipes.py)
+- [orchestrator/core/seeds/platform-management-skill.md](orchestrator/core/seeds/platform-management-skill.md)
+- [orchestrator/modules/tools/discovery/handlers_playbooks.py](orchestrator/modules/tools/discovery/handlers_playbooks.py)
 
 </details>
 
@@ -19,213 +30,126 @@ The following files were used as context for generating this wiki page:
 
 ## Purpose and Scope
 
-This page documents the recipe creation workflow in Automatos AI, covering the frontend implementation of the creation UI, form state management, and the data transformation process before submission to the backend API. A recipe is a reusable workflow template that orchestrates multiple agents to perform complex tasks.
+This page documents the recipe creation workflow in Automatos AI, covering the frontend implementation of the creation UI, form state management, and the backend orchestration logic. A recipe (referred to in the database as a `WorkflowTemplate` or "Playbook") is a reusable template that orchestrates multiple agents to perform sequential or parallel tasks.
 
 ---
 
 ## Recipe Concept
 
-A **recipe** (stored as `WorkflowTemplate` in the database) is a reusable template that defines:
-- **Steps**: Ordered sequence of agent invocations with prompt templates [frontend/components/workflows/create-recipe-modal.tsx:34-42]().
-- **Input/Output Schemas**: Optional JSON schemas for runtime validation [frontend/components/workflows/create-recipe-modal.tsx:32-33]().
-- **Execution Configuration**: Performance settings, retry logic, and timeouts [frontend/components/workflows/create-recipe-modal.tsx:43-51]().
-- **Schedule Configuration**: Manual execution, cron schedules, or webhook triggers [frontend/components/workflows/create-recipe-modal.tsx:52-57]().
+A **recipe** is a structured automation blueprint stored in the `workflow_templates` table [orchestrator/api/workflow_recipes.py:25-25](). It defines a series of discrete operations that agents perform in a specific order or concurrently.
 
-Recipes are workspace-scoped and can be shared via the platform marketplace.
+- **Steps**: An ordered array of step definitions containing `agent_id`, `prompt_template`, and `error_handling` strategies [frontend/components/workflows/playbook-step-builder.tsx:121-129]().
+- **Execution Mode**: Supports `sequential` (step-by-step) or `parallel` (simultaneous) execution [frontend/components/workflows/playbook-preview-panel.tsx:140-152]().
+- **Variables**: Prompts support dynamic interpolation using the `{variable_name}` syntax [frontend/components/workflows/playbook-step-builder.tsx:212-212]().
+- **Scheduling**: Supports manual execution, cron-based scheduling, and event-driven triggers via Composio [orchestrator/api/workflow_recipes.py:34-70]().
 
-**Sources:** [frontend/components/workflows/create-recipe-modal.tsx:29-58](), [frontend/hooks/use-recipe-form.ts:89-102]()
+**Sources:** [orchestrator/api/workflow_recipes.py:1-30](), [frontend/components/workflows/playbook-step-builder.tsx:120-130]()
 
 ---
 
-## Creation Wizard Overview
+## Creation Wizard Architecture
 
-The recipe creation interface is a 4-step modal wizard implemented in `CreateRecipeModal`. The wizard uses progressive disclosure to guide users through configuration.
+The recipe creation interface is a multi-step modal wizard implemented via `CreatePlaybookModal`. It utilizes `react-hook-form` to manage the complex state of steps, execution configs, and schedules.
 
-### Wizard Architecture
+### Data Flow Diagram
 
 ```mermaid
-graph TB
-    subgraph "Entry Points"
-        ["WorkflowManagement"]
-        ["RecipesTab"]
-        
-        ["WorkflowManagement"] -->|open| Modal["CreateRecipeModal"]
-        ["RecipesTab"] -->|open| Modal
+graph TD
+    subgraph "Frontend UI (Next.js)"
+        Modal["CreatePlaybookModal"]
+        Form["PlaybookFormValues"]
+        Builder["PlaybookStepBuilder"]
+        Preview["PlaybookPreviewPanel"]
     end
     
-    subgraph "CreateRecipeModal Component"
-        Modal["CreateRecipeModal<br/>create-recipe-modal.tsx"]
-        FormProvider["FormProvider<br/>react-hook-form"]
-        Steps["STEPS constant<br/>basic, steps, execution, schedule"]
-        
-        Modal --> FormProvider
-        FormProvider --> Steps
+    subgraph "Backend API (FastAPI)"
+        Router["/api/workflow-recipes"]
+        Scheduler["PlaybookSchedulerService"]
+        TriggerHandler["_auto_register_trigger"]
     end
-    
-    subgraph "Step Components"
-        Step1["Step 1: Basic Config<br/>name, description, schemas"]
-        Step2["RecipeStepBuilder<br/>workflow steps"]
-        Step3["RecipeExecutionConfig<br/>performance, retry, timeout"]
-        Step4["RecipeScheduleConfig<br/>manual, cron, webhook"]
-        
-        Steps --> Step1
-        Steps --> Step2
-        Steps --> Step3
-        Steps --> Step4
+
+    subgraph "Persistence"
+        DB[("PostgreSQL<br/>WorkflowTemplate")]
     end
-    
-    subgraph "Supporting Components"
-        JsonEditor["JsonSchemaEditor<br/>input/output validation"]
-        Preview["RecipePreviewPanel<br/>live preview"]
-        
-        Step1 --> JsonEditor
-        FormProvider -.->|watches values| Preview
-    end
-    
-    subgraph "Submission Flow"
-        FormHook["useRecipeForm hook<br/>validation + transform"]
-        CreateAPI["POST /api/workflow-recipes"]
-        UpdateAPI["PUT /api/workflow-recipes/{id}"]
-        
-        Modal --> FormHook
-        FormHook -->|new recipe| CreateAPI
-        FormHook -->|edit mode| UpdateAPI
-    end
+
+    Modal --> Builder
+    Builder -->|Updates| Form
+    Form --> Preview
+    Modal -->|POST| Router
+    Router -->|Persist| DB
+    Router -->|Cron| Scheduler
+    Router -->|Composio| TriggerHandler
 ```
 
-**Sources:** [frontend/components/workflows/create-recipe-modal.tsx:20-27](), [frontend/components/workflows/create-recipe-modal.tsx:68-214](), [frontend/hooks/use-recipe-form.ts:160-255]()
+**Sources:** [frontend/components/workflows/playbook-step-builder.tsx:109-111](), [orchestrator/api/workflow_recipes.py:22-30](), [frontend/components/workflows/playbook-preview-panel.tsx:70-76]()
 
-### Form State Management
+### Form State Management (`PlaybookFormValues`)
 
-The wizard uses `react-hook-form` with the `RecipeFormValues` interface. Default values are initialized in the modal to ensure a valid starting state [frontend/components/workflows/create-recipe-modal.tsx:74-96]().
+The form state is centralized to ensure consistency between the step builder and the preview panel.
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `name` | string | `''` | Recipe name (min 3 chars) |
-| `inputs` | string | `'{}'` | JSON schema string for inputs |
-| `steps` | array | `[]` | Workflow steps with agent assignments |
-| `execution_config.mode` | string | `'sequential'` | Sequential or Parallel execution |
-| `execution_config.max_retries` | number | `3` | Max retries per step |
-| `schedule_config.type` | string | `'manual'` | Manual, Cron, or Trigger |
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | `string` | Human-readable title of the recipe [frontend/components/workflows/playbook-preview-panel.tsx:72-72](). |
+| `steps` | `Array` | List of step objects including `agent_id` and `prompt_template` [frontend/components/workflows/playbook-step-builder.tsx:111-111](). |
+| `execution_config` | `Object` | Contains `mode` (sequential/parallel) and `max_retries` [frontend/components/workflows/playbook-preview-panel.tsx:75-75](). |
+| `schedule_config` | `Object` | Defines the `type` (manual, cron, trigger) and associated config [frontend/components/workflows/playbook-preview-panel.tsx:76-76](). |
 
-**Sources:** [frontend/components/workflows/create-recipe-modal.tsx:29-58](), [frontend/components/workflows/create-recipe-modal.tsx:74-96]()
+**Sources:** [frontend/components/workflows/playbook-step-builder.tsx:110-112](), [frontend/components/workflows/playbook-preview-panel.tsx:70-77]()
 
 ---
 
-## Step 1: Basic Configuration & JSON Editing
+## Step Builder & Logic
 
-The first step collects metadata and defines the data contract for the recipe.
+The `PlaybookStepBuilder` component handles the construction of the workflow DAG (Directed Acyclic Graph).
 
-### JSON Schema Editor
-The `JsonSchemaEditor` component provides a custom editing experience with syntax highlighting via `Prism.js` [frontend/components/workflows/json-schema-editor.tsx:39-43]().
+- **Agent Assignment**: Steps require an `agent_id`. The UI filters for `active` agents to ensure execution reliability [frontend/components/workflows/playbook-step-builder.tsx:114-118]().
+- **Prompt Templating**: A specialized `VariableHighlightTextarea` provides visual feedback for `{variable}` tags used for data interpolation [frontend/components/workflows/playbook-step-builder.tsx:56-107]().
+- **Validation**: The builder performs real-time validation, including checking for circular dependencies in `pass_to` chains [frontend/components/workflows/playbook-step-builder.tsx:168-186]().
+- **Error Handling**: Users can configure steps to `stop`, `skip`, `retry`, or use a `fallback` upon failure [frontend/components/workflows/playbook-step-builder.tsx:49-54]().
 
-- **Validation**: It parses JSON on blur and provides real-time error feedback [frontend/components/workflows/json-schema-editor.tsx:59-68]().
-- **Formatting**: A "Format" button allows users to auto-indent valid JSON using `JSON.stringify(parsed, null, 2)` [frontend/components/workflows/json-schema-editor.tsx:92-98]().
-- **Implementation**: Uses a transparent `textarea` overlaid on a syntax-highlighted `pre` tag to maintain a native editing feel with IDE-like visuals [frontend/components/workflows/json-schema-editor.tsx:172-199]().
-
-**Sources:** [frontend/components/workflows/json-schema-editor.tsx:1-211]()
+**Sources:** [frontend/components/workflows/playbook-step-builder.tsx:49-54](), [frontend/components/workflows/playbook-step-builder.tsx:168-202]()
 
 ---
 
-## Step 2: Workflow Steps & Agents
+## Preview & Complexity Analysis
 
-The `RecipeStepBuilder` allows users to define the execution sequence.
-
-- **Agent Selection**: Fetches active agents from the workspace using `useAgents` [frontend/components/workflows/recipe-step-builder.tsx:112-118]().
-- **Prompt Templates**: Supports variable interpolation using `{variable_name}` syntax. A custom `VariableHighlightTextarea` provides visual cues for these variables [frontend/components/workflows/recipe-step-builder.tsx:56-107]().
-- **Routing**: Steps can define a `pass_to` field to create non-linear execution flows [frontend/components/workflows/recipe-step-builder.tsx:161-165]().
-- **Validation**: Detects circular dependencies in the `pass_to` chain to prevent infinite loops during execution [frontend/components/workflows/recipe-step-builder.tsx:168-186]().
-
-**Sources:** [frontend/components/workflows/recipe-step-builder.tsx:109-202]()
-
----
-
-## Step 3: Execution Settings
-
-`RecipeExecutionConfig` manages performance and reliability settings.
-
-- **Execution Mode**: Users choose between `sequential` (steps run in order) and `parallel` (steps run simultaneously) [frontend/components/workflows/recipe-execution-config.tsx:45-80]().
-- **Timeouts**: Configures `timeout_per_step` and `total_timeout`. The UI calculates the total theoretical maximum time based on the selected mode [frontend/components/workflows/recipe-execution-config.tsx:30-35]().
-- **Memory Isolation**: Options for `shared` (steps share context) or `isolated` memory [frontend/components/workflows/recipe-execution-config.tsx:10-13]().
-
-**Sources:** [frontend/components/workflows/recipe-execution-config.tsx:21-160]()
-
----
-
-## Step 4: Scheduling & Triggers
-
-`RecipeScheduleConfig` defines the entry point for recipe execution.
-
-- **Cron Schedule**: Provides "Quick Picks" for common schedules (e.g., "Daily at 9am") and a preview of the next 5 execution times based on the cron expression [frontend/components/workflows/recipe-schedule-config.tsx:18-84]().
-- **Webhook Triggers**: For recipes triggered by external events, the UI displays a generated webhook URL [frontend/components/workflows/recipe-schedule-config.tsx:102-104]().
-
-**Sources:** [frontend/components/workflows/recipe-schedule-config.tsx:12-124]()
-
----
-
-## Data Transformation and Submission
-
-Before sending data to the backend, the `useRecipeForm` hook transforms the frontend state into the API-compliant payload.
-
-### API Transformation Flow
-
-```mermaid
-graph LR
-    subgraph "Frontend Space (RecipeFormValues)"
-        F_Steps["steps: Array"]
-        F_Timeouts["timeouts: ms"]
-        F_JSON["inputs/outputs: string"]
-    end
-
-    subgraph "Code Entity: transformFormToApiPayload"
-        T_ID["Generate template_id<br/>(slug + timestamp)"]
-        T_Steps["Map steps<br/>(parse agent_id to int)"]
-        T_Time["Convert timeouts<br/>(ms / 1000)"]
-        T_JSON["JSON.parse(inputs/outputs)"]
-    end
-
-    subgraph "Backend Space (API Payload)"
-        B_Template["template_definition: object"]
-        B_Exec["execution_config: object"]
-        B_ID["template_id: string"]
-    end
-
-    F_Steps --> T_Steps
-    F_Timeouts --> T_Time
-    F_JSON --> T_JSON
-    T_ID --> B_ID
-    T_Steps --> B_Template
-    T_Time --> B_Exec
-    T_JSON --> B_Template
-```
-
-**Key Transformations:**
-1. **Timeouts**: Frontend values in milliseconds are converted to seconds for the backend [frontend/hooks/use-recipe-form.ts:71-72]().
-2. **Template ID**: A slug-style `template_id` is generated from the recipe name [frontend/hooks/use-recipe-form.ts:14-18]().
-3. **JSON Parsing**: Schema strings are parsed into objects. If parsing fails or the string is empty, they remain undefined [frontend/hooks/use-recipe-form.ts:21-40]().
-4. **Step Mapping**: Frontend step objects are mapped to the backend structure, ensuring `agent_id` is passed as an integer [frontend/hooks/use-recipe-form.ts:43-51]().
-
-**Sources:** [frontend/hooks/use-recipe-form.ts:12-102](), [frontend/hooks/use-recipe-form.ts:166-197]()
-
----
-
-## Preview and Complexity Analysis
-
-The `RecipePreviewPanel` provides a live visualization of the recipe as it is being built. It includes a complexity assessment logic to warn users about advanced configurations.
+The `PlaybookPreviewPanel` provides a live visualization of the recipe and calculates a complexity score to help users understand the operational "weight" of the workflow.
 
 ### Complexity Scoring Logic
-The `calculateComplexity` function aggregates points based on recipe features [frontend/components/workflows/recipe-preview-panel.tsx:37-41]():
-- **Step Count**: 8 points per step (capped at 40) [frontend/components/workflows/recipe-preview-panel.tsx:45]().
-- **Parallel Mode**: +10 points [frontend/components/workflows/recipe-preview-panel.tsx:48]().
-- **Triggers**: Webhook triggers add +10 points vs manual [frontend/components/workflows/recipe-preview-panel.tsx:56]().
-- **Custom Routing**: Each step with a `pass_to` destination adds +5 points [frontend/components/workflows/recipe-preview-panel.tsx:59-60]().
+The score (0-100) is derived from:
+- **Step Count**: 8 points per step (capped at 40) [frontend/components/workflows/playbook-preview-panel.tsx:45-45]().
+- **Execution Mode**: Parallel mode adds 10 points [frontend/components/workflows/playbook-preview-panel.tsx:48-48]().
+- **Reliability**: High retry counts (>5) add 10 points [frontend/components/workflows/playbook-preview-panel.tsx:51-51]().
+- **Triggers**: Cron (+5) or External Triggers (+10) increase complexity [frontend/components/workflows/playbook-preview-panel.tsx:55-56]().
+- **Routing**: Custom `pass_to` routing adds 5 points per branch [frontend/components/workflows/playbook-preview-panel.tsx:59-60]().
 
-**Complexity Labels:**
-- **Simple**: ≤ 25 points
-- **Moderate**: ≤ 50 points
-- **Complex**: ≤ 75 points
-- **Advanced**: > 75 points
+**Sources:** [frontend/components/workflows/playbook-preview-panel.tsx:37-68]()
 
-**Sources:** [frontend/components/workflows/recipe-preview-panel.tsx:37-68](), [frontend/components/workflows/recipe-preview-panel.tsx:111-114]()
+---
+
+## Backend Registration & Scheduling
+
+When a recipe is saved, the backend performs several critical synchronization tasks.
+
+### Cron & Trigger Sync
+- **Cron**: If `schedule_config` is type `cron`, the `_sync_cron_schedule` function registers the recipe with the `PlaybookSchedulerService` [orchestrator/api/workflow_recipes.py:34-48]().
+- **External Triggers**: For `trigger` types sourced from `composio`, the system calls `_auto_register_trigger` to subscribe to external events and store a `TriggerSubscription` [orchestrator/api/workflow_recipes.py:50-126]().
+
+### Agent Enrichment
+The API provides an `_enrich_steps_with_agents` helper that fetches full agent metadata (model, provider, status) for each step ID, ensuring the frontend has the necessary context to render agent icons and capabilities [orchestrator/api/workflow_recipes.py:140-174]().
+
+**Sources:** [orchestrator/api/workflow_recipes.py:34-48](), [orchestrator/api/workflow_recipes.py:50-126](), [orchestrator/api/workflow_recipes.py:140-174]()
+
+---
+
+## Marketplace & Portability
+
+Recipes can be published to and installed from the Community Marketplace.
+
+- **Publishing**: Agents or admins can publish recipes by setting `owner_type` to `marketplace`. This makes the recipe visible in the `MarketplacePlaybooksTab` [orchestrator/api/marketplace.py:155-156]().
+- **Installation**: The `useInstallPlaybookFromMarketplace` hook handles cloning the recipe into a local workspace [frontend/components/marketplace/marketplace-playbooks-tab.tsx:101-135]().
+- **Dependency Resolution**: During installation, the system attempts to resolve and clone required agents. If an agent is missing, the system generates warnings for the user [frontend/components/marketplace/marketplace-playbooks-tab.tsx:114-122]().
+
+**Sources:** [orchestrator/api/marketplace.py:123-138](), [frontend/components/marketplace/marketplace-playbooks-tab.tsx:101-135]()
 
 ---

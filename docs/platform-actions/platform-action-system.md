@@ -5,41 +5,15 @@
 
 The following files were used as context for generating this wiki page:
 
-- [orchestrator/alembic/versions/prd123_checkpoint_count.py](orchestrator/alembic/versions/prd123_checkpoint_count.py)
-- [orchestrator/api/missions.py](orchestrator/api/missions.py)
-- [orchestrator/config.py](orchestrator/config.py)
-- [orchestrator/core/context_guard.py](orchestrator/core/context_guard.py)
-- [orchestrator/core/models/orchestration.py](orchestrator/core/models/orchestration.py)
-- [orchestrator/core/models/orchestration_enums.py](orchestrator/core/models/orchestration_enums.py)
-- [orchestrator/main.py](orchestrator/main.py)
-- [orchestrator/modules/coordination/dispatcher.py](orchestrator/modules/coordination/dispatcher.py)
-- [orchestrator/modules/coordination/planner.py](orchestrator/modules/coordination/planner.py)
-- [orchestrator/modules/coordination/reconciler.py](orchestrator/modules/coordination/reconciler.py)
-- [orchestrator/modules/memory/context_router.py](orchestrator/modules/memory/context_router.py)
-- [orchestrator/modules/memory/unified_memory_service.py](orchestrator/modules/memory/unified_memory_service.py)
-- [orchestrator/modules/tools/discovery/action_registry.py](orchestrator/modules/tools/discovery/action_registry.py)
-- [orchestrator/modules/tools/discovery/actions_agents.py](orchestrator/modules/tools/discovery/actions_agents.py)
-- [orchestrator/modules/tools/discovery/actions_assignments.py](orchestrator/modules/tools/discovery/actions_assignments.py)
-- [orchestrator/modules/tools/discovery/actions_documents.py](orchestrator/modules/tools/discovery/actions_documents.py)
-- [orchestrator/modules/tools/discovery/actions_marketplace.py](orchestrator/modules/tools/discovery/actions_marketplace.py)
-- [orchestrator/modules/tools/discovery/actions_missions.py](orchestrator/modules/tools/discovery/actions_missions.py)
-- [orchestrator/modules/tools/discovery/actions_monitoring.py](orchestrator/modules/tools/discovery/actions_monitoring.py)
-- [orchestrator/modules/tools/discovery/actions_playbooks.py](orchestrator/modules/tools/discovery/actions_playbooks.py)
-- [orchestrator/modules/tools/discovery/actions_reports.py](orchestrator/modules/tools/discovery/actions_reports.py)
-- [orchestrator/modules/tools/discovery/actions_scheduling.py](orchestrator/modules/tools/discovery/actions_scheduling.py)
-- [orchestrator/modules/tools/discovery/actions_search.py](orchestrator/modules/tools/discovery/actions_search.py)
-- [orchestrator/modules/tools/discovery/actions_workspace.py](orchestrator/modules/tools/discovery/actions_workspace.py)
-- [orchestrator/modules/tools/discovery/handlers_agents.py](orchestrator/modules/tools/discovery/handlers_agents.py)
-- [orchestrator/modules/tools/discovery/handlers_reports.py](orchestrator/modules/tools/discovery/handlers_reports.py)
-- [orchestrator/modules/tools/execution/concurrency.py](orchestrator/modules/tools/execution/concurrency.py)
-- [orchestrator/services/checkpoint_service.py](orchestrator/services/checkpoint_service.py)
-- [orchestrator/services/coordinator_service.py](orchestrator/services/coordinator_service.py)
-- [orchestrator/services/orchestration_state.py](orchestrator/services/orchestration_state.py)
-- [orchestrator/tests/test_budget_gate.py](orchestrator/tests/test_budget_gate.py)
-- [orchestrator/tests/test_dispatcher_parallel.py](orchestrator/tests/test_dispatcher_parallel.py)
-- [orchestrator/tests/test_unified_memory.py](orchestrator/tests/test_unified_memory.py)
-- [scripts/ralph/IMPLEMENTATION_PLAN.md](scripts/ralph/IMPLEMENTATION_PLAN.md)
-- [scripts/ralph/progress.txt](scripts/ralph/progress.txt)
+- [orchestrator/consumers/chatbot/auto.py](orchestrator/consumers/chatbot/auto.py)
+- [orchestrator/core/security/rate_limiter.py](orchestrator/core/security/rate_limiter.py)
+- [orchestrator/core/services/auto_reporting.py](orchestrator/core/services/auto_reporting.py)
+- [orchestrator/core/services/notification_dispatcher.py](orchestrator/core/services/notification_dispatcher.py)
+- [orchestrator/modules/tools/discovery/actions_auto_reporting.py](orchestrator/modules/tools/discovery/actions_auto_reporting.py)
+- [orchestrator/modules/tools/discovery/handlers_auto_reporting.py](orchestrator/modules/tools/discovery/handlers_auto_reporting.py)
+- [orchestrator/modules/tools/discovery/platform_actions.py](orchestrator/modules/tools/discovery/platform_actions.py)
+- [orchestrator/modules/tools/discovery/platform_executor.py](orchestrator/modules/tools/discovery/platform_executor.py)
+- [orchestrator/tests/test_prd128_notification_dispatcher.py](orchestrator/tests/test_prd128_notification_dispatcher.py)
 
 </details>
 
@@ -49,15 +23,15 @@ The Platform Action System enables AI agents to introspect and manage the Automa
 
 ## Architecture Overview
 
-The platform action system consists of three core layers: **Action Definitions** (the catalog), **Detection & Routing** (AutoBrain keyword matching), and **Execution** (PlatformActionExecutor with direct database queries). Recent updates in **PRD-122** have introduced "Promoted Actions," allowing high-value platform tools to be exposed as first-class OpenAI tool schemas rather than being hidden behind a single dispatcher [scripts/ralph/IMPLEMENTATION_PLAN.md:1-15]().
+The platform action system consists of three core layers: **Action Definitions** (the catalog), **Detection & Routing** (AutoBrain keyword matching), and **Execution** (PlatformActionExecutor with direct domain handlers).
 
 Title: Platform Action System Architecture
 ```mermaid
 graph TB
     subgraph "1. Action Definition Layer"
         Registry["ActionRegistry<br/>(action_registry.py)"]
-        Def1["ActionDefinition<br/>name: platform_list_agents<br/>promoted: true<br/>admin_only: false"]
-        Def2["ActionDefinition<br/>name: platform_get_logs<br/>promoted: false<br/>admin_only: true"]
+        Def1["ActionDefinition<br/>name: platform_list_agents<br/>permission: read"]
+        Def2["ActionDefinition<br/>name: platform_update_agent<br/>permission: write"]
         
         Registry -->|"register()"| Def1
         Registry -->|"register()"| Def2
@@ -66,30 +40,32 @@ graph TB
     subgraph "2. Detection & Routing"
         AutoBrain["AutoBrain<br/>(auto.py)"]
         Keywords["_PLATFORM_KEYWORDS<br/>phrase → action mapping"]
-        ToolRouter["ToolRouter<br/>(tool_router.py)"]
+        ToolRouter["SmartToolRouter<br/>(smart_tool_router.py)"]
         
         AutoBrain -->|"_match_platform_query()"| Keywords
-        ToolRouter -->|"to_first_class_schemas()"| Registry
+        ToolRouter -->|"ALWAYS_INCLUDE"| Registry
     end
     
     subgraph "3. Execution Layer"
-        UnifiedExec["UnifiedToolExecutor<br/>(unified_executor.py)"]
         Executor["PlatformActionExecutor<br/>(platform_executor.py)"]
-        Handlers["_handlers: Dict[str, callable]"]
+        Handlers["Domain Handlers<br/>(handlers_agents.py, etc.)"]
+        Sec["Hierarchy Permissions<br/>(hierarchy_permissions.py)"]
+        Rate["RateLimiter<br/>(rate_limiter.py)"]
         DB[("PostgreSQL<br/>workspace-scoped")]
         
-        UnifiedExec -->|"execute_tool(caller_context)"| Executor
-        Executor -->|"Permission Check"| Handlers
+        Executor -->|"check_rate_limit()"| Rate
+        Executor -->|"can_actor_modify()"| Sec
+        Executor -->|"dispatch"| Handlers
         Handlers -->|"SQLAlchemy"| DB
     end
 ```
 
-**Key insight:** Platform actions bypass the Composio integration layer entirely. They use direct database queries for speed and simplicity, as the orchestrator owns the schema.
+**Key insight:** Platform actions bypass the external tool integration layer (Composio) entirely. They use direct database queries via specialized handlers for speed and security, as the orchestrator owns the schema [orchestrator/modules/tools/discovery/platform_executor.py:5-9]().
 
 **Sources:**
-- [orchestrator/modules/tools/discovery/action_registry.py:55-74]()
-- [scripts/ralph/IMPLEMENTATION_PLAN.md:9-19]()
-- [scripts/ralph/progress.txt:11-20]()
+- [orchestrator/modules/tools/discovery/platform_executor.py:1-9]()
+- [orchestrator/consumers/chatbot/auto.py:116-127]()
+- [orchestrator/core/security/rate_limiter.py:45-57]()
 
 ---
 
@@ -97,126 +73,130 @@ graph TB
 
 ### ActionRegistry & ActionDefinition
 
-The `ActionRegistry` maintains a catalog of all available platform actions. It stores `ActionDefinition` objects indexed by action name. These definitions are split into domain-specific files (e.g., `actions_agents.py`, `actions_marketplace.py`) and aggregated in the main registration entry point [orchestrator/modules/tools/discovery/action_registry.py:67-74]().
+The `ActionRegistry` maintains a catalog of all available platform actions. It stores `ActionDefinition` objects indexed by action name. These definitions are split into domain-specific files and aggregated in the `register_all_actions` entry point [orchestrator/modules/tools/discovery/platform_actions.py:38-66]().
 
 | Field | Type | Purpose |
 |-------|------|---------|
-| `name` | `str` | Unique identifier (e.g. `platform_list_agents`) [orchestrator/modules/tools/discovery/action_registry.py:31]() |
-| `permission_level` | `str` | `read`, `write`, or `destructive` [orchestrator/modules/tools/discovery/action_registry.py:35]() |
-| `admin_only` | `bool` | If true, only workspace owners/admins can execute [orchestrator/modules/tools/discovery/action_registry.py:38]() |
-| `promoted` | `bool` | If true, exposed as a first-class tool schema to LLMs [orchestrator/modules/tools/discovery/action_registry.py:39]() |
+| `name` | `str` | Unique identifier (e.g. `platform_list_agents`). |
+| `permission_level` | `str` | `read`, `write`, or `destructive`. |
+| `requires_confirmation` | `bool` | If true, UI forces user approval before execution. |
+| `category` | `str` | Logical grouping (e.g., `settings`, `agents`, `analytics`). |
 
 **Sources:**
-- [orchestrator/modules/tools/discovery/action_registry.py:27-52]()
-- [scripts/ralph/IMPLEMENTATION_PLAN.md:23-35]()
-- [scripts/ralph/progress.txt:49-56]()
+- [orchestrator/modules/tools/discovery/platform_actions.py:1-66]()
+- [orchestrator/modules/tools/discovery/actions_auto_reporting.py:14-154]()
 
 ### PlatformActionExecutor
 
-The `PlatformActionExecutor` class handles actual execution. It is initialized with a database session and a `workspace_id` to ensure all operations are strictly isolated to the current tenant.
+The `PlatformActionExecutor` class handles actual execution. It is initialized with a database session and a `workspace_id` to ensure all operations are strictly isolated to the current tenant [orchestrator/modules/tools/discovery/platform_executor.py:8-9](). It maintains a mapping of action names to their respective handler functions across 20+ domain modules [orchestrator/modules/tools/discovery/platform_executor.py:19-177]().
 
-Title: Execution Logic and Workspace Isolation
+Title: Execution Logic and Entity Association
 ```mermaid
 graph LR
     subgraph "Code Entity Space"
         Executor["class PlatformActionExecutor"]
-        Handlers["_handlers: Dict[str, Callable]"]
-        CallerCtx["caller_context: Dict"]
+        Handler["handlers_auto_reporting.py<br/>send_notification()"]
+        Dispatcher["NotificationDispatcher"]
         DB["self.db: Session"]
     end
 
     subgraph "Execution Flow"
-        Call["execute(action_name, params, caller_context)"]
-        Perm["Admin Gate Check"]
+        Call["execute_tool(params)"]
+        RateLimit["check_rate_limit('platform_write')"]
         Lookup["_handlers.get(action_name)"]
-        SQL["SQLAlchemy Query<br/>JOIN workspace_members"]
+        Logic["domain_handler(db, ws_id, params)"]
     end
 
-    Executor --> Handlers
-    Call --> Perm
-    Perm --> Lookup
-    Lookup --> SQL
+    Call --> RateLimit
+    RateLimit --> Lookup
+    Lookup --> Logic
+    Logic --> Handler
+    Handler --> Dispatcher
+    Dispatcher --> DB
 ```
 
 **Sources:**
-- [scripts/ralph/IMPLEMENTATION_PLAN.md:26]()
-- [scripts/ralph/progress.txt:21-32]()
+- [orchestrator/modules/tools/discovery/platform_executor.py:19-177]()
+- [orchestrator/modules/tools/discovery/handlers_auto_reporting.py:57-104]()
+- [orchestrator/core/services/notification_dispatcher.py:76-111]()
 
 ---
 
 ## Permission & Security Model
 
-Platform actions use a multi-tier security model enforced at the execution layer to prevent unauthorized access to system internals or cross-tenant data.
+Platform actions use a multi-tier security model enforced at the execution layer to prevent unauthorized access or resource exhaustion.
 
-### Permission Levels
-- **Read**: Non-mutating queries (e.g., `platform_list_agents`).
-- **Write**: Mutates state (e.g., `platform_create_agent`).
-- **Destructive**: Permanent deletion (e.g., `platform_delete_agent`). If an action is marked `destructive` but `requires_confirmation` is false, the system rejects it as a misconfiguration [scripts/ralph/progress.txt:28-31]().
+### Permission Levels & Rate Limiting
+- **Read**: Non-mutating queries (e.g., `platform_get_auto_reporting_prefs`) [orchestrator/modules/tools/discovery/actions_auto_reporting.py:28]().
+- **Write/Destructive**: Mutates state. These actions are governed by the `platform_write` rate limit, which allows 60 operations per minute per subject (agent) [orchestrator/core/security/rate_limiter.py:56-57]().
+- **Confirmation**: Destructive or high-impact actions like `platform_update_auto_reporting_prefs` require explicit confirmation (`requires_confirmation=True`) [orchestrator/modules/tools/discovery/actions_auto_reporting.py:86]().
 
-### Admin Gating (PRD-122)
-Certain infrastructure tools (e.g., `platform_query_loki_logs`, `platform_query_prometheus`, `platform_get_system_health`) are marked `admin_only=True` [scripts/ralph/progress.txt:3-8]().
-- **Enforcement**: The `PlatformActionExecutor` checks the `caller_context`. Access is granted only if the user has a `workspace_role` of `owner` or `admin`, or a `system_role` == `admin` [scripts/ralph/progress.txt:21-27]().
-- **Fail-Closed**: If no `caller_context` is provided (no identity), admin-only actions are denied [scripts/ralph/progress.txt:25]().
+### Hierarchy Permissions (PRD-140)
+Mutating actions targeting specific entities (agents, playbooks, tasks) undergo a hierarchy check via `can_actor_modify`. The `_HIERARCHY_TARGETS` map associates action names with their target types (e.g., `TARGET_AGENT`, `TARGET_PLAYBOOK`) and the parameter key containing the ID [orchestrator/modules/tools/discovery/platform_executor.py:199-230]().
 
 **Sources:**
-- [scripts/ralph/progress.txt:3-32]()
-- [orchestrator/modules/tools/discovery/action_registry.py:35-38]()
+- [orchestrator/core/security/rate_limiter.py:45-57]()
+- [orchestrator/modules/tools/discovery/platform_executor.py:182-230]()
+- [orchestrator/modules/tools/discovery/actions_auto_reporting.py:85-86]()
 
 ---
 
 ## Detection & Discovery
 
-Platform actions are detected by **AutoBrain** during complexity assessment using keyword pattern matching. When a user query matches a platform keyword, AutoBrain sets `tool_hints` accordingly to include platform capabilities.
+Platform actions are detected by **AutoBrain** during complexity assessment using keyword pattern matching. When a user query matches a platform keyword, the system identifies the appropriate tool hints.
 
 Title: Natural Language to Platform Action Mapping
 ```mermaid
 graph TD
     subgraph "Natural Language Space"
-        Q1["'show my agents'"]
+        Q1["'list my agents'"]
         Q2["'how much have i spent'"]
-        Q3["'check system health'"]
+        Q3["'set telegram as primary channel'"]
     end
 
-    subgraph "Code Entity Space (ActionRegistry)"
-        Registry["ActionRegistry"]
+    subgraph "Code Entity Space (auto.py)"
+        Keywords["_PLATFORM_KEYWORDS"]
         Match1["platform_list_agents"]
         Match2["platform_get_llm_usage"]
-        Match3["platform_get_system_health"]
+        Match3["platform_update_auto_reporting_prefs"]
+    end
+
+    subgraph "Tool Selection"
+        Router["SmartToolRouter"]
+        Hints["tool_hints"]
     end
 
     Q1 --> Match1
     Q2 --> Match2
     Q3 --> Match3
     
-    Match1 --> Hint["tool_hints: ['platform']"]
-    Match2 --> Hint
-    Match3 --> Hint
+    Match1 --> Hints
+    Match2 --> Hints
+    Match3 --> Hints
+    
+    Hints --> Router
 ```
 
-High-value actions marked as `promoted=True` bypass the generic `platform_execute` dispatcher and are presented to the LLM as distinct tools. These include:
-- **Agents:** `platform_list_agents`, `platform_create_agent`, `platform_update_agent` [scripts/ralph/progress.txt:69-70]()
-- **Marketplace:** `platform_browse_marketplace_agents`, `platform_install_skill` [scripts/ralph/progress.txt:70-71]()
-- **Memory:** `platform_store_memory`, `platform_search_memory` [scripts/ralph/progress.txt:71-73]()
+**AutoBrain** maintains a comprehensive mapping in `_PLATFORM_KEYWORDS`, covering agents, recipes, usage, documents, workspace info, tools, and auto-reporting [orchestrator/consumers/chatbot/auto.py:116-184]().
 
 **Sources:**
-- [scripts/ralph/progress.txt:68-76]()
-- [orchestrator/modules/tools/discovery/action_registry.py:114-134]()
+- [orchestrator/consumers/chatbot/auto.py:116-184]()
+- [orchestrator/modules/tools/discovery/actions_auto_reporting.py:30-34]()
 
 ---
 
-## Execution Flow
+## Unified Notification Integration
 
-When a platform action is triggered, the system follows a specific sequence to ensure security and context-awareness.
+A key subset of platform actions facilitates communication through the **Unified Notification System**. The `platform_send_notification` tool allows agents to fire events that honor workspace-specific routing rules, quiet hours, and channel preferences [orchestrator/modules/tools/discovery/actions_auto_reporting.py:96-103]().
 
-1. **Schema Generation**: `ActionRegistry.to_first_class_schemas()` generates OpenAI function schemas for promoted actions [orchestrator/modules/tools/discovery/action_registry.py:119-134]().
-2. **Unified Execution**: `UnifiedToolExecutor.execute_tool()` receives the request and forwards the `caller_context` to the specific executor [scripts/ralph/progress.txt:11-19]().
-3. **Permission Gate**: `PlatformActionExecutor` verifies `admin_only` and `destructive` constraints before proceeding [scripts/ralph/progress.txt:21-31]().
-4. **Database Query**: The action handler is called with the active SQLAlchemy session. Multi-tenancy is enforced via `workspace_id` filtering [scripts/ralph/progress.txt:42-46]().
-5. **Logging**: All permission denials are logged at the `WARNING` level with the action name and sanitized context [scripts/ralph/progress.txt:27]().
+### Auto-Reporting Configuration
+Agents can introspect and modify how the platform communicates via:
+- `platform_get_auto_reporting_prefs`: Reads `primary_channel`, `quiet_hours`, and `routes` [orchestrator/modules/tools/discovery/actions_auto_reporting.py:15-22]().
+- `platform_update_auto_reporting_prefs`: Merges partial updates into `workspace.settings.auto_reporting` [orchestrator/modules/tools/discovery/actions_auto_reporting.py:38-44]().
 
 **Sources:**
-- [orchestrator/modules/tools/discovery/action_registry.py:119-150]()
-- [scripts/ralph/progress.txt:11-46]()
-- [scripts/ralph/IMPLEMENTATION_PLAN.md:41-45]()
+- [orchestrator/modules/tools/discovery/handlers_auto_reporting.py:14-108]()
+- [orchestrator/core/services/auto_reporting.py:42-55]()
+- [orchestrator/core/services/notification_dispatcher.py:87-111]()
 
 ---

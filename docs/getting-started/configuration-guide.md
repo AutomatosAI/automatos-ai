@@ -5,198 +5,165 @@
 
 The following files were used as context for generating this wiki page:
 
-- [.gitignore](.gitignore)
-- [README.md](README.md)
-- [docker-compose.yml](docker-compose.yml)
-- [docs/PRDS/126-BUSINESS-KNOWLEDGE-GRAPH.md](docs/PRDS/126-BUSINESS-KNOWLEDGE-GRAPH.md)
-- [docs/README.md](docs/README.md)
-- [frontend/.dockerignore](frontend/.dockerignore)
-- [frontend/Dockerfile](frontend/Dockerfile)
-- [orchestrator/.env.example](orchestrator/.env.example)
-- [orchestrator/Dockerfile](orchestrator/Dockerfile)
-- [orchestrator/api/cloud_documents.py](orchestrator/api/cloud_documents.py)
-- [orchestrator/core/credentials/service.py](orchestrator/core/credentials/service.py)
-- [orchestrator/core/models/credentials.py](orchestrator/core/models/credentials.py)
-- [orchestrator/core/redis/client.py](orchestrator/core/redis/client.py)
-- [orchestrator/core/services/plugin_cache.py](orchestrator/core/services/plugin_cache.py)
-- [orchestrator/modules/tools/services/__init__.py](orchestrator/modules/tools/services/__init__.py)
-- [orchestrator/requirements.txt](orchestrator/requirements.txt)
+- [frontend/components/settings/GeneralSettingsTab.tsx](frontend/components/settings/GeneralSettingsTab.tsx)
+- [frontend/components/settings/OnboardingAgentsTab.tsx](frontend/components/settings/OnboardingAgentsTab.tsx)
+- [frontend/components/settings/SettingsPanel.tsx](frontend/components/settings/SettingsPanel.tsx)
+- [frontend/components/settings/SystemSettingsTab.tsx](frontend/components/settings/SystemSettingsTab.tsx)
+- [frontend/tsconfig.tsbuildinfo](frontend/tsconfig.tsbuildinfo)
+- [orchestrator/api/chatbot_llm.py](orchestrator/api/chatbot_llm.py)
+- [orchestrator/api/onboarding_agents.py](orchestrator/api/onboarding_agents.py)
+- [orchestrator/config.py](orchestrator/config.py)
+- [orchestrator/core/llm/manager.py](orchestrator/core/llm/manager.py)
+- [orchestrator/core/models/system_settings.py](orchestrator/core/models/system_settings.py)
+- [orchestrator/core/seeds/seed_system_settings.py](orchestrator/core/seeds/seed_system_settings.py)
+- [orchestrator/main.py](orchestrator/main.py)
+- [orchestrator/modules/memory/context_router.py](orchestrator/modules/memory/context_router.py)
+- [orchestrator/modules/memory/unified_memory_service.py](orchestrator/modules/memory/unified_memory_service.py)
+- [orchestrator/scripts/create_test_workspace.py](orchestrator/scripts/create_test_workspace.py)
+- [orchestrator/tests/test_unified_memory.py](orchestrator/tests/test_unified_memory.py)
+- [scripts/ralph/IMPLEMENTATION_PLAN.md](scripts/ralph/IMPLEMENTATION_PLAN.md)
+- [scripts/ralph/prd.json](scripts/ralph/prd.json)
+- [scripts/ralph/progress.txt](scripts/ralph/progress.txt)
 
 </details>
 
 
 
-This document covers all configuration options for Automatos AI, including environment variables, database settings, LLM providers, Redis, AWS S3, and the credential management system. For initial setup, see [Installation & Setup]().
+This document covers the technical configuration of Automatos AI, including environment variables, service-specific settings (LLM, Redis, Postgres), memory layer parameters, and the database-backed system settings architecture that replaces traditional `.env` files for runtime configuration.
 
 ---
 
 ## Configuration Architecture
 
-Automatos AI uses a centralized configuration system where the backend (FastAPI) and various worker services consume environment variables to initialize core services. The configuration is primarily driven by the `.env` file and managed through Docker Compose for containerized environments.
+Automatos AI has migrated from a static environment-based configuration to a dynamic, database-backed system. While core infrastructure (DB/Redis) still uses environment variables for bootstrapping, LLM tiers and feature flags are managed via the `SystemSetting` model.
 
 ### Configuration Loading Flow
 
 ```mermaid
 graph TB
-    subgraph "InputSources"
+    subgraph "BootstrapSpace"
         EnvFile[".env File"]
-        ShellVars["Shell Env Vars"]
-        DockerCompose["docker-compose.yml"]
+        ConfigClass["'Config' (config.py)"]
     end
 
     subgraph "CodeEntitySpace"
-        ConfigClass["'Config' (config.py)"]
-        Validation["'Config.validate()'"]
-        CredentialStore["'CredentialStore' (service.py)"]
+        AppStartup["FastAPI 'main.py'"]
+        LLMManager["'LLMManager' (manager.py)"]
+        SysSeed["'seed_system_settings' (seed_system_settings.py)"]
+        DB_Settings["'SystemSetting' Table (models/system_settings.py)"]
+    end
+
+    subgraph "FrontendSpace"
+        SettingsUI["'SystemSettingsTab' (SystemSettingsTab.tsx)"]
     end
 
     EnvFile --> ConfigClass
-    ShellVars --> ConfigClass
-    DockerCompose --> ConfigClass
+    ConfigClass --> AppStartup
+    AppStartup -->|"Check/Seed"| SysSeed
+    SysSeed --> DB_Settings
     
-    ConfigClass --> Validation
-    Validation -->|"Success"| AppStartup["FastAPI 'main.py'"]
-    
-    AppStartup -->|"Init"| CredentialStore
-    CredentialStore -->|"Load Keys"| Encryption["'EncryptionService'"]
+    LLMManager -->|"get_system_setting"| DB_Settings
+    SettingsUI -->|"bulkUpdateSettings"| DB_Settings
 ```
 
-**Sources:** `orchestrator/.env.example:1-65`(), `orchestrator/Dockerfile:85-129`(), `orchestrator/core/credentials/service.py:48-57`()
+**Sources:** [orchestrator/config.py:28-150](), [orchestrator/core/llm/manager.py:56-96](), [orchestrator/core/seeds/seed_system_settings.py:161-180](), [frontend/components/settings/SystemSettingsTab.tsx:72-107]()
 
 ---
 
-## Database Configuration
+## Core Infrastructure
 
 ### PostgreSQL with pgvector
-The system requires PostgreSQL 16 with the `pgvector` extension for storing embeddings used in RAG and memory layers. The schema is initialized via `init_complete_schema.sql` during the first container start.
+The system requires PostgreSQL with the `pgvector` extension. Production environments enforce SSL for non-local hosts via `Config.get_database_url()`.
 
-| Variable | Required | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `POSTGRES_DB` | **Yes** | `orchestrator_db` | Database name [orchestrator/.env.example:4]() |
-| `POSTGRES_USER` | **Yes** | `postgres` | Database username [orchestrator/.env.example:5]() |
-| `POSTGRES_PASSWORD` | **Yes** | - | Secure database password [orchestrator/.env.example:6]() |
-| `POSTGRES_HOST` | **Yes** | `localhost` | Hostname (use `postgres` in Docker) [docker-compose.yml:95]() |
-| `DATABASE_URL` | No | - | Full SQLAlchemy connection string [docker-compose.yml:97]() |
+| Variable | Required | Description |
+| :--- | :--- | :--- |
+| `DATABASE_URL` | **Yes** | Primary connection string. Overrides individual params. [orchestrator/config.py:42]() |
+| `POSTGRES_DB` | **Yes** | Database name. [orchestrator/config.py:37]() |
+| `SQL_DEBUG` | No | Enables SQLAlchemy echo mode. [orchestrator/config.py:43]() |
 
-**Sources:** `docker-compose.yml:22-44`(), `orchestrator/.env.example:1-6`(), `orchestrator/requirements.txt:7-11`()
+### Redis Configuration
+Redis is the backbone for L1 memory, task queues, and result caching. The `Config` class constructs the `REDIS_URL` from parts if not explicitly provided.
+
+| Variable | Required | Description |
+| :--- | :--- | :--- |
+| `REDIS_HOST` | **Yes** | Redis server host. [orchestrator/config.py:63]() |
+| `REDIS_URL` | No | Full connection string (e.g., `redis://user:pass@host:port/0`). [orchestrator/config.py:69-79]() |
+
+**Sources:** [orchestrator/config.py:34-79]()
 
 ---
 
-## Redis Configuration
+## LLM Tier Configuration (PRD-136)
 
-Redis is critical for the `UnifiedMemoryService` (L1 memory), real-time workflow updates via Pub/Sub, and task queuing for the `WorkspaceWorker`.
+The system has collapsed fragmented LLM configurations into three canonical tiers. These are managed via the `SystemSettingsTab` in the UI and stored in the `system_settings` table.
 
-### Connection Parameters
-| Variable | Required | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `REDIS_HOST` | **Yes** | `localhost` | Redis server host [orchestrator/.env.example:9]() |
-| `REDIS_PORT` | **Yes** | `6379` | Redis server port [orchestrator/.env.example:10]() |
-| `REDIS_PASSWORD` | **Yes** | - | Password for authentication [orchestrator/.env.example:11]() |
-| `REDIS_URL` | No | - | Overrides individual vars (e.g., for Railway) [orchestrator/core/redis/client.py:161-162]() |
+| Tier | Category | Purpose |
+| :--- | :--- | :--- |
+| **Auto** | `orchestrator_llm` | The "Brain". Premium reasoning, planning, and user chat. [orchestrator/core/llm/manager.py:35-36]() |
+| **System** | `system_llm` | Internal high-volume calls (RAG, summarization, tool routing). [orchestrator/core/llm/manager.py:39-49]() |
+| **Embeddings** | `embeddings` | Vectorization and semantic search. [orchestrator/core/llm/manager.py:52]() |
 
-### Redis Data Flow
-The `RedisClient` provides both synchronous and asynchronous connections via `aioredis` for non-blocking WebSocket delivery.
+### LLM Resolution Logic
+The `LLMManager` resolves configurations using a tiered strategy:
+1. **Tier Settings**: Fetches `provider` and `model` from the category defined in `SERVICE_CATEGORY_MAP`. [orchestrator/core/llm/manager.py:33-53]()
+2. **Credential Resolution**: Maps the provider to a secret in the `CredentialStore` using the pattern `credential_name_{provider}`. [orchestrator/core/llm/manager.py:163-180]()
+3. **Fallback**: Defaults to environment variables (e.g., `OPENAI_API_KEY`) if no database credential is found. [orchestrator/core/llm/manager.py:145-146]()
 
-```mermaid
-graph LR
-    subgraph "InternalServices"
-        WS["'WorkspaceWorker'"]
-        Mem["'UnifiedMemoryService'"]
-        Pub["'RedisClient.publish'"]
-    end
+**Sources:** [orchestrator/core/llm/manager.py:1-185](), [orchestrator/core/seeds/seed_system_settings.py:29-158]()
 
-    subgraph "RedisStorage"
-        Cache["L1 Cache (LRU)"]
-        Queue["Task Queue (ARQ)"]
-        Channels["Pub/Sub Channels"]
-    end
+---
 
-    WS -->|"Pop Task"| Queue
-    Mem -->|"Set/Get"| Cache
-    Pub -->|"Notify"| Channels
-    Channels -->|"Stream"| Frontend["Next.js Frontend"]
+## Memory System Parameters
+
+The `UnifiedMemoryService` manages a 5-layer stack. Configuration for these layers is defined in `Config` and can be overridden via system settings.
+
+### Memory Layer Configuration (L1-L3)
+| Parameter | Default | Description |
+| :--- | :--- | :--- |
+| `MEMORY_SESSION_TTL_SECONDS` | `86400` | L1 Working Memory (Redis) retention (24h). [orchestrator/config.py:85]() |
+| `MEMORY_DECAY_RATE` | `0.1` | Ebbinghaus decay rate for L2 (Short-term). [orchestrator/config.py:99]() |
+| `MEMORY_PROMOTION_MIN_IMPORTANCE` | `0.7` | Threshold for L2 $\rightarrow$ L3 (Long-term) promotion. [orchestrator/config.py:105]() |
+| `MEMORY_CACHE_TTL_SECONDS` | `300` | TTL for Mem0 search result caching in Redis. [orchestrator/config.py:89]() |
+
+### Memory Namespacing
+All memory operations use the `MemoryNamespace` class to ensure consistent key formatting across Redis and Mem0.
+
+```python
+# Standardized namespacing implementation
+namespace = MemoryNamespace(workspace_id="ws_123")
+redis_key = namespace.session("conv_456") # mem:session:ws_123:conv_456
+mem0_user_id = namespace.agent(agent_id=7) # mem:ws_123:agent:7
 ```
 
-**Sources:** `orchestrator/core/redis/client.py:14-119`(), `docker-compose.yml:48-73`(), `orchestrator/core/redis/client.py:141-197`()
-
----
-
-## LLM Provider Configuration
-
-Automatos AI supports multiple providers. Credentials can be set via environment variables or managed dynamically through the **Settings > Credentials** UI.
-
-### Provider API Keys
-| Variable | Required | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `OPENAI_API_KEY` | Conditional | - | Required for GPT models [orchestrator/.env.example:19]() |
-| `ANTHROPIC_API_KEY` | Conditional | - | Required for Claude models [orchestrator/.env.example:20]() |
-| `LLM_PROVIDER` | No | `openai` | Default system provider [orchestrator/.env.example:23]() |
-
-The system uses `tiktoken` for token counting to manage context windows and `pydantic-settings` for robust validation of these parameters.
-
-**Sources:** `orchestrator/requirements.txt:71-75`(), `orchestrator/.env.example:18-27`(), `orchestrator/requirements.txt:16-17`()
+**Sources:** [orchestrator/config.py:82-124](), [orchestrator/modules/memory/unified_memory_service.py:38-117]()
 
 ---
 
 ## Credential Management System
 
-The `CredentialStore` handles sensitive information (API keys, DB passwords) using AES encryption before persisting to the `credentials` table.
+The `CredentialStore` provides secure storage for API keys and sensitive tokens, using the `EncryptionService` for AES-256 encryption.
 
-### Implementation Details
-- **Encryption**: Uses `EncryptionService` to wrap values [orchestrator/core/credentials/service.py:56]().
-- **Validation**: `_validate_credential_data` checks inputs against `schema_definition` in `CredentialType` [orchestrator/core/credentials/service.py:128]().
-- **Audit Logging**: Every access or modification creates a `CredentialAuditLog` entry [orchestrator/core/models/credentials.py:105-126]().
+### Credential Resolution Strategy
+When a service (like the LLM Manager) requests a credential, the `resolver.py` follows this priority:
+1. **Explicit Mapping**: Check `system_settings` for a key like `orchestrator_llm.credential_name_openai`. [orchestrator/core/llm/manager.py:163-170]()
+2. **Standard Pattern**: Search for `{environment}_{provider}_api`. [orchestrator/core/llm/manager.py:141]()
+3. **Environment Fallback**: Last resort check for standard env vars. [orchestrator/core/llm/manager.py:145]()
 
-```mermaid
-graph TB
-    User["User/Agent"]
-    Store["'CredentialStore' (service.py)"]
-    Encrypt["'EncryptionService' (encryption.py)"]
-    DB_Cred["'Credential' Table (models/credentials.py)"]
-    DB_Audit["'CredentialAuditLog' Table"]
+### Monitoring and Audit
+Every credential access is logged to the `CredentialAuditLog` table, tracking the `workspace_id` and the identity of the requester to ensure multi-tenant isolation.
 
-    User -->|"Request Secret"| Store
-    Store -->|"Fetch Encrypted"| DB_Cred
-    DB_Cred -->|"Ciphertext"| Store
-    Store -->|"Decrypt"| Encrypt
-    Encrypt -->|"Plaintext"| Store
-    Store -->|"Log Access"| DB_Audit
-    Store -->|"Return Secret"| User
-```
-
-**Sources:** `orchestrator/core/credentials/service.py:42-185`(), `orchestrator/core/models/credentials.py:60-103`(), `orchestrator/core/models/credentials.py:25-58`()
+**Sources:** [orchestrator/core/llm/manager.py:135-185](), [frontend/components/settings/SettingsPanel.tsx:71-74](), [orchestrator/main.py:61]()
 
 ---
 
-## Cloud Storage & Knowledge Graph (PRD-42/126)
+## Onboarding & Coordination Settings
 
-Automatos AI integrates with cloud providers for document synchronization and relational knowledge mapping.
+Specialized settings for the **Mission Pipeline** (PRD-130) and **Onboarding Agents** are managed through the `OnboardingAgentsTab`.
 
-### Cloud Sync & S3
-| Variable | Required | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `S3_VECTORS_ENABLED` | No | `true` | Enable S3-backed vector storage [orchestrator/.env.example:64]() |
-| `AWS_ACCESS_KEY_ID` | Conditional | - | AWS credentials [orchestrator/.env.example:49]() |
-| `AWS_SECRET_ACCESS_KEY` | Conditional | - | AWS credentials [orchestrator/.env.example:50]() |
-| `AWS_REGION` | No | `us-east-1` | S3 bucket region [orchestrator/.env.example:51]() |
+- **Planner Configuration**: Controls `planner_max_tokens` and `planner_temperature` for the Mission decomposition stage. [frontend/components/settings/OnboardingAgentsTab.tsx:45]()
+- **Verifier Configuration**: Sets the `verification_pass_threshold` (e.g., 0.8) and `catastrophic_threshold` for the LLM-as-judge pipeline. [frontend/components/settings/OnboardingAgentsTab.tsx:47]()
+- **Agent Personas**: Allows runtime editing of `custom_persona_prompt` for onboarding agents without code changes. [frontend/components/settings/OnboardingAgentsTab.tsx:32]()
 
-### Knowledge Graph Integration
-The system uses `graphifyy[leiden]` for building relational knowledge graphs from documents and code.
-- **GraphifyService**: Manages per-workspace graphs [docs/PRDS/126-BUSINESS-KNOWLEDGE-GRAPH.md:68]().
-- **Source Extraction**: Processes documents (LLM), code (tree-sitter), and DB schemas [docs/PRDS/126-BUSINESS-KNOWLEDGE-GRAPH.md:69]().
-
-**Sources:** `orchestrator/api/cloud_documents.py:185-230`(), `orchestrator/requirements.txt:105-106`(), `docs/PRDS/126-BUSINESS-KNOWLEDGE-GRAPH.md:14-78`(), `orchestrator/requirements.txt:115-117`()
-
----
-
-## Monitoring & System Health
-
-The backend includes health checks and resource monitoring to ensure platform stability.
-
-- **Health Endpoint**: `GET /health` is used by Docker and Railway to verify service status [orchestrator/Dockerfile:78-79]().
-- **System Metrics**: Uses `psutil` to monitor CPU and memory usage for the dashboard [orchestrator/requirements.txt:34-35]().
-- **Logging**: Controlled by `LOG_LEVEL` (default `INFO`) and `LOG_FILE` [orchestrator/.env.example:29-30]().
-
-**Sources:** `orchestrator/Dockerfile:78-79`(), `orchestrator/.env.example:29-30`(), `orchestrator/requirements.txt:34-35`()
+**Sources:** [frontend/components/settings/OnboardingAgentsTab.tsx:20-176](), [orchestrator/api/onboarding_agents.py]()
 
 ---

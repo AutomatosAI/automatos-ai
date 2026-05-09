@@ -5,14 +5,12 @@
 
 The following files were used as context for generating this wiki page:
 
-- [.env.example](.env.example)
 - [frontend/components/knowledge/BusinessGraphPanel.tsx](frontend/components/knowledge/BusinessGraphPanel.tsx)
-- [frontend/components/knowledge/BusinessGraphVisualization.tsx](frontend/components/knowledge/BusinessGraphVisualization.tsx)
-- [frontend/components/knowledge/GraphDiffBanner.tsx](frontend/components/knowledge/GraphDiffBanner.tsx)
+- [frontend/components/workflows/execution-kitchen.tsx](frontend/components/workflows/execution-kitchen.tsx)
 - [frontend/lib/api-client.ts](frontend/lib/api-client.ts)
 - [orchestrator/api/knowledge_graph.py](orchestrator/api/knowledge_graph.py)
+- [orchestrator/api/workflows.py](orchestrator/api/workflows.py)
 - [orchestrator/modules/context/sections/graph_context.py](orchestrator/modules/context/sections/graph_context.py)
-- [orchestrator/modules/knowledge/__init__.py](orchestrator/modules/knowledge/__init__.py)
 - [orchestrator/modules/knowledge/graph_extraction.py](orchestrator/modules/knowledge/graph_extraction.py)
 - [orchestrator/modules/knowledge/graph_service.py](orchestrator/modules/knowledge/graph_service.py)
 - [orchestrator/modules/tools/discovery/actions_graph.py](orchestrator/modules/tools/discovery/actions_graph.py)
@@ -38,7 +36,6 @@ The API Client is implemented as a singleton class (`ApiClient`) that wraps the 
 
 The `ApiClient` maintains internal state for base URL resolution, default headers, and mock configuration. It supports an admin override mechanism to allow administrators to "impersonate" or view other workspace contexts without changing their primary session.
 
-**ApiClient Class Diagram**
 ```mermaid
 classDiagram
     class ApiClient {
@@ -53,8 +50,8 @@ classDiagram
         +setCurrentPage(pageName): void
         +getBaseUrl(): string
         +getAuthHeaders(): Promise~Record~
-        +buildBusinessGraph(): Promise~any~
         +getWorkspaceFileContent(wsId, path): Promise~any~
+        +buildBusinessGraph(): Promise~any~
         -shouldUseMock(endpoint): boolean
         -getMockDataForEndpoint(endpoint): any
     }
@@ -79,7 +76,7 @@ classDiagram
     ApiClient --> PAGE_MOCK_CONFIG
 ```
 
-**Sources:** [frontend/lib/api-client.ts:94-155](), [frontend/lib/api-client.ts:55-79](), [frontend/lib/api-client.ts:84-92](), [frontend/lib/api-client.ts:174-186]()
+**Sources:** [frontend/lib/api-client.ts:94-155](), [frontend/lib/api-client.ts:55-79](), [frontend/lib/api-client.ts:84-92](), [frontend/components/knowledge/BusinessGraphPanel.tsx:179-179](), [frontend/components/knowledge/BusinessGraphPanel.tsx:197-197]()
 
 ---
 
@@ -89,16 +86,15 @@ The system utilizes a hybrid authentication model. The frontend fetches a JWT fr
 
 ### Authentication Flow
 
-The backend uses `get_request_context_hybrid` to validate these tokens and extract the workspace context.
+The backend uses `get_request_context_hybrid` in `core/auth/hybrid.py` to validate these tokens and extract the workspace context.
 
-**Frontend-to-Backend Auth Flow**
 ```mermaid
 sequenceDiagram
     participant Component as "React Component"
     participant ApiClient as "apiClient (api-client.ts)"
     participant ClerkAuth as "@clerk/nextjs"
     participant Backend as "FastAPI (main.py)"
-    participant HybridAuth as "get_request_context_hybrid (hybrid.py)"
+    participant HybridAuth as "get_request_context_hybrid"
     
     Component->>ApiClient: request("/api/agents")
     ApiClient->>ClerkAuth: getToken()
@@ -120,7 +116,7 @@ sequenceDiagram
     ApiClient-->>Component: Typed Data <T>
 ```
 
-**Sources:** [frontend/lib/api-client.ts:819-841](), [frontend/lib/api-client.ts:156-164](), [orchestrator/api/knowledge_graph.py:17-18]()
+**Sources:** [frontend/lib/api-client.ts:819-841](), [orchestrator/api/knowledge_graph.py:17-17](), [frontend/lib/api-client.ts:156-164]()
 
 ### Token Injection Implementation
 
@@ -142,12 +138,12 @@ The `request<T>` method is the primary entry point for all data fetching.
 
 1.  **Token Retrieval:** Calls the registered `getClerkToken` [frontend/lib/api-client.ts:827-828]().
 2.  **Header Assembly:** Merges default headers, auth headers, and workspace ID [frontend/lib/api-client.ts:849-863]().
-3.  **Body Serialization:** Automatically stringifies objects unless the body is an instance of `FormData` (used for file uploads or graph imports) [frontend/lib/api-client.ts:844-847]().
+3.  **Body Serialization:** Automatically stringifies objects unless the body is an instance of `FormData`. For example, the `BusinessGraphPanel` bypasses the standard `apiClient.request` for multipart uploads to `/api/knowledge/graph/import` to handle `FormData` manually [frontend/components/knowledge/BusinessGraphPanel.tsx:102-110]().
 4.  **Execution:** Performs the native `fetch` call.
 5.  **Error Handling:** If the response is not `ok`, it attempts to parse the backend's `detail` error message [frontend/lib/api-client.ts:884-895]().
 6.  **Mock Fallback:** If the network call fails and mocks are enabled for that context, it returns mock data instead of throwing [frontend/lib/api-client.ts:909-927]().
 
-**Sources:** [frontend/lib/api-client.ts:819-927]()
+**Sources:** [frontend/lib/api-client.ts:819-927](), [frontend/components/knowledge/BusinessGraphPanel.tsx:102-110]()
 
 ---
 
@@ -161,7 +157,11 @@ The client resolves the workspace ID using the following priority:
 1.  **Admin Override:** A module-level variable `_adminWorkspaceOverride` set via `setAdminWorkspaceOverride()` [frontend/lib/api-client.ts:84-92]().
 2.  **Local Storage:** Checks `last_active_workspace` or `last_active_org` keys [frontend/lib/api-client.ts:858-861]().
 
-**Sources:** [frontend/lib/api-client.ts:80-92](), [frontend/lib/api-client.ts:855-862]()
+### Team-Based Access Control (PRD-124)
+
+The API Client and its corresponding backend routers support team-scoped filtering. Backend services like `GraphifyService` and handlers like `handle_query_graph` use `team_filtered_view` to restrict data access based on the agent's assigned team [orchestrator/modules/knowledge/graph_service.py:107-121](), [orchestrator/modules/tools/discovery/handlers_graph.py:64-67]().
+
+**Sources:** [frontend/lib/api-client.ts:80-92](), [frontend/lib/api-client.ts:855-862](), [orchestrator/modules/knowledge/graph_service.py:107-121](), [orchestrator/modules/tools/discovery/handlers_graph.py:64-67]()
 
 ---
 
@@ -172,51 +172,94 @@ The client features a tiered mock system that allows developers to work offline 
 ### Mock Control Hierarchy
 
 Mocks are evaluated in the following order:
-1.  **Production Check:** Mocks are strictly disabled in production environments [frontend/lib/api-client.ts:241-243]().
+1.  **Production Check:** Mocks are strictly disabled in production environments [frontend/lib/api-client.ts:126-126]().
 2.  **Page-Level Override:** `PAGE_MOCK_CONFIG` defines which pages should use mocks (e.g., `test` or `demo` pages) [frontend/lib/api-client.ts:55-79]().
 3.  **Global Toggle:** A global `enabled` flag in `mockConfig` [frontend/lib/api-client.ts:251-253]().
 4.  **Endpoint Toggle:** Specific endpoint overrides within `mockConfig.endpoints` [frontend/lib/api-client.ts:256-259]().
+
+### Mock Data Matching
+
+The system supports exact path matching and fallback "default" data. It can also match dynamic patterns like `/api/agents/[id]` using substring checks. If a real API call fails (network error), the client will attempt to find a mock for that endpoint as a safety fallback [frontend/lib/api-client.ts:909-915]().
 
 **Sources:** [frontend/lib/api-client.ts:238-264](), [frontend/lib/api-client.ts:753-796](), [frontend/lib/api-client.ts:909-927]()
 
 ---
 
-## Specialized Implementation: Knowledge Graph
+## Backend Integration
 
-The `ApiClient` includes specific methods for interacting with the Knowledge Graph system, which involves file-based storage in the workspace filesystem.
+The `ApiClient` targets the FastAPI backend routers, including specialized routers for Workflow tracking and Knowledge Graph.
 
-### Graph Data Flow
-The client retrieves graph data (`graph.json`) and metadata (`meta.json`) from the workspace storage via the `getWorkspaceFileContent` method.
+### Key Knowledge & RAG Endpoints
 
-**Knowledge Graph Entity Mapping**
+The API Client supports advanced knowledge graph and RAG operations:
+
+| Frontend Method | Backend Route | Purpose |
+| :--- | :--- | :--- |
+| `getWorkspaceFileContent` | `/api/workspaces/{ws_id}/files/content` | Fetches JSON graph data (e.g., `graph/graph.json`) [frontend/components/knowledge/BusinessGraphPanel.tsx:197-197]() |
+| `buildBusinessGraph` | `/api/knowledge/graph/build` | Triggers background graph construction [frontend/components/knowledge/BusinessGraphPanel.tsx:179-179]() |
+| N/A (Manual Fetch) | `/api/knowledge/graph/import` | Uploads `.json` graph exports via `FormData` [frontend/components/knowledge/BusinessGraphPanel.tsx:102-102]() |
+| N/A | `/api/knowledge/entities` | Lists extracted entities with importance scores [orchestrator/api/knowledge_graph.py:84-84]() |
+
+### Workflow Execution Tracking
+
+The frontend consumes workflow progress via SSE (Server-Sent Events). The `WorkflowStageTracker` on the backend emits events for both legacy 9-stage workflows and PRD-59 dynamic phases (PLAN, PREPARE, EXECUTE, EVALUATE, LEARN) [orchestrator/api/workflows.py:37-68]().
+
 ```mermaid
 graph LR
-    subgraph "Frontend (Next.js)"
-        BGP["BusinessGraphPanel.tsx"]
-        AC["api-client.ts"]
-    end
-
     subgraph "Backend (FastAPI)"
-        KGA["knowledge_graph.py (API)"]
-        GS["graph_service.py (Service)"]
-        WC["WorkspaceClient (Core)"]
+        A["WorkflowStageTracker"] --> B["_emit()"]
+        B --> C["Redis Pub/Sub"]
+        B --> D["SSE Stream Manager"]
     end
-
-    subgraph "Storage"
-        FILES["/graph/graph.json"]
+    subgraph "Frontend (React)"
+        E["WorkflowStreamViewer"] -- "EventSource" --> D
+        E --> F["ExecutionKitchen Log"]
     end
-
-    BGP -- "apiClient.getWorkspaceFileContent()" --> AC
-    AC -- "GET /api/workspace/{id}/files" --> KGA
-    KGA -- "load_graph()" --> GS
-    GS -- "read()" --> WC
-    WC -- "I/O" --> FILES
 ```
 
-- **`buildBusinessGraph()`**: Triggers the backend pipeline to collect sources and build the NetworkX graph [frontend/lib/api-client.ts:174-186]().
-- **`getWorkspaceFileContent()`**: Fetches raw or parsed JSON files (like `graph.json`) from the `/graph/` directory of a specific workspace [frontend/lib/api-client.ts:197-200]().
+**Sources:** [orchestrator/api/workflows.py:37-68](), [orchestrator/api/workflows.py:161-178](), [frontend/components/workflows/execution-kitchen.tsx:29-29]()
 
-**Sources:** [frontend/lib/api-client.ts:174-200](), [frontend/components/knowledge/BusinessGraphPanel.tsx:190-217](), [orchestrator/modules/knowledge/graph_service.py:145-152]()
+### Platform Graph Actions
+
+Agents interact with the knowledge graph through `PlatformActionExecutor` using handlers defined in the backend. These handlers, such as `handle_query_graph`, apply PRD-124 team filtering to ensure agents only see nodes visible to their assigned team [orchestrator/modules/tools/discovery/handlers_graph.py:98-132]().
+
+| Action Name | Handler Function | Description |
+| :--- | :--- | :--- |
+| `platform_query_graph` | `handle_query_graph` | Natural-language traversal (BFS/DFS) [orchestrator/modules/tools/discovery/actions_graph.py:9-10]() |
+| `platform_graph_neighbors` | `handle_graph_neighbors` | Finds direct node connections [orchestrator/modules/tools/discovery/actions_graph.py:62-63]() |
+| `platform_graph_impact` | `handle_graph_impact` | Analyzes downstream ripple effects [orchestrator/modules/tools/discovery/actions_graph.py:138-139]() |
+
+**Sources:** [orchestrator/api/knowledge_graph.py:84-142](), [orchestrator/modules/tools/discovery/handlers_graph.py:98-177](), [orchestrator/modules/tools/discovery/actions_graph.py:9-140]()
+
+### Entity Search & Visualization
+
+The backend provides structured models for the `ApiClient` to consume, specifically for the `BusinessGraphVisualization` component.
+
+```mermaid
+classDiagram
+    class Entity {
+        +int id
+        +string entity_name
+        +string entity_type
+        +float importance_score
+    }
+    class GraphNode {
+        +int id
+        +string label
+        +string type
+        +float importance
+    }
+    class GraphEdge {
+        +int source
+        +int target
+        +string label
+        +float strength
+    }
+    KnowledgeGraphResponse --> GraphNode
+    KnowledgeGraphResponse --> GraphEdge
+```
+
+**Sources:** [orchestrator/api/knowledge_graph.py:29-71](), [frontend/components/knowledge/BusinessGraphPanel.tsx:20-41]()
 
 ---
 
@@ -224,11 +267,11 @@ graph LR
 
 The client's behavior is dictated by environment variables and build-time settings.
 
-| Variable | Source | Usage |
-| :--- | :--- | :--- |
-| `NEXT_PUBLIC_API_URL` | `.env` / Docker | Primary backend URL [frontend/lib/api-client.ts:107-111]() |
-| `NODE_ENV` | Build System | Toggles developer logging and mock availability [frontend/lib/api-client.ts:126-126]() |
+| Variable | Usage |
+| :--- | :--- |
+| `NEXT_PUBLIC_API_URL` | Primary backend URL resolved at runtime or build-time [frontend/lib/api-client.ts:107-111]() |
+| `NODE_ENV` | Toggles developer logging and mock availability [frontend/lib/api-client.ts:126-126]() |
 
-**Sources:** [frontend/lib/api-client.ts:101-155](), [.env.example:34-34]()
+**Sources:** [frontend/lib/api-client.ts:101-155]()
 
 ---

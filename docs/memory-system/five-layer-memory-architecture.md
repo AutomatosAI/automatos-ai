@@ -5,44 +5,33 @@
 
 The following files were used as context for generating this wiki page:
 
-- [docs/PRDS/39-MEM0-MIGRATION-PRD.md](docs/PRDS/39-MEM0-MIGRATION-PRD.md)
-- [orchestrator/alembic/versions/prd123_checkpoint_count.py](orchestrator/alembic/versions/prd123_checkpoint_count.py)
-- [orchestrator/api/missions.py](orchestrator/api/missions.py)
+- [docs/PRDS/137-AUTO-CHATBOT-RECOVERY.md](docs/PRDS/137-AUTO-CHATBOT-RECOVERY.md)
+- [frontend/tsconfig.tsbuildinfo](frontend/tsconfig.tsbuildinfo)
 - [orchestrator/config.py](orchestrator/config.py)
-- [orchestrator/core/context_guard.py](orchestrator/core/context_guard.py)
-- [orchestrator/core/models/orchestration.py](orchestrator/core/models/orchestration.py)
-- [orchestrator/core/models/orchestration_enums.py](orchestrator/core/models/orchestration_enums.py)
+- [orchestrator/consumers/chatbot/integration.py](orchestrator/consumers/chatbot/integration.py)
+- [orchestrator/consumers/chatbot/prompt_analyzer.py](orchestrator/consumers/chatbot/prompt_analyzer.py)
+- [orchestrator/consumers/chatbot/smart_memory.py](orchestrator/consumers/chatbot/smart_memory.py)
+- [orchestrator/consumers/chatbot/smart_orchestrator.py](orchestrator/consumers/chatbot/smart_orchestrator.py)
 - [orchestrator/main.py](orchestrator/main.py)
-- [orchestrator/mem0_openapi.json](orchestrator/mem0_openapi.json)
-- [orchestrator/modules/coordination/dispatcher.py](orchestrator/modules/coordination/dispatcher.py)
-- [orchestrator/modules/coordination/planner.py](orchestrator/modules/coordination/planner.py)
-- [orchestrator/modules/coordination/reconciler.py](orchestrator/modules/coordination/reconciler.py)
+- [orchestrator/modules/agents/queries.py](orchestrator/modules/agents/queries.py)
+- [orchestrator/modules/context/sections/identity.py](orchestrator/modules/context/sections/identity.py)
+- [orchestrator/modules/context/sections/skills.py](orchestrator/modules/context/sections/skills.py)
+- [orchestrator/modules/context/sections/task_context.py](orchestrator/modules/context/sections/task_context.py)
 - [orchestrator/modules/memory/context_router.py](orchestrator/modules/memory/context_router.py)
-- [orchestrator/modules/memory/integrations/__init__.py](orchestrator/modules/memory/integrations/__init__.py)
-- [orchestrator/modules/memory/operations/__init__.py](orchestrator/modules/memory/operations/__init__.py)
-- [orchestrator/modules/memory/storage/knowledge_system.py](orchestrator/modules/memory/storage/knowledge_system.py)
-- [orchestrator/modules/memory/tests/conftest.py](orchestrator/modules/memory/tests/conftest.py)
-- [orchestrator/modules/memory/tests/test_hierarchical_memory.py](orchestrator/modules/memory/tests/test_hierarchical_memory.py)
+- [orchestrator/modules/memory/integrations/mem0_client.py](orchestrator/modules/memory/integrations/mem0_client.py)
 - [orchestrator/modules/memory/unified_memory_service.py](orchestrator/modules/memory/unified_memory_service.py)
-- [orchestrator/modules/nl2sql/tests/test_validator.py](orchestrator/modules/nl2sql/tests/test_validator.py)
-- [orchestrator/modules/tools/discovery/action_registry.py](orchestrator/modules/tools/discovery/action_registry.py)
-- [orchestrator/modules/tools/execution/concurrency.py](orchestrator/modules/tools/execution/concurrency.py)
-- [orchestrator/services/checkpoint_service.py](orchestrator/services/checkpoint_service.py)
-- [orchestrator/services/coordinator_service.py](orchestrator/services/coordinator_service.py)
-- [orchestrator/services/orchestration_state.py](orchestrator/services/orchestration_state.py)
-- [orchestrator/tests/test_budget_gate.py](orchestrator/tests/test_budget_gate.py)
-- [orchestrator/tests/test_dispatcher_parallel.py](orchestrator/tests/test_dispatcher_parallel.py)
 - [orchestrator/tests/test_unified_memory.py](orchestrator/tests/test_unified_memory.py)
 - [scripts/ralph/IMPLEMENTATION_PLAN.md](scripts/ralph/IMPLEMENTATION_PLAN.md)
+- [scripts/ralph/prd.json](scripts/ralph/prd.json)
 - [scripts/ralph/progress.txt](scripts/ralph/progress.txt)
 
 </details>
 
 
 
-This page documents the hierarchical memory system in Automatos AI, which organizes agent memory into five layers (L0–L4) ranging from immediate focus to organizational knowledge. The architecture enables intelligent context retrieval, automatic consolidation between layers, and workspace-scoped isolation.
+This page documents the hierarchical memory system in Automatos AI, which organizes agent memory into five layers (L0–L4) ranging from immediate focus to organizational knowledge. The architecture enables intelligent context retrieval, automatic consolidation between layers, and workspace-scoped isolation via the `UnifiedMemoryService`.
 
-**Related pages:** For memory integration in the chat system, see **9.5 Memory Integration**. For signal-based retrieval logic, see **3.3 Context Router**. For background jobs managing memory lifecycle, see **3.4 Memory Lifecycle & Consolidation**.
+**Related pages:** For memory integration in the chat system, see **Context Service (4)**. For signal-based retrieval logic, see **Context Router (3.3)**. For background jobs managing memory lifecycle, see **Memory Lifecycle & Consolidation (3.4)**.
 
 ---
 
@@ -50,7 +39,7 @@ This page documents the hierarchical memory system in Automatos AI, which organi
 
 The memory system is organized as a hierarchy where each layer serves a specific retention window and access pattern:
 
-### Memory Hierarchy Flow
+### Memory Consolidation and Promotion Flow
 Title: Memory Consolidation and Promotion Flow
 ```mermaid
 graph TB
@@ -62,7 +51,7 @@ graph TB
     
     L0 -->|"No consolidation<br/>(ephemeral)"| L1
     L1 -->|"end_session()<br/>consolidate_session()"| L2
-    L2 -->|"Promotion job<br/>(access_count >= 3)"| L3
+    L2 -->|"Promotion job<br/>(access_count ≥ 3)"| L3
     L3 -.->|"No automatic flow"| L4
     
     L1 -.->|"get_session()"| User["User Query"]
@@ -70,15 +59,15 @@ graph TB
     L3 -.->|"search_long_term()"| User
     L4 -.->|"Tool calls only"| User
 ```
-Sources: [orchestrator/modules/memory/unified_memory_service.py:8-21](), [orchestrator/config.py:106-111]()
+Sources: [orchestrator/modules/memory/unified_memory_service.py:8-21](), [orchestrator/modules/memory/unified_memory_service.py:108-115]()
 
 | Layer | Storage Backend | Retention | Access Pattern | Key Entity |
 |-------|----------------|-----------|----------------|------------|
 | **L0** | LLM context window | Current conversation only | Direct (no API) | `messages` list |
 | **L1** | Redis | 24 hours (active)<br/>1 hour (after end) | `get_session()` | `SessionMemory` |
-| **L2** | PostgreSQL (`memory_short_term`) | Decays via Ebbinghaus formula | `search_short_term()` | `MemoryShortTerm` model |
+| **L2** | PostgreSQL (`memory_items`) | Decays via Ebbinghaus formula | `search_short_term()` | `MemoryItem` model |
 | **L3** | Mem0 service | Indefinite (fact-extracted) | `search_long_term()` | `Mem0Client` |
-| **L4** | Vector DB + NL2SQL | Indefinite (org data) | `search_knowledge` tool | `RAGService` |
+| **L4** | Vector DB + NL2SQL | Indefinite (org data) | `search_knowledge` tool | `EnhancedVectorStore` |
 
 Sources: [orchestrator/config.py:82-118](), [orchestrator/modules/memory/unified_memory_service.py:8-14]()
 
@@ -88,13 +77,12 @@ Sources: [orchestrator/config.py:82-118](), [orchestrator/modules/memory/unified
 
 **Definition:** The immediate conversation context passed directly to the LLM. No persistent storage — ephemeral within a single request.
 
-**Implementation:** Managed by `ContextService` message assembly. The `messages` parameter to `build_context()` becomes the conversation history fed to the LLM.
+**Implementation:** Managed by `ContextService` message assembly. The `messages` parameter to `build_context()` becomes the conversation history fed to the LLM. In `IdentitySection`, the agent's persona and personality are injected to provide the immediate behavioral "memory" of who the agent is.
 
 **Code Entities:**
 - `ContextService.build_context(messages=...)` — assembles L0 context.
-- `ContextResult.messages` — final message array for LLM.
-
-**No API methods** — L0 is implicitly created by the caller constructing the messages list.
+- `IdentitySection` — Renders Priority 1 identity context [orchestrator/modules/context/sections/identity.py:55-69]().
+- `SmartChatOrchestrator.prepare_request` — Initiates context building [orchestrator/consumers/chatbot/smart_orchestrator.py:126-153]().
 
 ---
 
@@ -124,7 +112,7 @@ classDiagram
         +consolidate_session(workspace_id, conversation_id)
     }
     
-    SessionMemory --> UnifiedMemoryService : "stored/retrieved by"
+    SessionMemory --> UnifiedMemoryService : stored/retrieved by
 ```
 Sources: [orchestrator/modules/memory/unified_memory_service.py:123-149]()
 
@@ -140,61 +128,49 @@ def session(self, conversation_id: str) -> str:
 ```
 Sources: [orchestrator/modules/memory/unified_memory_service.py:78-80]()
 
-### TTL Configuration
-
-| State | TTL Constant | Default Value |
-|-------|--------------|---------------|
-| Active session | `MEMORY_SESSION_TTL_SECONDS` | 86400 (24 hours) |
-| Ended session (consolidation window) | `MEMORY_SESSION_CONSOLIDATION_TTL_SECONDS` | 3600 (1 hour) |
-
-Sources: [orchestrator/config.py:84-87]()
-
 ---
 
 ## L2: Short-Term Memory (PostgreSQL)
 
-**Definition:** Recent memories stored in the `memory_short_term` table with an Ebbinghaus decay-based retention score. Items gradually lose relevance over time unless accessed frequently.
-
-### Database Schema & Content Types
-
-**Content Types:**
-- `exchange` — user-assistant chat turns (from L1 consolidation).
-- `recipe_summary` — workflow execution summaries.
-- `heartbeat_log` — orchestrator proactive tick logs.
-- `tool_result` — significant tool execution outputs.
-- `session_decision` — decisions from L1 sessions.
-
-Sources: [orchestrator/modules/memory/unified_memory_service.py:12-13]()
+**Definition:** Recent memories stored in the `memory_items` table with an Ebbinghaus decay-based retention score. Items gradually lose relevance over time unless accessed frequently.
 
 ### Ebbinghaus Decay Formula
 
-The decay score is calculated based on the `MEMORY_DECAY_RATE` (default 0.1) and `importance` score. Items with a score below `MEMORY_DECAY_ARCHIVE_THRESHOLD` (default 0.3) are archived.
+The decay score is calculated based on the `MEMORY_DECAY_RATE` (default 0.1). Items with a score below `MEMORY_DECAY_ARCHIVE_THRESHOLD` (default 0.3) are archived during the background decay job.
 
-Sources: [orchestrator/config.py:100-106]()
+Sources: [orchestrator/config.py:100-106](), [orchestrator/modules/memory/unified_memory_service.py:100-105]()
 
 ---
 
 ## L3: Long-Term Memory (Mem0)
 
-**Definition:** Persistent, fact-extracted memories stored in the external Mem0 service. Optimized for semantic search and long-term retention.
+**Definition:** Persistent, fact-extracted memories stored in the external Mem0 service. Optimized for semantic search and long-term retention of specific user/agent facts.
 
-### Mem0Client Wrapper
+### Mem0Client and Circuit Breaker
+To prevent external service failures from blocking the chat loop, the `Mem0Client` implements a circuit breaker that skips calls after 3 consecutive failures for a 300s cooldown.
 
-The `UnifiedMemoryService` holds a single shared `Mem0Client` instance which handles communication with the Mem0 API.
+Title: Mem0 Integration with Circuit Breaker
+```mermaid
+sequenceDiagram
+    participant UMS as UnifiedMemoryService
+    participant M0C as Mem0Client
+    participant CB as _CircuitBreaker
+    participant M0S as Mem0 Service (External)
 
-```python
-# From UnifiedMemoryService.__init__
-from modules.memory.integrations.mem0_client import Mem0Client
-
-self._mem0 = Mem0Client()
+    UMS->>M0C: search_long_term(query)
+    M0C->>CB: allow_request()
+    CB-->>M0C: True
+    M0C->>M0S: POST /api/v1/memories/search
+    M0S-->>M0C: 503 Service Unavailable
+    M0C->>CB: record_failure()
+    M0C-->>UMS: None (fallback to L2)
 ```
-Sources: [orchestrator/modules/memory/unified_memory_service.py:177-182]()
+Sources: [orchestrator/modules/memory/integrations/mem0_client.py:25-60](), [orchestrator/modules/memory/integrations/mem0_client.py:107-157]()
 
-### L3 Cache Layer (Redis)
-
-L3 search results are cached in Redis for 5 minutes (configurable via `MEMORY_CACHE_TTL_SECONDS`) to avoid redundant Mem0 API calls.
-
-Sources: [orchestrator/config.py:88-89](), [orchestrator/modules/memory/unified_memory_service.py:84-92]()
+### Smart Memory Tiering
+`SmartMemoryManager` classifies whether a memory should be stored globally or specifically to an agent based on keywords.
+- **Global:** Personal facts like "my name is..." [orchestrator/consumers/chatbot/smart_memory.py:129-135]().
+- **Agent:** Tool-specific info like "Slack channel #dev" [orchestrator/consumers/chatbot/smart_memory.py:113-126]().
 
 ---
 
@@ -202,26 +178,16 @@ Sources: [orchestrator/config.py:88-89](), [orchestrator/modules/memory/unified_
 
 **Definition:** Organizational data sources (documents, databases) accessed via tool calls. L4 is **not pre-fetched** into context — the LLM must explicitly invoke tools to query it.
 
-### RAG Service Architecture
+### Retrieval Pipeline
 Title: L4 RAG Retrieval Pipeline
 ```mermaid
 graph TB
-    Query["User Query"] --> RAG["RAGService.retrieve()"]
-    RAG --> Chunking["SemanticChunker<br/>(Adaptive/Recursive)"]
-    RAG --> Search["Vector Store Search"]
-    Search --> Optimizer["ContextOptimizer<br/>(MMR/Knapsack)"]
-    Optimizer --> Context["Formatted Context"]
+    Query["User Query"] --> Tool["search_knowledge Tool"]
+    Tool --> RAG["RAG Retrieval Engine"]
+    RAG --> Chunking["Semantic Chunking"]
+    RAG --> Search["pgvector Search"]
+    Search --> Context["Formatted Context Segment"]
 ```
-
-### Available Tools
-
-| Tool Name | Purpose | Backend |
-|-----------|---------|---------|
-| `search_knowledge` | Semantic search over uploaded documents | `RAGService` |
-| `query_database` | Natural language queries to databases | NL2SQL service |
-| `platform_search_memory` | Search across memory layers via tool | `ActionRegistry` promoted tool |
-
-Sources: [scripts/ralph/progress.txt:73]()
 
 ---
 
@@ -251,15 +217,15 @@ classDiagram
         +search(query, user_id, limit)
     }
     
-    UnifiedMemoryService --> Mem0Client : "owns"
+    UnifiedMemoryService --> Mem0Client : owns
 ```
 Sources: [orchestrator/modules/memory/unified_memory_service.py:154-188]()
 
 ---
 
-## MemoryNamespace (Standardized user_id)
+## MemoryNamespace (Standardized Scoping)
 
-`MemoryNamespace` is a frozen dataclass that builds all Mem0/Redis keys using a single pattern to prevent data leaks.
+`MemoryNamespace` is a frozen dataclass that builds all Mem0/Redis keys using a single pattern to prevent data leaks between agents and workspaces.
 
 ### Namespace Methods
 
@@ -274,49 +240,17 @@ Sources: [orchestrator/modules/memory/unified_memory_service.py:38-117]()
 
 ---
 
-## ContextRouter (Signal-Based Retrieval)
+## Context Routing (Signal-Based Retrieval)
 
-`ContextRouter` analyzes user queries using regex patterns to detect which memory layers should be fetched.
+The `ContextRouter` (integrated via `SmartChatOrchestrator`) analyzes user queries using `PromptAnalyzer` to decide which memory layers to fetch.
 
-### Signal Detection
+| Signal | Pattern Example | Target Layer |
+|--------|-----------------|--------------|
+| `is_temporal` | "last week", "yesterday" | L2 Daily Logs |
+| `is_personal_fact` | "my name", "i prefer" | L3 Mem0 |
+| `is_session_continuation` | "earlier in this chat" | L1 Redis |
+| `is_knowledge_query` | "search the docs" | L4 RAG |
 
-| Signal | Source Layer |
-|--------|--------------|
-| `is_temporal` | L2 Short-Term |
-| `is_personal_fact` | L3 Long-Term |
-| `is_knowledge` | L4 Knowledge |
-
-Sources: [orchestrator/modules/memory/context_router.py:82-171]()
-
----
-
-## Usage Examples
-
-### Storing Long-Term Memory (L3)
-```python
-from modules.memory.unified_memory_service import get_unified_memory_service
-
-service = get_unified_memory_service()
-await service.store_long_term(
-    workspace_id="ws-123",
-    content="The user prefers Python for all coding tasks.",
-    agent_id=42
-)
-```
-Sources: [orchestrator/modules/memory/unified_memory_service.py:16-21]()
-
-### Updating Session Memory (L1)
-```python
-from modules.memory.unified_memory_service import get_unified_memory_service
-
-service = get_unified_memory_service()
-await service.update_session(
-    workspace_id="ws-123",
-    conversation_id="conv-456",
-    user_msg="Hello!",
-    assistant_msg="Hi there! How can I help?"
-)
-```
-Sources: [orchestrator/modules/memory/unified_memory_service.py:154-188]()
+Sources: [orchestrator/consumers/chatbot/prompt_analyzer.py:88-156](), [orchestrator/consumers/chatbot/smart_orchestrator.py:160-184]()
 
 ---

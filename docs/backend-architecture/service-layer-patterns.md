@@ -5,30 +5,21 @@
 
 The following files were used as context for generating this wiki page:
 
-- [README.md](README.md)
-- [docker-compose.yml](docker-compose.yml)
-- [docs/README.md](docs/README.md)
-- [frontend/.dockerignore](frontend/.dockerignore)
-- [frontend/Dockerfile](frontend/Dockerfile)
-- [frontend/app/chat/page.tsx](frontend/app/chat/page.tsx)
-- [frontend/next-env.d.ts](frontend/next-env.d.ts)
-- [orchestrator/Dockerfile](orchestrator/Dockerfile)
-- [orchestrator/alembic/versions/20260202_add_workspace_id_to_skills_patterns_models.py](orchestrator/alembic/versions/20260202_add_workspace_id_to_skills_patterns_models.py)
-- [orchestrator/api/cloud_documents.py](orchestrator/api/cloud_documents.py)
-- [orchestrator/api/context.py](orchestrator/api/context.py)
-- [orchestrator/api/workflows.py](orchestrator/api/workflows.py)
-- [orchestrator/core/llm/clients/openai_embedding.py](orchestrator/core/llm/clients/openai_embedding.py)
-- [orchestrator/core/llm/rerank_manager.py](orchestrator/core/llm/rerank_manager.py)
-- [orchestrator/core/redis/client.py](orchestrator/core/redis/client.py)
-- [orchestrator/core/services/__init__.py](orchestrator/core/services/__init__.py)
-- [orchestrator/modules/tools/services/__init__.py](orchestrator/modules/tools/services/__init__.py)
-- [orchestrator/requirements.txt](orchestrator/requirements.txt)
+- [frontend/tsconfig.tsbuildinfo](frontend/tsconfig.tsbuildinfo)
+- [orchestrator/config.py](orchestrator/config.py)
+- [orchestrator/main.py](orchestrator/main.py)
+- [orchestrator/modules/memory/context_router.py](orchestrator/modules/memory/context_router.py)
+- [orchestrator/modules/memory/unified_memory_service.py](orchestrator/modules/memory/unified_memory_service.py)
+- [orchestrator/tests/test_unified_memory.py](orchestrator/tests/test_unified_memory.py)
+- [scripts/ralph/IMPLEMENTATION_PLAN.md](scripts/ralph/IMPLEMENTATION_PLAN.md)
+- [scripts/ralph/prd.json](scripts/ralph/prd.json)
+- [scripts/ralph/progress.txt](scripts/ralph/progress.txt)
 
 </details>
 
 
 
-This document describes the architectural patterns used in the service layer of Automatos AI. The service layer provides business logic, orchestration, and resource management, sitting between API routers and the data persistence layer.
+This document describes the architectural patterns used in the service layer of Automatos AI. The service layer provides business logic, orchestration, and resource management, sitting between API routers and the data persistence layer. It emphasizes the use of singleton services, dependency injection, and complex service composition.
 
 ---
 
@@ -38,149 +29,152 @@ The service layer implements the business logic tier in a three-layer architectu
 
 ### Core Service Interaction
 
-The following diagram maps high-level system components to their corresponding code entities and shows the flow of data through the service layer.
+The following diagram maps high-level system components to their corresponding code entities and shows the flow of data through the service layer, bridging Natural Language Space to Code Entity Space.
 
 ```mermaid
 graph TB
     subgraph "API Layer (Code Entity Space)"
         ChatRoute["orchestrator/api/chat.py"]
-        RecipeRoute["orchestrator/api/recipe_executor.py"]
-        WorkflowsRoute["orchestrator/api/workflows.py"]
+        MemoryRoute["orchestrator/api/memory.py"]
+        SystemRoute["orchestrator/api/system.py"]
     end
     
     subgraph "Service Layer (Logic Space)"
-        SmartOrchestrator["SmartChatOrchestrator"]
-        ContextService["ContextService"]
-        RecipeExecutor["_execute_step"]
-        UnifiedExecutor["UnifiedToolExecutor"]
-        WorkflowStageTracker["WorkflowStageTracker"]
+        UnifiedMemory["UnifiedMemoryService"]
+        ContextRouter["ContextRouter"]
+        AgentFactory["AgentFactory"]
+        LLMManager["LLMManager"]
+        GraphRouter["GraphRouter"]
     end
     
     subgraph "Data Layer (Entity Space)"
-        AgentModel["Agent (ORM)"]
-        RecipeExecution["RecipeExecution (ORM)"]
-        Mem0Client["Mem0Client (External/L3)"]
-        Redis["RedisClient (orchestrator/core/redis/client.py)"]
-        Postgres["PostgreSQL (orchestrator/database/init_complete_schema.sql)"]
+        Redis["Redis (L1/Cache)"]
+        Postgres["PostgreSQL (L2/ORM)"]
+        Mem0["Mem0Client (L3)"]
+        SysSetting["SystemSetting (ORM)"]
     end
     
-    ChatRoute --> SmartOrchestrator
-    RecipeRoute --> RecipeExecutor
-    WorkflowsRoute --> WorkflowStageTracker
+    ChatRoute --> AgentFactory
+    MemoryRoute --> UnifiedMemory
+    SystemRoute --> SysSetting
     
-    SmartOrchestrator --> ContextService
-    RecipeExecutor --> UnifiedExecutor
-    RecipeExecutor --> ContextService
+    AgentFactory --> ContextRouter
+    ContextRouter --> UnifiedMemory
+    UnifiedMemory --> Redis
+    UnifiedMemory --> Postgres
+    UnifiedMemory --> Mem0
     
-    ContextService --> AgentModel
-    SmartOrchestrator --> Mem0Client
-    RecipeExecutor --> RecipeExecution
-    WorkflowStageTracker --> Redis
-    RecipeExecutor --> Postgres
+    AgentFactory --> LLMManager
+    AgentFactory --> GraphRouter
 ```
 
-**Sources**: [orchestrator/api/workflows.py:37-70](), [orchestrator/core/redis/client.py:14-31](), [orchestrator/api/context.py:53-83](), [orchestrator/database/init_complete_schema.sql:1-50]()
+**Sources**: [orchestrator/main.py:36-113](), [orchestrator/modules/memory/unified_memory_service.py:154-188](), [orchestrator/modules/memory/context_router.py:5-24](), [orchestrator/modules/agents/factory/agent_factory.py:158-175]()
 
 ---
 
 ## Singleton and Instance Patterns
 
-Automatos AI utilizes the Singleton pattern for core registry and stateful services to ensure consistent state and efficient resource usage across the application.
+Automatos AI utilizes the Singleton pattern via `get_instance()` methods and centralized factory functions to ensure consistent state and efficient resource usage across the application.
 
 ### Singleton Implementation (`get_instance`)
 
-Services like the `RedisClient` and `MonitoringService` use factory functions or singleton-like patterns to manage lifecycle and configuration injection.
+Core services use class-level `_instance` variables to manage shared state across the lifecycle of the FastAPI application.
 
-- **Redis Singleton**: `get_redis_client()` provides a global, lazy-initialized instance that supports both `REDIS_URL` (for Railway/Heroku) and individual environment variables [orchestrator/core/redis/client.py:149-197]().
-- **Monitoring Singleton**: `get_monitoring_service()` returns the global instance of `MonitoringService` for platform-level health tracking [orchestrator/core/services/__init__.py:8-14]().
-- **Audit Singleton**: `get_audit_service()` manages the `AuditService` lifecycle for recording system events [orchestrator/core/services/__init__.py:10-19]().
+- **Unified Memory Service**: `UnifiedMemoryService.get_instance()` ensures that only one shared `Mem0Client` and one Redis client connection pool are active at any time [orchestrator/modules/memory/unified_memory_service.py:163-170]().
+- **Graph Router**: Implements a `get_graph_router()` factory to provide a singleton instance for tool routing logic [scripts/ralph/progress.txt:110-110]().
+- **Agent Runtime Management**: `AgentFactory` maintains an internal `_agents` dictionary to cache `AgentRuntime` objects, preventing redundant LLM manager initializations [orchestrator/modules/agents/factory/agent_factory.py:215-225]().
 
-**Sources**: [orchestrator/core/redis/client.py:149-197](), [orchestrator/core/services/__init__.py:8-20]()
+### Instance Management Functions
+
+| Function | Service Provided | Implementation Detail |
+| :--- | :--- | :--- |
+| `get_unified_memory_service()` | `UnifiedMemoryService` | Wraps `get_instance()` for memory operations [orchestrator/modules/memory/unified_memory_service.py:16-18]() |
+| `get_monitoring_service()` | Monitoring Logic | Platform-level monitoring instance [orchestrator/modules/agents/factory/agent_factory.py:37-40]() |
+| `get_redis_client()` | Redis Connection | Shared client for L1 session and L3 caching [orchestrator/modules/memory/unified_memory_service.py:184-186]() |
+
+**Sources**: [orchestrator/modules/memory/unified_memory_service.py:154-188](), [orchestrator/modules/agents/factory/agent_factory.py:37-44](), [scripts/ralph/progress.txt:102-113]()
 
 ---
 
 ## Dependency Injection & Service Composition
 
-Automatos AI uses composition to bridge different domains. Services are frequently composed to create complex pipelines, such as the `RAGService` which interacts with database sessions and embedding providers.
+Automatos AI uses composition to bridge different domains. Services are frequently composed to create complex pipelines, such as the `ContextRouter` which integrates with the `UnifiedMemoryService`.
 
-### Composition in Context Engineering
+### Memory Service Composition (PRD-79)
 
-The `RAGService` is injected into API routes via FastAPI's `Depends` mechanism, allowing it to interact with the database and vector store:
+The `UnifiedMemoryService` encapsulates the 5-layer memory stack, composing multiple data backends into a single interface:
 
-| Component | Role | Code Reference |
+| Component | Responsibility | Code Reference |
 | :--- | :--- | :--- |
-| `RAGService` | Core logic for retrieval and stats | [orchestrator/api/context.py:86-86]() |
-| `Session` | Database persistence (Postgres) | [orchestrator/api/context.py:87-87]() |
-| `get_rag_service` | Factory for RAG dependency injection | [orchestrator/api/context.py:20-20]() |
+| `MemoryNamespace` | Standardizes scoped IDs for Mem0 and Redis | [orchestrator/modules/memory/unified_memory_service.py:39-118]() |
+| `SessionMemory` | Manages L1 working memory (Redis) | [orchestrator/modules/memory/unified_memory_service.py:124-149]() |
+| `Mem0Client` | Interfaces with L3 long-term memory | [orchestrator/modules/memory/unified_memory_service.py:178-181]() |
 
-### Workflow Stage Composition
+### Context Assembly Pipeline
 
-The `WorkflowStageTracker` composes `RedisClient` and a `stream_manager` to handle multi-channel event broadcasting [orchestrator/api/workflows.py:70-73](). It maps high-level "Phases" (PLAN, PREPARE, EXECUTE, EVALUATE, LEARN) to specific underlying stages [orchestrator/api/workflows.py:62-68]().
+The `ContextRouter` demonstrates service composition by analyzing queries and orchestrating retrieval across memory layers:
+1. **Signal Detection**: Uses regex patterns to detect `is_temporal`, `is_personal_fact`, etc. [orchestrator/modules/memory/context_router.py:40-56]().
+2. **Context Retrieval**: Calls `UnifiedMemoryService` to fetch L1/L2/L3 data based on detected signals [orchestrator/modules/memory/context_router.py:10-12]().
+3. **Budget Management**: Assembles a `ContextBundle` constrained by token budgets defined in `Config` [orchestrator/modules/memory/context_router.py:62-79](), [orchestrator/config.py:90-95]().
 
-**Sources**: [orchestrator/api/context.py:84-105](), [orchestrator/api/workflows.py:53-78]()
-
----
-
-## Lazy Initialization Pattern
-
-Expensive resources, such as Redis connections or specific service connectors, are initialized only when first requested. This prevents application startup delays and handles optional modules gracefully.
-
-### Lazy Redis Loading
-
-The `get_redis_client` function defers the creation of the `RedisClient` until a service actually requires a connection.
-
-- **Initial State**: The global `_redis_client` is set to `None` [orchestrator/core/redis/client.py:138-138]().
-- **Initialization Trigger**: On first call, it parses `config.REDIS_URL` or fallback environment variables [orchestrator/core/redis/client.py:156-168]().
-- **Connection Testing**: It immediately runs `test_connection()` during initialization to ensure the service is available [orchestrator/core/redis/client.py:145-145]().
-
-**Sources**: [orchestrator/core/redis/client.py:137-197]()
+**Sources**: [orchestrator/modules/memory/unified_memory_service.py:1-32](), [orchestrator/modules/memory/context_router.py:1-33](), [orchestrator/config.py:82-124]()
 
 ---
 
-## Service Reliability Patterns
+## Service Layer Data Flow
 
-Services interacting with external systems implement reliability patterns to handle timeouts and connection failures.
-
-### Redis Connection Management
-
-The `RedisClient` uses a `ConnectionPool` with a `max_connections` limit to prevent resource exhaustion [orchestrator/core/redis/client.py:22-29](). It also provides a synchronous `pubsub_client` context manager that ensures connections are closed even if an exception occurs during message processing [orchestrator/core/redis/client.py:37-46]().
-
-### Async Streaming Reliability
-
-For real-time updates, the `get_async_pubsub` method utilizes `aioredis` to provide non-blocking message delivery, essential for FastAPI's asynchronous event loop [orchestrator/core/redis/client.py:48-64]().
-
-**Sources**: [orchestrator/core/redis/client.py:22-64]()
-
----
-
-## Data Flow & Persistence
-
-Services interact with the database using SQLAlchemy sessions, typically injected via FastAPI dependencies (`get_db`) or passed through service constructors.
-
-### Workflow Event Pipeline
-
-The `WorkflowStageTracker` manages the state of long-running executions and emits updates via SSE and Redis.
+The flow of data through services is often governed by "Signals" and "Bundles". The following diagram illustrates the lifecycle of a memory retrieval request.
 
 ```mermaid
 graph LR
-    subgraph "Execution Logic (orchestrator/api/workflows.py)"
-        StageTracker["WorkflowStageTracker"]
+    subgraph "Natural Language Space"
+        UserQuery["'What did we discuss yesterday?'"]
     end
-    
-    subgraph "Persistence & Comms"
-        DB["PostgreSQL (orchestrator_db)"]
-        Redis["Redis (automatos_redis)"]
-        SSE["SSE Stream Manager"]
+
+    subgraph "Code Entity Space"
+        Router["ContextRouter.analyze_query()"]
+        Signals["ContextSignals (is_temporal=True)"]
+        UMS["UnifiedMemoryService.search_long_term()"]
+        Bundle["ContextBundle"]
     end
-    
-    StageTracker -->|emit| Redis
-    StageTracker -->|broadcast_event| SSE
-    StageTracker -->|log_info| DB
+
+    UserQuery --> Router
+    Router --> Signals
+    Signals --> UMS
+    UMS --> Bundle
 ```
 
-- **Phase Management**: Phases are marked as started/completed with millisecond-precision duration tracking [orchestrator/api/workflows.py:88-124]().
-- **Multi-Channel Emission**: The `_emit` method ensures that every status update is sent to both the internal `stream_manager` (for active SSE connections) and Redis (for cross-worker synchronization) [orchestrator/api/workflows.py:161-179]().
+**Sources**: [orchestrator/modules/memory/context_router.py:14-24](), [orchestrator/modules/memory/unified_memory_service.py:18-21]()
 
-**Sources**: [orchestrator/api/workflows.py:88-179](), [orchestrator/core/redis/client.py:91-120](), [orchestrator/api/context.py:55-83]()
+---
+
+## Lazy Initialization & Resolution Patterns
+
+Expensive resources or environment-dependent configurations are resolved lazily to ensure the system remains portable and responsive.
+
+### API Key Resolution Strategy
+
+The `AgentFactory` implements a 3-tier lazy resolution pattern for LLM API keys:
+1. **BYOK (Bring Your Own Key)**: Checked first from the `Agent` model's own credentials [orchestrator/modules/agents/factory/agent_factory.py:281-285]().
+2. **Platform Credentials**: Checked second from the `CredentialStore` [orchestrator/modules/agents/factory/agent_factory.py:287-291]().
+3. **Environment Variables**: Final fallback to system-level `.env` values [orchestrator/modules/agents/factory/agent_factory.py:293-295]().
+
+### Graph-Based Tool Routing
+
+The `GraphRouter` service lazily expansions entry nodes through `tool_routing_edges` to build execution chains [scripts/ralph/progress.txt:102-104](). It utilizes a fallback pattern: if the graph is empty or a database error occurs, it returns single-action chains based on embedding scores [scripts/ralph/progress.txt:108-109]().
+
+**Sources**: [orchestrator/modules/agents/factory/agent_factory.py:270-300](), [scripts/ralph/progress.txt:92-113]()
+
+---
+
+## Service Initialization & Background Jobs
+
+The platform uses a robust seeding pattern and background job scheduling to maintain service health.
+
+- **Background Memory Jobs**: The `UnifiedMemoryService` relies on background intervals for session consolidation (L1→L2), Ebbinghaus decay, and L2→L3 promotion [orchestrator/config.py:110-115]().
+- **System Settings Seeding**: The `seed_system_settings` script ensures that categories like `GENERAL` and `ORCHESTRATOR_LLM` have valid defaults [orchestrator/core/seeds/seed_system_settings.py:8-11]().
+- **Graphify Archival**: A monthly job (PRD-131d) folds aged L2+L3 memories into the workspace knowledge graph [orchestrator/config.py:116-123]().
+
+**Sources**: [orchestrator/config.py:82-124](), [orchestrator/core/seeds/seed_system_settings.py:8-20]()
 
 ---

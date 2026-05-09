@@ -2,7 +2,7 @@
 
 Auto-synced from [DeepWiki](https://deepwiki.com/AutomatosAI/automatos-ai)
 
-Last synced: 2026-04-09 21:40:50 UTC
+Last synced: 2026-05-08 23:55:45 UTC
 
 ## Table of Contents
 
@@ -13,6 +13,7 @@ Last synced: 2026-04-09 21:40:50 UTC
   - [Installation & Setup](getting-started/installation-setup.md)
   - [Configuration Guide](getting-started/configuration-guide.md)
   - [Quick Start Tutorial](getting-started/quick-start-tutorial.md)
+  - [Business Intake Wizard](getting-started/business-intake-wizard.md)
 - [Memory System](memory-system/_index.md)
   - [Five-Layer Memory Architecture](memory-system/five-layer-memory-architecture.md)
   - [UnifiedMemoryService](memory-system/unifiedmemoryservice.md)
@@ -51,6 +52,7 @@ Last synced: 2026-04-09 21:40:50 UTC
   - [RAG Retrieval System](knowledge-base-rag/rag-retrieval-system.md)
   - [Cloud Storage Integration](knowledge-base-rag/cloud-storage-integration.md)
   - [Knowledge Graph & Entity Extraction](knowledge-base-rag/knowledge-graph-entity-extraction.md)
+  - [CodeGraph — Code Repository Indexing](knowledge-base-rag/codegraph-code-repository-indexing.md)
   - [Documents API Reference](knowledge-base-rag/documents-api-reference.md)
 - [Tools & Integrations](tools-integrations/_index.md)
   - [Composio Integration](tools-integrations/composio-integration.md)
@@ -145,6 +147,7 @@ Last synced: 2026-04-09 21:40:50 UTC
   - [GitHub Integration](workspace-execution/github-integration.md)
   - [Security & Sandboxing](workspace-execution/security-sandboxing.md)
   - [Task Management & Board Integration](workspace-execution/task-management-board-integration.md)
+  - [Workspace Outputs Hub](workspace-execution/workspace-outputs-hub.md)
 - [Missions & Multi-Agent Coordination](missions-multi-agent-coordination/_index.md)
   - [Mission Data Model](missions-multi-agent-coordination/mission-data-model.md)
   - [Coordinator Service & Dispatcher](missions-multi-agent-coordination/coordinator-service-dispatcher.md)
@@ -152,3 +155,7 @@ Last synced: 2026-04-09 21:40:50 UTC
   - [Mission UI & Human Review](missions-multi-agent-coordination/mission-ui-human-review.md)
   - [Budget Governance & Telemetry](missions-multi-agent-coordination/budget-governance-telemetry.md)
 - [Glossary](glossary/_index.md)
+- [Unified Notification System](unified-notification-system/_index.md)
+  - [NotificationDispatcher](unified-notification-system/notificationdispatcher.md)
+  - [Notification API & Settings](unified-notification-system/notification-api-settings.md)
+  - [Notification Bell UI](unified-notification-system/notification-bell-ui.md)
