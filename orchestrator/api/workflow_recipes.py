@@ -1043,7 +1043,24 @@ async def cancel_execution(
         except Exception:
             logger.warning("Board task update on cancel failed (non-blocking)", exc_info=True)
 
-        logger.info(f"[cancel_execution] {execution_id} cancelled by user")
+        # Signal the running task to abort the in-flight LLM call immediately.
+        # If the task is on this replica, httpx propagates CancelledError and
+        # closes the TCP connection mid-request — no more cost burn. If the
+        # task is on a different replica, it'll catch the status flip on its
+        # next DB poll inside _execute_step.
+        try:
+            from api.recipe_executor import request_execution_cancel
+            killed_locally = request_execution_cancel(execution_id)
+            logger.info(
+                "[cancel_execution] %s cancelled (local_kill=%s)",
+                execution_id, killed_locally,
+            )
+        except Exception:
+            logger.warning(
+                "[cancel_execution] Failed to signal task — DB poll will pick it up next iteration",
+                exc_info=True,
+            )
+
         return {"status": "cancelled", "execution_id": execution_id}
 
     except HTTPException:
