@@ -230,6 +230,23 @@ async def _auto_create_playbook_report(
 # ---------------------------------------------------------------------------
 _workspace_semaphores: Dict[str, asyncio.Semaphore] = {}
 
+# Process-local registry of currently running execution tasks. Lets the cancel
+# endpoint signal the in-flight LLM call to abort immediately (httpx propagates
+# CancelledError, which closes the TCP connection mid-request — no more cost
+# burn). Cross-replica cancels are handled by the DB-poll fallback inside
+# _execute_step.
+_running_executions: Dict[str, asyncio.Task] = {}
+
+
+def request_execution_cancel(execution_id: str) -> bool:
+    """Signal a cancel to a locally-running execution. Returns True if the
+    task was found and cancelled on this replica, False otherwise."""
+    task = _running_executions.get(execution_id)
+    if task is None or task.done():
+        return False
+    task.cancel()
+    return True
+
 
 def _get_workspace_semaphore(workspace_id: str, max_concurrent: int = 3) -> asyncio.Semaphore:
     """Return (or create) an asyncio.Semaphore for the given workspace.
@@ -871,6 +888,11 @@ async def execute_recipe_direct(
             "[recipe_direct] QUEUED — waiting for workspace semaphore %s (execution=%s, recipe=%s)",
             workspace_id, recipe_execution_id, recipe_id,
         )
+
+    current_task = asyncio.current_task()
+    if current_task is not None:
+        _running_executions[recipe_execution_id] = current_task
+
     async with semaphore:
         logger.info(
             "[recipe_direct] Semaphore ACQUIRED for %s (execution=%s, recipe=%s, was_waiting=%s)",
@@ -880,11 +902,49 @@ async def execute_recipe_direct(
             await _execute_recipe_inner(
                 recipe_execution_id, recipe_id, workspace_id, input_data, db_url,
             )
+        except asyncio.CancelledError:
+            logger.info(
+                "[recipe_direct] CancelledError received — execution %s aborted mid-flight",
+                recipe_execution_id,
+            )
+            await _mark_execution_cancelled(recipe_execution_id, db_url)
+            # Do not re-raise — we've handled it cleanly. Task can complete.
         finally:
+            _running_executions.pop(recipe_execution_id, None)
             logger.info(
                 "[recipe_direct] Semaphore RELEASED for %s (execution=%s)",
                 workspace_id, recipe_execution_id,
             )
+
+
+async def _mark_execution_cancelled(execution_id: str, db_url: Optional[str]) -> None:
+    """Ensure the execution row reflects cancellation. The cancel endpoint
+    already writes status='cancelled', but if the kill came via task.cancel()
+    without going through the endpoint (or the endpoint hasn't committed yet),
+    we patch it here defensively."""
+    try:
+        if db_url:
+            _engine = create_engine(db_url)
+            _SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=_engine)
+            db = _SessionLocal()
+        else:
+            db = SessionLocal()
+        try:
+            execution = db.query(RecipeExecution).filter(
+                RecipeExecution.execution_id == execution_id
+            ).first()
+            if execution and execution.status not in ("completed", "failed", "cancelled"):
+                execution.status = "cancelled"
+                execution.error_message = execution.error_message or "Cancelled by user"
+                execution.completed_at = sa_func.now()
+                db.commit()
+        finally:
+            db.close()
+    except Exception:
+        logger.warning(
+            "[recipe_direct] Failed to mark execution %s cancelled (best-effort)",
+            execution_id, exc_info=True,
+        )
 
 
 async def _execute_recipe_inner(
