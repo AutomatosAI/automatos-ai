@@ -190,6 +190,12 @@ class InstrumentedSharedContext(SharedContextPort):
         )
         return results
 
+    async def context_exists(self, context_id: str) -> bool:
+        """Pass through to inner adapter's existence check (no metric)."""
+        if hasattr(self._inner, "context_exists"):
+            return await self._inner.context_exists(context_id)
+        return True  # Backends without exists check assume valid
+
     async def destroy_context(self, context_id: str) -> None:
         start = time.monotonic()
         await self._inner.destroy_context(context_id)

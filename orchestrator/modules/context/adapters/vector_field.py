@@ -114,6 +114,19 @@ class VectorFieldSharedContext(SharedContextPort):
         except Exception:
             logger.warning("[Field] Failed to delete collection %s", collection, exc_info=True)
 
+    async def context_exists(self, context_id: str) -> bool:
+        """Check whether the underlying Qdrant collection still exists.
+
+        Used by the coordinator to detect stale field_ids inherited from
+        a parent/template mission whose collection has already been
+        destroyed by _cleanup_terminal_fields.
+        """
+        try:
+            return await self._client.collection_exists(f"field_{context_id}")
+        except Exception:
+            logger.debug("[Field] collection_exists check failed for %s", context_id, exc_info=True)
+            return False
+
     # ── Inject ──────────────────────────────────────────────────
 
     async def inject(

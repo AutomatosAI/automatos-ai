@@ -908,7 +908,31 @@ class CoordinatorService:
         workspace_id = run.workspace_id
 
         # --- PRD-108: Ensure field exists (lazy create for manual-approve path) ---
-        if not (run.config or {}).get("field_id"):
+        # Validates the underlying Qdrant collection still exists — a stale
+        # field_id can survive in run.config if it was inherited from a parent
+        # mission whose collection was destroyed by _cleanup_terminal_fields.
+        existing_field_id = (run.config or {}).get("field_id")
+        needs_field = not existing_field_id
+
+        if existing_field_id and not needs_field:
+            field = self._get_field()
+            if field and hasattr(field, "context_exists"):
+                try:
+                    if not await field.context_exists(existing_field_id):
+                        logger.warning(
+                            "[PRD-108] Stale field_id %s on mission %s — collection missing, recreating",
+                            existing_field_id, run.id,
+                        )
+                        # Clear the stale id so _create_mission_field assigns a fresh one
+                        updated_config = {**(run.config or {})}
+                        updated_config.pop("field_id", None)
+                        run.config = updated_config
+                        db.flush()
+                        needs_field = True
+                except Exception as e:
+                    logger.debug("[PRD-108] field exists-check raised: %s", e)
+
+        if needs_field:
             field_id = await self._create_mission_field(db, run)
             # Seed field with uploaded document references
             if field_id:
