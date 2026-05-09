@@ -52,6 +52,7 @@ def register_blog_actions(registry: ActionRegistry) -> None:
         },
         permission_level="write",
         requires_confirmation=False,
+        promoted=True,
         tags=["blog", "write", "publish", "content"],
         examples=[
             "publish a blog post about our findings",
@@ -89,6 +90,7 @@ def register_blog_actions(registry: ActionRegistry) -> None:
             "required": [],
         },
         permission_level="read",
+        promoted=True,
         tags=["blog", "read", "list", "content"],
         examples=[
             "list my blog posts",
@@ -121,6 +123,7 @@ def register_blog_actions(registry: ActionRegistry) -> None:
             "required": [],
         },
         permission_level="read",
+        promoted=True,
         tags=["blog", "read", "content"],
         examples=[
             "read blog post",
@@ -163,6 +166,7 @@ def register_blog_actions(registry: ActionRegistry) -> None:
         },
         permission_level="write",
         requires_confirmation=False,
+        promoted=True,
         tags=["blog", "write", "create", "mission", "content"],
         examples=[
             "create a blog post about multi-agent AI",
@@ -204,6 +208,7 @@ def register_blog_actions(registry: ActionRegistry) -> None:
         },
         permission_level="write",
         requires_confirmation=False,
+        promoted=True,
         tags=["blog", "image", "cover", "design", "content"],
         examples=[
             "generate a cover image for the latest draft",
@@ -267,6 +272,7 @@ def register_blog_actions(registry: ActionRegistry) -> None:
         },
         permission_level="write",
         requires_confirmation=False,
+        promoted=True,
         tags=["blog", "write", "update", "edit", "content"],
         examples=[
             "update blog post",
