@@ -180,3 +180,39 @@ async def unpublish_post(
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
     return post.to_dict(include_content=False)
+
+
+# ---------------------------------------------------------------------------
+# Create Blog Mission — single entry point used by the "Create Blog" UI button.
+# Same code path as the platform_create_blog_post agent tool: builds the
+# standardized goal and dispatches to CoordinatorService.
+# ---------------------------------------------------------------------------
+
+class CreateBlogMissionRequest(BaseModel):
+    topic: str = Field(..., min_length=3, max_length=500)
+    category: Optional[str] = Field(None, max_length=100)
+
+
+@router.post("/missions")
+async def create_blog_mission(
+    body: CreateBlogMissionRequest,
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """
+    Fire a research-and-write blog mission for a topic. Same end-to-end
+    pipeline whether triggered from the UI button, an agent, or a scheduled
+    playbook — they all converge on this code path.
+    """
+    from modules.tools.discovery.handlers_blog import create_blog_post_from_topic
+
+    user_id = ctx.user.clerk_user_id if ctx.user else None
+    params = {
+        "topic": body.topic.strip(),
+        "category": (body.category or "AI & Automation").strip(),
+        "_user_id": user_id,
+    }
+    result = await create_blog_post_from_topic(db, ctx.workspace_id, params)
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "Mission failed to start"))
+    return result

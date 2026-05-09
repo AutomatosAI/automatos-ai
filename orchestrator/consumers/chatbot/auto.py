@@ -493,6 +493,16 @@ _PLATFORM_KEYWORDS = {
         "improve draft", "edit article", "update post",
         "change blog post", "set cover image",
     ],
+    "platform_create_blog_post": [
+        "create blog post about", "write a blog about", "new blog post",
+        "start blog mission", "blog post topic", "create blog on",
+        "research and write blog", "produce blog post",
+    ],
+    "platform_generate_cover_image": [
+        "generate cover image", "create cover art", "blog cover image",
+        "make a cover for", "design cover image", "add cover to post",
+        "generate cover for blog",
+    ],
     # PRD-82A: Missions
     "platform_create_mission": [
         "launch a mission", "start a mission", "create a mission",

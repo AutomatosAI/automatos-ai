@@ -141,6 +141,8 @@ from modules.tools.discovery.handlers_blog import (
     list_blog_posts,
     get_blog_post,
     update_blog_post,
+    create_blog_post_from_topic,
+    generate_cover_image,
 )
 from modules.tools.discovery.handlers_missions import (
     create_mission,
@@ -355,6 +357,8 @@ class PlatformActionExecutor:
             "platform_list_blog_posts": list_blog_posts,
             "platform_get_blog_post": get_blog_post,
             "platform_update_blog_post": update_blog_post,
+            "platform_create_blog_post": create_blog_post_from_topic,
+            "platform_generate_cover_image": generate_cover_image,
             # PRD-82A: Missions
             "platform_create_mission": create_mission,
             "platform_list_missions": list_missions,

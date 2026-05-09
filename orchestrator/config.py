@@ -182,6 +182,24 @@ class Config:
             return os.getenv("LLM_MODEL", DEFAULT_LLM_MODEL)
     
     @property
+    def BLOG_COVER_MODEL(self) -> str:
+        """
+        Image-gen model used by platform_generate_cover_image to produce blog
+        covers. Resolves from system_settings (category=content_creation,
+        key=blog_cover_model) → env BLOG_COVER_MODEL → DEFAULT_IMAGE_GEN_MODEL.
+        Operators change this per-deployment without code changes.
+        """
+        from core.llm.defaults import DEFAULT_IMAGE_GEN_MODEL
+        try:
+            from core.llm.manager import get_system_setting
+            return get_system_setting(
+                "content_creation", "blog_cover_model",
+                os.getenv("BLOG_COVER_MODEL", DEFAULT_IMAGE_GEN_MODEL),
+            )
+        except Exception:
+            return os.getenv("BLOG_COVER_MODEL", DEFAULT_IMAGE_GEN_MODEL)
+
+    @property
     def PLANNER_MODEL(self) -> str:
         """Planner model — resolves to System LLM tier (PRD-136)."""
         try:
