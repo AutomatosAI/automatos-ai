@@ -16,13 +16,10 @@ import {
   CheckCircle,
   Archive,
   CalendarClock,
-  Sparkles,
 } from 'lucide-react'
 import { DeliverableIcon } from '@/components/icons/deliverable-icon'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Select,
@@ -44,19 +41,10 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
-import {
   useBlogPosts,
   usePublishPost,
   useUnpublishPost,
   useDeletePost,
-  useCreateBlogMission,
 } from '@/hooks/use-blogs-api'
 import type { BlogPost, BlogFilters } from '@/hooks/use-blogs-api'
 import { BlogEditor } from './blog-editor'
@@ -269,26 +257,6 @@ export function DeliverablesBlog() {
   const publishMutation = usePublishPost()
   const unpublishMutation = useUnpublishPost()
   const deleteMutation = useDeletePost()
-  const createMissionMutation = useCreateBlogMission()
-
-  const [missionModalOpen, setMissionModalOpen] = useState(false)
-  const [missionTopic, setMissionTopic] = useState('')
-  const [missionCategory, setMissionCategory] = useState('AI & Automation')
-
-  const handleCreateBlogMission = useCallback(() => {
-    const topic = missionTopic.trim()
-    if (!topic) return
-    createMissionMutation.mutate(
-      { topic, category: missionCategory.trim() || undefined },
-      {
-        onSuccess: () => {
-          setMissionModalOpen(false)
-          setMissionTopic('')
-          refetch()
-        },
-      },
-    )
-  }, [missionTopic, missionCategory, createMissionMutation, refetch])
 
   const handleFilterChange = useCallback(
     (key: keyof BlogFilters, value: string | undefined) => {
@@ -337,19 +305,9 @@ export function DeliverablesBlog() {
         titleAccent="Posts"
         subtitle="Manage published and draft blog content"
         actions={
-          <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setMissionModalOpen(true)}
-              title="Let agents research and write a blog post for you"
-            >
-              <Sparkles className="w-4 h-4 mr-1" /> Create Blog
-            </Button>
-            <Button size="sm" onClick={handleCreatePost}>
-              <Plus className="w-4 h-4 mr-1" /> Create Post
-            </Button>
-          </div>
+          <Button size="sm" onClick={handleCreatePost}>
+            <Plus className="w-4 h-4 mr-1" /> Create Post
+          </Button>
         }
       />
 
@@ -399,76 +357,13 @@ export function DeliverablesBlog() {
         </TabsContent>
       </FilterTabs>
 
-      {/* Blog editor */}
+      {/* Blog editor — single entry point, has Write Manually / Have Agents Write It modes */}
       {isEditorOpen && (
         <BlogEditor
           postId={editingPostId}
           onClose={handleEditorClose}
         />
       )}
-
-      {/* Create Blog mission modal */}
-      <Dialog open={missionModalOpen} onOpenChange={setMissionModalOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-primary" /> Create Blog
-            </DialogTitle>
-            <DialogDescription>
-              Pick a topic. Agents will research, write, edit, generate a cover image,
-              and queue the draft for your review. Takes 5-10 minutes.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4 py-2">
-            <div className="space-y-2">
-              <Label htmlFor="blog-topic">Topic</Label>
-              <Input
-                id="blog-topic"
-                placeholder="e.g. Multi-agent orchestration for Shopify stores"
-                value={missionTopic}
-                onChange={(e) => setMissionTopic(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && missionTopic.trim()) {
-                    e.preventDefault()
-                    handleCreateBlogMission()
-                  }
-                }}
-                autoFocus
-              />
-              <p className="text-xs text-muted-foreground">
-                Be specific. The more concrete the topic, the better the post.
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="blog-category">Category</Label>
-              <Input
-                id="blog-category"
-                placeholder="AI & Automation"
-                value={missionCategory}
-                onChange={(e) => setMissionCategory(e.target.value)}
-              />
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button
-              variant="ghost"
-              onClick={() => setMissionModalOpen(false)}
-              disabled={createMissionMutation.isPending}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={handleCreateBlogMission}
-              disabled={!missionTopic.trim() || createMissionMutation.isPending}
-            >
-              {createMissionMutation.isPending ? 'Starting…' : 'Start Mission'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   )
 }
