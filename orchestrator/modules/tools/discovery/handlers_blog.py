@@ -382,7 +382,7 @@ async def generate_cover_image(
         logger.error("Image store save failed: %s", e, exc_info=True)
         return {"success": False, "error": f"Image upload failed: {str(e)[:200]}"}
 
-    cover_url = f"/api/generated-images/{image_id}"
+    cover_url = f"{config.BACKEND_URL.rstrip('/')}/api/generated-images/{image_id}"
 
     try:
         updated = await svc.update_post(post.id, cover_image_url=cover_url)
