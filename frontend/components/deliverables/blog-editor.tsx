@@ -1,9 +1,9 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import DOMPurify from 'dompurify'
 import ReactMarkdown from 'react-markdown'
-import { Save } from 'lucide-react'
+import { Save, Sparkles, Pencil, Upload, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -33,8 +33,18 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { toast } from 'react-hot-toast'
-import { useBlogPost, useCreatePost, useUpdatePost, usePublishPost, useUnpublishPost } from '@/hooks/use-blogs-api'
+import {
+  useBlogPost,
+  useCreatePost,
+  useUpdatePost,
+  usePublishPost,
+  useUnpublishPost,
+  useCreateBlogMission,
+  useUploadCoverImage,
+} from '@/hooks/use-blogs-api'
 import { useSystemRole } from '@/contexts/role-context'
+
+type CreateMode = 'manual' | 'mission'
 
 interface BlogEditorProps {
   postId: string | null
@@ -62,6 +72,14 @@ export function BlogEditor({ postId, onClose }: BlogEditorProps) {
   const updateMutation = useUpdatePost()
   const publishMutation = usePublishPost()
   const unpublishMutation = useUnpublishPost()
+  const missionMutation = useCreateBlogMission()
+  const uploadMutation = useUploadCoverImage()
+
+  // Mode toggle — only relevant in New Post (no postId). Edit always shows manual.
+  const [mode, setMode] = useState<CreateMode>('manual')
+  const [missionTopic, setMissionTopic] = useState('')
+  const [missionCategory, setMissionCategory] = useState('AI & Automation')
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   // Track whether post was already published when opened (for first-publish confirmation)
   const wasPublished = existingPost?.status === 'published'
@@ -154,7 +172,35 @@ export function BlogEditor({ postId, onClose }: BlogEditorProps) {
     await handlePublishAction()
   }
 
+  const handleStartMission = async () => {
+    const topic = missionTopic.trim()
+    if (!topic) {
+      toast.error('Topic is required')
+      return
+    }
+    await missionMutation.mutateAsync({
+      topic,
+      category: missionCategory.trim() || undefined,
+    })
+    onClose()
+  }
+
+  const handleCoverFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = '' // allow re-selecting same file
+    if (!file) return
+    try {
+      const result = await uploadMutation.mutateAsync(file)
+      setCoverImageUrl(result.cover_image_url)
+      toast.success('Cover image uploaded')
+    } catch {
+      // error toast surfaced by hook
+    }
+  }
+
   const isSaving = createMutation.isLoading || updateMutation.isLoading || publishMutation.isLoading || unpublishMutation.isLoading
+  const isMissionStarting = missionMutation.isLoading
+  const isUploading = uploadMutation.isLoading
 
   return (
     <Sheet open onOpenChange={() => onClose()}>
@@ -163,6 +209,96 @@ export function BlogEditor({ postId, onClose }: BlogEditorProps) {
           <SheetTitle>{isEditMode ? 'Edit Post' : 'New Post'}</SheetTitle>
         </SheetHeader>
 
+        {/* Mode toggle — only when creating a new post */}
+        {!isEditMode && (
+          <div className="mt-4 flex gap-2 p-1 bg-muted/40 rounded-lg w-fit">
+            <button
+              type="button"
+              onClick={() => setMode('manual')}
+              className={`flex items-center gap-2 px-4 py-1.5 rounded-md text-sm font-medium transition ${
+                mode === 'manual'
+                  ? 'bg-background shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <Pencil className="w-4 h-4" /> Write Manually
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('mission')}
+              className={`flex items-center gap-2 px-4 py-1.5 rounded-md text-sm font-medium transition ${
+                mode === 'mission'
+                  ? 'bg-background shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <Sparkles className="w-4 h-4" /> Have Agents Write It
+            </button>
+          </div>
+        )}
+
+        {/* Mission mode — simple topic + category form */}
+        {!isEditMode && mode === 'mission' && (
+          <div className="mt-6 space-y-4 max-w-xl">
+            <div className="text-sm text-muted-foreground">
+              Pick a topic. Agents will research, write, edit, generate a cover image,
+              and queue the draft for your review. Takes 5-10 minutes.
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="mission-topic">Topic</Label>
+              <Input
+                id="mission-topic"
+                placeholder="e.g. Multi-agent orchestration for Shopify stores"
+                value={missionTopic}
+                onChange={(e) => setMissionTopic(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && missionTopic.trim()) {
+                    e.preventDefault()
+                    handleStartMission()
+                  }
+                }}
+                autoFocus
+              />
+              <p className="text-xs text-muted-foreground">
+                Be specific. The more concrete the topic, the better the post.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="mission-category">Category</Label>
+              <Input
+                id="mission-category"
+                placeholder="AI & Automation"
+                value={missionCategory}
+                onChange={(e) => setMissionCategory(e.target.value)}
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <Button variant="ghost" onClick={onClose} disabled={isMissionStarting}>
+                Cancel
+              </Button>
+              <Button
+                onClick={handleStartMission}
+                disabled={!missionTopic.trim() || isMissionStarting}
+              >
+                {isMissionStarting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-1 animate-spin" /> Starting…
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4 mr-1" /> Start Mission
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Manual mode — full editor (always shown for Edit, conditional for New) */}
+        {(isEditMode || mode === 'manual') && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
           {/* Left: Form */}
           <div className="space-y-4">
@@ -200,13 +336,42 @@ export function BlogEditor({ postId, onClose }: BlogEditorProps) {
             </div>
 
             <div>
-              <label className="text-xs font-medium text-muted-foreground">Cover Image URL</label>
-              <Input
-                value={coverImageUrl}
-                onChange={(e) => setCoverImageUrl(e.target.value)}
-                placeholder="https://..."
-                className="mt-1"
-              />
+              <label className="text-xs font-medium text-muted-foreground">Cover Image</label>
+              <div className="mt-1 flex gap-2">
+                <Input
+                  value={coverImageUrl}
+                  onChange={(e) => setCoverImageUrl(e.target.value)}
+                  placeholder="https://... or upload your own →"
+                  className="flex-1"
+                />
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  className="hidden"
+                  onChange={handleCoverFileSelected}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isUploading}
+                  title="Upload your own cover image (max 8 MB)"
+                >
+                  {isUploading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <>
+                      <Upload className="w-4 h-4 mr-1" /> Upload
+                    </>
+                  )}
+                </Button>
+              </div>
+              {coverImageUrl && coverImageUrl.startsWith('/api/generated-images/') && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  Uploaded image saved. Saved with the post on Save.
+                </p>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-3">
@@ -329,6 +494,7 @@ export function BlogEditor({ postId, onClose }: BlogEditorProps) {
             </div>
           </div>
         </div>
+        )}
 
         {/* First-publish confirmation modal */}
         <AlertDialog open={showPublishConfirm} onOpenChange={setShowPublishConfirm}>

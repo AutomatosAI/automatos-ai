@@ -201,3 +201,27 @@ export function useCreateBlogMission() {
     },
   })
 }
+
+export interface CoverImageUploadResult {
+  image_id: string
+  cover_image_url: string
+  size_bytes: number
+  content_type: string
+}
+
+export function useUploadCoverImage() {
+  return useMutation<CoverImageUploadResult, Error, File>({
+    mutationFn: async (file: File) => {
+      const fd = new FormData()
+      fd.append('file', file)
+      // apiClient.request auto-handles FormData and adds workspace + auth headers
+      return apiClient.request<CoverImageUploadResult>('/api/blog/cover-image/upload', {
+        method: 'POST',
+        body: fd,
+      })
+    },
+    onError: (error) => {
+      toast.error(error.message || 'Failed to upload image')
+    },
+  })
+}
