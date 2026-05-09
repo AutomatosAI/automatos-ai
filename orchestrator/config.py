@@ -472,19 +472,9 @@ class Config:
     # COORDINATOR_TASK_MAX_TOKENS is now a @property above (reads from system_settings)
     # Maximum seconds a single task execution can take before being timed out
     COORDINATOR_TASK_EXECUTION_TIMEOUT: int = int(os.getenv("COORDINATOR_TASK_EXECUTION_TIMEOUT", "240"))
-    # Synthesis model override — synthesis tasks consolidate prior step outputs and
-    # don't need premium reasoning, so we bias toward fast cheap models. Falls back
-    # to the assigned agent's model if neither override is available in the workspace.
-    # Set COORDINATOR_SYNTHESIS_MODEL_OVERRIDE_ENABLED=false to disable entirely.
-    COORDINATOR_SYNTHESIS_MODEL_OVERRIDE_ENABLED: bool = os.getenv(
-        "COORDINATOR_SYNTHESIS_MODEL_OVERRIDE_ENABLED", "true"
-    ).lower() in ("true", "1", "yes")
-    COORDINATOR_SYNTHESIS_MODEL_PRIMARY: str = os.getenv(
-        "COORDINATOR_SYNTHESIS_MODEL_PRIMARY", "google/gemini-2.5-flash"
-    )
-    COORDINATOR_SYNTHESIS_MODEL_FALLBACK: str = os.getenv(
-        "COORDINATOR_SYNTHESIS_MODEL_FALLBACK", "anthropic/claude-haiku-4.5"
-    )
+    # Note: synthesis-task model selection is now driven by power_mode +
+    # the agent's own configured model — no synthesis-specific override.
+    # System LLM (gemini-2.5-flash) is reserved for codegraph / Mem0 / planner.
     # Cross-task consistency verification — feature flag, lives in `general`
     # (post PRD-136 collapse — no longer an LLM-tier setting).
     @property
