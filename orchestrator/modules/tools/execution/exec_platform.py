@@ -33,6 +33,7 @@ async def execute_platform_action(
     workspace_id: Optional[UUID] = None,
     trace_id: Optional[str] = None,
     caller_context: Optional[Dict[str, Any]] = None,
+    agent_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Execute a platform action via PlatformActionExecutor.
 
@@ -42,6 +43,10 @@ async def execute_platform_action(
             If None, falls back to workspace-scoped check via
             _workspace_has_admin_owner() — admin workspace grants access,
             non-admin workspace denies.
+        agent_id: ID of the calling agent. Injected as ``_agent_id`` (and
+            ``_agent_name`` resolved from DB) into params so handlers like
+            ``platform_submit_report`` can attribute the call. Without this,
+            recipe-step calls failed with "Could not determine calling agent".
     """
     if not workspace_id:
         return {
@@ -49,6 +54,24 @@ async def execute_platform_action(
             "error": "workspace_id required for platform actions",
             "tool": tool_name,
         }
+
+    # Inject agent context into params so handlers (submit_report, blog,
+    # auto_reporting, board_tasks) can attribute the call. Don't overwrite
+    # if the LLM already supplied them.
+    if agent_id and isinstance(parameters, dict):
+        if "_agent_id" not in parameters:
+            parameters = {**parameters, "_agent_id": agent_id}
+        if "_agent_name" not in parameters:
+            try:
+                from core.models import Agent
+                agent = executor.db.query(Agent).filter(
+                    Agent.id == agent_id,
+                    Agent.workspace_id == workspace_id,
+                ).first()
+                if agent:
+                    parameters = {**parameters, "_agent_name": agent.name}
+            except Exception as e:
+                logger.debug("[exec_platform] _agent_name lookup failed: %s", e)
 
     try:
         from modules.tools.discovery.platform_executor import PlatformActionExecutor
