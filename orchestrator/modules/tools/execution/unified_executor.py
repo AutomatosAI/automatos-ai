@@ -407,7 +407,7 @@ class UnifiedToolExecutor:
                     return result
                 result = await self._execute_platform_action(
                     action_name, action_params, workspace_id=workspace_id, trace_id=trace,
-                    caller_context=caller_context,
+                    caller_context=caller_context, agent_id=agent_id,
                 )
                 return result
 
@@ -416,7 +416,7 @@ class UnifiedToolExecutor:
                 logger.info(f"[tool-trace {trace}] Routing to PlatformActionExecutor: {tool_name}")
                 result = await self._execute_platform_action(
                     tool_name, parameters, workspace_id=workspace_id, trace_id=trace,
-                    caller_context=caller_context,
+                    caller_context=caller_context, agent_id=agent_id,
                 )
                 return result
 
@@ -531,8 +531,12 @@ class UnifiedToolExecutor:
     async def _execute_platform_tool(self, tool_name, parameters, agent_id, **kw):
         return await exec_platform.execute_platform_tool(self, tool_name, parameters, agent_id)
 
-    async def _execute_platform_action(self, tool_name, parameters, workspace_id=None, trace_id=None, caller_context=None):
-        return await exec_platform.execute_platform_action(self, tool_name, parameters, workspace_id=workspace_id, trace_id=trace_id, caller_context=caller_context)
+    async def _execute_platform_action(self, tool_name, parameters, workspace_id=None, trace_id=None, caller_context=None, agent_id=None):
+        return await exec_platform.execute_platform_action(
+            self, tool_name, parameters,
+            workspace_id=workspace_id, trace_id=trace_id, caller_context=caller_context,
+            agent_id=agent_id,
+        )
 
     async def _execute_database_tool(self, tool_name, parameters, agent_id, **kw):
         return await exec_research.execute_database_tool(self, tool_name, parameters, agent_id)
