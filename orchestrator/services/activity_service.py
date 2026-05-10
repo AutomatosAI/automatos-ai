@@ -273,10 +273,13 @@ class ActivityService:
                 # Map trigger
                 trigger = self._map_recipe_trigger(ex.triggered_by)
 
-                # Build deep-link to ExecutionKitchen
+                # Build deep-link to ExecutionKitchen.
+                # /activity/execution renders ExecutionKitchen directly. The
+                # old /activity?openExecution=... pattern only changed the
+                # feed tab — it never opened the live run screen.
                 exec_id = getattr(ex, "execution_id", None) or str(ex.id)
                 recipe_template_id = recipe.template_id if recipe else str(ex.recipe_id)
-                source_url = f"/activity?openExecution={exec_id}&recipeId={recipe_template_id}"
+                source_url = f"/activity/execution?id={exec_id}&recipeId={recipe_template_id}"
 
                 # Aggregate tokens and duration from step_results
                 total_tokens = 0
