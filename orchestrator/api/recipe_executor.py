@@ -472,6 +472,25 @@ async def _execute_step(
 
         response = await llm.generate_response(messages=messages, tools=tools)
 
+        # Detect empty-choices responses (OpenRouter intermittency): the call
+        # returns successfully but with no content AND no tool_calls. Without
+        # retry, the tool loop below would treat empty as "LLM done" and the
+        # step would finish without ever emitting its final tool call (e.g.
+        # platform_submit_report). Retry up to the configured budget before
+        # giving up.
+        if response and not response.tool_calls and not (response.content or "").strip():
+            from config import config as _app_config
+            empty_retry_budget = _app_config.RECIPE_EMPTY_COMPLETION_RETRY_BUDGET
+            for retry_idx in range(empty_retry_budget):
+                logger.warning(
+                    "[recipe_direct] Empty completion at step %d iter %d (retry %d/%d) "
+                    "— content+tool_calls both empty, retrying",
+                    step_order, iteration, retry_idx + 1, empty_retry_budget,
+                )
+                response = await llm.generate_response(messages=messages, tools=tools)
+                if response and (response.tool_calls or (response.content or "").strip()):
+                    break  # got a real response
+
         if not response or not response.tool_calls:
             break  # LLM done, has final text
 
