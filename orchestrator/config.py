@@ -281,6 +281,14 @@ class Config:
         return self._required_int_setting("recipe", "default_max_iterations")
 
     @property
+    def RECIPE_EMPTY_COMPLETION_RETRY_BUDGET(self) -> int:
+        """Retries for empty LLM completions (no content + no tool_calls).
+        OpenRouter intermittently returns 'empty-choices' responses with
+        zero tokens — without retry, the tool loop treats empty as 'done'
+        and the step finishes without emitting its final tool call."""
+        return self._required_int_setting("recipe", "empty_completion_retry_budget")
+
+    @property
     def AGENT_HEARTBEAT_MAX_TOOL_ITERATIONS(self) -> int:
         """Max tool-call turns per heartbeat tick."""
         return self._required_int_setting("agent_heartbeat", "max_tool_iterations")

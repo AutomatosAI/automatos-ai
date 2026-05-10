@@ -624,6 +624,21 @@ def seed_system_settings(db: Session):
             "is_required": True,
             "validation_rules": {"min": 5, "max": 100},
         },
+        {
+            "category": SettingCategory.RECIPE.value,
+            "key": "empty_completion_retry_budget",
+            "default_value": "2",
+            "value_type": "number",
+            "description": (
+                "How many times to retry an LLM call that returns an empty "
+                "completion (no content AND no tool_calls — typically an "
+                "OpenRouter empty-choices event). Without this, the recipe "
+                "tool loop treats empty as 'LLM done' and the step finishes "
+                "without ever calling its final tool (e.g. platform_submit_report)."
+            ),
+            "is_required": True,
+            "validation_rules": {"min": 0, "max": 5},
+        },
     ])
 
     # =========================================================================
