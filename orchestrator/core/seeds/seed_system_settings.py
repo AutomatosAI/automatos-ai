@@ -627,17 +627,34 @@ def seed_system_settings(db: Session):
         {
             "category": SettingCategory.RECIPE.value,
             "key": "empty_completion_retry_budget",
-            "default_value": "2",
+            "default_value": "4",
             "value_type": "number",
             "description": (
                 "How many times to retry an LLM call that returns an empty "
                 "completion (no content AND no tool_calls — typically an "
                 "OpenRouter empty-choices event). Without this, the recipe "
                 "tool loop treats empty as 'LLM done' and the step finishes "
-                "without ever calling its final tool (e.g. platform_submit_report)."
+                "without ever calling its final tool (e.g. platform_submit_report). "
+                "Retries use exponential backoff (0.5s, 1s, 2s, 4s)."
             ),
             "is_required": True,
-            "validation_rules": {"min": 0, "max": 5},
+            "validation_rules": {"min": 0, "max": 8},
+        },
+        {
+            "category": SettingCategory.RECIPE.value,
+            "key": "empty_completion_fallback_model",
+            "default_value": "anthropic/claude-sonnet-4.6",
+            "value_type": "string",
+            "description": (
+                "If all empty_completion_retry_budget retries against the "
+                "agent's primary model still return empty, do one final attempt "
+                "with this fallback model. Lets a step survive sustained "
+                "provider degradation on a specific model (e.g. Gemini 2.5 Pro "
+                "empty-choices windows) so the step still emits its final "
+                "tool call. Set to empty string to disable model fallback."
+            ),
+            "is_required": False,
+            "validation_rules": {},
         },
     ])
 

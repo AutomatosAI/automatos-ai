@@ -271,6 +271,14 @@ class Config:
         return self._required_int_setting("recipe", "empty_completion_retry_budget")
 
     @property
+    def RECIPE_EMPTY_COMPLETION_FALLBACK_MODEL(self) -> str:
+        """Fallback model used when same-model retries still return empty.
+        Empty string disables fallback. Stored as system_settings.recipe.empty_completion_fallback_model."""
+        from core.llm.manager import get_system_setting
+        val = get_system_setting("recipe", "empty_completion_fallback_model", "")
+        return str(val).strip() if val is not None else ""
+
+    @property
     def AGENT_HEARTBEAT_MAX_TOOL_ITERATIONS(self) -> int:
         """Max tool-call turns per heartbeat tick."""
         return self._required_int_setting("agent_heartbeat", "max_tool_iterations")

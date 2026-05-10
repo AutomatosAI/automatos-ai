@@ -476,20 +476,50 @@ async def _execute_step(
         # returns successfully but with no content AND no tool_calls. Without
         # retry, the tool loop below would treat empty as "LLM done" and the
         # step would finish without ever emitting its final tool call (e.g.
-        # platform_submit_report). Retry up to the configured budget before
-        # giving up.
+        # platform_submit_report). Retry with backoff, then swap to a fallback
+        # model if the agent's primary model is in a sustained empty-choices
+        # window (e.g. Gemini 2.5 Pro degradation).
         if response and not response.tool_calls and not (response.content or "").strip():
             from config import config as _app_config
             empty_retry_budget = _app_config.RECIPE_EMPTY_COMPLETION_RETRY_BUDGET
             for retry_idx in range(empty_retry_budget):
+                backoff_s = min(0.5 * (2 ** retry_idx), 4.0)
                 logger.warning(
-                    "[recipe_direct] Empty completion at step %d iter %d (retry %d/%d) "
+                    "[recipe_direct] Empty completion at step %d iter %d (retry %d/%d, backoff=%.1fs) "
                     "— content+tool_calls both empty, retrying",
-                    step_order, iteration, retry_idx + 1, empty_retry_budget,
+                    step_order, iteration, retry_idx + 1, empty_retry_budget, backoff_s,
                 )
+                await asyncio.sleep(backoff_s)
                 response = await llm.generate_response(messages=messages, tools=tools)
                 if response and (response.tool_calls or (response.content or "").strip()):
                     break  # got a real response
+
+            # If still empty after same-model retries, swap to fallback model
+            # for one final attempt. This survives sustained per-model provider
+            # degradation that affects the primary model only.
+            if response and not response.tool_calls and not (response.content or "").strip():
+                fallback_model = _app_config.RECIPE_EMPTY_COMPLETION_FALLBACK_MODEL
+                if fallback_model:
+                    logger.warning(
+                        "[recipe_direct] Empty completion persists at step %d iter %d after %d retries "
+                        "— swapping to fallback model %s",
+                        step_order, iteration, empty_retry_budget, fallback_model,
+                    )
+                    try:
+                        from core.llm.manager import create_llm_manager
+                        fallback_llm = create_llm_manager(
+                            service_name="orchestrator",
+                            model=fallback_model,
+                            request_type="recipe_fallback",
+                        )
+                        if recipe_execution_id and hasattr(fallback_llm, "_tracking_ctx"):
+                            fallback_llm._tracking_ctx["execution_id"] = recipe_execution_id
+                        response = await fallback_llm.generate_response(messages=messages, tools=tools)
+                    except Exception as fallback_exc:
+                        logger.error(
+                            "[recipe_direct] Fallback model %s also failed at step %d iter %d: %s",
+                            fallback_model, step_order, iteration, fallback_exc,
+                        )
 
         if not response or not response.tool_calls:
             break  # LLM done, has final text
