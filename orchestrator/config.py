@@ -570,8 +570,11 @@ class Config:
     RECIPE_LOG_S3_BUCKET: str = os.getenv("RECIPE_LOG_S3_BUCKET", "automatos-ai")
     MEM0_API_URL: str = os.getenv("MEM0_API_URL", "http://automatos-mem0-server.railway.internal")
     MEM0_API_KEY: str = os.getenv("MEM0_API_KEY")
-    # PRD-137 Fix #6: timeout was 15s — too long for chat critical path.
+    # Read path (search/get_all) blocks TTFT — keep short.
     MEM0_TIMEOUT_SECONDS: float = float(os.getenv("MEM0_TIMEOUT_SECONDS", "3.0"))
+    # Write path runs post-LLM; mem0 does sync inference+embedding server-side
+    # (observed 2-7s). 3s causes constant timeouts → CB trips → 5min blackouts.
+    MEM0_WRITE_TIMEOUT_SECONDS: float = float(os.getenv("MEM0_WRITE_TIMEOUT_SECONDS", "15.0"))
     # Open circuit after this many consecutive failures.
     MEM0_CIRCUIT_THRESHOLD: int = int(os.getenv("MEM0_CIRCUIT_THRESHOLD", "3"))
     # Stay open for this many seconds before allowing a probe.

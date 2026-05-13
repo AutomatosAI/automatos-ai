@@ -502,7 +502,11 @@ class AgentFactory:
         provider = provider_map[effective_provider]
         resolved = await self._resolve_api_key(effective_provider, agent_name, workspace_id=workspace_id)
         if not resolved:
-            raise ValueError(f"API key not found for provider: {effective_provider}")
+            raise ValueError(
+                f"No API key available for {effective_provider}. "
+                f"Add one in Settings → API Keys, or set platform fallback "
+                f"({effective_provider.upper()}_API_KEY env var on the API service)."
+            )
 
         llm_config = LLMConfig(
             provider=provider,

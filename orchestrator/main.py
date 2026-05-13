@@ -806,6 +806,18 @@ app = FastAPI(
     }
 )
 
+# Pilot fallback health log — platform OpenRouter key kicks in when a user has no BYOK.
+# If this is missing, new users without a key cannot run agents/chat.
+_platform_or_key = bool((config.OPENROUTER_API_KEY or "").strip())
+if _platform_or_key:
+    logger.info("Platform OpenRouter fallback ACTIVE (OPENROUTER_API_KEY configured)")
+else:
+    logger.error(
+        "Platform OpenRouter fallback MISSING — OPENROUTER_API_KEY env var not set. "
+        "New users without their own BYOK key will fail at first LLM call. "
+        "Set OPENROUTER_API_KEY on the API service to unblock pilot users."
+    )
+
 # CORS middleware - use centralized config
 # Parse and clean CORS origins (handle comma-separated list with whitespace)
 cors_origins = [origin.strip() for origin in config.CORS_ALLOW_ORIGINS.split(",") if origin.strip()]

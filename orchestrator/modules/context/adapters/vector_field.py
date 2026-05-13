@@ -27,6 +27,7 @@ from qdrant_client.models import (
     Distance,
     FieldCondition,
     Filter,
+    HnswConfigDiff,
     MatchValue,
     PayloadSchemaType,
     PointStruct,
@@ -78,7 +79,10 @@ class VectorFieldSharedContext(SharedContextPort):
             vectors_config=VectorParams(
                 size=self._dimension,
                 distance=Distance.COSINE,
+                on_disk=True,
             ),
+            hnsw_config=HnswConfigDiff(on_disk=True),
+            on_disk_payload=True,
         )
 
         # Payload indexes for filtered queries — wait=True to avoid race
