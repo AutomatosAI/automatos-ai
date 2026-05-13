@@ -41,6 +41,40 @@ class WidgetChatRequest(BaseModel):
     conversation_id: Optional[str] = None
     agent_id: Optional[str] = None  # UUID (public_id) or legacy integer id as string
     model_id: Optional[str] = None
+    # PRD-007: page context + trigger reason for proactive engagement.
+    # Both backwards-compatible (default None). When trigger_reason is set
+    # (e.g. "proactive_opener"), the chat service uses an opener prompt
+    # variant instead of treating ``message`` as a user utterance.
+    page_context: Optional[dict] = None
+    trigger_reason: Optional[str] = None
+
+
+# PRD-007: trigger reasons that flip the agent into opener-generation mode.
+# Anything else is treated as a normal user message.
+PROACTIVE_TRIGGER_REASONS: frozenset[str] = frozenset({"proactive_opener"})
+
+
+def _build_proactive_opener_message(page_context: dict) -> str:
+    """Synthesize the user-side message for a proactive opener request.
+
+    The widget never sends real user text for proactive openers — instead
+    we synthesize a directive describing the page context. The agent's
+    ``shopify-support`` skill recognises the ``[PROACTIVE_OPENER]`` prefix
+    and generates a one-sentence contextual greeting.
+    """
+    ctx_summary_parts: list[str] = []
+    if page_context.get("pageType"):
+        ctx_summary_parts.append(f"page_type={page_context['pageType']}")
+    if page_context.get("productTitle"):
+        ctx_summary_parts.append(f"product=\"{page_context['productTitle']}\"")
+    elif page_context.get("productHandle"):
+        ctx_summary_parts.append(f"product_handle={page_context['productHandle']}")
+    if page_context.get("productType"):
+        ctx_summary_parts.append(f"product_type={page_context['productType']}")
+    if page_context.get("collectionTitle"):
+        ctx_summary_parts.append(f"collection=\"{page_context['collectionTitle']}\"")
+    summary = ", ".join(ctx_summary_parts) if ctx_summary_parts else "no context"
+    return f"[PROACTIVE_OPENER] Generate a contextual one-sentence opener. Context: {summary}"
 
 
 class WidgetMessageOut(BaseModel):
@@ -109,6 +143,15 @@ async def widget_chat(
 
     workspace_id = str(auth.workspace_id)
     user_id = _get_widget_user_id(db)
+
+    # PRD-007: rewrite ``message`` for proactive opener requests so the agent
+    # sees a directive, not an empty / placeholder user utterance from the SDK.
+    is_proactive = (
+        body.trigger_reason in PROACTIVE_TRIGGER_REASONS
+        and body.page_context is not None
+    )
+    if is_proactive:
+        body.message = _build_proactive_opener_message(body.page_context or {})
 
     chat_service = ChatService(db)
     streaming_service = StreamingChatService(db, workspace_id=workspace_id, widget_mode=True)

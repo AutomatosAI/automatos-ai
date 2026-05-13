@@ -22,8 +22,11 @@ from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
 from core.database.database import get_db
+from core.models.workspaces import Workspace
 from core.services.api_key_service import ApiKeyService
 from config import config
+
+from api.widgets.config import build_widget_config
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +67,7 @@ class SessionTokenResponse(BaseModel):
     expires_at: str
     permissions: List[str]
     workspace_id: str
+    widget_config: Optional[dict] = None
 
 
 # ---------------------------------------------------------------------------
@@ -146,10 +150,19 @@ async def exchange_session_token(
         algorithm=WIDGET_TOKEN_ALGORITHM,
     )
 
-    # --- 5. Return response ---------------------------------------------
+    # --- 5. Resolve widget config for the browser ------------------------
+    workspace = (
+        db.query(Workspace)
+        .filter(Workspace.id == api_key_record.workspace_id)
+        .first()
+    )
+    widget_config = build_widget_config(workspace)
+
+    # --- 6. Return response ---------------------------------------------
     return SessionTokenResponse(
         session_token=session_token,
         expires_at=exp.isoformat(),
         permissions=effective_permissions,
         workspace_id=str(api_key_record.workspace_id),
+        widget_config=widget_config,
     )

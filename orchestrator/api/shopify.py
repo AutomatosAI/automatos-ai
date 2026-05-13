@@ -103,6 +103,25 @@ SHOPIFY_AGENT_SLUGS = [
 ]
 
 
+# PRD-007: default proactive widget config seeded into workspace.settings
+# at provision time. Merchant flips `enabled: true` from the dashboard
+# (or via PATCH /api/workspaces/:id/settings) to activate.
+DEFAULT_WIDGET_PROACTIVE_CONFIG: dict = {
+    "enabled": False,
+    "page_types": ["product"],
+    "triggers": [
+        {"type": "time_on_page", "seconds": 20},
+    ],
+    "frequency_cap": {"scope": "session", "max_pops": 1},
+    "greeting_source": "agent_with_canned_fallback",
+    "canned_fallback": "Need a hand finding the right product?",
+    "agent_timeout_ms": 1500,
+    "popup_style": "corner_bubble",
+    "respect_consent": True,
+    "dismissal_persistence": "session",
+}
+
+
 # ===================================================================
 # POST /api/shopify/provision
 # ===================================================================
@@ -153,6 +172,7 @@ async def provision_workspace(
                 "source": request.source,
                 "shopify_domain": shop,
                 "shopify_metadata": request.metadata,
+                "widget_proactive": dict(DEFAULT_WIDGET_PROACTIVE_CONFIG),
             },
         )
         db.add(workspace)
