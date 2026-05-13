@@ -25,6 +25,12 @@ except ImportError as e:
     logger.warning(f"Widget session router not available: {e}")
 
 try:
+    from api.widgets.config import router as config_router
+    router.include_router(config_router)
+except ImportError as e:
+    logger.warning(f"Widget config router not available: {e}")
+
+try:
     from api.widgets.chat import router as chat_router
     router.include_router(chat_router)
 except ImportError as e:
