@@ -15,10 +15,11 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 import uuid
 from typing import AsyncGenerator, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import text
@@ -28,6 +29,17 @@ from api.widgets.auth import WidgetAuthContext, require_permission, widget_auth
 from core.database.database import get_db
 
 logger = logging.getLogger(__name__)
+
+# Tag every widget-chat log line so we can grep `widget_chat` in Railway.
+_LOG_TAG = "widget_chat"
+
+
+def _short(s: Optional[str], n: int = 80) -> str:
+    """Truncate strings for logging. Avoids dumping huge messages into logs."""
+    if s is None:
+        return "<none>"
+    s = str(s)
+    return s if len(s) <= n else s[:n] + f"…(+{len(s) - n})"
 
 router = APIRouter(tags=["Widget Chat"])
 
@@ -113,6 +125,7 @@ def _get_widget_user_id(db: Session) -> int:
 @router.post("/chat")
 async def widget_chat(
     body: WidgetChatRequest,
+    request: Request,
     auth: WidgetAuthContext = Depends(require_permission("chat")),
     db: Session = Depends(get_db),
 ):
@@ -131,11 +144,36 @@ async def widget_chat(
     """
 
     # ------------------------------------------------------------------
+    # Tag this request for log correlation
+    # ------------------------------------------------------------------
+    req_id = (
+        request.headers.get("X-Request-ID")
+        or request.headers.get("x-railway-request-id")
+        or uuid.uuid4().hex[:12]
+    )
+    started_at = time.perf_counter()
+    origin = request.headers.get("Origin") or "?"
+    log_extra = (
+        f"[{_LOG_TAG} req={req_id} ws={auth.workspace_id} origin={origin}]"
+    )
+    logger.info(
+        "%s REQUEST: agent_id=%s conv_id=%s trigger_reason=%s page_type=%s msg_len=%d msg_preview=%s",
+        log_extra,
+        body.agent_id,
+        body.conversation_id,
+        body.trigger_reason,
+        (body.page_context or {}).get("pageType") if body.page_context else None,
+        len(body.message or ""),
+        _short(body.message),
+    )
+
+    # ------------------------------------------------------------------
     # Import chat infrastructure (may not be available in every deploy)
     # ------------------------------------------------------------------
     try:
         from consumers.chatbot import ChatService, StreamingChatService
     except ImportError:
+        logger.error("%s SERVICE_UNAVAILABLE: consumers.chatbot import failed", log_extra)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Chat service is not available in this deployment",
@@ -151,7 +189,22 @@ async def widget_chat(
         and body.page_context is not None
     )
     if is_proactive:
+        original_len = len(body.message or "")
         body.message = _build_proactive_opener_message(body.page_context or {})
+        logger.info(
+            "%s PROACTIVE_REWRITE: original_msg_len=%d new_msg_len=%d new_preview=%s",
+            log_extra,
+            original_len,
+            len(body.message),
+            _short(body.message),
+        )
+    elif body.trigger_reason:
+        logger.warning(
+            "%s UNKNOWN_TRIGGER_REASON: %s (page_context=%s) — proceeding as normal chat",
+            log_extra,
+            body.trigger_reason,
+            "present" if body.page_context else "missing",
+        )
 
     chat_service = ChatService(db)
     streaming_service = StreamingChatService(db, workspace_id=workspace_id, widget_mode=True)
@@ -161,15 +214,22 @@ async def widget_chat(
     # ------------------------------------------------------------------
     chat_id: str
 
+    t_conv = time.perf_counter()
     if body.conversation_id:
         ws_uuid = uuid.UUID(workspace_id) if isinstance(workspace_id, str) else workspace_id
         chat = chat_service.get_chat(body.conversation_id, workspace_id=ws_uuid)
         if not chat:
+            logger.warning(
+                "%s CONV_NOT_FOUND: %s",
+                log_extra,
+                body.conversation_id,
+            )
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Conversation not found",
             )
         chat_id = body.conversation_id
+        logger.info("%s CONV_RESUMED: chat_id=%s", log_extra, chat_id)
     else:
         short_id = uuid.uuid4().hex[:8]
         title = f"{body.message[:40] if body.message else 'Widget Chat'} [{short_id}]"
@@ -181,15 +241,29 @@ async def widget_chat(
             workspace_id=ws_uuid,
         )
         chat_id = str(chat.id)
+        logger.info(
+            "%s CONV_CREATED: chat_id=%s title=%s (took %.0fms)",
+            log_extra,
+            chat_id,
+            _short(title, 60),
+            (time.perf_counter() - t_conv) * 1000,
+        )
 
     # ------------------------------------------------------------------
     # Persist the user message
     # ------------------------------------------------------------------
+    t_save = time.perf_counter()
     chat_service.save_message(
         chat_id=chat_id,
         role="user",
         parts=[{"type": "text", "text": body.message}],
         workspace_id=workspace_id,
+    )
+    logger.debug(
+        "%s USER_MSG_SAVED: chat_id=%s (took %.0fms)",
+        log_extra,
+        chat_id,
+        (time.perf_counter() - t_save) * 1000,
     )
 
     # ------------------------------------------------------------------
@@ -197,6 +271,9 @@ async def widget_chat(
     # ------------------------------------------------------------------
     messages = chat_service.get_messages_by_chat_id(chat_id)
     message_history = [{"role": msg.role, "parts": msg.parts} for msg in messages]
+    logger.debug(
+        "%s HISTORY_LOADED: %d messages", log_extra, len(message_history)
+    )
 
     # API key can lock the agent — ignore client-provided agent_id when set
     # Resolve public_id (UUID) or legacy int to internal id
@@ -204,10 +281,22 @@ async def widget_chat(
     _raw_agent_ref = auth.default_agent_id or body.agent_id
     if _raw_agent_ref:
         effective_agent_id = _resolve_aid(db, _raw_agent_ref, workspace_id)
+        logger.info(
+            "%s AGENT_RESOLVED: input=%s -> id=%s (source=%s)",
+            log_extra,
+            _raw_agent_ref,
+            effective_agent_id,
+            "key_lock" if auth.default_agent_id else "body",
+        )
     else:
         # Fallback to workspace Auto agent (Phase 2 will replace the `or 1`)
         from api.chat import get_default_agent_id
         effective_agent_id = get_default_agent_id(db, workspace_id)
+        logger.info(
+            "%s AGENT_DEFAULT: id=%s (workspace auto)",
+            log_extra,
+            effective_agent_id,
+        )
 
     # PRD-124: Resolve agent team for document scoping
     agent_team: Optional[str] = None
@@ -232,6 +321,19 @@ async def widget_chat(
         The widget SDK expects standard SSE:
         ``event: message\ndata: {"content":"text","conversation_id":"..."}\n\n``
         """
+        stream_start = time.perf_counter()
+        first_chunk_at: Optional[float] = None
+        first_yield_at: Optional[float] = None
+        counts = {
+            "total": 0, "dict": 0, "non_str": 0,
+            "text": 0, "data_event": 0, "other": 0,
+            "yielded_message": 0, "yielded_tool_start": 0, "yielded_tool_end": 0,
+            "text_chars": 0,
+        }
+        logger.info(
+            "%s STREAM_START: chat_id=%s agent_id=%s team=%s proactive=%s",
+            log_extra, chat_id, effective_agent_id, agent_team, is_proactive,
+        )
         try:
             async for chunk in streaming_service.stream_response_with_agent(
                 chat_id=chat_id,
@@ -240,16 +342,30 @@ async def widget_chat(
                 user_id=user_id,
                 team=agent_team,
             ):
+                counts["total"] += 1
+                if first_chunk_at is None:
+                    first_chunk_at = time.perf_counter()
+                    logger.info(
+                        "%s STREAM_FIRST_CHUNK: after %.0fms (type=%s, preview=%s)",
+                        log_extra,
+                        (first_chunk_at - stream_start) * 1000,
+                        type(chunk).__name__,
+                        _short(repr(chunk), 100),
+                    )
+
                 # Skip internal dicts (e.g. _final_response)
                 if isinstance(chunk, dict):
+                    counts["dict"] += 1
                     continue
 
                 # Skip non-string chunks
                 if not isinstance(chunk, str):
+                    counts["non_str"] += 1
                     continue
 
                 # Parse AI-SDK text chunks: 0:"text content"\n
                 if chunk.startswith('0:'):
+                    counts["text"] += 1
                     text = chunk[2:].strip()
                     # Remove surrounding quotes: "text" → text
                     if text.startswith('"') and text.endswith('"'):
@@ -259,26 +375,60 @@ async def widget_chat(
                         except (json.JSONDecodeError, ValueError):
                             text = text[1:-1]
                     if text:
+                        counts["text_chars"] += len(text)
+                        if first_yield_at is None:
+                            first_yield_at = time.perf_counter()
+                            logger.info(
+                                "%s STREAM_FIRST_TEXT_YIELD: after %.0fms",
+                                log_extra,
+                                (first_yield_at - stream_start) * 1000,
+                            )
+                        counts["yielded_message"] += 1
                         yield f"event: message\ndata: {json.dumps({'content': text, 'conversation_id': chat_id})}\n\n"
 
                 # Forward tool events for SDK tool-start/tool-end support
                 elif chunk.startswith('d:'):
+                    counts["data_event"] += 1
                     try:
                         data = json.loads(chunk[2:].strip())
                         event_type = data.get("type", "")
                         if event_type == "tool-start":
+                            counts["yielded_tool_start"] += 1
                             yield f"event: tool-start\ndata: {json.dumps({'tool': data.get('data', {}).get('toolName', ''), 'arguments': data.get('data', {}).get('input', {})})}\n\n"
                         elif event_type == "tool-end":
+                            counts["yielded_tool_end"] += 1
                             yield f"event: tool-end\ndata: {json.dumps({'tool': data.get('data', {}).get('toolName', ''), 'result': data.get('data', {}).get('result')})}\n\n"
                     except (json.JSONDecodeError, ValueError):
                         pass
 
                 # Skip other AI-SDK control chunks (e:, etc.)
+                else:
+                    counts["other"] += 1
 
         except Exception as exc:
-            logger.exception("Widget chat streaming error for chat_id=%s", chat_id)
+            logger.exception(
+                "%s STREAM_ERROR: chat_id=%s after %.0fms",
+                log_extra, chat_id, (time.perf_counter() - stream_start) * 1000,
+            )
             yield f"event: error\ndata: {json.dumps({'message': str(exc)})}\n\n"
         finally:
+            elapsed_ms = (time.perf_counter() - stream_start) * 1000
+            total_ms = (time.perf_counter() - started_at) * 1000
+            log_level = logger.info if counts["yielded_message"] > 0 or counts["yielded_tool_start"] > 0 else logger.warning
+            log_level(
+                "%s STREAM_DONE: chat_id=%s stream=%.0fms total=%.0fms counts=%s",
+                log_extra, chat_id, elapsed_ms, total_ms, counts,
+            )
+            if counts["total"] == 0:
+                logger.warning(
+                    "%s STREAM_EMPTY: no chunks from streaming service. Agent=%s may be misconfigured or LLM call returned nothing.",
+                    log_extra, effective_agent_id,
+                )
+            elif counts["yielded_message"] == 0:
+                logger.warning(
+                    "%s STREAM_NO_TEXT: agent produced %d chunks but no text (text_count=%d, data_event=%d, dict=%d). Skill prompt may be missing or agent is tool-only.",
+                    log_extra, counts["total"], counts["text"], counts["data_event"], counts["dict"],
+                )
             yield f"event: done\ndata: {json.dumps({'conversation_id': chat_id})}\n\n"
 
     return StreamingResponse(
