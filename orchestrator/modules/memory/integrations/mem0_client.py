@@ -84,6 +84,7 @@ class Mem0Client:
         self.api_url = (api_url or config.MEM0_API_URL or "").strip()
         self.api_key = api_key or config.MEM0_API_KEY
         self.timeout = float(getattr(config, "MEM0_TIMEOUT_SECONDS", 3.0))
+        self.write_timeout = float(getattr(config, "MEM0_WRITE_TIMEOUT_SECONDS", 15.0))
 
         if not self.api_url:
             logger.info(
@@ -131,7 +132,14 @@ class Mem0Client:
                     _breaker.record_success()
                     return resp
 
-                if resp.status_code in (400, 401, 403, 404):
+                if resp.status_code == 404:
+                    logger.debug(
+                        "[Mem0] 404 on %s %s — treating as empty result",
+                        method.upper(), url,
+                    )
+                    return resp
+
+                if resp.status_code in (400, 401, 403):
                     logger.warning(
                         "[Mem0] Client/config error %d on %s %s — not retrying",
                         resp.status_code, method.upper(), url,
@@ -206,7 +214,7 @@ class Mem0Client:
 
         logger.debug("[Mem0] Adding memory for user_id=%s (text_len=%d)", user_id, len(text))
 
-        resp = self._request("POST", url, json=payload)
+        resp = self._request("POST", url, json=payload, timeout=self.write_timeout)
         if resp is None:
             return {"success": False, "error": "Mem0 unavailable (circuit breaker or timeout)"}
 
@@ -258,6 +266,10 @@ class Mem0Client:
 
         resp = self._request("GET", url, params=params)
         if resp is None:
+            return []
+
+        if resp.status_code == 404:
+            logger.debug("[Mem0] Search: no memories yet for user_id=%s", user_id)
             return []
 
         if resp.status_code >= 400:

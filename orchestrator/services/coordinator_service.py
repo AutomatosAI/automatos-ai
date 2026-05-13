@@ -23,7 +23,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
-from sqlalchemy import and_
+from sqlalchemy import and_, text
 from sqlalchemy.orm import Session
 
 from config import COMPLEXITY_TOKEN_BUDGET, Config, config
@@ -742,14 +742,19 @@ class CoordinatorService:
             return None
 
     async def _cleanup_terminal_fields(self, db: Session) -> None:
-        """Destroy fields for missions that have ended."""
+        """Destroy fields for missions that have ended.
+
+        Each field is its own Qdrant collection — Qdrant loads all collections
+        into memory on startup, so a backlog OOM-crashes Qdrant. Throttle
+        is intentionally generous to drain the backlog quickly.
+        """
         terminal_with_fields = (
             db.query(OrchestrationRun)
             .filter(
                 OrchestrationRun.state.in_([s.value for s in TERMINAL_RUN_STATES]),
                 OrchestrationRun.config["field_id"].astext.isnot(None),
             )
-            .limit(5)  # Throttle — max 5 cleanups per tick
+            .limit(50)
             .all()
         )
         for run in terminal_with_fields:
@@ -762,6 +767,63 @@ class CoordinatorService:
             updated_config.pop("field_id", None)
             run.config = updated_config
             db.flush()
+
+    async def _cleanup_orphan_field_collections(self, db: Session, limit: int = 20) -> None:
+        """Delete Qdrant ``field_*`` collections that no OrchestrationRun references.
+
+        Each mission field is its own Qdrant collection. Abandoned ones survive
+        when a run row is purged or its field_id is cleared without deleting
+        the collection. Qdrant loads every collection's HNSW into memory on
+        startup, so orphans bloat the baseline until pod OOMs.
+        """
+        field = self._get_field()
+        if not field:
+            return
+
+        client = getattr(field, "_client", None)
+        if client is None:
+            return
+
+        try:
+            collections_resp = await client.get_collections()
+        except Exception:
+            logger.debug("[Coordinator] Qdrant get_collections failed", exc_info=True)
+            return
+
+        field_collections = [
+            c.name for c in collections_resp.collections
+            if c.name.startswith("field_")
+        ]
+        if not field_collections:
+            return
+
+        # All field_ids still tied to a mission run (any state — only orphans go)
+        referenced_ids = {
+            row[0] for row in db.execute(
+                text(
+                    "SELECT config->>'field_id' FROM orchestration_runs "
+                    "WHERE config->>'field_id' IS NOT NULL"
+                )
+            ).fetchall()
+            if row[0]
+        }
+
+        deleted = 0
+        for name in field_collections:
+            if deleted >= limit:
+                break
+            field_id = name[len("field_"):]
+            if field_id in referenced_ids:
+                continue
+            try:
+                await client.delete_collection(name)
+                deleted += 1
+                logger.info("[Coordinator] Deleted orphan field collection %s", name)
+            except Exception:
+                logger.warning("[Coordinator] Failed to delete orphan %s", name, exc_info=True)
+
+        if deleted:
+            logger.info("[Coordinator] Orphan cleanup: removed %d field collections", deleted)
 
     async def _save_pending_output_documents(self, db: Session) -> None:
         """Save output documents for completed missions that don't have one yet."""
@@ -878,6 +940,14 @@ class CoordinatorService:
                 # --- PRD-108: Clean up fields for terminal runs ---
                 await self._cleanup_terminal_fields(db)
                 db.commit()  # Persist field_id removal to stop destroy loop
+
+                # --- PRD-108: Drop orphan Qdrant collections (no mission row) ---
+                # Each field is its own collection; abandoned collections
+                # accumulate and crash Qdrant on startup (OOM). Throttled.
+                try:
+                    await self._cleanup_orphan_field_collections(db, limit=20)
+                except Exception:
+                    logger.warning("[Coordinator] Orphan field cleanup failed", exc_info=True)
 
                 # --- Save output docs for completed missions ---
                 await self._save_pending_output_documents(db)
