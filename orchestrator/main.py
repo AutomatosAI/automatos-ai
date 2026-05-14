@@ -43,6 +43,10 @@ try:
     from api.shopify import router as shopify_router
 except ImportError:
     shopify_router = None
+try:
+    from api.sites import router as sites_router
+except ImportError:
+    sites_router = None
 from api.documents import router as documents_router
 from api.cache import router as cache_router
 from api.system import router as system_router
@@ -976,6 +980,8 @@ app.include_router(general_webhooks_router)  # General workspace webhooks (no au
 app.include_router(marketplace_router)  # Community Marketplace
 if shopify_router is not None:
     app.include_router(shopify_router)  # Shopify App Store provisioning & webhook forwarding
+if sites_router is not None:
+    app.include_router(sites_router)  # PRD-008-A: per-merchant Sites CRUD (any channel type)
 app.include_router(document_generation_router)  # PRD-63: Must be BEFORE documents_router (has /templates, /generated specific routes that would otherwise be caught by documents_router's /{document_id} catch-all → 422)
 app.include_router(documents_router)
 app.include_router(blog_router)  # Authenticated blog management (Deliverables → Blogs)
