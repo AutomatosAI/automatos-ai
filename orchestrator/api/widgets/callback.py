@@ -38,6 +38,8 @@ from services.callback import (
     new_request_id,
     normalise_phone,
 )
+from services.destinations.base import CallbackPayload
+from services.destinations.dispatcher import enqueue_callback_dispatch
 from services.sites import get_default_site
 
 logger = logging.getLogger(__name__)
@@ -176,15 +178,27 @@ async def submit_callback(
         },
     )
 
-    # --- 8. Queue destination dispatch (Phase 6 will implement) ------------
-    # TODO PRD-008-A Phase 6: enqueue Redis tasks per destination.
-    # For now, log so operations can see we're accepting requests that
-    # will be delivered once the dispatcher lands.
+    # --- 8. Fan-out destination dispatch (Phase 6) -------------------------
     destinations = callback_settings.get("destinations", [])
     if destinations:
+        enqueue_callback_dispatch(
+            site=site,
+            session_id=body.session_id,
+            request_id=request_id,
+            payload=CallbackPayload(
+                request_id=request_id,
+                name=body.name,
+                phone=phone,
+                product_context=body.product_context,
+                urgency=body.urgency,
+                preferred_time=body.preferred_time,
+                site_display_name=site.display_name,
+                site_external_id=site.external_id,
+            ),
+            destinations=destinations,
+        )
         logger.info(
-            "callback %s accepted for site=%s — %d destination(s) "
-            "(dispatch lands in Phase 6)",
+            "callback %s queued for site=%s — %d destination(s)",
             request_id, site.id, len(destinations),
         )
     else:
