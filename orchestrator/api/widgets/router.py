@@ -59,3 +59,9 @@ try:
     router.include_router(docs_router)
 except ImportError as e:
     logger.warning(f"Widget docs router not available: {e}")
+
+try:
+    from api.widgets.callback import router as callback_router
+    router.include_router(callback_router)
+except ImportError as e:
+    logger.warning(f"Widget callback router not available: {e}")

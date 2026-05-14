@@ -34,6 +34,25 @@ def list_sites(db: Session, workspace_id: UUID) -> list[Site]:
     )
 
 
+def get_default_site(db: Session, workspace_id: UUID) -> Optional[Site]:
+    """Resolve the default Site for a workspace — the oldest one.
+
+    Widget endpoints authenticate via API key → workspace_id, but settings
+    live on Sites. For PRD-008-A v1 we assume 1 workspace = 1 Site (the
+    common case); multi-Site agencies will get explicit site_id pinning on
+    public keys in a follow-up.
+
+    Returns None if the workspace has no Sites — i.e. backfill migration
+    has not run yet. Callers should treat that as a 503 condition.
+    """
+    return (
+        db.query(Site)
+        .filter(Site.workspace_id == workspace_id)
+        .order_by(Site.created_at.asc())
+        .first()
+    )
+
+
 def get_site(db: Session, workspace_id: UUID, site_id: UUID) -> Optional[Site]:
     """Fetch a single Site iff it belongs to the given workspace.
 
