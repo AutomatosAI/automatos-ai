@@ -226,6 +226,7 @@ def compute_eta_phrase(
     *,
     product_context: Optional[str] = None,
     now: Optional[datetime] = None,
+    locale: Optional[str] = None,
 ) -> str:
     """Generate the user-facing reassurance line based on the merchant's
     callback config + the current time.
@@ -234,9 +235,13 @@ def compute_eta_phrase(
     - working_hours_only: if True and outside hours, uses outside-hours phrasing
     - team_capacity: 'limited' softens "we'll" → "we'll aim to"
     - sla_hours: numeric cap surfaced in the phrase
+    - locale: routes through ``modules.widgets.i18n.t`` (PRD-008-A Phase 11);
+      defaults to en-GB when None.
 
     Never raises — falls back to a safe generic phrase on any config issue.
     """
+    from modules.widgets.i18n import t
+
     try:
         sla_hours = int(callback_settings.get("sla_hours", 4))
         capacity = callback_settings.get("team_capacity", "limited")
@@ -256,20 +261,19 @@ def compute_eta_phrase(
             _is_within_working_hours(now_local, working_hours) if working_hours else True
         )
 
-        verb = "aim to call" if capacity == "limited" else "call"
-        product_clause = f" about the {product_context}" if product_context else ""
-
-        if working_hours_only and not is_in_hours:
-            return (
-                f"We're closed right now — we'll {verb} you "
-                f"first thing the next working day{product_clause}."
-            )
-
-        return (
-            f"We'll {verb} you within {sla_hours} working hours{product_clause}."
+        product_clause = (
+            t("callback.sla.product_clause", locale, product=product_context)
+            if product_context
+            else ""
         )
+
+        capacity_suffix = "aim_to_call" if capacity == "limited" else "will_call"
+        in_or_out = "in_hours" if (not working_hours_only or is_in_hours) else "outside_hours"
+        key = f"callback.sla.{in_or_out}.{capacity_suffix}"
+
+        return t(key, locale, sla_hours=sla_hours, product_clause=product_clause)
     except Exception:  # noqa: BLE001 — phrasing must never fail the request
-        return "Thanks — we'll be in touch."
+        return t("callback.sla.fallback", locale)
 
 
 # ---------------------------------------------------------------------------
