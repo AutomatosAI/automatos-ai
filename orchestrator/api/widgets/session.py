@@ -22,11 +22,10 @@ from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
 from core.database.database import get_db
-from core.models.workspaces import Workspace
 from core.services.api_key_service import ApiKeyService
 from config import config
 
-from api.widgets.config import build_widget_config
+from api.widgets.config import resolve_widget_config
 
 logger = logging.getLogger(__name__)
 
@@ -151,12 +150,9 @@ async def exchange_session_token(
     )
 
     # --- 5. Resolve widget config for the browser ------------------------
-    workspace = (
-        db.query(Workspace)
-        .filter(Workspace.id == api_key_record.workspace_id)
-        .first()
-    )
-    widget_config = build_widget_config(workspace)
+    # PRD-008-A: read from the workspace's default Site; falls back to
+    # workspace.settings during the migration transition window.
+    widget_config = resolve_widget_config(db, api_key_record.workspace_id)
 
     # --- 6. Return response ---------------------------------------------
     return SessionTokenResponse(
