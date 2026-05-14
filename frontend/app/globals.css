@@ -910,6 +910,46 @@
     border-radius: 8px;
     box-shadow: 0 4px 14px hsla(30 50% 18% / 0.08);
   }
+
+  /* ──────────────────────────────────────────────────────────────────────
+   * Studio icon + brand desaturation.
+   *
+   * Tool / agent / brand icons in the platform pre-date Studio and are
+   * authored at full saturation against the dark orange/glass system. Under
+   * Studio's cream paper they read as visually noisy.
+   *
+   * Desaturate ~30% + drop brightness ~5% across:
+   *   - <img> inside icon-shaped containers (.tool-logo, .agent-icon, etc.)
+   *   - brand mark images
+   *   - SVG icons set with currentColor stay untouched (they pick up colours
+   *     via the variable layer already)
+   * Audit cross-cutting E + F.
+   * ────────────────────────────────────────────────────────────────────── */
+  .studio .tool-logo img,
+  .studio .agent-icon img,
+  .studio [data-studio-desaturate] img,
+  .studio img[alt*="logo" i],
+  .studio img[src*="/logos/"],
+  .studio img[src*="/brand/"],
+  .studio img[src*="/integrations/"] {
+    filter: saturate(0.7) brightness(0.96);
+    transition: filter 220ms ease;
+  }
+
+  /* On hover, restore full saturation — Studio is calm by default, expressive
+     on interaction. Optional, can remove if too playful. */
+  .studio .tool-logo:hover img,
+  .studio .agent-icon:hover img,
+  .studio [data-studio-desaturate]:hover img {
+    filter: saturate(0.9) brightness(1);
+  }
+
+  /* The boat-mark brand logo gets a slightly stronger desat so it lands as
+     "warm brown on cream" rather than "bright orange on cream". */
+  .studio img[src*="automatos-mark"],
+  .studio img[src*="automatos-logo"] {
+    filter: saturate(0.55) brightness(0.88) hue-rotate(-5deg);
+  }
 }
 
 html {
