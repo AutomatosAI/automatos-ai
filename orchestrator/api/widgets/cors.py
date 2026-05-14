@@ -2,9 +2,18 @@
 Widget CORS Middleware (ASGI-native)
 =====================================
 
-Dynamic CORS for ``/api/widgets/*`` routes.  Implemented as a pure ASGI
-middleware (not ``BaseHTTPMiddleware``) so that ``StreamingResponse`` /
-SSE connections are **not buffered**.
+Dynamic CORS for the storefront-widget + dashboard-Sites API surfaces.
+Implemented as a pure ASGI middleware (not ``BaseHTTPMiddleware``) so
+that ``StreamingResponse`` / SSE connections are **not buffered**.
+
+Path coverage (PRD-008-A):
+- ``/api/widgets/*``  — storefront widget calls (any storefront origin)
+- ``/api/sites/*``    — Automatos dashboard Sites CRUD (admin operations)
+
+Both surfaces share the ``WIDGET_ORIGIN_ALLOWLIST`` env var. When empty,
+all origins are allowed (development default). The actual security
+boundary on /api/sites is the JWT in cookies, not CORS — CORS just lets
+the dashboard browser issue the request in the first place.
 """
 
 import logging
@@ -12,6 +21,14 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from config import config
 
 logger = logging.getLogger(__name__)
+
+# Path prefixes this middleware governs. First-match short-circuits the
+# rest of the ASGI stack to inject CORS headers; non-matching paths flow
+# through to FastAPI's default CORSMiddleware (which has its own allowlist).
+COVERED_PATH_PREFIXES: tuple[str, ...] = (
+    "/api/widgets",
+    "/api/sites",
+)
 
 # Explicit origin allowlist — comma-separated in env var.
 # Only these origins may make credentialed requests to widget endpoints.
@@ -33,8 +50,12 @@ def _origin_allowed(origin: str) -> bool:
     return origin.rstrip("/") in WIDGET_ORIGIN_ALLOWLIST
 
 
+def _path_is_covered(path: str) -> bool:
+    return any(path.startswith(prefix) for prefix in COVERED_PATH_PREFIXES)
+
+
 class WidgetCORSMiddleware:
-    """Add CORS headers to /api/widgets/* without buffering responses."""
+    """Add CORS headers to widget + Sites API paths without buffering responses."""
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
@@ -45,7 +66,7 @@ class WidgetCORSMiddleware:
             return
 
         path: str = scope.get("path", "")
-        if not path.startswith("/api/widgets"):
+        if not _path_is_covered(path):
             await self.app(scope, receive, send)
             return
 
