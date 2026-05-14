@@ -200,6 +200,102 @@
     --chart-4: 271 91% 65%;
     --chart-5: 43 96% 56%;
   }
+
+  /*
+   * Studio theme — Ledger Studio rebrand (Phase 1 token foundation).
+   * Cream paper + serif headlines + mono detail. Semantic colour lock:
+   *   near-black = positive primary    burnt orange = consequence
+   *   olive = good / success           navy = info / queued
+   *   tan = neutral / border           cream = paper / background
+   *
+   * Applied via body class `.studio` (toggled by `?theme=studio-preview`
+   * or user-menu preference). Variables flow through every shadcn primitive
+   * and custom utility automatically. No primitive rewrites required for the
+   * colour layer.
+   *
+   * Source-of-truth tokens: DUMPING AREA/redesign/styles.css
+   * Phase 1 micro-spec:    DUMPING AREA/phase1/microspec.jsx
+   * PRD reference:         PRD_PLATFORM_REDESIGN.md §3
+   */
+  .studio {
+    /* Surfaces — cream paper foundation */
+    --background: 38 50% 92%;        /* #f4eee2 cream paper */
+    --foreground: 30 12% 9%;         /* #1a1814 warm near-black ink */
+    --card: 0 0% 100%;               /* #ffffff white paper for cards */
+    --card-foreground: 30 12% 9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 30 12% 9%;
+
+    /* Brand — POSITIVE PRIMARY IS NEAR-BLACK (locked semantic) */
+    --primary: 30 12% 9%;            /* #1a1814 — default CTA */
+    --primary-foreground: 38 50% 96%;
+
+    /* Secondary surfaces — slightly darker cream */
+    --secondary: 38 40% 86%;         /* #ebe3d2 */
+    --secondary-foreground: 36 12% 22%;
+    --muted: 40 30% 80%;             /* #dcd2bd tan */
+    --muted-foreground: 36 12% 36%;  /* #5a5448 muted ink */
+
+    /* Accent — BURNT ORANGE IS CONSEQUENCE (destructive flavour, brand pop) */
+    --accent: 15 76% 44%;            /* #c44a1a burnt orange */
+    --accent-foreground: 38 50% 96%;
+    --destructive: 15 76% 44%;       /* same colour, consequence semantic */
+    --destructive-foreground: 38 50% 96%;
+
+    /* Edges — tan borders */
+    --border: 40 30% 80%;            /* #dcd2bd */
+    --input: 40 30% 80%;
+    --ring: 82 30% 33%;              /* #5b6f3a olive @ focus, per microspec */
+
+    /* No background gradient wash — paper is flat */
+    --background-gradient-from: 38 50% 92%;
+    --background-gradient-to: 38 50% 92%;
+
+    /* Kill the glass — Studio is flat paper. Same approach as .matte. */
+    --glass-card-alpha: 1;
+    --glass-panel-alpha: 1;
+    --glass-border-alpha: 1;
+    --glass-border-alpha-hover: 1;
+    --glass-glow-alpha: 0;
+    --glass-shadow-alpha: 0;
+    --glass-shadow-alpha-hover: 0;
+    --glass-border: var(--border);
+    --glass-border-hover: 40 30% 70%; /* #c9bea4 border-2, per microspec card hover */
+
+    --card-shadow-alpha: 0;
+    --card-shadow-alpha-hover: 0.06;
+    --card-accent-alpha: 0;
+    --card-accent-alpha-hover: 0;
+    --card-highlight-alpha: 0;
+
+    /* Semantic — olive = good, navy = info, warn = sand */
+    --success: 82 30% 33%;           /* #5b6f3a olive */
+    --success-foreground: 38 50% 96%;
+    --warning: 47 73% 56%;           /* sand/wheat */
+    --warning-foreground: 30 12% 9%;
+    --info: 213 51% 23%;             /* #1d3658 navy */
+    --info-foreground: 38 50% 96%;
+    --agent: 213 51% 23%;            /* navy (Studio has no purple) */
+    --agent-foreground: 38 50% 96%;
+
+    /* Charts — Studio palette */
+    --chart-1: 15 76% 44%;           /* burnt orange */
+    --chart-2: 213 51% 23%;          /* navy */
+    --chart-3: 82 30% 33%;           /* olive */
+    --chart-4: 36 12% 36%;           /* muted ink */
+    --chart-5: 47 73% 56%;           /* sand */
+
+    /* Stage colours — desaturated, Studio-flavoured */
+    --stage-1: 82 30% 33%;
+    --stage-2: 213 51% 23%;
+    --stage-3: 47 73% 56%;
+    --stage-4: 36 12% 36%;
+    --stage-5: 82 30% 33%;
+    --stage-6: 15 76% 44%;
+    --stage-7: 213 51% 23%;
+    --stage-8: 36 12% 36%;
+    --stage-9: 82 30% 33%;
+  }
 }
 
 @layer base {
@@ -208,6 +304,30 @@
   }
   body {
     @apply bg-background text-foreground;
+  }
+
+  /* Studio typography — serif on display headings, mono on detail surfaces.
+     Body stays system sans. Applies only when .studio is on body. */
+  .studio {
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+                 "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  .studio h1,
+  .studio h2,
+  .studio .font-serif,
+  .studio [data-studio-serif] {
+    font-family: "Tiempos Headline", "Charter", "Iowan Old Style", Georgia, ui-serif, serif;
+    font-weight: 500;
+    letter-spacing: -0.015em;
+    line-height: 1.15;
+  }
+  .studio .font-mono,
+  .studio code,
+  .studio kbd,
+  .studio pre,
+  .studio [data-studio-mono] {
+    font-family: "JetBrains Mono", "Fira Code", "SF Mono", Monaco, Consolas, monospace;
+    font-feature-settings: "liga" 1, "calt" 1;
   }
 }
 
@@ -492,6 +612,193 @@
   .matte .agent-avatar {
     background: hsl(var(--secondary));
     border-color: hsl(var(--border));
+  }
+
+  /* ──────────────────────────────────────────────────────────────────────
+   * Studio theme overrides — flatten glass, paper-on-paper cards.
+   * Same pattern as .matte (kill blur/glow); plus Studio-specific:
+   *   - cards get 1px tan border instead of glass-edge
+   *   - card hover lifts via tiny olive-tinted shadow (microspec §A1)
+   *   - all "glow" classes become noops (no neon glow in Studio)
+   *   - gradient-text becomes plain foreground (no orange-text gradient)
+   *   - stage-active/pulse animations die (no live glow effects)
+   * ────────────────────────────────────────────────────────────────────── */
+  .studio .glass-card,
+  .studio .glass-panel,
+  .studio .glass-panel-light {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: hsl(var(--card));
+    border: 1px solid hsl(var(--border));
+    border-radius: 10px;
+    box-shadow: none;
+  }
+
+  .studio .glass-card:hover {
+    background: hsl(var(--card));
+    border-color: hsl(40 30% 70%); /* border-2 #c9bea4 per microspec */
+    box-shadow: 0 4px 12px hsla(30 50% 18% / 0.06);
+    transform: none;
+  }
+
+  .studio .card-glow,
+  .studio .card-glow:hover {
+    box-shadow: 0 1px 0 hsla(30 50% 18% / 0.05);
+  }
+
+  /* Studio: cards-as-buttons get olive @ 18% focus ring (microspec §A2) */
+  .studio [role="button"]:focus-visible,
+  .studio button.glass-card:focus-visible,
+  .studio .glass-card[role="button"]:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px hsla(82 30% 33% / 0.18);
+  }
+
+  /* Gradient text — Studio kills the orange-text trick. Plain ink instead. */
+  .studio .gradient-text {
+    background: none;
+    -webkit-background-clip: initial;
+    -webkit-text-fill-color: currentColor;
+    background-clip: initial;
+    color: hsl(var(--foreground));
+  }
+  .studio .gradient-accent {
+    background: hsl(var(--accent));
+  }
+
+  /* Stage states — flatten, kill animations */
+  .studio .stage-completed,
+  .studio .stage-active,
+  .studio .stage-pending {
+    box-shadow: none;
+    animation: none;
+    background: hsl(var(--card));
+    border-color: hsl(var(--border));
+  }
+  .studio .stage-active {
+    border-color: hsl(var(--info));
+  }
+  .studio .stage-completed {
+    border-color: hsl(var(--success));
+  }
+
+  /* All glow utilities → noop in Studio */
+  .studio .glow-orange,
+  .studio .glow-primary,
+  .studio .glow-green,
+  .studio .glow-blue {
+    box-shadow: none;
+  }
+  .studio .stage-active-badge,
+  .studio .agent-avatar-active,
+  .studio .progress-shimmer,
+  .studio .flow-particle {
+    animation: none;
+  }
+  .studio .progress-shimmer {
+    background: none;
+  }
+
+  .studio .agent-avatar {
+    background: hsl(var(--muted));
+    border: 1px solid hsl(var(--border));
+  }
+
+  /* Stage connectors — tan in Studio */
+  .studio .stage-connector {
+    background: hsl(var(--border));
+  }
+  .studio .stage-connector-active,
+  .studio .stage-connector-completed {
+    background: hsl(var(--success));
+  }
+
+  /* Log entries — paper-on-cream with tan left border */
+  .studio .log-entry {
+    background: hsl(var(--card));
+    border: 1px solid hsl(var(--border));
+    border-radius: 6px;
+  }
+  .studio .log-entry:hover {
+    background: hsl(var(--card));
+    border-color: hsl(40 30% 70%);
+  }
+  .studio .log-entry-success { border-left: 3px solid hsl(var(--success)); }
+  .studio .log-entry-error   { border-left: 3px solid hsl(var(--accent)); }
+  .studio .log-entry-info    { border-left: 3px solid hsl(var(--info)); }
+  .studio .log-entry-warning { border-left: 3px solid hsl(var(--warning)); }
+  .studio .log-entry-agent   { border-left: 3px solid hsl(var(--info)); }
+
+  /* ── Studio-only utility classes (matches DesignKIT/round2/styles.css) ── */
+
+  /* Pills — 6 semantic tones. Use as: <span class="studio-pill ok">. */
+  .studio .studio-pill,
+  .studio-pill {
+    display: inline-flex; align-items: center;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 10px; font-weight: 600;
+    padding: 1px 6px; border-radius: 2px; letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .studio .studio-pill.ok,
+  .studio-pill.ok       { background: hsla(82 30% 33% / 0.16); color: hsl(82 50% 22%); }
+  .studio .studio-pill.err,
+  .studio-pill.err      { background: hsla(15 76% 44% / 0.16); color: hsl(15 67% 31%); }
+  .studio .studio-pill.warn,
+  .studio-pill.warn     { background: hsla(47 73% 56% / 0.22); color: hsl(38 76% 27%); }
+  .studio .studio-pill.info,
+  .studio-pill.info     { background: hsla(213 51% 23% / 0.16); color: hsl(213 51% 23%); }
+  .studio .studio-pill.brand,
+  .studio-pill.brand    { background: hsla(15 76% 44% / 0.16); color: hsl(15 76% 44%); }
+  .studio .studio-pill.muted,
+  .studio-pill.muted    { background: hsl(40 30% 80%); color: hsl(36 12% 36%); }
+
+  /* Editorial eyebrows + ledes — used by PageHeader and section heads */
+  .studio .studio-eyebrow {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px; font-weight: 600;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    color: hsl(var(--muted-foreground));
+    margin: 0 0 6px;
+  }
+  .studio .studio-lede {
+    font-size: 14px; line-height: 1.55;
+    color: hsl(var(--muted-foreground));
+    max-width: 70ch;
+  }
+
+  /* Studio panels — replace glass-panel with paper-on-cream framed surface */
+  .studio .studio-panel {
+    background: hsl(var(--card));
+    border: 1px solid hsl(var(--border));
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .studio .studio-panel-head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px;
+    border-bottom: 1px solid hsl(var(--border));
+    background: hsl(38 45% 96%);
+    font-family: "JetBrains Mono", monospace;
+    font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase;
+    color: hsl(var(--muted-foreground));
+  }
+
+  /* Studio status pip (the locked vocabulary from kit.jsx) */
+  .studio .studio-pip {
+    width: 22px; height: 22px; border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-family: "Tiempos Headline", "Charter", Georgia, ui-serif, serif;
+    font-weight: 600; font-size: 11px;
+    color: #fff; flex-shrink: 0;
+  }
+  .studio .studio-pip.done    { background: hsl(82 30% 33%); }      /* ✓ */
+  .studio .studio-pip.error   { background: hsl(15 76% 44%); }      /* ! */
+  .studio .studio-pip.queued  { background: hsl(213 51% 23%); }     /* ↻ */
+  .studio .studio-pip.running { background: hsl(40 20% 65%); }      /* ◐ */
+  .studio .studio-pip.pending { background: hsl(36 10% 50%); }      /* · */
+  .studio .studio-pip.paused  {
+    background: hsl(40 30% 80%); color: hsl(36 10% 50%);
   }
 }
 

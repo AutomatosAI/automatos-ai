@@ -3,7 +3,7 @@
 
 import { ClerkProvider } from '@clerk/nextjs'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { useState } from 'react'
+import { Suspense, useState } from 'react'
 import { MockProvider } from '../lib/mock-context'
 import { ThemeProvider } from './theme-provider'
 import { WorkspaceProvider } from './workspace-provider'
@@ -12,6 +12,13 @@ import { RoleProvider } from '../contexts/role-context'
 import { FirstLoginGuard } from './onboarding/first-login-guard'
 import { Toaster } from 'react-hot-toast'
 import { GlobalSearch } from './shared/global-search'
+import { useStudioThemeFlag } from '../hooks/use-studio-theme'
+
+// Inline child so we can read useSearchParams (needs a Suspense boundary in Next).
+function StudioThemeFlag() {
+  useStudioThemeFlag()
+  return null
+}
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(() => new QueryClient({
@@ -60,13 +67,16 @@ export function Providers({ children }: { children: React.ReactNode }) {
             attribute="class"
             defaultTheme="system"
             enableSystem
-            themes={['light', 'dark', 'matte']}
+            themes={['light', 'dark', 'matte', 'studio']}
             storageKey="automatos-theme"
             disableTransitionOnChange
           >
             <QueryClientProvider client={queryClient}>
               <WorkspaceProvider>
                 <MockProvider>
+                  <Suspense fallback={null}>
+                    <StudioThemeFlag />
+                  </Suspense>
                   <FirstLoginGuard />
                   {children}
                   <GlobalSearch />
