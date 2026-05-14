@@ -633,7 +633,8 @@ export function DocumentManagement() {
         <PageHeader
           title="Knowledge"
           titleAccent="Bases"
-          subtitle="Manage documents, code repositories, and knowledge sources"
+          eyebrow="Workforce · what they know"
+          lede="Documents, code repositories, and references your agents can read. Add a source, scope who sees it, and your workforce becomes more accurate with every search."
           actions={
             <div className="flex items-center gap-2">
               <input ref={graphFileRef} type="file" accept=".json" onChange={handleGraphImport} className="hidden" />

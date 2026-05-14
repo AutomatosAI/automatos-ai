@@ -36,7 +36,8 @@ export function SettingsPanel() {
         <PageHeader
           title="System"
           titleAccent="Settings"
-          subtitle="Manage system configuration, credentials, and security"
+          eyebrow="Workspace · configuration"
+          lede="Defaults that apply across every agent, mission, and routing decision. Workspace inherits to teams; teams to individuals."
         />
       </div>
 

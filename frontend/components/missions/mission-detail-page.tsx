@@ -136,7 +136,8 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
         <PageHeader
           title="Mission"
           titleAccent={(mission.config as Record<string, unknown>)?.name as string || mission.goal.split(':')[0]}
-          subtitle={
+          eyebrow={`Operations · mission ${missionId.slice(0, 8)}`}
+          lede={
             [
               mission.state,
               stats ? `${stats.tasksDone}/${stats.taskCount} tasks` : null,
