@@ -97,12 +97,26 @@ class WidgetCORSMiddleware:
             await send({"type": "http.response.body", "body": b""})
             return
 
-        # For actual requests, inject CORS headers only for allowed origins
+        # For actual requests, inject CORS headers only for allowed origins.
+        # Strip any CORS headers an upstream middleware (e.g. FastAPI's
+        # CORSMiddleware) already added — duplicate Access-Control-Allow-*
+        # headers cause Chrome to reject the response with "Failed to fetch".
         allowed = _origin_allowed(origin) if origin else False
+
+        _CORS_HEADERS_TO_OVERRIDE = (
+            b"access-control-allow-origin",
+            b"access-control-allow-credentials",
+            b"vary",
+        )
 
         async def send_with_cors(message: dict) -> None:
             if message["type"] == "http.response.start":
-                headers = list(message.get("headers", []))
+                upstream = list(message.get("headers", []))
+                # Drop any CORS headers from upstream so we own them exclusively.
+                headers = [
+                    (k, v) for (k, v) in upstream
+                    if k.lower() not in _CORS_HEADERS_TO_OVERRIDE
+                ]
                 headers.append((b"vary", b"Origin"))
                 if origin and allowed:
                     headers.append((b"access-control-allow-origin", origin.encode("latin-1")))
