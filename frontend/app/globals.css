@@ -800,6 +800,116 @@
   .studio .studio-pip.paused  {
     background: hsl(40 30% 80%); color: hsl(36 10% 50%);
   }
+
+  /* ──────────────────────────────────────────────────────────────────────
+   * Studio shadcn primitive overrides — radius + edge adjustments.
+   *
+   * The shadcn primitives use rounded-2xl/xl heavily (16-24px corners).
+   * Studio is a 6-10px-radius system. Rather than rewriting 53 components,
+   * we override the resolved corners under .studio scope. The colour layer
+   * already flows through the variable swap above.
+   * ────────────────────────────────────────────────────────────────────── */
+
+  /* Button — rounded-2xl → 6px under Studio. Targets the cva base + size mods. */
+  .studio button.rounded-2xl,
+  .studio button.rounded-xl,
+  .studio [role="button"].rounded-2xl,
+  .studio [role="button"].rounded-xl,
+  .studio a.rounded-2xl,
+  .studio a.rounded-xl {
+    border-radius: 6px;
+  }
+
+  /* Inputs / textareas / selects */
+  .studio input.rounded-2xl,
+  .studio input.rounded-xl,
+  .studio input.rounded-md,
+  .studio textarea.rounded-2xl,
+  .studio textarea.rounded-xl,
+  .studio textarea.rounded-md,
+  .studio select.rounded-2xl,
+  .studio select.rounded-xl,
+  .studio select.rounded-md {
+    border-radius: 6px;
+  }
+
+  /* Cards — 24px → 10px. Card component uses rounded-lg by default but
+     custom cards often use rounded-2xl. Both go to 10px under Studio. */
+  .studio .rounded-2xl {
+    border-radius: 10px;
+  }
+  .studio .rounded-xl {
+    border-radius: 8px;
+  }
+  /* rounded-lg already approximates 8px via --radius — leave alone */
+
+  /* Dialog content + Popover content — 12-16px → 10px */
+  .studio [role="dialog"].rounded-lg,
+  .studio [role="dialog"].rounded-2xl,
+  .studio [data-radix-popper-content-wrapper] > [role="dialog"],
+  .studio .DialogContent,
+  .studio .PopoverContent {
+    border-radius: 10px;
+  }
+
+  /* Badge — rounded-md → 2px (Studio uses near-square pills, like .studio-pill) */
+  .studio .Badge,
+  .studio [data-slot="badge"] {
+    border-radius: 2px;
+  }
+
+  /* Tabs trigger underline — Studio uses 2px accent border-bottom on active,
+     not a pill background. Bring shadcn tabs closer to that pattern. */
+  .studio [role="tablist"] {
+    border-bottom: 1px solid hsl(var(--border));
+  }
+  .studio [role="tab"][data-state="active"] {
+    background: transparent;
+    border-bottom: 2px solid hsl(var(--accent));
+    color: hsl(var(--foreground));
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  /* Force serif on heading utility classes — covers h1/h2 plus utility classes
+     used for display text (text-3xl, text-4xl, text-5xl). */
+  .studio .text-3xl,
+  .studio .text-4xl,
+  .studio .text-5xl,
+  .studio .text-6xl,
+  .studio h3.text-2xl {
+    font-family: "Tiempos Headline", "Charter", "Iowan Old Style", Georgia, ui-serif, serif;
+    font-weight: 500;
+    letter-spacing: -0.015em;
+    line-height: 1.15;
+  }
+
+  /* Mono on inline code blocks, kbd, and explicit .font-mono */
+  .studio code:not(pre code),
+  .studio kbd {
+    background: hsl(var(--secondary));
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 0.9em;
+  }
+
+  /* Tooltip — Studio's are near-black bg, white text, mono content */
+  .studio [data-radix-tooltip-content],
+  .studio [role="tooltip"] {
+    background: hsl(var(--foreground));
+    color: hsl(var(--background));
+    border-radius: 4px;
+    font-size: 11.5px;
+  }
+
+  /* Toast — Studio uses paper with semantic left-border (per kit.jsx) */
+  .studio [data-sonner-toast],
+  .studio .react-hot-toast {
+    background: hsl(var(--card));
+    border: 1px solid hsl(var(--border));
+    border-radius: 8px;
+    box-shadow: 0 4px 14px hsla(30 50% 18% / 0.08);
+  }
 }
 
 html {
