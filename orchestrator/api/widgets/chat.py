@@ -66,27 +66,69 @@ class WidgetChatRequest(BaseModel):
 PROACTIVE_TRIGGER_REASONS: frozenset[str] = frozenset({"proactive_opener"})
 
 
+# Fields from page_context that the agent gets to ground openers on.
+# Order matters — first match per group wins. Numeric/boolean fields are
+# coerced to strings only when present + non-default.
+_OPENER_CONTEXT_FIELDS: tuple[tuple[str, str], ...] = (
+    ("pageType",          "page_type"),
+    ("template",          "template"),
+    # Product
+    ("productTitle",      "product"),
+    ("productType",       "product_type"),
+    ("productVendor",     "vendor"),
+    ("productPrice",      "price"),
+    ("productAvailable",  "in_stock"),
+    ("productHandle",     "product_handle"),
+    # Collection (when on a collection page)
+    ("collectionTitle",   "collection"),
+    ("collectionHandle",  "collection_handle"),
+    # Shop / locale
+    ("shopDomain",        "shop"),
+    ("shopCurrency",      "currency"),
+    ("shopLocale",        "locale"),
+    # Customer / cart
+    ("customerId",        "logged_in_customer_id"),
+    ("customerTags",      "customer_tags"),
+    ("cartItemCount",     "cart_item_count"),
+    ("cartTotalPrice",    "cart_total"),
+)
+
+
+def _format_opener_context_value(key: str, value) -> Optional[str]:
+    """Render a single page-context value into the directive. Returns None
+    if the value is empty/zero/false and shouldn't be sent to the agent."""
+    if value is None or value == "" or value == 0 or value is False:
+        return None
+    if isinstance(value, str):
+        return f'{key}="{value}"' if " " in value or '"' in value else f"{key}={value}"
+    return f"{key}={value}"
+
+
 def _build_proactive_opener_message(page_context: dict) -> str:
     """Synthesize the user-side message for a proactive opener request.
 
     The widget never sends real user text for proactive openers — instead
-    we synthesize a directive describing the page context. The agent's
-    ``shopify-support`` skill recognises the ``[PROACTIVE_OPENER]`` prefix
-    and generates a one-sentence contextual greeting.
+    we synthesize a directive carrying the FULL page context the agent
+    needs to ground a contextual one-line opener.
+
+    PRD-007 v0.4: previously only pageType + productTitle/Type leaked into
+    the directive; agents had to make up everything else (price, vendor,
+    availability). Now every populated page_context field is forwarded so
+    the agent can lean on real facts before reaching for a tool call.
     """
-    ctx_summary_parts: list[str] = []
-    if page_context.get("pageType"):
-        ctx_summary_parts.append(f"page_type={page_context['pageType']}")
-    if page_context.get("productTitle"):
-        ctx_summary_parts.append(f"product=\"{page_context['productTitle']}\"")
-    elif page_context.get("productHandle"):
-        ctx_summary_parts.append(f"product_handle={page_context['productHandle']}")
-    if page_context.get("productType"):
-        ctx_summary_parts.append(f"product_type={page_context['productType']}")
-    if page_context.get("collectionTitle"):
-        ctx_summary_parts.append(f"collection=\"{page_context['collectionTitle']}\"")
-    summary = ", ".join(ctx_summary_parts) if ctx_summary_parts else "no context"
-    return f"[PROACTIVE_OPENER] Generate a contextual one-sentence opener. Context: {summary}"
+    parts: list[str] = []
+    for src_key, label in _OPENER_CONTEXT_FIELDS:
+        rendered = _format_opener_context_value(label, page_context.get(src_key))
+        if rendered is not None:
+            parts.append(rendered)
+    summary = ", ".join(parts) if parts else "no context"
+    return (
+        "[PROACTIVE_OPENER] Generate a contextual one-sentence opener. "
+        "Use the facts below as your source of truth — do NOT invent specs, "
+        "compatibility, or pricing the context doesn't include. If a fact "
+        "you'd want isn't here, ask a question instead of fabricating. "
+        f"Context: {summary}"
+    )
 
 
 class WidgetMessageOut(BaseModel):

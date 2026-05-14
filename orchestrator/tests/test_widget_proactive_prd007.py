@@ -145,6 +145,64 @@ def test_opener_message_handles_collection_pages():
     assert "Fans & Ventilation" in msg
 
 
+def test_opener_message_includes_full_grounding_context():
+    """PRD-007 v0.4: rich page context grounds the agent so it stops
+    inventing facts. Every populated field should reach the directive."""
+    from api.widgets.chat import _build_proactive_opener_message
+
+    msg = _build_proactive_opener_message({
+        "pageType": "product",
+        "productTitle": "Actulux SVM 4 amp Micro 24V Basic",
+        "productType": "Smoke Control",
+        "productVendor": "Actulux",
+        "productPrice": "362.18",
+        "productAvailable": True,
+        "productHandle": "actulux-svm-basic",
+        "shopDomain": "inbuilduk.com",
+        "shopCurrency": "GBP",
+        "cartItemCount": 0,
+    })
+    # All the rich facts the agent would otherwise invent
+    assert "Actulux SVM 4 amp Micro 24V Basic" in msg
+    assert "Smoke Control" in msg
+    assert "Actulux" in msg
+    assert "362.18" in msg
+    assert "in_stock=True" in msg
+    assert "GBP" in msg
+    # Anti-fabrication directive
+    assert "do NOT invent" in msg
+
+
+def test_opener_message_skips_empty_zero_false_fields():
+    """Don't pollute the directive with empty / zero / false signals."""
+    from api.widgets.chat import _build_proactive_opener_message
+
+    msg = _build_proactive_opener_message({
+        "pageType": "product",
+        "productTitle": "Widget",
+        "productAvailable": False,        # should NOT appear
+        "cartItemCount": 0,                # should NOT appear
+        "productVendor": "",               # should NOT appear
+        "customerId": None,                # should NOT appear
+    })
+    assert "in_stock" not in msg
+    assert "cart_item_count" not in msg
+    assert "vendor" not in msg
+    assert "logged_in_customer_id" not in msg
+
+
+def test_opener_message_quotes_values_with_spaces():
+    """Multi-word values (like product titles) need quoting so the agent
+    parses them as single tokens."""
+    from api.widgets.chat import _build_proactive_opener_message
+
+    msg = _build_proactive_opener_message({
+        "pageType": "product",
+        "productTitle": "EN 12101-9 Control Panel",
+    })
+    assert 'product="EN 12101-9 Control Panel"' in msg
+
+
 def test_opener_message_handles_empty_context():
     from api.widgets.chat import _build_proactive_opener_message
 
