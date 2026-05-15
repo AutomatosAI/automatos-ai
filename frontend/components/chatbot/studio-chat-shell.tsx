@@ -3,12 +3,18 @@
 /**
  * StudioChatShell — wraps the existing <Chat> in CD round-3's ledger layout.
  *
- * Two columns by default: collapsible threads (left) + main thread (right).
- * The mission rail is hidden until a real mission-state API is wired up — we
- * removed the pilot-snapshot rail because showing fake stats next to a real
- * chat reads as broken, not as a placeholder.
+ * Three columns when an active mission is attached to the conversation:
+ * threads (collapsible) | thread (1fr) | mission rail (280px, collapsible).
  *
- * Threads column persists collapsed/expanded state to localStorage so the
+ * Real-data wiring:
+ * - Threads list: `getChatHistory()` (existing API)
+ * - Active mission: `useMissionStore.activePlanningMissionId` → `useMission(id)`
+ *   for live state. Stats come from `computeMissionStats`. Pipeline is the
+ *   mission's task list sorted by sequence.
+ * - If no mission is attached to the active thread, the rail shows a single
+ *   editorial empty state — we never render fabricated data.
+ *
+ * Both side columns persist their collapsed state to localStorage so the
  * user's preference sticks across reloads.
  */
 
@@ -20,8 +26,17 @@ import {
   ChevronRight,
   PanelLeftClose,
   PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
 } from 'lucide-react'
 import { getChatHistory } from '@/lib/chat/api'
+import { useMission } from '@/hooks/use-missions-api'
+import { useMissionStore } from '@/stores/mission-store'
+import {
+  computeMissionStats,
+  RUN_STATE_CONFIG,
+  type TaskResponse,
+} from '@/types/missions'
 import type { Chat as ChatType, ChatMessage } from '@/types'
 
 export interface StudioChatShellProps {
@@ -32,7 +47,8 @@ export interface StudioChatShellProps {
   onNewChat: () => void
 }
 
-const STORAGE_KEY = 'studioChatThreadsCollapsed'
+const THREADS_KEY = 'studioChatThreadsCollapsed'
+const RAIL_KEY = 'studioChatRailCollapsed'
 
 export function StudioChatShell({
   children,
@@ -44,13 +60,16 @@ export function StudioChatShell({
   const [threads, setThreads] = useState<ChatType[]>([])
   const [loadingThreads, setLoadingThreads] = useState(true)
   const [threadsCollapsed, setThreadsCollapsed] = useState(false)
+  const [railCollapsed, setRailCollapsed] = useState(false)
 
-  // Load persisted collapse state
+  const activeMissionId = useMissionStore((s) => s.activePlanningMissionId)
+  const { data: mission, isLoading: missionLoading } = useMission(activeMissionId)
+
+  // Load persisted collapse states
   useEffect(() => {
     try {
-      if (localStorage.getItem(STORAGE_KEY) === '1') {
-        setThreadsCollapsed(true)
-      }
+      if (localStorage.getItem(THREADS_KEY) === '1') setThreadsCollapsed(true)
+      if (localStorage.getItem(RAIL_KEY) === '1') setRailCollapsed(true)
     } catch {}
   }, [])
 
@@ -58,7 +77,17 @@ export function StudioChatShell({
     setThreadsCollapsed((prev) => {
       const next = !prev
       try {
-        localStorage.setItem(STORAGE_KEY, next ? '1' : '0')
+        localStorage.setItem(THREADS_KEY, next ? '1' : '0')
+      } catch {}
+      return next
+    })
+  }
+
+  const toggleRail = () => {
+    setRailCollapsed((prev) => {
+      const next = !prev
+      try {
+        localStorage.setItem(RAIL_KEY, next ? '1' : '0')
       } catch {}
       return next
     })
@@ -85,7 +114,13 @@ export function StudioChatShell({
   const activeTitle = selectedChat?.title ?? 'New conversation'
 
   return (
-    <div className={`sh-chat${threadsCollapsed ? ' threads-collapsed' : ''}`}>
+    <div
+      className={
+        'sh-chat' +
+        (threadsCollapsed ? ' threads-collapsed' : '') +
+        (railCollapsed ? ' rail-collapsed' : '')
+      }
+    >
       {/* Breadcrumb bar */}
       <div className="sh-chat-bar">
         <button
@@ -122,10 +157,23 @@ export function StudioChatShell({
             <Share2 style={{ width: 11, height: 11 }} />
             <span>Share</span>
           </button>
+          <button
+            type="button"
+            className="sh-chat-side-toggle"
+            onClick={toggleRail}
+            aria-label={railCollapsed ? 'Show mission rail' : 'Hide mission rail'}
+            title={railCollapsed ? 'Show mission rail' : 'Hide mission rail'}
+          >
+            {railCollapsed ? (
+              <PanelRightOpen style={{ width: 14, height: 14, strokeWidth: 1.6 }} />
+            ) : (
+              <PanelRightClose style={{ width: 14, height: 14, strokeWidth: 1.6 }} />
+            )}
+          </button>
         </div>
       </div>
 
-      {/* Two-column body */}
+      {/* Grid body */}
       <div className="sh-chat-grid">
         {/* Threads list */}
         {!threadsCollapsed && (
@@ -170,6 +218,160 @@ export function StudioChatShell({
 
         {/* Main thread */}
         <div className="sh-chat-main">{children}</div>
+
+        {/* Mission rail — real data or editorial empty state */}
+        {!railCollapsed && (
+          <MissionRail
+            missionId={activeMissionId}
+            mission={mission}
+            loading={missionLoading}
+          />
+        )}
+      </div>
+    </div>
+  )
+}
+
+interface MissionRailProps {
+  missionId: string | null
+  mission: ReturnType<typeof useMission>['data']
+  loading: boolean
+}
+
+function MissionRail({ missionId, mission, loading }: MissionRailProps) {
+  // No mission attached — editorial empty state
+  if (!missionId) {
+    return (
+      <aside className="sh-chat-rail" aria-label="Mission rail">
+        <div className="sh-chat-rail-empty">
+          <p className="sh-chat-rail-eyebrow">Mission · this thread</p>
+          <p className="sh-chat-rail-empty-body">
+            No mission attached. Ask the agent to plan one, or open Mission
+            Mode from the composer to start tracking work here.
+          </p>
+        </div>
+      </aside>
+    )
+  }
+
+  // Mission exists but data hasn't arrived yet
+  if (loading || !mission) {
+    return (
+      <aside className="sh-chat-rail" aria-label="Mission rail">
+        <div>
+          <p className="sh-chat-rail-eyebrow">Mission · this thread</p>
+          <div className="sh-chat-rail-title">Loading mission…</div>
+          <div className="sh-chat-rail-id">{missionId.slice(0, 14)}</div>
+        </div>
+      </aside>
+    )
+  }
+
+  const stats = computeMissionStats(mission)
+  const stateMeta = RUN_STATE_CONFIG[mission.state]
+  const tasksOrdered = [...mission.tasks].sort(
+    (a, b) => a.sequence_number - b.sequence_number,
+  )
+  const taskSlice = tasksOrdered.slice(0, 6)
+
+  return (
+    <aside className="sh-chat-rail" aria-label="Mission rail">
+      <div>
+        <p className="sh-chat-rail-eyebrow">Mission · this thread</p>
+        <div className="sh-chat-rail-title">{mission.goal}</div>
+        <div className="sh-chat-rail-meta">
+          <span className="sh-chat-rail-id">{mission.id.slice(0, 14)}</span>
+          <span className="sh-chat-rail-state">{stateMeta?.label ?? mission.state}</span>
+        </div>
+      </div>
+
+      <div className="sh-chat-rail-stats">
+        <Stat label="TASKS" value={`${stats.tasksDone} / ${stats.taskCount}`} tone="accent" />
+        <Stat label="ACTIVE" value={String(stats.tasksActive)} />
+        <Stat label="TOKENS" value={formatTokens(stats.tokensUsed)} tone="olive" />
+        <Stat
+          label="ELAPSED"
+          value={stats.elapsedMs > 0 ? formatElapsed(stats.elapsedMs) : '—'}
+        />
+      </div>
+
+      <div>
+        <p className="sh-chat-rail-eyebrow">Pipeline</p>
+        {taskSlice.length === 0 ? (
+          <p className="sh-chat-rail-empty-body" style={{ margin: '4px 0 0' }}>
+            No tasks yet. The agent will list steps once the plan is approved.
+          </p>
+        ) : (
+          <div className="sh-chat-dag">
+            {taskSlice.map((task) => (
+              <DagRow key={task.id} task={task} />
+            ))}
+            {tasksOrdered.length > taskSlice.length && (
+              <div className="sh-chat-rail-more">
+                +{tasksOrdered.length - taskSlice.length} more
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      <a
+        href={`/missions/${mission.id}`}
+        className="sh-chat-rail-cta"
+      >
+        Open mission detail →
+      </a>
+    </aside>
+  )
+}
+
+function Stat({
+  label,
+  value,
+  tone,
+}: {
+  label: string
+  value: string
+  tone?: 'accent' | 'olive'
+}) {
+  return (
+    <div>
+      <div className="sh-chat-stat-label">{label}</div>
+      <div className={`sh-chat-stat-value${tone ? ' ' + tone : ''}`}>{value}</div>
+    </div>
+  )
+}
+
+const DONE_STATES = new Set(['verified', 'completed', 'skipped'])
+const ERROR_STATES = new Set(['failed', 'stalled'])
+const ACTIVE_STATES = new Set([
+  'assigned',
+  'running',
+  'verifying',
+  'retrying',
+  'queued',
+])
+
+function DagRow({ task }: { task: TaskResponse }) {
+  let tone: 'done' | 'queued' | 'err' | 'pending' = 'pending'
+  let pip: string | number = task.sequence_number
+  if (DONE_STATES.has(task.state)) {
+    tone = 'done'
+    pip = '✓'
+  } else if (ERROR_STATES.has(task.state)) {
+    tone = 'err'
+    pip = '!'
+  } else if (ACTIVE_STATES.has(task.state)) {
+    tone = 'queued'
+    pip = '↻'
+  }
+
+  return (
+    <div className={`sh-chat-dag-step ${tone}`}>
+      <span className="sh-chat-dag-pip">{pip}</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="sh-chat-dag-agent">{task.title}</div>
+        <div className="sh-chat-dag-tool">{task.agent_role ?? task.task_type ?? task.state}</div>
       </div>
     </div>
   )
@@ -188,3 +390,19 @@ function relativeTime(input: string | Date | undefined): string {
   if (d < 7) return `${d}d`
   return then.toLocaleDateString('en-GB', { month: 'short', day: 'numeric' })
 }
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`
+  return String(n)
+}
+
+function formatElapsed(ms: number): string {
+  const s = Math.floor(ms / 1000)
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}m ${s % 60}s`
+  const h = Math.floor(m / 60)
+  return `${h}h ${m % 60}m`
+}
+
