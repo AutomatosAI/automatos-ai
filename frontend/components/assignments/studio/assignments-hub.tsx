@@ -93,6 +93,30 @@ export function StudioAssignmentsHub() {
         </div>
       </div>
 
+      {/* Flip tabs — moved above Start something so they're the first
+          navigation element visible at scroll=0 and stay sticky as the
+          user scrolls into the library below. */}
+      <nav className="cc-tabs" aria-label="Assignments sections">
+        <button
+          type="button"
+          className={`cc-tab${tab === 'playbooks' ? ' active' : ''}`}
+          aria-current={tab === 'playbooks' ? 'page' : undefined}
+          onClick={() => setTab('playbooks')}
+        >
+          <span>Playbooks</span>
+          {totalPlaybooks > 0 && <span className="cc-tab-ct">{totalPlaybooks}</span>}
+        </button>
+        <button
+          type="button"
+          className={`cc-tab${tab === 'missions' ? ' active' : ''}`}
+          aria-current={tab === 'missions' ? 'page' : undefined}
+          onClick={() => setTab('missions')}
+        >
+          <span>Missions</span>
+          {missionCount > 0 && <span className="cc-tab-ct">{missionCount}</span>}
+        </button>
+      </nav>
+
       {/* Start something — EntryGrid */}
       <section style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
@@ -119,28 +143,6 @@ export function StudioAssignmentsHub() {
         </div>
         <EntryGrid recommended="mission" onPick={handleEntry} />
       </section>
-
-      {/* Flip tabs: Playbooks · Missions */}
-      <nav className="cc-tabs" aria-label="Assignments sections">
-        <button
-          type="button"
-          className={`cc-tab${tab === 'playbooks' ? ' active' : ''}`}
-          aria-current={tab === 'playbooks' ? 'page' : undefined}
-          onClick={() => setTab('playbooks')}
-        >
-          <span>Playbooks</span>
-          {totalPlaybooks > 0 && <span className="cc-tab-ct">{totalPlaybooks}</span>}
-        </button>
-        <button
-          type="button"
-          className={`cc-tab${tab === 'missions' ? ' active' : ''}`}
-          aria-current={tab === 'missions' ? 'page' : undefined}
-          onClick={() => setTab('missions')}
-        >
-          <span>Missions</span>
-          {missionCount > 0 && <span className="cc-tab-ct">{missionCount}</span>}
-        </button>
-      </nav>
 
       {/* Tab body */}
       {tab === 'playbooks' ? <PlaybooksBody /> : <MissionsBody />}

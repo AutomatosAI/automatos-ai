@@ -1640,9 +1640,11 @@
     overflow-x: auto; scrollbar-width: none;
     margin: 0 -28px;
     padding: 0 28px;
+    /* Pin to top of the .cc-page scroll container — stays visible
+       even after the user scrolls into the library below. */
     position: sticky; top: 0;
     background: hsl(var(--background));
-    z-index: 5;
+    z-index: 20;
     box-shadow: 0 1px 0 hsl(var(--border));
   }
   .studio .cc-tabs::-webkit-scrollbar { display: none; }
