@@ -106,18 +106,32 @@ function fmtTokens(tokens: number | null | undefined): string {
   return `${tokens} tok`
 }
 
-function rowHref(item: ActivityFeedItem): string {
-  // Mirror the classic ActivityFeed deep-link behavior.
-  if (item.type === 'mission' && item.source_id) {
-    return `/missions/${item.source_id}`
+function rowHref(item: ActivityFeedItem): string | null {
+  // Mirror the classic ActivityFeed's deep-link behaviour. Only playbooks
+  // (recipes) belong in the ExecutionKitchen viewer. Routines are
+  // heartbeats — they should go to the agent that owns them, not the
+  // playbook viewer.
+  switch (item.type) {
+    case 'mission':
+      return item.source_id ? `/missions/${item.source_id}` : null
+    case 'chat':
+      return item.source_id ? `/chat/${item.source_id}` : null
+    case 'recipe':
+      if (!item.source_id) return null
+      // Recipe id pattern: feed id is "recipe-<execId>", source_id is the recipe id
+      return `/activity/execution?id=${encodeURIComponent(
+        item.id.replace(/^recipe-/, ''),
+      )}&recipeId=${encodeURIComponent(item.source_id)}`
+    case 'task':
+      return item.source_id
+        ? `/command-center?tab=board&task=${encodeURIComponent(item.source_id)}`
+        : null
+    case 'routine':
+      // Heartbeat — open the owning agent so the user can pause/tune it
+      return item.agent?.id ? `/agents?agent=${item.agent.id}` : null
+    default:
+      return null
   }
-  if (item.type === 'chat' && item.source_id) {
-    return `/chat/${item.source_id}`
-  }
-  if (item.source_id) {
-    return `/activity/execution?id=${encodeURIComponent(item.source_id)}`
-  }
-  return '/command-center?tab=activity'
 }
 
 export function ActivityTab() {
@@ -148,7 +162,8 @@ export function ActivityTab() {
   }, [allData, items])
 
   const handleRowClick = (item: ActivityFeedItem) => {
-    router.push(rowHref(item) as any)
+    const href = rowHref(item)
+    if (href) router.push(href as any)
   }
 
   return (

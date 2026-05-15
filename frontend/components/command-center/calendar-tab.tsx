@@ -51,6 +51,56 @@ interface CalEvent {
   agentId: number | null
   dayKey: string
   date: Date
+  /** true when this event is a synthesised recurrence (not the literal next_run_at) */
+  recurring?: boolean
+}
+
+/**
+ * Parse "Every 30m", "Every 8h", "Every 1d" → minutes. Returns null on
+ * raw cron expressions (those get handled by getRecurringDays).
+ */
+function parseIntervalMinutes(frequency: string | null | undefined): number | null {
+  if (!frequency) return null
+  const m = frequency.match(/every\s+(\d+)\s*(m|min|h|hr|d|day)/i)
+  if (!m) return null
+  const v = parseInt(m[1], 10)
+  const u = m[2].toLowerCase()
+  if (u.startsWith('m')) return v
+  if (u.startsWith('h')) return v * 60
+  if (u.startsWith('d')) return v * 1440
+  return null
+}
+
+/**
+ * Cron field → day-of-week indices (0 = Sun ... 6 = Sat).
+ * Returns null when the cron expression doesn't have a parseable DOW field.
+ */
+function cronDaysOfWeek(frequency: string | null | undefined): number[] | null {
+  if (!frequency) return null
+  const m = frequency.match(
+    /^[\d,/*-]+\s+[\d,/*-]+\s+[\d,/*-]+\s+[\d,/*-]+\s+([\d,/*-]+)$/,
+  )
+  if (!m) return null
+  const f = m[1]
+  if (f === '*') return [0, 1, 2, 3, 4, 5, 6]
+  const range = f.match(/^(\d)-(\d)$/)
+  if (range) {
+    const out: number[] = []
+    for (let i = parseInt(range[1], 10); i <= parseInt(range[2], 10); i++) out.push(i)
+    return out
+  }
+  if (/^[\d,]+$/.test(f)) return f.split(',').map(Number)
+  return null
+}
+
+/**
+ * Cron's hour + minute fields → hour-of-day. Returns null when not parseable.
+ */
+function cronHourMin(frequency: string | null | undefined): { h: number; m: number } | null {
+  if (!frequency) return null
+  const m = frequency.match(/^(\d+)\s+(\d+)\s+/)
+  if (!m) return null
+  return { m: parseInt(m[1], 10), h: parseInt(m[2], 10) }
 }
 
 function startOfWeek(d: Date): Date {
@@ -134,34 +184,134 @@ export function CalendarTab() {
     return week
   }, [mode, anchor, week])
 
+  // Window covered by the current view (used to expand recurring events).
+  const windowSpan = useMemo(() => {
+    if (mode === 'day') {
+      const start = new Date(anchor)
+      start.setHours(0, 0, 0, 0)
+      const end = new Date(start)
+      end.setHours(23, 59, 59, 999)
+      return { start, end }
+    }
+    if (mode === 'week') {
+      const start = startOfWeek(anchor)
+      const end = addDays(start, 7)
+      end.setMilliseconds(end.getMilliseconds() - 1)
+      return { start, end }
+    }
+    // month → 6-week grid
+    const start = startOfMonthGrid(anchor)
+    const end = addDays(start, 42)
+    end.setMilliseconds(end.getMilliseconds() - 1)
+    return { start, end }
+  }, [mode, anchor])
+
   const events = useMemo<CalEvent[]>(() => {
     if (!schedule?.scheduled) return []
-    const visibleKeys = new Set(visibleDays.map((d) => d.date.toDateString()))
-    const allEvts = schedule.scheduled
-      .map((s, idx) => {
-        if (!s.next_run_at) return null
-        const d = new Date(s.next_run_at)
-        return {
-          id: `${s.id}-${idx}`,
-          hour: d.getHours(),
-          min: d.getMinutes(),
-          durMin: 15,
-          name: s.name,
-          agent: s.agent_name,
-          agentId: s.agent_id,
-          dayKey: d.toDateString(),
-          date: d,
+    const out: CalEvent[] = []
+    schedule.scheduled.forEach((s, idx) => {
+      const interval = parseIntervalMinutes(s.frequency)
+      const dow = cronDaysOfWeek(s.frequency)
+      const cronHm = cronHourMin(s.frequency)
+
+      // Recurring: "Every Xh" / "Every Xm" but slower than hourly. Hourly+
+      // routines go in the always-on band, not the grid.
+      if (interval !== null && interval > 60) {
+        // Anchor at next_run_at and walk backwards + forwards across window.
+        const anchorDate = s.next_run_at ? new Date(s.next_run_at) : new Date()
+        // Walk back
+        let t = anchorDate.getTime()
+        while (t > windowSpan.start.getTime() - 1) {
+          if (t <= windowSpan.end.getTime()) {
+            const d = new Date(t)
+            out.push({
+              id: `${s.id}-${t}`,
+              hour: d.getHours(),
+              min: d.getMinutes(),
+              durMin: 20,
+              name: s.name,
+              agent: s.agent_name,
+              agentId: s.agent_id,
+              dayKey: d.toDateString(),
+              date: d,
+              recurring: true,
+            })
+          }
+          t -= interval * 60_000
         }
-      })
-      .filter((e): e is CalEvent => e !== null)
-    if (mode === 'month') return allEvts
-    return allEvts.filter((e) => visibleKeys.has(e.dayKey))
-  }, [schedule, visibleDays, mode])
+        // Walk forward
+        t = anchorDate.getTime() + interval * 60_000
+        while (t < windowSpan.end.getTime() + 1) {
+          if (t >= windowSpan.start.getTime()) {
+            const d = new Date(t)
+            out.push({
+              id: `${s.id}-${t}`,
+              hour: d.getHours(),
+              min: d.getMinutes(),
+              durMin: 20,
+              name: s.name,
+              agent: s.agent_name,
+              agentId: s.agent_id,
+              dayKey: d.toDateString(),
+              date: d,
+              recurring: true,
+            })
+          }
+          t += interval * 60_000
+        }
+        return
+      }
+
+      // Cron with day-of-week + hour fields (e.g. "0 9 * * 1-5") — render
+      // an event on every matching day in the window.
+      if (dow && cronHm) {
+        for (let i = 0; i < 42; i++) {
+          const d = addDays(windowSpan.start, i)
+          if (d > windowSpan.end) break
+          if (!dow.includes(d.getDay())) continue
+          d.setHours(cronHm.h, cronHm.m, 0, 0)
+          out.push({
+            id: `${s.id}-${d.toISOString()}`,
+            hour: cronHm.h,
+            min: cronHm.m,
+            durMin: 20,
+            name: s.name,
+            agent: s.agent_name,
+            agentId: s.agent_id,
+            dayKey: d.toDateString(),
+            date: new Date(d),
+            recurring: true,
+          })
+        }
+        return
+      }
+
+      // Fallback: single occurrence at next_run_at when we can't parse
+      // anything else. Better than nothing — the user still sees something.
+      if (s.next_run_at) {
+        const d = new Date(s.next_run_at)
+        if (d >= windowSpan.start && d <= windowSpan.end) {
+          out.push({
+            id: `${s.id}-${idx}`,
+            hour: d.getHours(),
+            min: d.getMinutes(),
+            durMin: 15,
+            name: s.name,
+            agent: s.agent_name,
+            agentId: s.agent_id,
+            dayKey: d.toDateString(),
+            date: d,
+          })
+        }
+      }
+    })
+    return out
+  }, [schedule, windowSpan])
 
   const alwaysOn = useMemo(() => {
     if (!heartbeats?.heartbeats) return []
     return heartbeats.heartbeats
-      .filter((h) => h.enabled && h.interval_minutes <= 30)
+      .filter((h) => h.enabled && h.interval_minutes <= 60)
       .map((h) => ({
         id: h.id,
         name: `${h.agent_name} · every ${h.interval_minutes}m`,
