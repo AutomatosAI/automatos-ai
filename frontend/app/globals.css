@@ -1027,10 +1027,42 @@
     display: flex; flex-direction: column;
     padding: 18px 12px 14px;
     height: 100vh; position: sticky; top: 0;
+    transition: width 180ms ease;
+  }
+  .studio .sh-side.collapsed {
+    width: 60px; padding: 18px 8px 14px;
   }
   .studio .sh-side .sh-brand-row {
     display: flex; align-items: center; gap: 9px;
     padding: 0 6px 14px;
+  }
+  .studio .sh-side.collapsed .sh-brand-row {
+    padding: 0 0 14px; justify-content: center; flex-direction: column; gap: 6px;
+  }
+  .studio .sh-side .sh-toggle {
+    width: 22px; height: 22px; border-radius: 5px;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: transparent; border: 1px solid transparent;
+    color: hsl(var(--muted-foreground));
+    cursor: pointer; flex-shrink: 0;
+    transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+  }
+  .studio .sh-side .sh-toggle:hover {
+    background: hsl(var(--card)); border-color: hsl(var(--border));
+    color: hsl(var(--foreground));
+  }
+  .studio .sh-side:not(.collapsed) .sh-toggle { margin-left: 4px; }
+  .studio .sh-side.collapsed .sh-ws-card {
+    padding: 8px; justify-content: center;
+  }
+  .studio .sh-side.collapsed .sh-item {
+    justify-content: center; padding: 7px 0;
+  }
+  .studio .sh-side.collapsed .sh-group-rule {
+    height: 1px; background: hsl(var(--border)); margin: 10px 6px 6px; opacity: 0.6;
+  }
+  .studio .sh-side.collapsed .sh-footer {
+    border-top: 1px solid hsl(var(--border));
   }
   .studio .sh-side .sh-ws-card {
     display: flex; align-items: center; gap: 10px;

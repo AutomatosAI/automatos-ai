@@ -1,7 +1,7 @@
 
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { Sidebar } from './sidebar'
@@ -23,9 +23,27 @@ interface MainLayoutProps {
 export function MainLayout({ children }: MainLayoutProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [studioSidebarCollapsed, setStudioSidebarCollapsed] = useState(false)
   const isMobileLayout = useIsTabletOrBelow()
   const isStudio = useIsStudio()
   const pathname = usePathname()
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('studioSidebarCollapsed')
+      if (stored === '1') setStudioSidebarCollapsed(true)
+    } catch {}
+  }, [])
+
+  const toggleStudioSidebar = () => {
+    setStudioSidebarCollapsed((prev) => {
+      const next = !prev
+      try {
+        localStorage.setItem('studioSidebarCollapsed', next ? '1' : '0')
+      } catch {}
+      return next
+    })
+  }
 
   // Auto-start page tour on first visit (per-user, per-page)
   useAutoTour()
@@ -71,7 +89,10 @@ export function MainLayout({ children }: MainLayoutProps) {
   if (isStudio && !isMobileLayout) {
     return (
       <div className="sh-shell">
-        <StudioSidebar />
+        <StudioSidebar
+          collapsed={studioSidebarCollapsed}
+          onToggle={toggleStudioSidebar}
+        />
         <div className="sh-main">
           <StudioTicker />
           <StudioHeader />
