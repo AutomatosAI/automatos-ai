@@ -70,7 +70,7 @@ export function ProfileMenu() {
                             className="w-8 h-8 rounded-full border-2 border-primary/30"
                         />
                     ) : (
-                        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-purple-600 flex items-center justify-center">
+                        <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center">
                             <User className="w-4 h-4 text-primary-foreground" />
                         </div>
                     )}
@@ -94,7 +94,7 @@ export function ProfileMenu() {
                                     className="w-10 h-10 rounded-full border-2 border-primary/30"
                                 />
                             ) : (
-                                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary to-purple-600 flex items-center justify-center">
+                                <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center">
                                     <User className="w-5 h-5 text-primary-foreground" />
                                 </div>
                             )}

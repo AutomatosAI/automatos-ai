@@ -10,6 +10,7 @@ import { Header } from './header'
 import { StudioSidebar } from './studio-sidebar'
 import { StudioHeader } from './studio-header'
 import { StudioTicker } from './studio-ticker'
+import { StudioPageTabs } from './studio-page-tabs'
 import { AutoWidget } from '../chatbot/chat-widget'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { useIsTabletOrBelow } from '@/hooks/use-mobile'
@@ -18,9 +19,16 @@ import { useIsStudio } from '@/hooks/use-studio-theme'
 
 interface MainLayoutProps {
   children: React.ReactNode
+  /**
+   * When true, render the main content area with no padding and no max-width
+   * cap so the page can take the full available width and height. Use for
+   * full-canvas surfaces like chat. Studio shell only — classic layout still
+   * applies its own padding.
+   */
+  fullBleed?: boolean
 }
 
-export function MainLayout({ children }: MainLayoutProps) {
+export function MainLayout({ children, fullBleed = false }: MainLayoutProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [studioSidebarCollapsed, setStudioSidebarCollapsed] = useState(false)
@@ -96,16 +104,21 @@ export function MainLayout({ children }: MainLayoutProps) {
         <div className="sh-main">
           <StudioTicker />
           <StudioHeader />
-          <main className="px-4 py-4 md:px-6 md:py-6 lg:px-12 lg:py-8 2xl:px-16">
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5 }}
-              className="max-w-[1720px] mx-auto"
-            >
-              {children}
-            </motion.div>
-          </main>
+          {!fullBleed && <StudioPageTabs />}
+          {fullBleed ? (
+            <main className="flex-1 min-h-0 flex flex-col">{children}</main>
+          ) : (
+            <main className="px-4 py-4 md:px-6 md:py-6 lg:px-12 lg:py-8 2xl:px-16">
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5 }}
+                className="max-w-[1720px] mx-auto"
+              >
+                {children}
+              </motion.div>
+            </main>
+          )}
         </div>
         <AutoWidget
           position="bottom-right"
@@ -134,14 +147,22 @@ export function MainLayout({ children }: MainLayoutProps) {
         </>
       )}
 
-      {/* Mobile Navigation Sheet */}
+      {/* Mobile Navigation Sheet — Studio uses the labelled rail, classic uses the existing MobileSidebar */}
       {isMobileLayout && (
         <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
           <SheetContent
             side="left"
-            className="w-[280px] p-0 glass-card border-r border-primary/15 bg-background/95 backdrop-blur-lg"
+            className={
+              isStudio
+                ? 'w-[260px] p-0 bg-secondary border-r border-border'
+                : 'w-[280px] p-0 glass-card border-r border-primary/15 bg-background/95 backdrop-blur-lg'
+            }
           >
-            <MobileSidebar onNavigate={() => setMobileMenuOpen(false)} />
+            {isStudio ? (
+              <StudioSidebar />
+            ) : (
+              <MobileSidebar onNavigate={() => setMobileMenuOpen(false)} />
+            )}
           </SheetContent>
         </Sheet>
       )}

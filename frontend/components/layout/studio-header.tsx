@@ -21,20 +21,21 @@ import {
  * actions all behave consistently with the classic layout.
  */
 
-export interface StudioHeaderProps {
-  /** Search trigger handler (cmdK). If absent, the search input is non-interactive visual stub. */
-  onSearchClick?: () => void;
-}
+export function StudioHeader() {
+  const openSearch = () => {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('automatos:global-search-open'));
+    }
+  };
 
-export function StudioHeader({ onSearchClick }: StudioHeaderProps) {
   return (
     <header className="sh-headbar">
-      {/* Search cmdK */}
+      {/* Search cmdK — dispatches the global search open event */}
       <button
         type="button"
         className="sh-cmdk"
-        onClick={onSearchClick}
-        aria-label="Search the platform"
+        onClick={openSearch}
+        aria-label="Open search (⌘K)"
       >
         <Search style={{ width: 12, height: 12 }} />
         <span>Jump to mission, agent, run…</span>

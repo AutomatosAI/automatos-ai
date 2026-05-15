@@ -32,6 +32,10 @@ export interface StudioTickerProps {
   live?: boolean;
 }
 
+// TODO: wire to a real metrics endpoint. Until then these are the pilot
+// snapshot values from the PRD. When a metrics API is online, replace this
+// constant with a SWR/React Query hook (e.g. useTickerMetrics) and pass
+// the result via the `cells` prop on the mount point in MainLayout.
 const DEFAULT_CELLS: TickerCell[] = [
   { label: 'UPTIME', value: '99.84%', tone: 'ok' },
   { label: 'CACHE', value: '68%', tone: 'ok', delta: '↑ vs 41%' },

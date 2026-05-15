@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { ChevronsUpDown, ExternalLink, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { ExternalLink, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import {
   STUDIO_MENU_PRIMARY,
   STUDIO_MENU_FOOTER,
@@ -29,20 +29,21 @@ export interface StudioSidebarProps {
   workspaceName?: string;
   workspaceMeta?: string;
   workspaceMark?: string;
-  onWorkspaceClick?: () => void;
   alerts?: Record<string, string | number>;
   showStats?: boolean;
-  /** Collapse to icon-rail (56px). Defaults false. */
+  /** Collapse to icon-rail (60px). Defaults false. */
   collapsed?: boolean;
   /** Toggle handler. If absent, the toggle button is hidden. */
   onToggle?: () => void;
 }
 
+// NOTE: Multi-workspace switching is OOS for the Studio rebrand (one
+// workspace per user). The workspace pill is intentionally non-interactive
+// — kept as a static identity card showing the current workspace.
 export function StudioSidebar({
   workspaceName = 'Automatos AI',
   workspaceMeta = 'pilot · 11 op',
   workspaceMark,
-  onWorkspaceClick,
   alerts = {},
   showStats = true,
   collapsed = false,
@@ -98,26 +99,16 @@ export function StudioSidebar({
         )}
       </div>
 
-      {/* Workspace switcher pill */}
-      <button
-        type="button"
-        className="sh-ws-card"
-        onClick={onWorkspaceClick}
-        aria-label="Switch workspace"
-      >
+      {/* Workspace identity (static — multi-workspace OOS for the rebrand) */}
+      <div className="sh-ws-card" role="group" aria-label="Current workspace">
         <span className="sh-mk">{mark}</span>
         {!collapsed && (
-          <>
-            <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
-              <div className="sh-nm">{workspaceName}</div>
-              <div className="sh-meta">{workspaceMeta}</div>
-            </div>
-            <ChevronsUpDown
-              style={{ width: 13, height: 13, color: 'hsl(var(--muted-foreground))', strokeWidth: 1.6 }}
-            />
-          </>
+          <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+            <div className="sh-nm">{workspaceName}</div>
+            <div className="sh-meta">{workspaceMeta}</div>
+          </div>
         )}
-      </button>
+      </div>
 
       {/* Primary menu — grouped */}
       <nav style={{ flex: 1, overflow: 'hidden auto' }} aria-label="Main">

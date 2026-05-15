@@ -7,10 +7,12 @@ import { ArrowLeft } from 'lucide-react'
 import { MainLayout } from '@/components/layout/main-layout'
 import { Chat } from '@/components/chatbot/chat'
 import { AppSidebar } from '@/components/chatbot/sidebar'
+import { StudioChatShell } from '@/components/chatbot/studio-chat-shell'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { Button } from '@/components/ui/button'
 import { usePageAPI } from '@/hooks/use-page-api'
 import { useIsMobile } from '@/hooks/use-mobile'
+import { useIsStudio } from '@/hooks/use-studio-theme'
 import { useMissionStore } from '@/stores/mission-store'
 import type { Chat as ChatType, ChatMessage } from '@/types'
 
@@ -20,6 +22,7 @@ export const dynamic = 'force-dynamic'
 export default function ChatPage() {
   usePageAPI('chat')
   const isMobile = useIsMobile()
+  const isStudio = useIsStudio()
   const searchParams = useSearchParams()
   const router = useRouter()
   const setPlanMode = useMissionStore((s) => s.setPlanMode)
@@ -81,11 +84,39 @@ export default function ChatPage() {
     return () => window.removeEventListener('automatos:chat-history-toggle', handler as any)
   }, [])
 
+  const chatBody = (
+    <Chat
+      key={`${currentChatId || 'new'}-${chatInstance}`}
+      id={currentChatId}
+      initialMessages={currentMessages}
+      initialChatModel="gpt-4"
+      initialVisibilityType={selectedChat?.visibility || 'private'}
+      isReadonly={false}
+      autoResume={false}
+      initialLastContext={selectedChat?.lastContext}
+    />
+  )
+
+  // Studio desktop: CD's three-column ledger layout
+  if (isStudio && !isMobile) {
+    return (
+      <MainLayout fullBleed>
+        <StudioChatShell
+          selectedChatId={currentChatId}
+          selectedChat={selectedChat}
+          onSelectChat={handleChatSelect}
+          onNewChat={handleNewChat}
+        >
+          {chatBody}
+        </StudioChatShell>
+      </MainLayout>
+    )
+  }
+
+  // Classic layout (mobile + non-studio desktop)
   return (
     <MainLayout>
-      {/* Use dvh for mobile to handle browser chrome, vh for desktop */}
       <div className="relative h-[calc(100dvh-5rem)] md:h-[calc(100vh-8rem)]">
-        {/* US-015: Back-link when navigated from Assignments */}
         {fromParam === 'assignments' && (
           <div className="absolute top-2 left-3 z-30">
             <Button
@@ -99,7 +130,6 @@ export default function ChatPage() {
             </Button>
           </div>
         )}
-        {/* Mobile: chat history as Sheet overlay */}
         {isMobile ? (
           <Sheet open={isHistoryOpen} onOpenChange={setIsHistoryOpen}>
             <SheetContent side="left" className="w-[300px] p-0 bg-background/95 backdrop-blur-lg">
@@ -107,7 +137,6 @@ export default function ChatPage() {
             </SheetContent>
           </Sheet>
         ) : (
-          /* Desktop: docked chat history panel */
           <AnimatePresence>
             {isHistoryOpen && (
               <motion.aside
@@ -125,19 +154,7 @@ export default function ChatPage() {
           </AnimatePresence>
         )}
 
-        {/* Main chat area */}
-        <div className="h-full">
-          <Chat
-            key={`${currentChatId || 'new'}-${chatInstance}`}
-            id={currentChatId}
-            initialMessages={currentMessages}
-            initialChatModel="gpt-4"
-            initialVisibilityType={selectedChat?.visibility || 'private'}
-            isReadonly={false}
-            autoResume={false}
-            initialLastContext={selectedChat?.lastContext}
-          />
-        </div>
+        <div className="h-full">{chatBody}</div>
       </div>
     </MainLayout>
   )
