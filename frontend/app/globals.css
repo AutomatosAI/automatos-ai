@@ -1243,11 +1243,17 @@
 
   /* ── Studio shell layout container ─────────────────────────────── */
   .studio .sh-shell {
-    display: flex; min-height: 100vh;
+    display: flex; height: 100vh; height: 100dvh;
     background: hsl(var(--background));
+    overflow: hidden;
   }
   .studio .sh-shell .sh-main {
-    flex: 1; min-width: 0; display: flex; flex-direction: column;
+    flex: 1; min-width: 0; min-height: 0;
+    display: flex; flex-direction: column;
+  }
+  /* Non-full-bleed main scrolls internally so the shell stays viewport-bound */
+  .studio .sh-shell .sh-main > main:not(.sh-fullbleed) {
+    overflow-y: auto;
   }
 
   /* ── Studio page tabs (sub-nav under header) ───────────────────── */
@@ -1289,15 +1295,30 @@
 
   /* ── Studio chat layout (CD round 3) ───────────────────────────── */
   .studio .sh-chat {
-    display: flex; flex-direction: column; flex: 1; min-height: 0;
+    display: flex; flex-direction: column;
+    flex: 1; min-height: 0; height: 100%;
     background: hsl(var(--background));
+    overflow: hidden;
   }
   .studio .sh-chat-bar {
     display: flex; align-items: center; gap: 8px;
-    padding: 12px 24px;
+    padding: 10px 20px;
     border-bottom: 1px solid hsl(var(--border));
     background: hsl(var(--background));
     font-size: 12px;
+    flex-shrink: 0;
+  }
+  .studio .sh-chat-side-toggle {
+    width: 24px; height: 24px; border-radius: 5px;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: transparent; border: 1px solid transparent;
+    color: hsl(var(--muted-foreground)); cursor: pointer;
+    transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+    margin-right: 4px;
+  }
+  .studio .sh-chat-side-toggle:hover {
+    background: hsl(var(--card)); border-color: hsl(var(--border));
+    color: hsl(var(--foreground));
   }
   .studio .sh-chat-eyebrow {
     font-family: var(--font-geist-mono, monospace); font-size: 10px;
@@ -1345,34 +1366,35 @@
 
   .studio .sh-chat-grid {
     flex: 1; min-height: 0; display: grid;
-    grid-template-columns: 220px 1fr 280px;
+    grid-template-columns: 220px 1fr;
+    grid-template-rows: 1fr;
     overflow: hidden;
   }
-  @media (max-width: 1199px) {
-    .studio .sh-chat-grid { grid-template-columns: 220px 1fr; }
-    .studio .sh-chat-rail { display: none; }
+  .studio .sh-chat.threads-collapsed .sh-chat-grid {
+    grid-template-columns: 1fr;
   }
 
-  /* Threads column */
+  /* Threads column — minimised editorial list */
   .studio .sh-chat-threads {
     border-right: 1px solid hsl(var(--border));
     background: hsl(var(--secondary));
     display: flex; flex-direction: column;
-    padding: 14px 8px; overflow: hidden;
+    padding: 12px 6px; min-height: 0; overflow: hidden;
   }
   .studio .sh-chat-threads-head {
     display: flex; align-items: center; gap: 8px;
-    padding: 4px 10px 10px;
+    padding: 4px 8px 8px;
   }
   .studio .sh-chat-threads-head .sh-chat-act { margin-left: auto; height: 22px; padding: 0 8px; }
   .studio .sh-chat-thread-list {
-    flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 1px;
+    flex: 1; min-height: 0; overflow-y: auto;
+    display: flex; flex-direction: column; gap: 0;
   }
   .studio .sh-chat-thread {
-    display: flex; align-items: flex-start; gap: 8px;
-    padding: 8px 10px; border-radius: 6px;
+    display: flex; align-items: center; gap: 7px;
+    padding: 6px 8px; border-radius: 5px;
     background: transparent; border: 0; cursor: pointer; text-align: left;
-    transition: background 140ms ease;
+    transition: background 140ms ease; min-width: 0;
   }
   .studio .sh-chat-thread:hover { background: hsl(38 45% 96%); }
   .studio .sh-chat-thread.active {
@@ -1380,35 +1402,33 @@
     box-shadow: 0 1px 0 hsla(30 50% 18% / 0.05);
   }
   .studio .sh-chat-thread-dot {
-    width: 6px; height: 6px; border-radius: 50%; margin-top: 7px;
+    width: 5px; height: 5px; border-radius: 50%;
     flex-shrink: 0; background: hsl(var(--muted-foreground));
   }
   .studio .sh-chat-thread-dot.ok { background: hsl(82 50% 22%); }
   .studio .sh-chat-thread-dot.warn { background: hsl(var(--accent)); }
-  .studio .sh-chat-thread-body {
-    flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px;
-  }
   .studio .sh-chat-thread-title {
-    font-size: 12.5px; color: hsl(var(--foreground)); font-weight: 400;
+    flex: 1; min-width: 0;
+    font-size: 12px; color: hsl(var(--foreground)); font-weight: 400;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .studio .sh-chat-thread.active .sh-chat-thread-title { font-weight: 600; }
-  .studio .sh-chat-thread-id {
-    font-family: var(--font-geist-mono, monospace); font-size: 10px;
-    color: hsl(var(--muted-foreground));
-  }
   .studio .sh-chat-thread-ts {
-    font-family: var(--font-geist-mono, monospace); font-size: 10px;
+    font-family: var(--font-geist-mono, monospace); font-size: 9.5px;
     color: hsl(var(--muted-foreground)); flex-shrink: 0;
   }
   .studio .sh-chat-thread-empty {
-    padding: 24px 10px; text-align: center;
+    padding: 20px 10px; text-align: center;
     color: hsl(var(--muted-foreground)); font-size: 12px;
   }
 
-  /* Main thread column — host the existing <Chat> component */
+  /* Main thread column — host the existing <Chat> component.
+     The grid row is `1fr`, this cell is height: 100% so the Chat (which
+     uses `height: 100%`) has a concrete dimension to fill. */
   .studio .sh-chat-main {
-    display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+    display: flex; flex-direction: column;
+    min-height: 0; min-width: 0; height: 100%;
+    overflow: hidden;
     background: hsl(var(--background));
   }
   .studio .sh-chat-main > * { flex: 1; min-height: 0; }

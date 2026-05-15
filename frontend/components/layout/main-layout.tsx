@@ -106,7 +106,9 @@ export function MainLayout({ children, fullBleed = false }: MainLayoutProps) {
           <StudioHeader />
           {!fullBleed && <StudioPageTabs />}
           {fullBleed ? (
-            <main className="flex-1 min-h-0 flex flex-col">{children}</main>
+            <main className="sh-fullbleed flex-1 min-h-0 flex flex-col">
+              {children}
+            </main>
           ) : (
             <main className="px-4 py-4 md:px-6 md:py-6 lg:px-12 lg:py-8 2xl:px-16">
               <motion.div
