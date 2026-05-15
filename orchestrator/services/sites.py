@@ -176,7 +176,7 @@ def public_site_dict(site: Site) -> dict:
         "display_name": site.display_name,
         "status": site.status,
         "settings": site.settings or {},
-        "capabilities": site.capabilities or {},
+        "capabilities": site.effective_capabilities,
         "created_at": site.created_at.isoformat() if site.created_at else None,
         "updated_at": site.updated_at.isoformat() if site.updated_at else None,
     }
