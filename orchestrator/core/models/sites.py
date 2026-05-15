@@ -95,3 +95,16 @@ class Site(Base):
             f"<Site id={self.id} type={self.type!r} "
             f"external_id={self.external_id!r} workspace={self.workspace_id}>"
         )
+
+    @property
+    def effective_capabilities(self) -> dict[str, bool]:
+        # Merges stored capabilities over the type's defaults so legacy
+        # rows (capabilities={}) still surface the right flags to the UI
+        # without depending on a one-shot data backfill.
+        defaults = (
+            derive_default_capabilities(self.type)
+            if self.type in SITE_TYPES
+            else {key: False for key in CAPABILITY_KEYS}
+        )
+        stored = self.capabilities or {}
+        return {key: bool(stored.get(key, defaults[key])) for key in CAPABILITY_KEYS}

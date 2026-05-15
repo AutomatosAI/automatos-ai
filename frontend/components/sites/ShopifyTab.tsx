@@ -1,29 +1,37 @@
-'use client';
+'use client'
 
-import { ExternalLink, ShoppingBag, Database } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import type { Site } from '@/lib/sites/types';
+import { ExternalLink, ShoppingBag, Database } from 'lucide-react'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import type { Site } from '@/lib/sites/types'
 
+const CAPABILITY_LABEL: Record<string, string> = {
+  has_cart: 'Cart events',
+  has_catalog: 'Product catalog',
+  has_volume_discounts: 'Volume discounts',
+  has_customer_records: 'Customer records',
+  has_working_hours_source: 'Working hours source',
+  supports_theme_override: 'Theme override',
+}
 
 export function ShopifyTab({ site }: { site: Site }) {
   if (site.type !== 'shopify' || !site.external_id) {
     return (
-      <Card>
-        <CardContent className="py-6 text-center text-gray-500 text-sm">
+      <Card className="glass-card">
+        <CardContent className="py-6 text-center text-muted-foreground text-sm">
           This Site is not a Shopify store.
         </CardContent>
       </Card>
-    );
+    )
   }
 
-  const themeEditorUrl = `https://${site.external_id}/admin/themes/current/editor`;
-  const adminUrl = `https://${site.external_id}/admin`;
+  const themeEditorUrl = `https://${site.external_id}/admin/themes/current/editor`
+  const adminUrl = `https://${site.external_id}/admin`
 
   return (
     <div className="space-y-4">
-      <Card>
+      <Card className="glass-card">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <ShoppingBag className="w-4 h-4" /> Shopify store
@@ -31,8 +39,8 @@ export function ShopifyTab({ site }: { site: Site }) {
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex items-center justify-between">
-            <span className="text-sm text-gray-600">Domain</span>
-            <code className="text-xs bg-gray-100 px-2 py-1 rounded">
+            <span className="text-sm text-muted-foreground">Domain</span>
+            <code className="text-xs bg-secondary/50 text-foreground px-2 py-1 rounded">
               {site.external_id}
             </code>
           </div>
@@ -51,7 +59,7 @@ export function ShopifyTab({ site }: { site: Site }) {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="glass-card">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <Database className="w-4 h-4" /> Capabilities
@@ -61,13 +69,15 @@ export function ShopifyTab({ site }: { site: Site }) {
           <div className="grid grid-cols-2 gap-2 text-sm">
             {Object.entries(site.capabilities).map(([key, value]) => (
               <div key={key} className="flex items-center justify-between">
-                <span className="text-gray-600 text-xs">{key}</span>
+                <span className="text-muted-foreground text-xs">
+                  {CAPABILITY_LABEL[key] ?? key}
+                </span>
                 <Badge
                   variant="outline"
                   className={
                     value
-                      ? 'text-emerald-700 border-emerald-200 bg-emerald-50'
-                      : 'text-gray-500 border-gray-200'
+                      ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                      : 'border-border/30 bg-secondary/30 text-muted-foreground'
                   }
                 >
                   {value ? 'yes' : 'no'}
@@ -78,18 +88,18 @@ export function ShopifyTab({ site }: { site: Site }) {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="glass-card">
         <CardHeader>
           <CardTitle className="text-base">Catalog sync</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-gray-500">
-            Catalog knowledge sync ships with PRD-009 (parked until PRD-008-A ships).
-            For now the agent grounds responses on real-time Composio queries
-            against your Shopify catalog.
+          <p className="text-sm text-muted-foreground">
+            Catalog knowledge sync ships with PRD-009 (parked until PRD-008-A
+            ships). For now the agent grounds responses on real-time Composio
+            queries against your Shopify catalog.
           </p>
         </CardContent>
       </Card>
     </div>
-  );
+  )
 }

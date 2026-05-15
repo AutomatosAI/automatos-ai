@@ -1,10 +1,14 @@
 """
-Destination dispatch orchestrator (PRD-008-A Phase 6).
+Destination dispatch orchestrator (PRD-008-A.1).
 
-Routes a single callback to all of a Site's configured destinations
-in parallel, with retry-with-exponential-backoff on retryable
-failures. Every attempt writes a row to ``widget_event_log`` so the
-dashboard can surface delivery state.
+Routes a callback to all of a Site's configured destinations in
+parallel, with retry-with-exponential-backoff on retryable failures.
+Every attempt writes a row to ``widget_event_log`` so the dashboard
+can surface delivery state.
+
+Destinations reference ``ChannelConnection`` rows (PRD-55) by id.
+Dispatch loads the running adapter from ``ChannelManager`` and calls
+``send_message(target, text)`` — same path heartbeats use.
 
 For v1 the queue is in-process via ``asyncio.create_task`` (called
 from the callback endpoint). The same orchestrator function will work
@@ -16,20 +20,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Awaitable, Callable
+import time
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
 from core.database.database import SessionLocal
+from core.models.channels import ChannelConnection
 from core.models.sites import Site
 from modules.widgets.telemetry import log_widget_event
 
 from services.destinations.base import CallbackPayload, DispatchResult
-from services.destinations.crm import dispatch_crm_webhook
-from services.destinations.email import dispatch_email
-from services.destinations.shopify_note import dispatch_shopify_customer_note
-from services.destinations.slack import dispatch_slack_webhook
 
 logger = logging.getLogger(__name__)
 
@@ -38,47 +39,152 @@ MAX_ATTEMPTS = 3
 BACKOFF_SECONDS = (0, 5, 15)  # before attempts 1, 2, 3
 
 
-# Shopify customer-note dispatcher needs extra context (shop domain +
-# access token), so its signature differs. We wrap it to fit the common
-# DispatcherFn shape used by the orchestrator.
+def _render_callback_text(payload: CallbackPayload) -> str:
+    """Format a callback for any text-based channel (Slack/Telegram/WA)."""
+    lines = [
+        f"🔔 Callback request — {payload.site_display_name}",
+        "",
+        f"Customer: {payload.name}",
+        f"Phone: {payload.phone}",
+    ]
+    if payload.product_context:
+        lines.append(f"Topic: {payload.product_context}")
+    if payload.urgency:
+        lines.append(f"Urgency: {payload.urgency}")
+    if payload.preferred_time:
+        lines.append(f"Preferred time: {payload.preferred_time}")
+    lines.append("")
+    lines.append(f"Request ID: {payload.request_id}")
+    return "\n".join(lines)
 
-DispatcherFn = Callable[..., Awaitable[DispatchResult]]
 
-
-def _resolve_dispatcher(
-    destination_type: str,
+async def dispatch_via_channel(
     *,
-    shop_domain: str | None = None,
-    access_token: str | None = None,
-) -> DispatcherFn | None:
-    if destination_type == "email":
-        return dispatch_email
-    if destination_type == "slack_webhook":
-        return dispatch_slack_webhook
-    if destination_type == "crm_webhook":
-        return dispatch_crm_webhook
-    if destination_type == "shopify_customer_note":
-        async def _wrapped(*, destination, payload):
-            return await dispatch_shopify_customer_note(
-                destination=destination,
-                payload=payload,
-                shop_domain=shop_domain or "",
-                access_token=access_token or "",
-            )
-        return _wrapped
-    return None
+    destination: dict,
+    payload: CallbackPayload,
+    db: Session,
+    workspace_id: UUID,
+) -> DispatchResult:
+    """Dispatch a callback to a workspace's connected channel.
+
+    `destination` shape:
+        {"type": "channel_connection",
+         "connection_id": "<uuid>",
+         "target": "<channel/chat id or phone>",
+         "platform": "<optional display hint>",
+         "label": "<optional display label>"}
+    """
+    started_ms = time.monotonic()
+    conn_id_raw = destination.get("connection_id")
+    target = destination.get("target")
+
+    # Static guards (permanent failures — no retry)
+    if not conn_id_raw or not target:
+        return DispatchResult(
+            success=False,
+            destination_type="channel_connection",
+            latency_ms=int((time.monotonic() - started_ms) * 1000),
+            error="missing connection_id or target",
+            retryable=False,
+        )
+    try:
+        conn_id = UUID(str(conn_id_raw))
+    except (ValueError, TypeError):
+        return DispatchResult(
+            success=False,
+            destination_type="channel_connection",
+            latency_ms=int((time.monotonic() - started_ms) * 1000),
+            error="connection_id is not a valid UUID",
+            retryable=False,
+        )
+
+    # Workspace-scoped lookup — enforces tenant isolation even if a
+    # malicious request slipped a foreign connection_id into Site
+    # settings.
+    conn = (
+        db.query(ChannelConnection)
+        .filter(
+            ChannelConnection.id == conn_id,
+            ChannelConnection.workspace_id == workspace_id,
+        )
+        .first()
+    )
+    if conn is None:
+        return DispatchResult(
+            success=False,
+            destination_type="channel_connection",
+            latency_ms=int((time.monotonic() - started_ms) * 1000),
+            error="channel connection not found in this workspace",
+            retryable=False,
+        )
+    if conn.status != "active":
+        return DispatchResult(
+            success=False,
+            destination_type="channel_connection",
+            latency_ms=int((time.monotonic() - started_ms) * 1000),
+            error=f"channel connection status is {conn.status!r}; expected 'active'",
+            retryable=False,
+        )
+
+    # Lazy import to avoid circular dep at module load
+    from channels.manager import get_channel_manager
+
+    manager = get_channel_manager()
+    adapter = manager._adapters.get(str(conn_id))
+    if adapter is None:
+        # Adapter not running yet — could be a cold start. Mark retryable
+        # so the next attempt gets a fresh chance after the worker has
+        # had a moment to load.
+        return DispatchResult(
+            success=False,
+            destination_type="channel_connection",
+            latency_ms=int((time.monotonic() - started_ms) * 1000),
+            error="channel adapter not loaded",
+            retryable=True,
+        )
+
+    text = _render_callback_text(payload)
+    try:
+        ok = await adapter.send_message(str(target), text)
+    except Exception as exc:  # noqa: BLE001 — adapter-specific transients
+        logger.warning(
+            "dispatch_via_channel raised for connection_id=%s: %s",
+            conn_id, exc,
+        )
+        return DispatchResult(
+            success=False,
+            destination_type="channel_connection",
+            latency_ms=int((time.monotonic() - started_ms) * 1000),
+            error=f"adapter exception: {exc}",
+            retryable=True,
+        )
+
+    latency_ms = int((time.monotonic() - started_ms) * 1000)
+    if ok:
+        return DispatchResult(
+            success=True,
+            destination_type="channel_connection",
+            latency_ms=latency_ms,
+            extra={"platform": conn.platform, "target": str(target)},
+        )
+    return DispatchResult(
+        success=False,
+        destination_type="channel_connection",
+        latency_ms=latency_ms,
+        error="adapter rejected target (returned False)",
+        retryable=False,
+    )
 
 
 async def dispatch_one_destination(
     *,
     db: Session,
     site_id: UUID,
+    workspace_id: UUID,
     session_id: str,
     request_id: str,
     destination: dict,
     payload: CallbackPayload,
-    shop_domain: str | None = None,
-    access_token: str | None = None,
 ) -> DispatchResult:
     """Try a single destination up to MAX_ATTEMPTS, with backoff between
     retryable failures. Writes a widget_event_log row for every attempt.
@@ -86,15 +192,13 @@ async def dispatch_one_destination(
     Returns the final DispatchResult (success or terminal failure).
     """
     destination_type = destination.get("type") or "unknown"
-    dispatcher = _resolve_dispatcher(
-        destination_type, shop_domain=shop_domain, access_token=access_token
-    )
-    if dispatcher is None:
+
+    if destination_type != "channel_connection":
         result = DispatchResult(
             success=False,
             destination_type=destination_type,
             latency_ms=0,
-            error=f"unknown destination type: {destination_type}",
+            error=f"unsupported destination type: {destination_type!r}",
             retryable=False,
         )
         await log_widget_event(
@@ -117,7 +221,12 @@ async def dispatch_one_destination(
         if attempt > 1:
             await asyncio.sleep(BACKOFF_SECONDS[attempt - 1])
 
-        result = await dispatcher(destination=destination, payload=payload)
+        result = await dispatch_via_channel(
+            destination=destination,
+            payload=payload,
+            db=db,
+            workspace_id=workspace_id,
+        )
         last = result
 
         if result.success:
@@ -165,12 +274,11 @@ async def dispatch_one_destination(
 async def dispatch_callback_for_site(
     *,
     site_id: UUID,
+    workspace_id: UUID,
     session_id: str,
     request_id: str,
     payload: CallbackPayload,
     destinations: list[dict],
-    shop_domain: str | None = None,
-    access_token: str | None = None,
 ) -> list[DispatchResult]:
     """Dispatch a callback to all of a Site's destinations in parallel.
 
@@ -183,12 +291,11 @@ async def dispatch_callback_for_site(
             dispatch_one_destination(
                 db=db,
                 site_id=site_id,
+                workspace_id=workspace_id,
                 session_id=session_id,
                 request_id=request_id,
                 destination=dest,
                 payload=payload,
-                shop_domain=shop_domain,
-                access_token=access_token,
             )
             for dest in destinations
         ]
@@ -220,15 +327,13 @@ def enqueue_callback_dispatch(
     v1: in-process via ``asyncio.create_task``. v2 swap-in: push to a
     Redis queue + worker. The endpoint's contract doesn't change.
     """
-    secrets = site.secrets or {}
     asyncio.create_task(
         dispatch_callback_for_site(
             site_id=site.id,
+            workspace_id=site.workspace_id,
             session_id=session_id,
             request_id=request_id,
             payload=payload,
             destinations=destinations,
-            shop_domain=site.external_id if site.type == "shopify" else None,
-            access_token=secrets.get("shopify_access_token") if site.type == "shopify" else None,
         )
     )

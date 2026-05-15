@@ -168,6 +168,74 @@ def test_status_defaults_to_active():
 
 
 # ---------------------------------------------------------------------------
+# 5b. effective_capabilities — runtime fallback for legacy empty rows
+# ---------------------------------------------------------------------------
+
+def test_effective_capabilities_falls_back_when_db_empty():
+    """A Shopify Site that landed before the runtime fallback must still
+    surface has_cart=True so CartIdlePanel renders. PRD-008-A.1 fix."""
+    from core.models.sites import Site
+
+    site = Site(
+        workspace_id=uuid4(),
+        type="shopify",
+        display_name="legacy",
+        capabilities={},
+    )
+    caps = site.effective_capabilities
+    assert caps["has_cart"] is True
+    assert caps["has_catalog"] is True
+    assert caps["has_customer_records"] is True
+
+
+def test_effective_capabilities_preserves_stored_overrides():
+    """If a connector flipped a flag (e.g. has_volume_discounts), the
+    stored value wins over the type default."""
+    from core.models.sites import Site
+
+    site = Site(
+        workspace_id=uuid4(),
+        type="shopify",
+        display_name="x",
+        capabilities={"has_volume_discounts": True},
+    )
+    caps = site.effective_capabilities
+    assert caps["has_volume_discounts"] is True
+    # Other shopify defaults still apply.
+    assert caps["has_cart"] is True
+
+
+def test_effective_capabilities_filters_unknown_keys():
+    """Unknown keys in the stored dict are dropped — UI components never
+    see flags they can't reason about."""
+    from core.models.sites import Site
+
+    site = Site(
+        workspace_id=uuid4(),
+        type="shopify",
+        display_name="x",
+        capabilities={"has_cart": False, "fake_key": True},
+    )
+    caps = site.effective_capabilities
+    assert "fake_key" not in caps
+    # Stored override wins (False even though shopify default is True).
+    assert caps["has_cart"] is False
+
+
+def test_effective_capabilities_for_non_shopify_type():
+    from core.models.sites import Site, CAPABILITY_KEYS
+
+    site = Site(
+        workspace_id=uuid4(),
+        type="custom",
+        display_name="x",
+        capabilities={},
+    )
+    caps = site.effective_capabilities
+    assert all(caps[k] is False for k in CAPABILITY_KEYS)
+
+
+# ---------------------------------------------------------------------------
 # 6. Debug-friendly repr
 # ---------------------------------------------------------------------------
 
