@@ -1,23 +1,32 @@
 'use client'
 
+import { useEffect } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
+
 import { MainLayout } from '@/components/layout/main-layout'
 import { PlaybooksPanel } from '@/components/playbooks/PlaybooksPanel'
-import { StudioPlaybooksPage } from '@/components/assignments/studio/studio-playbooks-page'
 import { useIsStudio } from '@/hooks/use-studio-theme'
 import { useIsTabletOrBelow } from '@/hooks/use-mobile'
 
 export default function PlaybooksPage() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
   const isStudio = useIsStudio()
   const isMobileLayout = useIsTabletOrBelow()
 
-  // Studio desktop: CD's standalone Playbooks library. Mobile + classic
-  // theme keep the existing PlaybooksPanel.
+  // Studio: the Assignments hub is the canonical view. Forward to it
+  // with the Playbooks tab pre-selected and any other params preserved
+  // (e.g. ?id=<recipe> for the detail panel).
+  useEffect(() => {
+    if (!isStudio || isMobileLayout) return
+    const params = new URLSearchParams(searchParams?.toString() ?? '')
+    params.set('tab', 'playbooks')
+    router.replace(`/assignments?${params.toString()}` as any)
+  }, [router, searchParams, isStudio, isMobileLayout])
+
+  // Classic theme + mobile keep the existing standalone Playbooks panel.
   if (isStudio && !isMobileLayout) {
-    return (
-      <MainLayout fullBleed>
-        <StudioPlaybooksPage />
-      </MainLayout>
-    )
+    return <MainLayout fullBleed>{null}</MainLayout>
   }
 
   return (
@@ -26,5 +35,3 @@ export default function PlaybooksPage() {
     </MainLayout>
   )
 }
-
-

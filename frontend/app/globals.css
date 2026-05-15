@@ -1591,6 +1591,7 @@
     height: 100%; min-height: 0;
     padding: 24px 28px 0;
     gap: 18px;
+    overflow-y: auto;
   }
   .studio .cc-headrow { display: flex; align-items: flex-end; gap: 18px; }
   .studio .cc-headrow > .cc-head { flex: 1; min-width: 0; }
@@ -1639,6 +1640,10 @@
     overflow-x: auto; scrollbar-width: none;
     margin: 0 -28px;
     padding: 0 28px;
+    position: sticky; top: 0;
+    background: hsl(var(--background));
+    z-index: 5;
+    box-shadow: 0 1px 0 hsl(var(--border));
   }
   .studio .cc-tabs::-webkit-scrollbar { display: none; }
   .studio .cc-tab {
