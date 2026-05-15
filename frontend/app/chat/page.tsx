@@ -30,6 +30,9 @@ export default function ChatPage() {
   // US-015: Deep-link params — ?mode=plan&from=assignments
   const modeParam = searchParams?.get('mode') ?? null
   const fromParam = searchParams?.get('from') ?? null
+  // Deep-link: /chat?chatId=<id> auto-loads that chat using client-side
+  // auth (avoids the server-side /chat/[id] route's 404-on-fetch problem).
+  const chatIdParam = searchParams?.get('chatId') ?? null
 
   // Activate plan mode when arriving via ?mode=plan
   useEffect(() => {
@@ -83,6 +86,33 @@ export default function ChatPage() {
     window.addEventListener('automatos:chat-history-toggle', handler as any)
     return () => window.removeEventListener('automatos:chat-history-toggle', handler as any)
   }, [])
+
+  // Auto-select chat when arriving via ?chatId=<id>
+  const [chatLoadAttempted, setChatLoadAttempted] = useState<string | null>(null)
+  useEffect(() => {
+    if (!chatIdParam || chatIdParam === currentChatId || chatLoadAttempted === chatIdParam) {
+      return
+    }
+    setChatLoadAttempted(chatIdParam)
+    let cancelled = false
+    ;(async () => {
+      try {
+        const { getChat, getChatMessages } = await import('@/lib/chat/api')
+        const [chat, messages] = await Promise.all([
+          getChat(chatIdParam),
+          getChatMessages(chatIdParam),
+        ])
+        if (!cancelled) {
+          handleChatSelect(chat, messages)
+        }
+      } catch (err) {
+        console.error('Failed to load chat from chatId param:', err)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [chatIdParam, currentChatId, chatLoadAttempted])
 
   const chatBody = (
     <Chat

@@ -115,7 +115,11 @@ function rowHref(item: ActivityFeedItem): string | null {
     case 'mission':
       return item.source_id ? `/missions/${item.source_id}` : null
     case 'chat':
-      return item.source_id ? `/chat/${item.source_id}` : null
+      // Use query param so client-side auth loads the thread; /chat/[id]
+      // server route 404s without a server-side auth context.
+      return item.source_id
+        ? `/chat?chatId=${encodeURIComponent(item.source_id)}`
+        : null
     case 'recipe':
       if (!item.source_id) return null
       // Recipe id pattern: feed id is "recipe-<execId>", source_id is the recipe id

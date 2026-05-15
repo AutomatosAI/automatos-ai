@@ -3,17 +3,14 @@
 /**
  * StatsStrip — CD round-4 STATS-A: a six-cell editorial strip with
  * sparklines, mono numerals and semantic tones. The cells:
- *   WORKING · AGENTS · QUEUE · ATTENTION · CACHE-HIT · $ / DEC
+ *   WORKING · AGENTS · QUEUE · ATTENTION · CACHE-HIT · $ / REQ
  *
  * Live values come from `useActivityStats('1d')` for the workforce four,
- * and `useCostAnalyticsUnified(7)` for $/DEC. Cache-hit doesn't have a
- * dedicated endpoint yet — we render `—` with a "metric pending" delta
- * rather than fabricate a number.
- *
- * Auto-swap to a single editorial sentence (STATS-B) when the operations
- * layer is genuinely empty (no working / no queue / no attention). The
- * prose variant has no action buttons — Command Centre is monitoring,
- * not creation.
+ * `useCostAnalyticsUnified(7)` for $/REQ, and `useHeartbeats()` for the
+ * scheduled count. Cache-hit doesn't have a dedicated endpoint yet — we
+ * render `—` with a "metric pending" delta rather than fabricate a
+ * number. The strip always renders — no auto-swap to prose. Idle cells
+ * show their zero state honestly ("idle", "0 high", "0 open").
  */
 
 import { useHeartbeats } from '@/hooks/use-heartbeats-api'
@@ -39,24 +36,7 @@ export function StatsStrip() {
   const queue = stats?.tasks_in_queue ?? 0
   const attn = stats?.needs_attention ?? 0
 
-  const isQuiet = working === 0 && attn === 0 && queue === 0
   const scheduled = heartbeats?.heartbeats?.filter((h) => h.enabled).length ?? 0
-
-  if (isQuiet) {
-    return (
-      <div className="cc-stats-prose">
-        <div className="pulse">
-          <MoonStar />
-        </div>
-        <div className="phrase">
-          A quiet hour. <span className="num">{agents}</span>{' '}
-          agent{agents === 1 ? '' : 's'} working,{' '}
-          <span className="num">{scheduled}</span> scheduled. Routines keep
-          the lights on while you focus on something else.
-        </div>
-      </div>
-    )
-  }
 
   const costPerReq = (() => {
     const c = cost?.summary?.totalCost ?? 0
@@ -78,28 +58,24 @@ export function StatsStrip() {
       value: String(working),
       tone: working > 0 ? 'ok' : 'muted',
       delta: working > 0 ? 'running now' : 'idle',
-      spark: [0, 0, 0, 1, 1, 2, 2, 2, 3, working],
     },
     {
       label: 'AGENTS',
       value: String(agents),
       tone: 'info',
       delta: `${scheduled} scheduled`,
-      spark: [0, 2, 5, 8, 11, 13, 13, 11, 9, agents],
     },
     {
       label: 'QUEUE',
       value: String(queue),
       tone: queue > 0 ? 'warn' : 'muted',
       delta: queue > 0 ? `${queue} in queue` : '0 high',
-      spark: [4, 6, 9, 5, 3, 2, 1, 2, 1, queue],
     },
     {
       label: 'ATTENTION',
       value: String(attn),
       tone: attn > 0 ? 'err' : 'muted',
       delta: attn > 0 ? 'needs you' : '0 open',
-      spark: [1, 0, 2, 1, 3, 2, 1, 2, 0, attn],
     },
     {
       label: 'CACHE-HIT',
@@ -165,21 +141,3 @@ function Dot({ tone }: { tone: SparklineTone }) {
   )
 }
 
-function MoonStar() {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-      <path d="M19 3v4" />
-      <path d="M21 5h-4" />
-    </svg>
-  )
-}

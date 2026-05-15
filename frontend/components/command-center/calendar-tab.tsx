@@ -207,15 +207,81 @@ export function CalendarTab() {
   }, [mode, anchor])
 
   const events = useMemo<CalEvent[]>(() => {
-    if (!schedule?.scheduled) return []
     const out: CalEvent[] = []
+    const MAX_OCCURRENCES = 200 // safety cap so a 5-min heartbeat doesn't run away
+
+    // Pass 1: heartbeats (routines). Use structured interval_minutes — no
+    // string parsing — and expand across the visible window.
+    if (heartbeats?.heartbeats) {
+      heartbeats.heartbeats
+        .filter((h) => h.enabled)
+        .forEach((h) => {
+          const interval = h.interval_minutes
+          // Sub-30min heartbeats are summarised in the always-on band only.
+          // Putting them on the grid would clutter every column.
+          if (interval < 30) return
+          const anchorDate = h.next_run_at
+            ? new Date(h.next_run_at)
+            : new Date()
+          const name = `${h.agent_name} routine`
+          let count = 0
+          // Walk back
+          let t = anchorDate.getTime()
+          while (t >= windowSpan.start.getTime() && count < MAX_OCCURRENCES) {
+            if (t <= windowSpan.end.getTime()) {
+              const d = new Date(t)
+              out.push({
+                id: `hb-${h.id}-${t}`,
+                hour: d.getHours(),
+                min: d.getMinutes(),
+                durMin: Math.min(Math.max(interval, 15), 45),
+                name,
+                agent: h.agent_name,
+                agentId: h.agent_id,
+                dayKey: d.toDateString(),
+                date: d,
+                recurring: true,
+              })
+              count++
+            }
+            t -= interval * 60_000
+          }
+          // Walk forward
+          t = anchorDate.getTime() + interval * 60_000
+          while (t <= windowSpan.end.getTime() && count < MAX_OCCURRENCES) {
+            if (t >= windowSpan.start.getTime()) {
+              const d = new Date(t)
+              out.push({
+                id: `hb-${h.id}-${t}`,
+                hour: d.getHours(),
+                min: d.getMinutes(),
+                durMin: Math.min(Math.max(interval, 15), 45),
+                name,
+                agent: h.agent_name,
+                agentId: h.agent_id,
+                dayKey: d.toDateString(),
+                date: d,
+                recurring: true,
+              })
+              count++
+            }
+            t += interval * 60_000
+          }
+        })
+    }
+
+    // Pass 2: items from the schedule endpoint that aren't heartbeats
+    // (recipes / one-offs). Fall through if next_run_at is in window.
+    if (!schedule?.scheduled) return out
     schedule.scheduled.forEach((s, idx) => {
+      // Skip routine items — heartbeats already cover those above and
+      // contain structured interval data we don't need to re-parse.
+      if (s.type === 'routine') return
+
       const interval = parseIntervalMinutes(s.frequency)
       const dow = cronDaysOfWeek(s.frequency)
       const cronHm = cronHourMin(s.frequency)
 
-      // Recurring: "Every Xh" / "Every Xm" but slower than hourly. Hourly+
-      // routines go in the always-on band, not the grid.
       if (interval !== null && interval > 60) {
         // Anchor at next_run_at and walk backwards + forwards across window.
         const anchorDate = s.next_run_at ? new Date(s.next_run_at) : new Date()
@@ -306,7 +372,7 @@ export function CalendarTab() {
       }
     })
     return out
-  }, [schedule, windowSpan])
+  }, [schedule, windowSpan, heartbeats])
 
   const alwaysOn = useMemo(() => {
     if (!heartbeats?.heartbeats) return []
