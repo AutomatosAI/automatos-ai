@@ -76,10 +76,16 @@ export const STUDIO_MENU_FOOTER: StudioFooterItem[] = [
   { id: 'settings', label: 'Settings', desc: 'Profile, API keys, preferences', href: '/settings', icon: Settings },
 ];
 
-/** Per-page sub-nav tabs. Lifted from the round-3 shell delivery. */
+/**
+ * Per-page sub-nav tabs rendered by the generic <StudioPageTabs /> under the
+ * header. Pages with bespoke composed layouts (Command Centre, Chat) render
+ * their own tabs as part of their editorial page frame and are deliberately
+ * absent from this map.
+ *
+ * Tab counts here are seed values for display before the page mounts and
+ * fetches the real numbers — pages that care wire their own dynamic counts.
+ */
 export const STUDIO_PAGE_TABS: Record<string, Array<[string, number]>> = {
-  cmd:     [['Summary', 12], ['Board', 4], ['Calendar', 0], ['Feed', 0], ['History', 0]],
-  chat:    [['Conversations', 7], ['Saved', 3], ['Auto', 0]],
   assign:  [['All', 18], ['Mine', 4], ['Scheduled', 9], ['Drafts', 2]],
   deliv:   [['Outputs', 41], ['Blogs', 6], ['Templates', 12], ['Explorer', 0]],
   agents:  [['Roster', 11], ['Skills', 24], ['Lineage', 0], ['Settings', 0]],
