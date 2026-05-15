@@ -21,7 +21,8 @@ export default function NotificationSettingsPage() {
         <PageHeader
           title="Notification"
           titleAccent="Preferences"
-          subtitle="Choose where each event type notifies you."
+          eyebrow="Account · alerts"
+          lede="Decide which event types page you, which go to Slack, and which sit quietly in the log. You can change these any time."
         />
         <NotificationsSettingsTab />
       </div>

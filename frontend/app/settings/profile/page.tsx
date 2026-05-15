@@ -164,13 +164,14 @@ export default function ProfilePage() {
                     <PageHeader
                         title="Profile"
                         titleAccent="Settings"
-                        subtitle="Manage your account information and preferences"
+                        eyebrow="Account · personal"
+                        lede="Your name, email, role, and how you authenticate. Workspace-level settings live one level up under Workspace settings."
                         actions={
                             <Button
                                 variant="ghost"
                                 size="sm"
                                 onClick={() => router.back()}
-                                className="text-slate-400 hover:text-white hover:bg-slate-800"
+                                className="text-muted-foreground hover:text-foreground hover:bg-secondary"
                             >
                                 <ArrowLeft className="w-4 h-4 mr-1" />
                                 Back
