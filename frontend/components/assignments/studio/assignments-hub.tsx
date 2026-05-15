@@ -1,37 +1,30 @@
 'use client'
 
 /**
- * Studio Assignments hub — CD round 4 HUB-A ("launcher first").
+ * Studio Assignments hub.
  *
- *  1. Editorial top: eyebrow · h1 · sub · Filter/New mission actions
- *  2. Start something — EntryGrid (Mission · Playbook · Plan · Task)
- *  3. Needs approval — conditional MissionCard grid (warn-bordered)
- *  4. Running now — MissionCard grid (3-up)
- *  5. Most-used playbooks — PlaybookCard grid (3-up)
- *  6. Recommended in the marketplace — MktCard strip (5-up)
+ * Editorial top → "Start something" 4-up EntryGrid → Needs approval
+ * cards (conditional) → Playbooks/Missions flip tabs (URL-synced via
+ * ?tab=) → the matching Body component (PlaybooksBody / MissionsBody).
  *
- * Mission/playbook clicks route to existing detail pages; Plan opens
- * /chat?mode=plan; Marketplace cards route to /marketplace?id=. CTAs
- * never invent new flows — they always re-use what we have.
+ * The flip tabs replace CD round 4's "Most-used playbooks" + 5-card
+ * "Marketplace" lower strips — the user wants to browse one or the
+ * other in place, not see three stacked teaser sections.
  */
 
 import { useCallback, useMemo, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 import { Filter, Plus } from 'lucide-react'
 import dynamic from 'next/dynamic'
 
 import { useMissions } from '@/hooks/use-missions-api'
 import { useWorkflowPlaybooks } from '@/hooks/use-playbook-api'
-import {
-  useRecommendedAssignments,
-  type RecommendedItem,
-} from '@/hooks/use-assignments-api'
 
 import { EntryGrid, type EntryType } from './entry-grid'
 import { StatusHead } from './status-head'
 import { MissionCard } from './mission-card'
-import { PlaybookCard, type PlaybookLike } from './playbook-card'
-import { MktCard } from './mkt-card'
+import { MissionsBody } from './missions-body'
+import { PlaybooksBody } from './playbooks-body'
 
 import type { MissionResponse } from '@/types/missions'
 
@@ -48,44 +41,45 @@ const CreateTaskDialog = dynamic(
   { ssr: false },
 )
 
+type Tab = 'playbooks' | 'missions'
+
 function isAwaitingApproval(m: MissionResponse): boolean {
   return m.state === 'awaiting_approval' || m.state === 'awaiting_human'
 }
 
-function isRunning(m: MissionResponse): boolean {
-  return (
-    m.state === 'running' ||
-    m.state === 'planning' ||
-    m.state === 'verifying' ||
-    m.state === 'paused'
-  )
-}
-
 export function StudioAssignmentsHub() {
   const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+
+  const tabParam = (searchParams?.get('tab') as Tab | null) ?? null
+  const tab: Tab = tabParam === 'missions' || tabParam === 'playbooks' ? tabParam : 'playbooks'
 
   const [missionOpen, setMissionOpen] = useState(false)
   const [playbookOpen, setPlaybookOpen] = useState(false)
   const [taskOpen, setTaskOpen] = useState(false)
 
   const { data: missionData } = useMissions({ limit: 30 })
-  const { data: playbookData } = useWorkflowPlaybooks({ limit: 24, sort_by: 'use_count' })
-  const { data: recommended } = useRecommendedAssignments(8)
+  const { data: playbookData } = useWorkflowPlaybooks({ limit: 1 })
 
   const missions = missionData?.missions ?? []
-  const needsApproval = useMemo(() => missions.filter(isAwaitingApproval).slice(0, 4), [missions])
-  const running = useMemo(() => missions.filter(isRunning).slice(0, 3), [missions])
-
-  const playbooks = (playbookData as { items?: PlaybookLike[] } | undefined)?.items ?? []
-  const mostUsed = useMemo(
-    () =>
-      [...playbooks]
-        .sort((a, b) => (b.use_count ?? 0) - (a.use_count ?? 0))
-        .slice(0, 3),
-    [playbooks],
+  const needsApproval = useMemo(
+    () => missions.filter(isAwaitingApproval).slice(0, 4),
+    [missions],
   )
+  const totalPlaybooks =
+    (playbookData as { total?: number; items?: unknown[] } | undefined)?.total ??
+    (playbookData as { items?: unknown[] } | undefined)?.items?.length ??
+    0
 
-  const marketplace = (recommended?.items ?? []).slice(0, 5)
+  const setTab = useCallback(
+    (next: Tab) => {
+      const params = new URLSearchParams(searchParams?.toString() ?? '')
+      params.set('tab', next)
+      router.push(`${pathname}?${params.toString()}` as any, { scroll: false })
+    },
+    [pathname, router, searchParams],
+  )
 
   const handleEntry = useCallback(
     (type: EntryType) => {
@@ -99,25 +93,6 @@ export function StudioAssignmentsHub() {
 
   const handleMission = useCallback(
     (id: string) => router.push(`/missions/${id}` as any),
-    [router],
-  )
-  const handlePlaybook = useCallback(
-    (p: PlaybookLike) => {
-      const id = p.template_id || (p.id != null ? String(p.id) : '')
-      if (id) router.push(`/playbooks?id=${encodeURIComponent(id)}` as any)
-    },
-    [router],
-  )
-  const handleMarketplace = useCallback(
-    (item: RecommendedItem) => {
-      if (item.source === 'marketplace') {
-        router.push(`/marketplace?id=${item.id}` as any)
-      } else if (item.type === 'mission') {
-        router.push(`/missions/${item.id}` as any)
-      } else {
-        router.push(`/playbooks?id=${item.id}` as any)
-      }
-    },
     [router],
   )
 
@@ -208,118 +183,30 @@ export function StudioAssignmentsHub() {
         </section>
       )}
 
-      {/* Section 3 — Running */}
-      <section>
-        <StatusHead
-          pip="hsl(var(--foreground))"
-          label="Running now"
-          count={`${running.length} active`}
-          right={
-            <button
-              type="button"
-              className="l-btn"
-              style={{ height: 26, fontSize: 11.5, padding: '0 10px' }}
-              onClick={() => router.push('/missions' as any)}
-            >
-              All missions →
-            </button>
-          }
-        />
-        {running.length > 0 ? (
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(3, 1fr)',
-              gap: 12,
-            }}
-          >
-            {running.map((m) => (
-              <MissionCard key={m.id} mission={m} onOpen={handleMission} />
-            ))}
-          </div>
-        ) : (
-          <div
-            className="pg-panel"
-            style={{
-              padding: 24,
-              textAlign: 'center',
-              color: 'var(--fg-3)',
-              fontFamily: 'var(--font-geist-mono, monospace)',
-              fontSize: 11.5,
-              letterSpacing: '0.04em',
-            }}
-          >
-            Nothing running right now. Start something above, or schedule a
-            playbook to run when you’re away.
-          </div>
-        )}
-      </section>
+      {/* Flip-tabs: Playbooks · Missions */}
+      <nav className="cc-tabs" aria-label="Assignments sections">
+        <button
+          type="button"
+          className={`cc-tab${tab === 'playbooks' ? ' active' : ''}`}
+          aria-current={tab === 'playbooks' ? 'page' : undefined}
+          onClick={() => setTab('playbooks')}
+        >
+          <span>Playbooks</span>
+          {totalPlaybooks > 0 && <span className="cc-tab-ct">{totalPlaybooks}</span>}
+        </button>
+        <button
+          type="button"
+          className={`cc-tab${tab === 'missions' ? ' active' : ''}`}
+          aria-current={tab === 'missions' ? 'page' : undefined}
+          onClick={() => setTab('missions')}
+        >
+          <span>Missions</span>
+          {missions.length > 0 && <span className="cc-tab-ct">{missions.length}</span>}
+        </button>
+      </nav>
 
-      {/* Section 4 — Most-used playbooks */}
-      {mostUsed.length > 0 && (
-        <section>
-          <StatusHead
-            pip="hsl(82 50% 22%)"
-            label="Most-used playbooks"
-            count={`${playbooks.length} in library`}
-            right={
-              <button
-                type="button"
-                className="l-btn"
-                style={{ height: 26, fontSize: 11.5, padding: '0 10px' }}
-                onClick={() => router.push('/playbooks' as any)}
-              >
-                Browse library →
-              </button>
-            }
-          />
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(3, 1fr)',
-              gap: 12,
-            }}
-          >
-            {mostUsed.map((p) => (
-              <PlaybookCard
-                key={String(p.template_id || p.id)}
-                playbook={p}
-                onRun={handlePlaybook}
-              />
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Section 5 — Marketplace */}
-      {marketplace.length > 0 && (
-        <section>
-          <StatusHead
-            pip="hsl(var(--info))"
-            label="Recommended in the marketplace"
-            count={`${marketplace.length} picks for your stack`}
-            right={
-              <button
-                type="button"
-                className="l-btn"
-                style={{ height: 26, fontSize: 11.5, padding: '0 10px' }}
-                onClick={() => router.push('/marketplace' as any)}
-              >
-                Browse marketplace →
-              </button>
-            }
-          />
-          <div className="mkt-strip" style={{ paddingBottom: 24 }}>
-            {marketplace.map((item) => (
-              <MktCard
-                key={`${item.source}-${item.id}`}
-                item={item}
-                onClick={handleMarketplace}
-              />
-            ))}
-          </div>
-        </section>
-      )}
+      {/* Tab body */}
+      {tab === 'playbooks' ? <PlaybooksBody /> : <MissionsBody />}
 
       <CreateMissionModal open={missionOpen} onOpenChange={setMissionOpen} />
       <CreatePlaybookModal
