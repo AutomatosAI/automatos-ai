@@ -46,8 +46,8 @@ export function MissionCreatedCard({ missionId }: MissionCreatedCardProps) {
     <div className="bg-card/50 backdrop-blur border border-border rounded-xl p-4 space-y-3 max-w-md">
       {/* Header */}
       <div className="flex items-center gap-2">
-        <Target className="w-4 h-4 text-orange-500" />
-        <span className="text-xs font-medium text-orange-400">Mission Created</span>
+        <Target className="w-4 h-4 text-primary" />
+        <span className="text-xs font-medium text-primary">Mission Created</span>
         <MissionStatusBadge state={mission.state} size="sm" />
       </div>
 
@@ -65,7 +65,7 @@ export function MissionCreatedCard({ missionId }: MissionCreatedCardProps) {
       <Button
         variant="outline"
         size="sm"
-        className="border-orange-500/30 text-orange-400 hover:bg-orange-500/10"
+        className="border-primary/30 text-primary hover:bg-primary/10"
         onClick={handleReviewPlan}
       >
         Review Plan

@@ -274,7 +274,7 @@ export function SheetArtifact({ content, metadata }: SheetArtifactProps) {
                 <div className="flex w-full items-center justify-between text-xs text-muted-foreground">
                   <span className="truncate">{chart.filename}</span>
                   <button
-                    className="rounded border border-border/60 px-2 py-1 text-[11px] uppercase tracking-wide text-foreground/90 hover:border-orange-400/60 hover:text-orange-300"
+                    className="rounded border border-border/60 px-2 py-1 text-[11px] uppercase tracking-wide text-foreground/90 hover:border-primary/60 hover:text-primary/80"
                     onClick={() => {
                       const link = document.createElement('a')
                       link.href = `data:${chart.mime_type};base64,${chart.base64}`

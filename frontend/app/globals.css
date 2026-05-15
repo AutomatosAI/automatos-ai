@@ -950,6 +950,59 @@
   .studio img[src*="automatos-logo"] {
     filter: saturate(0.55) brightness(0.88) hue-rotate(-5deg);
   }
+
+  /* ──────────────────────────────────────────────────────────────────────
+   * Studio layout chrome — sidebar + header use cream paper, not white.
+   *
+   * The classic theme uses `glass-card` for the side rail and top bar.
+   * My earlier .studio override mapped glass-card → bg-card (white) which
+   * is correct for content cards (paper-on-cream) but WRONG for layout
+   * chrome — sidebars and headers should be cream so cards inside them
+   * read as paper-on-cream, not paper-on-paper.
+   *
+   * Two specific overrides:
+   *   - header.glass-card  → cream + tan bottom rule
+   *   - sidebar (data-tour="sidebar") → cream + tan right rule
+   *   - mobile sidebar     → cream
+   * ────────────────────────────────────────────────────────────────────── */
+  .studio header.glass-card {
+    background: hsl(var(--background));
+    border-color: hsl(var(--border));
+    box-shadow: none;
+  }
+
+  .studio [data-tour="sidebar"],
+  .studio [data-tour="sidebar"].glass-card {
+    background: hsl(var(--background));
+    border-color: hsl(var(--border));
+    box-shadow: none;
+    backdrop-filter: none;
+  }
+
+  /* Mobile sidebar sheet — also cream, not glass */
+  .studio [role="dialog"].glass-card[class*="border-r"],
+  .studio aside.glass-card,
+  .studio .glass-card[class*="fixed"][class*="top-0"] {
+    background: hsl(var(--background));
+    border-color: hsl(var(--border));
+    box-shadow: none;
+    backdrop-filter: none;
+  }
+
+  /* Sidebar nav items — active state goes paper-on-cream + primary border.
+     Hover stays as muted tan. */
+  .studio [data-tour="sidebar"] a[data-active="true"],
+  .studio [data-tour="sidebar"] [data-active="true"] {
+    background: hsl(var(--card));
+    border-color: hsl(var(--border));
+    box-shadow: 0 1px 0 hsla(30 50% 18% / 0.05);
+  }
+
+  /* Sidebar workspace pill / brand block — also cream surface */
+  .studio [data-tour="sidebar"] .bg-secondary\/30,
+  .studio [data-tour="sidebar"] [class*="bg-background/25"] {
+    background: hsl(var(--card));
+  }
 }
 
 html {

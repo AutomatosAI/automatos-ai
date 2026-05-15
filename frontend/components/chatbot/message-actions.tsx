@@ -117,7 +117,7 @@ export function MessageActions({
               variant="ghost"
               size="sm"
               onClick={() => onLaunchAsMission(content)}
-              className="text-orange-400 hover:text-orange-300 hover:bg-orange-500/10 px-2 h-auto gap-1"
+              className="text-primary hover:text-primary/80 hover:bg-primary/10 px-2 h-auto gap-1"
             >
               <Rocket className="w-3 h-3" />
               <span className="text-[11px] font-medium">Launch as Mission</span>
