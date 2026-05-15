@@ -7,10 +7,14 @@ import { motion } from 'framer-motion'
 import { Sidebar } from './sidebar'
 import { MobileSidebar } from './mobile-sidebar'
 import { Header } from './header'
+import { StudioSidebar } from './studio-sidebar'
+import { StudioHeader } from './studio-header'
+import { StudioTicker } from './studio-ticker'
 import { AutoWidget } from '../chatbot/chat-widget'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { useIsTabletOrBelow } from '@/hooks/use-mobile'
 import { useAutoTour } from '@/hooks/use-auto-tour'
+import { useIsStudio } from '@/hooks/use-studio-theme'
 
 interface MainLayoutProps {
   children: React.ReactNode
@@ -20,6 +24,7 @@ export function MainLayout({ children }: MainLayoutProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const isMobileLayout = useIsTabletOrBelow()
+  const isStudio = useIsStudio()
   const pathname = usePathname()
 
   // Auto-start page tour on first visit (per-user, per-page)
@@ -56,6 +61,38 @@ export function MainLayout({ children }: MainLayoutProps) {
     } else {
       setSidebarCollapsed(!sidebarCollapsed)
     }
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Studio shell — render the CD round-4 chrome (sidebar + header + ticker)
+  // when .studio is active and we're on desktop. Mobile keeps the existing
+  // sheet pattern for now. Falls through to classic layout below.
+  // ────────────────────────────────────────────────────────────────────
+  if (isStudio && !isMobileLayout) {
+    return (
+      <div className="sh-shell">
+        <StudioSidebar />
+        <div className="sh-main">
+          <StudioTicker />
+          <StudioHeader />
+          <main className="px-4 py-4 md:px-6 md:py-6 lg:px-12 lg:py-8 2xl:px-16">
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5 }}
+              className="max-w-[1720px] mx-auto"
+            >
+              {children}
+            </motion.div>
+          </main>
+        </div>
+        <AutoWidget
+          position="bottom-right"
+          currentPage={currentPage}
+          visible={showAutoWidget}
+        />
+      </div>
+    )
   }
 
   return (
