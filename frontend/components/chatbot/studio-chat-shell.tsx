@@ -21,15 +21,14 @@
 import { useEffect, useState } from 'react'
 import {
   Plus,
-  GitFork,
-  Share2,
   ChevronRight,
   PanelLeftClose,
   PanelLeftOpen,
   PanelRightClose,
   PanelRightOpen,
 } from 'lucide-react'
-import { getChatHistory } from '@/lib/chat/api'
+import { toast } from 'sonner'
+import { getChatHistory, getChatMessages } from '@/lib/chat/api'
 import { useMission } from '@/hooks/use-missions-api'
 import { useMissionStore } from '@/stores/mission-store'
 import {
@@ -59,6 +58,7 @@ export function StudioChatShell({
 }: StudioChatShellProps) {
   const [threads, setThreads] = useState<ChatType[]>([])
   const [loadingThreads, setLoadingThreads] = useState(true)
+  const [openingThreadId, setOpeningThreadId] = useState<string | null>(null)
   const [threadsCollapsed, setThreadsCollapsed] = useState(false)
   const [railCollapsed, setRailCollapsed] = useState(false)
 
@@ -111,6 +111,20 @@ export function StudioChatShell({
     }
   }, [selectedChatId])
 
+  const handleThreadClick = async (t: ChatType) => {
+    if (t.id === selectedChatId || openingThreadId) return
+    setOpeningThreadId(t.id)
+    try {
+      const messages = await getChatMessages(t.id)
+      onSelectChat(t, messages)
+    } catch (err) {
+      console.error('Failed to load chat messages:', err)
+      toast.error('Failed to load chat')
+    } finally {
+      setOpeningThreadId(null)
+    }
+  }
+
   const activeTitle = selectedChat?.title ?? 'New conversation'
 
   return (
@@ -148,29 +162,20 @@ export function StudioChatShell({
             {selectedChatId.slice(0, 8)}
           </span>
         )}
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-          <button type="button" className="sh-chat-act" title="Fork thread (coming soon)">
-            <GitFork style={{ width: 11, height: 11 }} />
-            <span>Fork thread</span>
-          </button>
-          <button type="button" className="sh-chat-act" title="Share (coming soon)">
-            <Share2 style={{ width: 11, height: 11 }} />
-            <span>Share</span>
-          </button>
-          <button
-            type="button"
-            className="sh-chat-side-toggle"
-            onClick={toggleRail}
-            aria-label={railCollapsed ? 'Show mission rail' : 'Hide mission rail'}
-            title={railCollapsed ? 'Show mission rail' : 'Hide mission rail'}
-          >
-            {railCollapsed ? (
-              <PanelRightOpen style={{ width: 14, height: 14, strokeWidth: 1.6 }} />
-            ) : (
-              <PanelRightClose style={{ width: 14, height: 14, strokeWidth: 1.6 }} />
-            )}
-          </button>
-        </div>
+        <button
+          type="button"
+          className="sh-chat-side-toggle"
+          onClick={toggleRail}
+          aria-label={railCollapsed ? 'Show mission rail' : 'Hide mission rail'}
+          title={railCollapsed ? 'Show mission rail' : 'Hide mission rail'}
+          style={{ marginLeft: 'auto' }}
+        >
+          {railCollapsed ? (
+            <PanelRightOpen style={{ width: 14, height: 14, strokeWidth: 1.6 }} />
+          ) : (
+            <PanelRightClose style={{ width: 14, height: 14, strokeWidth: 1.6 }} />
+          )}
+        </button>
       </div>
 
       {/* Grid body */}
@@ -193,13 +198,19 @@ export function StudioChatShell({
               ) : (
                 threads.map((t) => {
                   const isActive = t.id === selectedChatId
+                  const isOpening = t.id === openingThreadId
                   const rel = relativeTime(t.createdAt)
                   return (
                     <button
                       key={t.id}
                       type="button"
-                      className={`sh-chat-thread${isActive ? ' active' : ''}`}
-                      onClick={() => onSelectChat(t, [])}
+                      className={
+                        'sh-chat-thread' +
+                        (isActive ? ' active' : '') +
+                        (isOpening ? ' opening' : '')
+                      }
+                      onClick={() => handleThreadClick(t)}
+                      disabled={isOpening}
                       title={t.title}
                     >
                       <span
@@ -207,7 +218,9 @@ export function StudioChatShell({
                         aria-hidden
                       />
                       <span className="sh-chat-thread-title">{t.title}</span>
-                      <span className="sh-chat-thread-ts">{rel}</span>
+                      <span className="sh-chat-thread-ts">
+                        {isOpening ? '…' : rel}
+                      </span>
                     </button>
                   )
                 })
