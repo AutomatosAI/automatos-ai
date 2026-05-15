@@ -349,7 +349,7 @@ export function ActiveWorkflowsPanel({ onWorkflowClick, onPlaybookRunClick: onRe
       <div className="flex items-center justify-between">
         <div>
           <h3 className="text-lg font-semibold">
-            <span className="text-white">What's</span> <span className="text-orange-500">Cooking</span>
+            <span className="text-foreground">What's</span> <span className="text-primary">Cooking</span>
           </h3>
           <p className="text-sm text-muted-foreground">
             {filteredWorkflows.length} workflow{filteredWorkflows.length !== 1 ? 's' : ''}{hasRecipeRuns ? ` • ${workflowsData.recipe_runs.length} recipe run${workflowsData.recipe_runs.length !== 1 ? 's' : ''}` : ''} • {workflowsData.system_load}% system load
@@ -471,7 +471,7 @@ export function ActiveWorkflowsPanel({ onWorkflowClick, onPlaybookRunClick: onRe
                       <h4 className="font-semibold text-base">{workflow.name}</h4>
                       <Badge className={`text-xs ${
                         workflow.current_execution.status === 'running'
-                          ? 'bg-orange-500/20 text-orange-400 border-orange-500/30'
+                          ? 'bg-primary/20 text-primary border-primary/30'
                           : workflow.current_execution.status === 'failed'
                             ? 'bg-destructive/20 text-destructive border-destructive/30'
                             : workflow.metrics.last_execution
@@ -550,7 +550,7 @@ export function ActiveWorkflowsPanel({ onWorkflowClick, onPlaybookRunClick: onRe
 
                     <Button
                       size="sm"
-                      className="bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white"
+                      className="bg-primary hover:bg-primary/90 text-primary-foreground"
                       onClick={(e) => {
                         e.stopPropagation()
                         console.log('🔥 COOK BUTTON CLICKED - Workflow:', workflow.id, 'Status:', workflow.current_execution?.status)
@@ -600,9 +600,9 @@ export function ActiveWorkflowsPanel({ onWorkflowClick, onPlaybookRunClick: onRe
       {hasRecipeRuns && (
         <>
           <div className="flex items-center gap-2 mt-6">
-            <ChefHat className="w-5 h-5 text-orange-400" />
+            <ChefHat className="w-5 h-5 text-primary" />
             <h3 className="text-base font-semibold">
-              <span className="text-white">Playbook</span> <span className="text-orange-400">Runs</span>
+              <span className="text-foreground">Playbook</span> <span className="text-primary">Runs</span>
             </h3>
             <Badge variant="outline" className="text-xs">
               {workflowsData.recipe_runs.length}
@@ -643,7 +643,7 @@ export function ActiveWorkflowsPanel({ onWorkflowClick, onPlaybookRunClick: onRe
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
                         <h4 className="font-semibold text-base">{run.recipe_name}</h4>
-                        <Badge className="text-xs bg-orange-500/20 text-orange-300 border-orange-500/30">
+                        <Badge className="text-xs bg-primary/20 text-primary border-primary/30">
                           <Zap className="w-3 h-3 mr-1" />
                           Recipe
                         </Badge>
@@ -771,7 +771,7 @@ export function ActiveWorkflowsPanel({ onWorkflowClick, onPlaybookRunClick: onRe
               Remove from Kitchen
             </DialogTitle>
             <DialogDescription>
-              Are you sure you want to remove <span className="font-semibold text-white">"{workflowToDelete?.name}"</span> from the kitchen?
+              Are you sure you want to remove <span className="font-semibold text-foreground">"{workflowToDelete?.name}"</span> from the kitchen?
               <br /><br />
               This will permanently delete the workflow and all its execution history. This action cannot be undone.
             </DialogDescription>
@@ -801,7 +801,7 @@ export function ActiveWorkflowsPanel({ onWorkflowClick, onPlaybookRunClick: onRe
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Trash2 className="w-5 h-5 text-orange-400" />
+              <Trash2 className="w-5 h-5 text-primary" />
               Cleanup Old Workflows
             </DialogTitle>
             <DialogDescription>

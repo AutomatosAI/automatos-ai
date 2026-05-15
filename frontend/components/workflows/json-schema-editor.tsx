@@ -161,7 +161,7 @@ export function JsonSchemaEditor({
         className={cn(
           'relative rounded-2xl overflow-hidden border transition-colors',
           isFocused
-            ? 'border-orange-400/50 ring-1 ring-orange-400/20'
+            ? 'border-primary/50 ring-1 ring-primary/20'
             : error
               ? 'border-destructive/50'
               : 'border-input',
@@ -191,9 +191,9 @@ export function JsonSchemaEditor({
           spellCheck={false}
           className={cn(
             'relative w-full p-3 m-0 bg-transparent font-mono text-xs leading-relaxed resize-y',
-            'text-transparent caret-orange-400 placeholder:text-muted-foreground',
+            'text-transparent caret-primary placeholder:text-muted-foreground',
             'outline-none border-none ring-0',
-            'selection:bg-orange-400/20'
+            'selection:bg-primary/20'
           )}
           style={{ minHeight }}
         />

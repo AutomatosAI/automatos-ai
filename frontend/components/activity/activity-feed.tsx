@@ -426,7 +426,7 @@ function FeedRow({ item, index, isNew, onView }: FeedRowProps) {
               </Badge>
             )}
             {isRecipe && (
-              <Badge className="text-xs bg-orange-500/20 text-orange-300 border-orange-500/30 shrink-0">
+              <Badge className="text-xs bg-primary/20 text-primary border-primary/30 shrink-0">
                 <Zap className="w-3 h-3 mr-1" />
                 Playbook
               </Badge>

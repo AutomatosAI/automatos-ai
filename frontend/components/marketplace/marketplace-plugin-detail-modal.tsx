@@ -436,7 +436,7 @@ export function MarketplacePluginDetailModal({
                             >
                               <div className="min-w-0 flex-1">
                                 <div className="font-medium text-sm flex items-center gap-2">
-                                  <Cpu className="w-3 h-3 text-orange-400 shrink-0" />
+                                  <Cpu className="w-3 h-3 text-primary shrink-0" />
                                   {agent.name}
                                 </div>
                                 {agent.description && (

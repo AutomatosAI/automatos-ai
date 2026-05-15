@@ -228,7 +228,7 @@ export function WizardShell({ open, onClose, onComplete }: WizardShellProps) {
             exit={{ opacity: 0, scale: 0.95 }}
             transition={{ duration: 0.2 }}
           >
-            <Card className="glass-card card-glow w-full max-w-4xl max-h-[90vh] overflow-hidden">
+            <Card className="bg-card border-border w-full max-w-4xl max-h-[90vh] overflow-hidden">
               <CardHeader className="flex flex-row items-center justify-between border-b border-border/30">
                 <CardTitle className="flex items-center space-x-3">
                   <Sparkles className="w-6 h-6 text-primary" />

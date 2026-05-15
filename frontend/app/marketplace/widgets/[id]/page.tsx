@@ -270,7 +270,7 @@ function ReviewForm({ widgetId, onSubmitted }: { widgetId: string; onSubmitted: 
   }
 
   return (
-    <Card className="glass-card">
+    <Card className="bg-card border border-border">
       <CardHeader className="pb-3">
         <CardTitle className="text-base">Write a Review</CardTitle>
       </CardHeader>
@@ -460,7 +460,7 @@ export default function WidgetDetailPage() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4 }}
         >
-          <Card className="glass-card">
+          <Card className="bg-card border border-border">
             <CardContent className="pt-6">
               <div className="flex flex-col sm:flex-row gap-6">
                 {/* Icon */}
@@ -576,7 +576,7 @@ export default function WidgetDetailPage() {
 
               {/* Overview tab */}
               <TabsContent value="overview" className="mt-4">
-                <Card className="glass-card">
+                <Card className="bg-card border border-border">
                   <CardContent className="pt-6">
                     {widget.readme ? (
                       <div
@@ -600,7 +600,7 @@ export default function WidgetDetailPage() {
 
               {/* Screenshots tab */}
               <TabsContent value="screenshots" className="mt-4">
-                <Card className="glass-card">
+                <Card className="bg-card border border-border">
                   <CardContent className="pt-6">
                     <ScreenshotGallery screenshots={widget.screenshots} />
                   </CardContent>
@@ -611,7 +611,7 @@ export default function WidgetDetailPage() {
               <TabsContent value="reviews" className="mt-4 space-y-4">
                 <ReviewForm widgetId={widgetId} onSubmitted={fetchReviews} />
 
-                <Card className="glass-card">
+                <Card className="bg-card border border-border">
                   <CardHeader className="pb-3">
                     <CardTitle className="text-base">
                       Reviews ({reviews.length})
@@ -635,7 +635,7 @@ export default function WidgetDetailPage() {
 
               {/* Changelog tab */}
               <TabsContent value="changelog" className="mt-4">
-                <Card className="glass-card">
+                <Card className="bg-card border border-border">
                   <CardContent className="pt-6">
                     {widget.changelog ? (
                       <pre className="whitespace-pre-wrap text-sm text-muted-foreground font-sans leading-relaxed">
@@ -660,7 +660,7 @@ export default function WidgetDetailPage() {
             className="space-y-4"
           >
             {/* Info card */}
-            <Card className="glass-card">
+            <Card className="bg-card border border-border">
               <CardHeader className="pb-3">
                 <CardTitle className="text-base">Details</CardTitle>
               </CardHeader>
@@ -741,7 +741,7 @@ export default function WidgetDetailPage() {
 
             {/* Categories */}
             {widget.categories.length > 0 && (
-              <Card className="glass-card">
+              <Card className="bg-card border border-border">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base">Categories</CardTitle>
                 </CardHeader>
@@ -763,7 +763,7 @@ export default function WidgetDetailPage() {
 
             {/* Permissions */}
             {widget.permissions.length > 0 && (
-              <Card className="glass-card">
+              <Card className="bg-card border border-border">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base flex items-center gap-2">
                     <Shield className="h-4 w-4" />

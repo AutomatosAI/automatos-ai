@@ -500,7 +500,7 @@ export function AutoWidget({
                     <Button
                       type="submit"
                       disabled={formState === 'loading' || !title.trim() || !description.trim()}
-                      className="w-full bg-gradient-to-br from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white"
+                      className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
                     >
                       {formState === 'loading' ? (
                         <span className="flex items-center gap-2">
@@ -526,7 +526,7 @@ export function AutoWidget({
                           href={successUrl}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-sm text-orange-400 hover:text-orange-300 underline"
+                          className="text-sm text-primary hover:text-primary/80 underline"
                         >
                           {successKey}
                         </a>

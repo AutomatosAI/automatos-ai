@@ -137,7 +137,7 @@ export function SignInForm() {
             transition={{ duration: 0.3 }}
             className="w-full max-w-md"
         >
-            <Card className="glass-card overflow-hidden border-border/50 shadow-2xl">
+            <Card className="border-border bg-card">
                 <CardHeader className="space-y-1 text-center pb-8 pt-8">
                     <motion.div
                         initial={{ y: -20, opacity: 0 }}
@@ -151,13 +151,13 @@ export function SignInForm() {
                             alt="Automatos AI"
                             width={48}
                             height={48}
-                            className="rounded-xl shadow-lg shadow-orange-500/20"
+                            className="rounded-xl"
                         />
                     </motion.div>
-                    <CardTitle className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400">
+                    <CardTitle className="text-2xl font-bold text-foreground">
                         Welcome Back
                     </CardTitle>
-                    <CardDescription className="text-slate-400">
+                    <CardDescription className="text-muted-foreground">
                         Sign in to access your autonomous agents
                     </CardDescription>
                 </CardHeader>
@@ -172,7 +172,7 @@ export function SignInForm() {
                     <div className="grid grid-cols-2 gap-4">
                         <Button
                             variant="outline"
-                            className="bg-secondary/20 border-border/40 hover:bg-secondary/40 hover:text-white transition-all duration-220"
+                            className="bg-secondary/20 border-border/40 hover:bg-secondary/40 hover:text-foreground transition-all duration-220"
                             onClick={() => signInWith('oauth_github')}
                             type="button"
                         >
@@ -186,7 +186,7 @@ export function SignInForm() {
                         </Button>
                         <Button
                             variant="outline"
-                            className="bg-secondary/20 border-border/40 hover:bg-secondary/40 hover:text-white transition-all duration-220"
+                            className="bg-secondary/20 border-border/40 hover:bg-secondary/40 hover:text-foreground transition-all duration-220"
                             onClick={() => signInWith('oauth_google')}
                             type="button"
                         >
@@ -225,13 +225,13 @@ export function SignInForm() {
 
                     {pendingSecondFactor ? (
                         <form onSubmit={handleSecondFactor} className="space-y-4">
-                            <p className="text-sm text-slate-400">
+                            <p className="text-sm text-muted-foreground">
                                 {secondFactorStrategy === 'phone_code'
                                     ? 'Enter the verification code sent to your phone.'
                                     : 'Enter the verification code from your authenticator app.'}
                             </p>
                             <div className="space-y-2">
-                                <Label htmlFor="verify-code" className="text-slate-300">Verification Code</Label>
+                                <Label htmlFor="verify-code" className="text-foreground">Verification Code</Label>
                                 <div className="relative group">
                                     <Lock className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
                                     <Input
@@ -249,11 +249,11 @@ export function SignInForm() {
                             </div>
                             <Button
                                 type="submit"
-                                className="w-full gradient-accent font-medium shadow-lg shadow-orange-500/20 hover:shadow-orange-500/40 transition-all duration-300"
+                                className="w-full font-medium transition-all duration-300"
                                 disabled={isLoading}
                             >
                                 {isLoading ? (
-                                    <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Verifying...</>
+                                    <><Loader2 className="mr-2 h-4 w-4 animate-spin text-[hsl(var(--info))]" />Verifying...</>
                                 ) : (
                                     <>Verify<ArrowRight className="ml-2 h-4 w-4" /></>
                                 )}
@@ -261,7 +261,7 @@ export function SignInForm() {
                             <button
                                 type="button"
                                 onClick={() => { setPendingSecondFactor(false); setVerifyCode(''); setError(null) }}
-                                className="w-full text-sm text-muted-foreground hover:text-white transition-colors"
+                                className="w-full text-sm text-muted-foreground hover:text-foreground transition-colors"
                             >
                                 Back to sign in
                             </button>
@@ -269,7 +269,7 @@ export function SignInForm() {
                     ) : (
                         <form onSubmit={handleSubmit} className="space-y-4">
                             <div className="space-y-2">
-                                <Label htmlFor="email" className="text-slate-300">Email</Label>
+                                <Label htmlFor="email" className="text-foreground">Email</Label>
                                 <div className="relative group">
                                     <Mail className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
                                     <Input
@@ -285,7 +285,7 @@ export function SignInForm() {
                             </div>
                             <div className="space-y-2">
                                 <div className="flex items-center justify-between">
-                                    <Label htmlFor="password" className="text-slate-300">Password</Label>
+                                    <Label htmlFor="password" className="text-foreground">Password</Label>
                                     <button
                                         type="button"
                                         onClick={handleForgotPassword}
@@ -307,7 +307,7 @@ export function SignInForm() {
                                     <button
                                         type="button"
                                         onClick={() => setShowPassword(!showPassword)}
-                                        className="absolute right-3 top-2.5 text-muted-foreground hover:text-white transition-colors"
+                                        className="absolute right-3 top-2.5 text-muted-foreground hover:text-foreground transition-colors"
                                     >
                                         {showPassword ? (
                                             <EyeOff className="h-4 w-4" />
@@ -320,12 +320,12 @@ export function SignInForm() {
 
                             <Button
                                 type="submit"
-                                className="w-full gradient-accent font-medium shadow-lg shadow-orange-500/20 hover:shadow-orange-500/40 transition-all duration-300"
+                                className="w-full font-medium transition-all duration-300"
                                 disabled={isLoading}
                             >
                                 {isLoading ? (
                                     <>
-                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                        <Loader2 className="mr-2 h-4 w-4 animate-spin text-[hsl(var(--info))]" />
                                         Signing in...
                                     </>
                                 ) : (

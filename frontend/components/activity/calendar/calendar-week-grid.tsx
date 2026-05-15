@@ -13,7 +13,7 @@ const AGENT_COLORS = [
   { bg: 'bg-warning/20', border: 'border-warning/40', text: 'text-amber-300' },
   { bg: 'bg-rose-500/20', border: 'border-rose-500/40', text: 'text-rose-300' },
   { bg: 'bg-cyan-500/20', border: 'border-cyan-500/40', text: 'text-cyan-300' },
-  { bg: 'bg-orange-500/20', border: 'border-orange-500/40', text: 'text-orange-300' },
+  { bg: 'bg-primary/20', border: 'border-primary/40', text: 'text-primary' },
   { bg: 'bg-indigo-500/20', border: 'border-indigo-500/40', text: 'text-indigo-300' },
 ]
 

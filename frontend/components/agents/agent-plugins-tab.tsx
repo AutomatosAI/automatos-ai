@@ -111,7 +111,7 @@ export function AgentPlugins({ agents, selectedAgentId, onAgentSelect }: AgentPl
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-base flex items-center gap-2">
-                    <Sparkles className="w-5 h-5 text-orange-400" />
+                    <Sparkles className="w-5 h-5 text-primary" />
                     {plugin.name}
                   </CardTitle>
                   <Badge variant="outline" className="text-xs">v{plugin.version}</Badge>

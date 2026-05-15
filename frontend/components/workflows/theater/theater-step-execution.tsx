@@ -111,8 +111,8 @@ function StatusBadge({ status }: { status: StepExecutionData['status'] }) {
     pending: { label: 'Pending', className: 'text-muted-foreground border-border/40', icon: null },
     running: {
       label: 'Running',
-      className: 'text-orange-400 border-orange-400/40',
-      icon: <Loader2 className="w-3 h-3 animate-spin" />,
+      className: 'text-primary border-primary/40',
+      icon: <Loader2 className="w-3 h-3 animate-spin text-[hsl(var(--info))]" />,
     },
     success: {
       label: 'Success',
@@ -195,7 +195,7 @@ function LLMMessagesSection({ messages }: { messages: LLMMessage[] }) {
       case 'assistant':
         return 'text-success bg-success/10 border-success/20'
       case 'tool':
-        return 'text-orange-400 bg-orange-400/10 border-orange-400/20'
+        return 'text-primary bg-primary/10 border-primary/20'
       default:
         return 'text-muted-foreground bg-secondary/50 border-border/20'
     }
@@ -241,7 +241,7 @@ function ToolCallsSection({ toolCalls }: { toolCalls: ToolCall[] }) {
       case 'error':
         return <AlertCircle className="w-3.5 h-3.5 text-destructive" />
       case 'pending':
-        return <Loader2 className="w-3.5 h-3.5 text-orange-400 animate-spin" />
+        return <Loader2 className="w-3.5 h-3.5 text-[hsl(var(--info))] animate-spin" />
       default:
         return <CheckCircle className="w-3.5 h-3.5 text-success" />
     }
@@ -260,7 +260,7 @@ function ToolCallsSection({ toolCalls }: { toolCalls: ToolCall[] }) {
               {getToolStatusIcon(tool.status)}
               <Badge
                 variant="outline"
-                className="text-[10px] h-5 text-orange-400 border-orange-400/30"
+                className="text-[10px] h-5 text-primary border-primary/30"
               >
                 {tool.app_name}
               </Badge>
@@ -366,7 +366,7 @@ export function TheaterStepExecution({ step, index }: TheaterStepExecutionProps)
       transition={{ delay: index * 0.1, duration: 0.3 }}
       className={cn(
         'glass-card rounded-2xl p-4 transition-all',
-        step.status === 'running' && 'ring-1 ring-orange-400/30',
+        step.status === 'running' && 'ring-1 ring-primary/30',
         step.status === 'failed' && 'ring-1 ring-destructive/30'
       )}
     >

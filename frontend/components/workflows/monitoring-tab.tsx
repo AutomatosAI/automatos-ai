@@ -134,7 +134,7 @@ export function MonitoringTab() {
       change: '-8%',
       trend: 'down' as const,
       icon: Clock,
-      color: 'text-orange-400'
+      color: 'text-primary'
     }
   ]
 
@@ -159,7 +159,7 @@ export function MonitoringTab() {
                     <div className={`w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center`}>
                       <Icon className={`w-5 h-5 ${metric.color}`} />
                     </div>
-                    <div className={`flex items-center text-xs ${metric.trend === 'up' ? 'text-success' : 'text-orange-400'}`}>
+                    <div className={`flex items-center text-xs ${metric.trend === 'up' ? 'text-success' : 'text-primary'}`}>
                       <TrendIcon className="w-3 h-3 mr-1" />
                       {metric.change}
                     </div>
@@ -229,7 +229,7 @@ export function MonitoringTab() {
                           <Brain className="w-5 h-5 text-agent" />
                           <Badge className="bg-success/20 text-success border-success/30">Active</Badge>
                         </div>
-                        <div className="text-3xl font-bold text-white mb-1">
+                        <div className="text-3xl font-bold text-foreground mb-1">
                           {memoryStats?.system_stats?.total_memories || 0}
                         </div>
                         <div className="text-xs text-muted-foreground">Total Memories</div>
@@ -241,7 +241,7 @@ export function MonitoringTab() {
                           <TrendingUp className="w-4 h-4 text-info" />
                           {memoryStats?.is_real_data && <Badge variant="outline" className="text-xs">Real</Badge>}
                         </div>
-                        <div className="text-2xl font-bold text-white mb-1">
+                        <div className="text-2xl font-bold text-foreground mb-1">
                           {memoryStats?.access_metrics?.hit_rate ? (memoryStats.access_metrics.hit_rate * 100).toFixed(1) : '0.0'}%
                         </div>
                         <div className="text-xs text-success">Cache Hit Rate</div>
@@ -253,7 +253,7 @@ export function MonitoringTab() {
                           <Activity className="w-4 h-4 text-cyan-400" />
                           <span className="text-xs text-cyan-400">Active</span>
                         </div>
-                        <div className="text-2xl font-bold text-white mb-1">
+                        <div className="text-2xl font-bold text-foreground mb-1">
                           {memoryStats?.access_metrics?.total_accesses || 0}
                         </div>
                         <div className="text-xs text-success">Total Accesses</div>
@@ -265,7 +265,7 @@ export function MonitoringTab() {
                           <Clock className="w-4 h-4 text-success" />
                           <span className="text-xs text-success">Score</span>
                         </div>
-                        <div className="text-2xl font-bold text-white mb-1">
+                        <div className="text-2xl font-bold text-foreground mb-1">
                           {memoryStats?.access_metrics?.avg_importance ? (memoryStats.access_metrics.avg_importance * 100).toFixed(0) : '0'}
                         </div>
                         <div className="text-xs text-success">Avg Importance</div>
@@ -433,7 +433,7 @@ export function MonitoringTab() {
                             {ragStats?.systemStatus || 'Unknown'}
                           </Badge>
                         </div>
-                        <div className="text-2xl font-bold text-white mb-1">
+                        <div className="text-2xl font-bold text-foreground mb-1">
                           {ragStats?.contextQueries?.toLocaleString() || '0'}
                         </div>
                         <div className="text-xs text-success">Total Queries</div>
@@ -446,7 +446,7 @@ export function MonitoringTab() {
                             {ragStats?.retrievalSuccess > 0 ? 'Active' : 'Idle'}
                           </span>
                         </div>
-                        <div className="text-2xl font-bold text-white mb-1">
+                        <div className="text-2xl font-bold text-foreground mb-1">
                           {ragStats?.retrievalSuccess?.toFixed(1) || '0.0'}%
                         </div>
                         <div className="text-xs text-success">Success Rate</div>
@@ -459,7 +459,7 @@ export function MonitoringTab() {
                             {ragStats?.avgResponseTime && ragStats.avgResponseTime !== '0s' ? 'Fast' : 'N/A'}
                           </span>
                         </div>
-                        <div className="text-2xl font-bold text-white mb-1">
+                        <div className="text-2xl font-bold text-foreground mb-1">
                           {ragStats?.avgResponseTime || '0s'}
                         </div>
                         <div className="text-xs text-success">Avg Latency</div>
@@ -515,7 +515,7 @@ export function MonitoringTab() {
                             '#60B5FF': 'text-info',
                             '#A78BFA': 'text-agent',
                             '#72BF78': 'text-success',
-                            '#F97316': 'text-orange-400',
+                            '#F97316': 'text-primary',
                             '#EF4444': 'text-destructive'
                           }
                           const textColor = colorMap[source.color] || 'text-info'
@@ -543,7 +543,7 @@ export function MonitoringTab() {
                     <div className="inline-flex p-4 bg-cyan-500/10 border border-cyan-500/30 rounded-full mb-2">
                       <Zap className="w-12 h-12 text-cyan-400" />
                     </div>
-                    <h3 className="text-lg font-semibold text-white">Tools Usage Tracking</h3>
+                    <h3 className="text-lg font-semibold text-foreground">Tools Usage Tracking</h3>
                     <p className="text-sm text-muted-foreground">
                       Tool tracking will be implemented in future workflow executions.
                     </p>
