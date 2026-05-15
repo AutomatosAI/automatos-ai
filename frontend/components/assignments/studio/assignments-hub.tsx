@@ -3,16 +3,16 @@
 /**
  * Studio Assignments hub.
  *
- * Editorial top → "Start something" 4-up EntryGrid → Needs approval
- * cards (conditional) → Playbooks/Missions flip tabs (URL-synced via
- * ?tab=) → the matching Body component (PlaybooksBody / MissionsBody).
+ * Editorial top → "Start something" 4-up EntryGrid → Playbooks/Missions
+ * flip tabs (URL-synced via ?tab=) → the matching Body component
+ * (PlaybooksBody / MissionsBody).
  *
- * The flip tabs replace CD round 4's "Most-used playbooks" + 5-card
- * "Marketplace" lower strips — the user wants to browse one or the
- * other in place, not see three stacked teaser sections.
+ * Awaiting-approval missions surface inside the Missions tab via the
+ * "Needs your call" group in MissionsBody's Grouped view, so the hub
+ * doesn't render a separate cards section above the tabs.
  */
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 import { Filter, Plus } from 'lucide-react'
 import dynamic from 'next/dynamic'
@@ -21,12 +21,8 @@ import { useMissions } from '@/hooks/use-missions-api'
 import { useWorkflowPlaybooks } from '@/hooks/use-playbook-api'
 
 import { EntryGrid, type EntryType } from './entry-grid'
-import { StatusHead } from './status-head'
-import { MissionCard } from './mission-card'
 import { MissionsBody } from './missions-body'
 import { PlaybooksBody } from './playbooks-body'
-
-import type { MissionResponse } from '@/types/missions'
 
 const CreateMissionModal = dynamic(
   () => import('@/components/missions/create-mission-modal').then((m) => m.CreateMissionModal),
@@ -43,10 +39,6 @@ const CreateTaskDialog = dynamic(
 
 type Tab = 'playbooks' | 'missions'
 
-function isAwaitingApproval(m: MissionResponse): boolean {
-  return m.state === 'awaiting_approval' || m.state === 'awaiting_human'
-}
-
 export function StudioAssignmentsHub() {
   const router = useRouter()
   const pathname = usePathname()
@@ -62,11 +54,7 @@ export function StudioAssignmentsHub() {
   const { data: missionData } = useMissions({ limit: 30 })
   const { data: playbookData } = useWorkflowPlaybooks({ limit: 1 })
 
-  const missions = missionData?.missions ?? []
-  const needsApproval = useMemo(
-    () => missions.filter(isAwaitingApproval).slice(0, 4),
-    [missions],
-  )
+  const missionCount = missionData?.missions?.length ?? 0
   const totalPlaybooks =
     (playbookData as { total?: number; items?: unknown[] } | undefined)?.total ??
     (playbookData as { items?: unknown[] } | undefined)?.items?.length ??
@@ -91,17 +79,12 @@ export function StudioAssignmentsHub() {
     [router],
   )
 
-  const handleMission = useCallback(
-    (id: string) => router.push(`/missions/${id}` as any),
-    [router],
-  )
-
   return (
     <div className="cc-page">
       {/* Editorial top */}
       <div className="cc-headrow">
         <div className="cc-head">
-          <p className="cc-eyebrow">The work · pilot · {missions.length} op</p>
+          <p className="cc-eyebrow">The work · pilot · {missionCount} op</p>
           <h1 className="cc-h1">Assignments</h1>
           <p className="cc-sub">
             Plan, schedule, and orchestrate work for your crew. Start something
@@ -124,7 +107,7 @@ export function StudioAssignmentsHub() {
         </div>
       </div>
 
-      {/* Section 1 — Start something */}
+      {/* Start something — EntryGrid */}
       <section style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
           <span
@@ -151,39 +134,7 @@ export function StudioAssignmentsHub() {
         <EntryGrid recommended="mission" onPick={handleEntry} />
       </section>
 
-      {/* Section 2 — Needs approval (only when present) */}
-      {needsApproval.length > 0 && (
-        <section>
-          <StatusHead
-            pip="hsl(38 78% 50%)"
-            label="Needs approval"
-            count={`${needsApproval.length} waiting`}
-            right={
-              <button
-                type="button"
-                className="l-btn"
-                style={{ height: 26, fontSize: 11.5, padding: '0 10px' }}
-                onClick={() => router.push('/missions?state=awaiting_approval' as any)}
-              >
-                Open queue →
-              </button>
-            }
-          />
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(2, 1fr)',
-              gap: 12,
-            }}
-          >
-            {needsApproval.map((m) => (
-              <MissionCard key={m.id} mission={m} onOpen={handleMission} />
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Flip-tabs: Playbooks · Missions */}
+      {/* Flip tabs: Playbooks · Missions */}
       <nav className="cc-tabs" aria-label="Assignments sections">
         <button
           type="button"
@@ -201,7 +152,7 @@ export function StudioAssignmentsHub() {
           onClick={() => setTab('missions')}
         >
           <span>Missions</span>
-          {missions.length > 0 && <span className="cc-tab-ct">{missions.length}</span>}
+          {missionCount > 0 && <span className="cc-tab-ct">{missionCount}</span>}
         </button>
       </nav>
 
