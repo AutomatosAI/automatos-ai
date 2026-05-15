@@ -270,7 +270,7 @@ export function MissionConstellationCard({ onStart }: MissionConstellationCardPr
         {/* ── Copy + CTA (bottom-left) ───────────────────────────── */}
         <div className="absolute inset-x-0 bottom-0 z-10 p-6 flex items-end justify-between gap-4">
           <div className="min-w-0">
-            <div className="inline-flex items-center gap-1.5 mb-3 px-2 py-0.5 rounded font-mono text-[10px] tracking-[0.12em] text-orange-300 border border-primary/30 bg-primary/10">
+            <div className="inline-flex items-center gap-1.5 mb-3 px-2 py-0.5 rounded font-mono text-[10px] tracking-[0.12em] text-primary border border-primary/30 bg-primary/10">
               <span className="w-1 h-1 rounded-full bg-primary shadow-[0_0_6px_rgba(249,115,22,0.9)]" />
               MULTI-AGENT
             </div>
@@ -291,7 +291,7 @@ export function MissionConstellationCard({ onStart }: MissionConstellationCardPr
           </div>
           <Button
             onClick={onStart}
-            className="shrink-0 shadow-[0_8px_20px_rgba(249,115,22,0.35)]"
+            className="shrink-0"
           >
             Start <span aria-hidden="true">&rarr;</span>
           </Button>

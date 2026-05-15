@@ -157,7 +157,7 @@ export function PatternDetailsModal({ isOpen, onClose, pattern }: PatternDetails
                 <Button variant="outline" size="sm" onClick={() => setIsEditing(false)}>
                   Cancel
                 </Button>
-                <Button size="sm" onClick={handleSave} className="gradient-accent">
+                <Button size="sm" onClick={handleSave}>
                   <Save className="w-4 h-4 mr-2" />
                   Save Changes
                 </Button>
@@ -229,7 +229,7 @@ export function PatternDetailsModal({ isOpen, onClose, pattern }: PatternDetails
                         <p className="text-sm text-muted-foreground">Category</p>
                         <p className="text-lg font-bold">{pattern.category}</p>
                       </div>
-                      <Clock className="w-8 h-8 text-orange-400" />
+                      <Clock className="w-8 h-8 text-primary" />
                     </div>
                   </CardContent>
                 </Card>
@@ -439,7 +439,7 @@ export function PatternDetailsModal({ isOpen, onClose, pattern }: PatternDetails
                   <Button
                     onClick={handleTest}
                     disabled={!testQuery.trim() || testLoading}
-                    className="w-full gradient-accent"
+                    className="w-full"
                   >
                     {testLoading ? (
                       <>
