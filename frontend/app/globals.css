@@ -2558,6 +2558,8 @@
     border-radius: 10px; padding: 16px;
     display: flex; flex-direction: column; gap: 10px;
     position: relative; text-align: left;
+    /* Constrain to grid cell so long unbreakable goal text wraps. */
+    width: 100%; min-width: 0;
   }
   .studio .mis-card .row1 { display: flex; align-items: center; gap: 10px; }
   .studio .mis-card .id {
@@ -2572,6 +2574,8 @@
     letter-spacing: -0.01em; line-height: 1.25;
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
     overflow: hidden;
+    /* Force long URLs / no-space goal text to wrap inside the card. */
+    overflow-wrap: anywhere; word-break: break-word; min-width: 0;
   }
   .studio .mis-card .row-actions { margin-left: auto; display: inline-flex; gap: 4px; align-items: center; }
   .studio .mis-card .row-meta {

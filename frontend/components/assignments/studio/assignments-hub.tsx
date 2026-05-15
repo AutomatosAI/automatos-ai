@@ -14,7 +14,6 @@
 
 import { useCallback, useState } from 'react'
 import { useRouter, useSearchParams, usePathname } from 'next/navigation'
-import { Filter, Plus } from 'lucide-react'
 import dynamic from 'next/dynamic'
 
 import { useMissions } from '@/hooks/use-missions-api'
@@ -81,7 +80,8 @@ export function StudioAssignmentsHub() {
 
   return (
     <div className="cc-page">
-      {/* Editorial top */}
+      {/* Editorial top — actions removed: Filter was dead, and "+ New
+          mission" duplicated the Mission card in the EntryGrid below. */}
       <div className="cc-headrow">
         <div className="cc-head">
           <p className="cc-eyebrow">The work · pilot · {missionCount} op</p>
@@ -90,20 +90,6 @@ export function StudioAssignmentsHub() {
             Plan, schedule, and orchestrate work for your crew. Start something
             new — or pick up what’s running.
           </p>
-        </div>
-        <div className="cc-actions">
-          <button type="button" className="cc-btn" title="Filter">
-            <Filter style={{ width: 12, height: 12 }} />
-            Filter
-          </button>
-          <button
-            type="button"
-            className="cc-btn primary"
-            onClick={() => setMissionOpen(true)}
-          >
-            <Plus style={{ width: 12, height: 12 }} />
-            New mission
-          </button>
         </div>
       </div>
 

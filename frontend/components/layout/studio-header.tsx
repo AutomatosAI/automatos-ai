@@ -38,7 +38,7 @@ export function StudioHeader() {
         aria-label="Open search (⌘K)"
       >
         <Search style={{ width: 12, height: 12 }} />
-        <span>Jump to mission, agent, run…</span>
+        <span>Search</span>
         <span className="sh-kbd">⌘K</span>
       </button>
 
