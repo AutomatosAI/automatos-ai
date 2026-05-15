@@ -2798,6 +2798,80 @@
     border-color: var(--fg);
   }
   .studio .l-btn--p:hover { background: hsl(30 12% 9% / 0.88); }
+
+  /* Assignments table (Missions / Playbooks list views) */
+  .studio .act-table {
+    width: 100%; border-collapse: collapse;
+    font-size: 12.5px;
+  }
+  .studio .act-table thead th {
+    text-align: left;
+    padding: 10px 14px;
+    border-bottom: 1px solid hsl(var(--border));
+    font-family: var(--font-geist-mono, monospace);
+    font-size: 9.5px; letter-spacing: 0.10em;
+    text-transform: uppercase; color: var(--fg-3);
+    font-weight: 700;
+    background: hsl(38 45% 96%);
+  }
+  .studio .act-table tbody td {
+    padding: 10px 14px;
+    border-bottom: 1px solid hsl(var(--border));
+    color: var(--fg);
+    vertical-align: middle;
+  }
+  .studio .act-table tbody td.mono {
+    font-family: var(--font-geist-mono, monospace);
+    font-feature-settings: "tnum";
+    font-size: 11px;
+  }
+  .studio .act-table tbody tr { cursor: pointer; background: var(--paper); }
+  .studio .act-table tbody tr:hover { background: var(--bg-2); }
+  .studio .act-table tbody tr:last-child td { border-bottom: 0; }
+  .studio .act-table .nm {
+    font-family: var(--serif); font-size: 13.5px; font-weight: 500;
+    letter-spacing: -0.005em;
+  }
+  .studio .act-table .ag {
+    font-family: var(--serif); font-size: 13px; font-weight: 500;
+  }
+
+  /* studio-pill — small status badge used in tables / hub */
+  .studio .studio-pill {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 7px; border-radius: 3px;
+    font-family: var(--font-geist-mono, monospace);
+    font-size: 9.5px; letter-spacing: 0.06em;
+    text-transform: uppercase; font-weight: 700;
+  }
+  .studio .studio-pill.ok   { background: hsl(82 50% 22% / 0.14); color: hsl(82 50% 22%); }
+  .studio .studio-pill.err  { background: hsl(var(--accent) / 0.14); color: hsl(var(--accent)); }
+  .studio .studio-pill.warn { background: hsl(38 78% 27% / 0.14); color: hsl(38 78% 27%); }
+  .studio .studio-pill.info { background: hsl(var(--info) / 0.14); color: hsl(var(--info)); }
+  .studio .studio-pill.run  { background: hsl(30 12% 9% / 0.08); color: var(--fg); }
+  .studio .studio-pill.muted{ background: hsl(40 30% 80% / 0.4); color: var(--fg-3); }
+  .studio .studio-pill.brand{ background: hsl(15 76% 44% / 0.14); color: hsl(var(--accent)); }
+
+  /* Scope tabs (Playbooks page: All / Mine / Workspace / Imported) */
+  .studio .scope-tabs {
+    display: inline-flex; background: var(--bg-2);
+    padding: 3px; border-radius: 6px; gap: 2px;
+  }
+  .studio .scope-tabs button {
+    background: transparent; border: 0; padding: 5px 12px;
+    border-radius: 4px; font-size: 12px; font-weight: 500;
+    color: var(--fg-2); cursor: pointer;
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: inherit;
+  }
+  .studio .scope-tabs button.on {
+    background: var(--paper); color: var(--fg);
+    box-shadow: 0 1px 0 rgba(60,40,10,.05);
+  }
+  .studio .scope-tabs .ct {
+    font-family: var(--font-geist-mono, monospace);
+    font-size: 10px; color: var(--fg-3); font-weight: 600;
+  }
 }
 
 html {
