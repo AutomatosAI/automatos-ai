@@ -16,9 +16,9 @@ import {
   Package,
   Bot,
   PlugZap,
-  LibraryBig,
+  Library,
   Store,
-  UsersRound,
+  Users,
   TrendingUp,
   Building2,
   BookOpen,
@@ -62,11 +62,11 @@ export const STUDIO_MENU_PRIMARY: StudioMenuItem[] = [
   // WORKFORCE — managing agents + capabilities
   { id: 'agents',   label: 'Agent Management', desc: 'Manage AI agents and skills',        href: '/agents',         icon: Bot,               group: 'WORKFORCE' },
   { id: 'tools',    label: 'Tools & Integrations', desc: 'Development and utility tools',  href: '/tools',          icon: PlugZap,           group: 'WORKFORCE' },
-  { id: 'kb',       label: 'Knowledge Base',   desc: 'Documents, databases & code',        href: '/documents',      icon: LibraryBig,        group: 'WORKFORCE' },
+  { id: 'kb',       label: 'Knowledge Base',   desc: 'Documents, databases & code',        href: '/documents',      icon: Library,           group: 'WORKFORCE' },
   { id: 'market',   label: 'Marketplace',      desc: 'Discover agents, playbooks',         href: '/marketplace',    icon: Store,             group: 'WORKFORCE' },
 
   // WORKSPACE — admin + decision economics
-  { id: 'team',     label: 'Team Management',  desc: 'Manage workspace members',           href: '/team',           icon: UsersRound,        group: 'WORKSPACE' },
+  { id: 'team',     label: 'Team Management',  desc: 'Manage workspace members',           href: '/team',           icon: Users,             group: 'WORKSPACE' },
   { id: 'analytics',label: 'Analytics',        desc: 'Performance, costs & insights',      href: '/analytics',      icon: TrendingUp,        group: 'WORKSPACE' },
   { id: 'admin',    label: 'Workspace Admin',  desc: 'Manage all workspaces',              href: '/admin/workspaces', icon: Building2,       group: 'WORKSPACE' },
 ];

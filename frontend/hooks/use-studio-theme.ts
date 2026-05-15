@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useTheme } from 'next-themes';
 import { useSearchParams } from 'next/navigation';
 
@@ -31,5 +31,13 @@ export function useStudioThemeFlag(): void {
  */
 export function useIsStudio(): boolean {
   const { theme, resolvedTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // Avoid hydration mismatch: server render returns false, client decides post-mount.
+  if (!mounted) return false;
   return theme === 'studio' || resolvedTheme === 'studio';
 }

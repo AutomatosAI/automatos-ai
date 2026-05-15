@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import { useUser } from '@clerk/nextjs';
-import { Search, BookOpen, CircleHelp, Bell, ChevronDown } from 'lucide-react';
+import { Search, BookOpen, HelpCircle, Bell, ChevronDown } from 'lucide-react';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
 
 /**
@@ -76,7 +76,7 @@ export function StudioHeader({
           title="Help"
           aria-label="Help"
         >
-          <CircleHelp style={{ width: 15, height: 15, strokeWidth: 1.6 }} />
+          <HelpCircle style={{ width: 15, height: 15, strokeWidth: 1.6 }} />
         </button>
         <button
           type="button"
