@@ -8,6 +8,7 @@
 
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { useUser } from '@clerk/nextjs'
 import {
   LayoutGrid,
   List as ListIcon,
@@ -19,7 +20,8 @@ import {
   Hand,
 } from 'lucide-react'
 
-import { useWorkflowPlaybooks } from '@/hooks/use-playbook-api'
+import { useWorkflowPlaybooks, useExecutePlaybook } from '@/hooks/use-playbook-api'
+import { useToast } from '@/hooks/use-toast'
 
 import { StatusHead } from './status-head'
 import { PlaybookCard, type PlaybookLike } from './playbook-card'
@@ -45,6 +47,7 @@ interface PlaybooksBodyProps {
 
 export function PlaybooksBody({ limit = 100, hideFeatured = false }: PlaybooksBodyProps) {
   const router = useRouter()
+  const { user } = useUser()
 
   const [view, setView] = useState<View>('grid')
   const [scope, setScope] = useState<Scope>('all')
@@ -54,30 +57,52 @@ export function PlaybooksBody({ limit = 100, hideFeatured = false }: PlaybooksBo
   const { data, isLoading } = useWorkflowPlaybooks({ limit })
   const all = (data as { items?: PlaybookLike[] } | undefined)?.items ?? []
 
+  // Identify the current user against the playbook `created_by` field
+  // (set server-side to email or "system"). Same approach as missions-body.
+  const userKey = user?.primaryEmailAddress?.emailAddress || user?.id || ''
+  const userIdNum = user?.id ? Number(user.id) : NaN
+
+  type RawPlaybook = PlaybookLike & {
+    created_by?: string
+    created_by_user_id?: number | null
+    workspace_id?: string | null
+    cloned_from_id?: number | null
+    owner_type?: string
+    is_marketplace_item?: boolean
+  }
+
+  const isMine = (p: RawPlaybook): boolean => {
+    if (!userKey && Number.isNaN(userIdNum)) return false
+    if (p.created_by && userKey && p.created_by === userKey) return true
+    if (p.created_by_user_id != null && !Number.isNaN(userIdNum)
+        && p.created_by_user_id === userIdNum) return true
+    return false
+  }
+
+  const isImported = (p: RawPlaybook): boolean =>
+    (p.cloned_from_id != null) ||
+    p.owner_type === 'marketplace' ||
+    p.is_marketplace_item === true
+
+  const isWorkspace = (p: RawPlaybook): boolean =>
+    p.workspace_id != null && !isMine(p) && !isImported(p)
+
   const counts = useMemo(() => {
-    const mine = all.filter((p) => (p as { is_mine?: boolean }).is_mine).length
-    const workspace = all.filter(
-      (p) => (p as { is_public?: boolean }).is_public === false,
-    ).length
-    const imported = all.filter(
-      (p) => (p as { source?: string }).source === 'marketplace',
-    ).length
-    return { all: all.length, mine, workspace, imported }
-  }, [all])
+    const list = all as RawPlaybook[]
+    return {
+      all: list.length,
+      mine: list.filter(isMine).length,
+      workspace: list.filter(isWorkspace).length,
+      imported: list.filter(isImported).length,
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [all, userKey, userIdNum])
 
   const filtered = useMemo(() => {
-    let list = all
-    if (scope === 'mine') {
-      list = list.filter((p) => (p as { is_mine?: boolean }).is_mine)
-    } else if (scope === 'workspace') {
-      list = list.filter(
-        (p) => (p as { is_public?: boolean }).is_public === false,
-      )
-    } else if (scope === 'imported') {
-      list = list.filter(
-        (p) => (p as { source?: string }).source === 'marketplace',
-      )
-    }
+    let list = all as RawPlaybook[]
+    if (scope === 'mine') list = list.filter(isMine)
+    else if (scope === 'workspace') list = list.filter(isWorkspace)
+    else if (scope === 'imported') list = list.filter(isImported)
     if (search.trim()) {
       const q = search.trim().toLowerCase()
       list = list.filter(
@@ -99,7 +124,8 @@ export function PlaybooksBody({ limit = 100, hideFeatured = false }: PlaybooksBo
       return (b.use_count ?? 0) - (a.use_count ?? 0)
     })
     return sorted
-  }, [all, scope, sort, search])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [all, scope, sort, search, userKey, userIdNum])
 
   const featured = useMemo(() => all.filter((p) => p.is_featured).slice(0, 5), [all])
   const totalRuns = all.reduce((acc, p) => acc + (p.use_count ?? 0), 0)
@@ -107,6 +133,32 @@ export function PlaybooksBody({ limit = 100, hideFeatured = false }: PlaybooksBo
   const handleRun = (p: PlaybookLike) => {
     const id = p.template_id || (p.id != null ? String(p.id) : '')
     if (id) router.push(`/playbooks?id=${encodeURIComponent(id)}` as any)
+  }
+
+  const executePlaybook = useExecutePlaybook()
+  const { toast } = useToast()
+
+  const handleFeaturedRun = async (p: PlaybookLike) => {
+    const id = p.template_id || (p.id != null ? String(p.id) : '')
+    if (!id) return
+    try {
+      const result: any = await executePlaybook.mutateAsync({ playbookId: id })
+      toast({
+        title: 'Playbook started',
+        description: `"${p.name}" is now running.`,
+      })
+      if (result?.recipe_execution_id) {
+        router.push(
+          `/activity/execution?id=${encodeURIComponent(result.recipe_execution_id)}&recipeId=${encodeURIComponent(id)}` as any,
+        )
+      }
+    } catch (err: any) {
+      toast({
+        title: 'Could not start playbook',
+        description: err?.message || 'Execution failed',
+        variant: 'destructive',
+      })
+    }
   }
 
   return (
@@ -225,7 +277,8 @@ export function PlaybooksBody({ limit = 100, hideFeatured = false }: PlaybooksBo
                 key={String(p.template_id || p.id)}
                 type="button"
                 className="mkt-card"
-                onClick={() => handleRun(p)}
+                onClick={() => handleFeaturedRun(p)}
+                disabled={executePlaybook.isPending}
               >
                 <div className="top">
                   <span className="ic">
@@ -282,7 +335,7 @@ export function PlaybooksBody({ limit = 100, hideFeatured = false }: PlaybooksBo
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(3, 1fr)',
+              gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
               gap: 12,
               paddingBottom: 24,
             }}

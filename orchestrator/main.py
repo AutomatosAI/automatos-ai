@@ -391,6 +391,25 @@ async def _seed_semantic_embeddings():
 
     _asyncio.create_task(_embed_all_agents_on_startup())
 
+    # PRD-108 single-collection refactor: ensure the shared field_memory
+    # collection + payload indexes exist before the coordinator boots.
+    async def _ensure_field_memory_collection() -> None:
+        try:
+            from modules.context.factory import get_shared_context
+            from modules.context.adapters.vector_field import VectorFieldSharedContext
+            ctx = get_shared_context()
+            inner = getattr(ctx, "_inner", ctx)
+            if isinstance(inner, VectorFieldSharedContext):
+                await inner.ensure_shared_collection()
+                logger.info("PRD-108: shared field_memory collection ready")
+        except Exception:
+            logger.warning(
+                "PRD-108: shared field_memory bootstrap failed (non-fatal)",
+                exc_info=True,
+            )
+
+    _asyncio.create_task(_ensure_field_memory_collection())
+
 
 class TrustGateError(RuntimeError):
     """Raised when the trust gate check fails — platform runs in degraded mode."""

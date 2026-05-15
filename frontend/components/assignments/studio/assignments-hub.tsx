@@ -14,7 +14,6 @@
 
 import { useCallback, useState } from 'react'
 import { useRouter, useSearchParams, usePathname } from 'next/navigation'
-import { Filter, Plus } from 'lucide-react'
 import dynamic from 'next/dynamic'
 
 import { useMissions } from '@/hooks/use-missions-api'
@@ -81,7 +80,8 @@ export function StudioAssignmentsHub() {
 
   return (
     <div className="cc-page">
-      {/* Editorial top */}
+      {/* Editorial top — actions removed: Filter was dead, and "+ New
+          mission" duplicated the Mission card in the EntryGrid below. */}
       <div className="cc-headrow">
         <div className="cc-head">
           <p className="cc-eyebrow">The work · pilot · {missionCount} op</p>
@@ -91,21 +91,31 @@ export function StudioAssignmentsHub() {
             new — or pick up what’s running.
           </p>
         </div>
-        <div className="cc-actions">
-          <button type="button" className="cc-btn" title="Filter">
-            <Filter style={{ width: 12, height: 12 }} />
-            Filter
-          </button>
-          <button
-            type="button"
-            className="cc-btn primary"
-            onClick={() => setMissionOpen(true)}
-          >
-            <Plus style={{ width: 12, height: 12 }} />
-            New mission
-          </button>
-        </div>
       </div>
+
+      {/* Flip tabs — moved above Start something so they're the first
+          navigation element visible at scroll=0 and stay sticky as the
+          user scrolls into the library below. */}
+      <nav className="cc-tabs" aria-label="Assignments sections">
+        <button
+          type="button"
+          className={`cc-tab${tab === 'playbooks' ? ' active' : ''}`}
+          aria-current={tab === 'playbooks' ? 'page' : undefined}
+          onClick={() => setTab('playbooks')}
+        >
+          <span>Playbooks</span>
+          {totalPlaybooks > 0 && <span className="cc-tab-ct">{totalPlaybooks}</span>}
+        </button>
+        <button
+          type="button"
+          className={`cc-tab${tab === 'missions' ? ' active' : ''}`}
+          aria-current={tab === 'missions' ? 'page' : undefined}
+          onClick={() => setTab('missions')}
+        >
+          <span>Missions</span>
+          {missionCount > 0 && <span className="cc-tab-ct">{missionCount}</span>}
+        </button>
+      </nav>
 
       {/* Start something — EntryGrid */}
       <section style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -133,28 +143,6 @@ export function StudioAssignmentsHub() {
         </div>
         <EntryGrid recommended="mission" onPick={handleEntry} />
       </section>
-
-      {/* Flip tabs: Playbooks · Missions */}
-      <nav className="cc-tabs" aria-label="Assignments sections">
-        <button
-          type="button"
-          className={`cc-tab${tab === 'playbooks' ? ' active' : ''}`}
-          aria-current={tab === 'playbooks' ? 'page' : undefined}
-          onClick={() => setTab('playbooks')}
-        >
-          <span>Playbooks</span>
-          {totalPlaybooks > 0 && <span className="cc-tab-ct">{totalPlaybooks}</span>}
-        </button>
-        <button
-          type="button"
-          className={`cc-tab${tab === 'missions' ? ' active' : ''}`}
-          aria-current={tab === 'missions' ? 'page' : undefined}
-          onClick={() => setTab('missions')}
-        >
-          <span>Missions</span>
-          {missionCount > 0 && <span className="cc-tab-ct">{missionCount}</span>}
-        </button>
-      </nav>
 
       {/* Tab body */}
       {tab === 'playbooks' ? <PlaybooksBody /> : <MissionsBody />}

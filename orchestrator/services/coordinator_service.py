@@ -768,36 +768,39 @@ class CoordinatorService:
             run.config = updated_config
             db.flush()
 
-    async def _cleanup_orphan_field_collections(self, db: Session, limit: int = 20) -> None:
-        """Delete Qdrant ``field_*`` collections that no OrchestrationRun references.
+    async def _cleanup_orphan_field_data(self, db: Session) -> None:
+        """Delete field memory points whose ``field_id`` has no OrchestrationRun.
 
-        Each mission field is its own Qdrant collection. Abandoned ones survive
-        when a run row is purged or its field_id is cleared without deleting
-        the collection. Qdrant loads every collection's HNSW into memory on
-        startup, so orphans bloat the baseline until pod OOMs.
+        Fields now live in a single shared Qdrant collection (``field_memory``)
+        with ``field_id`` as a payload filter. Orphans appear when a run row
+        is purged before its field was destroyed. One delete-by-filter call
+        per orphan id is atomic and cheap.
+
+        Also sweeps any leftover legacy per-mission ``field_<uuid>``
+        collections from the pre-refactor layout. Safe to call repeatedly;
+        becomes a no-op once they're all gone.
         """
         field = self._get_field()
         if not field:
             return
 
-        client = getattr(field, "_client", None)
+        # Resolve the inner adapter through the instrumentation wrapper.
+        inner = getattr(field, "_inner", field)
+        client = getattr(inner, "_client", None)
         if client is None:
             return
 
         try:
-            collections_resp = await client.get_collections()
+            from modules.context.adapters.vector_field import (
+                SHARED_COLLECTION,
+                VectorFieldSharedContext,
+            )
         except Exception:
-            logger.debug("[Coordinator] Qdrant get_collections failed", exc_info=True)
             return
 
-        field_collections = [
-            c.name for c in collections_resp.collections
-            if c.name.startswith("field_")
-        ]
-        if not field_collections:
+        if not isinstance(inner, VectorFieldSharedContext):
             return
 
-        # All field_ids still tied to a mission run (any state — only orphans go)
         referenced_ids = {
             row[0] for row in db.execute(
                 text(
@@ -808,22 +811,52 @@ class CoordinatorService:
             if row[0]
         }
 
-        deleted = 0
-        for name in field_collections:
-            if deleted >= limit:
-                break
-            field_id = name[len("field_"):]
-            if field_id in referenced_ids:
-                continue
-            try:
-                await client.delete_collection(name)
-                deleted += 1
-                logger.info("[Coordinator] Deleted orphan field collection %s", name)
-            except Exception:
-                logger.warning("[Coordinator] Failed to delete orphan %s", name, exc_info=True)
+        # --- Pass 1: orphan points in the shared collection ---
+        try:
+            scrolled, _ = await client.scroll(
+                collection_name=SHARED_COLLECTION,
+                limit=10000,
+                with_payload=["field_id"],
+                with_vectors=False,
+            )
+            present_ids = {
+                p.payload.get("field_id") for p in scrolled
+                if p.payload and p.payload.get("field_id")
+            }
+            orphan_ids = present_ids - referenced_ids
+            for fid in orphan_ids:
+                try:
+                    await inner.destroy_context(fid)
+                except Exception:
+                    logger.warning(
+                        "[Coordinator] Failed to destroy orphan field %s",
+                        fid, exc_info=True,
+                    )
+            if orphan_ids:
+                logger.info(
+                    "[Coordinator] Orphan cleanup: removed points for %d field_ids",
+                    len(orphan_ids),
+                )
+        except Exception:
+            logger.debug("[Coordinator] orphan-point sweep skipped", exc_info=True)
 
-        if deleted:
-            logger.info("[Coordinator] Orphan cleanup: removed %d field collections", deleted)
+        # --- Pass 2: legacy per-mission collections (pre-refactor) ---
+        try:
+            collections_resp = await client.get_collections()
+            legacy = [
+                c.name for c in collections_resp.collections
+                if c.name.startswith("field_") and c.name != SHARED_COLLECTION
+            ]
+            for name in legacy[:20]:  # throttle: 20 per tick
+                try:
+                    await client.delete_collection(name)
+                    logger.info("[Coordinator] Dropped legacy field collection %s", name)
+                except Exception:
+                    logger.warning(
+                        "[Coordinator] Failed to drop legacy %s", name, exc_info=True,
+                    )
+        except Exception:
+            logger.debug("[Coordinator] legacy-collection sweep skipped", exc_info=True)
 
     async def _save_pending_output_documents(self, db: Session) -> None:
         """Save output documents for completed missions that don't have one yet."""
@@ -941,11 +974,12 @@ class CoordinatorService:
                 await self._cleanup_terminal_fields(db)
                 db.commit()  # Persist field_id removal to stop destroy loop
 
-                # --- PRD-108: Drop orphan Qdrant collections (no mission row) ---
-                # Each field is its own collection; abandoned collections
-                # accumulate and crash Qdrant on startup (OOM). Throttled.
+                # --- PRD-108: Drop orphan field data (no mission row) ---
+                # Atomic delete-by-filter inside the shared field_memory
+                # collection; also sweeps any leftover legacy per-mission
+                # collections from the pre-refactor layout.
                 try:
-                    await self._cleanup_orphan_field_collections(db, limit=20)
+                    await self._cleanup_orphan_field_data(db)
                 except Exception:
                     logger.warning("[Coordinator] Orphan field cleanup failed", exc_info=True)
 
