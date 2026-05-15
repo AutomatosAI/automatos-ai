@@ -30,7 +30,7 @@ export function ConnectedAppCard({ app, onManage, onDisconnect }: ConnectedAppCa
     const isActive = app.status === 'active'
 
     return (
-        <Card className="bg-slate-800/50 border-slate-700/50 hover:border-slate-600/50 transition-all group card-glow">
+        <Card className="bg-secondary/50 border-border/50 hover:border-border/50 transition-all group">
             <CardContent className="p-4">
                 <div className="flex items-start gap-3">
                     {/* App Icon */}
@@ -51,7 +51,7 @@ export function ConnectedAppCard({ app, onManage, onDisconnect }: ConnectedAppCa
                     {/* App Info */}
                     <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
-                            <h3 className="font-medium text-slate-100 truncate">
+                            <h3 className="font-medium text-foreground truncate">
                                 {app.display_name}
                             </h3>
                             <Badge
@@ -67,7 +67,7 @@ export function ConnectedAppCard({ app, onManage, onDisconnect }: ConnectedAppCa
                             </Badge>
                         </div>
                         {app.action_count !== undefined && (
-                            <p className="text-xs text-slate-400 mt-1">
+                            <p className="text-xs text-muted-foreground mt-1">
                                 {app.action_count} features available
                             </p>
                         )}
@@ -79,7 +79,7 @@ export function ConnectedAppCard({ app, onManage, onDisconnect }: ConnectedAppCa
                             variant="ghost"
                             size="icon"
                             onClick={onManage}
-                            className="h-8 w-8 text-slate-400 hover:text-info hover:bg-info/10"
+                            className="h-8 w-8 text-muted-foreground hover:text-info hover:bg-info/10"
                             title="Manage features"
                         >
                             <Settings className="h-4 w-4" />
@@ -88,7 +88,7 @@ export function ConnectedAppCard({ app, onManage, onDisconnect }: ConnectedAppCa
                             variant="ghost"
                             size="icon"
                             onClick={onDisconnect}
-                            className="h-8 w-8 text-slate-400 hover:text-destructive hover:bg-destructive/10"
+                            className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
                             title="Disconnect"
                         >
                             <Unplug className="h-4 w-4" />

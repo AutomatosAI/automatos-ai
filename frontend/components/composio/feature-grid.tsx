@@ -47,15 +47,15 @@ export function FeatureGrid({ features, onToggle, loading }: FeatureGridProps) {
             {/* Search and stats */}
             <div className="flex items-center gap-4">
                 <div className="relative flex-1">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
                         placeholder="Search features..."
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
-                        className="pl-10 bg-slate-800/50 border-slate-700 focus:border-blue-500"
+                        className="pl-10 bg-secondary/50 border-border focus:border-primary"
                     />
                 </div>
-                <div className="text-sm text-slate-400 whitespace-nowrap">
+                <div className="text-sm text-muted-foreground whitespace-nowrap">
                     <span className="text-info font-medium">{enabledCount}</span>
                     <span className="mx-1">/</span>
                     <span>{features.length}</span>
@@ -69,12 +69,12 @@ export function FeatureGrid({ features, onToggle, loading }: FeatureGridProps) {
                     {[...Array(6)].map((_, i) => (
                         <div
                             key={i}
-                            className="h-20 rounded-xl bg-slate-800/50 animate-pulse"
+                            className="h-20 rounded-xl bg-secondary/50 animate-pulse"
                         />
                     ))}
                 </div>
             ) : filteredFeatures.length === 0 ? (
-                <div className="text-center py-8 text-slate-400">
+                <div className="text-center py-8 text-muted-foreground">
                     {searchQuery ? (
                         <p>No features match "{searchQuery}"</p>
                     ) : (
@@ -82,7 +82,7 @@ export function FeatureGrid({ features, onToggle, loading }: FeatureGridProps) {
                     )}
                 </div>
             ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[400px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[400px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
                     {filteredFeatures.map((feature) => (
                         <FeatureCard
                             key={feature.name}
