@@ -1,192 +1,260 @@
 'use client'
 
 /**
- * CommandCenterShell — page frame for the Studio /command-center route.
+ * CommandCenterShell — Studio wrapper for the existing Command Centre.
  *
- * Layout (top to bottom):
- *   1. Editorial top: eyebrow + h1 + sub + actions cluster
- *   2. StatsStrip (auto-swaps to prose when everything's zero)
- *   3. Tab strip (Summary · Board · Calendar · Activity) with live counts
- *   4. Tab body
+ * Reuses every working piece: PageHeader, StatsBar, FilterTabs, the live
+ * `CommandCentreDashboard` (Summary widgets), `BoardView` (with real DnD),
+ * `ActivityCalendar` (with working time grid + clickable events), and
+ * `ActivityFeed` (which merges feed + history per CD's round-4 spec).
  *
- * The active tab is driven by `?tab=` in the URL. Counts on tabs come from
- * the same data hooks that the tabs use, so they stay in sync as backend
- * state changes.
+ * The Studio rebrand is a re-shelve, not a rebuild — every existing widget
+ * and interaction is preserved. The only structural change is dropping the
+ * legacy History tab; Activity now hosts the merged stream.
+ *
+ * Toolbar matches the classic ActivityPage exactly: period selector +
+ * Refresh. No speculative CTAs (mission creation lives on /assignments,
+ * task scheduling on /chat?mode=plan, books on /analytics).
  */
 
-import { useMemo } from 'react'
-import { useRouter, useSearchParams, usePathname } from 'next/navigation'
-import Link from 'next/link'
-import { RotateCw, Play, Wallet, Plus } from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import dynamic from 'next/dynamic'
+import {
+  Activity,
+  AlertTriangle,
+  Calendar,
+  Columns,
+  LayoutDashboard,
+  ListTodo,
+  RefreshCw,
+  Rss,
+  Users,
+} from 'lucide-react'
 
-import { useActivityStats, useActivityFeed } from '@/hooks/use-activity-api'
-import { useBoardTasks } from '@/hooks/use-board-tasks'
-import { useActivitySchedule } from '@/hooks/use-activity-api'
-import { useDecisionsNeeded } from '@/hooks/use-kpi-api'
+import { Button } from '@/components/ui/button'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { PageHeader } from '@/components/shared/page-header'
+import { StatsBar } from '@/components/shared/stats-bar'
+import { FilterTabs, TabsContent } from '@/components/shared/filter-tabs'
+import { ActivityFeed } from '@/components/activity/activity-feed'
+import { ActivityCalendar } from '@/components/activity/calendar'
+import { useActivityStats } from '@/hooks/use-activity-api'
+import type { StatItem } from '@/components/shared/stats-bar'
 
-import { StatsStrip } from './stats-strip'
-import { SummaryTab } from './summary-tab'
-import { BoardTab } from './board-tab'
-import { CalendarTab } from './calendar-tab'
-import { ActivityTab } from './activity-tab'
+const CommandCentreDashboard = dynamic(
+  () =>
+    import('@/components/activity/widgets/command-centre-dashboard').then(
+      (m) => m.CommandCentreDashboard,
+    ),
+  { ssr: false, loading: () => <DashboardSkeleton /> },
+)
 
-type TabKey = 'summary' | 'board' | 'calendar' | 'activity'
+const BoardView = dynamic(
+  () => import('@/components/activity/board').then((m) => m.BoardView),
+  { ssr: false, loading: () => <BoardSkeleton /> },
+)
 
-const TABS: { key: TabKey; label: string }[] = [
-  { key: 'summary', label: 'Summary' },
-  { key: 'board', label: 'Board' },
-  { key: 'calendar', label: 'Calendar' },
-  { key: 'activity', label: 'Activity' },
+function DashboardSkeleton() {
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-4">
+        <div className="h-[280px] bg-secondary/30 rounded-xl animate-pulse" />
+        <div className="h-[280px] bg-secondary/30 rounded-xl animate-pulse" />
+      </div>
+      <div className="h-[280px] bg-secondary/30 rounded-xl animate-pulse" />
+      <div className="h-[220px] bg-secondary/30 rounded-xl animate-pulse" />
+    </div>
+  )
+}
+
+function BoardSkeleton() {
+  return (
+    <div className="space-y-3">
+      <div className="h-8 bg-secondary/30 rounded-lg animate-pulse w-96" />
+      <div className="flex gap-2">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="flex-1 min-w-[240px] space-y-2">
+            <div className="h-6 w-24 bg-secondary/40 rounded animate-pulse" />
+            <div className="h-32 bg-secondary/30 rounded-lg animate-pulse" />
+            <div className="h-28 bg-secondary/30 rounded-lg animate-pulse" />
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+const PERIOD_OPTIONS = [
+  { value: '1d', label: '1 Day' },
+  { value: '7d', label: '7 Days' },
+  { value: '30d', label: '30 Days' },
+  { value: '90d', label: '90 Days' },
 ]
 
-const VALID_TABS = new Set<TabKey>(TABS.map((t) => t.key))
-
-function todayDateline(): string {
-  const now = new Date()
-  const date = now.toLocaleDateString('en-GB', {
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-  })
-  const time = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
-  const tz =
-    Intl.DateTimeFormat().resolvedOptions().timeZone.split('/').pop() ?? ''
-  return `${date} · ${time} ${tz}`
-}
+// CD round 4: five tabs become four — Feed and History merge into Activity.
+const TAB_DEFS = [
+  { value: 'summary', label: 'Summary', icon: LayoutDashboard },
+  { value: 'board', label: 'Board', icon: Columns },
+  { value: 'calendar', label: 'Calendar', icon: Calendar },
+  { value: 'activity', label: 'Activity', icon: Rss },
+]
+const VALID_TABS = new Set(TAB_DEFS.map((t) => t.value))
 
 export function CommandCenterShell() {
   const router = useRouter()
-  const pathname = usePathname()
   const searchParams = useSearchParams()
 
-  const rawTab = (searchParams?.get('tab') ?? 'summary') as TabKey
-  const activeTab: TabKey = VALID_TABS.has(rawTab) ? rawTab : 'summary'
+  const initialTab = (() => {
+    const raw = searchParams?.get('tab') ?? 'summary'
+    // Legacy feed/history URLs → activity tab
+    if (raw === 'feed' || raw === 'history') return 'activity'
+    return VALID_TABS.has(raw) ? raw : 'summary'
+  })()
 
-  const { data: stats } = useActivityStats('1d')
-  const { columns } = useBoardTasks()
-  const { data: schedule } = useActivitySchedule('7d')
-  const { data: feed } = useActivityFeed({ limit: 200 })
-  const { data: decisions } = useDecisionsNeeded(10)
+  const [activeTab, setActiveTab] = useState(initialTab)
+  const [period, setPeriod] = useState('1d')
 
-  const dateline = useMemo(todayDateline, [])
+  const openExecution = searchParams?.get('openExecution') ?? null
+  const deepLinkRecipeId = searchParams?.get('recipeId') ?? null
+  const tabParam = searchParams?.get('tab') ?? null
 
-  const tabCounts: Record<TabKey, number> = useMemo(
-    () => ({
-      summary: decisions?.total ?? 0,
-      board: columns.reduce(
-        (sum, c) => (c.status === 'done' ? sum : sum + c.tasks.length),
-        0,
-      ),
-      calendar: schedule?.scheduled?.length ?? 0,
-      activity: feed?.total ?? feed?.items?.length ?? 0,
-    }),
-    [decisions, columns, schedule, feed],
-  )
+  useEffect(() => {
+    if (tabParam === 'feed' || tabParam === 'history') {
+      setActiveTab('activity')
+    } else if (tabParam && VALID_TABS.has(tabParam)) {
+      setActiveTab(tabParam)
+    } else if (openExecution) {
+      setActiveTab('activity')
+    }
+  }, [tabParam, openExecution])
 
-  const working = stats?.working_now ?? 0
-  const attn = stats?.needs_attention ?? 0
-  const isQuiet = working === 0 && attn === 0
-
-  const lede = isQuiet ? (
-    <>
-      A quiet hour. <span className="num">{stats?.agents_active ?? 0}</span> agents
-      working,{' '}
-      <span className="num">{stats?.tasks_in_queue ?? 0}</span> in queue. Routines
-      keep the lights on while you focus on something else.
-    </>
-  ) : (
-    <>
-      <span className="num">{working}</span> agent{working === 1 ? '' : 's'} working,{' '}
-      <span className="num">{stats?.tasks_in_queue ?? 0}</span> in queue
-      {attn > 0 && (
-        <>
-          ,{' '}
-          <span style={{ color: 'hsl(var(--accent))' }}>
-            <span className="num">{attn}</span> need
-            {attn === 1 ? 's' : ''} your eyes
-          </span>
-        </>
-      )}
-      . Streaming live; switch tabs to drill in.
-    </>
-  )
-
-  const setTab = (k: TabKey) => {
+  const handleTabChange = (next: string) => {
+    setActiveTab(next)
     const params = new URLSearchParams(searchParams?.toString() ?? '')
-    params.set('tab', k)
-    router.push(`${pathname}?${params.toString()}` as any, { scroll: false })
+    params.set('tab', next)
+    router.replace(`/command-center?${params.toString()}` as any, { scroll: false })
   }
 
+  const handleViewAllActivity = useCallback(() => handleTabChange('board'), [])
+  const handleViewCalendar = useCallback(() => handleTabChange('calendar'), [])
+
+  const { data: liveStats, refetch } = useActivityStats(period)
+
+  const stats: StatItem[] = [
+    {
+      label: 'Working Now',
+      value: liveStats?.working_now ?? 0,
+      icon: Activity,
+      iconColor: 'text-[hsl(var(--info))]',
+      globalIconKey: 'global_activity',
+    },
+    {
+      label: 'Agents Active',
+      value: liveStats?.agents_active ?? 0,
+      icon: Users,
+      iconColor: 'text-[hsl(var(--agent))]',
+    },
+    {
+      label: 'Tasks in Queue',
+      value: liveStats?.tasks_in_queue ?? 0,
+      icon: ListTodo,
+      iconColor: 'text-[hsl(var(--info))]',
+    },
+    {
+      label: 'Needs Attention',
+      value: liveStats?.needs_attention ?? 0,
+      icon: AlertTriangle,
+      iconColor: 'text-destructive',
+    },
+  ]
+
   return (
-    <div className="cc-page">
-      <div className="cc-headrow">
-        <div className="cc-head">
-          <p className="cc-eyebrow">Operations · {dateline}</p>
-          <h1 className="cc-h1">Command Centre</h1>
-          <p className="cc-sub">{lede}</p>
-        </div>
-        <div className="cc-actions">
-          <button
-            type="button"
-            className="cc-btn"
-            onClick={() => router.refresh()}
-            title="Refresh"
-          >
-            <RotateCw style={{ width: 12, height: 12 }} />
-            Refresh
-          </button>
-          <Link href={'/command-center?tab=activity' as any} className="cc-btn">
-            <Play style={{ width: 12, height: 12 }} />
-            Replay 1h
-          </Link>
-          <Link href={'/analytics' as any} className="cc-btn primary">
-            <Wallet style={{ width: 12, height: 12 }} />
-            Open in books
-          </Link>
-        </div>
+    <div className="space-y-4 sm:space-y-6 px-4 py-4 md:px-8 md:py-6 lg:px-12 lg:py-8 max-w-[1720px] mx-auto w-full">
+      <div data-tour="activity-page-header">
+        <PageHeader
+          title="Command"
+          titleAccent="Centre"
+          eyebrow="Operations · daily glance"
+          lede="What your workforce is running right now, what cleared, and what needs your eyes. Everything streams live; replay any window to the second."
+          actions={
+            <>
+              <Select value={period} onValueChange={setPeriod}>
+                <SelectTrigger className="w-28 bg-secondary/50 min-h-[44px] sm:min-h-0">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PERIOD_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Button
+                variant="outline"
+                size="sm"
+                className="min-h-[44px] sm:min-h-0"
+                onClick={() => refetch()}
+              >
+                <RefreshCw className="w-4 h-4 mr-2" />
+                <span className="hidden sm:inline">Refresh</span>
+              </Button>
+            </>
+          }
+        />
       </div>
 
-      <StatsStrip />
+      <div data-tour="activity-stats">
+        <StatsBar stats={stats} className="grid gap-3 md:gap-4" />
+      </div>
 
-      <nav className="cc-tabs" aria-label="Command Centre sections">
-        {TABS.map((t) => {
-          const isActive = t.key === activeTab
-          const count = tabCounts[t.key]
-          return (
-            <button
-              key={t.key}
-              type="button"
-              className={`cc-tab${isActive ? ' active' : ''}`}
-              aria-current={isActive ? 'page' : undefined}
-              onClick={() => setTab(t.key)}
-            >
-              <span>{t.label}</span>
-              {count > 0 && <span className="cc-tab-ct">{count}</span>}
-            </button>
-          )
-        })}
-        {/* New mission CTA aligned to the end of the tab strip */}
-        <Link
-          href={'/chat?mode=plan' as any}
-          className="cc-btn primary"
-          style={{
-            marginLeft: 'auto',
-            alignSelf: 'center',
-            height: 28,
-            fontSize: 11.5,
-            padding: '0 12px',
-          }}
+      <div>
+        <FilterTabs
+          tabs={TAB_DEFS}
+          value={activeTab}
+          onValueChange={handleTabChange}
+          dataTour="activity-tabs"
         >
-          <Plus style={{ width: 12, height: 12 }} />
-          New mission
-        </Link>
-      </nav>
+          <TabsContent value="summary">
+            <div data-tour="activity-summary">
+              <CommandCentreDashboard
+                period={period}
+                onViewAllActivity={handleViewAllActivity}
+                onViewCalendar={handleViewCalendar}
+              />
+            </div>
+          </TabsContent>
 
-      <div className="cc-body">
-        {activeTab === 'summary' && <SummaryTab />}
-        {activeTab === 'board' && <BoardTab />}
-        {activeTab === 'calendar' && <CalendarTab />}
-        {activeTab === 'activity' && <ActivityTab />}
+          <TabsContent value="board">
+            <div data-tour="activity-board">
+              <BoardView period={period} />
+            </div>
+          </TabsContent>
+
+          <TabsContent value="calendar">
+            <div data-tour="activity-calendar">
+              <ActivityCalendar />
+            </div>
+          </TabsContent>
+
+          <TabsContent value="activity">
+            <div data-tour="activity-feed">
+              <ActivityFeed
+                period={period}
+                openExecution={openExecution}
+                deepLinkRecipeId={deepLinkRecipeId}
+              />
+            </div>
+          </TabsContent>
+        </FilterTabs>
       </div>
     </div>
   )

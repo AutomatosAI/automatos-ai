@@ -12,11 +12,12 @@ export default function CommandCenterPage() {
   const isStudio = useIsStudio()
   const isMobileLayout = useIsTabletOrBelow()
 
-  // Studio desktop renders CD's round-4 Command Centre. Mobile and classic
-  // theme still use the existing ActivityPage until CD ships a mobile pass.
+  // Studio desktop wraps the same working ActivityPage internals in a Studio
+  // shell — every widget, drag-and-drop, and clickable event is preserved.
+  // Mobile + classic theme keep the original page verbatim.
   if (isStudio && !isMobileLayout) {
     return (
-      <MainLayout fullBleed>
+      <MainLayout>
         <CommandCenterShell />
       </MainLayout>
     )
