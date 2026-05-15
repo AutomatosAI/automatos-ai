@@ -278,7 +278,7 @@ export function PlaybooksBody({ limit = 100, hideFeatured = false }: PlaybooksBo
                 type="button"
                 className="mkt-card"
                 onClick={() => handleFeaturedRun(p)}
-                disabled={executePlaybook.isPending}
+                disabled={executePlaybook.isLoading}
               >
                 <div className="top">
                   <span className="ic">
