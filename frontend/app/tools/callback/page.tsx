@@ -61,10 +61,10 @@ export default function ComposioCallbackPage() {
     }, [searchParams, router])
 
     return (
-        <div className="flex flex-col items-center justify-center min-h-screen bg-black text-white">
-            <Loader2 className="w-12 h-12 text-orange-500 animate-spin mb-4" />
-            <h2 className="text-xl font-semibold">Connecting...</h2>
-            <p className="text-muted-foreground">Please wait while we wrap things up.</p>
+        <div className="flex flex-col items-center justify-center min-h-screen bg-background text-foreground">
+            <Loader2 className="w-12 h-12 text-[hsl(var(--info))] animate-spin mb-4" />
+            <h2 className="text-xl font-semibold">Connecting</h2>
+            <p className="text-muted-foreground">Wrapping things up. This usually finishes in under a second.</p>
         </div>
     )
 }

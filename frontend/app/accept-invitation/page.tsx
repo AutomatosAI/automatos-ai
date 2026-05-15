@@ -100,7 +100,7 @@ function AcceptInvitationInner() {
         return (
             <Shell>
                 <div className="flex flex-col items-center text-center gap-4">
-                    <Loader2 className="w-8 h-8 animate-spin text-orange-500" />
+                    <Loader2 className="w-8 h-8 animate-spin text-[hsl(var(--info))]" />
                     <p className="text-muted-foreground">Loading invitation…</p>
                 </div>
             </Shell>
@@ -138,7 +138,7 @@ function AcceptInvitationInner() {
             <Shell wide>
                 <div className="space-y-6">
                     <div className="text-center space-y-2">
-                        <Mail className="w-8 h-8 text-orange-500 mx-auto" />
+                        <Mail className="w-8 h-8 text-primary mx-auto" />
                         <h1 className="text-2xl font-semibold">
                             Join {info.workspace_name}
                         </h1>
@@ -155,7 +155,7 @@ function AcceptInvitationInner() {
                         appearance={{
                             elements: {
                                 rootBox: 'mx-auto',
-                                card: 'bg-zinc-900/80 border border-zinc-800 shadow-2xl',
+                                card: 'bg-card border border-border',
                             },
                         }}
                         initialValues={{ emailAddress: info.email }}
@@ -185,7 +185,7 @@ function AcceptInvitationInner() {
                     )}
                     <Link
                         href="/chat"
-                        className="text-sm text-orange-500 hover:text-orange-400"
+                        className="text-sm text-primary hover:text-primary/80"
                     >
                         Go to chat
                     </Link>
@@ -197,7 +197,7 @@ function AcceptInvitationInner() {
     return (
         <Shell>
             <div className="flex flex-col items-center text-center gap-4">
-                <Loader2 className="w-8 h-8 animate-spin text-orange-500" />
+                <Loader2 className="w-8 h-8 animate-spin text-[hsl(var(--info))]" />
                 <p className="text-muted-foreground">Joining {info.workspace_name}…</p>
             </div>
         </Shell>
@@ -206,10 +206,8 @@ function AcceptInvitationInner() {
 
 function Shell({ children, wide = false }: { children: React.ReactNode; wide?: boolean }) {
     return (
-        <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-black via-zinc-900 to-black px-6 py-12 relative overflow-hidden">
-            <div className="absolute top-[-10%] right-[-5%] w-[500px] h-[500px] rounded-full bg-primary/10 blur-[120px] pointer-events-none" />
-            <div className="absolute bottom-[-10%] left-[-5%] w-[500px] h-[500px] rounded-full bg-orange-600/10 blur-[120px] pointer-events-none" />
-            <div className={`relative z-10 w-full ${wide ? 'max-w-md' : 'max-w-sm'} bg-[#0A0A0A]/60 border border-white/10 rounded-xl p-8 backdrop-blur-md`}>
+        <div className="min-h-screen flex items-center justify-center bg-background px-6 py-12">
+            <div className={`relative z-10 w-full ${wide ? 'max-w-md' : 'max-w-sm'} bg-card border border-border rounded-md p-8`}>
                 {children}
             </div>
         </div>
@@ -225,7 +223,7 @@ function ErrorState({ title, detail, cta }: { title: string; detail: string; cta
                 <p className="text-muted-foreground text-sm">{detail}</p>
                 <Link
                     href={cta?.href || '/sign-in'}
-                    className="text-sm text-orange-500 hover:text-orange-400"
+                    className="text-sm text-primary hover:text-primary/80"
                 >
                     {cta?.label || 'Go to sign-in'}
                 </Link>
@@ -236,7 +234,7 @@ function ErrorState({ title, detail, cta }: { title: string; detail: string; cta
 
 export default function AcceptInvitationPage() {
     return (
-        <Suspense fallback={<Shell><Loader2 className="w-8 h-8 animate-spin text-orange-500 mx-auto" /></Shell>}>
+        <Suspense fallback={<Shell><Loader2 className="w-8 h-8 animate-spin text-[hsl(var(--info))] mx-auto" /></Shell>}>
             <AcceptInvitationInner />
         </Suspense>
     )

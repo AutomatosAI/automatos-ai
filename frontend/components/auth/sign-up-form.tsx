@@ -105,7 +105,7 @@ export function SignUpForm() {
             transition={{ duration: 0.3 }}
             className="w-full max-w-md"
         >
-            <Card className="glass-card overflow-hidden border-border/50 shadow-2xl">
+            <Card className="overflow-hidden border-border bg-card">
                 <CardHeader className="space-y-1 text-center pb-8 pt-8">
                     <motion.div
                         initial={{ y: -20, opacity: 0 }}
@@ -119,13 +119,13 @@ export function SignUpForm() {
                             alt="Automatos AI"
                             width={48}
                             height={48}
-                            className="rounded-xl shadow-lg shadow-orange-500/20"
+                            className="rounded-md"
                         />
                     </motion.div>
-                    <CardTitle className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400">
-                        {onWaitlist ? "You're on the list!" : pendingVerification ? 'Verify Email' : 'Join the Waitlist'}
+                    <CardTitle className="text-2xl font-bold text-foreground">
+                        {onWaitlist ? "You're on the list" : pendingVerification ? 'Verify Email' : 'Join the Waitlist'}
                     </CardTitle>
-                    <CardDescription className="text-slate-400">
+                    <CardDescription className="text-muted-foreground">
                         {onWaitlist
                             ? "We'll notify you at " + email + " when your spot is ready"
                             : pendingVerification
@@ -152,7 +152,7 @@ export function SignUpForm() {
                                 <div className="w-16 h-16 rounded-full bg-primary/20 flex items-center justify-center mx-auto">
                                     <CheckCircle2 className="w-8 h-8 text-primary" />
                                 </div>
-                                <p className="text-sm text-slate-400">
+                                <p className="text-sm text-muted-foreground">
                                     We're onboarding users in waves. You'll receive an invite email when it's your turn.
                                 </p>
                                 <Link href="/sign-in">
@@ -225,7 +225,7 @@ export function SignUpForm() {
 
                                 <form onSubmit={handleSubmit} className="space-y-4">
                                     <div className="space-y-2">
-                                        <Label htmlFor="email" className="text-slate-300">Email</Label>
+                                        <Label htmlFor="email" className="text-foreground">Email</Label>
                                         <div className="relative group">
                                             <Mail className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
                                             <Input
@@ -240,7 +240,7 @@ export function SignUpForm() {
                                         </div>
                                     </div>
                                     <div className="space-y-2">
-                                        <Label htmlFor="password" className="text-slate-300">Password</Label>
+                                        <Label htmlFor="password" className="text-foreground">Password</Label>
                                         <div className="relative group">
                                             <Lock className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
                                             <Input
@@ -268,7 +268,7 @@ export function SignUpForm() {
 
                                     <Button
                                         type="submit"
-                                        className="w-full gradient-accent font-medium shadow-lg shadow-orange-500/20 hover:shadow-orange-500/40 transition-all duration-300"
+                                        className="w-full font-medium"
                                         disabled={isLoading}
                                     >
                                         {isLoading ? (
@@ -316,7 +316,7 @@ export function SignUpForm() {
 
                                     <Button
                                         type="submit"
-                                        className="w-full gradient-accent font-medium shadow-lg shadow-orange-500/20 hover:shadow-orange-500/40 transition-all duration-300"
+                                        className="w-full font-medium"
                                         disabled={isLoading || code.length < 6}
                                     >
                                         {isLoading ? (
