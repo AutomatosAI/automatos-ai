@@ -306,17 +306,21 @@
     @apply bg-background text-foreground;
   }
 
-  /* Studio typography — serif on display headings, mono on detail surfaces.
-     Body stays system sans. Applies only when .studio is on body. */
+  /* Studio typography — Geist sans, Geist Mono, Newsreader serif.
+     Fonts load via next/font/google in app/layout.tsx and bind to the
+     --font-* CSS variables. Falls back through Tiempos → Charter →
+     Georgia when fonts can't reach the CDN. */
   .studio {
-    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
-                 "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-family: var(--font-geist-sans), ui-sans-serif, system-ui,
+                 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                 sans-serif;
   }
   .studio h1,
   .studio h2,
   .studio .font-serif,
   .studio [data-studio-serif] {
-    font-family: "Tiempos Headline", "Charter", "Iowan Old Style", Georgia, ui-serif, serif;
+    font-family: var(--font-newsreader), "Tiempos Headline", Charter,
+                 "Iowan Old Style", Georgia, ui-serif, serif;
     font-weight: 500;
     letter-spacing: -0.015em;
     line-height: 1.15;
@@ -326,7 +330,8 @@
   .studio kbd,
   .studio pre,
   .studio [data-studio-mono] {
-    font-family: "JetBrains Mono", "Fira Code", "SF Mono", Monaco, Consolas, monospace;
+    font-family: var(--font-geist-mono), "JetBrains Mono", "Fira Code",
+                 "SF Mono", Monaco, Consolas, monospace;
     font-feature-settings: "liga" 1, "calt" 1;
   }
 }
@@ -1002,6 +1007,217 @@
   .studio [data-tour="sidebar"] .bg-secondary\/30,
   .studio [data-tour="sidebar"] [class*="bg-background/25"] {
     background: hsl(var(--card));
+  }
+
+  /* ──────────────────────────────────────────────────────────────────────
+   * Studio shell chrome — sidebar + header + ticker.
+   *
+   * Ported from `DUMPING AREA/sidebar-header-shell/styles.css` (CD's
+   * round-4 shell delivery). The default combo is SIDE-B + HEAD-A +
+   * TICK-A per CD's recommendation.
+   *
+   * All chrome lives under .studio scope so the classic theme stays
+   * 100% untouched. Variables read from the Studio token block above.
+   * ────────────────────────────────────────────────────────────────────── */
+
+  /* ── Studio sidebar (SIDE-B · labelled 232px) ──────────────────── */
+  .studio .sh-side {
+    width: 232px; flex-shrink: 0;
+    background: hsl(var(--secondary)); border-right: 1px solid hsl(var(--border));
+    display: flex; flex-direction: column;
+    padding: 18px 12px 14px;
+    height: 100vh; position: sticky; top: 0;
+  }
+  .studio .sh-side .sh-brand-row {
+    display: flex; align-items: center; gap: 9px;
+    padding: 0 6px 14px;
+  }
+  .studio .sh-side .sh-ws-card {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 10px; border-radius: 8px;
+    background: hsl(var(--card)); border: 1px solid hsl(var(--border));
+    margin-bottom: 14px; cursor: pointer; user-select: none;
+    transition: border-color 140ms ease;
+  }
+  .studio .sh-side .sh-ws-card:hover { border-color: hsl(40 30% 70%); }
+  .studio .sh-side .sh-ws-card .sh-mk {
+    width: 26px; height: 26px; border-radius: 6px;
+    background: hsl(82 30% 33%); color: #fff;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-family: var(--font-newsreader, serif); font-weight: 700; font-size: 14px;
+  }
+  .studio .sh-side .sh-ws-card .sh-nm {
+    font-size: 12.5px; font-weight: 600; color: hsl(var(--foreground));
+  }
+  .studio .sh-side .sh-ws-card .sh-meta {
+    font-family: var(--font-geist-mono, monospace); font-size: 9.5px;
+    color: hsl(var(--muted-foreground)); letter-spacing: 0.04em;
+  }
+  .studio .sh-side .sh-group {
+    font-family: var(--font-geist-mono, monospace); font-size: 9.5px;
+    letter-spacing: 0.14em; text-transform: uppercase;
+    color: hsl(var(--muted-foreground)); padding: 14px 8px 4px; font-weight: 600;
+  }
+  .studio .sh-side .sh-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 6px 9px; margin: 1px 0; border-radius: 6px;
+    color: hsl(var(--muted-foreground)); font-size: 12.5px; font-weight: 500;
+    letter-spacing: -0.003em; white-space: nowrap; cursor: pointer;
+    text-decoration: none;
+    transition: background 140ms ease, color 140ms ease;
+  }
+  .studio .sh-side .sh-item:hover {
+    background: hsl(38 45% 96%); color: hsl(var(--foreground));
+  }
+  .studio .sh-side .sh-item > span { overflow: hidden; text-overflow: ellipsis; }
+  .studio .sh-side .sh-item .sh-ic { width: 14px; height: 14px; flex-shrink: 0; }
+  .studio .sh-side .sh-item.active {
+    background: hsl(var(--card)); color: hsl(var(--foreground));
+    box-shadow: 0 1px 0 hsla(30 50% 18% / 0.06), 0 1px 4px hsla(30 50% 18% / 0.04);
+  }
+  .studio .sh-side .sh-item.active .sh-ic { color: hsl(var(--accent)); }
+  .studio .sh-side .sh-item .sh-ct {
+    margin-left: auto; font-family: var(--font-geist-mono, monospace);
+    font-size: 9.5px; color: hsl(var(--muted-foreground)); font-weight: 600;
+  }
+  .studio .sh-side .sh-item .sh-ct.alert { color: hsl(var(--accent)); }
+  .studio .sh-side .sh-footer {
+    margin-top: auto; padding-top: 10px; border-top: 1px solid hsl(var(--border));
+  }
+  .studio .sh-side .sh-mini-stats {
+    font-family: var(--font-geist-mono, monospace); font-size: 9.5px;
+    color: hsl(var(--muted-foreground)); padding: 8px 8px 0;
+    display: grid; gap: 3px;
+  }
+  .studio .sh-side .sh-mini-stats .sh-row {
+    display: flex; justify-content: space-between;
+  }
+  .studio .sh-side .sh-mini-stats .sh-row .sh-ok { color: hsl(82 50% 22%); }
+
+  /* ── Studio brand wordmark ─────────────────────────────────────── */
+  .studio .sh-brand {
+    display: inline-flex; align-items: center; gap: 9px;
+    font-family: var(--font-newsreader, serif); font-size: 18px; font-weight: 500;
+    letter-spacing: -0.012em; color: hsl(var(--foreground));
+    text-decoration: none;
+  }
+  .studio .sh-brand .sh-glyph {
+    width: 22px; height: 22px; border-radius: 50%;
+    background: hsl(var(--accent)); position: relative;
+  }
+  .studio .sh-brand .sh-glyph::after {
+    content: ''; position: absolute; left: 50%; top: 50%;
+    width: 0; height: 0; transform: translate(-50%, -55%);
+    border-left: 4px solid transparent; border-right: 4px solid transparent;
+    border-bottom: 8px solid #fff;
+  }
+
+  /* ── Studio header (HEAD-A · editorial) ────────────────────────── */
+  .studio .sh-headbar {
+    display: flex; align-items: center; gap: 14px;
+    padding: 12px 28px;
+    background: hsl(var(--background));
+    border-bottom: 1px solid hsl(var(--border));
+    flex-wrap: nowrap; min-width: 0;
+  }
+  .studio .sh-headbar > * { flex-shrink: 0; }
+
+  /* Header utilities cluster (cmdK, alerts, profile) */
+  .studio .sh-utils {
+    display: inline-flex; align-items: center; gap: 4px;
+  }
+  .studio .sh-utils .sh-icon-btn {
+    width: 30px; height: 30px; border-radius: 6px;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: transparent; border: 1px solid transparent;
+    color: hsl(var(--muted-foreground)); position: relative;
+    transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+    cursor: pointer;
+  }
+  .studio .sh-utils .sh-icon-btn:hover {
+    background: hsl(var(--secondary)); border-color: hsl(var(--border));
+    color: hsl(var(--foreground));
+  }
+  .studio .sh-utils .sh-icon-btn .sh-badge {
+    position: absolute; top: -2px; right: -2px;
+    min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px;
+    background: hsl(var(--accent)); color: #fff;
+    font-family: var(--font-geist-mono, monospace); font-size: 9px; font-weight: 700;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: 1.5px solid hsl(var(--background));
+  }
+  .studio .sh-utils .sh-sep {
+    width: 1px; height: 18px; background: hsl(var(--border)); margin: 0 6px;
+  }
+  .studio .sh-utils .sh-profile {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 6px 3px 4px; border-radius: 20px;
+    border: 1px solid hsl(var(--border)); background: hsl(var(--card));
+    cursor: pointer; transition: border-color 140ms ease;
+  }
+  .studio .sh-utils .sh-profile:hover { border-color: hsl(40 30% 70%); }
+  .studio .sh-utils .sh-profile .sh-av {
+    width: 22px; height: 22px; border-radius: 50%;
+    background: linear-gradient(135deg, #d8552a, hsl(var(--accent)));
+    color: #fff; display: inline-flex; align-items: center; justify-content: center;
+    font-family: var(--font-newsreader, serif); font-weight: 600; font-size: 11px;
+  }
+  .studio .sh-utils .sh-cmdk {
+    display: inline-flex; align-items: center; gap: 8px;
+    height: 30px; padding: 0 10px 0 8px; min-width: 240px;
+    border: 1px solid hsl(var(--border)); border-radius: 6px;
+    background: hsl(var(--card)); color: hsl(var(--muted-foreground)); font-size: 12px;
+    white-space: nowrap; cursor: pointer;
+    transition: border-color 140ms ease;
+  }
+  .studio .sh-utils .sh-cmdk:hover { border-color: hsl(40 30% 70%); }
+  .studio .sh-utils .sh-cmdk .sh-kbd {
+    margin-left: auto; font-family: var(--font-geist-mono, monospace); font-size: 10px;
+    padding: 1px 5px; border: 1px solid hsl(var(--border)); border-radius: 3px;
+    background: hsl(var(--secondary)); color: hsl(var(--muted-foreground));
+  }
+
+  /* ── Studio ticker (TICK-A · editorial slim 30px) ──────────────── */
+  .studio .sh-ticker {
+    display: flex; align-items: center;
+    height: 30px; padding: 0 24px; gap: 18px;
+    background: hsl(38 45% 96%); border-bottom: 1px solid hsl(var(--border));
+    font-family: var(--font-geist-mono, monospace);
+    font-size: 10.5px; color: hsl(var(--muted-foreground));
+    letter-spacing: 0.01em; overflow-x: auto; scrollbar-width: none;
+  }
+  .studio .sh-ticker::-webkit-scrollbar { display: none; }
+  .studio .sh-ticker .sh-cell {
+    display: inline-flex; align-items: baseline; gap: 6px; white-space: nowrap;
+  }
+  .studio .sh-ticker .sh-cell .sh-l {
+    color: hsl(var(--muted-foreground)); letter-spacing: 0.10em;
+    text-transform: uppercase; font-size: 9.5px;
+  }
+  .studio .sh-ticker .sh-cell .sh-v {
+    color: hsl(var(--foreground)); font-weight: 600;
+    font-feature-settings: "tnum";
+  }
+  .studio .sh-ticker .sh-cell .sh-v.ok  { color: hsl(82 50% 22%); }
+  .studio .sh-ticker .sh-cell .sh-v.err { color: hsl(var(--accent)); }
+  .studio .sh-ticker .sh-cell .sh-v.info { color: hsl(var(--info)); }
+  .studio .sh-ticker .sh-cell .sh-delta {
+    color: hsl(var(--muted-foreground)); font-size: 9.5px;
+  }
+  .studio .sh-ticker .sh-clock {
+    margin-left: auto; color: hsl(var(--muted-foreground));
+  }
+  .studio .sh-ticker .sh-divider {
+    width: 1px; height: 12px; background: hsl(var(--border)); flex-shrink: 0;
+  }
+
+  /* ── Studio shell layout container ─────────────────────────────── */
+  .studio .sh-shell {
+    display: flex; min-height: 100vh;
+    background: hsl(var(--background));
+  }
+  .studio .sh-shell .sh-main {
+    flex: 1; min-width: 0; display: flex; flex-direction: column;
   }
 }
 
