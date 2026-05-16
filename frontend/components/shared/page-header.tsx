@@ -3,6 +3,7 @@
 import type { ReactNode } from 'react'
 import { motion } from 'framer-motion'
 import { cn } from '@/lib/utils'
+import { useIsStudio } from '@/hooks/use-studio-theme'
 
 export interface PageHeaderProps {
   /** First word(s) of the title — rendered in foreground */
@@ -44,6 +45,36 @@ export function PageHeader({
   actions,
   className,
 }: PageHeaderProps) {
+  const isStudio = useIsStudio()
+
+  // Studio: editorial cc-* primitives. Matches Command Centre /
+  // Assignments / Mission Detail headers. Title halves concatenate
+  // (Studio neutralises the gradient on titleAccent anyway).
+  if (isStudio) {
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.35 }}
+        className={cn('cc-headrow', className)}
+      >
+        <div className="cc-head">
+          {eyebrow && <p className="cc-eyebrow">{eyebrow}</p>}
+          <h1 data-testid="page-title" className="cc-h1">
+            {title}
+            {titleAccent ? ` ${titleAccent}` : null}
+          </h1>
+          {lede ? (
+            <p className="cc-sub">{lede}</p>
+          ) : subtitle ? (
+            <p className="cc-sub">{subtitle}</p>
+          ) : null}
+        </div>
+        {actions && <div className="cc-actions">{actions}</div>}
+      </motion.div>
+    )
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
