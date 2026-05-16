@@ -64,7 +64,8 @@ export function CommandCenterShell() {
   const { data: stats } = useActivityStats('1d')
   const { columns } = useBoardTasks()
   const { data: schedule } = useActivitySchedule('7d')
-  const { data: feed } = useActivityFeed({ limit: 200 })
+  // Backend caps limit at 100; sending 200 returns 422.
+  const { data: feed } = useActivityFeed({ limit: 100 })
   const { data: decisions } = useDecisionsNeeded(10)
 
   const dateline = useMemo(todayDateline, [])
