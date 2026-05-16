@@ -152,15 +152,12 @@ export function PlaybooksBody({ limit = 100, hideFeatured = false }: PlaybooksBo
   const featured = useMemo(() => all.filter((p) => p.is_featured).slice(0, 5), [all])
   const totalRuns = all.reduce((acc, p) => acc + (p.use_count ?? 0), 0)
 
-  const handleRun = (p: PlaybookLike) => {
-    const id = p.template_id || (p.id != null ? String(p.id) : '')
-    if (id) router.push(`/playbooks?id=${encodeURIComponent(id)}` as any)
-  }
-
   const executePlaybook = useExecutePlaybook()
   const { toast } = useToast()
 
-  const handleFeaturedRun = async (p: PlaybookLike) => {
+  // Single run handler — execute the playbook, then route to the live
+  // execution screen. Used by featured strip, grid cards, and list rows.
+  const handleRun = async (p: PlaybookLike) => {
     const id = p.template_id || (p.id != null ? String(p.id) : '')
     if (!id) return
     try {
@@ -182,6 +179,7 @@ export function PlaybooksBody({ limit = 100, hideFeatured = false }: PlaybooksBo
       })
     }
   }
+  const handleFeaturedRun = handleRun
 
   return (
     <>
