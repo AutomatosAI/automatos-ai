@@ -30,12 +30,34 @@ type View = 'grid' | 'list'
 type Scope = 'all' | 'mine' | 'workspace' | 'imported'
 type Sort = 'most_run' | 'recent' | 'success'
 
-function trigger(p: PlaybookLike): { label: string; kind: 'cron' | 'webhook' | 'manual' } {
-  const t = (p.trigger_type || '').toLowerCase()
-  if (t === 'cron' || p.schedule_config?.cron) {
-    return { label: p.schedule_config?.cron || 'scheduled', kind: 'cron' }
+type TriggerKind = 'cron' | 'trigger' | 'manual'
+
+function humanizeCron(cron: string): string {
+  const c = cron.trim()
+  if (c === '@daily' || c === '0 0 * * *') return 'daily · midnight'
+  if (c === '@hourly' || c === '0 * * * *') return 'hourly'
+  if (c === '@weekly' || c === '0 0 * * 0') return 'weekly'
+  if (c === '@monthly' || c === '0 0 1 * *') return 'monthly'
+  const m = c.match(/^0\s+(\d{1,2})\s+\*\s+\*\s+\*$/)
+  if (m) {
+    const h = Number(m[1])
+    const tag = h === 0 ? 'midnight' : h === 12 ? 'noon' : `${h.toString().padStart(2, '0')}:00`
+    return `daily · ${tag}`
   }
-  if (t === 'webhook') return { label: 'webhook', kind: 'webhook' }
+  return c
+}
+
+function trigger(p: PlaybookLike): { label: string; kind: TriggerKind } {
+  const sched = p.schedule_config ?? null
+  const type = (sched?.type || p.trigger_type || 'manual').toLowerCase()
+  if (type === 'cron' && sched?.cron_expression) {
+    return { label: humanizeCron(sched.cron_expression), kind: 'cron' }
+  }
+  if (type === 'cron') return { label: 'scheduled', kind: 'cron' }
+  if (type === 'trigger' || type === 'webhook' || type === 'event') {
+    const evt = sched?.trigger_config?.event
+    return { label: evt || 'triggered', kind: 'trigger' }
+  }
   return { label: 'manual', kind: 'manual' }
 }
 
@@ -381,9 +403,11 @@ function ListView({
           {items.map((p) => {
             const trig = trigger(p)
             const TrigIcon =
-              trig.kind === 'cron' ? Clock : trig.kind === 'webhook' ? TriggerZap : Hand
+              trig.kind === 'cron' ? Clock : trig.kind === 'trigger' ? TriggerZap : Hand
             const runs = p.use_count ?? 0
-            const success = p.success_rate ?? null
+            // Hide success when there are no runs — backend defaults to 0.0,
+            // and "0%" is misleading for a never-executed playbook.
+            const success = runs > 0 ? p.success_rate ?? null : null
             return (
               <tr
                 key={String(p.template_id || p.id)}
