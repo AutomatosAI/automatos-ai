@@ -700,8 +700,11 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
         </div>
       )}
 
-      {/* Main content */}
-      <div className="flex-1 min-h-0">
+      {/* Main content — explicit min-height keeps the DAG/right-panel row
+          from collapsing when a tab renders a short empty state (e.g.
+          Field with no patterns yet). The parent chain has no concrete
+          height (MainLayout's <main> is auto), so we anchor on vh. */}
+      <div className="flex-1" style={{ minHeight: '60vh' }}>
         <ResizablePanelGroup direction="horizontal" className="h-full">
           {/* DAG panel */}
           <ResizablePanel defaultSize={showReview || isReviewable ? 50 : 60} minSize={30}>
