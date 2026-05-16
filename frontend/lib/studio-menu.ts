@@ -85,9 +85,15 @@ export const STUDIO_MENU_FOOTER: StudioFooterItem[] = [
  * Tab counts here are seed values for display before the page mounts and
  * fetches the real numbers — pages that care wire their own dynamic counts.
  */
-export const STUDIO_PAGE_TABS: Record<string, Array<[string, number]>> = {
+/**
+ * Tuple shape: [label, count, hrefOverride?]
+ * hrefOverride is used when a tab needs to navigate to a different route
+ * instead of `?tab=<slug>` on the menu's base href (e.g. Deliverables →
+ * Explorer is its own page, not a tab panel).
+ */
+export const STUDIO_PAGE_TABS: Record<string, Array<[string, number, string?]>> = {
   assign:  [['All', 18], ['Mine', 4], ['Scheduled', 9], ['Drafts', 2]],
-  deliv:   [['Outputs', 41], ['Blogs', 6], ['Templates', 12], ['Explorer', 0]],
+  deliv:   [['Outputs', 41], ['Blogs', 6], ['Templates', 12], ['Explorer', 0, '/deliverables/explorer']],
   agents:  [['Roster', 11], ['Skills', 24], ['Lineage', 0], ['Settings', 0]],
 };
 
