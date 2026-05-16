@@ -51,6 +51,16 @@ interface MissionDetailPageProps {
   missionId: string
 }
 
+// Derive a single-line headline from a (possibly long) mission brief:
+// first sentence (.!?) or first line; hard cap at 100 chars with ellipsis.
+function deriveMissionHeadline(text: string): string {
+  const firstLine = text.split(/\r?\n/, 1)[0]?.trim() ?? text
+  const sentenceEnd = firstLine.search(/[.!?](\s|$)/)
+  let head = sentenceEnd > 0 ? firstLine.slice(0, sentenceEnd + 1) : firstLine
+  if (head.length > 100) head = head.slice(0, 97).trimEnd() + '…'
+  return head
+}
+
 export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -121,9 +131,12 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
   const isTerminal = (TERMINAL_RUN_STATES as readonly string[]).includes(mission.state)
   const isReviewable = mission.state === 'awaiting_human'
 
-  // Strip a leading "Mission:" / "Mission " prefix so the H1 reads as the
-  // actual goal — the eyebrow already says "Mission <short id>".
-  const goalTitle = mission.goal.replace(/^\s*mission\s*[:\-—]?\s*/i, '').trim() || mission.goal
+  // Strip a leading "Mission:" / "Mission " prefix, then derive a tight
+  // headline so a multi-paragraph brief doesn't become the H1. Full text
+  // remains available on hover (title attr) and in the brief panel below.
+  const cleanedGoal = mission.goal.replace(/^\s*mission\s*[:\-—]?\s*/i, '').trim() || mission.goal
+  const goalTitle = deriveMissionHeadline(cleanedGoal)
+  const goalIsTruncated = goalTitle !== cleanedGoal
   const stateLabel = RUN_STATE_CONFIG[mission.state]?.label ?? mission.state
 
   // ── Stats strip (Studio) ───────────────────────────────────────
@@ -167,7 +180,7 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
           <div className="cc-headrow">
             <div className="cc-head">
               <p className="cc-eyebrow">Operations · Mission {missionId.slice(0, 8)}</p>
-              <h1 className="cc-h1" style={{ maxWidth: '90ch' }}>{goalTitle}</h1>
+              <h1 className="cc-h1" style={{ maxWidth: '90ch' }} title={goalIsTruncated ? cleanedGoal : undefined}>{goalTitle}</h1>
               <p className="cc-sub">
                 <b>{stateLabel}</b>
                 {stats ? ` · ${stats.tasksDone}/${stats.taskCount} tasks` : ''}
