@@ -8,7 +8,7 @@ also heals stored data so direct DB readers and analytics see the
 right state.
 
 Revision ID: prd008a_capabilities_backfill
-Revises: prd008a_widget_event_log
+Revises: 20260520_merge
 Create Date: 2026-05-15
 """
 from __future__ import annotations
@@ -17,7 +17,7 @@ from alembic import op
 
 
 revision = "prd008a_capabilities_backfill"
-down_revision = "prd008a_widget_event_log"
+down_revision = "20260520_merge"
 branch_labels = None
 depends_on = None
 
