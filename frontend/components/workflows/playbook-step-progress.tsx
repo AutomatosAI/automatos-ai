@@ -147,7 +147,7 @@ export function PlaybookStepProgress({
             variant="outline"
             className={cn(
               'text-xs',
-              status === 'running' && 'border-orange-400/50 text-orange-400',
+              status === 'running' && 'border-primary/50 text-primary',
               status === 'completed' && 'border-success/50 text-success',
               status === 'failed' && 'border-destructive/50 text-destructive',
               status === 'pending' && 'border-border/50 text-muted-foreground'
@@ -165,7 +165,7 @@ export function PlaybookStepProgress({
             'h-full rounded-full',
             status === 'completed' ? 'bg-success' :
             status === 'failed' ? 'bg-destructive' :
-            'bg-gradient-to-r from-orange-500 to-primary'
+            'bg-primary'
           )}
           initial={{ width: 0 }}
           animate={{ width: `${progressPercent}%` }}
@@ -191,7 +191,7 @@ export function PlaybookStepProgress({
                 transition={{ delay: idx * 0.05 }}
                 className={cn(
                   'rounded-xl border transition-all duration-220',
-                  step.status === 'running' && 'border-orange-400/30 bg-orange-400/5 ring-1 ring-orange-400/20',
+                  step.status === 'running' && 'border-primary/30 bg-primary/5 ring-1 ring-primary/20',
                   step.status === 'success' && 'border-success/20 bg-success/5',
                   step.status === 'failed' && 'border-destructive/20 bg-destructive/5',
                   step.status === 'pending' && 'border-border/30 bg-white/[0.02]',
@@ -206,7 +206,7 @@ export function PlaybookStepProgress({
                   <div className="flex-shrink-0 relative">
                     <div className={cn(
                       'w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold',
-                      step.status === 'running' && 'bg-orange-400/20 text-orange-400',
+                      step.status === 'running' && 'bg-primary/20 text-primary',
                       step.status === 'success' && 'bg-success/20 text-success',
                       step.status === 'failed' && 'bg-destructive/20 text-destructive',
                       step.status === 'pending' && 'bg-white/10 text-muted-foreground',

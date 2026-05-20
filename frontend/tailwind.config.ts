@@ -11,6 +11,23 @@ const config: Config = {
   ],
   theme: {
     extend: {
+      // Studio rebrand: add serif + mono font families. Sans stays system default.
+      // Use via Tailwind utilities: font-sans (default), font-serif (Studio headlines),
+      // font-mono (Studio detail surfaces).
+      fontFamily: {
+        sans: [
+          'ui-sans-serif', 'system-ui', '-apple-system', 'BlinkMacSystemFont',
+          '"Segoe UI"', 'Roboto', '"Helvetica Neue"', 'Arial', 'sans-serif',
+        ],
+        serif: [
+          '"Tiempos Headline"', '"Charter"', '"Iowan Old Style"', 'Georgia',
+          'ui-serif', 'serif',
+        ],
+        mono: [
+          '"JetBrains Mono"', '"Fira Code"', '"SF Mono"', 'Monaco', 'Consolas',
+          '"Liberation Mono"', 'monospace',
+        ],
+      },
       transitionDuration: {
         '220': '220ms',
       },

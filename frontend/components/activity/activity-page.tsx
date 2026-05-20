@@ -134,7 +134,8 @@ export function ActivityPage() {
         <PageHeader
           title="Command"
           titleAccent="Centre"
-          subtitle="Your AI workforce at a glance"
+          eyebrow="Operations · daily glance"
+          lede="What your workforce is running right now, what cleared, and what needs your eyes. Everything streams live; replay any window to the second."
           actions={
             <>
               <Select value={period} onValueChange={setPeriod}>

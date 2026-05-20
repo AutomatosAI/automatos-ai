@@ -84,9 +84,10 @@ export default function DeliverablesPage() {
       ) : (
         <div className="space-y-6">
           <PageHeader
-            title=""
+            title="Your"
             titleAccent="Deliverables"
-            subtitle="Files, reports & agent output"
+            eyebrow="Outputs · the work that landed"
+            lede="Every file, report, draft, and template your agents produced. Open, share, fork into a new mission, or post to the books."
           />
           <FilterTabs
             tabs={[

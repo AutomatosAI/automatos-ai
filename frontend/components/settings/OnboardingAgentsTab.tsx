@@ -219,7 +219,7 @@ export function OnboardingAgentsTab() {
           <CardHeader>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <Target className="h-5 w-5 text-orange-500" />
+                <Target className="h-5 w-5 text-primary" />
                 <div>
                   <CardTitle className="text-base">Mission Planner</CardTitle>
                   <CardDescription>

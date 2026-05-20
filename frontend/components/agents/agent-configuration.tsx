@@ -786,7 +786,7 @@ export function AgentConfiguration({
         <Card className="glass-card">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Sparkles className="w-5 h-5 text-orange-400" />
+              <Sparkles className="w-5 h-5 text-primary" />
               Capability Assignment
             </CardTitle>
             <div className="flex items-center justify-between">
@@ -820,7 +820,7 @@ export function AgentConfiguration({
                       key={plugin.plugin_id}
                       className={`flex items-start space-x-3 p-3 rounded-lg border transition-colors ${
                         isAssigned
-                          ? 'bg-orange-500/5 border-orange-500/30'
+                          ? 'bg-primary/5 border-primary/30'
                           : 'bg-background/50 border-border/50'
                       }`}
                     >

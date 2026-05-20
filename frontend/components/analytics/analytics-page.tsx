@@ -63,9 +63,10 @@ export function AnalyticsPage() {
     <div className="space-y-6">
       <div data-tour="analytics-page-header">
       <PageHeader
-        title=""
+        title="Workspace"
         titleAccent="Analytics"
-        subtitle={wsLabel ? `Viewing: ${wsLabel}` : 'Your workspace performance, costs, and insights at a glance'}
+        eyebrow={wsLabel ? `Books · ${wsLabel}` : "Books · decision economics"}
+        lede="Cost per agent, cost per decision, and where the cache is paying for itself. Numbers the books read straight from execution."
         actions={
           <>
             {isAdmin && <AdminWorkspaceSwitcher onWorkspaceChange={handleWorkspaceChange} />}

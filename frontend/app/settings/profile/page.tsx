@@ -50,7 +50,7 @@ export default function ProfilePage() {
     if (!isLoaded) {
         return (
             <div className="min-h-screen flex items-center justify-center">
-                <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-orange-500"></div>
+                <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
             </div>
         )
     }
@@ -58,7 +58,7 @@ export default function ProfilePage() {
     if (!user) {
         return (
             <div className="min-h-screen flex items-center justify-center">
-                <p className="text-slate-400">Please sign in to view your profile.</p>
+                <p className="text-muted-foreground">Please sign in to view your profile.</p>
             </div>
         )
     }
@@ -164,13 +164,14 @@ export default function ProfilePage() {
                     <PageHeader
                         title="Profile"
                         titleAccent="Settings"
-                        subtitle="Manage your account information and preferences"
+                        eyebrow="Account · personal"
+                        lede="Your name, email, role, and how you authenticate. Workspace-level settings live one level up under Workspace settings."
                         actions={
                             <Button
                                 variant="ghost"
                                 size="sm"
                                 onClick={() => router.back()}
-                                className="text-slate-400 hover:text-white hover:bg-slate-800"
+                                className="text-muted-foreground hover:text-foreground hover:bg-secondary"
                             >
                                 <ArrowLeft className="w-4 h-4 mr-1" />
                                 Back
@@ -199,26 +200,26 @@ export default function ProfilePage() {
                 )}
 
                 {/* Profile Card */}
-                <div className="glass-card rounded-2xl border border-slate-700/50 p-8 mb-6">
+                <div className="glass-card rounded-2xl border border-border p-8 mb-6">
                     {/* Avatar Section */}
-                    <div className="flex items-start justify-between mb-8 pb-8 border-b border-slate-700/50">
+                    <div className="flex items-start justify-between mb-8 pb-8 border-b border-border">
                         <div className="flex items-center space-x-6">
                             {user.imageUrl ? (
                                 <img
                                     src={user.imageUrl}
                                     alt={user.fullName || 'User'}
-                                    className="w-24 h-24 rounded-full border-4 border-orange-500/30"
+                                    className="w-24 h-24 rounded-full border-4 border-primary/30"
                                 />
                             ) : (
-                                <div className="w-24 h-24 rounded-full bg-gradient-to-br from-orange-500 to-purple-600 flex items-center justify-center">
-                                    <User className="w-12 h-12 text-white" />
+                                <div className="w-24 h-24 rounded-full bg-primary flex items-center justify-center">
+                                    <User className="w-12 h-12 text-foreground" />
                                 </div>
                             )}
                             <div>
-                                <h2 className="text-2xl font-bold text-white mb-1">
+                                <h2 className="text-2xl font-bold text-foreground mb-1">
                                     {user.fullName || 'User'}
                                 </h2>
-                                <p className="text-slate-400 mb-3">
+                                <p className="text-muted-foreground mb-3">
                                     {user.primaryEmailAddress?.emailAddress}
                                 </p>
                                 <input
@@ -233,7 +234,7 @@ export default function ProfilePage() {
                                     size="sm"
                                     onClick={handleAvatarClick}
                                     disabled={isUploadingAvatar}
-                                    className="border-orange-500/30 text-orange-400 hover:bg-orange-500/10 hover:text-orange-300 disabled:opacity-50"
+                                    className="border-primary/30 text-primary hover:bg-primary/10 hover:text-primary/80 disabled:opacity-50"
                                 >
                                     {isUploadingAvatar ? (
                                         <Loader2 className="w-4 h-4 mr-2 animate-spin" />
@@ -255,7 +256,7 @@ export default function ProfilePage() {
                                     })
                                     setIsEditing(true)
                                 }}
-                                className="bg-gradient-to-r from-orange-500 to-purple-600 hover:from-orange-600 hover:to-purple-700 text-white"
+                                className="bg-primary hover:bg-primary/90 text-primary-foreground"
                             >
                                 Edit Profile
                             </Button>
@@ -264,7 +265,7 @@ export default function ProfilePage() {
                                 <Button
                                     onClick={handleSave}
                                     disabled={isSaving}
-                                    className="bg-gradient-to-r from-orange-500 to-purple-600 hover:from-orange-600 hover:to-purple-700 text-white disabled:opacity-50"
+                                    className="bg-primary hover:bg-primary/90 text-primary-foreground disabled:opacity-50"
                                 >
                                     {isSaving ? (
                                         <Loader2 className="w-4 h-4 mr-2 animate-spin" />
@@ -276,7 +277,7 @@ export default function ProfilePage() {
                                 <Button
                                     onClick={() => setIsEditing(false)}
                                     variant="outline"
-                                    className="border-slate-600 text-slate-300 hover:bg-slate-800"
+                                    className="border-border text-foreground hover:bg-secondary"
                                 >
                                     <X className="w-4 h-4 mr-2" />
                                     Cancel
@@ -288,13 +289,13 @@ export default function ProfilePage() {
                     {/* Personal Information */}
                     <div className="space-y-6">
                         <div>
-                            <h3 className="text-lg font-semibold text-white mb-4 flex items-center">
-                                <User className="w-5 h-5 mr-2 text-orange-400" />
+                            <h3 className="text-lg font-semibold text-foreground mb-4 flex items-center">
+                                <User className="w-5 h-5 mr-2 text-primary" />
                                 Personal Information
                             </h3>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-300 mb-2">
+                                    <label className="block text-sm font-medium text-foreground mb-2">
                                         First Name
                                     </label>
                                     {isEditing ? (
@@ -302,17 +303,17 @@ export default function ProfilePage() {
                                             type="text"
                                             value={formData.firstName}
                                             onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
-                                            className="w-full px-4 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-white placeholder:text-slate-500 focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 outline-none"
+                                            className="w-full px-4 py-2 bg-secondary/50 border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none"
                                             placeholder="Enter first name"
                                         />
                                     ) : (
-                                        <p className="px-4 py-2 bg-slate-800/30 border border-slate-700/50 rounded-lg text-white">
+                                        <p className="px-4 py-2 bg-secondary/30 border border-border rounded-lg text-foreground">
                                             {user.firstName || 'Not set'}
                                         </p>
                                     )}
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-300 mb-2">
+                                    <label className="block text-sm font-medium text-foreground mb-2">
                                         Last Name
                                     </label>
                                     {isEditing ? (
@@ -320,17 +321,17 @@ export default function ProfilePage() {
                                             type="text"
                                             value={formData.lastName}
                                             onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
-                                            className="w-full px-4 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-white placeholder:text-slate-500 focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 outline-none"
+                                            className="w-full px-4 py-2 bg-secondary/50 border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none"
                                             placeholder="Enter last name"
                                         />
                                     ) : (
-                                        <p className="px-4 py-2 bg-slate-800/30 border border-slate-700/50 rounded-lg text-white">
+                                        <p className="px-4 py-2 bg-secondary/30 border border-border rounded-lg text-foreground">
                                             {user.lastName || 'Not set'}
                                         </p>
                                     )}
                                 </div>
                                 <div className="md:col-span-2">
-                                    <label className="block text-sm font-medium text-slate-300 mb-2">
+                                    <label className="block text-sm font-medium text-foreground mb-2">
                                         Username
                                     </label>
                                     {isEditing ? (
@@ -338,11 +339,11 @@ export default function ProfilePage() {
                                             type="text"
                                             value={formData.username}
                                             onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-                                            className="w-full px-4 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-white placeholder:text-slate-500 focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 outline-none"
+                                            className="w-full px-4 py-2 bg-secondary/50 border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none"
                                             placeholder="Enter username"
                                         />
                                     ) : (
-                                        <p className="px-4 py-2 bg-slate-800/30 border border-slate-700/50 rounded-lg text-white">
+                                        <p className="px-4 py-2 bg-secondary/30 border border-border rounded-lg text-foreground">
                                             {user.username || 'Not set'}
                                         </p>
                                     )}
@@ -351,22 +352,22 @@ export default function ProfilePage() {
                         </div>
 
                         {/* Email Addresses */}
-                        <div className="pt-6 border-t border-slate-700/50">
-                            <h3 className="text-lg font-semibold text-white mb-4 flex items-center">
-                                <Mail className="w-5 h-5 mr-2 text-orange-400" />
+                        <div className="pt-6 border-t border-border">
+                            <h3 className="text-lg font-semibold text-foreground mb-4 flex items-center">
+                                <Mail className="w-5 h-5 mr-2 text-primary" />
                                 Email Addresses
                             </h3>
                             <div className="space-y-3">
                                 {user.emailAddresses.map((email) => (
                                     <div
                                         key={email.id}
-                                        className="flex items-center justify-between px-4 py-3 bg-slate-800/30 border border-slate-700/50 rounded-lg"
+                                        className="flex items-center justify-between px-4 py-3 bg-secondary/30 border border-border rounded-lg"
                                     >
                                         <div className="flex items-center space-x-3">
-                                            <Mail className="w-4 h-4 text-slate-400" />
-                                            <span className="text-white">{email.emailAddress}</span>
+                                            <Mail className="w-4 h-4 text-muted-foreground" />
+                                            <span className="text-foreground">{email.emailAddress}</span>
                                             {email.id === user.primaryEmailAddressId && (
-                                                <span className="px-2 py-0.5 text-xs font-medium bg-orange-500/20 text-orange-400 border border-orange-500/30 rounded">
+                                                <span className="px-2 py-0.5 text-xs font-medium bg-primary/20 text-primary border border-primary/30 rounded">
                                                     Primary
                                                 </span>
                                             )}
@@ -377,23 +378,23 @@ export default function ProfilePage() {
                         </div>
 
                         {/* Workspace */}
-                        <div className="pt-6 border-t border-slate-700/50">
-                            <h3 className="text-lg font-semibold text-white mb-4 flex items-center">
-                                <Briefcase className="w-5 h-5 mr-2 text-orange-400" />
+                        <div className="pt-6 border-t border-border">
+                            <h3 className="text-lg font-semibold text-foreground mb-4 flex items-center">
+                                <Briefcase className="w-5 h-5 mr-2 text-primary" />
                                 Workspace
                             </h3>
                             <div>
-                                <label className="block text-sm font-medium text-slate-300 mb-2">
+                                <label className="block text-sm font-medium text-foreground mb-2">
                                     Workspace ID
                                 </label>
                                 <div className="flex items-center space-x-2">
-                                    <div className="flex-1 px-4 py-2 bg-slate-800/30 border border-slate-700/50 rounded-lg">
+                                    <div className="flex-1 px-4 py-2 bg-secondary/30 border border-border rounded-lg">
                                         {workspaceLoading ? (
-                                            <span className="text-slate-500 font-mono text-sm">Loading…</span>
+                                            <span className="text-muted-foreground font-mono text-sm">Loading…</span>
                                         ) : workspaceId ? (
-                                            <span className="text-white font-mono text-sm break-all">{workspaceId}</span>
+                                            <span className="text-foreground font-mono text-sm break-all">{workspaceId}</span>
                                         ) : (
-                                            <span className="text-slate-500 font-mono text-sm">No workspace</span>
+                                            <span className="text-muted-foreground font-mono text-sm">No workspace</span>
                                         )}
                                     </div>
                                     <Button
@@ -401,7 +402,7 @@ export default function ProfilePage() {
                                         size="sm"
                                         onClick={handleCopyWorkspaceId}
                                         disabled={!workspaceId}
-                                        className="border-slate-700 text-slate-300 hover:bg-slate-800 hover:text-white disabled:opacity-50"
+                                        className="border-border text-foreground hover:bg-secondary hover:text-foreground disabled:opacity-50"
                                     >
                                         {copiedWorkspaceId ? (
                                             <>
@@ -416,28 +417,28 @@ export default function ProfilePage() {
                                         )}
                                     </Button>
                                 </div>
-                                <p className="mt-2 text-xs text-slate-500">
+                                <p className="mt-2 text-xs text-muted-foreground">
                                     Include this ID when reporting an issue — it helps support trace your workspace in logs.
                                 </p>
                             </div>
                         </div>
 
                         {/* Security */}
-                        <div className="pt-6 border-t border-slate-700/50">
-                            <h3 className="text-lg font-semibold text-white mb-4 flex items-center">
-                                <Shield className="w-5 h-5 mr-2 text-orange-400" />
+                        <div className="pt-6 border-t border-border">
+                            <h3 className="text-lg font-semibold text-foreground mb-4 flex items-center">
+                                <Shield className="w-5 h-5 mr-2 text-primary" />
                                 Security
                             </h3>
                             <div className="space-y-3">
                                 <Button
                                     variant="outline"
-                                    className="w-full justify-start border-slate-700 text-slate-300 hover:bg-slate-800 hover:text-white"
+                                    className="w-full justify-start border-border text-foreground hover:bg-secondary hover:text-foreground"
                                 >
                                     Change Password
                                 </Button>
                                 <Button
                                     variant="outline"
-                                    className="w-full justify-start border-slate-700 text-slate-300 hover:bg-slate-800 hover:text-white"
+                                    className="w-full justify-start border-border text-foreground hover:bg-secondary hover:text-foreground"
                                 >
                                     Enable Two-Factor Authentication
                                 </Button>

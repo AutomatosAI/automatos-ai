@@ -125,7 +125,7 @@ function StreamingLog({ logs, selectedStage, onClearFilter }: { logs: LogEntry[]
       case 'task_complete': return <CheckCircle className="w-4 h-4 text-success" />
       case 'task_error': return <AlertCircle className="w-4 h-4 text-destructive" />
       case 'inter_agent': return <MessageSquare className="w-4 h-4 text-pink-400" />
-      case 'memory_write': return <Brain className="w-4 h-4 text-orange-400" />
+      case 'memory_write': return <Brain className="w-4 h-4 text-primary" />
       default: return <Clock className="w-4 h-4 text-muted-foreground" />
     }
   }
@@ -230,7 +230,7 @@ function StreamingLog({ logs, selectedStage, onClearFilter }: { logs: LogEntry[]
                               <div className="mt-3 flex items-center gap-2 flex-wrap">
                                 <span className="text-xs text-primary/60 uppercase">Tools:</span>
                                 {log.toolsUsed.map((tool, i) => (
-                                  <Badge key={i} variant="outline" className="text-[10px] text-orange-400 border-orange-400/30">{tool}</Badge>
+                                  <Badge key={i} variant="outline" className="text-[10px] text-primary border-primary/30">{tool}</Badge>
                                 ))}
                               </div>
                             )}
@@ -1092,8 +1092,8 @@ export function ExecutionKitchen({
               // Recipe mode: execution already started, show status + cancel
               isExecuting && (
                 <div className="flex items-center gap-2">
-                  <Badge variant="outline" className="bg-orange-500/10 text-orange-400 border-orange-500/30">
-                    <Loader2 className="w-3 h-3 mr-2 animate-spin" />
+                  <Badge variant="outline" className="bg-primary/10 text-primary border-primary/30">
+                    <Loader2 className="w-3 h-3 mr-2 animate-spin text-[hsl(var(--info))]" />
                     Cooking...
                   </Badge>
                   <Button
@@ -1120,7 +1120,7 @@ export function ExecutionKitchen({
             ) : (
               // Workflow mode: full execution controls
               !isExecuting ? (
-                <Button onClick={handleStartExecution} className="gap-2 glow-orange"><Play className="w-4 h-4" />Execute</Button>
+                <Button onClick={handleStartExecution} className="gap-2"><Play className="w-4 h-4" />Execute</Button>
               ) : (
                 <>
                   <Button variant="outline" size="sm" onClick={handlePauseExecution}><Pause className="w-4 h-4 mr-2" />Pause</Button>
@@ -1202,10 +1202,10 @@ export function ExecutionKitchen({
             exit={{ opacity: 0, height: 0 }}
             className="px-6 pb-4 overflow-hidden"
           >
-            <div className="glass-panel rounded-2xl p-4 border border-orange-400/20">
+            <div className="glass-panel rounded-2xl p-4 border border-primary/20">
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
-                  <Lightbulb className="w-4 h-4 text-orange-400" />
+                  <Lightbulb className="w-4 h-4 text-primary" />
                   <h3 className="text-sm font-semibold">Improvement Suggestions</h3>
                 </div>
                 <Button
@@ -1277,7 +1277,7 @@ export function ExecutionKitchen({
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center h-full text-center">
-                  <Loader2 className="w-8 h-8 animate-spin text-primary mb-3" />
+                  <Loader2 className="w-8 h-8 animate-spin text-[hsl(var(--info))] mb-3" />
                   <p className="text-sm text-muted-foreground">Executing recipe steps...</p>
                   <p className="text-xs text-muted-foreground/60 mt-1">
                     Step {recipeExecData?.current_step || 0} of {recipeExecData?.total_steps || '?'}

@@ -50,7 +50,7 @@ export function ImageGallery({ images }: ImageGalleryProps) {
           <button
             key={idx}
             onClick={() => openLightbox(idx)}
-            className="group relative overflow-hidden rounded-xl border border-orange-500/10 bg-black/20 hover:shadow-[0_0_20px_rgba(249,115,22,0.15)] transition-all duration-220"
+            className="group relative overflow-hidden rounded-xl border border-primary/10 bg-black/20 transition-all duration-220"
           >
             <img
               src={img.src}
@@ -87,7 +87,7 @@ export function ImageGallery({ images }: ImageGalleryProps) {
 
       {/* Lightbox */}
       <Dialog open={lightboxIndex !== null} onOpenChange={() => closeLightbox()}>
-        <DialogContent className="max-w-[95vw] max-h-[95vh] p-0 border-orange-500/20 bg-black/95 backdrop-blur-xl overflow-hidden [&>button]:hidden">
+        <DialogContent className="max-w-[95vw] max-h-[95vh] p-0 border-primary/20 bg-black/95 backdrop-blur-xl overflow-hidden [&>button]:hidden">
           {lightboxIndex !== null && (
             <div className="relative flex items-center justify-center w-full h-[90vh]">
               <img

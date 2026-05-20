@@ -72,7 +72,7 @@ export function Message({
         href={href}
         target="_blank"
         rel="noreferrer"
-        className="text-orange-300 hover:text-orange-200 underline"
+        className="text-primary hover:text-primary/80 underline"
       >
         {children}
       </a>
@@ -89,7 +89,7 @@ export function Message({
     code: ({ inline, className, children }: any) => {
       if (inline) {
         return (
-          <code className="rounded bg-orange-500/10 px-1.5 py-0.5 text-[13px] font-mono text-orange-200 border border-orange-500/10">
+          <code className="rounded bg-primary/10 px-1.5 py-0.5 text-[13px] font-mono text-primary border border-primary/10">
             {children}
           </code>
         )
@@ -102,7 +102,7 @@ export function Message({
     },
     pre: ({ children }: any) => <>{children}</>,
     blockquote: ({ children }: any) => (
-      <blockquote className="border-l-2 border-orange-500/40 pl-4 py-1 bg-orange-500/5 rounded-r-lg text-foreground/80 dark:text-foreground/90 italic">
+      <blockquote className="border-l-2 border-primary/40 pl-4 py-1 bg-primary/5 rounded-r-lg text-foreground/80 dark:text-foreground/90 italic">
         {children}
       </blockquote>
     ),
@@ -116,7 +116,7 @@ export function Message({
       <h3 className="text-sm font-semibold text-foreground dark:text-gray-100 mb-1">{children}</h3>
     ),
     hr: () => (
-      <hr className="border-0 h-px bg-gradient-to-r from-transparent via-orange-500/30 to-transparent my-4" />
+      <hr className="border-0 h-px bg-gradient-to-r from-transparent via-primary/30 to-transparent my-4" />
     ),
     table: ({ children }: any) => (
       <div className="overflow-x-auto rounded-xl border border-border/60 bg-card/50 dark:border-gray-800/60 dark:bg-background/40">
@@ -148,7 +148,7 @@ export function Message({
     img: () => null,
   }), [])
 
-  const proseClass = "prose prose-sm md:prose-base max-w-none space-y-3 break-words [overflow-wrap:anywhere] dark:prose-invert prose-headings:text-foreground dark:prose-headings:text-gray-100 prose-p:text-foreground dark:prose-p:text-gray-100 prose-a:text-orange-500 dark:prose-a:text-orange-300"
+  const proseClass = "prose prose-sm md:prose-base max-w-none space-y-3 break-words [overflow-wrap:anywhere] dark:prose-invert prose-headings:text-foreground dark:prose-headings:text-gray-100 prose-p:text-foreground dark:prose-p:text-gray-100 prose-a:text-primary dark:prose-a:text-primary"
 
   const renderMarkdownWithImages = (text: string, keyPrefix = '') => {
     const { text: cleanText, images } = extractImages(text)
@@ -243,12 +243,12 @@ export function Message({
             {[0, 1, 2].map((i) => (
               <div
                 key={i}
-                className="w-2 h-2 rounded-full bg-orange-400/60 animate-pulse"
+                className="w-2 h-2 rounded-full bg-primary/60 animate-pulse"
                 style={{ animationDelay: `${i * 0.15}s` }}
               />
             ))}
           </div>
-          <span className="text-xs text-orange-300/80 font-medium">Thinking</span>
+          <span className="text-xs text-primary/80 font-medium">Thinking</span>
         </div>
       )
     }
@@ -284,8 +284,8 @@ export function Message({
     return (
       <div className="flex flex-wrap items-center gap-2">
         {runningTools.length > 0 && (
-          <div className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs bg-orange-500/10 border border-orange-500/30 text-orange-300">
-            <Loader2 className="w-3 h-3 animate-spin" />
+          <div className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs bg-primary/10 border border-primary/30 text-primary">
+            <Loader2 className="w-3 h-3 animate-spin text-[hsl(var(--info))]" />
             <span>
               {runningTools.length === 1
                 ? formatToolName(runningTools[0].toolName)
@@ -312,11 +312,11 @@ export function Message({
     const { agentName, agentId, confidence } = message.routingInfo
     const displayName = agentName || `Agent #${agentId}`
     return (
-      <div className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs bg-orange-500/10 border border-orange-500/20 text-orange-300/90">
+      <div className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs bg-primary/10 border border-primary/20 text-primary">
         <Zap className="w-3 h-3" />
         <span>Routed to: <span className="font-medium">{displayName}</span></span>
         {confidence > 0 && confidence < 1 && (
-          <span className="text-orange-300/60 ml-1">{(confidence * 100).toFixed(0)}%</span>
+          <span className="text-primary/60 ml-1">{(confidence * 100).toFixed(0)}%</span>
         )}
       </div>
     )
@@ -353,7 +353,7 @@ export function Message({
           {/* Message bubble */}
           <div className={`rounded-2xl px-4 py-3 space-y-2 ${
             isUser
-              ? 'bg-gradient-to-br from-orange-500/15 to-orange-600/5 border border-orange-500/10 rounded-tr-sm'
+              ? 'bg-primary/10 border border-primary/10 rounded-tr-sm'
               : 'bg-card/40 backdrop-blur-sm border border-border/30 rounded-tl-sm'
           }`}>
             {renderMessageContent()}
@@ -377,7 +377,7 @@ export function Message({
                       message.metadata.source === 'rag' ? 'bg-info/10 border-info/20 text-info' :
                       message.metadata.source === 'semantic' ? 'bg-success/10 border-success/20 text-success' :
                       message.metadata.source === 'database' ? 'bg-success/10 border-success/20 text-success' :
-                      message.metadata.source === 'llm' ? 'bg-orange-500/10 border-orange-500/20 text-orange-400' : ''
+                      message.metadata.source === 'llm' ? 'bg-primary/10 border-primary/20 text-primary' : ''
                     }`}>
                       {message.metadata.source.toUpperCase()}
                     </Badge>
@@ -501,17 +501,17 @@ export function Message({
                   )}
 
                   {dbResult.status === 'needs_clarification' && dbResult.clarifications && dbResult.clarifications.length > 0 ? (
-                    <div className="mt-3 rounded-lg border border-orange-500/30 bg-orange-500/10 p-3 text-left">
-                      <div className="text-sm font-semibold text-orange-200">Clarification needed</div>
+                    <div className="mt-3 rounded-lg border border-primary/30 bg-primary/10 p-3 text-left">
+                      <div className="text-sm font-semibold text-primary">Clarification needed</div>
                       {dbResult.message && (
-                        <div className="mt-1 text-sm text-orange-100/80">{dbResult.message}</div>
+                        <div className="mt-1 text-sm text-foreground/80">{dbResult.message}</div>
                       )}
-                      <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-orange-100/90">
+                      <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-foreground">
                         {dbResult.clarifications.slice(0, 3).map((q, qIdx) => (
                           <li key={qIdx}>{q}</li>
                         ))}
                       </ul>
-                      <div className="mt-2 text-xs text-orange-100/70">
+                      <div className="mt-2 text-xs text-muted-foreground">
                         Click to open the Data Explorer and copy questions.
                       </div>
                     </div>

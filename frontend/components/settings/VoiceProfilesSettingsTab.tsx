@@ -440,7 +440,7 @@ export function VoiceProfilesSettingsTab() {
                   className="flex items-center justify-between rounded-xl border border-border/50 bg-card/50 px-4 py-3 transition-colors hover:bg-accent/30"
                 >
                   <div className="flex items-center gap-3 min-w-0">
-                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-orange-500/10 text-orange-500">
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
                       {profile.reference_audio ? (
                         <Mic className="w-4 h-4" />
                       ) : (

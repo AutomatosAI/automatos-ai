@@ -56,7 +56,7 @@ export function ModelSelector({ selectedModelId, onModelChange }: ModelSelectorP
           variant="ghost"
           size="sm"
           data-tour="chat-model-selector"
-          className="h-8 px-3 rounded-full border-2 border-orange-500/20 bg-black/20 hover:bg-orange-500/5 hover:border-orange-500/40 text-foreground/90 text-xs gap-2 shadow-[0_0_18px_rgba(249,115,22,0.10)]"
+          className="h-8 px-3 rounded-full border-2 border-primary/20 bg-card hover:bg-primary/5 hover:border-primary/40 text-foreground/90 text-xs gap-2"
         >
           {isLoading ? (
             <Loader2 className="w-3 h-3 animate-spin" />
@@ -65,12 +65,12 @@ export function ModelSelector({ selectedModelId, onModelChange }: ModelSelectorP
               {selectedModel?.display_name || selectedModel?.name || 'Select Model'}
             </span>
           )}
-          <ChevronDown className="w-3 h-3 text-orange-400" />
+          <ChevronDown className="w-3 h-3 text-primary" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="start"
-        className="w-[340px] max-h-[500px] overflow-y-auto bg-background border-orange-500/20 rounded-2xl"
+        className="w-[340px] max-h-[500px] overflow-y-auto bg-background border-primary/20 rounded-2xl"
         style={{ maxHeight: '70vh' }}
       >
         {Object.entries(modelsByProvider).map(([provider, providerModels]) => (

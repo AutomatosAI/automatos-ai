@@ -27,8 +27,8 @@ export function FeatureCard({ feature, onToggle, disabled }: FeatureCardProps) {
         <div
             className={cn(
                 "group relative p-4 rounded-xl border transition-all duration-220 cursor-pointer",
-                "bg-slate-800/50 border-slate-700/50",
-                "hover:bg-slate-700/50 hover:border-slate-600/50",
+                "bg-secondary/50 border-border/50",
+                "hover:bg-secondary/50 hover:border-border/50",
                 feature.enabled && "border-blue-500/50 bg-blue-500/10",
                 disabled && "opacity-50 cursor-not-allowed"
             )}
@@ -36,11 +36,11 @@ export function FeatureCard({ feature, onToggle, disabled }: FeatureCardProps) {
         >
             <div className="flex justify-between items-start gap-3">
                 <div className="flex-1 min-w-0">
-                    <h4 className="font-medium text-sm text-slate-100 truncate">
+                    <h4 className="font-medium text-sm text-foreground truncate">
                         {feature.display_name}
                     </h4>
                     {feature.description && (
-                        <p className="text-xs text-slate-400 mt-1 line-clamp-2">
+                        <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
                             {feature.description}
                         </p>
                     )}

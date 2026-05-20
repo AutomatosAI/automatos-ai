@@ -20,7 +20,7 @@ export interface OrgChartNodeData {
 
 const STATUS_COLORS: Record<string, string> = {
   active: 'bg-success',
-  inactive: 'bg-zinc-500',
+  inactive: 'bg-muted-foreground',
   training: 'bg-warning',
 }
 
@@ -56,8 +56,8 @@ function hashString(s: string): number {
 function getTeamStyle(team: string | null): { border: string; badge: string } {
   if (!team) {
     return {
-      border: 'border-zinc-700/60',
-      badge: 'bg-zinc-800 text-zinc-300 border-zinc-700/50',
+      border: 'border-border',
+      badge: 'bg-card text-foreground border-border',
     }
   }
   return TEAM_PALETTE[hashString(team.toLowerCase()) % TEAM_PALETTE.length]
@@ -84,33 +84,33 @@ function OrgChartNodeInner({ data }: NodeProps<OrgChartNodeData>) {
   return (
     <div
       className={cn(
-        'rounded-xl border-2 bg-zinc-900/90 backdrop-blur-sm px-4 py-3 w-[220px]',
+        'rounded-xl border-2 bg-card backdrop-blur-sm px-4 py-3 w-[220px]',
         'transition-all duration-220 hover:border-primary/20',
         teamStyle.border,
-        data.isSystemAgent && 'ring-2 ring-orange-500/40 border-orange-500/60',
+        data.isSystemAgent && 'ring-2 ring-primary/40 border-primary/60',
       )}
     >
       {/* Target handle (from parent) */}
       <Handle
         type="target"
         position={Position.Top}
-        className="!bg-zinc-600 !border-zinc-500 !w-2 !h-2"
+        className="!bg-muted-foreground !border-border !w-2 !h-2"
       />
 
       {/* Header: status dot + name */}
       <div className="flex items-center gap-2 mb-1.5">
-        <div className={cn('w-2 h-2 rounded-full shrink-0', STATUS_COLORS[data.status] ?? 'bg-zinc-500')} />
-        <span className="text-sm font-semibold text-zinc-100 truncate">
+        <div className={cn('w-2 h-2 rounded-full shrink-0', STATUS_COLORS[data.status] ?? 'bg-muted-foreground')} />
+        <span className="text-sm font-semibold text-foreground truncate">
           {data.name}
         </span>
         {data.isSystemAgent && (
-          <Shield className="w-3 h-3 text-orange-400 shrink-0" />
+          <Shield className="w-3 h-3 text-primary shrink-0" />
         )}
       </div>
 
       {/* Job title */}
       {data.jobTitle && (
-        <div className="text-xs text-zinc-400 truncate mb-1.5">
+        <div className="text-xs text-muted-foreground truncate mb-1.5">
           {data.jobTitle}
         </div>
       )}
@@ -128,7 +128,7 @@ function OrgChartNodeInner({ data }: NodeProps<OrgChartNodeData>) {
       )}
 
       {/* Stats row */}
-      <div className="flex items-center gap-3 text-[10px] text-zinc-500">
+      <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
         {modelShort && (
           <span className="flex items-center gap-1">
             <Cpu className="w-3 h-3" />
@@ -153,7 +153,7 @@ function OrgChartNodeInner({ data }: NodeProps<OrgChartNodeData>) {
       <Handle
         type="source"
         position={Position.Bottom}
-        className="!bg-zinc-600 !border-zinc-500 !w-2 !h-2"
+        className="!bg-muted-foreground !border-border !w-2 !h-2"
       />
     </div>
   )

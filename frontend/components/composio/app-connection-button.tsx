@@ -107,7 +107,7 @@ export function AppConnectionButton({
             size="sm"
             onClick={handleConnect}
             disabled={isConnecting}
-            className="bg-slate-800 hover:bg-slate-700 border-slate-600"
+            className="bg-secondary hover:bg-secondary/80 border-border"
         >
             {isConnecting ? (
                 <>

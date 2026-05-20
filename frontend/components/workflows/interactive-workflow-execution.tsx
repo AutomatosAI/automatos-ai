@@ -445,7 +445,7 @@ export function InteractiveWorkflowExecution({ workflowId }: { workflowId: numbe
             Metrics
           </Button>
           {humanInteractions.length > 0 && (
-            <Badge className="bg-orange-500/10 text-orange-400 border-orange-500/20">
+            <Badge className="bg-primary/10 text-primary border-primary/20">
               {humanInteractions.length} interaction{humanInteractions.length > 1 ? 's' : ''} needed
             </Badge>
           )}
@@ -577,8 +577,8 @@ export function InteractiveWorkflowExecution({ workflowId }: { workflowId: numbe
                     </div>
 
                     {activity.needsHumanInput && (
-                      <div className="mt-3 p-2 bg-orange-500/10 border border-orange-500/20 rounded">
-                        <p className="text-sm text-orange-400 flex items-center">
+                      <div className="mt-3 p-2 bg-primary/10 border border-primary/20 rounded">
+                        <p className="text-sm text-primary flex items-center">
                           <MessageCircle className="w-4 h-4 mr-1" />
                           Needs human input
                         </p>
@@ -746,9 +746,9 @@ export function InteractiveWorkflowExecution({ workflowId }: { workflowId: numbe
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {humanInteractions.map((interaction) => (
-              <div key={interaction.id} className="border border-orange-500/20 rounded-lg p-4 bg-orange-500/5">
+              <div key={interaction.id} className="border border-primary/20 rounded-lg p-4 bg-primary/5">
                 <div className="flex items-center justify-between mb-2">
-                  <Badge className="bg-orange-500/10 text-orange-400 border-orange-500/20">
+                  <Badge className="bg-primary/10 text-primary border-primary/20">
                     {interaction.agentName}
                   </Badge>
                   <div className="text-xs text-muted-foreground">

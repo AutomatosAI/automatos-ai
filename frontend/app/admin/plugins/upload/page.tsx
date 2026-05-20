@@ -151,7 +151,7 @@ function severityColor(severity: string) {
     case 'critical':
       return 'text-destructive'
     case 'high':
-      return 'text-orange-400'
+      return 'text-primary'
     case 'medium':
       return 'text-warning'
     case 'low':
@@ -374,7 +374,7 @@ export default function AdminPluginUploadPage() {
           {/* Left Column: Upload */}
           <div className="space-y-6">
             {/* Upload Method Selection */}
-            <Card className="glass-card">
+            <Card className="bg-card border border-border">
               <CardHeader className="pb-3">
                 <CardTitle className="text-lg">Upload Method</CardTitle>
               </CardHeader>
@@ -407,10 +407,10 @@ export default function AdminPluginUploadPage() {
                       {...getRootProps()}
                       className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
                         isDragActive
-                          ? 'border-orange-500 bg-orange-500/5'
+                          ? 'border-primary bg-primary/5'
                           : selectedFile
                           ? 'border-success/50 bg-success/5'
-                          : 'border-border hover:border-orange-500/50'
+                          : 'border-border hover:border-primary/50'
                       } ${isScanning ? 'opacity-50 pointer-events-none' : ''}`}
                     >
                       <input {...getInputProps()} />
@@ -485,7 +485,7 @@ export default function AdminPluginUploadPage() {
 
             {/* Scan Progress */}
             {scanPhase !== 'idle' && (
-              <Card className="glass-card">
+              <Card className="bg-card border border-border">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-lg">Scan Progress</CardTitle>
                 </CardHeader>
@@ -514,7 +514,7 @@ export default function AdminPluginUploadPage() {
                           key={phase}
                           className={`flex items-center gap-2 text-sm ${
                             isActive
-                              ? 'text-orange-400'
+                              ? 'text-primary'
                               : isDone
                               ? 'text-success'
                               : isError && isActive
@@ -550,7 +550,7 @@ export default function AdminPluginUploadPage() {
           <div className="space-y-6">
             {/* Upload Result */}
             {uploadResult && (
-              <Card className="glass-card">
+              <Card className="bg-card border border-border">
                 <CardHeader className="pb-3">
                   <div className="flex items-center justify-between">
                     <CardTitle className="text-lg">Plugin Info</CardTitle>
@@ -588,7 +588,7 @@ export default function AdminPluginUploadPage() {
             {scanResult && (
               <>
                 {/* Risk Score */}
-                <Card className="glass-card">
+                <Card className="bg-card border border-border">
                   <CardHeader className="pb-3">
                     <CardTitle className="text-lg">Security Scan Results</CardTitle>
                   </CardHeader>
@@ -663,7 +663,7 @@ export default function AdminPluginUploadPage() {
 
                 {/* Static Findings */}
                 {scanResult.static_findings && scanResult.static_findings.length > 0 && (
-                  <Card className="glass-card">
+                  <Card className="bg-card border border-border">
                     <CardHeader className="pb-3">
                       <button
                         className="flex items-center justify-between w-full text-left"
@@ -717,7 +717,7 @@ export default function AdminPluginUploadPage() {
 
                 {/* LLM Findings */}
                 {scanResult.llm_findings && scanResult.llm_findings.length > 0 && (
-                  <Card className="glass-card">
+                  <Card className="bg-card border border-border">
                     <CardHeader className="pb-3">
                       <button
                         className="flex items-center justify-between w-full text-left"
@@ -774,7 +774,7 @@ export default function AdminPluginUploadPage() {
 
             {/* Approve / Reject Actions */}
             {scanPhase === 'complete' && uploadResult && !actionDone && (
-              <Card className="glass-card">
+              <Card className="bg-card border border-border">
                 <CardContent className="p-4">
                   <div className="flex gap-3">
                     <Button
@@ -809,7 +809,7 @@ export default function AdminPluginUploadPage() {
 
             {/* Action Result */}
             {actionDone && (
-              <Card className="glass-card">
+              <Card className="bg-card border border-border">
                 <CardContent className="p-4">
                   <div
                     className={`flex items-center gap-2 ${
@@ -838,7 +838,7 @@ export default function AdminPluginUploadPage() {
 
             {/* Error state reset */}
             {scanPhase === 'error' && (
-              <Card className="glass-card">
+              <Card className="bg-card border border-border">
                 <CardContent className="p-4">
                   <Button variant="outline" className="w-full" onClick={handleReset}>
                     Try Again

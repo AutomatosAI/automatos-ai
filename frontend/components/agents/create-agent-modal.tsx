@@ -947,7 +947,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                                 <motion.div
                                   key={plugin.plugin_id}
                                   className={`p-3 rounded-lg border cursor-pointer transition-all ${isSelected
-                                    ? 'border-orange-500/50 bg-orange-500/5'
+                                    ? 'border-primary/50 bg-primary/5'
                                     : 'border-border/50 hover:border-primary/30'
                                     }`}
                                   onClick={() => handlePluginToggle(plugin.plugin_id)}
@@ -956,7 +956,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                                 >
                                   <div className="flex items-center justify-between gap-2">
                                     <div className="flex items-center gap-2 min-w-0">
-                                      <Sparkles className="w-5 h-5 text-orange-400 shrink-0" />
+                                      <Sparkles className="w-5 h-5 text-primary shrink-0" />
                                       <span className="font-medium truncate">{plugin.name}</span>
                                       <Badge variant="outline" className="text-xs shrink-0">
                                         v{plugin.version}

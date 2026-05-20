@@ -13,7 +13,7 @@ const AGENT_COLORS = [
   'text-warning',
   'text-rose-400',
   'text-cyan-400',
-  'text-orange-400',
+  'text-primary',
   'text-indigo-400',
 ]
 

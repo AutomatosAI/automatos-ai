@@ -3,7 +3,7 @@
 
 import { ClerkProvider } from '@clerk/nextjs'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { useState } from 'react'
+import { Suspense, useState } from 'react'
 import { MockProvider } from '../lib/mock-context'
 import { ThemeProvider } from './theme-provider'
 import { WorkspaceProvider } from './workspace-provider'
@@ -12,6 +12,13 @@ import { RoleProvider } from '../contexts/role-context'
 import { FirstLoginGuard } from './onboarding/first-login-guard'
 import { Toaster } from 'react-hot-toast'
 import { GlobalSearch } from './shared/global-search'
+import { useStudioThemeFlag } from '../hooks/use-studio-theme'
+
+// Inline child so we can read useSearchParams (needs a Suspense boundary in Next).
+function StudioThemeFlag() {
+  useStudioThemeFlag()
+  return null
+}
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(() => new QueryClient({
@@ -27,26 +34,34 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <ClerkProvider
       signInFallbackRedirectUrl="/"
       signUpFallbackRedirectUrl="/"
+      // Clerk theming — Studio-aligned. Studio is the locked rebrand direction,
+      // so the Clerk surfaces (sign-in/sign-up/user menu/avatar ring) use the
+      // Studio palette across all themes. Reads as brand-coherent in classic
+      // mode too because Studio's primary (near-black) is a neutral.
+      // PRD §1 semantic lock + audit cross-cutting A.
       appearance={{
         baseTheme: undefined,
         variables: {
-          colorPrimary: '#ff6b35',
-          colorBackground: '#0f0f0f',
-          colorText: '#fafafa',
-          colorInputBackground: '#1a1a1a',
-          colorInputText: '#fafafa',
-          colorTextSecondary: '#a6a6a6',
-          colorDanger: '#e54545',
+          colorPrimary: '#1a1814',         // near-black — positive primary
+          colorBackground: '#ffffff',      // white paper card
+          colorText: '#1a1814',            // warm ink
+          colorInputBackground: '#fbf8f1', // cream surface
+          colorInputText: '#1a1814',
+          colorTextSecondary: '#5a5448',   // muted ink
+          colorDanger: '#c44a1a',          // burnt orange — consequence
           fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif',
-          borderRadius: '1rem',
+          borderRadius: '0.5rem',          // Studio uses 6-10px corners
         },
         elements: {
-          card: 'glass-card card-glow',
+          card: 'border border-border bg-card',
           headerTitle: 'text-foreground',
           headerSubtitle: 'text-muted-foreground',
-          socialButtonsBlockButton: 'bg-secondary/50 hover:bg-secondary/70 text-foreground border border-border/50 backdrop-blur rounded-2xl',
-          formFieldInput: 'bg-background/50 border border-border/50 text-foreground placeholder:text-muted-foreground backdrop-blur rounded-2xl',
-          formButtonPrimary: 'bg-primary hover:bg-primary/90 text-primary-foreground rounded-2xl',
+          socialButtonsBlockButton:
+            'bg-card hover:bg-secondary text-foreground border border-border rounded-md',
+          formFieldInput:
+            'bg-background border border-border text-foreground placeholder:text-muted-foreground rounded-md',
+          formButtonPrimary:
+            'bg-primary hover:bg-primary/90 text-primary-foreground rounded-md',
           footerActionLink: 'text-primary hover:text-primary/80',
         },
         layout: {
@@ -60,13 +75,16 @@ export function Providers({ children }: { children: React.ReactNode }) {
             attribute="class"
             defaultTheme="system"
             enableSystem
-            themes={['light', 'dark', 'matte']}
+            themes={['light', 'dark', 'matte', 'studio']}
             storageKey="automatos-theme"
             disableTransitionOnChange
           >
             <QueryClientProvider client={queryClient}>
               <WorkspaceProvider>
                 <MockProvider>
+                  <Suspense fallback={null}>
+                    <StudioThemeFlag />
+                  </Suspense>
                   <FirstLoginGuard />
                   {children}
                   <GlobalSearch />

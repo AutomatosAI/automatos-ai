@@ -37,7 +37,7 @@ export function TextArtifact({ content, metadata }: TextArtifactProps) {
           if (href?.startsWith('sandbox://')) {
             const label = children ?? href.replace('sandbox://', '')
             return (
-              <span className="inline-flex items-center text-orange-300/80">
+              <span className="inline-flex items-center text-primary/80">
                 {label}
               </span>
             )
@@ -48,7 +48,7 @@ export function TextArtifact({ content, metadata }: TextArtifactProps) {
               href={href}
               target="_blank"
               rel="noreferrer"
-              className="text-orange-300 hover:text-orange-200 underline"
+              className="text-primary hover:text-primary/80 underline"
             >
               {children}
             </a>
@@ -109,7 +109,7 @@ export function TextArtifact({ content, metadata }: TextArtifactProps) {
         <div className="space-y-4">
           <div className="flex flex-wrap items-center gap-2">
             {metadata.database && (
-              <span className="inline-flex items-center rounded-full border border-orange-500/40 bg-orange-500/10 px-3 py-1 text-xs font-semibold uppercase text-orange-700 dark:text-orange-200">
+              <span className="inline-flex items-center rounded-full border border-primary/40 bg-primary/10 px-3 py-1 text-xs font-semibold uppercase text-primary">
                 {metadata.database}
               </span>
             )}
@@ -179,7 +179,7 @@ export function TextArtifact({ content, metadata }: TextArtifactProps) {
                 <div className="mt-3 space-y-3">
                   <div className="flex items-center justify-end">
                     <button
-                      className="inline-flex items-center gap-2 rounded border border-border/60 px-2 py-1 text-[11px] uppercase tracking-wide text-muted-foreground hover:border-orange-400/60 hover:text-orange-600 dark:hover:text-orange-300"
+                      className="inline-flex items-center gap-2 rounded border border-border/60 px-2 py-1 text-[11px] uppercase tracking-wide text-muted-foreground hover:border-primary/60 hover:text-primary/80"
                       onClick={async () => {
                         if (!navigator.clipboard) {
                           toast.error('Clipboard API is not available')
@@ -230,7 +230,7 @@ export function TextArtifact({ content, metadata }: TextArtifactProps) {
                   <span className="truncate">{chart.filename}</span>
                   <div className="flex items-center gap-2">
                     <button
-                      className="rounded border border-border/60 px-2 py-1 text-[11px] uppercase tracking-wide text-foreground/90 hover:border-orange-400/60 hover:text-orange-300"
+                      className="rounded border border-border/60 px-2 py-1 text-[11px] uppercase tracking-wide text-foreground/90 hover:border-primary/60 hover:text-primary/80"
                       onClick={() => {
                         const link = document.createElement('a')
                         link.href = `data:${chart.mime_type};base64,${chart.base64}`
@@ -243,7 +243,7 @@ export function TextArtifact({ content, metadata }: TextArtifactProps) {
                       Download
                     </button>
                     <button
-                      className="rounded border border-border/60 px-2 py-1 text-[11px] uppercase tracking-wide text-foreground/90 hover:border-orange-400/60 hover:text-orange-300"
+                      className="rounded border border-border/60 px-2 py-1 text-[11px] uppercase tracking-wide text-foreground/90 hover:border-primary/60 hover:text-primary/80"
                       onClick={async () => {
                         if (!navigator.clipboard) {
                           toast.error('Clipboard API is not available')

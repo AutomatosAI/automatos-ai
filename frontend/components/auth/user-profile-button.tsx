@@ -24,7 +24,7 @@ export function UserProfileButton({
     if (!isLoaded) {
         // Loading skeleton
         return (
-            <div className="w-8 h-8 rounded-full bg-slate-700 animate-pulse" />
+            <div className="w-8 h-8 rounded-full bg-muted animate-pulse" />
         )
     }
 
@@ -45,13 +45,13 @@ export function UserProfileButton({
             appearance={{
                 elements: {
                     avatarBox: 'w-9 h-9',
-                    userButtonPopoverCard: 'bg-slate-800 border border-slate-700',
+                    userButtonPopoverCard: 'bg-secondary border border-border',
                     userButtonPopoverFooter: 'hidden',
-                    userPreviewMainIdentifier: 'text-white',
-                    userPreviewSecondaryIdentifier: 'text-slate-400',
-                    userButtonPopoverActionButton: 'text-slate-300 hover:bg-slate-700',
-                    userButtonPopoverActionButtonText: 'text-slate-300',
-                    userButtonPopoverActionButtonIcon: 'text-slate-400',
+                    userPreviewMainIdentifier: 'text-foreground',
+                    userPreviewSecondaryIdentifier: 'text-muted-foreground',
+                    userButtonPopoverActionButton: 'text-foreground hover:bg-secondary',
+                    userButtonPopoverActionButtonText: 'text-foreground',
+                    userButtonPopoverActionButtonIcon: 'text-muted-foreground',
                 },
             }}
             userProfileMode="navigation"

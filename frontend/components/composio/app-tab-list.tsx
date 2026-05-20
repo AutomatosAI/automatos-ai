@@ -26,14 +26,14 @@ interface AppTabListProps {
 export function AppTabList({ apps, selectedApp, onSelectApp }: AppTabListProps) {
     if (apps.length === 0) {
         return (
-            <div className="text-center py-4 text-slate-400">
+            <div className="text-center py-4 text-muted-foreground">
                 No apps connected. Connect an app to manage features.
             </div>
         )
     }
 
     return (
-        <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
+        <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
             {apps.map((app) => (
                 <button
                     key={app.name}
@@ -43,7 +43,7 @@ export function AppTabList({ apps, selectedApp, onSelectApp }: AppTabListProps) 
                         "border text-sm font-medium",
                         selectedApp === app.name
                             ? "bg-info/20 border-info/50 text-info/80"
-                            : "bg-slate-800/50 border-slate-700/50 text-slate-300 hover:bg-slate-700/50 hover:border-slate-600/50"
+                            : "bg-secondary/50 border-border/50 text-foreground hover:bg-secondary/50 hover:border-border/50"
                     )}
                 >
                     {app.logo_url ? (
@@ -53,12 +53,12 @@ export function AppTabList({ apps, selectedApp, onSelectApp }: AppTabListProps) 
                             className="h-5 w-5 rounded"
                         />
                     ) : (
-                        <div className="h-5 w-5 rounded bg-slate-600 flex items-center justify-center text-xs">
+                        <div className="h-5 w-5 rounded bg-muted-foreground flex items-center justify-center text-xs">
                             {app.display_name.charAt(0)}
                         </div>
                     )}
                     <span>{app.display_name}</span>
-                    <span className="text-xs text-slate-400">
+                    <span className="text-xs text-muted-foreground">
                         {app.enabled_count}/{app.total_count}
                     </span>
                 </button>

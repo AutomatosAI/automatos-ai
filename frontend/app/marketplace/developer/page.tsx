@@ -235,7 +235,8 @@ export default function DeveloperDashboardPage() {
         <PageHeader
           title="Developer"
           titleAccent="Dashboard"
-          subtitle="Manage your published widgets, track installs, and monitor reviews"
+          eyebrow="Marketplace · your widgets"
+          lede="Everything you've published. Installs, reviews, version history, and the queue of widgets still in review."
           actions={
             <Button
               onClick={() => router.push('/marketplace/publish')}

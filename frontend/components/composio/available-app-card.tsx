@@ -25,7 +25,7 @@ interface AvailableAppCardProps {
 
 export function AvailableAppCard({ app, onConnected }: AvailableAppCardProps) {
     return (
-        <Card className="bg-slate-800/50 border-slate-700/50 hover:border-slate-600/50 transition-all card-glow">
+        <Card className="bg-secondary/50 border-border/50 hover:border-border/50 transition-all">
             <CardContent className="p-4">
                 <div className="flex items-start gap-3">
                     {/* App Icon */}
@@ -37,7 +37,7 @@ export function AvailableAppCard({ app, onConnected }: AvailableAppCardProps) {
                                 className="h-10 w-10 rounded-lg"
                             />
                         ) : (
-                            <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-slate-600 to-slate-700 flex items-center justify-center text-slate-300 font-semibold">
+                            <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-muted-foreground to-muted flex items-center justify-center text-foreground font-semibold">
                                 {app.display_name.charAt(0)}
                             </div>
                         )}
@@ -45,11 +45,11 @@ export function AvailableAppCard({ app, onConnected }: AvailableAppCardProps) {
 
                     {/* App Info */}
                     <div className="flex-1 min-w-0">
-                        <h3 className="font-medium text-slate-100 truncate">
+                        <h3 className="font-medium text-foreground truncate">
                             {app.display_name}
                         </h3>
                         {app.description && (
-                            <p className="text-xs text-slate-400 mt-1 line-clamp-2">
+                            <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
                                 {app.description}
                             </p>
                         )}
@@ -59,7 +59,7 @@ export function AvailableAppCard({ app, onConnected }: AvailableAppCardProps) {
                                     <Badge
                                         key={cat}
                                         variant="outline"
-                                        className="text-xs border-slate-600 text-slate-400"
+                                        className="text-xs border-border text-muted-foreground"
                                     >
                                         {cat}
                                     </Badge>

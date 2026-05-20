@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useTheme } from 'next-themes'
-import { Sun, Moon, Monitor, Square } from 'lucide-react'
+import { Sun, Moon, Monitor, Square, BookOpen } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -35,6 +35,8 @@ export function ThemeToggle() {
         return <Moon className="h-4 w-4" />
       case 'matte':
         return <Square className="h-4 w-4" />
+      case 'studio':
+        return <BookOpen className="h-4 w-4" />
       default:
         return <Monitor className="h-4 w-4" />
     }
@@ -60,6 +62,13 @@ export function ThemeToggle() {
         <DropdownMenuItem onClick={() => setTheme('matte')}>
           <Square className="mr-2 h-4 w-4" />
           Matte
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => setTheme('studio')}>
+          <BookOpen className="mr-2 h-4 w-4" />
+          Studio
+          <span className="ml-auto text-[10px] uppercase tracking-wider opacity-70">
+            preview
+          </span>
         </DropdownMenuItem>
         <DropdownMenuItem onClick={() => setTheme('system')}>
           <Monitor className="mr-2 h-4 w-4" />

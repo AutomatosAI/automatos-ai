@@ -634,7 +634,8 @@ export function ToolsDashboard() {
       <PageHeader
         title="Tools &"
         titleAccent="Integrations"
-        subtitle="Discover, install, and manage tools to extend your AI agents' capabilities"
+        eyebrow="Workforce · what they can reach"
+        lede="The third-party services your agents are authorised to call: GitHub, Slack, Stripe, Shopify, Notion, and the rest. Connect once, scope access, your agents do the work."
         actions={
           <Badge variant="outline" className="text-primary border-primary/30">
             <div className="w-2 h-2 bg-[hsl(var(--success))] rounded-full animate-pulse mr-2" />

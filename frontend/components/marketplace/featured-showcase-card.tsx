@@ -371,12 +371,12 @@ export function FeaturedShowcaseCard({
         {/* ── Copy overlay (bottom-left) ────────────────────────── */}
         <div className="absolute left-6 bottom-5 right-44 z-10 flex flex-col gap-2.5">
           <div className="flex items-center gap-2.5">
-            <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded font-mono text-[10px] tracking-[0.12em] text-orange-300 border border-primary/30 bg-primary/10">
+            <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded font-mono text-[10px] tracking-[0.12em] text-primary border border-primary/30 bg-primary/10">
               <span className="w-1 h-1 rounded-full bg-primary shadow-[0_0_6px_rgba(249,115,22,0.9)]" />
               FEATURED
             </div>
             {(item.category || item.type) && (
-              <span className="font-mono text-[10px] tracking-wide text-slate-300 px-2.5 py-0.5 rounded-full border border-white/10 bg-[rgba(20,17,15,0.6)] backdrop-blur-sm">
+              <span className="font-mono text-[10px] tracking-wide text-foreground px-2.5 py-0.5 rounded-full border border-white/10 bg-[rgba(20,17,15,0.6)] backdrop-blur-sm">
                 {item.category || item.type}
               </span>
             )}
@@ -387,15 +387,15 @@ export function FeaturedShowcaseCard({
           <p className="text-sm text-muted-foreground leading-relaxed line-clamp-2 max-w-xl">
             {item.description}
           </p>
-          <div className="flex items-center gap-2 font-mono text-[10.5px] text-slate-400 mt-0.5">
+          <div className="flex items-center gap-2 font-mono text-[10.5px] text-muted-foreground mt-0.5">
             {item.creator_name && (
               <>
-                <span className="text-slate-300">{item.creator_name}</span>
-                <span className="text-slate-600">·</span>
+                <span className="text-foreground">{item.creator_name}</span>
+                <span className="text-muted-foreground/60">·</span>
               </>
             )}
             <span>v{item.version}</span>
-            <span className="text-slate-600">·</span>
+            <span className="text-muted-foreground/60">·</span>
             <span className="flex items-center gap-1">
               <Download className="h-3 w-3" />
               {formatInstalls(item.install_count)} installs
@@ -407,7 +407,6 @@ export function FeaturedShowcaseCard({
         <div className="absolute right-6 bottom-5 z-10">
           <Button
             onClick={handleInstall}
-            className="shadow-[0_8px_20px_rgba(249,115,22,0.35)]"
           >
             Install
             <svg

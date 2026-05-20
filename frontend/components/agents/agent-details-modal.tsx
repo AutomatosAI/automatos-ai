@@ -615,7 +615,7 @@ export function AgentDetailsModal({
                   <Card className="bg-secondary/30 border-border/30">
                     <CardHeader>
                       <CardTitle className="text-base flex items-center gap-2">
-                        <Sparkles className="h-5 w-5 text-orange-400" />
+                        <Sparkles className="h-5 w-5 text-primary" />
                         Assigned Capabilities
                       </CardTitle>
                     </CardHeader>

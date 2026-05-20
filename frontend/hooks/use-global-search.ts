@@ -99,7 +99,7 @@ export function useGlobalSearch() {
   const [memories, setMemories] = useState<SearchResult[]>([])
   const abortRef = useRef(0)
 
-  // Keyboard shortcut
+  // Keyboard shortcut + custom open event (Studio cmdK button uses the event)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
@@ -107,8 +107,13 @@ export function useGlobalSearch() {
         setOpen((prev) => !prev)
       }
     }
+    const openHandler = () => setOpen(true)
     window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
+    window.addEventListener('automatos:global-search-open', openHandler)
+    return () => {
+      window.removeEventListener('keydown', handler)
+      window.removeEventListener('automatos:global-search-open', openHandler)
+    }
   }, [])
 
   // Reset on close

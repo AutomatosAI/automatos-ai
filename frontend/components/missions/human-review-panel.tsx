@@ -21,7 +21,7 @@ import { TASK_STATE_CONFIG } from '@/types/missions'
 import { toast } from 'sonner'
 
 const proseClass =
-  'prose prose-sm max-w-none dark:prose-invert prose-headings:text-foreground prose-p:text-foreground prose-a:text-orange-500 dark:prose-a:text-orange-300 prose-li:text-foreground prose-strong:text-foreground'
+  'prose prose-sm max-w-none dark:prose-invert prose-headings:text-foreground prose-p:text-foreground prose-a:text-primary dark:prose-a:text-primary prose-li:text-foreground prose-strong:text-foreground'
 
 interface HumanReviewPanelProps {
   missionId: string

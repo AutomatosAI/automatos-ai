@@ -272,10 +272,10 @@ export function MultimodalInput({
           {uploadQueue.map((name) => (
             <div
               key={name}
-              className="inline-flex items-center gap-2 rounded-full border border-orange-500/20 bg-orange-500/10 px-3 py-1 text-xs text-orange-200"
+              className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs text-primary"
             >
               <span className="truncate max-w-[240px]">{name}</span>
-              <span className="text-orange-100/70">(uploading…)</span>
+              <span className="text-primary/70">(uploading…)</span>
             </div>
           ))}
         </div>
@@ -287,8 +287,8 @@ export function MultimodalInput({
           'relative w-full rounded-3xl border-2',
           voiceRecorder.state === 'recording'
             ? 'border-destructive/30 ring-2 ring-destructive/15'
-            : 'border-orange-500/20 focus-within:border-orange-500/40 focus-within:ring-2 focus-within:ring-orange-500/15',
-          'transition-all shadow-[0_0_60px_rgba(249,115,22,0.08)]',
+            : 'border-primary/20 focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-primary/15',
+          'transition-all',
         ].join(' ')}
       >
         {/* Textarea or Recording Indicator */}
@@ -397,12 +397,12 @@ export function MultimodalInput({
                       logo={tool.icon}
                       size={28}
                       showBackground={true}
-                      className="bg-background/80 ring-1 ring-orange-500/30 border border-orange-500/20 shadow-[0_0_10px_rgba(249,115,22,0.1)] rounded-lg"
+                      className="bg-background/80 ring-1 ring-primary/30 border border-primary/20 rounded-lg"
                     />
                   </button>
                 ))}
                 {activeAgent.tools.length > 4 && (
-                  <div className="w-8 h-8 rounded-lg bg-secondary/80 ring-1 ring-orange-500/30 flex items-center justify-center text-[10px] font-bold text-muted-foreground border border-orange-500/20 relative z-10">
+                  <div className="w-8 h-8 rounded-lg bg-secondary/80 ring-1 ring-primary/30 flex items-center justify-center text-[10px] font-bold text-muted-foreground border border-primary/20 relative z-10">
                     +{activeAgent.tools.length - 4}
                   </div>
                 )}
@@ -424,7 +424,7 @@ export function MultimodalInput({
                 type="submit"
                 disabled={!safeInput.trim()}
                 size="icon"
-                className="h-10 w-10 rounded-2xl disabled:opacity-50 bg-gradient-to-br from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 shadow-[0_0_20px_rgba(249,115,22,0.25)] hover:shadow-[0_0_28px_rgba(249,115,22,0.35)] transition-shadow"
+                className="h-10 w-10 rounded-2xl disabled:opacity-50 bg-primary hover:bg-primary/90 transition-colors"
               >
                 <Send className="w-4 h-4" />
               </Button>

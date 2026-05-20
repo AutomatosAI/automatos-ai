@@ -23,7 +23,7 @@ interface MissionResultsPanelProps {
 }
 
 const proseClass =
-  'prose prose-sm max-w-none dark:prose-invert prose-headings:text-foreground prose-p:text-foreground prose-a:text-orange-500 dark:prose-a:text-orange-300 prose-li:text-foreground prose-strong:text-foreground'
+  'prose prose-sm max-w-none dark:prose-invert prose-headings:text-foreground prose-p:text-foreground prose-a:text-primary dark:prose-a:text-primary prose-li:text-foreground prose-strong:text-foreground'
 
 type ResultsView = 'combined' | 'per-task'
 
@@ -174,9 +174,9 @@ export function MissionResultsPanel({ mission, className }: MissionResultsPanelP
 
       {/* App bundle download banner */}
       {isAppBuilder && isTerminal && (
-        <div className="mx-4 my-3 rounded-lg border border-orange-500/20 bg-orange-500/5 p-4">
+        <div className="mx-4 my-3 rounded-lg border border-primary/20 bg-primary/5 p-4">
           <div className="flex items-start gap-3">
-            <Package className="w-5 h-5 text-orange-500 mt-0.5 shrink-0" />
+            <Package className="w-5 h-5 text-primary mt-0.5 shrink-0" />
             <div className="flex-1 min-w-0">
               <h4 className="text-sm font-semibold text-foreground">App Bundle Ready</h4>
               <p className="text-xs text-muted-foreground mt-1">
@@ -190,7 +190,7 @@ export function MissionResultsPanel({ mission, className }: MissionResultsPanelP
               </div>
               <div className="mt-3 flex items-center gap-2">
                 {appBundleDocId ? (
-                  <Button size="sm" onClick={handleDownloadBundle} className="bg-orange-500 hover:bg-orange-600 text-white">
+                  <Button size="sm" onClick={handleDownloadBundle} className="bg-primary hover:bg-primary/90 text-primary-foreground">
                     <Download className="w-3.5 h-3.5 mr-1.5" />
                     Download .zip
                   </Button>

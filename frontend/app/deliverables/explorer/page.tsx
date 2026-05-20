@@ -53,7 +53,8 @@ export default function ExplorerPage() {
             <PageHeader
               title="Workspace"
               titleAccent="Explorer"
-              subtitle="Browse and edit workspace files"
+              eyebrow="Outputs · file tree"
+              lede="A live view of every file your workforce wrote, in the layout your agents chose. Open, edit, or download from here."
               actions={
                 <Button
                   variant="ghost"

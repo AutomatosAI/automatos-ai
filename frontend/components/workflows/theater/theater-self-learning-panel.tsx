@@ -331,12 +331,12 @@ function LearnSection({ data }: { data: LearningData }) {
                 className="rounded-lg border border-border/30 bg-black/20 p-2.5"
               >
                 <div className="flex items-center gap-2 mb-1">
-                  <span className="text-orange-400">
+                  <span className="text-primary">
                     {getSuggestionIcon(suggestion.type)}
                   </span>
                   <Badge
                     variant="outline"
-                    className="text-[10px] h-5 text-orange-400 border-orange-400/30"
+                    className="text-[10px] h-5 text-primary border-primary/30"
                   >
                     {getSuggestionLabel(suggestion.type)}
                   </Badge>
@@ -595,7 +595,7 @@ function MemorySection({ data }: { data: MemoryData }) {
                 className="flex items-center gap-2 rounded-lg border border-border/30 bg-black/20 p-2 text-xs"
               >
                 {entry.type === 'recipe_execution' ? (
-                  <Target className="w-3.5 h-3.5 text-orange-400 flex-shrink-0" />
+                  <Target className="w-3.5 h-3.5 text-primary flex-shrink-0" />
                 ) : (
                   <Brain className="w-3.5 h-3.5 text-agent flex-shrink-0" />
                 )}
@@ -689,7 +689,7 @@ export function TheaterSelfLearningPanel({
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
-      className="glass-card rounded-2xl overflow-hidden border border-orange-400/20"
+      className="glass-card rounded-2xl overflow-hidden border border-primary/20"
     >
       {/* Panel header - always visible */}
       <button
@@ -697,12 +697,12 @@ export function TheaterSelfLearningPanel({
         className="w-full flex items-center gap-3 p-4 text-left hover:bg-white/5 transition-colors"
       >
         {isOpen ? (
-          <ChevronDown className="w-5 h-5 text-orange-400 flex-shrink-0" />
+          <ChevronDown className="w-5 h-5 text-primary flex-shrink-0" />
         ) : (
-          <ChevronRight className="w-5 h-5 text-orange-400 flex-shrink-0" />
+          <ChevronRight className="w-5 h-5 text-primary flex-shrink-0" />
         )}
         <div className="flex items-center gap-2">
-          <Award className="w-5 h-5 text-orange-400" />
+          <Award className="w-5 h-5 text-primary" />
           <span className="text-sm font-semibold">Self-Learning Analysis</span>
         </div>
 
@@ -717,7 +717,7 @@ export function TheaterSelfLearningPanel({
             </Badge>
           )}
           {learningData && learningData.patterns.length > 0 && (
-            <Badge variant="outline" className="text-[10px] h-5 text-orange-400 border-orange-400/30">
+            <Badge variant="outline" className="text-[10px] h-5 text-primary border-primary/30">
               {learningData.patterns.length} patterns
             </Badge>
           )}
@@ -755,8 +755,8 @@ export function TheaterSelfLearningPanel({
               {learningData && (
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
-                    <Brain className="w-4 h-4 text-orange-400" />
-                    <span className="text-xs font-semibold uppercase tracking-wider text-orange-400">
+                    <Brain className="w-4 h-4 text-primary" />
+                    <span className="text-xs font-semibold uppercase tracking-wider text-primary">
                       Stage 6: Learn
                     </span>
                   </div>
@@ -768,8 +768,8 @@ export function TheaterSelfLearningPanel({
               {qualityData && (
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
-                    <Target className="w-4 h-4 text-orange-400" />
-                    <span className="text-xs font-semibold uppercase tracking-wider text-orange-400">
+                    <Target className="w-4 h-4 text-primary" />
+                    <span className="text-xs font-semibold uppercase tracking-wider text-primary">
                       Stage 7: Quality
                     </span>
                   </div>
@@ -781,8 +781,8 @@ export function TheaterSelfLearningPanel({
               {memoryData && (
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
-                    <Database className="w-4 h-4 text-orange-400" />
-                    <span className="text-xs font-semibold uppercase tracking-wider text-orange-400">
+                    <Database className="w-4 h-4 text-primary" />
+                    <span className="text-xs font-semibold uppercase tracking-wider text-primary">
                       Stage 8: Memory
                     </span>
                   </div>

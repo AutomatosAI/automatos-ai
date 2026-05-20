@@ -141,7 +141,8 @@ export function AgentManagement() {
       <PageHeader
         title="Agent"
         titleAccent="Management"
-        subtitle="Manage your AI agents and their capabilities"
+        eyebrow="Workforce · roster"
+        lede="Your agents, what they're good at, and what they're doing. Configure capabilities, swap models, install skills, retire the ones you no longer need."
         actions={
           <>
             {!!agentsError && (

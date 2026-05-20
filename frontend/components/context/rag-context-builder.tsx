@@ -78,7 +78,7 @@ export function RAGContextBuilder() {
   const getSimilarityColor = (similarity: number) => {
     if (similarity >= 0.8) return 'text-success bg-success/10 border-success/20'
     if (similarity >= 0.6) return 'text-warning bg-warning/10 border-warning/20'
-    return 'text-orange-400 bg-orange-500/10 border-orange-500/20'
+    return 'text-muted-foreground bg-muted/30 border-border'
   }
 
   return (
@@ -117,7 +117,6 @@ export function RAGContextBuilder() {
               disabled={ragMutation.isLoading}
             />
             <Button
-              className="gradient-accent"
               onClick={handleSearch}
               disabled={ragMutation.isLoading || !query.trim()}
             >
