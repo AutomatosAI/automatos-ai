@@ -33,7 +33,9 @@ from sqlalchemy.orm import Session
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db
+from core.models.channels import ChannelConnection
 from core.models.sites import SITE_TYPES
+from services.destinations.base import DESTINATION_TYPES
 
 from services.sites import (
     USER_SETTABLE_STATUSES,
@@ -142,6 +144,68 @@ async def patch_site_meta_route(
     return public_site_dict(site)
 
 
+def _validate_callback_destinations(
+    destinations: list, *, db: Session, workspace_id: UUID
+) -> None:
+    """Reject malformed or cross-workspace destinations early so the
+    dispatcher never has to deal with bad data."""
+    if not isinstance(destinations, list):
+        raise HTTPException(
+            status_code=400,
+            detail="callback.destinations must be a list",
+        )
+    for idx, dest in enumerate(destinations):
+        if not isinstance(dest, dict):
+            raise HTTPException(
+                status_code=400,
+                detail=f"callback.destinations[{idx}] must be an object",
+            )
+        dest_type = dest.get("type")
+        if dest_type not in DESTINATION_TYPES:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"callback.destinations[{idx}].type must be one of "
+                    f"{list(DESTINATION_TYPES)}; got {dest_type!r}"
+                ),
+            )
+        # Only one type today, but branch explicitly so future additions
+        # don't silently bypass validation.
+        if dest_type == "channel_connection":
+            conn_id_raw = dest.get("connection_id")
+            target = dest.get("target")
+            if not target or not str(target).strip():
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"callback.destinations[{idx}].target is required",
+                )
+            try:
+                conn_id = UUID(str(conn_id_raw))
+            except (ValueError, TypeError):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"callback.destinations[{idx}].connection_id must be a UUID"
+                    ),
+                )
+            owned = (
+                db.query(ChannelConnection.id)
+                .filter(
+                    ChannelConnection.id == conn_id,
+                    ChannelConnection.workspace_id == workspace_id,
+                )
+                .first()
+            )
+            if owned is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"callback.destinations[{idx}].connection_id does not "
+                        "belong to this workspace"
+                    ),
+                )
+
+
 @router.patch("/{site_id}/settings")
 async def patch_site_settings_route(
     site_id: UUID,
@@ -149,6 +213,14 @@ async def patch_site_settings_route(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
+    callback_patch = body.settings.get("callback") if isinstance(body.settings, dict) else None
+    if isinstance(callback_patch, dict) and "destinations" in callback_patch:
+        _validate_callback_destinations(
+            callback_patch.get("destinations") or [],
+            db=db,
+            workspace_id=ctx.workspace_id,
+        )
+
     site = update_site_settings(
         db,
         workspace_id=ctx.workspace_id,

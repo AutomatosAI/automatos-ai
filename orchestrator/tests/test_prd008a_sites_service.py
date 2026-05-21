@@ -38,6 +38,20 @@ def _make_fake_site(
     capabilities: dict | None = None,
 ) -> SimpleNamespace:
     """Build a SimpleNamespace that quacks like a Site row."""
+    from core.models.sites import (
+        CAPABILITY_KEYS,
+        SITE_TYPES,
+        derive_default_capabilities,
+    )
+
+    stored = capabilities or {}
+    defaults = (
+        derive_default_capabilities(type)
+        if type in SITE_TYPES
+        else {key: False for key in CAPABILITY_KEYS}
+    )
+    effective = {key: bool(stored.get(key, defaults[key])) for key in CAPABILITY_KEYS}
+
     return SimpleNamespace(
         id=uuid4(),
         workspace_id=workspace_id,
@@ -46,7 +60,8 @@ def _make_fake_site(
         display_name=display_name,
         status="active",
         settings=settings or {},
-        capabilities=capabilities or {},
+        capabilities=stored,
+        effective_capabilities=effective,
         secrets={"shopify_access_token": "shpat_secret"},
         created_at=datetime(2026, 5, 14, 12, 0, 0),
         updated_at=datetime(2026, 5, 14, 12, 0, 0),
@@ -334,6 +349,19 @@ def test_public_site_dict_includes_expected_fields():
     assert set(out.keys()) == expected_keys
 
 
+def test_public_site_dict_returns_effective_capabilities():
+    """PRD-008-A.1: Sites with capabilities={} (legacy data) must surface
+    the type-derived defaults so dashboard panels render correctly."""
+    from services.sites import public_site_dict
+
+    ws = uuid4()
+    site = _make_fake_site(workspace_id=ws, type="shopify", capabilities={})
+
+    out = public_site_dict(site)
+    assert out["capabilities"]["has_cart"] is True
+    assert out["capabilities"]["has_catalog"] is True
+
+
 def test_public_site_dict_serialises_uuids_and_dates_as_strings():
     """UUIDs and datetimes need to be JSON-safe for the API response."""
     from services.sites import public_site_dict
@@ -349,17 +377,24 @@ def test_public_site_dict_serialises_uuids_and_dates_as_strings():
 
 
 def test_public_site_dict_tolerates_null_settings():
-    """Older rows might have null settings; never crash on serialisation."""
+    """Older rows might have null settings; never crash on serialisation.
+    PRD-008-A.1: capabilities falls back to type defaults via
+    Site.effective_capabilities, so a shopify Site with stored
+    capabilities=None still surfaces has_cart=True etc."""
+    from core.models.sites import CAPABILITY_KEYS, derive_default_capabilities
     from services.sites import public_site_dict
 
     ws = uuid4()
-    site = _make_fake_site(workspace_id=ws)
+    site = _make_fake_site(workspace_id=ws, type="shopify")
     site.settings = None
     site.capabilities = None
+    site.effective_capabilities = derive_default_capabilities("shopify")
 
     out = public_site_dict(site)
     assert out["settings"] == {}
-    assert out["capabilities"] == {}
+    # Capabilities now fall back to type defaults — never bare {}.
+    assert set(out["capabilities"].keys()) == set(CAPABILITY_KEYS)
+    assert out["capabilities"]["has_cart"] is True
 
 
 # ---------------------------------------------------------------------------
