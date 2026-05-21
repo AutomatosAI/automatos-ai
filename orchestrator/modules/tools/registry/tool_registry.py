@@ -47,6 +47,7 @@ class ToolCategory(Enum):
     COMMUNICATION = "communication"    # Slack, Email, etc.
     DEVELOPER = "developer"            # GitHub, GitLab, etc.
     PRODUCTIVITY = "productivity"      # Jira, Linear, etc.
+    WIDGET = "widget"                  # Embedded chat-widget UI affordances
 
 
 class SecurityLevel(Enum):
@@ -1239,6 +1240,57 @@ class ToolRegistry:
             metadata={"added_in": "PRD-63"}
         ))
 
+        # ==========================================
+        # WIDGET UI AFFORDANCES (PRD-008-A.2)
+        # ==========================================
+        # Replaces the deprecated server-side keyword matcher: the LLM
+        # now decides when to open the inline callback form, calling this
+        # tool with the active product context (if any). Access is gated
+        # by the workspace's default-Site `settings.callback.enabled` flag
+        # in ``validate_tool_access`` below so the tool is invisible to
+        # the LLM on stores that haven't opted in.
+
+        from modules.tools.widget_callback import WIDGET_OPEN_CALLBACK_FORM_NAME
+
+        self.register_tool(ToolSpec(
+            name=WIDGET_OPEN_CALLBACK_FORM_NAME,
+            category=ToolCategory.WIDGET,
+            description=(
+                "Open the inline phone-callback form in the shopper's chat "
+                "panel. Use when the shopper asks for a callback, a phone "
+                "number, to speak with a human, or otherwise indicates they "
+                "want voice / phone contact rather than chat. The form "
+                "appears as a bubble in the chat; the shopper fills in name "
+                "and number and the merchant receives the lead. After "
+                "calling this tool, briefly confirm: 'I've opened a quick "
+                "form — just need your name and number.' Do NOT suggest "
+                "email or any other contact method."
+            ),
+            executor_class="UnifiedToolExecutor",
+            executor_method="_execute_widget_callback",
+            parameters=[
+                ToolParameter(
+                    name="product_context",
+                    type="string",
+                    description=(
+                        "Optional product the shopper is asking about — used "
+                        "to label the form (e.g. 'EN 12101-9 Control Panel'). "
+                        "Use the product title when one is in the conversation "
+                        "or page context; omit for general callback requests."
+                    ),
+                    required=False,
+                ),
+            ],
+            returns="Confirmation that the form has been opened in the shopper's chat panel",
+            security_level=SecurityLevel.SAFE,
+            permissions_required={"read": True},
+            examples=[
+                {"action": "widget_open_callback_form", "params": {}},
+                {"action": "widget_open_callback_form", "params": {"product_context": "EN 12101-9 Control Panel"}},
+            ],
+            metadata={"added_in": "PRD-008-A.2"},
+        ))
+
     def _extract_methods(self, capabilities: Dict[str, Any]) -> List[str]:
             
         # Try different keys
@@ -1311,6 +1363,35 @@ class ToolRegistry:
             return True, None
 
         # marketplace and custom tiers continue to existing assignment checks below
+
+        # ---------------------------------------------------------------------
+        # Widget UI tools: only exposed when the workspace's default Site has
+        # the matching feature enabled. The Site config is the source of truth
+        # (merchant toggles it on/off). When no DB session or no workspace
+        # context is available we fail closed — better to hide the tool than
+        # leak a UI affordance the merchant disabled.
+        # ---------------------------------------------------------------------
+        from modules.tools.widget_callback import WIDGET_OPEN_CALLBACK_FORM_NAME
+
+        if tool_name == WIDGET_OPEN_CALLBACK_FORM_NAME:
+            if not db or not workspace_id:
+                return False, "Widget callback tool requires workspace context"
+            try:
+                from services.sites import get_default_site
+                import uuid as _uuid
+
+                ws_uuid = workspace_id if isinstance(workspace_id, _uuid.UUID) else _uuid.UUID(str(workspace_id))
+                site = get_default_site(db, ws_uuid)
+            except Exception as exc:
+                return False, f"Failed to resolve site for widget callback: {exc}"
+
+            if site is None:
+                return False, "No Site configured for this workspace"
+
+            callback_settings = (getattr(site, "settings", None) or {}).get("callback") or {}
+            if not callback_settings.get("enabled"):
+                return False, "Callback feature is disabled for this Site"
+            # Enabled — fall through to the standard checks below.
 
         # ---------------------------------------------------------------------
         # Hard gating for Composio execution:
@@ -1399,7 +1480,11 @@ class ToolRegistry:
                     tool_cat = tool.metadata.get("category").lower()
                 
                 # Exception for System Tools
-                is_system_tool = tool_name in ["switch_context", "search_knowledge"]
+                is_system_tool = tool_name in [
+                    "switch_context",
+                    "search_knowledge",
+                    WIDGET_OPEN_CALLBACK_FORM_NAME,
+                ]
                 
                 if not is_system_tool and tool_cat not in allowed_categories:
                     self.logger.debug(f"ℹ️ ToolRegistry: Filtering out {tool_name} (category: {tool_cat}) - not in context '{active_context}'")

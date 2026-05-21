@@ -164,6 +164,9 @@ class UnifiedToolExecutor:
             'analyze_data': self._execute_analysis_tool,
             'write_document': self._execute_writing_tool,
 
+            # PRD-008-A.2: widget UI affordances
+            'widget_open_callback_form': self._execute_widget_callback,
+
             # PRD-36: Composio tools routed dynamically by prefix
         }
 
@@ -582,6 +585,13 @@ class UnifiedToolExecutor:
             self, tool_name, parameters,
             workspace_id=workspace_id, trace_id=trace_id,
             agent_id=agent_id, caller_context=caller_context,
+        )
+
+    async def _execute_widget_callback(self, tool_name, parameters, agent_id, workspace_id=None, trace_id=None):
+        from modules.tools.widget_callback import handle_widget_open_callback_form
+        return await handle_widget_open_callback_form(
+            tool_name, parameters,
+            agent_id=agent_id, workspace_id=workspace_id, trace_id=trace_id,
         )
 
     async def _execute_planning_tool(self, tool_name, parameters, agent_id, **kw):

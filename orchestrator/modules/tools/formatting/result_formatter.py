@@ -734,6 +734,13 @@ class ToolResultFormatter:
             }
             logger.info(f"[FrontendData] generate_document: {frontend_data['generated_document']['filename']}")
 
+        elif tool_name == "widget_open_callback_form":
+            # PRD-008-A.2: pass the widget signal straight through so the
+            # SSE bridge in api/widgets/chat.py can convert it to an
+            # `event: open-callback-form` event for the SDK.
+            passthrough = result.get("frontend_data") or {}
+            frontend_data.update(passthrough)
+
         return frontend_data
     
     @staticmethod
@@ -755,6 +762,13 @@ class ToolResultFormatter:
                 ws_json = str(ws_data)
             llm_text = f"Tool: {tool_name}\nStatus: success\n\n{ws_json}"
             return llm_text[:max_chars]
+
+        # PRD-008-A.2: widget UI tools return a short llm_context that the
+        # agent uses to confirm to the shopper. Pass it through verbatim.
+        if tool_name == "widget_open_callback_form":
+            if not result.get("success"):
+                return f"Tool {tool_name} failed: {result.get('error', 'Unknown error')}"
+            return result.get("llm_context") or "Callback form opened in shopper's chat panel."
 
         # Platform tools return data under custom keys (agents, recipes, etc.)
         # Bypass standardizer which only looks for "results"/"result" keys.
