@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 
 from api.widgets.auth import WidgetAuthContext, require_permission, widget_auth
 from core.database.database import get_db
+from services.sites import get_default_site
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,29 @@ class WidgetChatRequest(BaseModel):
 # PRD-007: trigger reasons that flip the agent into opener-generation mode.
 # Anything else is treated as a normal user message.
 PROACTIVE_TRIGGER_REASONS: frozenset[str] = frozenset({"proactive_opener"})
+
+
+# PRD-008-A.2: shopper utterances that should auto-open the callback form.
+# Per-Site overrides land via ``site.settings.callback.intent_phrases``;
+# this set is the fallback when the Site config is missing or empty.
+_DEFAULT_CALLBACK_INTENT_PHRASES: tuple[str, ...] = (
+    "speak to someone",
+    "call me back",
+    "talk to a human",
+    "phone me",
+    "give me a call",
+    "can someone call",
+)
+
+
+def _matches_callback_intent(message: Optional[str], phrases: tuple[str, ...]) -> bool:
+    """Return True if any intent phrase appears in ``message`` (case-insensitive
+    substring match). Empty / None messages never match.
+    """
+    if not message or not phrases:
+        return False
+    msg = message.lower()
+    return any(p.lower() in msg for p in phrases if p)
 
 
 # Fields from page_context that the agent gets to ground openers on.
@@ -248,6 +272,42 @@ async def widget_chat(
             "present" if body.page_context else "missing",
         )
 
+    # PRD-008-A.2: detect callback intent BEFORE the LLM call so the SDK can
+    # auto-open the phone-capture form. Skip if this is a proactive opener
+    # (the synthetic message isn't real user input).
+    is_callback_intent = False
+    callback_product_context: Optional[str] = None
+    if not is_proactive and body.message:
+        try:
+            site = get_default_site(db, uuid.UUID(workspace_id))
+        except Exception:
+            site = None
+        if site is not None:
+            cb_config = (site.settings or {}).get("callback") or {}
+            if cb_config.get("enabled"):
+                phrases = cb_config.get("intent_phrases") or list(_DEFAULT_CALLBACK_INTENT_PHRASES)
+                if _matches_callback_intent(body.message, tuple(phrases)):
+                    is_callback_intent = True
+                    # Pull product title (preferred) or handle for the form heading.
+                    pc = body.page_context or {}
+                    callback_product_context = (
+                        pc.get("productTitle") or pc.get("productHandle") or None
+                    )
+                    logger.info(
+                        "%s CALLBACK_INTENT_MATCHED: phrase set size=%d product_context=%s",
+                        log_extra, len(phrases), callback_product_context,
+                    )
+                    # Augment the message so the agent acknowledges gracefully
+                    # rather than suggesting email — the form is already opening.
+                    original_msg = body.message
+                    body.message = (
+                        f"[SYSTEM_NOTE: A phone callback form has just been opened "
+                        f"in the shopper's chat panel. Acknowledge briefly and ask "
+                        f"them to fill in their name and number — DO NOT suggest "
+                        f"email or alternative contact methods.] "
+                        f"User said: \"{original_msg}\""
+                    )
+
     chat_service = ChatService(db)
     streaming_service = StreamingChatService(db, workspace_id=workspace_id, widget_mode=True)
 
@@ -373,9 +433,22 @@ async def widget_chat(
             "text_chars": 0,
         }
         logger.info(
-            "%s STREAM_START: chat_id=%s agent_id=%s team=%s proactive=%s",
-            log_extra, chat_id, effective_agent_id, agent_team, is_proactive,
+            "%s STREAM_START: chat_id=%s agent_id=%s team=%s proactive=%s callback_intent=%s",
+            log_extra, chat_id, effective_agent_id, agent_team, is_proactive, is_callback_intent,
         )
+        # PRD-008-A.2: emit the open-callback-form signal first so the SDK
+        # opens the phone-capture form even before the agent's text arrives.
+        # Idempotent on the SDK side — listener guards against double-open.
+        if is_callback_intent:
+            payload = {
+                "conversation_id": chat_id,
+                "product_context": callback_product_context,
+            }
+            yield f"event: open-callback-form\ndata: {json.dumps(payload)}\n\n"
+            logger.info(
+                "%s OPEN_CALLBACK_FORM emitted (product_context=%s)",
+                log_extra, callback_product_context,
+            )
         try:
             async for chunk in streaming_service.stream_response_with_agent(
                 chat_id=chat_id,
