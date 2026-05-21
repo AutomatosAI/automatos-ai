@@ -100,22 +100,13 @@ class TestCallbackTestEndpoint:
         assert "destinations" in resp.json()["detail"].lower()
 
     def test_200_returns_per_destination_results(self, monkeypatch):
-        site = _make_site(
-            destinations=[
-                {
-                    "type": "channel_connection",
-                    "connection_id": str(uuid4()),
-                    "target": "C123ABC",
-                    "platform": "slack",
-                }
-            ],
-        )
+        site = _make_site(destinations=[{"platform": "slack", "channel_id": "C123ABC"}])
         from services.destinations.base import DispatchResult
 
         results = [
             DispatchResult(
                 success=True,
-                destination_type="channel_connection",
+                destination_type="slack",
                 latency_ms=142,
                 extra={"platform": "slack", "target": "C123ABC"},
             )
@@ -132,25 +123,16 @@ class TestCallbackTestEndpoint:
         assert body["request_id"].startswith("cb_")
 
     def test_failure_result_surfaces_error(self, monkeypatch):
-        site = _make_site(
-            destinations=[
-                {
-                    "type": "channel_connection",
-                    "connection_id": str(uuid4()),
-                    "target": "bad",
-                    "platform": "telegram",
-                }
-            ],
-        )
+        site = _make_site(destinations=[{"platform": "telegram"}])
         from services.destinations.base import DispatchResult
 
         results = [
             DispatchResult(
                 success=False,
-                destination_type="channel_connection",
+                destination_type="telegram",
                 latency_ms=7,
-                error="channel adapter not loaded",
-                retryable=True,
+                error="telegram delivery returned False — send /start to the bot",
+                retryable=False,
             )
         ]
         client, _ = _make_client(site=site, dispatch_results=results, monkeypatch=monkeypatch)
@@ -158,4 +140,4 @@ class TestCallbackTestEndpoint:
         assert resp.status_code == 200
         body = resp.json()
         assert body["results"][0]["success"] is False
-        assert body["results"][0]["error"] == "channel adapter not loaded"
+        assert "/start" in body["results"][0]["error"]

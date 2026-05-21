@@ -1,12 +1,17 @@
 """
-PRD-008-A.1 — channel_connection dispatcher tests
-==================================================
+PRD-008-A.1 — callback dispatcher tests (platform-keyed shape)
+==============================================================
 
-Replaces the legacy email/slack_webhook/crm_webhook/shopify_note tests
-with the single canonical destination type: dispatch_via_channel.
+These tests cover ``dispatch_via_channel`` after the rebuild that
+replaced the bespoke ``channel_connection`` shape with the same
+platform key heartbeat uses. Destinations are now of the form::
 
-The dispatcher is a thin wire over an existing ChannelConnection +
-running ChannelManager adapter (the same path heartbeats use).
+    {"platform": "telegram"}
+    {"platform": "slack",   "channel_id":  "C01ABC..."}
+    {"platform": "webhook", "webhook_url": "https://..."}
+
+Telegram / Slack / WhatsApp go through ``send_workspace_notification``
+(the heartbeat path). Webhook is dispatched directly via httpx.
 """
 
 from __future__ import annotations
@@ -46,312 +51,267 @@ def _payload(**overrides):
     return CallbackPayload(**defaults)
 
 
-def _stub_db_returning(conn_obj):
-    """Build a SQLAlchemy-session-shaped MagicMock whose ``.first()``
-    returns ``conn_obj`` (a ChannelConnection-shaped namespace, or None
-    to simulate a missing row)."""
-    db = MagicMock()
-    db.query.return_value.filter.return_value.first.return_value = conn_obj
-    return db
-
-
-def _make_conn(*, status="active", platform="slack", workspace_id=None, conn_id=None):
-    from core.models.channels import ChannelConnection
-    conn = ChannelConnection()
-    conn.id = conn_id or uuid4()
-    conn.workspace_id = workspace_id or uuid4()
-    conn.platform = platform
-    conn.status = status
-    return conn
-
-
 # ---------------------------------------------------------------------------
-# Static guards (reject before touching DB / adapter)
+# Static guards
 # ---------------------------------------------------------------------------
 
-def test_dispatch_via_channel_rejects_missing_connection_id():
+def test_dispatch_rejects_missing_platform():
     from services.destinations.dispatcher import dispatch_via_channel
 
     result = _await(dispatch_via_channel(
-        destination={"type": "channel_connection", "target": "C123"},
+        destination={},
         payload=_payload(),
         db=MagicMock(),
         workspace_id=uuid4(),
     ))
     assert result.success is False
     assert result.retryable is False
-    assert "missing connection_id" in result.error
+    assert "platform" in result.error
 
 
-def test_dispatch_via_channel_rejects_missing_target():
+def test_dispatch_rejects_unknown_platform():
     from services.destinations.dispatcher import dispatch_via_channel
 
     result = _await(dispatch_via_channel(
-        destination={"type": "channel_connection", "connection_id": str(uuid4())},
+        destination={"platform": "pigeon_post"},
         payload=_payload(),
         db=MagicMock(),
         workspace_id=uuid4(),
     ))
     assert result.success is False
     assert result.retryable is False
-    assert "missing connection_id or target" in result.error
-
-
-def test_dispatch_via_channel_rejects_invalid_uuid():
-    from services.destinations.dispatcher import dispatch_via_channel
-
-    result = _await(dispatch_via_channel(
-        destination={
-            "type": "channel_connection",
-            "connection_id": "not-a-uuid",
-            "target": "C123",
-        },
-        payload=_payload(),
-        db=MagicMock(),
-        workspace_id=uuid4(),
-    ))
-    assert result.success is False
-    assert result.retryable is False
-    assert "UUID" in result.error
+    assert "unsupported platform" in result.error.lower()
 
 
 # ---------------------------------------------------------------------------
-# Workspace isolation
+# Telegram / Slack — go through send_workspace_notification (heartbeat path)
 # ---------------------------------------------------------------------------
 
-def test_dispatch_via_channel_workspace_isolation_rejects_foreign_connection():
-    from services.destinations.dispatcher import dispatch_via_channel
-
-    # The DB query filters by (id, workspace_id); when the connection
-    # belongs to a different workspace, ``.first()`` returns None.
-    db = _stub_db_returning(None)
-
-    result = _await(dispatch_via_channel(
-        destination={
-            "type": "channel_connection",
-            "connection_id": str(uuid4()),
-            "target": "C123",
-        },
-        payload=_payload(),
-        db=db,
-        workspace_id=uuid4(),
-    ))
-    assert result.success is False
-    assert result.retryable is False
-    assert "not found in this workspace" in result.error
-
-
-# ---------------------------------------------------------------------------
-# Inactive connection rejected as permanent
-# ---------------------------------------------------------------------------
-
-def test_dispatch_via_channel_inactive_connection_is_permanent():
-    from services.destinations.dispatcher import dispatch_via_channel
-
-    conn = _make_conn(status="inactive")
-    db = _stub_db_returning(conn)
-
-    result = _await(dispatch_via_channel(
-        destination={
-            "type": "channel_connection",
-            "connection_id": str(conn.id),
-            "target": "C123",
-        },
-        payload=_payload(),
-        db=db,
-        workspace_id=conn.workspace_id,
-    ))
-    assert result.success is False
-    assert result.retryable is False
-    assert "inactive" in result.error
-
-
-# ---------------------------------------------------------------------------
-# Adapter not loaded -> retryable
-# ---------------------------------------------------------------------------
-
-def test_dispatch_via_channel_missing_adapter_is_retryable():
+def test_dispatch_telegram_success(monkeypatch):
     from services.destinations import dispatcher as disp_mod
 
-    conn = _make_conn(status="active")
-    db = _stub_db_returning(conn)
+    captured = {}
 
-    fake_manager = MagicMock()
-    fake_manager._adapters = {}  # adapter not loaded
+    async def fake_send(*, workspace_id, message, channel):
+        captured["workspace_id"] = workspace_id
+        captured["message"] = message
+        captured["channel"] = channel
+        return True
 
-    with pytest.MonkeyPatch.context() as mp:
-        # Patch get_channel_manager at the module path the dispatcher imports.
-        import channels.manager as cm
-        mp.setattr(cm, "get_channel_manager", lambda: fake_manager)
+    monkeypatch.setattr(disp_mod, "send_workspace_notification", fake_send)
 
-        result = _await(disp_mod.dispatch_via_channel(
-            destination={
-                "type": "channel_connection",
-                "connection_id": str(conn.id),
-                "target": "C123",
-            },
-            payload=_payload(),
-            db=db,
-            workspace_id=conn.workspace_id,
-        ))
-
-    assert result.success is False
-    assert result.retryable is True
-    assert "adapter not loaded" in result.error
-
-
-# ---------------------------------------------------------------------------
-# Happy path -> success with platform + target in extra
-# ---------------------------------------------------------------------------
-
-def test_dispatch_via_channel_happy_path():
-    from services.destinations import dispatcher as disp_mod
-
-    conn = _make_conn(status="active", platform="slack")
-    db = _stub_db_returning(conn)
-
-    sent = {}
-
-    class FakeAdapter:
-        async def send_message(self, channel_id, text, **kwargs):
-            sent["channel_id"] = channel_id
-            sent["text"] = text
-            return True
-
-    fake_manager = MagicMock()
-    fake_manager._adapters = {str(conn.id): FakeAdapter()}
-
-    with pytest.MonkeyPatch.context() as mp:
-        import channels.manager as cm
-        mp.setattr(cm, "get_channel_manager", lambda: fake_manager)
-
-        result = _await(disp_mod.dispatch_via_channel(
-            destination={
-                "type": "channel_connection",
-                "connection_id": str(conn.id),
-                "target": "C0123456",
-            },
-            payload=_payload(),
-            db=db,
-            workspace_id=conn.workspace_id,
-        ))
-
+    result = _await(disp_mod.dispatch_via_channel(
+        destination={"platform": "telegram"},
+        payload=_payload(),
+        db=MagicMock(),
+        workspace_id=uuid4(),
+    ))
     assert result.success is True
-    assert result.destination_type == "channel_connection"
-    assert result.extra["platform"] == "slack"
-    assert result.extra["target"] == "C0123456"
-    assert sent["channel_id"] == "C0123456"
-    assert "INBUILD UK" in sent["text"]
-    assert "+447700900123" in sent["text"]
+    assert result.destination_type == "telegram"
+    assert captured["channel"] == "telegram"
+    assert "INBUILD UK" in captured["message"]
+    assert "+447700900123" in captured["message"]
 
 
-# ---------------------------------------------------------------------------
-# Adapter returns False (bad target) -> permanent failure
-# ---------------------------------------------------------------------------
-
-def test_dispatch_via_channel_adapter_false_is_permanent():
+def test_dispatch_telegram_failure_returns_actionable_error(monkeypatch):
     from services.destinations import dispatcher as disp_mod
 
-    conn = _make_conn(status="active")
-    db = _stub_db_returning(conn)
+    async def fake_send(**_kw):
+        return False
 
-    class FakeAdapter:
-        async def send_message(self, channel_id, text, **kwargs):
-            return False
+    monkeypatch.setattr(disp_mod, "send_workspace_notification", fake_send)
 
-    fake_manager = MagicMock()
-    fake_manager._adapters = {str(conn.id): FakeAdapter()}
-
-    with pytest.MonkeyPatch.context() as mp:
-        import channels.manager as cm
-        mp.setattr(cm, "get_channel_manager", lambda: fake_manager)
-
-        result = _await(disp_mod.dispatch_via_channel(
-            destination={
-                "type": "channel_connection",
-                "connection_id": str(conn.id),
-                "target": "C-bad",
-            },
-            payload=_payload(),
-            db=db,
-            workspace_id=conn.workspace_id,
-        ))
-
+    result = _await(disp_mod.dispatch_via_channel(
+        destination={"platform": "telegram"},
+        payload=_payload(),
+        db=MagicMock(),
+        workspace_id=uuid4(),
+    ))
     assert result.success is False
-    assert result.retryable is False
-    assert "rejected target" in result.error
+    assert result.destination_type == "telegram"
+    assert "telegram" in result.error.lower()
+    # Tells the merchant the next concrete action.
+    assert "/start" in result.error or "chat_id" in result.error.lower()
 
 
-# ---------------------------------------------------------------------------
-# Adapter raises -> retryable
-# ---------------------------------------------------------------------------
-
-def test_dispatch_via_channel_adapter_exception_is_retryable():
+def test_dispatch_slack_with_explicit_channel_id(monkeypatch):
     from services.destinations import dispatcher as disp_mod
 
-    conn = _make_conn(status="active")
-    db = _stub_db_returning(conn)
+    captured = {}
 
-    class FakeAdapter:
-        async def send_message(self, channel_id, text, **kwargs):
-            raise RuntimeError("transient slack 5xx")
+    async def fake_send(*, workspace_id, message, channel):
+        captured["channel"] = channel
+        return True
 
-    fake_manager = MagicMock()
-    fake_manager._adapters = {str(conn.id): FakeAdapter()}
+    stashed = {}
 
-    with pytest.MonkeyPatch.context() as mp:
-        import channels.manager as cm
-        mp.setattr(cm, "get_channel_manager", lambda: fake_manager)
+    async def fake_stash(*, workspace_id, channel_id):
+        stashed["channel_id"] = channel_id
 
-        result = _await(disp_mod.dispatch_via_channel(
-            destination={
-                "type": "channel_connection",
-                "connection_id": str(conn.id),
-                "target": "C123",
-            },
-            payload=_payload(),
-            db=db,
-            workspace_id=conn.workspace_id,
-        ))
+    monkeypatch.setattr(disp_mod, "send_workspace_notification", fake_send)
+    monkeypatch.setattr(disp_mod, "_stash_slack_channel_override", fake_stash)
 
+    result = _await(disp_mod.dispatch_via_channel(
+        destination={"platform": "slack", "channel_id": "C01XYZ"},
+        payload=_payload(),
+        db=MagicMock(),
+        workspace_id=uuid4(),
+    ))
+    assert result.success is True
+    assert stashed["channel_id"] == "C01XYZ"
+    assert captured["channel"] == "slack"
+
+
+def test_dispatch_notification_exception_is_retryable(monkeypatch):
+    from services.destinations import dispatcher as disp_mod
+
+    async def boom(**_kw):
+        raise RuntimeError("network blip")
+
+    monkeypatch.setattr(disp_mod, "send_workspace_notification", boom)
+
+    result = _await(disp_mod.dispatch_via_channel(
+        destination={"platform": "telegram"},
+        payload=_payload(),
+        db=MagicMock(),
+        workspace_id=uuid4(),
+    ))
     assert result.success is False
     assert result.retryable is True
-    assert "adapter exception" in result.error
+    assert "network blip" in result.error
 
 
 # ---------------------------------------------------------------------------
-# Renderer carries optional fields
+# Webhook — direct httpx path
+# ---------------------------------------------------------------------------
+
+def test_dispatch_webhook_rejects_missing_url():
+    from services.destinations.dispatcher import dispatch_via_channel
+
+    result = _await(dispatch_via_channel(
+        destination={"platform": "webhook"},
+        payload=_payload(),
+        db=MagicMock(),
+        workspace_id=uuid4(),
+    ))
+    assert result.success is False
+    assert result.retryable is False
+    assert "webhook_url" in result.error
+
+
+def test_dispatch_webhook_success(monkeypatch):
+    from services.destinations import dispatcher as disp_mod
+
+    class _Resp:
+        status_code = 200
+
+    class _Client:
+        def __init__(self, *a, **kw): ...
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def post(self, url, json):
+            captured["url"] = url
+            captured["body"] = json
+            return _Resp()
+
+    captured = {}
+    import httpx
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+
+    result = _await(disp_mod.dispatch_via_channel(
+        destination={"platform": "webhook", "webhook_url": "https://hooks.example.com/x"},
+        payload=_payload(),
+        db=MagicMock(),
+        workspace_id=uuid4(),
+    ))
+    assert result.success is True
+    assert result.destination_type == "webhook"
+    assert captured["url"] == "https://hooks.example.com/x"
+    assert "INBUILD UK" in captured["body"]["text"]
+    assert captured["body"]["request_id"] == "cb_test123"
+
+
+def test_dispatch_webhook_5xx_is_retryable(monkeypatch):
+    from services.destinations import dispatcher as disp_mod
+
+    class _Resp:
+        status_code = 503
+
+    class _Client:
+        def __init__(self, *a, **kw): ...
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def post(self, *a, **kw): return _Resp()
+
+    import httpx
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+
+    result = _await(disp_mod.dispatch_via_channel(
+        destination={"platform": "webhook", "webhook_url": "https://hooks.example.com/x"},
+        payload=_payload(),
+        db=MagicMock(),
+        workspace_id=uuid4(),
+    ))
+    assert result.success is False
+    assert result.retryable is True
+    assert "503" in result.error
+
+
+def test_dispatch_webhook_4xx_is_permanent(monkeypatch):
+    from services.destinations import dispatcher as disp_mod
+
+    class _Resp:
+        status_code = 401
+
+    class _Client:
+        def __init__(self, *a, **kw): ...
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def post(self, *a, **kw): return _Resp()
+
+    import httpx
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+
+    result = _await(disp_mod.dispatch_via_channel(
+        destination={"platform": "webhook", "webhook_url": "https://hooks.example.com/x"},
+        payload=_payload(),
+        db=MagicMock(),
+        workspace_id=uuid4(),
+    ))
+    assert result.success is False
+    assert result.retryable is False
+    assert "401" in result.error
+
+
+# ---------------------------------------------------------------------------
+# Text rendering — unchanged behaviour
 # ---------------------------------------------------------------------------
 
 def test_render_callback_text_includes_optional_fields():
     from services.destinations.dispatcher import _render_callback_text
 
-    text = _render_callback_text(_payload(urgency="urgent", preferred_time="3pm"))
-    assert "Urgency: urgent" in text
-    assert "Preferred time: 3pm" in text
+    txt = _render_callback_text(_payload(urgency="ASAP", preferred_time="this afternoon"))
+    assert "INBUILD UK" in txt
+    assert "James Smith" in txt
+    assert "+447700900123" in txt
+    assert "EN 12101-9 panel" in txt
+    assert "ASAP" in txt
+    assert "this afternoon" in txt
 
 
 def test_render_callback_text_skips_unset_optional_fields():
     from services.destinations.dispatcher import _render_callback_text
 
-    text = _render_callback_text(_payload(urgency=None, preferred_time=None))
-    assert "Urgency:" not in text
-    assert "Preferred time:" not in text
+    txt = _render_callback_text(_payload(product_context=None))
+    assert "Topic:" not in txt
+    assert "Urgency:" not in txt
+    assert "Preferred time:" not in txt
 
 
-# ---------------------------------------------------------------------------
-# DESTINATION_TYPES whitelist
-# ---------------------------------------------------------------------------
+def test_callback_platforms_constant():
+    from services.destinations.base import CALLBACK_PLATFORMS
 
-def test_destination_types_is_channel_connection_only():
-    from services.destinations.base import DESTINATION_TYPES
-
-    assert DESTINATION_TYPES == ("channel_connection",), (
-        "PRD-008-A.1: legacy email/slack_webhook/crm_webhook/shopify_note "
-        "destination types are gone. Adding a new destination type should be "
-        "a deliberate change with a new dispatcher."
-    )
-
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+    assert "telegram" in CALLBACK_PLATFORMS
+    assert "slack" in CALLBACK_PLATFORMS
+    assert "whatsapp" in CALLBACK_PLATFORMS
+    assert "webhook" in CALLBACK_PLATFORMS
