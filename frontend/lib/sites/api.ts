@@ -43,3 +43,35 @@ export async function updateSiteSettings(
     settings: settingsPatch,
   });
 }
+
+/**
+ * Result for a single destination from `sendCallbackTest`.
+ * Mirrors the orchestrator's `CallbackTestDestinationResult` schema.
+ */
+export interface CallbackTestDestinationResult {
+  destination_type: string;
+  success: boolean;
+  latency_ms: number;
+  error?: string | null;
+  platform?: string | null;
+  target?: string | null;
+}
+
+export interface CallbackTestResponse {
+  request_id: string;
+  destinations_attempted: number;
+  results: CallbackTestDestinationResult[];
+}
+
+/**
+ * Fire a synthetic callback through the site's configured destinations.
+ * Used by the dashboard's "Send test" button so merchants can prove their
+ * Telegram / Slack / WhatsApp wiring works without needing a real shopper
+ * submission.
+ */
+export async function sendCallbackTest(siteId: string): Promise<CallbackTestResponse> {
+  return apiClient.post<CallbackTestResponse>(
+    `/api/sites/${siteId}/callback/test`,
+    {},
+  );
+}
