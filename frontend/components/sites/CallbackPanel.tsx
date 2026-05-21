@@ -94,9 +94,17 @@ export function CallbackPanel({
   const currentDest: CallbackDestination | null = draft.destinations[0] ?? null
   const choice: DestinationChoice = currentDest === null ? 'off' : currentDest.platform
 
-  const connectedPlatforms = new Set<string>(
-    (channels ?? []).filter((c) => c.status === 'active').map((c) => c.platform),
-  )
+  // Mirror heartbeat's "Report To" — a channel exists for the platform
+  // means it's selectable. ``inactive`` is a transient state (adapter
+  // not started, or no /start received yet); the test button + error
+  // surface that to the merchant rather than hiding the option here.
+  const platformStatuses = new Map<string, string>()
+  for (const c of channels ?? []) {
+    // First row wins if there are duplicates of the same platform.
+    if (!platformStatuses.has(c.platform)) {
+      platformStatuses.set(c.platform, c.status)
+    }
+  }
 
   function setChoice(next: DestinationChoice) {
     if (next === 'off') {
@@ -131,7 +139,7 @@ export function CallbackPanel({
       const url = currentDest.webhook_url?.trim() ?? ''
       return url.startsWith('http://') || url.startsWith('https://')
     }
-    return connectedPlatforms.has(currentDest.platform)
+    return platformStatuses.has(currentDest.platform)
   })()
 
   const dirty = JSON.stringify(draft) !== JSON.stringify(initial)
@@ -193,11 +201,17 @@ export function CallbackPanel({
             <SelectContent>
               <SelectItem value="off">Off — accept but don't deliver</SelectItem>
               {(['telegram', 'slack', 'whatsapp'] as const).map((p) => {
-                const connected = connectedPlatforms.has(p)
+                const status = platformStatuses.get(p)
+                const exists = status !== undefined
+                const suffix = !exists
+                  ? ' — not connected'
+                  : status !== 'active'
+                  ? ` — ${status}`
+                  : ''
                 return (
-                  <SelectItem key={p} value={p} disabled={!connected}>
+                  <SelectItem key={p} value={p} disabled={!exists}>
                     {PLATFORM_LABEL[p] ?? p}
-                    {!connected && ' — not connected'}
+                    {suffix}
                   </SelectItem>
                 )
               })}
@@ -216,15 +230,34 @@ export function CallbackPanel({
             {choice === 'webhook' &&
               'POSTed as JSON to your URL. Same shape as heartbeat webhooks.'}
           </p>
-          {choice !== 'off' && choice !== 'webhook' && !connectedPlatforms.has(choice) && (
-            <p className="text-xs text-destructive">
-              No active {PLATFORM_LABEL[choice] ?? choice} channel in this workspace.{' '}
-              <Link href="/settings" className="underline">
-                Connect one under Settings → Channels
-              </Link>{' '}
-              first.
-            </p>
-          )}
+          {choice !== 'off' && choice !== 'webhook' && (() => {
+            const status = platformStatuses.get(choice)
+            if (status === undefined) {
+              return (
+                <p className="text-xs text-destructive">
+                  No {PLATFORM_LABEL[choice] ?? choice} channel in this workspace.{' '}
+                  <Link href="/settings" className="underline">
+                    Connect one under Settings → Channels
+                  </Link>{' '}
+                  first.
+                </p>
+              )
+            }
+            if (status !== 'active') {
+              return (
+                <p className="text-xs text-amber-500">
+                  {PLATFORM_LABEL[choice] ?? choice} channel is currently <strong>{status}</strong>.
+                  Saving is fine — when you Send test, the dispatcher will surface a
+                  precise error if the adapter isn't running.{' '}
+                  <Link href="/settings" className="underline">
+                    Activate under Settings → Channels
+                  </Link>
+                  .
+                </p>
+              )
+            }
+            return null
+          })()}
         </div>
 
         {choice === 'slack' && (
