@@ -147,10 +147,12 @@ def _build_proactive_opener_message(page_context: dict) -> str:
             parts.append(rendered)
     summary = ", ".join(parts) if parts else "no context"
     return (
-        "[PROACTIVE_OPENER] Generate a contextual one-sentence opener. "
-        "Use the facts below as your source of truth — do NOT invent specs, "
-        "compatibility, or pricing the context doesn't include. If a fact "
-        "you'd want isn't here, ask a question instead of fabricating. "
+        "[PROACTIVE_OPENER] Generate a contextual one-sentence opener "
+        "(≤140 chars). RETURN PLAIN TEXT ONLY — no tool calls, no JSON, "
+        "no markdown, no greetings. Use the facts below as your source of "
+        "truth — do NOT invent specs, compatibility, or pricing the context "
+        "doesn't include. If a fact you'd want isn't here, ask a question "
+        "instead of fabricating. "
         f"Context: {summary}"
     )
 
@@ -456,6 +458,13 @@ async def widget_chat(
                 agent_id=effective_agent_id,
                 user_id=user_id,
                 team=agent_team,
+                # PRD-007 fix: proactive openers must NOT call Composio tools.
+                # The skill prompt forbids them (rule 5), but the LLM has been
+                # ignoring the directive and calling tools anyway — yielding
+                # data_event chunks but zero text (STREAM_NO_TEXT). Skipping
+                # Composio injection at the source forces text-only output and
+                # keeps openers within their <2s latency budget.
+                skip_composio=is_proactive,
             ):
                 counts["total"] += 1
                 if first_chunk_at is None:
