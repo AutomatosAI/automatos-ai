@@ -35,7 +35,9 @@ from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db
 from core.models.channels import ChannelConnection
 from core.models.sites import SITE_TYPES
-from services.destinations.base import DESTINATION_TYPES
+from services.callback import new_request_id
+from services.destinations.base import CallbackPayload, DESTINATION_TYPES
+from services.destinations.dispatcher import dispatch_callback_for_site
 
 from services.sites import (
     USER_SETTABLE_STATUSES,
@@ -230,3 +232,101 @@ async def patch_site_settings_route(
     if site is None:
         raise HTTPException(status_code=404, detail="Site not found")
     return public_site_dict(site)
+
+
+# ---------------------------------------------------------------------------
+# POST /api/sites/{site_id}/callback/test
+#
+# Fires a synthetic callback through every configured destination and waits
+# for the dispatcher to report per-destination success/failure. Used by the
+# dashboard's CallbackPanel "Send test" button so a merchant can prove their
+# Telegram / Slack / WhatsApp wiring works without needing a real shopper
+# submission.
+#
+# Phone is a fixed obvious placeholder so anyone receiving the message in
+# the destination channel can tell it's a test — never a real lead.
+# ---------------------------------------------------------------------------
+
+class CallbackTestDestinationResult(BaseModel):
+    destination_type: str
+    success: bool
+    latency_ms: int
+    error: Optional[str] = None
+    platform: Optional[str] = None
+    target: Optional[str] = None
+
+
+class CallbackTestResponse(BaseModel):
+    request_id: str
+    destinations_attempted: int
+    results: list[CallbackTestDestinationResult]
+
+
+_CALLBACK_TEST_PHONE = "+10000000000"  # Reserved test-only number, never dialed.
+_CALLBACK_TEST_NAME = "Dashboard test"
+_CALLBACK_TEST_TOPIC = "Test callback from the dashboard — no action required."
+
+
+@router.post("/{site_id}/callback/test", response_model=CallbackTestResponse)
+async def send_callback_test_route(
+    site_id: UUID,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+) -> CallbackTestResponse:
+    site = get_site(db, ctx.workspace_id, site_id)
+    if site is None:
+        raise HTTPException(status_code=404, detail="Site not found")
+
+    callback_settings = (site.settings or {}).get("callback") or {}
+    destinations = callback_settings.get("destinations") or []
+    if not destinations:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "No destinations configured. Add one under "
+                "Settings → Widgets SDK → Callback before testing."
+            ),
+        )
+
+    request_id = new_request_id()
+    payload = CallbackPayload(
+        request_id=request_id,
+        name=_CALLBACK_TEST_NAME,
+        phone=_CALLBACK_TEST_PHONE,
+        product_context=_CALLBACK_TEST_TOPIC,
+        urgency=None,
+        preferred_time=None,
+        site_display_name=site.display_name,
+        site_external_id=site.external_id,
+    )
+
+    results = await dispatch_callback_for_site(
+        site_id=site.id,
+        workspace_id=site.workspace_id,
+        session_id=f"dashboard-test-{request_id}",
+        request_id=request_id,
+        payload=payload,
+        destinations=destinations,
+    )
+
+    logger.info(
+        "callback test %s dispatched for site=%s (%d destination(s), %d success)",
+        request_id, site.id, len(destinations),
+        sum(1 for r in results if r.success),
+    )
+
+    return CallbackTestResponse(
+        request_id=request_id,
+        destinations_attempted=len(destinations),
+        results=[
+            CallbackTestDestinationResult(
+                destination_type=r.destination_type,
+                success=r.success,
+                latency_ms=r.latency_ms,
+                error=r.error,
+                platform=(r.extra or {}).get("platform") if isinstance(r.extra, dict) else None,
+                target=(r.extra or {}).get("target") if isinstance(r.extra, dict) else None,
+            )
+            for r in results
+        ],
+    )
