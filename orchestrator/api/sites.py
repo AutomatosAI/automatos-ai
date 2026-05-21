@@ -36,7 +36,7 @@ from core.database.database import get_db
 from core.models.channels import ChannelConnection
 from core.models.sites import SITE_TYPES
 from services.callback import new_request_id
-from services.destinations.base import CallbackPayload, DESTINATION_TYPES
+from services.destinations.base import CALLBACK_PLATFORMS, CallbackPayload, DESTINATION_TYPES
 from services.destinations.dispatcher import dispatch_callback_for_site
 
 from services.sites import (
@@ -149,8 +149,20 @@ async def patch_site_meta_route(
 def _validate_callback_destinations(
     destinations: list, *, db: Session, workspace_id: UUID
 ) -> None:
-    """Reject malformed or cross-workspace destinations early so the
-    dispatcher never has to deal with bad data."""
+    """Reject malformed destinations early so the dispatcher never has
+    to deal with bad data.
+
+    Heartbeat-style platform shape::
+
+        {"platform": "telegram"}                            # auto-resolves chat
+        {"platform": "slack",   "channel_id":  "C01ABC..."}
+        {"platform": "webhook", "webhook_url": "https://…"}
+
+    For Telegram / Slack / WhatsApp we also confirm a matching active
+    ``ChannelConnection`` exists in the workspace — same prereq the
+    heartbeat "Report To" dropdown enforces by only listing connected
+    platforms.
+    """
     if not isinstance(destinations, list):
         raise HTTPException(
             status_code=400,
@@ -162,50 +174,57 @@ def _validate_callback_destinations(
                 status_code=400,
                 detail=f"callback.destinations[{idx}] must be an object",
             )
-        dest_type = dest.get("type")
-        if dest_type not in DESTINATION_TYPES:
+        platform = str(dest.get("platform") or "").strip().lower()
+        if not platform:
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    f"callback.destinations[{idx}].type must be one of "
-                    f"{list(DESTINATION_TYPES)}; got {dest_type!r}"
+                    f"callback.destinations[{idx}].platform is required "
+                    f"(one of {list(CALLBACK_PLATFORMS)})"
                 ),
             )
-        # Only one type today, but branch explicitly so future additions
-        # don't silently bypass validation.
-        if dest_type == "channel_connection":
-            conn_id_raw = dest.get("connection_id")
-            target = dest.get("target")
-            if not target or not str(target).strip():
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"callback.destinations[{idx}].target is required",
-                )
-            try:
-                conn_id = UUID(str(conn_id_raw))
-            except (ValueError, TypeError):
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        f"callback.destinations[{idx}].connection_id must be a UUID"
-                    ),
-                )
-            owned = (
-                db.query(ChannelConnection.id)
-                .filter(
-                    ChannelConnection.id == conn_id,
-                    ChannelConnection.workspace_id == workspace_id,
-                )
-                .first()
+        if platform not in CALLBACK_PLATFORMS:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"callback.destinations[{idx}].platform must be one of "
+                    f"{list(CALLBACK_PLATFORMS)}; got {platform!r}"
+                ),
             )
-            if owned is None:
+
+        if platform == "webhook":
+            url = str(dest.get("webhook_url") or "").strip()
+            if not url:
                 raise HTTPException(
                     status_code=400,
-                    detail=(
-                        f"callback.destinations[{idx}].connection_id does not "
-                        "belong to this workspace"
-                    ),
+                    detail=f"callback.destinations[{idx}].webhook_url is required for webhook",
                 )
+            if not (url.startswith("https://") or url.startswith("http://")):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"callback.destinations[{idx}].webhook_url must start with http(s)://",
+                )
+            continue
+
+        # Channel-backed platforms (telegram/slack/whatsapp) — require an
+        # active ChannelConnection of this platform in the workspace.
+        connection_exists = (
+            db.query(ChannelConnection.id)
+            .filter(
+                ChannelConnection.workspace_id == workspace_id,
+                ChannelConnection.platform == platform,
+                ChannelConnection.status == "active",
+            )
+            .first()
+        )
+        if connection_exists is None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"No active {platform} channel connection in this workspace — "
+                    f"connect one under Settings → Channels first."
+                ),
+            )
 
 
 @router.patch("/{site_id}/settings")

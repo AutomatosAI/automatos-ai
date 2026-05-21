@@ -1,20 +1,63 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Switch } from '@/components/ui/switch'
 import { Button } from '@/components/ui/button'
-import { ChannelDestinationPicker } from './destinations/ChannelDestinationPicker'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
+  listCallbackChannels,
   sendCallbackTest,
   updateSiteSettings,
   type CallbackTestResponse,
 } from '@/lib/sites/api'
-import type { Site, CallbackSettings, CallbackDestination } from '@/lib/sites/types'
+import { PLATFORM_LABEL, type ChannelConnection } from '@/lib/channels/types'
+import type {
+  Site,
+  CallbackSettings,
+  CallbackDestination,
+  CallbackPlatform,
+} from '@/lib/sites/types'
+
+type DestinationChoice = CallbackPlatform | 'off'
 
 const DEFAULTS: CallbackSettings = {
   enabled: false,
   destinations: [],
+}
+
+/**
+ * Coerce a possibly-legacy persisted destinations array down to the
+ * single dropdown value the new UI exposes. We only render one
+ * destination — multi-destination fan-out lives in the dispatcher but
+ * is not exposed in the merchant UI yet. If multiple were saved, the
+ * first valid one wins.
+ */
+function pickPrimaryDestination(
+  raw: unknown,
+): CallbackDestination | null {
+  if (!Array.isArray(raw)) return null
+  for (const d of raw) {
+    if (!d || typeof d !== 'object') continue
+    const platform = (d as { platform?: string }).platform
+    if (platform === 'telegram' || platform === 'slack' || platform === 'whatsapp' || platform === 'webhook') {
+      return {
+        platform,
+        channel_id: (d as { channel_id?: string }).channel_id,
+        webhook_url: (d as { webhook_url?: string }).webhook_url,
+      }
+    }
+  }
+  return null
 }
 
 export function CallbackPanel({
@@ -24,14 +67,11 @@ export function CallbackPanel({
   site: Site
   onUpdated: (s: Site) => void
 }) {
+  const initialDestination = pickPrimaryDestination(site.settings.callback?.destinations)
   const initial: CallbackSettings = {
     ...DEFAULTS,
-    ...(site.settings.callback ?? {}),
-    // Drop legacy destination shapes silently — they were never shipped
-    // outside the user's test workspace, but be defensive.
-    destinations: ((site.settings.callback?.destinations as CallbackDestination[] | undefined) ?? []).filter(
-      (d) => d?.type === 'channel_connection',
-    ),
+    enabled: site.settings.callback?.enabled ?? false,
+    destinations: initialDestination ? [initialDestination] : [],
   }
   const [draft, setDraft] = useState<CallbackSettings>(initial)
   const [saving, setSaving] = useState(false)
@@ -40,15 +80,67 @@ export function CallbackPanel({
   const [testResult, setTestResult] = useState<CallbackTestResponse | null>(null)
   const [testError, setTestError] = useState<string | null>(null)
 
+  // Connected channels — same source as heartbeat's "Report To". Only
+  // platforms with an active workspace connection appear in the dropdown.
+  const [channels, setChannels] = useState<ChannelConnection[] | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    listCallbackChannels()
+      .then((c) => { if (!cancelled) setChannels(c) })
+      .catch(() => { if (!cancelled) setChannels([]) })
+    return () => { cancelled = true }
+  }, [])
+
+  const currentDest: CallbackDestination | null = draft.destinations[0] ?? null
+  const choice: DestinationChoice = currentDest === null ? 'off' : currentDest.platform
+
+  const connectedPlatforms = new Set<string>(
+    (channels ?? []).filter((c) => c.status === 'active').map((c) => c.platform),
+  )
+
+  function setChoice(next: DestinationChoice) {
+    if (next === 'off') {
+      setDraft((d) => ({ ...d, destinations: [] }))
+      return
+    }
+    const existing = currentDest && currentDest.platform === next ? currentDest : null
+    setDraft((d) => ({
+      ...d,
+      destinations: [
+        {
+          platform: next,
+          channel_id: existing?.channel_id,
+          webhook_url: existing?.webhook_url,
+        },
+      ],
+    }))
+  }
+
+  function patchCurrent(patch: Partial<CallbackDestination>) {
+    if (!currentDest) return
+    setDraft((d) => ({
+      ...d,
+      destinations: [{ ...currentDest, ...patch }],
+    }))
+  }
+
+  // Validation matches what the backend will accept.
+  const destValid = (() => {
+    if (!currentDest) return true // "Off" is fine
+    if (currentDest.platform === 'webhook') {
+      const url = currentDest.webhook_url?.trim() ?? ''
+      return url.startsWith('http://') || url.startsWith('https://')
+    }
+    return connectedPlatforms.has(currentDest.platform)
+  })()
+
   const dirty = JSON.stringify(draft) !== JSON.stringify(initial)
-  const targetsValid = draft.destinations.every((d) => d.target.trim().length > 0)
-  const canSave = dirty && !saving && targetsValid
-  // Test runs against what's saved on the server, not the unsaved draft.
+  const canSave = dirty && !saving && destValid
   const canTest =
     !testing &&
     !dirty &&
     initial.destinations.length > 0 &&
-    initial.destinations.every((d) => d.target.trim().length > 0)
+    initial.enabled
 
   async function save() {
     setSaving(true)
@@ -94,15 +186,68 @@ export function CallbackPanel({
         />
       </CardHeader>
       <CardContent className="space-y-4">
-        <ChannelDestinationPicker
-          value={draft.destinations}
-          onChange={(destinations) => setDraft((d) => ({ ...d, destinations }))}
-        />
-
-        {!targetsValid && draft.destinations.length > 0 && (
-          <p className="text-xs text-destructive">
-            Every destination needs a target (channel ID, chat ID, or phone number).
+        <div className="space-y-2">
+          <Label>Send to</Label>
+          <Select value={choice} onValueChange={(v) => setChoice(v as DestinationChoice)}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="off">Off — accept but don't deliver</SelectItem>
+              {(['telegram', 'slack', 'whatsapp'] as const).map((p) => {
+                const connected = connectedPlatforms.has(p)
+                return (
+                  <SelectItem key={p} value={p} disabled={!connected}>
+                    {PLATFORM_LABEL[p] ?? p}
+                    {!connected && ' — not connected'}
+                  </SelectItem>
+                )
+              })}
+              <SelectItem value="webhook">Webhook URL</SelectItem>
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            {choice === 'off' &&
+              'Submissions are recorded but no message is sent. Useful for staging.'}
+            {choice === 'telegram' &&
+              'Routed to your Telegram bot — uses the chat captured when you /start-ed it.'}
+            {choice === 'slack' &&
+              'Routed to your Slack workspace (channel below, or the workspace default).'}
+            {choice === 'whatsapp' &&
+              'Routed via your connected WhatsApp channel.'}
+            {choice === 'webhook' &&
+              'POSTed as JSON to your URL. Same shape as heartbeat webhooks.'}
           </p>
+          {choice !== 'off' && choice !== 'webhook' && !connectedPlatforms.has(choice) && (
+            <p className="text-xs text-destructive">
+              No active {PLATFORM_LABEL[choice] ?? choice} channel in this workspace.{' '}
+              <Link href="/settings" className="underline">
+                Connect one under Settings → Channels
+              </Link>{' '}
+              first.
+            </p>
+          )}
+        </div>
+
+        {choice === 'slack' && (
+          <div className="space-y-2">
+            <Label>Slack channel ID (optional)</Label>
+            <Input
+              value={currentDest?.channel_id ?? ''}
+              onChange={(e) => patchCurrent({ channel_id: e.target.value })}
+              placeholder="C01ABCDEF — leave blank to use workspace default"
+            />
+          </div>
+        )}
+
+        {choice === 'webhook' && (
+          <div className="space-y-2">
+            <Label>Webhook URL</Label>
+            <Input
+              type="url"
+              value={currentDest?.webhook_url ?? ''}
+              onChange={(e) => patchCurrent({ webhook_url: e.target.value })}
+              placeholder="https://hooks.slack.com/... or any endpoint"
+            />
+          </div>
         )}
 
         {error && <p className="text-xs text-destructive">{error}</p>}
@@ -116,9 +261,11 @@ export function CallbackPanel({
             title={
               dirty
                 ? 'Save your changes first, then send a test.'
+                : !initial.enabled
+                ? 'Enable callbacks before testing.'
                 : initial.destinations.length === 0
-                ? 'Add at least one destination before testing.'
-                : 'Fires a dummy callback through every configured destination.'
+                ? 'Pick a destination before testing.'
+                : 'Fires a dummy callback through the configured destination.'
             }
           >
             {testing ? 'Sending test…' : 'Send test'}
@@ -158,9 +305,11 @@ export function CallbackPanel({
                     className={r.success ? 'text-emerald-500' : 'text-destructive'}
                   >
                     {r.success ? '✓' : '✗'}{' '}
-                    {r.platform ?? r.destination_type}
-                    {r.target ? ` → ${r.target}` : ''}
-                    {' '}({r.latency_ms}ms)
+                    {PLATFORM_LABEL[r.platform ?? r.destination_type] ??
+                      r.platform ??
+                      r.destination_type}
+                    {r.target ? ` → ${r.target}` : ''}{' '}
+                    ({r.latency_ms}ms)
                     {r.error ? ` — ${r.error}` : ''}
                   </li>
                 ))}

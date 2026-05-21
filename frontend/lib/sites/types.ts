@@ -15,15 +15,19 @@ export interface SiteCapabilities {
   supports_theme_override: boolean
 }
 
-// Single canonical destination type — references a workspace
-// ChannelConnection (Slack/Telegram/WhatsApp/etc.) the merchant
-// already configured under Settings → Channels.
+// Platform-keyed destination — same shape heartbeat's "Report To"
+// uses. The backend auto-resolves Telegram chat ids / WhatsApp targets
+// from the workspace's connected channels (Settings → Channels). Slack
+// optionally takes an explicit channel override; webhook needs a URL.
+export type CallbackPlatform = 'telegram' | 'slack' | 'whatsapp' | 'webhook'
+
 export interface CallbackDestination {
-  type: 'channel_connection'
-  connection_id: string
-  target: string
-  platform?: string  // display hint; backend re-validates
-  label?: string     // display label (e.g. "#sales-handoffs")
+  platform: CallbackPlatform
+  /** Slack-only: explicit channel id (e.g. "C01ABC..."). When omitted,
+   *  uses ``workspace.settings.integrations.slack_default_channel``. */
+  channel_id?: string
+  /** Webhook-only: URL the orchestrator POSTs to. */
+  webhook_url?: string
 }
 
 export interface CallbackSettings {
