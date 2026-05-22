@@ -114,24 +114,51 @@ def _persist_connection(
 
 @register("shopifyAccessTokenApi")
 def shopify_access_token(ctx: BridgeContext) -> BridgeResult:
+    """
+    Repurposed: this single credential type now handles BOTH paths so the
+    merchant only sees one form regardless of where they got their Shopify
+    values from.
+
+      - accessToken starts with 'shpat_'  → use it directly as an Admin API
+        token (API_KEY flow). appSecretKey stays for webhook HMAC.
+      - Otherwise (Partner App credentials from Partner Dashboard):
+          accessToken    → Partner App Client ID
+          appSecretKey   → Partner App Client Secret
+        Bridge creates a per-workspace OAuth2 auth_config in Composio and
+        returns redirect_url → frontend opens popup → merchant clicks Install
+        on Shopify → ACTIVE shpat_ comes back automatically.
+    """
     data = ctx.decrypted_data or {}
     subdomain = _normalise_subdomain(data.get("shopSubdomain", ""))
-    token = (data.get("accessToken") or "").strip()
+    primary = (data.get("accessToken") or "").strip()
+    secondary = (data.get("appSecretKey") or "").strip()
 
-    if not subdomain or not token:
+    if not subdomain or not primary:
         return BridgeResult(
             status="bridge_error",
-            error="shopSubdomain and accessToken are required",
+            error="shopSubdomain and the first credential field are required",
         )
-    # Don't pre-validate the token prefix — Shopify ships multiple token types
-    # (shpat_/shpss_/shpua_/shpca_) and the prefixes have changed over time.
-    # Submit the token to Composio and surface their error verbatim if it
-    # rejects — Composio is the authority on what works with their toolkit.
-    if not token.startswith("shp"):
-        logger.warning(
-            "[bridge:shopify] accessToken doesn't start with 'shp' — proceeding "
-            "anyway and letting Composio validate."
+
+    # Branch: shpat_ goes to API_KEY direct, everything else goes to OAuth
+    # bounce treating (primary, secondary) as (clientId, clientSecret).
+    if not primary.startswith("shpat_"):
+        if not secondary:
+            return BridgeResult(
+                status="bridge_error",
+                error=(
+                    "Looks like Partner App credentials but no Client Secret was "
+                    "provided. Paste Client Secret into the second field."
+                ),
+            )
+        return _shopify_oauth_bounce(
+            ctx,
+            subdomain=subdomain,
+            client_id=primary,
+            client_secret=secondary,
         )
+
+    # ---- shpat_ direct path (Custom App admin API token) ---------------
+    token = primary
 
     entity_id = _resolve_entity_id(ctx.workspace_id)
     if not entity_id:
@@ -272,20 +299,19 @@ def shopify_access_token(ctx: BridgeContext) -> BridgeResult:
 # shopifyOAuth2Api — per-workspace OAuth via merchant's own Partner app
 # ---------------------------------------------------------------------------
 
-@register("shopifyOAuth2Api")
-def shopify_oauth2(ctx: BridgeContext) -> BridgeResult:
-    data = ctx.decrypted_data or {}
-    subdomain = _normalise_subdomain(data.get("shopSubdomain", ""))
-    client_id = (data.get("clientId") or "").strip()
-    client_secret = (data.get("clientSecret") or "").strip()
-    scope = (data.get("scope") or "").strip() or DEFAULT_OAUTH_SCOPES
-
-    if not subdomain or not client_id or not client_secret:
-        return BridgeResult(
-            status="bridge_error",
-            error="shopSubdomain, clientId and clientSecret are required",
-        )
-
+def _shopify_oauth_bounce(
+    ctx: BridgeContext,
+    subdomain: str,
+    client_id: str,
+    client_secret: str,
+    scope: Optional[str] = None,
+) -> BridgeResult:
+    """
+    Shared OAuth2 bounce: creates a per-workspace Composio auth_config with
+    Partner App credentials, returns a hosted-install redirect_url. Called by
+    BOTH the shopifyAccessTokenApi handler (when given Partner App creds
+    instead of an shpat_ token) AND the shopifyOAuth2Api handler.
+    """
     entity_id = _resolve_entity_id(ctx.workspace_id)
     if not entity_id:
         return BridgeResult(status="bridge_error", error="No Composio entity for workspace")
@@ -295,8 +321,6 @@ def shopify_oauth2(ctx: BridgeContext) -> BridgeResult:
     if not composio:
         return BridgeResult(status="bridge_error", error="Composio client not initialised (COMPOSIO_API_KEY missing)")
 
-    # Create a per-workspace OAuth2 auth config so each merchant owns their
-    # own Partner-app credentials. Composio keeps these encrypted server-side.
     auth_config = composio.auth_configs.create(
         toolkit="SHOPIFY",
         options={
@@ -305,7 +329,7 @@ def shopify_oauth2(ctx: BridgeContext) -> BridgeResult:
             "credentials": {
                 "client_id": client_id,
                 "client_secret": client_secret,
-                "scopes": scope,
+                "scopes": (scope or "").strip() or DEFAULT_OAUTH_SCOPES,
             },
             "name": f"Shopify OAuth (credential={ctx.credential_id})",
         },
@@ -314,8 +338,6 @@ def shopify_oauth2(ctx: BridgeContext) -> BridgeResult:
     if not auth_config_id:
         return BridgeResult(status="bridge_error", error="Composio did not return an auth_config id")
 
-    # Initiate the hosted OAuth bounce — Composio renders Shopify's install
-    # page with the merchant's own credentials and stored scopes.
     link = composio.connected_accounts.link(
         user_id=entity_id,
         auth_config_id=auth_config_id,
@@ -342,6 +364,29 @@ def shopify_oauth2(ctx: BridgeContext) -> BridgeResult:
         auth_scheme="OAUTH2",
         oauth_redirect_url=redirect_url,
         extra={"shop": f"{subdomain}.myshopify.com"},
+    )
+
+
+@register("shopifyOAuth2Api")
+def shopify_oauth2(ctx: BridgeContext) -> BridgeResult:
+    data = ctx.decrypted_data or {}
+    subdomain = _normalise_subdomain(data.get("shopSubdomain", ""))
+    client_id = (data.get("clientId") or "").strip()
+    client_secret = (data.get("clientSecret") or "").strip()
+    scope = (data.get("scope") or "").strip()
+
+    if not subdomain or not client_id or not client_secret:
+        return BridgeResult(
+            status="bridge_error",
+            error="shopSubdomain, clientId and clientSecret are required",
+        )
+
+    return _shopify_oauth_bounce(
+        ctx,
+        subdomain=subdomain,
+        client_id=client_id,
+        client_secret=client_secret,
+        scope=scope,
     )
 
 

@@ -48,19 +48,19 @@ const CREDENTIAL_FIELD_OVERRIDES: Record<string, Record<string, FieldOverride>> 
     shopSubdomain: {
       displayName: 'Shop Subdomain',
       description:
-        'Just the subdomain — e.g. innobuilduk for innobuilduk.myshopify.com. No https://, no .myshopify.com.',
+        'Just the subdomain — e.g. innobuilduk for innobuilduk.myshopify.com. No https:// and no .myshopify.com.',
       placeholder: 'innobuilduk',
     },
     accessToken: {
-      displayName: 'Admin API Access Token (shpat_…)',
+      displayName: 'Partner App Client ID  (or Admin API Token shpat_…)',
       description:
-        "From your Shopify admin → Settings → Apps and sales channels → Develop apps → your app → API credentials tab. Click 'Reveal token once' under 'Admin API access token'. NOT the Storefront API token (shpss_…) further down the page.",
-      placeholder: 'shpat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
+        'From your Shopify Partner Dashboard → Apps → your app → Configuration → Client ID. ' +
+        'Alternatively, if you already have a per-store Admin API token (shpat_…) from a Custom App, paste that here instead.',
     },
     appSecretKey: {
-      displayName: 'API Secret Key',
+      displayName: 'Partner App Client Secret  (leave blank if using shpat_)',
       description:
-        "From the same API credentials tab, in the 'API key and secret key' section. Used to verify Shopify webhooks (HMAC).",
+        'From the same Configuration screen, next to Client ID (shpss_…). Required when using Partner App credentials so we can complete the Shopify install bounce. Leave blank if you pasted an shpat_ token above.',
     },
   },
   shopifyOAuth2Api: {
