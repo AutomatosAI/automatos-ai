@@ -142,6 +142,48 @@ def shopify_access_token(ctx: BridgeContext) -> BridgeResult:
     if not composio:
         return BridgeResult(status="bridge_error", error="Composio client not initialised (COMPOSIO_API_KEY missing)")
 
+    # Sweep stale connections for this (entity, auth_config) before creating a
+    # new one — Composio rejects "Multiple connected accounts" otherwise. We
+    # delete anything not ACTIVE (EXPIRED, INITIATED, FAILED) since the user
+    # is explicitly re-saving the credential to reconnect. If an ACTIVE one
+    # already matches the token, just return success without creating another.
+    try:
+        existing = composio.connected_accounts.list(user_ids=[entity_id])
+        for acct in getattr(existing, "items", []) or []:
+            acct_auth = getattr(acct.auth_config, "id", None) if hasattr(acct, "auth_config") else None
+            if acct_auth != SHARED_API_KEY_AUTH_CONFIG:
+                continue
+            acct_status = (getattr(acct, "status", "") or "").upper()
+            if acct_status in ("EXPIRED", "INITIATED", "FAILED", "INACTIVE"):
+                logger.info("[bridge:shopify] deleting stale %s connection %s", acct_status, acct.id)
+                try:
+                    composio.connected_accounts.delete(nanoid=acct.id)
+                except Exception as del_err:
+                    logger.warning("[bridge:shopify] couldn't delete %s: %s", acct.id, del_err)
+            elif acct_status == "ACTIVE":
+                # Already connected — return success with the existing id.
+                logger.info("[bridge:shopify] reusing ACTIVE connection %s", acct.id)
+                _persist_connection(
+                    workspace_id=ctx.workspace_id,
+                    app_name="SHOPIFY",
+                    status="active",
+                    connection_id=acct.id,
+                    auth_config_id=SHARED_API_KEY_AUTH_CONFIG,
+                    auth_scheme="API_KEY",
+                    credential_id=ctx.credential_id,
+                )
+                return BridgeResult(
+                    status="connected",
+                    connection_id=acct.id,
+                    auth_config_id=SHARED_API_KEY_AUTH_CONFIG,
+                    auth_scheme="API_KEY",
+                    extra={"shop": f"{subdomain}.myshopify.com", "reused": True},
+                )
+    except Exception as sweep_err:
+        # Sweep is best-effort — if it fails, fall through to initiate and let
+        # Composio's "multiple accounts" error reach the user with full context.
+        logger.warning("[bridge:shopify] stale-connection sweep failed: %s", sweep_err)
+
     try:
         connection = composio.connected_accounts.initiate(
             entity_id,
