@@ -14,6 +14,10 @@ interface ChannelConnection {
   id: string
   platform: string
   status: string
+  mode?: 'webhook' | 'polling' | string
+  webhook_url?: string | null
+  last_verified?: string | null
+  last_error?: string | null
   message_count: number
   last_activity_at: string | null
   config: Record<string, string>
@@ -279,11 +283,44 @@ export function ChannelsSettingsTab() {
               <CardContent className="flex flex-col flex-1 pt-0">
                 {connected ? (
                   <>
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground flex-1">
-                      <MessageSquare className="h-3 w-3 shrink-0" />
-                      <span>{connected.message_count} messages</span>
-                      {connected.last_activity_at && (
-                        <span>· {new Date(connected.last_activity_at).toLocaleDateString()}</span>
+                    <div className="space-y-2 flex-1">
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <MessageSquare className="h-3 w-3 shrink-0" />
+                        <span>{connected.message_count} messages</span>
+                        {connected.mode && (
+                          <span>· {connected.mode}</span>
+                        )}
+                        {connected.last_activity_at && (
+                          <span>· {new Date(connected.last_activity_at).toLocaleDateString()}</span>
+                        )}
+                      </div>
+                      {connected.webhook_url && (
+                        <div className="text-xs">
+                          <Label className="text-[10px] uppercase text-muted-foreground">Webhook URL</Label>
+                          <div className="flex items-center gap-1 mt-1">
+                            <Input
+                              readOnly
+                              value={connected.webhook_url}
+                              className="text-[11px] font-mono h-7"
+                              onClick={(e) => (e.target as HTMLInputElement).select()}
+                            />
+                            <Button
+                              size="sm" variant="ghost"
+                              onClick={() => {
+                                navigator.clipboard.writeText(connected.webhook_url ?? '')
+                                toast.success('Webhook URL copied')
+                              }}
+                              title="Copy"
+                            >
+                              Copy
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                      {connected.last_error && (
+                        <p className="text-xs text-[hsl(var(--destructive))]">
+                          {connected.last_error}
+                        </p>
                       )}
                     </div>
                     <div className="flex gap-2 mt-4 pt-3 border-t border-border/30">

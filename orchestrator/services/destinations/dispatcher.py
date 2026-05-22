@@ -27,9 +27,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from core.database.database import SessionLocal
-from core.models.channels import ChannelConnection
 from core.models.sites import Site
-from core.services.notification_service import send_workspace_notification
 from modules.widgets.telemetry import log_widget_event
 
 from services.destinations.base import CALLBACK_PLATFORMS, CallbackPayload, DispatchResult
@@ -77,21 +75,18 @@ async def dispatch_via_channel(
     db: Session,
     workspace_id: UUID,
 ) -> DispatchResult:
-    """Dispatch a callback to a workspace's connected channel.
+    """Dispatch a callback through the unified ``channels.sender``.
+
+    Every per-platform detail (URLs, auth, error semantics) lives in
+    the driver. This function just shapes the input/output and
+    enforces the validator's contract.
 
     Accepted destination shapes::
 
-        {"platform": "telegram"}                            # auto-resolves chat
+        {"platform": "telegram"}
         {"platform": "slack",   "channel_id":  "C01ABC..."}
+        {"platform": "whatsapp"}
         {"platform": "webhook", "webhook_url": "https://…"}
-
-    Telegram/Slack go through ``send_workspace_notification`` — the same
-    function the heartbeat service uses for ``report_to: telegram`` /
-    ``report_to: slack``. Webhook handled here directly.
-
-    The legacy ``{"type": "channel_connection", "connection_id": …,
-    "target": …}`` shape is no longer accepted as input — the validator
-    rejects it on the way in.
     """
     started_ms = time.monotonic()
     platform = _resolve_platform(destination)
@@ -115,10 +110,16 @@ async def dispatch_via_channel(
 
     text = _render_callback_text(payload)
 
-    # Webhook is its own path — POST directly, no channel adapter.
-    if platform == "webhook":
-        webhook_url = (destination.get("webhook_url") or "").strip()
-        if not webhook_url:
+    # Per-platform target overrides from the destination row. Slack
+    # accepts an explicit channel_id, webhook needs the URL; everything
+    # else uses the driver-resolved default (e.g. Telegram's captured
+    # ``telegram_default_chat_id``).
+    target: str | None = None
+    if platform == "slack":
+        target = (destination.get("channel_id") or "").strip() or None
+    elif platform == "webhook":
+        target = (destination.get("webhook_url") or "").strip() or None
+        if not target:
             return DispatchResult(
                 success=False,
                 destination_type=platform,
@@ -126,129 +127,25 @@ async def dispatch_via_channel(
                 error="webhook destination missing 'webhook_url'",
                 retryable=False,
             )
-        try:
-            import httpx
 
-            async with httpx.AsyncClient(timeout=15) as client:
-                resp = await client.post(
-                    webhook_url,
-                    json={
-                        "text": text,
-                        "message": text,
-                        "request_id": payload.request_id,
-                        "site_display_name": payload.site_display_name,
-                    },
-                )
-                ok = resp.status_code < 400
-            latency_ms = int((time.monotonic() - started_ms) * 1000)
-            if ok:
-                return DispatchResult(
-                    success=True,
-                    destination_type=platform,
-                    latency_ms=latency_ms,
-                    extra={"platform": platform, "target": webhook_url},
-                )
-            return DispatchResult(
-                success=False,
-                destination_type=platform,
-                latency_ms=latency_ms,
-                error=f"webhook returned HTTP {resp.status_code}",
-                retryable=resp.status_code >= 500,
-            )
-        except Exception as exc:  # noqa: BLE001 — transient network failures
-            logger.warning("webhook dispatch failed for ws=%s: %s", workspace_id, exc)
-            return DispatchResult(
-                success=False,
-                destination_type=platform,
-                latency_ms=int((time.monotonic() - started_ms) * 1000),
-                error=f"webhook exception: {exc}",
-                retryable=True,
-            )
+    from channels.sender import send_to_channel
 
-    # Slack/Telegram/WhatsApp → reuse the heartbeat notification path.
-    # send_workspace_notification reads workspace.settings.integrations
-    # (telegram_bot_token + telegram_default_chat_id, slack_bot_token +
-    # slack_default_channel) and falls back to channel_connections.config.
-    # For Slack, an explicit ``channel_id`` in the destination overrides
-    # the workspace default — same affordance heartbeat offers.
-    explicit_channel_id = (destination.get("channel_id") or "").strip()
-    if platform == "slack" and explicit_channel_id:
-        await _stash_slack_channel_override(
-            workspace_id=workspace_id, channel_id=explicit_channel_id,
-        )
-
-    try:
-        ok = await send_workspace_notification(
-            workspace_id=str(workspace_id),
-            message=text,
-            channel=platform,
-        )
-    except Exception as exc:  # noqa: BLE001 — adapter-specific transients
-        logger.warning(
-            "send_workspace_notification raised for ws=%s platform=%s: %s",
-            workspace_id, platform, exc,
-        )
-        return DispatchResult(
-            success=False,
-            destination_type=platform,
-            latency_ms=int((time.monotonic() - started_ms) * 1000),
-            error=f"notification exception: {exc}",
-            retryable=True,
-        )
-
-    latency_ms = int((time.monotonic() - started_ms) * 1000)
-    if ok:
-        return DispatchResult(
-            success=True,
-            destination_type=platform,
-            latency_ms=latency_ms,
-            extra={"platform": platform, "target": explicit_channel_id or None},
-        )
-    return DispatchResult(
-        success=False,
-        destination_type=platform,
-        latency_ms=latency_ms,
-        error=(
-            f"{platform} delivery returned False — check workspace "
-            f"integration is connected and chat_id captured (Telegram: "
-            f"send /start to the bot; Slack: set default channel)"
-        ),
-        retryable=False,
+    result = await send_to_channel(
+        db=db,
+        workspace_id=workspace_id,
+        platform=platform,
+        text=text,
+        target=target,
     )
 
-
-# Slack's send_workspace_notification helper reads
-# ``workspace.settings.integrations.slack_default_channel``. When the
-# merchant sets a per-callback override in the dashboard we stash it
-# there transiently so the same helper picks it up — keeps the
-# Notification path the single source of truth.
-async def _stash_slack_channel_override(*, workspace_id: UUID, channel_id: str) -> None:
-    """Write ``slack_default_channel`` onto the workspace's integrations
-    block if missing, so heartbeat-style routing finds it. Idempotent."""
-    db: Session = SessionLocal()
-    try:
-        from core.models.workspaces import Workspace
-
-        ws = db.query(Workspace).get(workspace_id)
-        if ws is None:
-            return
-        settings = dict(ws.settings or {})
-        integrations = dict(settings.get("integrations") or {})
-        if integrations.get("slack_default_channel") == channel_id:
-            return
-        integrations["slack_default_channel"] = channel_id
-        settings["integrations"] = integrations
-        ws.settings = settings
-        db.commit()
-    except Exception:
-        logger.exception(
-            "Failed to stash slack_default_channel override for ws=%s", workspace_id,
-        )
-    finally:
-        try:
-            db.close()
-        except Exception:  # noqa: BLE001
-            pass
+    return DispatchResult(
+        success=result.ok,
+        destination_type=platform,
+        latency_ms=result.latency_ms or int((time.monotonic() - started_ms) * 1000),
+        error=result.error,
+        retryable=result.retryable,
+        extra={"platform": platform, "target": target} if result.ok else {},
+    )
 
 
 async def dispatch_one_destination(
