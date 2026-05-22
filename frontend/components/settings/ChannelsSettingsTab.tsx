@@ -14,6 +14,10 @@ interface ChannelConnection {
   id: string
   platform: string
   status: string
+  mode?: 'webhook' | 'polling' | string
+  webhook_url?: string | null
+  last_verified?: string | null
+  last_error?: string | null
   message_count: number
   last_activity_at: string | null
   config: Record<string, string>
@@ -130,12 +134,31 @@ const PLATFORMS = [
   }
 ]
 
+// Platforms supporting more than one connectivity mode. Anything not
+// in here is treated as single-mode (webhook for most, polling for
+// Discord etc.) and the picker is hidden.
+const MULTI_MODE_PLATFORMS: Record<string, Array<{ value: 'webhook' | 'polling'; label: string; hint: string }>> = {
+  telegram: [
+    {
+      value: 'webhook',
+      label: 'Webhook (recommended)',
+      hint: 'Telegram POSTs incoming messages to your orchestrator. No long-running process.',
+    },
+    {
+      value: 'polling',
+      label: 'Polling',
+      hint: 'Long-poll getUpdates from inside the orchestrator. Requires python-telegram-bot. Conflicts with webhook mode.',
+    },
+  ],
+}
+
 export function ChannelsSettingsTab() {
   const [channels, setChannels] = useState<ChannelConnection[]>([])
   const [loading, setLoading] = useState(true)
   const [connecting, setConnecting] = useState<string | null>(null)
   const [testing, setTesting] = useState<string | null>(null)
   const [newConfigs, setNewConfigs] = useState<Record<string, Record<string, string>>>({})
+  const [newModes, setNewModes] = useState<Record<string, 'webhook' | 'polling'>>({})
   const [fieldErrors, setFieldErrors] = useState<Record<string, Record<string, boolean>>>({})
 
   useEffect(() => {
@@ -180,13 +203,26 @@ export function ChannelsSettingsTab() {
     setFieldErrors(prev => ({ ...prev, [platform]: {} }))
     setConnecting(platform)
     try {
-      await apiClient.request('/api/channels', {
-        method: 'POST',
-        body: { platform, config } as any,
-      })
+      const mode = newModes[platform] ?? (MULTI_MODE_PLATFORMS[platform]?.[0].value)
+      const body: Record<string, any> = { platform, config }
+      if (mode) body.mode = mode
+      const resp = await apiClient.request<{
+        status?: string
+        test?: { status?: string; detail?: string; bot_name?: string }
+      }>('/api/channels', { method: 'POST', body: body as any })
       await loadChannels()
       setNewConfigs(prev => ({ ...prev, [platform]: {} }))
-      toast.success(`${platformDef?.name ?? platform} connected`)
+      // Show the driver's verify result on the same toast — the user
+      // sees "Telegram connected — @yourbot" or the precise error.
+      const verify = resp?.test
+      if (verify?.status === 'connected') {
+        const who = verify.bot_name
+        toast.success(who ? `${platformDef?.name ?? platform} connected — ${who}` : `${platformDef?.name ?? platform} connected`)
+      } else if (verify?.status === 'error') {
+        toast.error(`${platformDef?.name ?? platform}: ${verify.detail ?? 'verify failed'}`)
+      } else {
+        toast.success(`${platformDef?.name ?? platform} connected`)
+      }
     } catch (err) {
       console.error('[Channels] connect error:', err)
       toast.error(err instanceof Error ? err.message : 'Failed to connect channel')
@@ -222,6 +258,10 @@ export function ChannelsSettingsTab() {
       if (data.status === 'connected') {
         const who = data.bot_name ?? data.team?.name
         toast.success(who ? `Connection successful — ${who}` : 'Connection successful')
+        // Backend marks the row active on a successful ping; re-fetch
+        // so the badge in the list reflects the new state without a
+        // manual page refresh.
+        await loadChannels()
       } else {
         toast.error(`Test failed: ${data.detail || 'Unknown error'}`)
       }
@@ -275,11 +315,44 @@ export function ChannelsSettingsTab() {
               <CardContent className="flex flex-col flex-1 pt-0">
                 {connected ? (
                   <>
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground flex-1">
-                      <MessageSquare className="h-3 w-3 shrink-0" />
-                      <span>{connected.message_count} messages</span>
-                      {connected.last_activity_at && (
-                        <span>· {new Date(connected.last_activity_at).toLocaleDateString()}</span>
+                    <div className="space-y-2 flex-1">
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <MessageSquare className="h-3 w-3 shrink-0" />
+                        <span>{connected.message_count} messages</span>
+                        {connected.mode && (
+                          <span>· {connected.mode}</span>
+                        )}
+                        {connected.last_activity_at && (
+                          <span>· {new Date(connected.last_activity_at).toLocaleDateString()}</span>
+                        )}
+                      </div>
+                      {connected.webhook_url && (
+                        <div className="text-xs">
+                          <Label className="text-[10px] uppercase text-muted-foreground">Webhook URL</Label>
+                          <div className="flex items-center gap-1 mt-1">
+                            <Input
+                              readOnly
+                              value={connected.webhook_url}
+                              className="text-[11px] font-mono h-7"
+                              onClick={(e) => (e.target as HTMLInputElement).select()}
+                            />
+                            <Button
+                              size="sm" variant="ghost"
+                              onClick={() => {
+                                navigator.clipboard.writeText(connected.webhook_url ?? '')
+                                toast.success('Webhook URL copied')
+                              }}
+                              title="Copy"
+                            >
+                              Copy
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                      {connected.last_error && (
+                        <p className="text-xs text-[hsl(var(--destructive))]">
+                          {connected.last_error}
+                        </p>
                       )}
                     </div>
                     <div className="flex gap-2 mt-4 pt-3 border-t border-border/30">
@@ -295,6 +368,31 @@ export function ChannelsSettingsTab() {
                 ) : (
                   <>
                     <div className="space-y-3 flex-1">
+                      {MULTI_MODE_PLATFORMS[platform.id] && (
+                        <div className="space-y-1">
+                          <Label className="text-xs">Connection mode</Label>
+                          <select
+                            value={newModes[platform.id] ?? MULTI_MODE_PLATFORMS[platform.id][0].value}
+                            onChange={(e) => setNewModes(prev => ({
+                              ...prev,
+                              [platform.id]: e.target.value as 'webhook' | 'polling',
+                            }))}
+                            className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
+                          >
+                            {MULTI_MODE_PLATFORMS[platform.id].map(opt => (
+                              <option key={opt.value} value={opt.value}>
+                                {opt.label}
+                              </option>
+                            ))}
+                          </select>
+                          <p className="text-[10px] text-muted-foreground">
+                            {(() => {
+                              const selected = newModes[platform.id] ?? MULTI_MODE_PLATFORMS[platform.id][0].value
+                              return MULTI_MODE_PLATFORMS[platform.id].find(o => o.value === selected)?.hint
+                            })()}
+                          </p>
+                        </div>
+                      )}
                       {platform.fields.map(field => {
                         const hasError = !!fieldErrors[platform.id]?.[field.key]
                         return (

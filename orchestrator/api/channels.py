@@ -1,13 +1,21 @@
 """
-Channel Management API (PRD-55 US-023)
-=======================================
+Channel Management API (PRD-55 US-023, PRD-008-A.4)
+====================================================
 
-CRUD endpoints for managing channel connections (Telegram, Slack, Discord).
+CRUD endpoints for managing channel connections. Per-platform behaviour
+lives in ``channels/drivers/``; this module is platform-agnostic.
+
+The driver tells us what config the merchant must paste, what modes it
+supports (webhook / polling), and how to verify, send, install/uninstall
+webhook, and start/stop polling.
 """
 
+import json as _json
 import logging
-from typing import Any, Dict, List
-from uuid import uuid4
+import os
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy import text
@@ -17,10 +25,26 @@ from core.database.database import get_db
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
 
+from channels.drivers import (
+    ConnectivityMode,
+    DriverNotConfigured,
+    UnknownPlatform,
+    VerifyResult,
+    get_driver,
+    list_platforms,
+)
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/channels", tags=["channels"])
 
+# Public-API host used to build inbound webhook URLs. Override via env
+# (e.g. ``api.staging.automatos.app``) — default matches production.
+_PUBLIC_API_HOST = os.getenv("PUBLIC_API_HOST", "api.automatos.app").rstrip("/")
+
+# Kept so callers passing a platform not in the driver registry still
+# get a clear "unsupported" error rather than a 500. The driver
+# registry is the source of truth for what's wireable end-to-end.
 _SUPPORTED_PLATFORMS = {
     "telegram", "slack", "discord", "teams", "google_chat",
     "signal", "imessage", "irc", "matrix", "line", "whatsapp",
@@ -28,12 +52,97 @@ _SUPPORTED_PLATFORMS = {
 }
 
 
-async def _ping_platform(platform: str, config: Dict[str, Any]) -> Dict[str, Any]:
-    """Hit the platform's identity endpoint to verify the stored
-    credentials work. Returns the same shape ``/test`` returns to the
-    dashboard so callers can pass it through.
+# ---------------------------------------------------------------------------
+# Driver-mediated helpers
+# ---------------------------------------------------------------------------
 
-    Pure verification — no adapter lifecycle side effects.
+def _webhook_url_for(db: Session, workspace_id) -> Optional[str]:
+    """Build the inbound webhook URL the platform should POST to. Uses
+    ``workspaces.webhook_key`` (URL-as-secret) so the URL itself
+    authenticates the inbound request. None if no key is provisioned —
+    caller decides whether to fail or skip install."""
+    row = db.execute(
+        text("SELECT webhook_key FROM workspaces WHERE id = :ws"),
+        {"ws": str(workspace_id)},
+    ).fetchone()
+    if not row or not row.webhook_key:
+        return None
+    return f"https://{_PUBLIC_API_HOST}/api/webhooks/ws/{row.webhook_key}"
+
+
+def _verify_result_dict(result: VerifyResult) -> Dict[str, Any]:
+    """Marshal a ``VerifyResult`` into the dict shape the dashboard
+    /test handler consumes."""
+    if result.ok:
+        return {
+            "status": "connected",
+            "identity": result.identity,
+            "bot_name": (result.metadata or {}).get("username"),
+            "team": (result.metadata or {}).get("team"),
+            "metadata": dict(result.metadata or {}),
+        }
+    return {"status": "error", "detail": result.error or "Unknown error"}
+
+
+def _save_verify_outcome(
+    db: Session,
+    channel_id: str,
+    result: VerifyResult,
+    *,
+    extra_metadata: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Persist the outcome of a verify on the row: status,
+    last_verified, last_error, and any metadata the driver returned.
+    Best-effort — never raises."""
+    try:
+        now = datetime.now(timezone.utc)
+        new_status = "active" if result.ok else "error"
+        new_error = None if result.ok else (result.error or "verify failed")
+
+        # Merge new metadata into existing
+        meta_row = db.execute(
+            text("SELECT metadata FROM channel_connections WHERE id = :id"),
+            {"id": channel_id},
+        ).fetchone()
+        existing_meta: Dict[str, Any] = {}
+        if meta_row and meta_row.metadata:
+            existing_meta = meta_row.metadata if isinstance(meta_row.metadata, dict) else {}
+        if result.metadata:
+            existing_meta.update(dict(result.metadata))
+        if extra_metadata:
+            existing_meta.update(extra_metadata)
+
+        db.execute(
+            text(
+                """
+                UPDATE channel_connections
+                SET status = :status,
+                    last_verified = CASE WHEN :ok THEN :now ELSE last_verified END,
+                    last_error = :err,
+                    metadata = CAST(:meta AS JSON),
+                    updated_at = NOW()
+                WHERE id = :id
+                """
+            ),
+            {
+                "status": new_status,
+                "ok": result.ok,
+                "now": now,
+                "err": new_error,
+                "meta": _json.dumps(existing_meta),
+                "id": channel_id,
+            },
+        )
+        db.commit()
+    except Exception:
+        logger.exception("Failed to persist verify outcome for channel %s", channel_id)
+        db.rollback()
+
+
+async def _ping_platform_legacy(platform: str, config: Dict[str, Any]) -> Dict[str, Any]:
+    """Legacy inline pinger — retained ONLY for the route handlers that
+    haven't been ported to the driver interface yet (none should
+    remain). New code: ``get_driver(platform)().verify(...)``.
     """
     import httpx
 
@@ -130,7 +239,8 @@ async def list_channels(
     """
     rows = db.execute(
         text("""
-            SELECT id, platform, status, metadata, default_agent_id, message_count, last_activity_at, created_at
+            SELECT id, platform, status, mode, webhook_url, last_verified, last_error,
+                   metadata, default_agent_id, message_count, last_activity_at, created_at
             FROM channel_connections
             WHERE workspace_id = :ws_id
             ORDER BY created_at DESC
@@ -157,6 +267,10 @@ async def list_channels(
                 "id": str(r.id),
                 "platform": r.platform,
                 "status": effective_status,
+                "mode": r.mode or "webhook",
+                "webhook_url": r.webhook_url,
+                "last_verified": r.last_verified.isoformat() if r.last_verified else None,
+                "last_error": r.last_error,
                 "metadata": r.metadata or {},
                 "default_agent_id": r.default_agent_id,
                 "message_count": r.message_count or 0,
@@ -226,31 +340,112 @@ async def create_channel(
 
     logger.info("Created channel connection %s (%s) for workspace %s", conn_id, platform, ctx.workspace_id)
 
-    # Verify the credentials with a platform-API ping. If the token is
-    # valid, mark the row ``active`` — independent of whether we can
-    # start a polling adapter on top. Many users run their bot in
-    # webhook mode and don't want a polling adapter at all; previously
-    # those rows stayed ``inactive`` forever.
-    ping = await _ping_platform(platform, config)
-    if ping.get("status") == "connected":
-        _mark_active(db, str(conn_id))
-
-    # Best-effort polling-adapter start, for users who actually want
-    # polling. Doesn't gate the response status — that's now driven by
-    # the ping result. Failures are logged and swallowed.
+    # ------------------------------------------------------------------
+    # PRD-008-A.4 — driver-mediated verify + (install_webhook | start_polling)
+    # ------------------------------------------------------------------
     try:
-        from channels.manager import get_channel_manager
-        manager = get_channel_manager()
-        await manager.start_adapter(str(conn_id), str(ctx.workspace_id), platform, config)
-    except Exception as exc:
-        logger.warning("Polling adapter failed to start for new channel %s: %s", conn_id, exc)
+        driver = get_driver(platform)()
+    except UnknownPlatform:
+        # Platform is in _SUPPORTED_PLATFORMS but has no driver yet —
+        # row is saved, but caller gets a clear note.
+        return {
+            "id": str(conn_id),
+            "platform": platform,
+            "status": "inactive",
+            "test": {
+                "status": "error",
+                "detail": f"No driver registered for {platform!r} yet — row saved",
+            },
+        }
 
-    final_status = "active" if ping.get("status") == "connected" else "inactive"
+    requested_mode = str(payload.get("mode") or driver.default_mode().value).lower()
+    if not driver.supports(ConnectivityMode(requested_mode) if requested_mode in {"webhook", "polling"} else driver.default_mode()):
+        # Fall back to the driver's preferred mode rather than erroring.
+        requested_mode = driver.default_mode().value
+
+    verify_result = await driver.verify(workspace_id=str(ctx.workspace_id), config=config)
+
+    # Persist the mode on the row now that we know which one we'll use.
+    db.execute(
+        text("UPDATE channel_connections SET mode = :mode WHERE id = :id"),
+        {"mode": requested_mode, "id": str(conn_id)},
+    )
+    db.commit()
+
+    # If verify failed, persist the error and bail — no point installing
+    # webhooks or starting polling against creds we know don't work.
+    _save_verify_outcome(db, str(conn_id), verify_result)
+    if not verify_result.ok:
+        return {
+            "id": str(conn_id),
+            "platform": platform,
+            "status": "error",
+            "mode": requested_mode,
+            "test": _verify_result_dict(verify_result),
+        }
+
+    webhook_url: Optional[str] = None
+    install_result: Optional[VerifyResult] = None
+
+    if requested_mode == "webhook":
+        webhook_url = _webhook_url_for(db, ctx.workspace_id)
+        if webhook_url:
+            try:
+                install_result = await driver.install_webhook(
+                    workspace_id=str(ctx.workspace_id),
+                    config=config,
+                    webhook_url=webhook_url,
+                )
+            except NotImplementedError:
+                install_result = VerifyResult(ok=True, identity=webhook_url)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("install_webhook failed for %s: %s", platform, exc)
+                install_result = VerifyResult(ok=False, error=str(exc))
+            if install_result and install_result.ok:
+                db.execute(
+                    text(
+                        "UPDATE channel_connections SET webhook_url = :url, updated_at = NOW() "
+                        "WHERE id = :id"
+                    ),
+                    {"url": webhook_url, "id": str(conn_id)},
+                )
+                db.commit()
+            elif install_result:
+                # Webhook install failed — keep status=active (verify was ok)
+                # but surface the install error so the merchant knows
+                # they need to set the URL manually.
+                _save_verify_outcome(
+                    db, str(conn_id),
+                    VerifyResult(
+                        ok=False,
+                        error=f"verify ok but webhook install failed: {install_result.error}",
+                    ),
+                )
+    elif requested_mode == "polling":
+        try:
+            started = await driver.start_polling(
+                connection_id=str(conn_id),
+                workspace_id=str(ctx.workspace_id),
+                config=config,
+            )
+            if not started:
+                logger.info(
+                    "Polling not started for %s — likely optional dep missing", platform,
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("start_polling failed for %s: %s", platform, exc)
+
     return {
         "id": str(conn_id),
         "platform": platform,
-        "status": final_status,
-        "test": ping,
+        "status": "active",
+        "mode": requested_mode,
+        "webhook_url": webhook_url,
+        "test": _verify_result_dict(verify_result),
+        "install": (
+            _verify_result_dict(install_result)
+            if install_result is not None else None
+        ),
     }
 
 
@@ -297,22 +492,57 @@ async def delete_channel(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
-    """Delete a channel connection (stops adapter if running)."""
+    """Delete a channel connection.
+
+    Calls the driver's ``uninstall_webhook`` first (so the platform
+    stops POSTing to us) and stops any running polling adapter, then
+    removes the row. Both side-effects are best-effort — the row is
+    always deleted even if the driver call fails.
+    """
     row = db.execute(
-        text("SELECT id, platform FROM channel_connections WHERE id = :id AND workspace_id = :ws_id"),
+        text(
+            "SELECT id, platform, mode, config FROM channel_connections "
+            "WHERE id = :id AND workspace_id = :ws_id"
+        ),
         {"id": channel_id, "ws_id": str(ctx.workspace_id)},
     ).fetchone()
 
     if not row:
         raise HTTPException(404, "Channel connection not found")
 
-    # Stop adapter if running
+    config = row.config or {}
+    if isinstance(config, str):
+        try:
+            config = _json.loads(config)
+        except Exception:
+            config = {}
+
+    try:
+        driver = get_driver(row.platform)()
+    except UnknownPlatform:
+        driver = None
+
+    if driver is not None:
+        if (row.mode or "webhook") == "webhook":
+            try:
+                await driver.uninstall_webhook(
+                    workspace_id=str(ctx.workspace_id), config=config,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("uninstall_webhook failed for %s: %s", row.platform, exc)
+        else:
+            try:
+                await driver.stop_polling(connection_id=channel_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("stop_polling failed for %s: %s", row.platform, exc)
+
+    # Belt-and-braces: legacy adapter map may still hold a reference.
     try:
         from channels.manager import get_channel_manager
         manager = get_channel_manager()
         await manager.stop_adapter(channel_id)
-    except Exception as exc:
-        logger.warning("Could not stop adapter for channel %s: %s", channel_id, exc)
+    except Exception:
+        pass
 
     db.execute(
         text("DELETE FROM channel_connections WHERE id = :id"),
@@ -324,32 +554,75 @@ async def delete_channel(
     return {"status": "deleted"}
 
 
+# ---------------------------------------------------------------------------
+# Driver introspection — dashboard reads this to render the connect form.
+# ---------------------------------------------------------------------------
+
+@router.get("/platforms")
+async def list_supported_platforms() -> List[Dict[str, Any]]:
+    """Return every registered driver with the config fields the connect
+    form needs to collect and the connectivity modes it supports."""
+    out: List[Dict[str, Any]] = []
+    for platform in list_platforms():
+        try:
+            driver = get_driver(platform)()
+        except UnknownPlatform:
+            continue
+        out.append({
+            "platform": platform,
+            "display_name": driver.display_name or platform.title(),
+            "modes": [m.value for m in driver.supported_modes],
+            "default_mode": driver.default_mode().value,
+            "required_config": [
+                {"key": k, "label": label, "placeholder": placeholder}
+                for k, label, placeholder in driver.required_config
+            ],
+            "optional_config": [
+                {"key": k, "label": label, "placeholder": placeholder}
+                for k, label, placeholder in driver.optional_config
+            ],
+        })
+    return out
+
+
 @router.post("/{channel_id}/test")
 async def test_channel(
     channel_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
-    """Test a channel connection by pinging the platform API.
+    """Re-verify a channel via its driver.
 
-    On success the row is marked ``active`` so the dashboard reflects
-    the merchant's confirmation that the credentials work. Does NOT
-    start a polling adapter — that would conflict with a bot already
-    running in webhook mode. The separate ``/start`` endpoint handles
-    polling-adapter lifecycle when that's what the merchant wants.
+    Updates ``status`` / ``last_verified`` / ``last_error`` so the
+    dashboard reflects the most recent outcome without a page reload.
+    Never starts polling — see ``/start``.
     """
     row = db.execute(
         text("SELECT platform, config FROM channel_connections WHERE id = :id AND workspace_id = :ws_id"),
         {"id": channel_id, "ws_id": str(ctx.workspace_id)},
     ).fetchone()
-
     if not row:
         raise HTTPException(404, "Channel connection not found")
 
-    result = await _ping_platform(row.platform, row.config or {})
-    if result.get("status") == "connected":
-        _mark_active(db, channel_id)
-    return result
+    try:
+        driver = get_driver(row.platform)()
+    except UnknownPlatform:
+        return {"status": "error", "detail": f"No driver for platform {row.platform!r}"}
+
+    config = row.config or {}
+    if isinstance(config, str):
+        try:
+            config = _json.loads(config)
+        except Exception:
+            config = {}
+    try:
+        verify_result = await driver.verify(workspace_id=str(ctx.workspace_id), config=config)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("test_channel: driver.verify raised for %s", row.platform)
+        verify_result = VerifyResult(ok=False, error=f"driver raised: {exc}")
+
+    _save_verify_outcome(db, channel_id, verify_result)
+    return _verify_result_dict(verify_result)
 
 
 @router.post("/{channel_id}/start")
