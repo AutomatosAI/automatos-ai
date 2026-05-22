@@ -27,6 +27,77 @@ _SUPPORTED_PLATFORMS = {
     "webhook",
 }
 
+
+async def _ping_platform(platform: str, config: Dict[str, Any]) -> Dict[str, Any]:
+    """Hit the platform's identity endpoint to verify the stored
+    credentials work. Returns the same shape ``/test`` returns to the
+    dashboard so callers can pass it through.
+
+    Pure verification — no adapter lifecycle side effects.
+    """
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            if platform == "telegram":
+                token = config.get("bot_token", "")
+                resp = await client.get(f"https://api.telegram.org/bot{token}/getMe")
+                if resp.status_code == 200:
+                    bot_info = resp.json().get("result", {})
+                    return {"status": "connected", "bot_name": bot_info.get("username")}
+                # 404 is the symptom of a bot_token missing the "<bot_id>:" prefix —
+                # surface the likely cause so the dashboard error is actionable.
+                if resp.status_code == 404:
+                    return {
+                        "status": "error",
+                        "detail": (
+                            "Telegram returned 404 — the bot_token is likely missing the "
+                            "leading '<bot_id>:' prefix. Paste the full token from "
+                            "@BotFather, e.g. '1234567890:AAF…'."
+                        ),
+                    }
+                return {"status": "error", "detail": f"Telegram API returned {resp.status_code}"}
+
+            if platform == "slack":
+                token = config.get("bot_token", "")
+                resp = await client.post(
+                    "https://slack.com/api/auth.test",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                data = resp.json()
+                if data.get("ok"):
+                    return {"status": "connected", "team": data.get("team"), "bot_user": data.get("user")}
+                return {"status": "error", "detail": data.get("error", "Unknown error")}
+
+            if platform == "discord":
+                token = config.get("bot_token", "")
+                resp = await client.get(
+                    "https://discord.com/api/v10/users/@me",
+                    headers={"Authorization": f"Bot {token}"},
+                )
+                if resp.status_code == 200:
+                    user = resp.json()
+                    return {"status": "connected", "bot_name": user.get("username")}
+                return {"status": "error", "detail": f"Discord API returned {resp.status_code}"}
+
+        return {"status": "error", "detail": f"No verifier for platform {platform!r}"}
+    except Exception as exc:
+        logger.error("Platform ping failed for %s: %s", platform, exc)
+        return {"status": "error", "detail": "Connection test failed"}
+
+
+def _mark_active(db: Session, channel_id: str) -> None:
+    """Flip the row to ``status='active'``. Best-effort — never raises."""
+    try:
+        db.execute(
+            text("UPDATE channel_connections SET status = 'active', updated_at = NOW() WHERE id = :id"),
+            {"id": channel_id},
+        )
+        db.commit()
+    except Exception:
+        logger.exception("Failed to mark channel %s active", channel_id)
+        db.rollback()
+
 _REQUIRED_CONFIG = {
     "telegram": ["bot_token"],
     "slack": ["bot_token", "signing_secret"],
@@ -155,23 +226,32 @@ async def create_channel(
 
     logger.info("Created channel connection %s (%s) for workspace %s", conn_id, platform, ctx.workspace_id)
 
-    started = False
+    # Verify the credentials with a platform-API ping. If the token is
+    # valid, mark the row ``active`` — independent of whether we can
+    # start a polling adapter on top. Many users run their bot in
+    # webhook mode and don't want a polling adapter at all; previously
+    # those rows stayed ``inactive`` forever.
+    ping = await _ping_platform(platform, config)
+    if ping.get("status") == "connected":
+        _mark_active(db, str(conn_id))
+
+    # Best-effort polling-adapter start, for users who actually want
+    # polling. Doesn't gate the response status — that's now driven by
+    # the ping result. Failures are logged and swallowed.
     try:
         from channels.manager import get_channel_manager
         manager = get_channel_manager()
-        started = await manager.start_adapter(str(conn_id), str(ctx.workspace_id), platform, config)
+        await manager.start_adapter(str(conn_id), str(ctx.workspace_id), platform, config)
     except Exception as exc:
-        logger.warning("Failed to auto-start adapter for new channel %s: %s", conn_id, exc)
+        logger.warning("Polling adapter failed to start for new channel %s: %s", conn_id, exc)
 
-    if started:
-        db.execute(
-            text("UPDATE channel_connections SET status = 'active', updated_at = NOW() WHERE id = :id"),
-            {"id": str(conn_id)},
-        )
-        db.commit()
-
-    final_status = "active" if started else "inactive"
-    return {"id": str(conn_id), "platform": platform, "status": final_status}
+    final_status = "active" if ping.get("status") == "connected" else "inactive"
+    return {
+        "id": str(conn_id),
+        "platform": platform,
+        "status": final_status,
+        "test": ping,
+    }
 
 
 @router.put("/{channel_id}")
@@ -252,12 +332,11 @@ async def test_channel(
 ):
     """Test a channel connection by pinging the platform API.
 
-    Does NOT start an adapter or mutate ``status``. The user's bot may
-    be running in webhook mode (Telegram setWebhook / Slack Events
-    Subscriptions) — starting a polling adapter on top would conflict
-    with the webhook (Telegram returns 409 on getUpdates). The Channels
-    tab's separate "Start"/"Stop" controls handle adapter lifecycle when
-    the merchant actually wants polling.
+    On success the row is marked ``active`` so the dashboard reflects
+    the merchant's confirmation that the credentials work. Does NOT
+    start a polling adapter — that would conflict with a bot already
+    running in webhook mode. The separate ``/start`` endpoint handles
+    polling-adapter lifecycle when that's what the merchant wants.
     """
     row = db.execute(
         text("SELECT platform, config FROM channel_connections WHERE id = :id AND workspace_id = :ws_id"),
@@ -267,48 +346,10 @@ async def test_channel(
     if not row:
         raise HTTPException(404, "Channel connection not found")
 
-    platform = row.platform
-    config = row.config or {}
-
-    import httpx
-
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            if platform == "telegram":
-                token = config.get("bot_token", "")
-                resp = await client.get(f"https://api.telegram.org/bot{token}/getMe")
-                if resp.status_code == 200:
-                    bot_info = resp.json().get("result", {})
-                    return {"status": "connected", "bot_name": bot_info.get("username")}
-                return {"status": "error", "detail": f"Telegram API returned {resp.status_code}"}
-
-            elif platform == "slack":
-                token = config.get("bot_token", "")
-                resp = await client.post(
-                    "https://slack.com/api/auth.test",
-                    headers={"Authorization": f"Bearer {token}"},
-                )
-                data = resp.json()
-                if data.get("ok"):
-                    return {"status": "connected", "team": data.get("team"), "bot_user": data.get("user")}
-                return {"status": "error", "detail": data.get("error", "Unknown error")}
-
-            elif platform == "discord":
-                token = config.get("bot_token", "")
-                resp = await client.get(
-                    "https://discord.com/api/v10/users/@me",
-                    headers={"Authorization": f"Bot {token}"},
-                )
-                if resp.status_code == 200:
-                    user = resp.json()
-                    return {"status": "connected", "bot_name": user.get("username")}
-                return {"status": "error", "detail": f"Discord API returned {resp.status_code}"}
-
-        return {"status": "error", "detail": f"Unknown platform: {platform}"}
-
-    except Exception as e:
-        logger.error("Channel test failed for %s: %s", channel_id, e)
-        return {"status": "error", "detail": "Connection test failed"}
+    result = await _ping_platform(row.platform, row.config or {})
+    if result.get("status") == "connected":
+        _mark_active(db, channel_id)
+    return result
 
 
 @router.post("/{channel_id}/start")
