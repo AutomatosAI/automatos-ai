@@ -123,30 +123,14 @@ def shopify_access_token(ctx: BridgeContext) -> BridgeResult:
             status="bridge_error",
             error="shopSubdomain and accessToken are required",
         )
-    # Shopify ships several token types from the Custom App screen. Composio's
-    # Shopify tools (SHOPIFY_GET_PRODUCTS_LIST etc.) hit the Admin API and need
-    # the Admin API access token — which always starts with shpat_. The other
-    # prefixes are real Shopify tokens but for different APIs; reject them with
-    # a specific message so the merchant grabs the right one.
-    wrong_prefix_hints = {
-        "shpss_": "You pasted the Storefront API access token. Composio needs the "
-                  "Admin API access token (shpat_…) from the same Custom App's "
-                  "'API credentials' tab — it's the section above Storefront API.",
-        "shpua_": "You pasted a User access token. Composio needs the Admin API "
-                  "access token (shpat_…) from the Custom App's API credentials tab.",
-        "shpca_": "You pasted a Customer Account API token. Composio needs the "
-                  "Admin API access token (shpat_…) from the Custom App's API "
-                  "credentials tab.",
-    }
-    for bad_prefix, msg in wrong_prefix_hints.items():
-        if token.startswith(bad_prefix):
-            return BridgeResult(status="bridge_error", error=msg)
-    if not token.startswith("shpat_"):
-        return BridgeResult(
-            status="bridge_error",
-            error="accessToken doesn't look like a Shopify Admin API token (shpat_…). "
-                  "In your Shopify Custom App's 'API credentials' tab, click "
-                  "'Reveal token once' under 'Admin API access token' and paste that.",
+    # Don't pre-validate the token prefix — Shopify ships multiple token types
+    # (shpat_/shpss_/shpua_/shpca_) and the prefixes have changed over time.
+    # Submit the token to Composio and surface their error verbatim if it
+    # rejects — Composio is the authority on what works with their toolkit.
+    if not token.startswith("shp"):
+        logger.warning(
+            "[bridge:shopify] accessToken doesn't start with 'shp' — proceeding "
+            "anyway and letting Composio validate."
         )
 
     entity_id = _resolve_entity_id(ctx.workspace_id)
@@ -158,14 +142,27 @@ def shopify_access_token(ctx: BridgeContext) -> BridgeResult:
     if not composio:
         return BridgeResult(status="bridge_error", error="Composio client not initialised (COMPOSIO_API_KEY missing)")
 
-    connection = composio.connected_accounts.initiate(
-        entity_id,
-        SHARED_API_KEY_AUTH_CONFIG,
-        config={
-            "authScheme": "API_KEY",
-            "val": {"subdomain": subdomain, "generic_api_key": token},
-        },
-    )
+    try:
+        connection = composio.connected_accounts.initiate(
+            entity_id,
+            SHARED_API_KEY_AUTH_CONFIG,
+            config={
+                "authScheme": "API_KEY",
+                "val": {"subdomain": subdomain, "generic_api_key": token},
+            },
+        )
+    except Exception as e:
+        # Surface Composio's actual error — it's the authority on what's wrong.
+        logger.exception("[bridge:shopify] Composio rejected token")
+        err_msg = str(e)
+        # Strip generic SDK noise so the UI alert reads cleanly.
+        for chunk in ("Composio API Error: ", "API Error: "):
+            if chunk in err_msg:
+                err_msg = err_msg.split(chunk, 1)[1]
+        return BridgeResult(
+            status="bridge_error",
+            error=f"Composio rejected the credential: {err_msg}",
+        )
 
     conn_id = getattr(connection, "id", None) or getattr(connection, "connectionId", None)
     conn_status = (getattr(connection, "status", "") or "").upper()
