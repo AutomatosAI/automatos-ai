@@ -123,16 +123,30 @@ def shopify_access_token(ctx: BridgeContext) -> BridgeResult:
             status="bridge_error",
             error="shopSubdomain and accessToken are required",
         )
-    if not token.startswith(("shpat_", "shpua_", "shpss_", "shpca_")):
-        # Soft warning — log it but let Composio reject if it's really wrong.
-        # Shopify Custom App admin API tokens are normally shpat_*, but the
-        # prefix has evolved and we don't want a stale check to block valid
-        # tokens. The bridge is the wrong place to enforce Shopify schema.
-        logger.warning(
-            "[bridge:shopify] accessToken doesn't match known Shopify prefixes "
-            "(shpat_/shpua_/shpss_/shpca_) — submitting to Composio anyway. "
-            "If this fails, check that you copied the 'Admin API access token' "
-            "from your Shopify Custom App, not the API key or API secret key."
+    # Shopify ships several token types from the Custom App screen. Composio's
+    # Shopify tools (SHOPIFY_GET_PRODUCTS_LIST etc.) hit the Admin API and need
+    # the Admin API access token — which always starts with shpat_. The other
+    # prefixes are real Shopify tokens but for different APIs; reject them with
+    # a specific message so the merchant grabs the right one.
+    wrong_prefix_hints = {
+        "shpss_": "You pasted the Storefront API access token. Composio needs the "
+                  "Admin API access token (shpat_…) from the same Custom App's "
+                  "'API credentials' tab — it's the section above Storefront API.",
+        "shpua_": "You pasted a User access token. Composio needs the Admin API "
+                  "access token (shpat_…) from the Custom App's API credentials tab.",
+        "shpca_": "You pasted a Customer Account API token. Composio needs the "
+                  "Admin API access token (shpat_…) from the Custom App's API "
+                  "credentials tab.",
+    }
+    for bad_prefix, msg in wrong_prefix_hints.items():
+        if token.startswith(bad_prefix):
+            return BridgeResult(status="bridge_error", error=msg)
+    if not token.startswith("shpat_"):
+        return BridgeResult(
+            status="bridge_error",
+            error="accessToken doesn't look like a Shopify Admin API token (shpat_…). "
+                  "In your Shopify Custom App's 'API credentials' tab, click "
+                  "'Reveal token once' under 'Admin API access token' and paste that.",
         )
 
     entity_id = _resolve_entity_id(ctx.workspace_id)
