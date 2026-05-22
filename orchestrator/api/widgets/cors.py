@@ -88,8 +88,12 @@ class WidgetCORSMiddleware:
 
             response_headers = [
                 (b"access-control-allow-origin", origin.encode("latin-1")),
-                (b"access-control-allow-methods", b"GET, POST, PUT, DELETE, OPTIONS"),
-                (b"access-control-allow-headers", b"Authorization, Content-Type, X-Workspace-ID"),
+                # PRD-008-A.4: include PATCH — the dashboard CallbackPanel
+                # uses PATCH /api/sites/{id}/settings to save destinations.
+                # Without it the browser silently drops the actual request
+                # after a successful preflight and surfaces "Failed to fetch".
+                (b"access-control-allow-methods", b"GET, POST, PUT, PATCH, DELETE, OPTIONS"),
+                (b"access-control-allow-headers", b"Authorization, Content-Type, X-API-Key, X-Workspace-ID, X-Request-ID"),
                 (b"access-control-max-age", b"86400"),
                 (b"access-control-allow-credentials", b"true"),
             ]
