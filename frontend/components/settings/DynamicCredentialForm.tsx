@@ -33,6 +33,71 @@ interface DynamicCredentialFormProps {
   onCancel?: () => void
 }
 
+// Field-label overrides for credential types where the canonical schema in the
+// DB ships with terse names ("Access Token", "APP Secret Key" — useless when
+// the platform has multiple token types). Overlay clearer labels + inline
+// hints at render time so merchants know exactly which value to paste where
+// without us touching the shared credential_types DB rows.
+type FieldOverride = {
+  displayName?: string
+  description?: string
+  placeholder?: string
+}
+const CREDENTIAL_FIELD_OVERRIDES: Record<string, Record<string, FieldOverride>> = {
+  shopifyAccessTokenApi: {
+    shopSubdomain: {
+      displayName: 'Shop Subdomain',
+      description:
+        'Just the subdomain — e.g. innobuilduk for innobuilduk.myshopify.com. No https://, no .myshopify.com.',
+      placeholder: 'innobuilduk',
+    },
+    accessToken: {
+      displayName: 'Admin API Access Token (shpat_…)',
+      description:
+        "From your Shopify admin → Settings → Apps and sales channels → Develop apps → your app → API credentials tab. Click 'Reveal token once' under 'Admin API access token'. NOT the Storefront API token (shpss_…) further down the page.",
+      placeholder: 'shpat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
+    },
+    appSecretKey: {
+      displayName: 'API Secret Key',
+      description:
+        "From the same API credentials tab, in the 'API key and secret key' section. Used to verify Shopify webhooks (HMAC).",
+    },
+  },
+  shopifyOAuth2Api: {
+    shopSubdomain: {
+      displayName: 'Shop Subdomain',
+      description:
+        'Just the subdomain — e.g. innobuilduk for innobuilduk.myshopify.com.',
+      placeholder: 'innobuilduk',
+    },
+    clientId: {
+      displayName: 'Partner App Client ID',
+      description:
+        'From your Shopify Partner Dashboard → Apps → your app → Configuration → Client ID.',
+    },
+    clientSecret: {
+      displayName: 'Partner App Client Secret',
+      description:
+        'From the same Configuration screen, next to Client ID. Treat as a password.',
+    },
+  },
+}
+
+function applyFieldOverride(
+  typeName: string | undefined,
+  field: CredentialFieldDefinition,
+): CredentialFieldDefinition {
+  if (!typeName) return field
+  const overrides = CREDENTIAL_FIELD_OVERRIDES[typeName]?.[field.name]
+  if (!overrides) return field
+  return {
+    ...field,
+    displayName: overrides.displayName ?? field.displayName,
+    description: overrides.description ?? field.description,
+    placeholder: overrides.placeholder ?? field.placeholder,
+  }
+}
+
 export function DynamicCredentialForm({
   credentialId,
   lockCredentialTypeId,
@@ -500,7 +565,9 @@ export function DynamicCredentialForm({
             </div>
           )}
 
-          {selectedType.schema_definition.map(field => renderField(field))}
+          {selectedType.schema_definition.map(field =>
+            renderField(applyFieldOverride(selectedType.name, field))
+          )}
         </div>
       )}
 
