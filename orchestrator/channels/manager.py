@@ -164,6 +164,16 @@ class ChannelManager:
     # Status
     # ------------------------------------------------------------------
 
+    def is_running(self, connection_id: str) -> bool:
+        """True iff an adapter for ``connection_id`` is loaded AND its
+        ``is_running`` flag is set. Used by API surfaces (e.g.
+        ``GET /api/channels``) to reconcile the DB-stored status column
+        with reality after boot — the DB row can drift from
+        ``inactive`` to ``active`` (or back) without anyone updating it.
+        """
+        adapter = self._adapters.get(connection_id)
+        return bool(adapter and getattr(adapter, "is_running", False))
+
     def get_status(self) -> dict:
         """Return a status snapshot of all managed adapters."""
         return {

@@ -206,14 +206,18 @@ def _validate_callback_destinations(
                 )
             continue
 
-        # Channel-backed platforms (telegram/slack/whatsapp) — require an
-        # active ChannelConnection of this platform in the workspace.
+        # Channel-backed platforms (telegram/slack/whatsapp) — require a
+        # ChannelConnection of this platform to exist in the workspace.
+        # Status is NOT checked here: an ``inactive`` channel is the
+        # normal pre-/start state for a freshly connected Telegram bot,
+        # and the heartbeat "Report To" pattern doesn't filter on status
+        # either. The dispatcher will surface a precise runtime error
+        # if the adapter actually fails to deliver.
         connection_exists = (
             db.query(ChannelConnection.id)
             .filter(
                 ChannelConnection.workspace_id == workspace_id,
                 ChannelConnection.platform == platform,
-                ChannelConnection.status == "active",
             )
             .first()
         )
@@ -221,7 +225,7 @@ def _validate_callback_destinations(
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    f"No active {platform} channel connection in this workspace — "
+                    f"No {platform} channel connection in this workspace — "
                     f"connect one under Settings → Channels first."
                 ),
             )
