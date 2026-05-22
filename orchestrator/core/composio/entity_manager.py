@@ -123,12 +123,31 @@ class EntityManager:
                 result.append(app)
         return result
 
+    def get_connection_metadata(
+        self, entity_id: int, app_name: str
+    ) -> Optional[Dict[str, Any]]:
+        """Read connection_metadata for (entity, app). Returns {} when row exists with empty meta, None when no row."""
+        try:
+            entity_pk = int(entity_id)
+        except Exception:
+            return None
+        app = (app_name or "").upper()
+        row = (
+            self.db.query(ComposioConnection)
+            .filter(ComposioConnection.entity_id == entity_pk, ComposioConnection.app_name == app)
+            .first()
+        )
+        if not row:
+            return None
+        return dict(row.connection_metadata or {})
+
     def add_connection(
         self,
         entity_id: str,
         app_name: str,
         status: str = "pending",
         connection_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
         **_: Any,
     ) -> None:
         try:
@@ -151,6 +170,14 @@ class EntityManager:
         # Store connection_id when provided
         if connection_id is not None:
             row.connection_id = connection_id
+
+        # Merge connection_metadata when provided (preserves prior keys).
+        # Used to pin per-workspace auth_config_id / auth_scheme so reconnects
+        # reuse the same scheme that worked the first time.
+        if metadata:
+            current = dict(row.connection_metadata or {})
+            current.update({k: v for k, v in metadata.items() if v is not None})
+            row.connection_metadata = current
 
         # Set connected_at for active connections
         if status == "active":
