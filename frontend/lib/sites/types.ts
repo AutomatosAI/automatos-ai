@@ -26,6 +26,11 @@ export interface CallbackDestination {
   /** Slack-only: explicit channel id (e.g. "C01ABC..."). When omitted,
    *  uses ``workspace.settings.integrations.slack_default_channel``. */
   channel_id?: string
+  /** Telegram-only: explicit chat id to send to. When omitted, the
+   *  driver falls back to the workspace's auto-captured default
+   *  (only populated if someone /start-ed the bot from THIS workspace's
+   *  webhook). Required if no default has been captured. */
+  chat_id?: string
   /** Webhook-only: URL the orchestrator POSTs to. */
   webhook_url?: string
 }

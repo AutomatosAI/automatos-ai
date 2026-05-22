@@ -187,14 +187,22 @@ async def handle_request(
             ip_address=ip_address,
             workspace_id=ctx.workspace_id,
         )
-        
+
         # Build response (without decrypted values)
         cred_type = store.get_credential_type(created_cred.credential_type_id)
-        
+
         # Extract field names from encrypted data
         decrypted = store.encryption_service.decrypt_dict(created_cred.encrypted_data)
         field_names = list(decrypted.keys())
-        
+
+        # Dispatch integration bridge (Shopify→Composio etc.) — fail-soft.
+        bridge_result = store.dispatch_integration_bridge(
+            credential_id=created_cred.id,
+            workspace_id=ctx.workspace_id,
+            credential_type_name=cred_type.name,
+            decrypted_data=decrypted,
+        )
+
         response = CredentialResponse(
             id=created_cred.id,
             name=created_cred.name,
@@ -213,9 +221,15 @@ async def handle_request(
             created_at=created_cred.created_at,
             updated_at=created_cred.updated_at,
             has_credentials=True,
-            field_names=field_names
+            field_names=field_names,
+            connection_status=bridge_result.status if bridge_result else None,
+            connection_id=bridge_result.connection_id if bridge_result else None,
+            auth_config_id=bridge_result.auth_config_id if bridge_result else None,
+            auth_scheme=bridge_result.auth_scheme if bridge_result else None,
+            oauth_redirect_url=bridge_result.oauth_redirect_url if bridge_result else None,
+            connection_error=bridge_result.error if bridge_result else None,
         )
-        
+
         return response
     
     except CredentialValidationError as e:
@@ -418,13 +432,25 @@ async def update_credential(
         )
         
         cred_type = store.get_credential_type(updated_cred.credential_type_id)
-        
+
+        decrypted: Dict[str, Any] = {}
         try:
             decrypted = store.encryption_service.decrypt_dict(updated_cred.encrypted_data)
-            field_names = list(decrypted.keys())
-        except:
-            field_names = []
-        
+        except Exception:
+            decrypted = {}
+        field_names = list(decrypted.keys())
+
+        # Re-dispatch the integration bridge so a rotated token / changed
+        # OAuth credentials reconnect (only when credential_data changed).
+        bridge_result = None
+        if update_data.credential_data is not None and decrypted:
+            bridge_result = store.dispatch_integration_bridge(
+                credential_id=updated_cred.id,
+                workspace_id=ctx.workspace_id,
+                credential_type_name=cred_type.name,
+                decrypted_data=decrypted,
+            )
+
         return CredentialResponse(
             id=updated_cred.id,
             name=updated_cred.name,
@@ -443,7 +469,13 @@ async def update_credential(
             created_at=updated_cred.created_at,
             updated_at=updated_cred.updated_at,
             has_credentials=True,
-            field_names=field_names
+            field_names=field_names,
+            connection_status=bridge_result.status if bridge_result else None,
+            connection_id=bridge_result.connection_id if bridge_result else None,
+            auth_config_id=bridge_result.auth_config_id if bridge_result else None,
+            auth_scheme=bridge_result.auth_scheme if bridge_result else None,
+            oauth_redirect_url=bridge_result.oauth_redirect_url if bridge_result else None,
+            connection_error=bridge_result.error if bridge_result else None,
         )
     
     except CredentialNotFoundError as e:

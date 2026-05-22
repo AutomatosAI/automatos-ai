@@ -183,24 +183,58 @@ export function DynamicCredentialForm({
     try {
       setSaving(true)
 
-      if (credentialId) {
-        // Update existing credential
-        await updateCredential(credentialId, {
-          name: credentialMetadata.name,
-          credential_data: formData,
-          description: credentialMetadata.description || undefined,
-          tags: credentialMetadata.tags ? credentialMetadata.tags.split(',').map(t => t.trim()) : []
-        })
-      } else {
-        // Create new credential
-        await createCredential({
-          name: credentialMetadata.name,
-          credential_type_id: selectedTypeId,
-          credential_data: formData,
-          environment: credentialMetadata.environment,
-          description: credentialMetadata.description || undefined,
-          tags: credentialMetadata.tags ? credentialMetadata.tags.split(',').map(t => t.trim()) : []
-        })
+      const saved = credentialId
+        ? await updateCredential(credentialId, {
+            name: credentialMetadata.name,
+            credential_data: formData,
+            description: credentialMetadata.description || undefined,
+            tags: credentialMetadata.tags
+              ? credentialMetadata.tags.split(',').map(t => t.trim())
+              : [],
+          })
+        : await createCredential({
+            name: credentialMetadata.name,
+            credential_type_id: selectedTypeId,
+            credential_data: formData,
+            environment: credentialMetadata.environment,
+            description: credentialMetadata.description || undefined,
+            tags: credentialMetadata.tags
+              ? credentialMetadata.tags.split(',').map(t => t.trim())
+              : [],
+          })
+
+      // Surface backend integration-bridge result (Shopify→Composio etc.).
+      switch (saved.connection_status) {
+        case 'pending_oauth':
+          if (saved.oauth_redirect_url) {
+            // OAuth — open Composio's hosted install in a popup. Width/height
+            // mirror Shopify's recommended install dimensions.
+            const popup = window.open(
+              saved.oauth_redirect_url,
+              'shopify-oauth',
+              'width=600,height=720,menubar=no,toolbar=no,location=no',
+            )
+            if (!popup) {
+              alert(
+                'Pop-up blocked. Allow pop-ups for this site and try again, or open this URL manually:\n\n' +
+                  saved.oauth_redirect_url,
+              )
+            }
+          }
+          break
+        case 'unsupported':
+          alert(
+            saved.connection_error ||
+              'This credential type isn\'t supported by the integration platform — it was saved but no live connection was created.',
+          )
+          break
+        case 'bridge_error':
+          alert(
+            'Credential saved, but the platform connection failed:\n\n' +
+              (saved.connection_error || 'Unknown error'),
+          )
+          break
+        // case 'connected' or null — silent success
       }
 
       onSuccess?.()

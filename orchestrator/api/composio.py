@@ -77,14 +77,21 @@ class ConnectionResponse(BaseModel):
 
 
 class InitiateConnectionRequest(BaseModel):
-    """Request to initiate OAuth."""
+    """Request to initiate a hosted-auth connection."""
     callback_url: Optional[str] = None
+    # Optional per-workspace overrides for hosted-auth scheme selection.
+    # Pass auth_scheme="API_KEY" for Shopify merchants where managed-install
+    # breaks the OAuth bounce; auth_config_id pins a specific Composio config.
+    auth_scheme: Optional[str] = None
+    auth_config_id: Optional[str] = None
 
 
 class InitiateConnectionResponse(BaseModel):
-    """OAuth redirect URL."""
+    """Hosted-auth redirect URL + the chosen auth config (persisted on the workspace)."""
     redirect_url: str
     app_name: str
+    auth_config_id: Optional[str] = None
+    auth_scheme: Optional[str] = None
 
 
 class FeatureToggleRequest(BaseModel):
@@ -329,26 +336,48 @@ async def initiate_connection(
         frontend_url = config.FRONTEND_URL or "http://localhost:3000"
         callback_url = f"{frontend_url}/tools/callback?connected={app_name.upper()}"
 
+    # If the workspace already has a stored auth_config_id/scheme for this
+    # app (from a prior connect), reuse it unless the caller is explicitly
+    # overriding. This makes reconnects sticky to the scheme that worked.
+    explicit_scheme = request.auth_scheme if request else None
+    explicit_id = request.auth_config_id if request else None
+    if not explicit_scheme and not explicit_id:
+        prior_meta = entity_manager.get_connection_metadata(
+            entity_id=entity["id"], app_name=app_name.upper()
+        )
+        if prior_meta:
+            explicit_scheme = prior_meta.get("auth_scheme") or explicit_scheme
+            explicit_id = prior_meta.get("auth_config_id") or explicit_id
+
     try:
-        redirect_url = client.initiate_connection(
+        link = client.initiate_connection(
             entity_id=composio_entity_id,
             app=app_name.upper(),
-            callback_url=callback_url
+            callback_url=callback_url,
+            auth_config_id=explicit_id,
+            auth_scheme=explicit_scheme,
         )
     except Exception as e:
         logger.error(f"Failed to initiate connection for {app_name}: {e}")
         raise HTTPException(status_code=503, detail="Failed to initiate OAuth connection")
 
-    # Store pending connection
+    # Store pending connection + pin the chosen auth_config_id / scheme so
+    # subsequent reconnects pick the same one without the caller specifying.
     entity_manager.add_connection(
         entity_id=entity["id"],
         app_name=app_name.upper(),
-        status="pending"
+        status="pending",
+        metadata={
+            "auth_config_id": link.get("auth_config_id"),
+            "auth_scheme": link.get("auth_scheme"),
+        },
     )
 
     return InitiateConnectionResponse(
-        redirect_url=redirect_url,
-        app_name=app_name.upper()
+        redirect_url=link["redirect_url"],
+        app_name=app_name.upper(),
+        auth_config_id=link.get("auth_config_id"),
+        auth_scheme=link.get("auth_scheme"),
     )
 
 
