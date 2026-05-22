@@ -47,7 +47,16 @@ async def list_channels(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
-    """List all channel connections for the current workspace."""
+    """List all channel connections for the current workspace.
+
+    The ``status`` column is reconciled against ``ChannelManager`` at
+    read time — a row that reads ``inactive`` in the DB but whose
+    adapter is actually loaded and running (common after orchestrator
+    restarts, or for older rows that pre-date the auto-status-update
+    code) is reported as ``active`` here so the dashboard reflects
+    reality. The DB itself is also corrected so subsequent reads are
+    cheap.
+    """
     rows = db.execute(
         text("""
             SELECT id, platform, status, metadata, default_agent_id, message_count, last_activity_at, created_at
@@ -58,19 +67,54 @@ async def list_channels(
         {"ws_id": str(ctx.workspace_id)},
     ).fetchall()
 
-    return [
-        {
-            "id": str(r.id),
-            "platform": r.platform,
-            "status": r.status,
-            "metadata": r.metadata or {},
-            "default_agent_id": r.default_agent_id,
-            "message_count": r.message_count or 0,
-            "last_activity_at": r.last_activity_at.isoformat() if r.last_activity_at else None,
-            "created_at": r.created_at.isoformat() if r.created_at else None,
-        }
-        for r in rows
-    ]
+    try:
+        from channels.manager import get_channel_manager
+        manager = get_channel_manager()
+    except Exception:
+        manager = None
+
+    out: List[Dict[str, Any]] = []
+    rows_to_repair: List[str] = []
+    for r in rows:
+        effective_status = r.status
+        if manager is not None and manager.is_running(str(r.id)):
+            if effective_status != "active":
+                rows_to_repair.append(str(r.id))
+            effective_status = "active"
+        out.append(
+            {
+                "id": str(r.id),
+                "platform": r.platform,
+                "status": effective_status,
+                "metadata": r.metadata or {},
+                "default_agent_id": r.default_agent_id,
+                "message_count": r.message_count or 0,
+                "last_activity_at": r.last_activity_at.isoformat() if r.last_activity_at else None,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+        )
+
+    if rows_to_repair:
+        # Drift-repair: silently update the DB to match the running
+        # state. Best-effort — list endpoints must not fail on a write.
+        try:
+            db.execute(
+                text(
+                    "UPDATE channel_connections SET status = 'active', updated_at = NOW() "
+                    "WHERE id = ANY(:ids)"
+                ),
+                {"ids": rows_to_repair},
+            )
+            db.commit()
+            logger.info(
+                "list_channels: repaired stale status on %d row(s) (ws=%s)",
+                len(rows_to_repair), ctx.workspace_id,
+            )
+        except Exception:
+            logger.exception("list_channels: failed to repair stale status rows")
+            db.rollback()
+
+    return out
 
 
 @router.post("")
@@ -206,7 +250,15 @@ async def test_channel(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
-    """Test a channel connection by pinging the platform API."""
+    """Test a channel connection by pinging the platform API.
+
+    Does NOT start an adapter or mutate ``status``. The user's bot may
+    be running in webhook mode (Telegram setWebhook / Slack Events
+    Subscriptions) — starting a polling adapter on top would conflict
+    with the webhook (Telegram returns 409 on getUpdates). The Channels
+    tab's separate "Start"/"Stop" controls handle adapter lifecycle when
+    the merchant actually wants polling.
+    """
     row = db.execute(
         text("SELECT platform, config FROM channel_connections WHERE id = :id AND workspace_id = :ws_id"),
         {"id": channel_id, "ws_id": str(ctx.workspace_id)},

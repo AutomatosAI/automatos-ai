@@ -209,11 +209,21 @@ export function ChannelsSettingsTab() {
   const testChannel = async (channelId: string) => {
     setTesting(channelId)
     try {
-      const data = await apiClient.request<{ status: string; error?: string }>(`/api/channels/${channelId}/test`, { method: 'POST' })
-      if (data.status === 'ok') {
-        toast.success('Connection successful')
+      const data = await apiClient.request<{
+        status: string
+        detail?: string
+        bot_name?: string
+        team?: { name?: string }
+      }>(`/api/channels/${channelId}/test`, { method: 'POST' })
+      // Backend returns ``{status: "connected", ...}`` on success and
+      // ``{status: "error", detail: "..."}`` on failure. The previous
+      // implementation checked for "ok" which never matched, so even
+      // valid tokens reported "Test failed: Unknown error".
+      if (data.status === 'connected') {
+        const who = data.bot_name ?? data.team?.name
+        toast.success(who ? `Connection successful — ${who}` : 'Connection successful')
       } else {
-        toast.error(`Test failed: ${data.error || 'Unknown error'}`)
+        toast.error(`Test failed: ${data.detail || 'Unknown error'}`)
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Test failed')
