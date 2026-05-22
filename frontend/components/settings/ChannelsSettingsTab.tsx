@@ -222,6 +222,10 @@ export function ChannelsSettingsTab() {
       if (data.status === 'connected') {
         const who = data.bot_name ?? data.team?.name
         toast.success(who ? `Connection successful — ${who}` : 'Connection successful')
+        // Backend marks the row active on a successful ping; re-fetch
+        // so the badge in the list reflects the new state without a
+        // manual page refresh.
+        await loadChannels()
       } else {
         toast.error(`Test failed: ${data.detail || 'Unknown error'}`)
       }
