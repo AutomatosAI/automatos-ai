@@ -111,12 +111,14 @@ async def dispatch_via_channel(
     text = _render_callback_text(payload)
 
     # Per-platform target overrides from the destination row. Slack
-    # accepts an explicit channel_id, webhook needs the URL; everything
-    # else uses the driver-resolved default (e.g. Telegram's captured
-    # ``telegram_default_chat_id``).
+    # accepts an explicit channel_id; Telegram accepts an explicit
+    # chat_id (the workspace may have never received a /start so the
+    # auto-captured default isn't available); webhook needs the URL.
     target: str | None = None
     if platform == "slack":
         target = (destination.get("channel_id") or "").strip() or None
+    elif platform == "telegram":
+        target = (destination.get("chat_id") or "").strip() or None
     elif platform == "webhook":
         target = (destination.get("webhook_url") or "").strip() or None
         if not target:

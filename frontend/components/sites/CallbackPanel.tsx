@@ -271,6 +271,25 @@ export function CallbackPanel({
           </div>
         )}
 
+        {choice === 'telegram' && (
+          <div className="space-y-2">
+            <Label>Telegram chat ID</Label>
+            <Input
+              value={currentDest?.chat_id ?? ''}
+              onChange={(e) => patchCurrent({ chat_id: e.target.value })}
+              placeholder="e.g. 31973919 or -1001234567890"
+            />
+            <p className="text-xs text-muted-foreground">
+              Personal chat: send <code>/start</code> to your bot from Telegram —
+              the bot's <code>/getUpdates</code> response has your chat id.
+              Group/channel: invite the bot, then read the chat id from{' '}
+              <code>https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code>.
+              Leave blank only if the bot has already captured a default chat
+              for this workspace.
+            </p>
+          </div>
+        )}
+
         {choice === 'webhook' && (
           <div className="space-y-2">
             <Label>Webhook URL</Label>
