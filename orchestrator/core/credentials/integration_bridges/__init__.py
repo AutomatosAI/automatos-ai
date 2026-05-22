@@ -47,10 +47,24 @@ def dispatch(ctx: BridgeContext) -> Optional[BridgeResult]:
     surfaced as BridgeResult(status="bridge_error", error=...).
     """
     handler = _BRIDGES.get(ctx.credential_type_name)
+    logger.info(
+        "[bridge] dispatch type=%s workspace=%s credential=%s handler=%s registered=%s",
+        ctx.credential_type_name, ctx.workspace_id, ctx.credential_id,
+        bool(handler), list(_BRIDGES.keys()),
+    )
     if not handler:
         return None
     try:
-        return handler(ctx)
+        result = handler(ctx)
+        logger.info(
+            "[bridge] %s → status=%s connection_id=%s scheme=%s err=%s",
+            ctx.credential_type_name,
+            getattr(result, "status", None),
+            getattr(result, "connection_id", None),
+            getattr(result, "auth_scheme", None),
+            getattr(result, "error", None),
+        )
+        return result
     except Exception as e:  # noqa: BLE001 — bridges must never break save
         logger.exception(
             "Integration bridge raised for %s (workspace=%s, credential=%s)",
