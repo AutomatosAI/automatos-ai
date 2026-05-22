@@ -208,6 +208,45 @@ def shopify_access_token(ctx: BridgeContext) -> BridgeResult:
 
     conn_id = getattr(connection, "id", None) or getattr(connection, "connectionId", None)
     conn_status = (getattr(connection, "status", "") or "").upper()
+
+    # Composio doesn't validate tokens at create-time — it stores them and
+    # marks the connection ACTIVE blindly. The token is only proven good when
+    # a tool call actually goes through. Fire SHOPIFY_GET_SHOP_DETAILS now to
+    # catch a wrong token (Storefront vs Admin, expired, etc.) so the merchant
+    # gets the failure in the same UI alert instead of a silently-broken setup
+    # they only discover when the widget can't list products.
+    if conn_status == "ACTIVE":
+        try:
+            probe = composio.tools.execute(
+                "SHOPIFY_GET_SHOP_DETAILS",
+                user_id=entity_id,
+                arguments={},
+            )
+            if not getattr(probe, "successful", True) and getattr(probe, "successful", None) is not None:
+                err_text = getattr(probe, "error", None) or "Shopify rejected the request"
+                logger.warning("[bridge:shopify] post-create probe failed: %s", err_text)
+                # Clean up the dead connection so retries don't trip the sweep.
+                try:
+                    composio.connected_accounts.delete(nanoid=conn_id)
+                except Exception:
+                    pass
+                hint = ""
+                if "401" in str(err_text) or "Invalid API key" in str(err_text):
+                    hint = (
+                        " — Shopify says the token isn't valid for the Admin API. "
+                        "Make sure you copied the 'Admin API access token' (shpat_…), "
+                        "not the Storefront API token (shpss_…). Rotate the token by "
+                        "toggling a scope in the Custom App if you can't see it anymore."
+                    )
+                return BridgeResult(
+                    status="bridge_error",
+                    error=f"Shopify rejected the credential{hint}",
+                )
+        except Exception as probe_err:
+            # Probe is best-effort — if it raises, treat the create as success
+            # but log so we can diagnose later.
+            logger.warning("[bridge:shopify] post-create probe raised: %s", probe_err)
+
     persisted_status = "active" if conn_status == "ACTIVE" else "pending"
 
     _persist_connection(
