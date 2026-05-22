@@ -55,6 +55,15 @@ export interface Credential {
   updated_at: string
   has_credentials: boolean
   field_names: string[]
+  // Integration-bridge result (populated when the credential type has a backend
+  // bridge — e.g. Shopify→Composio). Surfaces on POST/PUT only; list endpoints
+  // omit these.
+  connection_status?: 'connected' | 'pending_oauth' | 'unsupported' | 'bridge_error' | null
+  connection_id?: string | null
+  auth_config_id?: string | null
+  auth_scheme?: string | null
+  oauth_redirect_url?: string | null
+  connection_error?: string | null
 }
 
 export interface CredentialCreateRequest {

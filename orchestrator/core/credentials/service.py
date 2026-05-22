@@ -44,16 +44,45 @@ class CredentialStore:
     Manages credential storage, retrieval, and lifecycle.
     Handles encryption, validation, testing, and audit logging.
     """
-    
+
     def __init__(self, db: Session):
         """
         Initialize credential store.
-        
+
         Args:
             db: SQLAlchemy database session
         """
         self.db = db
         self.encryption_service = get_encryption_service()
+
+    # ------------------------------------------------------------------
+    # Integration bridges (credential → execution-platform glue)
+    # ------------------------------------------------------------------
+    def dispatch_integration_bridge(
+        self,
+        credential_id: int,
+        workspace_id,
+        credential_type_name: str,
+        decrypted_data: Dict[str, Any],
+    ):
+        """
+        Dispatch a credential save to the matching integration bridge (if any).
+
+        Returns a BridgeResult or None when no bridge is registered for the
+        credential type. Imported lazily so the credentials module has no hard
+        dependency on the bridges (or their Composio imports).
+        """
+        from core.credentials.integration_bridges import dispatch as _dispatch_bridge
+        from core.credentials.integration_bridges.base import BridgeContext
+
+        return _dispatch_bridge(
+            BridgeContext(
+                workspace_id=workspace_id,
+                credential_id=credential_id,
+                credential_type_name=credential_type_name,
+                decrypted_data=decrypted_data,
+            )
+        )
     
     # ========================================================================
     # Credential Type Management
