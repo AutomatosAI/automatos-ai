@@ -123,11 +123,16 @@ def shopify_access_token(ctx: BridgeContext) -> BridgeResult:
             status="bridge_error",
             error="shopSubdomain and accessToken are required",
         )
-    if not token.startswith("shpat_"):
-        return BridgeResult(
-            status="bridge_error",
-            error="accessToken must be a Shopify admin API token (shpat_...). "
-                  "Mint one at Shopify admin → Settings → Apps → Develop apps.",
+    if not token.startswith(("shpat_", "shpua_", "shpss_", "shpca_")):
+        # Soft warning — log it but let Composio reject if it's really wrong.
+        # Shopify Custom App admin API tokens are normally shpat_*, but the
+        # prefix has evolved and we don't want a stale check to block valid
+        # tokens. The bridge is the wrong place to enforce Shopify schema.
+        logger.warning(
+            "[bridge:shopify] accessToken doesn't match known Shopify prefixes "
+            "(shpat_/shpua_/shpss_/shpca_) — submitting to Composio anyway. "
+            "If this fails, check that you copied the 'Admin API access token' "
+            "from your Shopify Custom App, not the API key or API secret key."
         )
 
     entity_id = _resolve_entity_id(ctx.workspace_id)
