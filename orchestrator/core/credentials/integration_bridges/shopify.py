@@ -338,20 +338,26 @@ def _shopify_oauth_bounce(
     if not auth_config_id:
         return BridgeResult(status="bridge_error", error="Composio did not return an auth_config id")
 
-    link = composio.connected_accounts.link(
+    # Use .initiate() not .link() — initiate accepts a config dict carrying the
+    # OAuth state (authScheme + val.shop), which is required for Shopify since
+    # the shop subdomain is part of the OAuth authorize URL Composio builds.
+    # allow_multiple=True so re-saves after a previously-INITIATED-but-never-
+    # completed install don't trip "Multiple connected accounts" rejection.
+    link = composio.connected_accounts.initiate(
         user_id=entity_id,
         auth_config_id=auth_config_id,
-        callback_url=None,
-        config={"val": {"shop": subdomain}},
+        config={"authScheme": "OAUTH2", "val": {"shop": subdomain}},
+        allow_multiple=True,
     )
 
     redirect_url = getattr(link, "redirect_url", None) or getattr(link, "redirectUrl", None)
+    conn_id = getattr(link, "id", None)
 
     _persist_connection(
         workspace_id=ctx.workspace_id,
         app_name="SHOPIFY",
         status="pending",
-        connection_id=getattr(link, "id", None),
+        connection_id=conn_id,
         auth_config_id=auth_config_id,
         auth_scheme="OAUTH2",
         credential_id=ctx.credential_id,
@@ -359,7 +365,7 @@ def _shopify_oauth_bounce(
 
     return BridgeResult(
         status="pending_oauth",
-        connection_id=getattr(link, "id", None),
+        connection_id=conn_id,
         auth_config_id=auth_config_id,
         auth_scheme="OAUTH2",
         oauth_redirect_url=redirect_url,
