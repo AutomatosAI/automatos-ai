@@ -740,6 +740,7 @@ class OrdersSyncResponse(BaseModel):
     object_count: Optional[int] = None
     file_size: Optional[int] = None
     fbt_edges_added: Optional[int] = None
+    stale_fbt_removed: Optional[int] = None
     total_orders_analysed: Optional[int] = None
     days_window: Optional[int] = None
     duration_seconds: Optional[float] = None
@@ -765,6 +766,7 @@ async def start_orders_sync(
     """
     import time
     import httpx
+    import networkx as nx
 
     from core.composio.client import get_composio_client
     from core.composio.entity_manager import EntityManager
@@ -841,6 +843,29 @@ async def start_orders_sync(
         )
         fbt_edges = len(graph_delta.get("edges", []))
 
+        # Before merging, strip stale `frequently_bought_with` edges from
+        # the existing graph. Otherwise each sync silently keeps the FIRST
+        # version's counts forever and never refreshes — the opposite of
+        # 'smarter over time'. Catalog edges (variant_of, by_vendor,
+        # in_collection, has_metafield) are preserved.
+        gs = GraphifyService()
+        existing_graph = await gs.load_graph(workspace_id)
+        stale_fbt_removed = 0
+        if existing_graph is not None:
+            stale_fbt = [
+                (u, v) for u, v, attrs in existing_graph.edges(data=True)
+                if (attrs.get("relation") or "").lower() == "frequently_bought_with"
+            ]
+            for u, v in stale_fbt:
+                existing_graph.remove_edge(u, v)
+            stale_fbt_removed = len(stale_fbt)
+            if stale_fbt:
+                # Persist the cleaned graph back before the import_graph merge,
+                # so the merge starts from a clean FBT slate. import_graph(merge=True)
+                # will then ADD the fresh FBT edges from this sync run.
+                fresh_data = nx.node_link_data(existing_graph)
+                await gs._import_graph_unlocked(workspace_id, fresh_data, merge=False)
+
         # Merge into the existing workspace graph (catalog nodes already
         # there from the products sync; we only add FBT edges).
         gs = GraphifyService()
@@ -861,6 +886,7 @@ async def start_orders_sync(
             "days": days,
             "min_support": min_support,
             "fbt_edges_added": fbt_edges,
+            "stale_fbt_removed": stale_fbt_removed,
             "total_orders_analysed": total_orders,
             "duration_seconds": duration,
             "completed_at": time.time(),
