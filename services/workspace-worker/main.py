@@ -527,19 +527,20 @@ class WorkspaceWorker:
             })
 
         async def list_files_handler(request):
-            """GET /workspaces/{workspace_id}/files?path=. — directory listing."""
+            """GET /workspaces/{workspace_id}/files?path=. — directory listing.
+
+            Provisions the workspace directory tree on first read so non-coder
+            clients see the default folder structure (reports/, content/, etc.)
+            even before any mission has run.
+            """
             from pathlib import Path as P
 
             workspace_id = request.match_info["workspace_id"]
             rel_path = request.query.get("path", ".")
 
             ws_manager = WorkspaceManager(workspace_id, volume_path)
+            ws_manager.ensure_workspace_exists()
             ws_dir = P(volume_path) / workspace_id
-
-            if not ws_dir.is_dir():
-                return web.json_response(
-                    {"error": "Workspace directory not found"}, status=404
-                )
 
             try:
                 target = ws_manager.resolve_safe_path(rel_path)
