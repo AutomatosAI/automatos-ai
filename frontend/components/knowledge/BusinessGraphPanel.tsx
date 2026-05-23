@@ -78,6 +78,7 @@ export function BusinessGraphPanel() {
 
   // PRD-009 Phase-2 polish state
   const [visibleTypes, setVisibleTypes] = useState<Set<string>>(new Set())  // empty = all
+  const [visibleRelations, setVisibleRelations] = useState<Set<string>>(new Set())  // empty = all
   const [colorMode, setColorMode] = useState<ColorMode>('community')
   const [isFullscreen, setIsFullscreen] = useState(false)
   const vizRef = useRef<BusinessGraphHandle>(null)
@@ -309,6 +310,60 @@ export function BusinessGraphPanel() {
   const isTypeVisible = useCallback(
     (t: string) => visibleTypes.size === 0 || visibleTypes.has(t),
     [visibleTypes],
+  )
+
+  // Relation chips — toggle catalog vs order-relationship edges.
+  // Counts derived from graphData.links (lazy — empty until data loads).
+  const relationCounts = useMemo(() => {
+    if (!graphData?.links) return new Map<string, number>()
+    const m = new Map<string, number>()
+    for (const l of graphData.links) {
+      const r = l.relation ?? 'related_to'
+      m.set(r, (m.get(r) ?? 0) + 1)
+    }
+    return m
+  }, [graphData])
+
+  const RELATION_DISPLAY: Record<string, { label: string; color: string; order: number }> = {
+    frequently_bought_with: { label: 'Order pairs',  color: '#ff3d8c', order: 1 },
+    variant_of:             { label: 'Variants',     color: '#ffb347', order: 2 },
+    in_collection:          { label: 'Collections',  color: '#10e89e', order: 3 },
+    by_vendor:              { label: 'Vendors',      color: '#c084fc', order: 4 },
+    has_metafield:          { label: 'Metafields',   color: '#38bdf8', order: 5 },
+  }
+
+  const relationChips = useMemo(() => {
+    return Array.from(relationCounts.entries())
+      .map(([r, n]) => ({
+        relation: r,
+        count: n,
+        label: RELATION_DISPLAY[r]?.label ?? r.replace(/_/g, ' '),
+        color: RELATION_DISPLAY[r]?.color ?? '#94a3b8',
+        order: RELATION_DISPLAY[r]?.order ?? 99,
+      }))
+      .sort((a, b) => a.order - b.order || b.count - a.count)
+  }, [relationCounts])
+
+  const toggleRelation = useCallback((r: string) => {
+    setVisibleRelations((prev) => {
+      const next = new Set(prev)
+      if (next.size === 0) {
+        for (const cr of relationChips) {
+          if (cr.relation !== r) next.add(cr.relation)
+        }
+      } else if (next.has(r)) {
+        next.delete(r)
+      } else {
+        next.add(r)
+      }
+      if (next.size === relationChips.length) next.clear()
+      return next
+    })
+  }, [relationChips])
+
+  const isRelationVisible = useCallback(
+    (r: string) => visibleRelations.size === 0 || visibleRelations.has(r),
+    [visibleRelations],
   )
 
   // Native HTML5 fullscreen on the graph container.
@@ -603,33 +658,75 @@ export function BusinessGraphPanel() {
             </button>
           </div>
 
-          {/* Type filter chips — bottom-left, doesn't compete with hover tooltip */}
-          {typeChips.length > 0 && (
-            <div className="absolute bottom-3 right-3 z-10 flex flex-wrap gap-1.5 max-w-[60%] justify-end">
-              {typeChips.map(({ type, label, color, count }) => {
-                const visible = isTypeVisible(type)
-                return (
-                  <button
-                    key={type}
-                    onClick={() => toggleType(type)}
-                    className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-xs border transition ${
-                      visible
-                        ? 'bg-white/10 border-white/20 text-foreground'
-                        : 'bg-black/40 border-white/10 text-muted-foreground/60 line-through'
-                    }`}
-                    title={`${count.toLocaleString()} ${label.toLowerCase()}`}
-                  >
-                    <span
-                      className="w-2 h-2 rounded-full"
-                      style={{ backgroundColor: visible ? color : '#52525b' }}
-                    />
-                    {label}
-                    <span className="text-[10px] text-muted-foreground">
-                      {count.toLocaleString()}
-                    </span>
-                  </button>
-                )
-              })}
+          {/* Filter chips — Nodes (top row) + Relations (bottom row).
+              Bottom-right so they don't compete with the hover tooltip. */}
+          {(typeChips.length > 0 || relationChips.length > 0) && (
+            <div className="absolute bottom-3 right-3 z-10 flex flex-col items-end gap-1.5 max-w-[65%]">
+              {typeChips.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 justify-end">
+                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground/70 self-center mr-1">
+                    Nodes
+                  </span>
+                  {typeChips.map(({ type, label, color, count }) => {
+                    const visible = isTypeVisible(type)
+                    return (
+                      <button
+                        key={type}
+                        onClick={() => toggleType(type)}
+                        className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-xs border transition ${
+                          visible
+                            ? 'bg-white/10 border-white/20 text-foreground'
+                            : 'bg-black/40 border-white/10 text-muted-foreground/60 line-through'
+                        }`}
+                        title={`${count.toLocaleString()} ${label.toLowerCase()}`}
+                      >
+                        <span
+                          className="w-2 h-2 rounded-full"
+                          style={{ backgroundColor: visible ? color : '#52525b' }}
+                        />
+                        {label}
+                        <span className="text-[10px] text-muted-foreground">
+                          {count.toLocaleString()}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+              {relationChips.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 justify-end">
+                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground/70 self-center mr-1">
+                    Edges
+                  </span>
+                  {relationChips.map(({ relation, label, color, count }) => {
+                    const visible = isRelationVisible(relation)
+                    // FBT chip gets a slightly bigger 'pop' since that's the
+                    // recommendation surface — pulse subtly when visible.
+                    const isFbt = relation === 'frequently_bought_with'
+                    return (
+                      <button
+                        key={relation}
+                        onClick={() => toggleRelation(relation)}
+                        className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-xs border transition ${
+                          visible
+                            ? `bg-white/10 border-white/20 text-foreground ${isFbt ? 'shadow-[0_0_8px_rgba(255,61,140,0.25)]' : ''}`
+                            : 'bg-black/40 border-white/10 text-muted-foreground/60 line-through'
+                        }`}
+                        title={`${count.toLocaleString()} ${label.toLowerCase()} edges`}
+                      >
+                        <span
+                          className="w-2 h-2 rounded-full"
+                          style={{ backgroundColor: visible ? color : '#52525b' }}
+                        />
+                        {label}
+                        <span className="text-[10px] text-muted-foreground">
+                          {count.toLocaleString()}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           )}
 
@@ -641,6 +738,7 @@ export function BusinessGraphPanel() {
               selectedCommunity={selectedCommunity}
               minConfidence={confidenceMin}
               visibleTypes={visibleTypes.size > 0 ? visibleTypes : undefined}
+              visibleRelations={visibleRelations.size > 0 ? visibleRelations : undefined}
               colorMode={colorMode}
             />
           </GraphErrorBoundary>
