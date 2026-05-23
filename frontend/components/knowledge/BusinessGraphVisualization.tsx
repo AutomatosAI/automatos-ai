@@ -2,15 +2,30 @@
 
 /**
  * Business Graph Visualization Component
- * D3 force-directed graph for business entity relationships
- * Features: community coloring, god-node scaling, confidence-based edge styling
+ * Canvas/WebGL force-directed graph for the workspace knowledge graph.
+ *
+ * Renderer: react-force-graph-2d (same d3-force physics under the hood,
+ * Canvas-based rendering — handles 25k+ nodes smoothly where SVG d3 chokes
+ * around 5k). Matches Obsidian's approach for large knowledge graphs.
+ *
+ * Features kept from the previous SVG implementation:
+ *  - Community-based coloring
+ *  - Node size proportional to degree ("god-node scaling")
+ *  - Click-to-select with selected-community highlighting
+ *  - Confidence-score edge filtering
  */
 
-import React, { useEffect, useRef, useCallback, useMemo } from "react";
-import * as d3 from "d3";
+import React, { useCallback, useMemo, useRef, useEffect, useState } from "react";
+import dynamic from "next/dynamic";
+
+// SSR-disabled dynamic import — react-force-graph needs window/canvas.
+const ForceGraph2D = dynamic(
+  () => import("react-force-graph-2d").then((m) => m.default),
+  { ssr: false },
+) as any;
 
 // ---------------------------------------------------------------------------
-// Types
+// Types — same shape the existing BusinessGraphPanel feeds in.
 // ---------------------------------------------------------------------------
 
 interface GraphNode {
@@ -39,46 +54,19 @@ interface BusinessGraphVisualizationProps {
   minConfidence?: number;
 }
 
-// D3 simulation node (extends GraphNode with x/y/fx/fy)
-interface SimNode extends d3.SimulationNodeDatum {
-  id: string;
-  label: string;
-  file_type: string;
-  community?: number;
-  source_file?: string;
+// Runtime-augmented node — degree added per render for sizing.
+interface VizNode extends GraphNode {
   degree: number;
 }
 
-interface SimLink extends d3.SimulationLinkDatum<SimNode> {
-  relation: string;
-  confidence: string;
-  confidence_score: number;
-}
-
 // ---------------------------------------------------------------------------
-// Constants
+// Visual constants
 // ---------------------------------------------------------------------------
 
-const ORANGE_ACCENT = "#FF6B35";
-const BG_COLOR = "#0f1117";
-const NODE_STROKE = "#ffffff";
-const LABEL_COLOR = "#e5e7eb";
-const DIMMED_OPACITY = 0.15;
-
-// Warm palette for community coloring (up to 12 distinct communities)
 const COMMUNITY_COLORS = [
-  "#e6194b", // red
-  "#f58231", // orange
-  "#ffe119", // yellow
-  "#3cb44b", // green
-  "#42d4f4", // cyan
-  "#4363d8", // blue
-  "#911eb4", // purple
-  "#f032e6", // magenta
-  "#fabebe", // pink
-  "#9a6324", // brown
-  "#800000", // maroon
-  "#aaffc3", // mint
+  "#e6194b", "#f58231", "#ffe119", "#3cb44b", "#42d4f4", "#4363d8",
+  "#911eb4", "#f032e6", "#fabebe", "#9a6324", "#800000", "#aaffc3",
+  "#469990", "#bfef45", "#fffac8", "#dcbeff", "#9A6324", "#fffac8",
 ];
 
 const communityColor = (community: number | undefined): string => {
@@ -86,19 +74,7 @@ const communityColor = (community: number | undefined): string => {
   return COMMUNITY_COLORS[community % COMMUNITY_COLORS.length];
 };
 
-/** Map confidence label to SVG stroke-dasharray */
-const confidenceDash = (confidence: string): string => {
-  switch (confidence.toUpperCase()) {
-    case "EXTRACTED":
-      return "none"; // solid
-    case "INFERRED":
-      return "6,4"; // dashed
-    case "AMBIGUOUS":
-      return "2,3"; // dotted
-    default:
-      return "none";
-  }
-};
+const DIMMED_OPACITY = 0.18;
 
 // ---------------------------------------------------------------------------
 // Component
@@ -110,353 +86,164 @@ const BusinessGraphVisualization: React.FC<BusinessGraphVisualizationProps> = ({
   selectedCommunity = null,
   minConfidence = 0,
 }) => {
-  const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const simulationRef = useRef<d3.Simulation<SimNode, SimLink> | null>(null);
+  const fgRef = useRef<any>(null);
+  const [size, setSize] = useState<{ w: number; h: number }>({ w: 800, h: 600 });
 
-  // ---- Derived data (filtered, with degree counts) -----------------------
+  // ── Filter links + compute degree per node ──────────────────────────────
 
-  const { nodes, links } = useMemo(() => {
-    // Filter links by minConfidence
-    const filteredLinks: SimLink[] = graphData.links
-      .filter((l) => l.confidence_score >= minConfidence)
-      .map((l) => ({
-        source: l.source,
-        target: l.target,
-        relation: l.relation,
-        confidence: l.confidence,
-        confidence_score: l.confidence_score,
-      }));
-
-    // Compute degree per node from filtered links
-    const degreeMap = new Map<string, number>();
+  const data = useMemo(() => {
+    const filteredLinks = graphData.links.filter(
+      (l) => l.confidence_score >= minConfidence,
+    );
+    const degree = new Map<string, number>();
     for (const l of filteredLinks) {
-      const src = typeof l.source === "string" ? l.source : (l.source as SimNode).id;
-      const tgt = typeof l.target === "string" ? l.target : (l.target as SimNode).id;
-      degreeMap.set(src, (degreeMap.get(src) ?? 0) + 1);
-      degreeMap.set(tgt, (degreeMap.get(tgt) ?? 0) + 1);
+      const s = typeof l.source === "string" ? l.source : (l.source as any).id;
+      const t = typeof l.target === "string" ? l.target : (l.target as any).id;
+      degree.set(s, (degree.get(s) ?? 0) + 1);
+      degree.set(t, (degree.get(t) ?? 0) + 1);
     }
-
-    const simNodes: SimNode[] = graphData.nodes.map((n) => ({
+    const nodes: VizNode[] = graphData.nodes.map((n) => ({
       ...n,
-      degree: degreeMap.get(n.id) ?? 0,
+      degree: degree.get(n.id) ?? 0,
     }));
-
-    return { nodes: simNodes, links: filteredLinks };
+    return { nodes, links: filteredLinks };
   }, [graphData, minConfidence]);
 
-  // ---- Node radius (god-node scaling) ------------------------------------
-
-  const nodeRadius = useCallback(
-    (d: SimNode): number => {
-      const maxDegree = Math.max(1, ...nodes.map((n) => n.degree));
-      const normalized = d.degree / maxDegree;
-      return 6 + normalized * 20; // 6px min, 26px max
-    },
-    [nodes],
+  // For node sizing — relative to the max-degree node in the current view.
+  const maxDegree = useMemo(
+    () => Math.max(1, ...data.nodes.map((n) => n.degree)),
+    [data.nodes],
   );
 
-  // ---- Render D3 graph ---------------------------------------------------
+  // ── Resize observer keeps the canvas filling its container ─────────────
 
   useEffect(() => {
-    if (!svgRef.current || nodes.length === 0) return;
+    if (!containerRef.current) return;
+    const el = containerRef.current;
+    const update = () => setSize({ w: el.clientWidth, h: el.clientHeight || 500 });
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
-    const svg = d3.select(svgRef.current);
-    svg.selectAll("*").remove();
+  // ── Node visual: filled circle, color by community, size by degree.
+  // For dense graphs (25k+) drawing per-node labels is too noisy — only
+  // show labels for high-degree nodes ("god nodes") and when zoomed in.
 
-    const width = svgRef.current.clientWidth || 800;
-    const height = svgRef.current.clientHeight || 600;
+  const nodeCanvasObject = useCallback(
+    (node: any, ctx: CanvasRenderingContext2D, globalScale: number) => {
+      const baseR = 2 + 6 * (node.degree / maxDegree);  // 2–8px radius
+      const dim = selectedCommunity != null && node.community !== selectedCommunity;
+      ctx.globalAlpha = dim ? DIMMED_OPACITY : 0.95;
 
-    // Background
-    svg
-      .append("rect")
-      .attr("width", width)
-      .attr("height", height)
-      .attr("fill", BG_COLOR);
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, baseR, 0, 2 * Math.PI);
+      ctx.fillStyle = communityColor(node.community);
+      ctx.fill();
+      ctx.lineWidth = 0.5 / globalScale;
+      ctx.strokeStyle = "rgba(255,255,255,0.4)";
+      ctx.stroke();
 
-    // Zoom container
-    const g = svg.append("g");
-
-    const zoomBehavior = d3
-      .zoom<SVGSVGElement, unknown>()
-      .scaleExtent([0.1, 6])
-      .on("zoom", (event) => {
-        g.attr("transform", event.transform);
-      });
-
-    svg.call(zoomBehavior);
-
-    // ---- Simulation -------------------------------------------------------
-
-    const simulation = d3
-      .forceSimulation<SimNode>(nodes)
-      .force(
-        "link",
-        d3
-          .forceLink<SimNode, SimLink>(links)
-          .id((d) => d.id)
-          .distance(100),
-      )
-      .force("charge", d3.forceManyBody().strength(-250))
-      .force("center", d3.forceCenter(width / 2, height / 2))
-      .force(
-        "collision",
-        d3.forceCollide<SimNode>().radius((d) => nodeRadius(d) + 4),
-      );
-
-    simulationRef.current = simulation;
-
-    // ---- Links ------------------------------------------------------------
-
-    const linkGroup = g.append("g").attr("class", "links");
-
-    const linkSelection = linkGroup
-      .selectAll<SVGLineElement, SimLink>("line")
-      .data(links)
-      .enter()
-      .append("line")
-      .attr("stroke", "#8b8b8b")
-      .attr("stroke-width", (d) => 1 + d.confidence_score * 2)
-      .attr("stroke-opacity", 0.6)
-      .attr("stroke-dasharray", (d) => confidenceDash(d.confidence));
-
-    // Link labels (relation)
-    const linkLabelGroup = g.append("g").attr("class", "link-labels");
-
-    const linkLabels = linkLabelGroup
-      .selectAll<SVGTextElement, SimLink>("text")
-      .data(links)
-      .enter()
-      .append("text")
-      .attr("font-size", 9)
-      .attr("fill", "#9ca3af")
-      .attr("text-anchor", "middle")
-      .attr("pointer-events", "none")
-      .text((d) => d.relation);
-
-    // ---- Nodes ------------------------------------------------------------
-
-    const nodeGroup = g.append("g").attr("class", "nodes");
-
-    const nodeSelection = nodeGroup
-      .selectAll<SVGCircleElement, SimNode>("circle")
-      .data(nodes)
-      .enter()
-      .append("circle")
-      .attr("r", (d) => nodeRadius(d))
-      .attr("fill", (d) => communityColor(d.community))
-      .attr("fill-opacity", (d) => {
-        if (selectedCommunity != null && d.community !== selectedCommunity) {
-          return DIMMED_OPACITY;
-        }
-        return 0.85;
-      })
-      .attr("stroke", NODE_STROKE)
-      .attr("stroke-width", 1.5)
-      .style("cursor", "pointer")
-      .call(
-        d3
-          .drag<SVGCircleElement, SimNode>()
-          .on("start", (event, d) => {
-            if (!event.active) simulation.alphaTarget(0.3).restart();
-            d.fx = d.x;
-            d.fy = d.y;
-          })
-          .on("drag", (event, d) => {
-            d.fx = event.x;
-            d.fy = event.y;
-          })
-          .on("end", (event, d) => {
-            if (!event.active) simulation.alphaTarget(0);
-            d.fx = null;
-            d.fy = null;
-          }),
-      );
-
-    // Hover effects
-    nodeSelection
-      .on("mouseenter", function (_event, d) {
-        d3.select(this)
-          .attr("stroke", ORANGE_ACCENT)
-          .attr("stroke-width", 3);
-      })
-      .on("mouseleave", function (_event, _d) {
-        d3.select(this)
-          .attr("stroke", NODE_STROKE)
-          .attr("stroke-width", 1.5);
-      });
-
-    // Click handler
-    nodeSelection.on("click", (_event, d) => {
-      // Highlight selected node
-      nodeSelection
-        .attr("stroke", NODE_STROKE)
-        .attr("stroke-width", 1.5);
-      d3.select(_event.currentTarget as SVGCircleElement)
-        .attr("stroke", ORANGE_ACCENT)
-        .attr("stroke-width", 3);
-
-      if (onNodeSelect) {
-        onNodeSelect({
-          id: d.id,
-          label: d.label,
-          file_type: d.file_type,
-          community: d.community,
-          source_file: d.source_file,
-        });
+      // Only label when zoomed enough AND node is significant — avoids
+      // unreadable text-spaghetti at low zoom on big graphs.
+      const showLabel = globalScale > 1.5 || node.degree > maxDegree * 0.6;
+      if (showLabel && node.label) {
+        const fontSize = Math.max(8, 12 / globalScale);
+        ctx.font = `${fontSize}px Inter, ui-sans-serif`;
+        ctx.fillStyle = "#e5e7eb";
+        ctx.textBaseline = "middle";
+        ctx.fillText(node.label, node.x + baseR + 2, node.y);
       }
-    });
+      ctx.globalAlpha = 1;
+    },
+    [maxDegree, selectedCommunity],
+  );
 
-    // Tooltips
-    nodeSelection
-      .append("title")
-      .text(
-        (d) =>
-          `${d.label}\nType: ${d.file_type}\nCommunity: ${d.community ?? "none"}\nConnections: ${d.degree}`,
-      );
+  // Click hit-area: extend slightly past the visible radius so it's easy
+  // to click small nodes on a dense graph.
+  const nodePointerAreaPaint = useCallback(
+    (node: any, color: string, ctx: CanvasRenderingContext2D) => {
+      const baseR = 2 + 6 * (node.degree / maxDegree);
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, baseR + 3, 0, 2 * Math.PI);
+      ctx.fill();
+    },
+    [maxDegree],
+  );
 
-    // ---- Node labels ------------------------------------------------------
+  const linkColor = useCallback(
+    (l: any) => {
+      // Dim links that don't touch the selected community.
+      if (selectedCommunity != null) {
+        const s = typeof l.source === "object" ? l.source : null;
+        const t = typeof l.target === "object" ? l.target : null;
+        const touches = s?.community === selectedCommunity || t?.community === selectedCommunity;
+        return touches ? "rgba(180,180,200,0.45)" : `rgba(180,180,200,${DIMMED_OPACITY})`;
+      }
+      return "rgba(180,180,200,0.30)";
+    },
+    [selectedCommunity],
+  );
 
-    const nodeLabelGroup = g.append("g").attr("class", "node-labels");
+  const handleNodeClick = useCallback(
+    (node: any) => {
+      if (!onNodeSelect) return;
+      const { degree, ...plain } = node;
+      onNodeSelect(plain as GraphNode);
+    },
+    [onNodeSelect],
+  );
 
-    const nodeLabels = nodeLabelGroup
-      .selectAll<SVGTextElement, SimNode>("text")
-      .data(nodes)
-      .enter()
-      .append("text")
-      .attr("font-size", 11)
-      .attr("fill", (d) => {
-        if (selectedCommunity != null && d.community !== selectedCommunity) {
-          return `rgba(229,231,235,${DIMMED_OPACITY})`;
-        }
-        return LABEL_COLOR;
-      })
-      .attr("text-anchor", "middle")
-      .attr("dy", (d) => nodeRadius(d) + 14)
-      .attr("pointer-events", "none")
-      .text((d) => {
-        // Truncate long labels
-        return d.label.length > 20 ? d.label.slice(0, 18) + "\u2026" : d.label;
-      });
+  // ── Zoom to fit on first load / when data changes substantially ────────
 
-    // ---- Tick -------------------------------------------------------------
+  useEffect(() => {
+    if (!fgRef.current || data.nodes.length === 0) return;
+    // Let the simulation settle a bit before zooming.
+    const timer = setTimeout(() => {
+      try {
+        fgRef.current.zoomToFit(400, 40);
+      } catch {
+        /* ignore — graph not mounted */
+      }
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [data.nodes.length]);
 
-    simulation.on("tick", () => {
-      linkSelection
-        .attr("x1", (d) => (d.source as SimNode).x ?? 0)
-        .attr("y1", (d) => (d.source as SimNode).y ?? 0)
-        .attr("x2", (d) => (d.target as SimNode).x ?? 0)
-        .attr("y2", (d) => (d.target as SimNode).y ?? 0);
-
-      linkLabels
-        .attr(
-          "x",
-          (d) =>
-            (((d.source as SimNode).x ?? 0) + ((d.target as SimNode).x ?? 0)) /
-            2,
-        )
-        .attr(
-          "y",
-          (d) =>
-            (((d.source as SimNode).y ?? 0) + ((d.target as SimNode).y ?? 0)) /
-            2,
-        );
-
-      nodeSelection
-        .attr("cx", (d) => d.x ?? 0)
-        .attr("cy", (d) => d.y ?? 0);
-
-      nodeLabels
-        .attr("x", (d) => d.x ?? 0)
-        .attr("y", (d) => d.y ?? 0);
-    });
-
-    // ---- Cleanup ----------------------------------------------------------
-
-    return () => {
-      simulation.stop();
-      simulationRef.current = null;
-    };
-  }, [nodes, links, selectedCommunity, nodeRadius, onNodeSelect]);
-
-  // ---- Render -------------------------------------------------------------
+  // ── Render ─────────────────────────────────────────────────────────────
 
   return (
-    <div ref={containerRef} className="relative w-full h-full min-h-[400px]">
-      <svg
-        ref={svgRef}
-        className="w-full h-full"
-        style={{ backgroundColor: BG_COLOR }}
-      />
-
-      {/* Legend overlay — bottom-left */}
-      {nodes.length > 0 && (
-        <div
-          className="absolute bottom-3 left-3 px-3 py-2 rounded-lg text-xs"
-          style={{
-            background: "rgba(15, 17, 23, 0.8)",
-            backdropFilter: "blur(8px)",
-            border: "1px solid rgba(255,255,255,0.1)",
-          }}
-        >
-          <div className="flex items-center gap-4 flex-wrap">
-            <span className="text-muted-foreground font-medium">Edges:</span>
-            <span className="text-foreground/90 flex items-center gap-1">
-              <svg width="24" height="8">
-                <line
-                  x1="0"
-                  y1="4"
-                  x2="24"
-                  y2="4"
-                  stroke="#9ca3af"
-                  strokeWidth="2"
-                />
-              </svg>
-              Extracted
-            </span>
-            <span className="text-foreground/90 flex items-center gap-1">
-              <svg width="24" height="8">
-                <line
-                  x1="0"
-                  y1="4"
-                  x2="24"
-                  y2="4"
-                  stroke="#9ca3af"
-                  strokeWidth="2"
-                  strokeDasharray="6,4"
-                />
-              </svg>
-              Inferred
-            </span>
-            <span className="text-foreground/90 flex items-center gap-1">
-              <svg width="24" height="8">
-                <line
-                  x1="0"
-                  y1="4"
-                  x2="24"
-                  y2="4"
-                  stroke="#9ca3af"
-                  strokeWidth="2"
-                  strokeDasharray="2,3"
-                />
-              </svg>
-              Ambiguous
-            </span>
-          </div>
+    <div ref={containerRef} className="w-full h-full min-h-[500px]">
+      {data.nodes.length === 0 ? (
+        <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
+          No nodes match the current filters.
         </div>
-      )}
-
-      {/* Empty state */}
-      {nodes.length === 0 && (
-        <div className="absolute inset-0 flex items-center justify-center">
-          <p className="text-muted-foreground text-sm">
-            No graph data available
-          </p>
-        </div>
+      ) : (
+        <ForceGraph2D
+          ref={fgRef}
+          graphData={data}
+          width={size.w}
+          height={size.h}
+          backgroundColor="#0f1117"
+          nodeRelSize={4}
+          nodeCanvasObject={nodeCanvasObject}
+          nodePointerAreaPaint={nodePointerAreaPaint}
+          linkColor={linkColor}
+          linkWidth={0.5}
+          // Force config tuned for large graphs — quicker cooldown so we
+          // don't burn CPU rebalancing 25k nodes forever.
+          cooldownTicks={120}
+          d3AlphaDecay={0.03}
+          d3VelocityDecay={0.35}
+          warmupTicks={20}
+          enableNodeDrag={false}
+          onNodeClick={handleNodeClick}
+        />
       )}
     </div>
   );
 };
 
-export { BusinessGraphVisualization };
 export default BusinessGraphVisualization;

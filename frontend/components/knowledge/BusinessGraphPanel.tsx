@@ -203,7 +203,10 @@ export function BusinessGraphPanel() {
     retry: false,
   })
 
-  const vizSafe = !!meta && (meta.node_count ?? 0) <= 5000
+  // The Canvas-based ForceGraph2D renderer handles tens of thousands of nodes
+  // smoothly (Obsidian-tier perf). Cap raised from 5,000 (old SVG/d3 limit)
+  // to 100,000. The hard ceiling is browser memory, not the renderer.
+  const vizSafe = !!meta && (meta.node_count ?? 0) <= 100000
 
   const {
     data: graphData,
