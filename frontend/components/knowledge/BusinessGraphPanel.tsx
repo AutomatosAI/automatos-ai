@@ -552,43 +552,14 @@ export function BusinessGraphPanel() {
 
       {/* Main Layout: Sidebar + Graph */}
       {vizSafe && <div className="flex flex-col md:flex-row gap-4 min-h-[500px]">
-        {/* Community Sidebar */}
-        <div className="w-full md:w-48 shrink-0 glass-card bg-white/5 backdrop-blur-sm border border-white/10 rounded-lg p-3 space-y-1 max-h-[500px] overflow-y-auto">
-          <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
-            <Layers className="w-3.5 h-3.5" />
-            Communities
-          </div>
-
-          <button
-            onClick={() => setSelectedCommunity(null)}
-            className={`w-full text-left text-sm px-2 py-1.5 rounded transition-colors ${
-              selectedCommunity === null
-                ? 'bg-primary/20 text-primary'
-                : 'text-muted-foreground hover:bg-white/5'
-            }`}
-          >
-            All clusters
-          </button>
-
-          {communities.map(({ id, count }) => (
-            <button
-              key={id}
-              onClick={() =>
-                setSelectedCommunity(selectedCommunity === id ? null : id)
-              }
-              className={`w-full text-left text-sm px-2 py-1.5 rounded flex items-center justify-between transition-colors ${
-                selectedCommunity === id
-                  ? 'bg-primary/20 text-primary'
-                  : 'text-muted-foreground hover:bg-white/5'
-              }`}
-            >
-              <span>Cluster {id}</span>
-              <Badge variant="secondary" className="text-[10px] h-5">
-                {count}
-              </Badge>
-            </button>
-          ))}
-        </div>
+        {/* Community Sidebar — at 800+ clusters a flat list is useless. We
+            hide tiny long-tail clusters (<5 nodes) and cap the visible
+            list at 30. 'Show all' expands. Sorted by size descending. */}
+        <ClusterSidebar
+          communities={communities}
+          selectedCommunity={selectedCommunity}
+          onSelect={setSelectedCommunity}
+        />
 
         {/* Graph Visualization + controls — wrapped in a localised error
             boundary so a renderer-level exception doesn't take down the
@@ -774,6 +745,108 @@ export function BusinessGraphPanel() {
               </div>
             </div>
           )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Cluster Sidebar ───────────────────────────────────────────────────
+// Lives in this file because it's panel-specific and shares the same
+// types. At 800+ clusters a flat list is unusable. Filters tiny clusters,
+// sorts by size, paginates, and offers a search box.
+
+interface ClusterSidebarProps {
+  communities: Array<{ id: number; count: number }>
+  selectedCommunity: number | null
+  onSelect: (id: number | null) => void
+}
+
+function ClusterSidebar({ communities, selectedCommunity, onSelect }: ClusterSidebarProps) {
+  const [query, setQuery] = useState('')
+  const [showAll, setShowAll] = useState(false)
+  const MIN_SIZE = 5  // hide singleton/pair clusters — pure long-tail noise
+  const PAGE = 30
+
+  const filtered = useMemo(() => {
+    const min = communities.filter((c) => c.count >= MIN_SIZE)
+    const q = query.trim()
+    if (!q) return min
+    // Allow searching by cluster id (e.g. "47") or size threshold ">100".
+    if (/^>\s*\d+$/.test(q)) {
+      const threshold = parseInt(q.replace(/^>\s*/, ''), 10)
+      return min.filter((c) => c.count > threshold)
+    }
+    return min.filter((c) => String(c.id).includes(q))
+  }, [communities, query])
+
+  const visible = showAll ? filtered : filtered.slice(0, PAGE)
+  const totalNodes = communities.reduce((a, b) => a + b.count, 0)
+  const hiddenLongTail = communities.length - filtered.length
+
+  return (
+    <div className="w-full md:w-56 shrink-0 glass-card bg-white/5 backdrop-blur-sm border border-white/10 rounded-lg p-3 space-y-2 max-h-[500px] overflow-y-auto">
+      <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+        <Layers className="w-3.5 h-3.5" />
+        Clusters
+        <span className="ml-auto text-[10px] text-muted-foreground/70">
+          {communities.length} total
+        </span>
+      </div>
+
+      <div className="relative">
+        <Search className="w-3.5 h-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search… or >100"
+          className="h-8 pl-7 text-xs bg-black/30 border-white/10"
+        />
+      </div>
+
+      <button
+        onClick={() => onSelect(null)}
+        className={`w-full text-left text-xs px-2 py-1.5 rounded transition-colors ${
+          selectedCommunity === null
+            ? 'bg-primary/25 text-primary'
+            : 'text-muted-foreground hover:bg-white/5'
+        }`}
+      >
+        All clusters
+        <span className="ml-1.5 text-[10px] text-muted-foreground/70">
+          {totalNodes.toLocaleString()} nodes
+        </span>
+      </button>
+
+      {visible.map(({ id, count }) => (
+        <button
+          key={id}
+          onClick={() => onSelect(selectedCommunity === id ? null : id)}
+          className={`w-full text-left text-xs px-2 py-1.5 rounded flex items-center justify-between transition-colors ${
+            selectedCommunity === id
+              ? 'bg-primary/25 text-primary'
+              : 'text-muted-foreground hover:bg-white/5'
+          }`}
+        >
+          <span>Cluster {id}</span>
+          <Badge variant="secondary" className="text-[10px] h-5">
+            {count}
+          </Badge>
+        </button>
+      ))}
+
+      {!showAll && filtered.length > PAGE && (
+        <button
+          onClick={() => setShowAll(true)}
+          className="w-full text-xs px-2 py-1.5 rounded text-muted-foreground hover:bg-white/5 transition-colors"
+        >
+          + {filtered.length - PAGE} more clusters
+        </button>
+      )}
+
+      {hiddenLongTail > 0 && (
+        <div className="text-[10px] text-muted-foreground/60 px-2 pt-1 border-t border-white/5">
+          {hiddenLongTail} tiny clusters hidden (&lt;{MIN_SIZE} nodes each)
         </div>
       )}
     </div>

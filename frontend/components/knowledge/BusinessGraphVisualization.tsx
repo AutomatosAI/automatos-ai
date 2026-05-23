@@ -293,19 +293,39 @@ const BusinessGraphVisualization = forwardRef<
       ctx.strokeStyle = "rgba(255,255,255,0.35)";
       ctx.stroke();
 
-      // Label — only at higher zoom OR for god-nodes OR for hovered/focused
+      // Label policy — at 24k nodes, labels become text-soup. Tight rules:
+      //   - Always: hovered, focused (clicked), or in the focus 1-hop.
+      //   - Zoom > 3.5: top god-nodes (top-5).
+      //   - Zoom > 5:   any node with degree above ~30% of max.
+      //   - Otherwise: no label.
+      // Net effect: at default zoom users see ONLY the node they're
+      // pointing at; the rest of the graph is colour-coded shapes.
+      const inFocusHood = focusNeighbourhood?.has(n.id);
       const showLabel =
-        isHover || isFocus || godNodeIds.has(n.id) || globalScale > 1.8;
+        isHover ||
+        isFocus ||
+        inFocusHood ||
+        (globalScale > 3.5 && godNodeIds.has(n.id)) ||
+        (globalScale > 5 && n.degree > maxDegree * 0.3);
       if (showLabel && n.label) {
-        const fontSize = Math.max(9, 13 / globalScale);
+        const fontSize = Math.max(10, 13 / globalScale);
         ctx.font = `${fontSize}px Inter, ui-sans-serif`;
         ctx.fillStyle = "#f1f5f9";
         ctx.textBaseline = "middle";
-        // Subtle text shadow for readability over dense edge fields
-        ctx.shadowColor = "rgba(0,0,0,0.85)";
-        ctx.shadowBlur = 3;
-        ctx.fillText(n.label, node.x + baseR + 3, node.y);
-        ctx.shadowBlur = 0;
+        // Background pill so the label is readable over dense edges.
+        const padding = 3 / globalScale;
+        const metrics = ctx.measureText(n.label);
+        const pillX = node.x + baseR + 4;
+        const pillY = node.y - fontSize / 2 - padding / 2;
+        ctx.fillStyle = "rgba(10,13,20,0.85)";
+        ctx.fillRect(
+          pillX - 2,
+          pillY,
+          metrics.width + 4,
+          fontSize + padding,
+        );
+        ctx.fillStyle = "#f1f5f9";
+        ctx.fillText(n.label, pillX, node.y);
       }
       ctx.globalAlpha = 1;
     },
@@ -444,6 +464,25 @@ const BusinessGraphVisualization = forwardRef<
           nodeRelSize={4}
           nodeCanvasObject={nodeCanvasObject}
           nodePointerAreaPaint={nodePointerAreaPaint}
+          // When a community is selected, hide everything outside it
+          // entirely — at 24k+ nodes dimming alone leaves too much noise.
+          // Same logic for the focused-node 1-hop neighbourhood.
+          nodeVisibility={(n: any) => {
+            if (selectedCommunity != null && n.community !== selectedCommunity) return false;
+            if (focusNeighbourhood && !focusNeighbourhood.has(n.id)) return false;
+            return true;
+          }}
+          linkVisibility={(l: any) => {
+            const s = typeof l.source === "object" ? l.source : null;
+            const t = typeof l.target === "object" ? l.target : null;
+            if (selectedCommunity != null) {
+              return s?.community === selectedCommunity && t?.community === selectedCommunity;
+            }
+            if (focusNeighbourhood) {
+              return !!(s && t && focusNeighbourhood.has(s.id) && focusNeighbourhood.has(t.id));
+            }
+            return true;
+          }}
           linkColor={linkColor}
           linkWidth={(l: any) => {
             if (!focusNeighbourhood) return 0.5;
