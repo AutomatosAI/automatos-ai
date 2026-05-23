@@ -267,11 +267,11 @@ export function BusinessGraphPanel() {
 
   // Pretty label for each node type — sortable for chip ordering.
   const TYPE_DISPLAY: Record<string, { label: string; color: string; order: number }> = {
-    shopify_product:    { label: 'Products',    color: '#ff7849', order: 1 },
-    shopify_variant:    { label: 'Variants',    color: '#fdba74', order: 2 },
-    shopify_vendor:     { label: 'Vendors',     color: '#a78bfa', order: 3 },
-    shopify_collection: { label: 'Collections', color: '#34d399', order: 4 },
-    shopify_metafield:  { label: 'Metafields',  color: '#60a5fa', order: 5 },
+    shopify_product:    { label: 'Products',    color: '#ff5e3a', order: 1 },
+    shopify_variant:    { label: 'Variants',    color: '#ffb347', order: 2 },
+    shopify_vendor:     { label: 'Vendors',     color: '#c084fc', order: 3 },
+    shopify_collection: { label: 'Collections', color: '#10e89e', order: 4 },
+    shopify_metafield:  { label: 'Metafields',  color: '#38bdf8', order: 5 },
   }
 
   const typeChips = useMemo(() => {
