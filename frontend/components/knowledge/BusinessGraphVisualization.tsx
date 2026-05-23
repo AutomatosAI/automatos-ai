@@ -65,6 +65,8 @@ export interface BusinessGraphVisualizationProps {
   minConfidence?: number;
   /** Which node `file_type` values to display. Undefined = show all. */
   visibleTypes?: Set<string>;
+  /** Which edge `relation` values to display. Undefined = show all. */
+  visibleRelations?: Set<string>;
   /** Coloring strategy. */
   colorMode?: ColorMode;
 }
@@ -150,6 +152,7 @@ const BusinessGraphVisualization = forwardRef<
     selectedCommunity = null,
     minConfidence = 0,
     visibleTypes,
+    visibleRelations,
     colorMode = "community",
   },
   ref,
@@ -191,9 +194,13 @@ const BusinessGraphVisualization = forwardRef<
 
     const nodes = graphData.nodes.filter(allowed);
     const nodeIds = new Set(nodes.map((n) => n.id));
+    const wantedRels = visibleRelations;
+    const relAllowed = (l: GraphLink) =>
+      !wantedRels || wantedRels.size === 0 || wantedRels.has(l.relation);
     const links = graphData.links.filter(
       (l) =>
         l.confidence_score >= minConfidence &&
+        relAllowed(l) &&
         nodeIds.has(typeof l.source === "string" ? l.source : (l.source as any).id) &&
         nodeIds.has(typeof l.target === "string" ? l.target : (l.target as any).id),
     );
@@ -210,7 +217,7 @@ const BusinessGraphVisualization = forwardRef<
       degree: degree.get(n.id) ?? 0,
     }));
     return { nodes: vizNodes, links };
-  }, [graphData, visibleTypes, minConfidence]);
+  }, [graphData, visibleTypes, visibleRelations, minConfidence]);
 
   const maxDegree = useMemo(
     () => Math.max(1, ...data.nodes.map((n) => n.degree)),

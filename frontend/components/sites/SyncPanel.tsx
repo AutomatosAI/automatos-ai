@@ -217,11 +217,21 @@ function ShopifySyncCard({ site, workspaceId }: { site: Site; workspaceId: strin
 // between products so the agent can recommend "customers who bought X
 // also bought Y". Requires the catalog sync to have run first.
 
+// Window presets — merchant picks before clicking Sync. days=0 means
+// all-time (omit the date filter in the bulk-op GraphQL).
+const WINDOW_OPTIONS: Array<{ days: number; label: string; hint: string }> = [
+  { days: 90,  label: '90 days', hint: 'Last quarter' },
+  { days: 180, label: '180 days', hint: 'Last 6 months' },
+  { days: 365, label: '1 year',  hint: 'Last 12 months' },
+  { days: 0,   label: 'All time', hint: 'Every order ever' },
+]
+
 function ShopifyOrdersSyncCard({ workspaceId }: { workspaceId: string | null }) {
   const [status, setStatus] = useState<ShopifyOrdersSyncStatus | null>(null)
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [windowDays, setWindowDays] = useState<number>(90)
 
   async function refreshStatus() {
     if (!workspaceId) { setLoading(false); return }
@@ -245,7 +255,11 @@ function ShopifyOrdersSyncCard({ workspaceId }: { workspaceId: string | null }) 
     if (!workspaceId) return
     setSyncing(true); setError(null)
     try {
-      const result = await startShopifyOrdersSync(workspaceId, { days: 90, minSupport: 2 })
+      // Auto-tune min_support to the window size: tiny window → 1 (any
+      // co-occurrence counts), big window → higher floor so noise filters
+      // out. Floor at 2 except for explicitly tight windows.
+      const minSupport = windowDays === 0 || windowDays >= 365 ? 3 : 2
+      const result = await startShopifyOrdersSync(workspaceId, { days: windowDays, minSupport })
       setStatus(result)
     } catch (e: any) {
       setError(e?.message ?? 'Sync failed')
@@ -277,9 +291,35 @@ function ShopifyOrdersSyncCard({ workspaceId }: { workspaceId: string | null }) 
       <CardContent className="space-y-3 text-sm">
         <p className="text-xs text-muted-foreground">
           Adds <strong>frequently-bought-together</strong> relationships between products by analysing
-          your last 90 days of orders. Only product IDs are read — no customer data, email,
+          your order history. Only product IDs are read — no customer data, email,
           address, or phone touches the graph.
         </p>
+
+        {/* Window selector. For test stores: pick All time. For high-volume
+            stores: shorter windows = faster syncs, less drift from current
+            ranges. */}
+        <div className="space-y-1">
+          <div className="text-[11px] uppercase tracking-wider text-muted-foreground/70">
+            Analyse orders from the last…
+          </div>
+          <div className="inline-flex bg-black/30 backdrop-blur-sm border border-white/10 rounded-md overflow-hidden">
+            {WINDOW_OPTIONS.map(({ days, label, hint }, i) => (
+              <button
+                key={days}
+                onClick={() => setWindowDays(days)}
+                disabled={syncing}
+                title={hint}
+                className={`px-3 py-1.5 text-xs transition ${i > 0 ? 'border-l border-white/10' : ''} ${
+                  windowDays === days
+                    ? 'bg-white/15 text-foreground'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-white/5'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
 
         {loading && (
           <div className="flex items-center text-muted-foreground">

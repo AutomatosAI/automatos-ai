@@ -720,17 +720,30 @@ async def get_product_sync_status(
 
 
 def _orders_bulk_query(days: int = 90) -> str:
-    """Build the orders bulk-op GraphQL string. Window in days from now."""
+    """Build the orders bulk-op GraphQL string.
+
+    Args:
+        days: rolling window in days. 0 (or negative) = all-time, no filter.
+              90/180/365 are the common selectable presets in the UI.
+    """
     from datetime import datetime, timedelta, timezone
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
-    # Note: Shopify's Bulk Op GraphQL doesn't support variables, so we inline
-    # the cutoff date. Safe — it's a controlled date string, not user input.
-    return (
-        "{ orders(query: \"created_at:>=" + cutoff + "\") "
-        "{ edges { node { id createdAt currencyCode cancelledAt "
+
+    inner = (
+        "edges { node { id createdAt currencyCode cancelledAt "
         "lineItems { edges { node { id quantity "
-        "variant { id product { id } } } } } } } } }"
+        "variant { id product { id } } } } } } }"
     )
+
+    if days and days > 0:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+        # Note: Shopify's Bulk Op GraphQL doesn't support variables, so we inline
+        # the cutoff date. Safe — controlled date string, not user input.
+        return "{ orders(query: \"created_at:>=" + cutoff + "\") { " + inner + " } }"
+
+    # All-time: omit the filter. Shopify's bulk-op streams everything.
+    # For very large merchants this may approach file-size limits; we'll
+    # handle chunking in a follow-up if anyone actually hits it.
+    return "{ orders { " + inner + " } }"
 
 
 class OrdersSyncResponse(BaseModel):
