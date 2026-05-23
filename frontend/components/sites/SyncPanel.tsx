@@ -1,14 +1,20 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Loader2, RefreshCw, CheckCircle2, AlertCircle, ShoppingBag } from 'lucide-react'
+import {
+  Loader2, RefreshCw, CheckCircle2, AlertCircle,
+  ShoppingBag, Network,
+} from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
   getShopifySyncStatus,
   startShopifySync,
+  getShopifyOrdersSyncStatus,
+  startShopifyOrdersSync,
   type ShopifySyncStatus,
+  type ShopifyOrdersSyncStatus,
 } from '@/lib/sites/api'
 import type { Site } from '@/lib/sites/types'
 
@@ -45,6 +51,7 @@ export function SyncPanel({ site, workspaceId }: SyncPanelProps) {
           merchant if not. Add WooCommerce/BigCommerce/Amazon cards here as
           their integrations land. */}
       <ShopifySyncCard site={site} workspaceId={workspaceId} />
+      <ShopifyOrdersSyncCard workspaceId={workspaceId} />
     </div>
   )
 }
@@ -196,6 +203,149 @@ function ShopifySyncCard({ site, workspaceId }: { site: Site; workspaceId: strin
         <p className="text-[11px] text-muted-foreground">
           The sync pulls every product, variant, metafield, and collection from Shopify in one
           Bulk Operation. Webhooks keep the graph fresh between manual syncs.
+        </p>
+      </CardContent>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Orders card — PRD-009 Phase 2
+// ---------------------------------------------------------------------------
+// Pulls order history (PII-stripped — only product co-occurrence, NO
+// customer / email / phone / address). Adds FREQUENTLY_BOUGHT_WITH edges
+// between products so the agent can recommend "customers who bought X
+// also bought Y". Requires the catalog sync to have run first.
+
+function ShopifyOrdersSyncCard({ workspaceId }: { workspaceId: string | null }) {
+  const [status, setStatus] = useState<ShopifyOrdersSyncStatus | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [syncing, setSyncing] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function refreshStatus() {
+    if (!workspaceId) { setLoading(false); return }
+    try {
+      const s = await getShopifyOrdersSyncStatus(workspaceId)
+      setStatus(s); setError(null)
+    } catch (e: any) {
+      setError(e?.message ?? 'Failed to load orders sync status')
+    } finally { setLoading(false) }
+  }
+
+  useEffect(() => { refreshStatus() }, [workspaceId])
+
+  // Same stuck-state detection as catalog card
+  const isStuckRunning =
+    status?.status === 'running' &&
+    !!status.started_at &&
+    Date.now() / 1000 - status.started_at > 600  // orders can be slower than catalog
+
+  async function handleSync() {
+    if (!workspaceId) return
+    setSyncing(true); setError(null)
+    try {
+      const result = await startShopifyOrdersSync(workspaceId, { days: 90, minSupport: 2 })
+      setStatus(result)
+    } catch (e: any) {
+      setError(e?.message ?? 'Sync failed')
+    } finally { setSyncing(false) }
+  }
+
+  return (
+    <Card className="glass-card">
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Network className="w-4 h-4" /> Order patterns
+          {status?.status === 'complete' && (
+            <Badge variant="outline" className="ml-auto text-emerald-400 border-emerald-400/30">
+              <CheckCircle2 className="w-3 h-3 mr-1" /> Synced
+            </Badge>
+          )}
+          {status?.status === 'running' && !isStuckRunning && (
+            <Badge variant="outline" className="ml-auto text-amber-400 border-amber-400/30">
+              <Loader2 className="w-3 h-3 mr-1 animate-spin" /> Running
+            </Badge>
+          )}
+          {status?.status === 'error' && (
+            <Badge variant="outline" className="ml-auto text-destructive border-destructive/30">
+              <AlertCircle className="w-3 h-3 mr-1" /> Error
+            </Badge>
+          )}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        <p className="text-xs text-muted-foreground">
+          Adds <strong>frequently-bought-together</strong> relationships between products by analysing
+          your last 90 days of orders. Only product IDs are read — no customer data, email,
+          address, or phone touches the graph.
+        </p>
+
+        {loading && (
+          <div className="flex items-center text-muted-foreground">
+            <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Loading status…
+          </div>
+        )}
+
+        {!loading && status?.status === 'complete' && (
+          <div className="grid grid-cols-2 gap-y-1.5 text-xs">
+            <span className="text-muted-foreground">FBT relations added</span>
+            <span className="text-foreground">{status.fbt_edges_added?.toLocaleString() ?? '—'}</span>
+            <span className="text-muted-foreground">Orders analysed</span>
+            <span className="text-foreground">{status.total_orders_analysed?.toLocaleString() ?? '—'}</span>
+            <span className="text-muted-foreground">Window</span>
+            <span className="text-foreground">{status.days_window ?? status.days ?? 90} days</span>
+            <span className="text-muted-foreground">Last sync duration</span>
+            <span className="text-foreground">
+              {status.duration_seconds ? `${status.duration_seconds.toFixed(1)}s` : '—'}
+            </span>
+          </div>
+        )}
+
+        {!loading && status?.status === 'never_synced' && (
+          <p className="text-xs text-muted-foreground">
+            Orders haven't been synced yet. Click <span className="text-foreground">Sync now</span> to
+            build customer co-purchase patterns. Sync the catalog first if you haven't.
+          </p>
+        )}
+
+        {!loading && status?.status === 'error' && (
+          <div className="text-xs text-destructive bg-destructive/10 border border-destructive/30 rounded p-2">
+            {status.error || 'Previous sync failed.'}
+          </div>
+        )}
+
+        {error && (
+          <div className="text-xs text-destructive bg-destructive/10 border border-destructive/30 rounded p-2">
+            {error}
+          </div>
+        )}
+
+        {isStuckRunning && (
+          <div className="text-xs text-amber-400 bg-amber-400/10 border border-amber-400/30 rounded p-2">
+            Previous sync didn't finish cleanly. You can re-run it now.
+          </div>
+        )}
+
+        <Button
+          onClick={handleSync}
+          disabled={!workspaceId || syncing || (status?.status === 'running' && !isStuckRunning)}
+          size="sm"
+          className="gap-2"
+        >
+          {syncing ? (
+            <>
+              <Loader2 className="w-3.5 h-3.5 animate-spin" /> Analysing orders… (1-2 min)
+            </>
+          ) : (
+            <>
+              <RefreshCw className="w-3.5 h-3.5" /> Sync orders
+            </>
+          )}
+        </Button>
+        <p className="text-[11px] text-muted-foreground">
+          GDPR-safe by design: only product IDs and order counts touch the graph.
+          Customer records stay in Shopify as the system of record.
         </p>
       </CardContent>
     </Card>

@@ -676,3 +676,123 @@ def _strip_html(html: str | None) -> str:
     # Drop tags, collapse whitespace. Good enough for embedding.
     no_tags = re.sub(r"<[^>]+>", " ", html)
     return re.sub(r"\s+", " ", no_tags).strip()
+
+
+# ---------------------------------------------------------------------------
+# PRD-009 Phase 2 — Shopify orders → FREQUENTLY_BOUGHT_WITH edges
+# ---------------------------------------------------------------------------
+# Privacy by design: this mapper accepts ONLY order id, createdAt, line items
+# with product references. Even if a customer-identifying field were
+# accidentally included in the JSONL we ignore it — no customer or order
+# nodes are created. Only aggregated Product↔Product co-occurrence edges.
+
+_ORDERS_SOURCE = "shopify://orders"
+
+
+def map_shopify_orders(
+    jsonl_iter,
+    *,
+    bulk_op_id: str | None = None,
+    min_support: int = 2,
+) -> dict[str, list]:
+    """Map a Shopify Orders Bulk Op JSONL stream into FBT edges.
+
+    Args:
+        jsonl_iter: Iterable of decoded dicts OR JSON strings (auto-detected).
+        bulk_op_id: Optional Bulk Operation id for the source_file tag.
+        min_support: Minimum number of orders a (Product A, Product B) pair
+                     must co-appear in before we emit an edge. Filters one-off
+                     coincidences. Default 2 = appeared in 2+ orders.
+
+    Output:
+        ``{nodes: [], edges: [...], hyperedges: []}`` — only edges; nodes are
+        assumed to already exist in the workspace graph (from the catalog
+        sync). Edge fields:
+          source = shopify_product_<id_A>  (canonical: lower id first)
+          target = shopify_product_<id_B>
+          relation = "frequently_bought_with"
+          confidence_score = co_count / total_orders   (0..1)
+          weight = co_count                            (raw)
+          attrs = {co_count, total_orders}
+    """
+    source_tag = f"{_ORDERS_SOURCE}#{bulk_op_id}" if bulk_op_id else _ORDERS_SOURCE
+
+    # Build: order_id → set(product_ids). We collect line items grouped by
+    # their parent order. The JSONL stream interleaves Orders + LineItems
+    # in arbitrary order; LineItems carry __parentId pointing at their Order.
+    order_products: dict[str, set[str]] = {}
+    cancelled_orders: set[str] = set()
+
+    for item in jsonl_iter:
+        if isinstance(item, (bytes, str)):
+            line = item.decode() if isinstance(item, bytes) else item
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+        elif isinstance(item, dict):
+            obj = item
+        else:
+            continue
+
+        gid = obj.get("id") or ""
+        kind_match = re.match(r"gid://shopify/([A-Za-z]+)/", gid)
+        if not kind_match:
+            continue
+        kind = kind_match.group(1)
+
+        if kind == "Order":
+            # Skip cancelled orders from co-occurrence math — they don't
+            # represent revealed customer preference.
+            if obj.get("cancelledAt"):
+                cancelled_orders.add(gid)
+            else:
+                order_products.setdefault(gid, set())
+            continue
+
+        if kind == "LineItem":
+            parent_order = obj.get("__parentId", "")
+            if not parent_order or parent_order in cancelled_orders:
+                continue
+            product_gid = (obj.get("variant") or {}).get("product", {}).get("id")
+            if not product_gid:
+                continue
+            product_tail = product_gid.rsplit("/", 1)[-1]
+            order_products.setdefault(parent_order, set()).add(product_tail)
+
+    # Filter out single-item orders — they contribute nothing to co-occurrence
+    valid_orders = {oid: pids for oid, pids in order_products.items() if len(pids) >= 2}
+    total_orders = len(valid_orders)
+
+    # Pair counts: (sorted_tuple_of_product_ids) → co_occurrence_count
+    from itertools import combinations
+    pair_counts: dict[tuple[str, str], int] = {}
+    for pids in valid_orders.values():
+        for a, b in combinations(sorted(pids), 2):
+            pair_counts[(a, b)] = pair_counts.get((a, b), 0) + 1
+
+    result = _empty_graph()
+    if total_orders == 0:
+        return result
+
+    for (a, b), count in pair_counts.items():
+        if count < min_support:
+            continue
+        src = _make_id("shopify_product", a)
+        tgt = _make_id("shopify_product", b)
+        confidence = count / total_orders
+        edge = _edge(
+            source=src,
+            target=tgt,
+            relation="frequently_bought_with",
+            source_file=source_tag,
+            confidence_score=confidence,
+            weight=float(count),
+        )
+        edge["attrs"] = {"co_count": count, "total_orders": total_orders}
+        result["edges"].append(edge)
+
+    return result
