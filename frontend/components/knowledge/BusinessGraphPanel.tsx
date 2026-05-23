@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useMemo, useCallback } from 'react'
+import { useState, useRef, useMemo, useCallback, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
 import { useWorkspace } from '@/hooks/use-workspace'
@@ -8,11 +8,15 @@ import { Input } from '@/components/ui/input'
 import { Slider } from '@/components/ui/slider'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import BusinessGraphVisualization from './BusinessGraphVisualization'
+import BusinessGraphVisualization, {
+  type BusinessGraphHandle,
+  type ColorMode,
+} from './BusinessGraphVisualization'
 import { GraphErrorBoundary } from './GraphErrorBoundary'
 import {
   Network, Loader2, Search, X, ChevronRight,
   FileText, Clock, Layers, Upload, RefreshCw, Plus,
+  Maximize2, Minimize2, Palette,
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 
@@ -71,6 +75,13 @@ export function BusinessGraphPanel() {
   const [importError, setImportError] = useState<string | null>(null)
   const [building, setBuilding] = useState(false)
   const [dragActive, setDragActive] = useState(false)
+
+  // PRD-009 Phase-2 polish state
+  const [visibleTypes, setVisibleTypes] = useState<Set<string>>(new Set())  // empty = all
+  const [colorMode, setColorMode] = useState<ColorMode>('community')
+  const [isFullscreen, setIsFullscreen] = useState(false)
+  const vizRef = useRef<BusinessGraphHandle>(null)
+  const graphContainerRef = useRef<HTMLDivElement>(null)
 
   // ── File handling (matches document-management.tsx pattern) ──
 
@@ -241,6 +252,83 @@ export function BusinessGraphPanel() {
       .sort((a, b) => b[1] - a[1])
       .map(([id, count]) => ({ id, count }))
   }, [graphData])
+
+  // Per-type counts for the filter chips. We pre-compute once so the chip
+  // row stays static even while the user toggles things off.
+  const typeCounts = useMemo(() => {
+    if (!graphData?.nodes) return new Map<string, number>()
+    const m = new Map<string, number>()
+    for (const n of graphData.nodes) {
+      const t = n.file_type ?? 'unknown'
+      m.set(t, (m.get(t) ?? 0) + 1)
+    }
+    return m
+  }, [graphData])
+
+  // Pretty label for each node type — sortable for chip ordering.
+  const TYPE_DISPLAY: Record<string, { label: string; color: string; order: number }> = {
+    shopify_product:    { label: 'Products',    color: '#ff7849', order: 1 },
+    shopify_variant:    { label: 'Variants',    color: '#fdba74', order: 2 },
+    shopify_vendor:     { label: 'Vendors',     color: '#a78bfa', order: 3 },
+    shopify_collection: { label: 'Collections', color: '#34d399', order: 4 },
+    shopify_metafield:  { label: 'Metafields',  color: '#60a5fa', order: 5 },
+  }
+
+  const typeChips = useMemo(() => {
+    return Array.from(typeCounts.entries())
+      .map(([t, n]) => ({
+        type: t,
+        count: n,
+        label: TYPE_DISPLAY[t]?.label ?? t.replace(/_/g, ' '),
+        color: TYPE_DISPLAY[t]?.color ?? '#94a3b8',
+        order: TYPE_DISPLAY[t]?.order ?? 99,
+      }))
+      .sort((a, b) => a.order - b.order || b.count - a.count)
+  }, [typeCounts])
+
+  const toggleType = useCallback((t: string) => {
+    setVisibleTypes((prev) => {
+      const next = new Set(prev)
+      // Empty set = "show all". First click on any chip switches into
+      // explicit mode with ONLY the others removed.
+      if (next.size === 0) {
+        for (const ct of typeChips) {
+          if (ct.type !== t) next.add(ct.type)
+        }
+      } else if (next.has(t)) {
+        next.delete(t)
+      } else {
+        next.add(t)
+      }
+      // If user re-enables everything, fall back to "show all" sentinel.
+      if (next.size === typeChips.length) next.clear()
+      return next
+    })
+  }, [typeChips])
+
+  const isTypeVisible = useCallback(
+    (t: string) => visibleTypes.size === 0 || visibleTypes.has(t),
+    [visibleTypes],
+  )
+
+  // Native HTML5 fullscreen on the graph container.
+  const handleFullscreen = useCallback(() => {
+    const el = graphContainerRef.current
+    if (!el) return
+    if (!document.fullscreenElement) {
+      el.requestFullscreen?.().then(() => setIsFullscreen(true)).catch(() => {})
+    } else {
+      document.exitFullscreen?.().then(() => setIsFullscreen(false)).catch(() => {})
+    }
+  }, [])
+
+  // Keep isFullscreen in sync if the user ESC-exits without clicking the
+  // toggle — otherwise the icon shows the wrong state.
+  useEffect(() => {
+    const onChange = () => setIsFullscreen(!!document.fullscreenElement)
+    document.addEventListener('fullscreenchange', onChange)
+    return () => document.removeEventListener('fullscreenchange', onChange)
+  }, [])
 
   const filteredData = useMemo((): GraphData | null => {
     if (!graphData) return null
@@ -502,16 +590,87 @@ export function BusinessGraphPanel() {
           ))}
         </div>
 
-        {/* Graph Visualization — wrapped in a localised error boundary so a
-            renderer-level exception (bad node, missing peer dep at runtime)
-            doesn't take down the whole dashboard. */}
-        <div className="flex-1 glass-card bg-white/5 backdrop-blur-sm border border-white/10 rounded-lg overflow-hidden min-h-[400px]">
+        {/* Graph Visualization + controls — wrapped in a localised error
+            boundary so a renderer-level exception doesn't take down the
+            whole dashboard. Container is the fullscreen target. */}
+        <div
+          ref={graphContainerRef}
+          className="flex-1 glass-card bg-white/5 backdrop-blur-sm border border-white/10 rounded-lg overflow-hidden min-h-[400px] relative"
+        >
+          {/* Top-right controls — color-mode toggle + fullscreen */}
+          <div className="absolute top-3 right-3 z-10 flex items-center gap-2">
+            <div className="flex items-center bg-black/50 backdrop-blur-sm rounded-md border border-white/10 overflow-hidden">
+              <button
+                onClick={() => setColorMode('community')}
+                className={`px-2.5 py-1 text-xs flex items-center gap-1 transition ${
+                  colorMode === 'community'
+                    ? 'bg-white/15 text-foreground'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-white/5'
+                }`}
+                title="Color by cluster"
+              >
+                <Layers className="w-3 h-3" /> Cluster
+              </button>
+              <button
+                onClick={() => setColorMode('type')}
+                className={`px-2.5 py-1 text-xs flex items-center gap-1 transition border-l border-white/10 ${
+                  colorMode === 'type'
+                    ? 'bg-white/15 text-foreground'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-white/5'
+                }`}
+                title="Color by node type"
+              >
+                <Palette className="w-3 h-3" /> Type
+              </button>
+            </div>
+            <button
+              onClick={handleFullscreen}
+              className="p-1.5 rounded-md bg-black/50 backdrop-blur-sm border border-white/10 text-muted-foreground hover:text-foreground hover:bg-white/10 transition"
+              title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+            >
+              {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+            </button>
+          </div>
+
+          {/* Type filter chips — bottom-left, doesn't compete with hover tooltip */}
+          {typeChips.length > 0 && (
+            <div className="absolute bottom-3 right-3 z-10 flex flex-wrap gap-1.5 max-w-[60%] justify-end">
+              {typeChips.map(({ type, label, color, count }) => {
+                const visible = isTypeVisible(type)
+                return (
+                  <button
+                    key={type}
+                    onClick={() => toggleType(type)}
+                    className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-xs border transition ${
+                      visible
+                        ? 'bg-white/10 border-white/20 text-foreground'
+                        : 'bg-black/40 border-white/10 text-muted-foreground/60 line-through'
+                    }`}
+                    title={`${count.toLocaleString()} ${label.toLowerCase()}`}
+                  >
+                    <span
+                      className="w-2 h-2 rounded-full"
+                      style={{ backgroundColor: visible ? color : '#52525b' }}
+                    />
+                    {label}
+                    <span className="text-[10px] text-muted-foreground">
+                      {count.toLocaleString()}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+
           <GraphErrorBoundary>
             <BusinessGraphVisualization
+              ref={vizRef}
               graphData={(filteredData ?? { nodes: [], links: [] }) as any}
               onNodeSelect={handleNodeSelect}
               selectedCommunity={selectedCommunity}
               minConfidence={confidenceMin}
+              visibleTypes={visibleTypes.size > 0 ? visibleTypes : undefined}
+              colorMode={colorMode}
             />
           </GraphErrorBoundary>
         </div>
