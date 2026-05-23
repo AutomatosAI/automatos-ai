@@ -38,20 +38,13 @@ export function SyncPanel({ site, workspaceId }: SyncPanelProps) {
         </CardContent>
       </Card>
 
-      {/* Per-platform cards. Site type drives which one shows. */}
-      {site.type === 'shopify' && (
-        <ShopifySyncCard site={site} workspaceId={workspaceId} />
-      )}
-
-      {site.type !== 'shopify' && (
-        <Card className="glass-card">
-          <CardContent className="py-6 text-sm text-muted-foreground">
-            Catalog sync isn't available for{' '}
-            <span className="text-foreground capitalize">{site.type}</span> sites yet.
-            It'll appear here once the integration lands.
-          </CardContent>
-        </Card>
-      )}
+      {/* Per-platform cards. Connectivity is workspace-level (Composio), not
+          site.type — InbuildUK has type='custom' but is fully wired to
+          Shopify via Composio. So we always render the Shopify card; the card
+          itself checks if Shopify is actually connected and guides the
+          merchant if not. Add WooCommerce/BigCommerce/Amazon cards here as
+          their integrations land. */}
+      <ShopifySyncCard site={site} workspaceId={workspaceId} />
     </div>
   )
 }
@@ -86,12 +79,12 @@ function ShopifySyncCard({ site, workspaceId }: { site: Site; workspaceId: strin
     refreshStatus()
   }, [workspaceId])
 
-  // Readiness check — has_catalog is set by the backend when the Site has
-  // a Shopify domain configured (capability backfill). The Composio
-  // SHOPIFY connection isn't yet exposed on the Site row, so we use this
-  // as a proxy; the backend endpoint will fail cleanly if Composio isn't
-  // actually active.
-  const isShopifyConnected = site.capabilities?.has_catalog === true
+  // Readiness — has_catalog flips true once the Site has a Shopify domain
+  // configured (capability backfill). Composio SHOPIFY connection status
+  // lives at the workspace level (composio_connections table), not on the
+  // Site row, so we don't gate on it here. Backend returns a clear error if
+  // Composio is missing and the error panel below surfaces it.
+  const isShopifyConnected = site.capabilities?.has_catalog !== false  // permissive: undefined → true
 
   async function handleSync() {
     if (!workspaceId) return
@@ -170,8 +163,10 @@ function ShopifySyncCard({ site, workspaceId }: { site: Site; workspaceId: strin
 
         {!isShopifyConnected && (
           <p className="text-xs text-amber-400">
-            Shopify isn't connected yet. Connect it in <strong>System Settings → Credentials</strong>{' '}
-            with the <em>Shopify Access Token API</em> credential type, then come back here.
+            This site doesn't have a Shopify domain configured yet. Add one in the Site
+            details before syncing, or connect Shopify in{' '}
+            <strong>System Settings → Credentials</strong> using the{' '}
+            <em>Shopify Access Token API</em> credential type.
           </p>
         )}
 
