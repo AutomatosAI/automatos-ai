@@ -116,7 +116,11 @@ class ComposioClient:
             # billing, and service monitoring. This is part of their service model.
             self._composio = Composio(
                 api_key=self.api_key,
-                toolkit_versions={"default": "latest"},
+                # "latest" is rejected for manual tools.execute() calls — see
+                # docs/SHOPIFY/COMPOSIO-SHOPIFY-SETUP.md gotcha #1. Pin shopify
+                # to the version we've tested PRD-009 sync against; other
+                # toolkits stay on "latest" via the default key.
+                toolkit_versions={"default": "latest", "shopify": "20260414_00"},
             )
         return self._composio
 
@@ -133,7 +137,9 @@ class ComposioClient:
             self._toolset = Composio(
                 api_key=self.api_key,
                 provider=OpenAIProvider(),
-                toolkit_versions={"default": "latest"},
+                # Mirror the pin on `composio` above so the OpenAI-provider
+                # variant doesn't drift back to "latest" for shopify.
+                toolkit_versions={"default": "latest", "shopify": "20260414_00"},
             )
         return self._toolset
     
