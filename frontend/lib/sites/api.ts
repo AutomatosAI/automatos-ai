@@ -112,3 +112,40 @@ export async function startShopifySync(workspaceId: string): Promise<ShopifySync
     {},
   );
 }
+
+// PRD-009 Phase 2 — orders → FREQUENTLY_BOUGHT_WITH edges
+export interface ShopifyOrdersSyncStatus {
+  status: 'never_synced' | 'running' | 'complete' | 'error';
+  bulk_operation_id?: string;
+  object_count?: number;
+  file_size?: number;
+  fbt_edges_added?: number;
+  total_orders_analysed?: number;
+  days?: number;
+  days_window?: number;
+  min_support?: number;
+  duration_seconds?: number;
+  started_at?: number;
+  completed_at?: number;
+  errored_at?: number;
+  error?: string;
+}
+
+export async function getShopifyOrdersSyncStatus(workspaceId: string): Promise<ShopifyOrdersSyncStatus> {
+  return apiClient.get<ShopifyOrdersSyncStatus>(
+    `/api/shopify/sync/orders/status?workspace_id=${encodeURIComponent(workspaceId)}`,
+  );
+}
+
+export async function startShopifyOrdersSync(
+  workspaceId: string,
+  opts: { days?: number; minSupport?: number } = {},
+): Promise<ShopifyOrdersSyncStatus> {
+  const params = new URLSearchParams({ workspace_id: workspaceId });
+  if (opts.days) params.set('days', String(opts.days));
+  if (opts.minSupport) params.set('min_support', String(opts.minSupport));
+  return apiClient.post<ShopifyOrdersSyncStatus>(
+    `/api/shopify/sync/orders/start?${params.toString()}`,
+    {},
+  );
+}
