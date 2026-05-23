@@ -593,21 +593,36 @@ async def start_product_sync(
     db.commit()
 
     try:
-        # 1. Bulk Op via Composio (synchronous — returns the signed URL)
+        # 1. Bulk Op via Composio (synchronous — returns the signed URL).
+        # Python SDK 0.12.0 returns a dict with keys: data, error, successful,
+        # logId. NOT an attribute-access object — keep .get() everywhere.
         bulk = client.composio.tools.execute(
             "SHOPIFY_BULK_QUERY_OPERATION",
             user_id=entity_id,
             arguments={"query": _SHOPIFY_BULK_CATALOG_QUERY},
         )
-        if not getattr(bulk, "successful", False):
-            raise HTTPException(status_code=502, detail=f"Bulk Op failed: {getattr(bulk, 'error', '?')}")
-        bulk_data = getattr(bulk, "data", {}) or {}
+        # Be liberal in what we accept — some SDK variants return objects with
+        # attribute access. Normalise to dict-style.
+        bulk_dict = bulk if isinstance(bulk, dict) else {
+            "successful": getattr(bulk, "successful", None),
+            "data": getattr(bulk, "data", None),
+            "error": getattr(bulk, "error", None),
+        }
+        if not bulk_dict.get("successful"):
+            raise HTTPException(
+                status_code=502,
+                detail=f"Bulk Op failed: {bulk_dict.get('error') or bulk_dict}",
+            )
+        bulk_data = bulk_dict.get("data") or {}
         download_url = bulk_data.get("url")
         bulk_op_id = bulk_data.get("bulk_operation_id")
         object_count = int(bulk_data.get("object_count") or 0)
         file_size = int(bulk_data.get("file_size") or 0)
         if not download_url:
-            raise HTTPException(status_code=502, detail="Bulk Op did not return a download URL")
+            raise HTTPException(
+                status_code=502,
+                detail=f"Bulk Op did not return a download URL — data={bulk_data}",
+            )
 
         # 2. Download JSONL
         dl_t0 = time.time()
