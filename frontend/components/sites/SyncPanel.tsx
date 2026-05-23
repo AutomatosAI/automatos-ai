@@ -79,12 +79,12 @@ function ShopifySyncCard({ site, workspaceId }: { site: Site; workspaceId: strin
     refreshStatus()
   }, [workspaceId])
 
-  // Readiness — has_catalog flips true once the Site has a Shopify domain
-  // configured (capability backfill). Composio SHOPIFY connection status
-  // lives at the workspace level (composio_connections table), not on the
-  // Site row, so we don't gate on it here. Backend returns a clear error if
-  // Composio is missing and the error panel below surfaces it.
-  const isShopifyConnected = site.capabilities?.has_catalog !== false  // permissive: undefined → true
+  // No front-end readiness gate — Composio connection status lives at the
+  // workspace level (composio_connections table) and isn't exposed on the
+  // Site row. The backend's POST /api/shopify/sync/products/start returns a
+  // clear 400/503 if Composio isn't wired; that error renders in the panel
+  // below. Better to let merchants click and see truth than block them on a
+  // stale site-level flag.
 
   async function handleSync() {
     if (!workspaceId) return
@@ -161,18 +161,10 @@ function ShopifySyncCard({ site, workspaceId }: { site: Site; workspaceId: strin
           </div>
         )}
 
-        {!isShopifyConnected && (
-          <p className="text-xs text-amber-400">
-            This site doesn't have a Shopify domain configured yet. Add one in the Site
-            details before syncing, or connect Shopify in{' '}
-            <strong>System Settings → Credentials</strong> using the{' '}
-            <em>Shopify Access Token API</em> credential type.
-          </p>
-        )}
 
         <Button
           onClick={handleSync}
-          disabled={!isShopifyConnected || !workspaceId || syncing || status?.status === 'running'}
+          disabled={!workspaceId || syncing || status?.status === 'running'}
           size="sm"
           className="gap-2"
         >
