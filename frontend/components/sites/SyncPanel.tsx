@@ -86,6 +86,15 @@ function ShopifySyncCard({ site, workspaceId }: { site: Site; workspaceId: strin
   // below. Better to let merchants click and see truth than block them on a
   // stale site-level flag.
 
+  // Detect a "running" status that's actually stuck (started_at older than
+  // 5 minutes). The bulk-op should complete in ~45s; anything beyond 5 min
+  // means the previous request crashed without writing a terminal status.
+  // We let the merchant retry by treating the row as effectively idle.
+  const isStuckRunning =
+    status?.status === 'running' &&
+    !!status.started_at &&
+    Date.now() / 1000 - status.started_at > 300
+
   async function handleSync() {
     if (!workspaceId) return
     setSyncing(true)
@@ -162,9 +171,15 @@ function ShopifySyncCard({ site, workspaceId }: { site: Site; workspaceId: strin
         )}
 
 
+        {isStuckRunning && (
+          <div className="text-xs text-amber-400 bg-amber-400/10 border border-amber-400/30 rounded p-2">
+            Previous sync didn't finish cleanly. You can re-run it now.
+          </div>
+        )}
+
         <Button
           onClick={handleSync}
-          disabled={!workspaceId || syncing || status?.status === 'running'}
+          disabled={!workspaceId || syncing || (status?.status === 'running' && !isStuckRunning)}
           size="sm"
           className="gap-2"
         >
