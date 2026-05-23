@@ -10,8 +10,12 @@ and ephemeral task execution dirs.
 Filesystem layout per workspace:
     /workspaces/{workspace_id}/
     ├── repos/          ← Cloned repos (persistent, git pull on revisit)
-    ├── tasks/          ← Ephemeral per-task execution dirs (cleaned up)
+    ├── reports/        ← Agent reports (platform_submit_report)
+    ├── content/        ← Long-form content (posts, articles, drafts)
     ├── artifacts/      ← Test reports, build outputs (persistent)
+    ├── analytics/      ← Analytics exports, KPI snapshots
+    ├── graph/          ← Knowledge graph exports
+    ├── tasks/          ← Ephemeral per-task execution dirs (cleaned up)
     ├── .ssh/           ← Deploy keys (injected from credential store)
     ├── .gitconfig      ← Per-workspace git identity
     └── .workspace_meta.json
@@ -55,11 +59,21 @@ class WorkspaceManager:
     # Directory provisioning
     # =========================================================================
 
+    DEFAULT_SUBDIRS: tuple[str, ...] = (
+        "repos",
+        "reports",
+        "content",
+        "artifacts",
+        "analytics",
+        "graph",
+        "tasks",
+    )
+
     def ensure_workspace_exists(self) -> bool:
         """Create workspace directory tree if first use. Returns True if newly created."""
         created = not self.root.exists()
 
-        for subdir in ("repos", "tasks", "artifacts"):
+        for subdir in self.DEFAULT_SUBDIRS:
             (self.root / subdir).mkdir(parents=True, exist_ok=True)
 
         meta_path = self.root / ".workspace_meta.json"
