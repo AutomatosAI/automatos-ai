@@ -86,6 +86,13 @@ function ShopifySyncCard({ site, workspaceId }: { site: Site; workspaceId: strin
     refreshStatus()
   }, [workspaceId])
 
+  // Poll while running — see ShopifyOrdersSyncCard for the rationale.
+  useEffect(() => {
+    if (status?.status !== 'running' || !workspaceId) return
+    const interval = setInterval(refreshStatus, 5000)
+    return () => clearInterval(interval)
+  }, [status?.status, workspaceId])
+
   // No front-end readiness gate — Composio connection status lives at the
   // workspace level (composio_connections table) and isn't exposed on the
   // Site row. The backend's POST /api/shopify/sync/products/start returns a
@@ -244,6 +251,16 @@ function ShopifyOrdersSyncCard({ workspaceId }: { workspaceId: string | null }) 
   }
 
   useEffect(() => { refreshStatus() }, [workspaceId])
+
+  // Poll while running — the original POST request may have been cut by
+  // the browser's fetch timeout while the server kept working. Polling
+  // the GET /status endpoint surfaces completion even if the in-flight
+  // POST never resolved. Stops the moment we see a terminal status.
+  useEffect(() => {
+    if (status?.status !== 'running' || !workspaceId) return
+    const interval = setInterval(refreshStatus, 5000)
+    return () => clearInterval(interval)
+  }, [status?.status, workspaceId])
 
   // Same stuck-state detection as catalog card
   const isStuckRunning =
