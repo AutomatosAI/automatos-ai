@@ -75,3 +75,40 @@ export async function sendCallbackTest(siteId: string): Promise<CallbackTestResp
     {},
   );
 }
+
+// ---------------------------------------------------------------------------
+// PRD-009 Layer 2 — catalog → knowledge graph sync
+// ---------------------------------------------------------------------------
+
+export interface ShopifySyncStatus {
+  status: 'never_synced' | 'running' | 'complete' | 'error';
+  bulk_operation_id?: string;
+  object_count?: number;
+  file_size?: number;
+  node_count?: number;
+  edge_count?: number;
+  community_count?: number;
+  duration_seconds?: number;
+  started_at?: number;
+  completed_at?: number;
+  errored_at?: number;
+  error?: string;
+}
+
+export interface ShopifySyncResult extends ShopifySyncStatus {
+  workspace_id: string;
+  download_seconds?: number;
+}
+
+export async function getShopifySyncStatus(workspaceId: string): Promise<ShopifySyncStatus> {
+  return apiClient.get<ShopifySyncStatus>(
+    `/api/shopify/sync/status?workspace_id=${encodeURIComponent(workspaceId)}`,
+  );
+}
+
+export async function startShopifySync(workspaceId: string): Promise<ShopifySyncResult> {
+  return apiClient.post<ShopifySyncResult>(
+    `/api/shopify/sync/products/start?workspace_id=${encodeURIComponent(workspaceId)}`,
+    {},
+  );
+}
