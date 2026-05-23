@@ -272,18 +272,36 @@ export function DynamicCredentialForm({
       switch (saved.connection_status) {
         case 'pending_oauth':
           if (saved.oauth_redirect_url) {
-            // OAuth — open Composio's hosted install in a popup. Width/height
-            // mirror Shopify's recommended install dimensions.
+            // Try popup first — but ALWAYS surface the URL on screen too. Popups
+            // get blocked silently in many browsers (especially after save flows
+            // not triggered by a direct click event), and merchants can't see
+            // why the install screen never appears. Showing the URL in a
+            // confirm() dialog lets them either keep the popup or click the
+            // URL directly. The URL also lands in clipboard via prompt() fallback.
             const popup = window.open(
               saved.oauth_redirect_url,
               'shopify-oauth',
               'width=600,height=720,menubar=no,toolbar=no,location=no',
             )
-            if (!popup) {
-              alert(
-                'Pop-up blocked. Allow pop-ups for this site and try again, or open this URL manually:\n\n' +
-                  saved.oauth_redirect_url,
+            const popupBlocked = !popup || popup.closed || typeof popup.closed === 'undefined'
+            if (popupBlocked) {
+              // Use prompt() so the URL is selectable/copyable in a single click.
+              window.prompt(
+                'Shopify install popup was blocked. Copy this URL and open it in a new tab to complete Shopify install:',
+                saved.oauth_redirect_url,
               )
+            } else {
+              // Popup opened — confirm the merchant sees it and knows what to do.
+              const stayOpen = window.confirm(
+                'A Shopify install popup has opened — click "Install app" on that page to finish connecting.\n\n' +
+                  'If you do not see the popup, click OK to copy the install URL and open it manually.',
+              )
+              if (stayOpen) {
+                window.prompt(
+                  'Open this URL in a new tab to complete Shopify install:',
+                  saved.oauth_redirect_url,
+                )
+              }
             }
           }
           break
