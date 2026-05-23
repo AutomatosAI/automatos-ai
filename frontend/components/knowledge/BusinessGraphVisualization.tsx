@@ -88,25 +88,38 @@ interface VizNode extends GraphNode {
 // ---------------------------------------------------------------------------
 
 const TYPE_COLORS: Record<string, string> = {
-  shopify_product: "#ff7849",      // brand orange
-  shopify_variant: "#fdba74",      // light orange
-  shopify_vendor: "#a78bfa",       // violet
-  shopify_collection: "#34d399",   // emerald
-  shopify_metafield: "#60a5fa",    // sky blue
-  // Catch-alls
-  product: "#ff7849",
-  variant: "#fdba74",
-  vendor: "#a78bfa",
-  collection: "#34d399",
-  metafield: "#60a5fa",
+  shopify_product:    "#ff5e3a",  // vivid orange — anchor
+  shopify_variant:    "#ffb347",  // amber
+  shopify_vendor:     "#c084fc",  // purple
+  shopify_collection: "#10e89e",  // electric emerald
+  shopify_metafield:  "#38bdf8",  // bright sky
+  // Catch-alls (used if anyone seeds graphs with the un-prefixed names)
+  product:    "#ff5e3a",
+  variant:    "#ffb347",
+  vendor:     "#c084fc",
+  collection: "#10e89e",
+  metafield:  "#38bdf8",
 };
 
-// Soft, distinguishable cluster palette (12 colors cycled).
+// 24-colour cluster palette spread across the hue wheel — every adjacent
+// pair is visually distinct (60° hue separation across two passes).
 const COMMUNITY_COLORS = [
-  "#ff7849", "#34d399", "#60a5fa", "#a78bfa",
-  "#fbbf24", "#f472b6", "#22d3ee", "#fb7185",
-  "#84cc16", "#818cf8", "#facc15", "#2dd4bf",
+  "#ff5e3a", "#10e89e", "#38bdf8", "#c084fc", "#fbbf24", "#f472b6",
+  "#22d3ee", "#fb7185", "#a3e635", "#818cf8", "#facc15", "#2dd4bf",
+  "#f97316", "#06b6d4", "#d946ef", "#84cc16", "#0ea5e9", "#ec4899",
+  "#eab308", "#14b8a6", "#a855f7", "#f59e0b", "#6366f1", "#22c55e",
 ];
+
+// Edge colour per relation type — so structure reads at a glance even
+// when zoomed out and individual nodes blur together. Used when no
+// neighbourhood / community focus is dimming the edges.
+const RELATION_COLORS: Record<string, string> = {
+  variant_of:     "#ffb347",   // amber — matches variant nodes
+  in_collection:  "#10e89e",   // emerald — matches collections
+  by_vendor:      "#c084fc",   // purple — matches vendors
+  has_metafield:  "#38bdf8",   // sky — matches metafields
+};
+const DEFAULT_LINK = "#94a3b8";
 
 const colorByType = (t: string | undefined): string =>
   TYPE_COLORS[t ?? ""] ?? "#94a3b8";
@@ -313,24 +326,34 @@ const BusinessGraphVisualization = forwardRef<
 
   // ── Link styling ───────────────────────────────────────────────────────
 
+  // Convert a #rrggbb to rgba(...) at a given alpha.
+  const withAlpha = (hex: string, alpha: number): string => {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return `rgba(${r},${g},${b},${alpha})`;
+  };
+
   const linkColor = useCallback(
     (l: any) => {
       const s = typeof l.source === "object" ? l.source : null;
       const t = typeof l.target === "object" ? l.target : null;
+      const relColor = RELATION_COLORS[l.relation] ?? DEFAULT_LINK;
 
-      // Focus dim
+      // Focus dim: only the focused neighbourhood's edges keep their colour
       if (focusNeighbourhood) {
         const touches =
           focusNeighbourhood.has(s?.id) && focusNeighbourhood.has(t?.id);
-        return touches ? "rgba(180,200,255,0.55)" : "rgba(120,130,150,0.06)";
+        return touches ? withAlpha(relColor, 0.65) : "rgba(120,130,150,0.05)";
       }
       // Community dim
       if (selectedCommunity != null) {
         const touches =
           s?.community === selectedCommunity || t?.community === selectedCommunity;
-        return touches ? "rgba(180,200,255,0.45)" : "rgba(120,130,150,0.10)";
+        return touches ? withAlpha(relColor, 0.55) : "rgba(120,130,150,0.08)";
       }
-      return "rgba(160,170,190,0.28)";
+      // Default — relation-coloured edge, low alpha so dense graphs don't drown
+      return withAlpha(relColor, 0.22);
     },
     [selectedCommunity, focusNeighbourhood],
   );
