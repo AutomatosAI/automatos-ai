@@ -672,7 +672,18 @@ async def start_product_sync(
             community_count=meta.get("community_count"),
             duration_seconds=duration,
         )
-    except HTTPException:
+    except HTTPException as he:
+        # Persist the failure so the UI doesn't stay stuck on "running" — the
+        # previous version's `except HTTPException: raise` skipped this and
+        # left workspaces wedged in running-forever state.
+        settings["product_sync"] = {
+            "status": "error",
+            "error": str(he.detail) if isinstance(he.detail, str) else f"HTTP {he.status_code}",
+            "errored_at": time.time(),
+        }
+        workspace.settings = settings
+        flag_modified(workspace, "settings")
+        db.commit()
         raise
     except Exception as e:  # noqa: BLE001
         logger.exception("PRD-009 sync failed for workspace %s", workspace_id)
