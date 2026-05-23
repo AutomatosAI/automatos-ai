@@ -228,6 +228,12 @@ const BusinessGraphVisualization = forwardRef<
   const nodeCanvasObject = useCallback(
     (node: any, ctx: CanvasRenderingContext2D, globalScale: number) => {
       const n = node as VizNode;
+      // d3-force can emit a paint frame before initial positions are set
+      // (warmupTicks=0 path inside the lib). createRadialGradient throws if
+      // x/y aren't finite, which surfaces as 'Couldn't render the graph view'
+      // in the GraphErrorBoundary. Skip non-finite frames; the simulation
+      // settles into finite coords within a few ticks.
+      if (!Number.isFinite(node.x) || !Number.isFinite(node.y)) return;
       const baseR = 2 + 7 * (n.degree / maxDegree);
 
       // Dim if community filtered OR outside focus neighbourhood
@@ -295,6 +301,7 @@ const BusinessGraphVisualization = forwardRef<
 
   const nodePointerAreaPaint = useCallback(
     (node: any, color: string, ctx: CanvasRenderingContext2D) => {
+      if (!Number.isFinite(node.x) || !Number.isFinite(node.y)) return;
       const baseR = 2 + 7 * ((node as VizNode).degree / maxDegree);
       ctx.fillStyle = color;
       ctx.beginPath();
@@ -351,7 +358,12 @@ const BusinessGraphVisualization = forwardRef<
       const next = focusNodeId === n.id ? null : n.id;
       setFocusNodeId(next);
 
-      if (next && fgRef.current?.centerAt && typeof n.x === "number") {
+      if (
+        next &&
+        fgRef.current?.centerAt &&
+        Number.isFinite(n.x) &&
+        Number.isFinite(n.y)
+      ) {
         fgRef.current.centerAt(n.x, n.y, 600);
         fgRef.current.zoom(Math.max(2.5, fgRef.current.zoom() ?? 1), 600);
       }
