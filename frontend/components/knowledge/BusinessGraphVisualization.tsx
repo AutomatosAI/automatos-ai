@@ -18,11 +18,17 @@
 import React, { useCallback, useMemo, useRef, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 
-// SSR-disabled dynamic import — react-force-graph needs window/canvas.
-const ForceGraph2D = dynamic(
-  () => import("react-force-graph-2d").then((m) => m.default),
-  { ssr: false },
-) as any;
+// SSR-disabled dynamic import — react-force-graph needs window/canvas. Next 15
+// can mis-resolve the default export for ESM-only packages when you go via
+// .then(m => m.default), so let Next handle the resolution itself.
+const ForceGraph2D = dynamic(() => import("react-force-graph-2d"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
+      Loading graph renderer…
+    </div>
+  ),
+}) as any;
 
 // ---------------------------------------------------------------------------
 // Types — same shape the existing BusinessGraphPanel feeds in.

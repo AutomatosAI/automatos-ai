@@ -8,7 +8,8 @@ import { Input } from '@/components/ui/input'
 import { Slider } from '@/components/ui/slider'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { BusinessGraphVisualization } from './BusinessGraphVisualization'
+import BusinessGraphVisualization from './BusinessGraphVisualization'
+import { GraphErrorBoundary } from './GraphErrorBoundary'
 import {
   Network, Loader2, Search, X, ChevronRight,
   FileText, Clock, Layers, Upload, RefreshCw, Plus,
@@ -205,8 +206,10 @@ export function BusinessGraphPanel() {
 
   // The Canvas-based ForceGraph2D renderer handles tens of thousands of nodes
   // smoothly (Obsidian-tier perf). Cap raised from 5,000 (old SVG/d3 limit)
-  // to 100,000. The hard ceiling is browser memory, not the renderer.
-  const vizSafe = !!meta && (meta.node_count ?? 0) <= 100000
+  // to 50,000 — high enough for InbuildUK (~24k) but low enough that the
+  // graph.json fetch + parse stays safely under ~30MB. Higher catalogs
+  // (~100k+) should switch to the cluster-first drill-in pattern instead.
+  const vizSafe = !!meta && (meta.node_count ?? 0) <= 50000
 
   const {
     data: graphData,
@@ -499,14 +502,18 @@ export function BusinessGraphPanel() {
           ))}
         </div>
 
-        {/* Graph Visualization */}
+        {/* Graph Visualization — wrapped in a localised error boundary so a
+            renderer-level exception (bad node, missing peer dep at runtime)
+            doesn't take down the whole dashboard. */}
         <div className="flex-1 glass-card bg-white/5 backdrop-blur-sm border border-white/10 rounded-lg overflow-hidden min-h-[400px]">
-          <BusinessGraphVisualization
-            graphData={(filteredData ?? { nodes: [], links: [] }) as any}
-            onNodeSelect={handleNodeSelect}
-            selectedCommunity={selectedCommunity}
-            minConfidence={confidenceMin}
-          />
+          <GraphErrorBoundary>
+            <BusinessGraphVisualization
+              graphData={(filteredData ?? { nodes: [], links: [] }) as any}
+              onNodeSelect={handleNodeSelect}
+              selectedCommunity={selectedCommunity}
+              minConfidence={confidenceMin}
+            />
+          </GraphErrorBoundary>
         </div>
       </div>}
 
