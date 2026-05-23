@@ -464,6 +464,29 @@ const BusinessGraphVisualization = forwardRef<
     onNodeSelect?.(null);
   }, [onNodeSelect]);
 
+  // ── Pre-filtered render data ───────────────────────────────────────────
+  // At 24k nodes, the per-tick nodeVisibility/linkVisibility callback path
+  // in react-force-graph causes the simulation to never settle. Filter the
+  // arrays ahead of time instead — the simulation runs once on the active
+  // subset, fast and stable.
+  const renderData = useMemo(() => {
+    const noFilter = selectedCommunity == null && !focusNeighbourhood;
+    if (noFilter) return data;
+
+    const nodes = data.nodes.filter((n) => {
+      if (selectedCommunity != null && n.community !== selectedCommunity) return false;
+      if (focusNeighbourhood && !focusNeighbourhood.has(n.id)) return false;
+      return true;
+    });
+    const nodeIds = new Set(nodes.map((n) => n.id));
+    const links = data.links.filter((l) => {
+      const s = typeof l.source === "object" ? (l.source as any).id : l.source;
+      const t = typeof l.target === "object" ? (l.target as any).id : l.target;
+      return nodeIds.has(s) && nodeIds.has(t);
+    });
+    return { nodes, links };
+  }, [data, selectedCommunity, focusNeighbourhood]);
+
   // ── Imperative API ─────────────────────────────────────────────────────
 
   useImperativeHandle(
@@ -493,39 +516,20 @@ const BusinessGraphVisualization = forwardRef<
 
   return (
     <div ref={containerRef} className="relative w-full h-full min-h-[500px]">
-      {data.nodes.length === 0 ? (
+      {renderData.nodes.length === 0 ? (
         <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
           No nodes match the current filters.
         </div>
       ) : (
         <ForceGraph2D
           ref={fgRef}
-          graphData={data}
+          graphData={renderData}
           width={size.w}
           height={size.h}
           backgroundColor="#0a0d14"
           nodeRelSize={4}
           nodeCanvasObject={nodeCanvasObject}
           nodePointerAreaPaint={nodePointerAreaPaint}
-          // When a community is selected, hide everything outside it
-          // entirely — at 24k+ nodes dimming alone leaves too much noise.
-          // Same logic for the focused-node 1-hop neighbourhood.
-          nodeVisibility={(n: any) => {
-            if (selectedCommunity != null && n.community !== selectedCommunity) return false;
-            if (focusNeighbourhood && !focusNeighbourhood.has(n.id)) return false;
-            return true;
-          }}
-          linkVisibility={(l: any) => {
-            const s = typeof l.source === "object" ? l.source : null;
-            const t = typeof l.target === "object" ? l.target : null;
-            if (selectedCommunity != null) {
-              return s?.community === selectedCommunity && t?.community === selectedCommunity;
-            }
-            if (focusNeighbourhood) {
-              return !!(s && t && focusNeighbourhood.has(s.id) && focusNeighbourhood.has(t.id));
-            }
-            return true;
-          }}
           linkColor={linkColor}
           linkWidth={linkWidth}
           linkDirectionalParticles={linkParticleCount}
