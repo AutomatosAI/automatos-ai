@@ -866,16 +866,19 @@ async def start_orders_sync(
                 fresh_data = nx.node_link_data(existing_graph)
                 await gs._import_graph_unlocked(workspace_id, fresh_data, merge=False)
 
+        # Pull total_orders BEFORE import_graph — that call mutates the dict
+        # in place (renames "edges" -> "links" for NetworkX 3.x compat),
+        # so reading graph_delta["edges"] AFTER would KeyError. Defensive
+        # .get() either way.
+        total_orders = 0
+        delta_edges = graph_delta.get("edges") or graph_delta.get("links") or []
+        if delta_edges:
+            total_orders = int(delta_edges[0].get("attrs", {}).get("total_orders", 0))
+
         # Merge into the existing workspace graph (catalog nodes already
         # there from the products sync; we only add FBT edges).
         gs = GraphifyService()
         meta = await gs.import_graph(workspace_id, graph_delta, merge=True)
-
-        # Count total orders analysed from the first edge's attrs (mapper
-        # writes the same value into every edge).
-        total_orders = 0
-        if graph_delta["edges"]:
-            total_orders = int(graph_delta["edges"][0].get("attrs", {}).get("total_orders", 0))
 
         duration = time.time() - t0
         settings["orders_sync"] = {
