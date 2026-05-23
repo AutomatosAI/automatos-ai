@@ -113,6 +113,7 @@
     "react-day-picker": "8.8.2",
     "react-dom": "18.2.0",
     "react-dropzone": "14.2.3",
+    "react-force-graph-2d": "^1.29.1",
     "react-grid-layout": "^2.2.2",
     "react-hook-form": "7.47.0",
     "react-hot-toast": "2.4.1",
