@@ -114,12 +114,21 @@ const COMMUNITY_COLORS = [
 // when zoomed out and individual nodes blur together. Used when no
 // neighbourhood / community focus is dimming the edges.
 const RELATION_COLORS: Record<string, string> = {
-  variant_of:     "#ffb347",   // amber — matches variant nodes
-  in_collection:  "#10e89e",   // emerald — matches collections
-  by_vendor:      "#c084fc",   // purple — matches vendors
-  has_metafield:  "#38bdf8",   // sky — matches metafields
+  variant_of:            "#ffb347",   // amber — matches variant nodes
+  in_collection:         "#10e89e",   // emerald — matches collections
+  by_vendor:             "#c084fc",   // purple — matches vendors
+  has_metafield:         "#38bdf8",   // sky — matches metafields
+  // PRD-009 Phase 2: customer co-purchase signal — hot magenta so it
+  // visually pops out from the static catalog structure. These edges
+  // ARE the recommendation surface.
+  frequently_bought_with: "#ff3d8c",
 };
 const DEFAULT_LINK = "#94a3b8";
+
+// Relations whose edge width scales with co-occurrence weight rather
+// than being constant. FBT edges carry a `weight` (raw co_count) so the
+// strongest co-purchases visually thicken; weaker ones recede.
+const WEIGHTED_RELATIONS = new Set(["frequently_bought_with"]);
 
 const colorByType = (t: string | undefined): string =>
   TYPE_COLORS[t ?? ""] ?? "#94a3b8";
@@ -378,6 +387,40 @@ const BusinessGraphVisualization = forwardRef<
     [selectedCommunity, focusNeighbourhood],
   );
 
+  // Pre-compute max FBT weight once so edge width scales relative to the
+  // strongest co-purchase in this dataset (rather than a hardcoded ceiling).
+  const maxFbtWeight = useMemo(() => {
+    let max = 1;
+    for (const l of data.links) {
+      if (WEIGHTED_RELATIONS.has((l as any).relation) && (l as any).weight > max) {
+        max = (l as any).weight;
+      }
+    }
+    return max;
+  }, [data.links]);
+
+  const linkWidth = useCallback(
+    (l: any) => {
+      const isFbt = WEIGHTED_RELATIONS.has(l.relation);
+      // FBT edges: width proportional to co_count → strongest pairs pop visually
+      if (isFbt) {
+        const weight = (l.weight ?? 1) as number;
+        const base = 0.4 + 2.6 * Math.min(1, weight / maxFbtWeight);  // 0.4 → 3.0
+        if (!focusNeighbourhood) return base;
+        const s = typeof l.source === "object" ? l.source : null;
+        const t = typeof l.target === "object" ? l.target : null;
+        const inHood = s && t && focusNeighbourhood.has(s.id) && focusNeighbourhood.has(t.id);
+        return inHood ? base + 1 : 0.3;
+      }
+      // Catalog edges: thin default, slightly thicker when in focus neighbourhood
+      if (!focusNeighbourhood) return 0.5;
+      const s = typeof l.source === "object" ? l.source : null;
+      const t = typeof l.target === "object" ? l.target : null;
+      return s && t && focusNeighbourhood.has(s.id) && focusNeighbourhood.has(t.id) ? 1.5 : 0.4;
+    },
+    [maxFbtWeight, focusNeighbourhood],
+  );
+
   // Directional particles only on the focused neighbourhood edges — keeps
   // the "data flow" feel without overwhelming a 30k-edge graph.
   const linkParticleCount = useCallback(
@@ -484,12 +527,7 @@ const BusinessGraphVisualization = forwardRef<
             return true;
           }}
           linkColor={linkColor}
-          linkWidth={(l: any) => {
-            if (!focusNeighbourhood) return 0.5;
-            const s = typeof l.source === "object" ? l.source : null;
-            const t = typeof l.target === "object" ? l.target : null;
-            return s && t && focusNeighbourhood.has(s.id) && focusNeighbourhood.has(t.id) ? 1.5 : 0.4;
-          }}
+          linkWidth={linkWidth}
           linkDirectionalParticles={linkParticleCount}
           linkDirectionalParticleSpeed={0.006}
           linkDirectionalParticleWidth={2}
