@@ -264,6 +264,28 @@ async def connected(
                     conn["status"] = "active"
                     conn["connection_id"] = composio_status.get("id")
                     logger.info(f"[CONNECTED_APPS] Synced {conn.get('app_name')} from pending → active")
+                    # PRD-009 Layer 2 — when SHOPIFY first goes active, kick
+                    # off the catalog → knowledge graph sync. Fire-and-forget
+                    # background task so we don't block this listing endpoint.
+                    if (conn.get("app_name") or "").upper() == "SHOPIFY":
+                        try:
+                            from api.shopify import start_product_sync
+                            import asyncio as _asyncio
+                            _asyncio.create_task(
+                                start_product_sync(
+                                    workspace_id=str(ctx.workspace_id),
+                                    db=db,
+                                )
+                            )
+                            logger.info(
+                                "[PRD-009] Auto-fired Shopify product sync for workspace %s",
+                                ctx.workspace_id,
+                            )
+                        except Exception as sync_err:
+                            logger.warning(
+                                "[PRD-009] Auto-sync trigger failed for workspace %s: %s",
+                                ctx.workspace_id, sync_err,
+                            )
             except Exception as e:
                 logger.debug(f"[CONNECTED_APPS] Pending sync failed for {conn.get('app_name')}: {e}")
 
