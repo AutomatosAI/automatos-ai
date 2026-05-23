@@ -8,6 +8,7 @@ import { ApiKeyManager } from './ApiKeyManager'
 import { CallbackPanel } from '@/components/sites/CallbackPanel'
 import { CartIdlePanel } from '@/components/sites/CartIdlePanel'
 import { ShopifyTab } from '@/components/sites/ShopifyTab'
+import { SyncPanel } from '@/components/sites/SyncPanel'
 import { listSites } from '@/lib/sites/api'
 import type { Site, SiteType } from '@/lib/sites/types'
 
@@ -25,7 +26,7 @@ const TYPE_ICON: Record<SiteType, typeof Globe> = {
   custom: Code2,
 }
 
-type Section = 'api-keys' | 'cart-idle' | 'callback' | 'shopify'
+type Section = 'api-keys' | 'cart-idle' | 'callback' | 'sync' | 'shopify'
 
 export function WidgetSdkTab() {
   const [sites, setSites] = useState<Site[] | null>(null)
@@ -56,6 +57,10 @@ export function WidgetSdkTab() {
     { key: 'api-keys', label: 'API keys', show: true },
     { key: 'cart-idle', label: 'Cart-idle', show: true },
     { key: 'callback', label: 'Callback', show: true },
+    // Sync is platform-agnostic; lights up the relevant card based on site.type.
+    // Always visible so merchants discover it even before a site is fully
+    // connected — the panel guides them on what's missing.
+    { key: 'sync', label: 'Sync', show: true },
     { key: 'shopify', label: 'Shopify', show: activeSite?.type === 'shopify' },
   ]
 
@@ -159,6 +164,12 @@ export function WidgetSdkTab() {
         activeSite
           ? <CallbackPanel site={activeSite} onUpdated={patchSite} />
           : renderSiteRequired('Callback')
+      )}
+
+      {section === 'sync' && (
+        activeSite
+          ? <SyncPanel site={activeSite} workspaceId={activeSite.workspace_id ?? null} />
+          : renderSiteRequired('Sync')
       )}
 
       {section === 'shopify' && activeSite?.type === 'shopify' && (
