@@ -443,6 +443,240 @@ async def forward_event(
         request.shop, request.event,
     )
 
-    # TODO: Queue event for agent processing (orders/create → inventory agent, etc.)
+    # PRD-009 Layer 2 — incremental graph updates on catalog mutations.
+    # We treat product/collection/inventory events as triggers to re-sync
+    # ONLY the touched entities. For the POC we use a coarse signal: any
+    # catalog-shaped event schedules an incremental rebuild via the existing
+    # GraphifyService.schedule_incremental_update mechanism. Fine-grained
+    # per-product re-embed is a follow-up — graph diff machinery in
+    # graph_service already deduplicates so this is safe.
+    CATALOG_EVENTS = {
+        "products/create", "products/update", "products/delete",
+        "inventory_levels/update",
+        "collections/create", "collections/update", "collections/delete",
+    }
+    if request.event in CATALOG_EVENTS:
+        # Resolve workspace by shop domain (already an indexed lookup pattern
+        # used by /sync and /deactivate above).
+        ws = (
+            db.query(Workspace)
+            .filter(
+                Workspace.settings["shopify_domain"].astext == request.shop,
+                Workspace.is_active.is_(True),
+            )
+            .first()
+        )
+        if ws:
+            try:
+                from modules.knowledge.graph_service import GraphifyService
+                gs = GraphifyService()
+                gs.schedule_incremental_update(
+                    workspace_id=str(ws.id),
+                    changed_sources=[{
+                        "source": "shopify",
+                        "event": request.event,
+                        "shop": request.shop,
+                    }],
+                )
+                logger.info(
+                    "[PRD-009] Scheduled incremental graph update for workspace=%s reason=%s",
+                    ws.id, request.event,
+                )
+            except Exception as e:
+                logger.warning(
+                    "[PRD-009] Could not schedule incremental update: %s", e
+                )
 
     return {"status": "received", "event": request.event}
+
+
+# ===================================================================
+# PRD-009 Layer 2 — Product Knowledge Graph sync
+# ===================================================================
+# Composio's SHOPIFY_BULK_QUERY_OPERATION returns a signed GCS URL once the
+# Bulk Op completes (synchronous from our side — Composio polls Shopify).
+# We download the JSONL, map it to graph nodes/edges via the existing
+# graph_extraction.map_shopify_catalog helper, and hand it to the existing
+# GraphifyService.import_graph for clustering + persistence.
+
+# Shopify Admin GraphQL bulk-op query for the catalog.
+_SHOPIFY_BULK_CATALOG_QUERY = """{
+  products {
+    edges {
+      node {
+        id
+        title
+        handle
+        productType
+        vendor
+        status
+        tags
+        descriptionHtml
+        createdAt
+        updatedAt
+        publishedAt
+        priceRangeV2 { minVariantPrice { amount currencyCode } maxVariantPrice { amount currencyCode } }
+        featuredImage { url altText }
+        totalInventory
+        tracksInventory
+        variants { edges { node { id sku title price compareAtPrice inventoryQuantity availableForSale selectedOptions { name value } barcode } } }
+        metafields { edges { node { id namespace key value type } } }
+        collections { edges { node { id title handle } } }
+      }
+    }
+  }
+}"""
+
+
+class SyncStartResponse(BaseModel):
+    status: str
+    workspace_id: str
+    bulk_operation_id: Optional[str] = None
+    object_count: Optional[int] = None
+    file_size: Optional[int] = None
+    download_seconds: Optional[float] = None
+    node_count: Optional[int] = None
+    edge_count: Optional[int] = None
+    community_count: Optional[int] = None
+    duration_seconds: Optional[float] = None
+    error: Optional[str] = None
+
+
+@router.post("/sync/products/start", response_model=SyncStartResponse)
+async def start_product_sync(
+    workspace_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Run a full Shopify catalog sync → knowledge graph for a workspace.
+
+    Reuses:
+      - composio_client.composio.tools.execute  (SHOPIFY_BULK_QUERY_OPERATION)
+      - modules.knowledge.graph_extraction.map_shopify_catalog
+      - modules.knowledge.graph_service.GraphifyService.import_graph
+      - core.composio.entity_manager.EntityManager
+
+    Called manually (admin) or auto-triggered when a workspace's SHOPIFY
+    Composio connection flips pending → active (see consumer of this).
+    """
+    import time
+    import httpx
+
+    from core.composio.client import get_composio_client
+    from core.composio.entity_manager import EntityManager
+    from modules.knowledge.graph_extraction import map_shopify_catalog
+    from modules.knowledge.graph_service import GraphifyService
+
+    if not workspace_id:
+        raise HTTPException(status_code=400, detail="workspace_id required")
+
+    workspace = db.query(Workspace).get(workspace_id)
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+
+    em = EntityManager(db)
+    entity = em.get_or_create_entity(workspace_id)
+    entity_id = entity.get("composio_entity_id")
+    if not entity_id:
+        raise HTTPException(status_code=400, detail="No Composio entity for workspace")
+
+    client = get_composio_client()
+    if not client.composio:
+        raise HTTPException(status_code=503, detail="Composio not configured")
+
+    t0 = time.time()
+    settings = dict(workspace.settings or {})
+    settings["product_sync"] = {"status": "running", "started_at": time.time()}
+    workspace.settings = settings
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(workspace, "settings")
+    db.commit()
+
+    try:
+        # 1. Bulk Op via Composio (synchronous — returns the signed URL)
+        bulk = client.composio.tools.execute(
+            "SHOPIFY_BULK_QUERY_OPERATION",
+            user_id=entity_id,
+            arguments={"query": _SHOPIFY_BULK_CATALOG_QUERY},
+        )
+        if not getattr(bulk, "successful", False):
+            raise HTTPException(status_code=502, detail=f"Bulk Op failed: {getattr(bulk, 'error', '?')}")
+        bulk_data = getattr(bulk, "data", {}) or {}
+        download_url = bulk_data.get("url")
+        bulk_op_id = bulk_data.get("bulk_operation_id")
+        object_count = int(bulk_data.get("object_count") or 0)
+        file_size = int(bulk_data.get("file_size") or 0)
+        if not download_url:
+            raise HTTPException(status_code=502, detail="Bulk Op did not return a download URL")
+
+        # 2. Download JSONL
+        dl_t0 = time.time()
+        async with httpx.AsyncClient(timeout=120.0) as http:
+            resp = await http.get(download_url)
+            resp.raise_for_status()
+            jsonl_text = resp.text
+        dl_secs = time.time() - dl_t0
+
+        # 3. Map to graph (deterministic, in-memory)
+        graph = map_shopify_catalog(jsonl_text.splitlines(), bulk_op_id=bulk_op_id)
+
+        # 4. Import via existing GraphifyService — clusters + persists + exports
+        gs = GraphifyService()
+        meta = await gs.import_graph(workspace_id, graph, merge=False)
+
+        duration = time.time() - t0
+        settings["product_sync"] = {
+            "status": "complete",
+            "bulk_operation_id": bulk_op_id,
+            "object_count": object_count,
+            "file_size": file_size,
+            "node_count": meta.get("node_count"),
+            "edge_count": meta.get("edge_count"),
+            "community_count": meta.get("community_count"),
+            "duration_seconds": duration,
+            "completed_at": time.time(),
+        }
+        workspace.settings = settings
+        flag_modified(workspace, "settings")
+        db.commit()
+
+        logger.info(
+            "PRD-009 sync complete: workspace=%s nodes=%s edges=%s duration=%.1fs",
+            workspace_id, meta.get("node_count"), meta.get("edge_count"), duration,
+        )
+
+        return SyncStartResponse(
+            status="complete",
+            workspace_id=str(workspace_id),
+            bulk_operation_id=bulk_op_id,
+            object_count=object_count,
+            file_size=file_size,
+            download_seconds=dl_secs,
+            node_count=meta.get("node_count"),
+            edge_count=meta.get("edge_count"),
+            community_count=meta.get("community_count"),
+            duration_seconds=duration,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        logger.exception("PRD-009 sync failed for workspace %s", workspace_id)
+        settings["product_sync"] = {"status": "error", "error": str(e), "errored_at": time.time()}
+        workspace.settings = settings
+        flag_modified(workspace, "settings")
+        db.commit()
+        raise HTTPException(status_code=500, detail=f"Sync failed: {e}")
+
+
+@router.get("/sync/status")
+async def get_product_sync_status(
+    workspace_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """Return the current product_sync state stored on the workspace."""
+    if not workspace_id:
+        raise HTTPException(status_code=400, detail="workspace_id required")
+    workspace = db.query(Workspace).get(workspace_id)
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    return (workspace.settings or {}).get("product_sync") or {"status": "never_synced"}
