@@ -1821,6 +1821,7 @@ class StreamingChatService:
         plan_mode: bool = False,
         team: Optional[str] = None,
         suggest_mission: bool = False,
+        force_text_only: bool = False,
     ) -> AsyncGenerator[str, None]:
         """
         Stream a chat response produced by the specified agent.
@@ -1912,6 +1913,11 @@ class StreamingChatService:
                 if complexity_assessment
                 else Complexity.MOLECULE
             )
+            # PRD-007 v0.5 — proactive openers force ATOM path. The 45-tool
+            # discovery in _get_tools() takes ~12s and the agent doesn't need
+            # tools to produce a one-sentence opener from the directive.
+            if force_text_only:
+                _complexity = Complexity.ATOM
             agent_ctx = await self._load_agent_context(agent_runtime)
             all_tools = []
             if _complexity != Complexity.ATOM:
@@ -1942,7 +1948,9 @@ class StreamingChatService:
                         exclude_admin=True,
                         allowed_names=_allowed,
                     )
-                    all_tools = [_dispatcher]
+                    # PRD-007 v0.5: proactive openers get zero tools — directive
+                    # is self-contained (page context + graph related products).
+                    all_tools = [] if force_text_only else [_dispatcher]
                 except Exception:
                     logger.debug("[chat] Could not load platform_execute for ATOM path")
 
@@ -2009,6 +2017,17 @@ class StreamingChatService:
                     agent_id, agent_runtime, skip_composio, complexity_assessment,
                 )
             else:
+                _composio_result = None
+
+            # PRD-007 v0.5 — proactive openers must produce plain text, never tool calls.
+            # The skill forbids tools, but with 40+ tools wired in the agent still calls
+            # one and emits 0 text chars (STREAM_NO_TEXT). Force-clear here so the LLM
+            # literally has nothing to call.
+            if force_text_only and use_tools:
+                logger.info(
+                    f"[force_text_only] Clearing {len(use_tools)} tools for text-only generation"
+                )
+                use_tools = None
                 _composio_result = None
 
             # Generate LLM response
