@@ -66,9 +66,12 @@ class WidgetChatRequest(BaseModel):
     trigger_reason: Optional[str] = None
 
 
-# PRD-007: trigger reasons that flip the agent into opener-generation mode.
-# Anything else is treated as a normal user message.
-PROACTIVE_TRIGGER_REASONS: frozenset[str] = frozenset({"proactive_opener"})
+# PRD-007 / PRD-008-B: trigger reasons that flip the agent into opener-generation
+# mode. Anything else is treated as a normal user message.
+PROACTIVE_TRIGGER_REASONS: frozenset[str] = frozenset({
+    "proactive_opener",  # product-page contextual opener (PRD-007)
+    "cart_idle",         # cart-page idle nudge w/ FBT recs (PRD-008-B Feature C2)
+})
 
 
 # Fields from page_context that the agent gets to ground openers on.
@@ -274,6 +277,173 @@ async def _resolve_graph_related_products(
         return []
 
 
+async def _resolve_cart_recommendations(
+    workspace_id: str,
+    page_context: dict,
+    *,
+    max_recs: int = 3,
+) -> list[dict]:
+    """Pull cross-sell recommendations for the items currently in the cart.
+
+    PRD-008-B Feature C2 (cart-idle): walks FBT edges across every cart
+    line-item, aggregates co_count across overlapping recommendations
+    (an item that pairs with multiple cart items scores higher), removes
+    products already in the cart, returns the top ``max_recs`` by score.
+
+    Empty list when no cart items, no graph, or any failure — caller
+    treats that as "fall back to merchant's static greeting".
+    """
+    cart_items = (page_context or {}).get("cartItems") or []
+    if not isinstance(cart_items, list) or not cart_items:
+        return []
+
+    # Cart items may arrive as [{handle, id, title, qty}, ...] OR as bare
+    # handles/strings — be defensive about shape.
+    seed_handles: set[str] = set()
+    for item in cart_items:
+        if isinstance(item, dict):
+            h = item.get("handle") or item.get("product_handle")
+            if h:
+                seed_handles.add(str(h))
+        elif isinstance(item, str):
+            seed_handles.add(item)
+    if not seed_handles:
+        return []
+
+    try:
+        from modules.knowledge.graph_service import GraphifyService
+
+        gs = GraphifyService()
+        graph = await gs.load_graph(workspace_id)
+        if graph is None:
+            return []
+
+        # Locate every cart-item node by handle. Skip silently if a handle
+        # isn't in the graph (newly-added product, catalog out of sync).
+        seed_node_ids: set = set()
+        cart_node_ids: set = set()  # for exclusion from recs
+        for node_id, attrs in graph.nodes(data=True):
+            node_attrs = attrs.get("attrs") or {}
+            if attrs.get("file_type") == "shopify_product":
+                h = node_attrs.get("handle")
+                if h and h in seed_handles:
+                    seed_node_ids.add(node_id)
+                    cart_node_ids.add(node_id)
+        if not seed_node_ids:
+            return []
+
+        # Aggregate FBT recommendations across all seeds. Score = sum of
+        # co_count across seeds it pairs with. A product paired with 2 of
+        # 3 cart items scores higher than one paired with just 1.
+        candidates: dict = {}  # node_id -> {label, score, total_orders, paired_with}
+        for seed_id in seed_node_ids:
+            for u, v, edata in graph.edges(seed_id, data=True):
+                rel = (edata.get("relation") or "").lower()
+                if rel != "frequently_bought_with":
+                    continue
+                other = v if u == seed_id else u
+                if other in cart_node_ids:
+                    continue  # don't recommend what's already in the cart
+                other_attrs = graph.nodes[other]
+                if other_attrs.get("file_type") != "shopify_product":
+                    continue
+                edge_attrs = edata.get("attrs") or {}
+                co_count = edge_attrs.get("co_count") or 0
+                entry = candidates.setdefault(other, {
+                    "label": other_attrs.get("label") or other,
+                    "handle": (other_attrs.get("attrs") or {}).get("handle"),
+                    "score": 0,
+                    "total_orders": edge_attrs.get("total_orders") or 0,
+                    "paired_with_count": 0,
+                })
+                entry["score"] += co_count
+                entry["paired_with_count"] += 1
+                # Track the widest total_orders denominator seen (for citation).
+                if edge_attrs.get("total_orders", 0) > entry["total_orders"]:
+                    entry["total_orders"] = edge_attrs["total_orders"]
+
+        if not candidates:
+            return []
+
+        # Rank: prefer items paired with the MOST cart items (cross-cutting
+        # adds = strongest signal), break ties on aggregate score.
+        ranked = sorted(
+            candidates.values(),
+            key=lambda c: (-c["paired_with_count"], -c["score"]),
+        )
+        return ranked[:max_recs]
+
+    except Exception as e:  # noqa: BLE001
+        logger.warning("_resolve_cart_recommendations failed: %s", e)
+        return []
+
+
+def _build_cart_idle_opener_message(
+    page_context: dict,
+    recommendations: Optional[list] = None,
+) -> str:
+    """Synthesize the directive for a cart-idle proactive popup.
+
+    PRD-008-B Feature C2: a shopper has been idle on the cart page for
+    `idle_seconds`. We want a graph-grounded nudge that references real
+    FBT pairings — "customers who bought your stuff also added X" — not
+    a generic "still there?" line.
+
+    When ``recommendations`` is empty (no graph, cold start, or no FBT
+    signal for cart items), the directive still produces a contextual
+    nudge based on cart size/total — never fabricates products.
+    """
+    cart_count = page_context.get("cartItemCount") or 0
+    cart_total = page_context.get("cartTotalPrice")
+    currency = page_context.get("shopCurrency") or ""
+
+    cart_summary_parts: list[str] = []
+    if cart_count:
+        cart_summary_parts.append(f"cart_item_count={cart_count}")
+    if cart_total:
+        # Shopify amounts are minor units (cents/pence). Render as e.g. "362.18 GBP".
+        try:
+            major = float(cart_total) / 100.0
+            cart_summary_parts.append(f"cart_total={major:.2f} {currency}".strip())
+        except (TypeError, ValueError):
+            cart_summary_parts.append(f"cart_total={cart_total}")
+    cart_summary = ", ".join(cart_summary_parts) if cart_summary_parts else "cart_idle"
+
+    rec_block = ""
+    if recommendations:
+        rendered = []
+        for r in recommendations:
+            label = r.get("label", "?")
+            paired = r.get("paired_with_count", 0)
+            if paired > 1:
+                rendered.append(
+                    f'"{label}" (bought with {paired} of the items in this cart)'
+                )
+            elif r.get("score") and r.get("total_orders"):
+                rendered.append(
+                    f'"{label}" (added together in {r["score"]} '
+                    f'of {r["total_orders"]} orders)'
+                )
+            else:
+                rendered.append(f'"{label}"')
+        rec_block = (
+            " Frequently bought with what's in this cart (real order-graph "
+            "data — pick ONE to mention, prefer the one paired with multiple "
+            "cart items): "
+            + "; ".join(rendered)
+        )
+
+    return (
+        "[PROACTIVE_OPENER] [CART_IDLE] The shopper has been idle on the cart "
+        "page. Generate a single helpful sentence (≤140 chars) that nudges "
+        "them toward checkout OR offers a relevant add-on. RETURN PLAIN TEXT "
+        "ONLY — no tool calls, no markdown, no greetings. Do NOT invent "
+        "products that aren't named below. If no recommendation is provided, "
+        "ask if they need help finishing their order — don't fabricate. "
+        f"Context: {cart_summary}.{rec_block}"
+    )
+
+
 class WidgetMessageOut(BaseModel):
     id: str
     role: str
@@ -367,32 +537,48 @@ async def widget_chat(
     workspace_id = str(auth.workspace_id)
     user_id = _get_widget_user_id(db)
 
-    # PRD-007: rewrite ``message`` for proactive opener requests so the agent
-    # sees a directive, not an empty / placeholder user utterance from the SDK.
+    # PRD-007 / PRD-008-B: rewrite ``message`` for proactive opener requests
+    # so the agent sees a directive, not an empty / placeholder user
+    # utterance from the SDK.
     is_proactive = (
         body.trigger_reason in PROACTIVE_TRIGGER_REASONS
         and body.page_context is not None
     )
     if is_proactive:
         original_len = len(body.message or "")
-        # PRD-007 addendum (post PRD-009 Layer 2): for product pages, pull
-        # the top 1 FBT pair + collection sibling + vendor sibling from the
-        # workspace graph and inject them as opener facts. Returns empty
-        # list for non-product pages or when the graph has no signal for
-        # this product — opener silently falls back to Layer-1-only.
-        related_products = await _resolve_graph_related_products(
-            workspace_id, body.page_context or {},
-        )
-        body.message = _build_proactive_opener_message(
-            body.page_context or {},
-            related_products=related_products,
-        )
+        pctx = body.page_context or {}
+        if body.trigger_reason == "cart_idle":
+            # PRD-008-B Feature C2: walk FBT edges across every cart line
+            # item, dedupe, score by cross-cutting hits, return top recs.
+            # Empty list ⇒ generic "anything else?" nudge with no fabricated
+            # products. Heavier than the product-page resolver (multi-seed
+            # traversal) — still bounded by 1-hop on a small graph.
+            recommendations = await _resolve_cart_recommendations(
+                workspace_id, pctx,
+            )
+            body.message = _build_cart_idle_opener_message(
+                pctx,
+                recommendations=recommendations,
+            )
+            related_count = len(recommendations)
+        else:
+            # PRD-007 addendum (post PRD-009 Layer 2): single-seed traversal
+            # — top 1 FBT pair + collection sibling + vendor sibling.
+            related_products = await _resolve_graph_related_products(
+                workspace_id, pctx,
+            )
+            body.message = _build_proactive_opener_message(
+                pctx,
+                related_products=related_products,
+            )
+            related_count = len(related_products)
         logger.info(
-            "%s PROACTIVE_REWRITE: original_msg_len=%d new_msg_len=%d related=%d new_preview=%s",
+            "%s PROACTIVE_REWRITE: trigger=%s original_msg_len=%d new_msg_len=%d related=%d new_preview=%s",
             log_extra,
+            body.trigger_reason,
             original_len,
             len(body.message),
-            len(related_products),
+            related_count,
             _short(body.message),
         )
     elif body.trigger_reason:

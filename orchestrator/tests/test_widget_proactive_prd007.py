@@ -243,6 +243,67 @@ def test_proactive_trigger_reason_constant_includes_proactive_opener():
     assert "proactive_opener" in PROACTIVE_TRIGGER_REASONS
 
 
+def test_proactive_trigger_reason_constant_includes_cart_idle():
+    """PRD-008-B Feature C2 — cart-idle is a proactive trigger and must
+    flow through the same opener-rewrite branch as the product-page one."""
+    from api.widgets.chat import PROACTIVE_TRIGGER_REASONS
+
+    assert "cart_idle" in PROACTIVE_TRIGGER_REASONS
+
+
+# ---------------------------------------------------------------------------
+# 4b. Cart-idle opener (PRD-008-B Feature C2)
+# ---------------------------------------------------------------------------
+
+def test_cart_idle_message_includes_cart_summary():
+    from api.widgets.chat import _build_cart_idle_opener_message
+
+    msg = _build_cart_idle_opener_message(
+        {"cartItemCount": 3, "cartTotalPrice": 14299, "shopCurrency": "GBP"},
+        recommendations=None,
+    )
+    assert "[CART_IDLE]" in msg
+    assert "cart_item_count=3" in msg
+    assert "142.99" in msg  # 14299 minor units → 142.99
+    assert "GBP" in msg
+
+
+def test_cart_idle_message_renders_recommendations_with_provenance():
+    from api.widgets.chat import _build_cart_idle_opener_message
+
+    recs = [
+        {"label": "Elta 4A Actuator", "paired_with_count": 2, "score": 24, "total_orders": 87},
+        {"label": "Cable Kit 5m", "paired_with_count": 1, "score": 8, "total_orders": 87},
+    ]
+    msg = _build_cart_idle_opener_message(
+        {"cartItemCount": 2, "shopCurrency": "GBP"},
+        recommendations=recs,
+    )
+    # First rec paired with multiple cart items uses cross-cutting phrasing
+    assert 'Elta 4A Actuator' in msg
+    assert 'bought with 2 of the items' in msg
+    # Second rec paired with only 1 cart item uses raw co_count/total_orders
+    assert 'Cable Kit 5m' in msg
+    assert '8 of 87 orders' in msg
+
+
+def test_cart_idle_message_falls_back_when_no_recommendations():
+    from api.widgets.chat import _build_cart_idle_opener_message
+
+    msg = _build_cart_idle_opener_message({"cartItemCount": 1}, recommendations=[])
+    # Directive still tells the agent to nudge toward checkout without
+    # fabricating products.
+    assert "[CART_IDLE]" in msg
+    assert "do NOT invent" in msg.lower() or "do not invent" in msg.lower()
+
+
+def test_cart_idle_message_skips_zero_cart_total():
+    from api.widgets.chat import _build_cart_idle_opener_message
+
+    msg = _build_cart_idle_opener_message({"cartItemCount": 1}, recommendations=None)
+    assert "cart_total" not in msg
+
+
 # ---------------------------------------------------------------------------
 # 5. ``SessionTokenResponse`` — new ``widget_config`` field
 # ---------------------------------------------------------------------------
