@@ -109,7 +109,10 @@ def _format_opener_context_value(key: str, value) -> Optional[str]:
     return f"{key}={value}"
 
 
-def _build_proactive_opener_message(page_context: dict) -> str:
+def _build_proactive_opener_message(
+    page_context: dict,
+    related_products: Optional[list] = None,
+) -> str:
     """Synthesize the user-side message for a proactive opener request.
 
     The widget never sends real user text for proactive openers — instead
@@ -120,6 +123,13 @@ def _build_proactive_opener_message(page_context: dict) -> str:
     the directive; agents had to make up everything else (price, vendor,
     availability). Now every populated page_context field is forwarded so
     the agent can lean on real facts before reaching for a tool call.
+
+    PRD-007 addendum (post PRD-009 Layer 2): when ``related_products`` is
+    supplied — top FBT pair, top in-collection sibling, top vendor sibling
+    — they're appended as facts the agent can weave into the opener. The
+    agent is instructed to lead with FBT signal when present (real
+    customer co-purchase pattern, highest leverage) and fall back to the
+    catalog siblings otherwise. Always real data; never invented.
     """
     parts: list[str] = []
     for src_key, label in _OPENER_CONTEXT_FIELDS:
@@ -127,6 +137,44 @@ def _build_proactive_opener_message(page_context: dict) -> str:
         if rendered is not None:
             parts.append(rendered)
     summary = ", ".join(parts) if parts else "no context"
+
+    related_block = ""
+    if related_products:
+        # Render each related product as a one-line fact with provenance,
+        # so the agent can cite naturally (e.g. "often bought with X — 12 of
+        # 57 orders"). Order matters: FBT first (strongest signal), then
+        # collection / vendor siblings as fall-backs.
+        rel_order = {
+            "frequently_bought_with": 0,
+            "in_collection": 1,
+            "by_vendor": 2,
+        }
+        sorted_rel = sorted(
+            related_products,
+            key=lambda p: rel_order.get(p.get("relation", ""), 99),
+        )
+        rendered_rel = []
+        for p in sorted_rel:
+            label = p.get("label", "?")
+            rel = p.get("relation", "")
+            if rel == "frequently_bought_with" and p.get("co_count"):
+                rendered_rel.append(
+                    f'"{label}" (bought together in {p["co_count"]} '
+                    f'of {p.get("total_orders", "?")} orders)'
+                )
+            elif rel == "in_collection":
+                rendered_rel.append(f'"{label}" (same collection)')
+            elif rel == "by_vendor":
+                rendered_rel.append(f'"{label}" (same vendor)')
+            else:
+                rendered_rel.append(f'"{label}"')
+        related_block = (
+            " Related from order/catalog graph (use these naturally — "
+            "prefer the order-pair signal when present, else mention the "
+            "collection/vendor sibling as a starter for conversation): "
+            + "; ".join(rendered_rel)
+        )
+
     return (
         "[PROACTIVE_OPENER] Generate a contextual one-sentence opener "
         "(≤140 chars). RETURN PLAIN TEXT ONLY — no tool calls, no JSON, "
@@ -134,8 +182,96 @@ def _build_proactive_opener_message(page_context: dict) -> str:
         "truth — do NOT invent specs, compatibility, or pricing the context "
         "doesn't include. If a fact you'd want isn't here, ask a question "
         "instead of fabricating. "
-        f"Context: {summary}"
+        f"Context: {summary}.{related_block}"
     )
+
+
+async def _resolve_graph_related_products(
+    workspace_id: str,
+    page_context: dict,
+    *,
+    max_per_relation: int = 1,
+) -> list[dict]:
+    """Pull top related products from the workspace knowledge graph.
+
+    Looks up the seed product node by Shopify handle in page_context, then
+    walks 1-hop edges by relation type:
+      - frequently_bought_with (highest co_count wins — real customer signal)
+      - in_collection (most-connected sibling — likely a category anchor)
+      - by_vendor (any same-vendor sibling)
+
+    Returns at most ``max_per_relation`` entries per relation type. Empty
+    list when no seed product, no graph, or any failure — caller treats
+    that as "fall back to plain Layer-1 opener".
+    """
+    handle = (page_context or {}).get("productHandle")
+    title = (page_context or {}).get("productTitle")
+    if not handle and not title:
+        return []  # No seed (cart/checkout/collection page) — nothing to traverse
+
+    try:
+        from modules.knowledge.graph_service import GraphifyService
+
+        gs = GraphifyService()
+        graph = await gs.load_graph(workspace_id)
+        if graph is None:
+            return []
+
+        # Find the seed node by handle (preferred) or label match.
+        seed_id = None
+        for node_id, attrs in graph.nodes(data=True):
+            node_attrs = attrs.get("attrs") or {}
+            if handle and node_attrs.get("handle") == handle:
+                seed_id = node_id
+                break
+        if seed_id is None and title:
+            for node_id, attrs in graph.nodes(data=True):
+                if (attrs.get("file_type") == "shopify_product"
+                        and attrs.get("label") == title):
+                    seed_id = node_id
+                    break
+        if seed_id is None:
+            return []
+
+        # Walk 1-hop, group by relation type, sort each group by signal strength.
+        by_relation: dict[str, list[dict]] = {}
+        for u, v, edata in graph.edges(seed_id, data=True):
+            rel = (edata.get("relation") or "").lower()
+            if rel not in ("frequently_bought_with", "in_collection", "by_vendor"):
+                continue
+            other = v if u == seed_id else u
+            other_attrs = graph.nodes[other]
+            # Only return product nodes (skip variants/vendors as targets —
+            # those aren't recommendable on their own to a shopper)
+            if other_attrs.get("file_type") not in ("shopify_product", "shopify_collection"):
+                # in_collection targets ARE collections; that's fine for catalog framing.
+                if rel != "in_collection":
+                    continue
+            edge_attrs = edata.get("attrs") or {}
+            by_relation.setdefault(rel, []).append({
+                "relation": rel,
+                "label": other_attrs.get("label") or other,
+                "type": other_attrs.get("file_type", ""),
+                "confidence": edata.get("confidence_score", 0),
+                "co_count": edge_attrs.get("co_count"),
+                "total_orders": edge_attrs.get("total_orders"),
+                "weight": edata.get("weight", 0),
+            })
+
+        # FBT: sort by co_count (raw signal strength).
+        by_relation.get("frequently_bought_with", []).sort(
+            key=lambda p: -(p.get("co_count") or 0)
+        )
+        # Collection / vendor: arbitrary — take first.
+
+        out: list[dict] = []
+        for rel in ("frequently_bought_with", "in_collection", "by_vendor"):
+            out.extend(by_relation.get(rel, [])[:max_per_relation])
+        return out
+
+    except Exception as e:  # noqa: BLE001 — opener falls back gracefully
+        logger.warning("_resolve_graph_related_products failed: %s", e)
+        return []
 
 
 class WidgetMessageOut(BaseModel):
@@ -239,12 +375,24 @@ async def widget_chat(
     )
     if is_proactive:
         original_len = len(body.message or "")
-        body.message = _build_proactive_opener_message(body.page_context or {})
+        # PRD-007 addendum (post PRD-009 Layer 2): for product pages, pull
+        # the top 1 FBT pair + collection sibling + vendor sibling from the
+        # workspace graph and inject them as opener facts. Returns empty
+        # list for non-product pages or when the graph has no signal for
+        # this product — opener silently falls back to Layer-1-only.
+        related_products = await _resolve_graph_related_products(
+            workspace_id, body.page_context or {},
+        )
+        body.message = _build_proactive_opener_message(
+            body.page_context or {},
+            related_products=related_products,
+        )
         logger.info(
-            "%s PROACTIVE_REWRITE: original_msg_len=%d new_msg_len=%d new_preview=%s",
+            "%s PROACTIVE_REWRITE: original_msg_len=%d new_msg_len=%d related=%d new_preview=%s",
             log_extra,
             original_len,
             len(body.message),
+            len(related_products),
             _short(body.message),
         )
     elif body.trigger_reason:
