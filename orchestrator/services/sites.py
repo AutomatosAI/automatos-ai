@@ -11,12 +11,15 @@ is treated as not-found (no existence leak).
 from __future__ import annotations
 
 import copy
+import logging
 from typing import Optional
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
 from core.models.sites import Site, SITE_TYPES, derive_default_capabilities
+
+logger = logging.getLogger(__name__)
 
 
 # Mutable status values a merchant can set via PATCH. Backend-managed
@@ -180,3 +183,65 @@ def public_site_dict(site: Site) -> dict:
         "created_at": site.created_at.isoformat() if site.created_at else None,
         "updated_at": site.updated_at.isoformat() if site.updated_at else None,
     }
+
+
+def ensure_shopify_site_for_workspace(db: Session, workspace) -> Optional[Site]:
+    """Heal Sites that don't reflect the workspace's connected platform.
+
+    The Shopify install path historically didn't create a Site row, so
+    early workspaces ended up with a stub `type=custom` Site (or none).
+    That hides cart-aware features like cart-idle from the dashboard
+    even though the workspace IS connected to Shopify.
+
+    Single-tenant invariant: each workspace has at most ONE Site, and
+    its type must match the connected platform. This helper:
+
+    * No-op if the workspace isn't Shopify-connected.
+    * Creates a Site if none exist.
+    * Upgrades the existing Site's type + capabilities + external_id
+      if it's mis-typed (e.g. `custom` → `shopify`).
+
+    Idempotent: returning early when the Site is already correct keeps
+    the dashboard's list-sites endpoint fast on the happy path.
+    """
+    settings = workspace.settings or {}
+    shopify_domain = settings.get("shopify_domain")
+    if not shopify_domain:
+        return None  # Not a Shopify workspace — leave alone.
+
+    sites = (
+        db.query(Site)
+        .filter(Site.workspace_id == workspace.id)
+        .order_by(Site.created_at.asc())
+        .all()
+    )
+
+    if not sites:
+        site = create_site(
+            db,
+            workspace_id=workspace.id,
+            type="shopify",
+            display_name=workspace.name or shopify_domain,
+            external_id=shopify_domain,
+        )
+        logger.info(
+            "ensure_shopify_site: created shopify Site %s for workspace %s (%s)",
+            site.id, workspace.id, shopify_domain,
+        )
+        return site
+
+    site = sites[0]
+    if site.type == "shopify" and site.external_id == shopify_domain:
+        return site  # Already correct.
+
+    prev_type = site.type
+    site.type = "shopify"
+    site.external_id = shopify_domain
+    site.capabilities = derive_default_capabilities("shopify")
+    db.commit()
+    db.refresh(site)
+    logger.info(
+        "ensure_shopify_site: upgraded Site %s from %s → shopify for workspace %s (%s)",
+        site.id, prev_type, workspace.id, shopify_domain,
+    )
+    return site
