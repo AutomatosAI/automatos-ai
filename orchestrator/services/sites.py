@@ -185,6 +185,51 @@ def public_site_dict(site: Site) -> dict:
     }
 
 
+def _workspace_is_shopify_connected(db: Session, workspace) -> tuple[bool, Optional[str]]:
+    """Detect Shopify connectivity from either install path.
+
+    Returns ``(is_shopify, domain)``. Domain may be ``None`` even when
+    ``is_shopify`` is True — the Composio path stores the shop in the
+    encrypted credential blob, not in workspace.settings, so we can't
+    surface it here without a decrypt round-trip.
+
+    Two signals are checked, in order:
+
+    1. ``workspace.settings.shopify_domain`` — set by the Shopify-app
+       install path (``/api/shopify/provision`` + ``/api/shopify/connect``).
+    2. An active ``shopifyAccessTokenApi`` Credential row for the
+       workspace — set by the Composio onboarding path that the
+       dashboard uses for the merchant self-serve flow.
+
+    Either one is sufficient.
+    """
+    settings = workspace.settings or {}
+    domain = settings.get("shopify_domain")
+    if domain:
+        return True, domain
+
+    # Composio onboarding path: a Shopify cred exists, even though
+    # workspace.settings doesn't carry the domain. Treat the workspace
+    # as Shopify; the dashboard can edit external_id later if needed.
+    try:
+        from core.models.credentials import Credential, CredentialType
+        has_cred = (
+            db.query(Credential.id)
+            .join(CredentialType, Credential.credential_type_id == CredentialType.id)
+            .filter(
+                Credential.workspace_id == workspace.id,
+                Credential.is_active.is_(True),
+                CredentialType.name == "shopifyAccessTokenApi",
+            )
+            .first()
+        )
+        if has_cred:
+            return True, None
+    except Exception as e:  # noqa: BLE001 — never fail callers on heal probe
+        logger.debug("Shopify credential probe failed: %s", e)
+    return False, None
+
+
 def ensure_shopify_site_for_workspace(db: Session, workspace) -> Optional[Site]:
     """Heal Sites that don't reflect the workspace's connected platform.
 
@@ -204,9 +249,8 @@ def ensure_shopify_site_for_workspace(db: Session, workspace) -> Optional[Site]:
     Idempotent: returning early when the Site is already correct keeps
     the dashboard's list-sites endpoint fast on the happy path.
     """
-    settings = workspace.settings or {}
-    shopify_domain = settings.get("shopify_domain")
-    if not shopify_domain:
+    is_shopify, shopify_domain = _workspace_is_shopify_connected(db, workspace)
+    if not is_shopify:
         return None  # Not a Shopify workspace — leave alone.
 
     sites = (
@@ -221,27 +265,29 @@ def ensure_shopify_site_for_workspace(db: Session, workspace) -> Optional[Site]:
             db,
             workspace_id=workspace.id,
             type="shopify",
-            display_name=workspace.name or shopify_domain,
-            external_id=shopify_domain,
+            display_name=workspace.name or shopify_domain or "Shopify",
+            external_id=shopify_domain,  # May be None for Composio onboarding path
         )
         logger.info(
-            "ensure_shopify_site: created shopify Site %s for workspace %s (%s)",
-            site.id, workspace.id, shopify_domain,
+            "ensure_shopify_site: created shopify Site %s for workspace %s (domain=%s)",
+            site.id, workspace.id, shopify_domain or "<unknown>",
         )
         return site
 
     site = sites[0]
-    if site.type == "shopify" and site.external_id == shopify_domain:
+    desired_external = shopify_domain or site.external_id
+    if site.type == "shopify" and site.external_id == desired_external:
         return site  # Already correct.
 
     prev_type = site.type
     site.type = "shopify"
-    site.external_id = shopify_domain
+    if shopify_domain:
+        site.external_id = shopify_domain
     site.capabilities = derive_default_capabilities("shopify")
     db.commit()
     db.refresh(site)
     logger.info(
-        "ensure_shopify_site: upgraded Site %s from %s → shopify for workspace %s (%s)",
-        site.id, prev_type, workspace.id, shopify_domain,
+        "ensure_shopify_site: upgraded Site %s from %s → shopify for workspace %s (domain=%s)",
+        site.id, prev_type, workspace.id, shopify_domain or "<unknown>",
     )
     return site
