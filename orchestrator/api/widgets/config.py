@@ -35,7 +35,21 @@ router = APIRouter(tags=["Widget Config"])
 
 # Keys exposed to browser widgets. Anything not listed here stays
 # server-side. Add new feature keys as PRDs land.
-PUBLIC_WIDGET_CONFIG_KEYS: tuple[str, ...] = ("widget_proactive",)
+#
+# - widget_proactive: PRD-007 product-page opener config (delays, triggers)
+# - cart_idle:        PRD-008-A C1 cart-idle popup config (enabled flag,
+#                     idle_seconds, greeting, frequency cap). The SDK
+#                     reads payload.cart_idle in bootstrapCartIdle; if
+#                     not whitelisted here, the SDK silently no-ops and
+#                     the popup never arms even when the merchant has
+#                     toggled it on in the dashboard.
+# - callback:         PRD-008-A B/C1 callback-form config (enabled flag,
+#                     destinations, form fields). Same whitelist gate.
+PUBLIC_WIDGET_CONFIG_KEYS: tuple[str, ...] = (
+    "widget_proactive",
+    "cart_idle",
+    "callback",
+)
 
 
 def _project_public_keys(settings: Optional[dict]) -> Optional[dict]:
