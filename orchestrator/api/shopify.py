@@ -349,6 +349,19 @@ async def connect_shopify_store(
 
     logger.info("Stored Shopify credentials for workspace %s", workspace.id)
 
+    # Ensure the workspace has a Site of type=shopify. Without this, the
+    # dashboard's cart-aware panels (cart-idle, callback) never light up
+    # even though the workspace IS connected. Idempotent — no-op when the
+    # Site already exists with the right type.
+    try:
+        from services.sites import ensure_shopify_site_for_workspace
+        ensure_shopify_site_for_workspace(db, workspace)
+    except Exception as e:  # noqa: BLE001 — never fail connect on heal error
+        logger.warning(
+            "ensure_shopify_site_for_workspace failed for workspace %s: %s",
+            workspace.id, e,
+        )
+
     return {"status": "connected", "shop": request.shop_domain}
 
 

@@ -42,6 +42,7 @@ from services.destinations.dispatcher import dispatch_callback_for_site
 from services.sites import (
     USER_SETTABLE_STATUSES,
     create_site,
+    ensure_shopify_site_for_workspace,
     get_site,
     list_sites,
     public_site_dict,
@@ -86,6 +87,18 @@ async def list_sites_route(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
+    # Self-heal: a Shopify-connected workspace that ended up with a
+    # mis-typed Site (legacy install path didn't create one) gets upgraded
+    # to type=shopify on the next dashboard load. Idempotent — returns
+    # immediately when the Site is already correct.
+    from core.models.workspace import Workspace
+    workspace = db.query(Workspace).get(ctx.workspace_id)
+    if workspace is not None:
+        try:
+            ensure_shopify_site_for_workspace(db, workspace)
+        except Exception as e:  # noqa: BLE001 — never fail list on heal error
+            logger.warning("ensure_shopify_site_for_workspace failed: %s", e)
+
     rows = list_sites(db, ctx.workspace_id)
     return {"sites": [public_site_dict(s) for s in rows]}
 
