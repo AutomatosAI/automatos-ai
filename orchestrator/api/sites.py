@@ -91,7 +91,7 @@ async def list_sites_route(
     # mis-typed Site (legacy install path didn't create one) gets upgraded
     # to type=shopify on the next dashboard load. Idempotent — returns
     # immediately when the Site is already correct.
-    from core.models.workspace import Workspace
+    from core.models.workspaces import Workspace
     workspace = db.query(Workspace).get(ctx.workspace_id)
     if workspace is not None:
         try:
