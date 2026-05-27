@@ -188,10 +188,8 @@ def public_site_dict(site: Site) -> dict:
 def _workspace_is_shopify_connected(db: Session, workspace) -> tuple[bool, Optional[str]]:
     """Detect Shopify connectivity from either install path.
 
-    Returns ``(is_shopify, domain)``. Domain may be ``None`` even when
-    ``is_shopify`` is True — the Composio path stores the shop in the
-    encrypted credential blob, not in workspace.settings, so we can't
-    surface it here without a decrypt round-trip.
+    Returns ``(is_shopify, domain)``. Domain is the fully-qualified
+    ``*.myshopify.com`` when we can resolve it.
 
     Two signals are checked, in order:
 
@@ -199,32 +197,49 @@ def _workspace_is_shopify_connected(db: Session, workspace) -> tuple[bool, Optio
        install path (``/api/shopify/provision`` + ``/api/shopify/connect``).
     2. An active ``shopifyAccessTokenApi`` Credential row for the
        workspace — set by the Composio onboarding path that the
-       dashboard uses for the merchant self-serve flow.
+       dashboard uses for the merchant self-serve flow. We decrypt
+       the credential's ``shopSubdomain`` field to backfill the domain.
 
-    Either one is sufficient.
+    Either signal is sufficient. The decrypt is best-effort: failure
+    falls back to ``(True, None)`` so the Site still gets tagged as
+    Shopify, even though dashboard panels that require ``external_id``
+    (like ShopifyTab) may stay degraded until the merchant edits it.
     """
     settings = workspace.settings or {}
     domain = settings.get("shopify_domain")
     if domain:
         return True, domain
 
-    # Composio onboarding path: a Shopify cred exists, even though
-    # workspace.settings doesn't carry the domain. Treat the workspace
-    # as Shopify; the dashboard can edit external_id later if needed.
+    # Composio onboarding path: probe for an active Shopify credential
+    # and pull the shop subdomain out so we can build the full domain.
     try:
+        from core.credentials.encryption import get_encryption_service
         from core.models.credentials import Credential, CredentialType
-        has_cred = (
-            db.query(Credential.id)
+        cred = (
+            db.query(Credential)
             .join(CredentialType, Credential.credential_type_id == CredentialType.id)
             .filter(
                 Credential.workspace_id == workspace.id,
                 Credential.is_active.is_(True),
                 CredentialType.name == "shopifyAccessTokenApi",
             )
+            .order_by(Credential.created_at.desc())
             .first()
         )
-        if has_cred:
-            return True, None
+        if cred is None:
+            return False, None
+
+        # Best-effort decrypt: we only need shopSubdomain, not the token.
+        try:
+            decrypted = get_encryption_service().decrypt_dict(cred.encrypted_data) or {}
+            subdomain = (decrypted.get("shopSubdomain") or "").strip().lower()
+            if subdomain.endswith(".myshopify.com"):
+                subdomain = subdomain[: -len(".myshopify.com")]
+            if subdomain:
+                return True, f"{subdomain}.myshopify.com"
+        except Exception as e:  # noqa: BLE001
+            logger.debug("Shopify cred decrypt for domain backfill failed: %s", e)
+        return True, None
     except Exception as e:  # noqa: BLE001 — never fail callers on heal probe
         logger.debug("Shopify credential probe failed: %s", e)
     return False, None
@@ -252,6 +267,21 @@ def ensure_shopify_site_for_workspace(db: Session, workspace) -> Optional[Site]:
     is_shopify, shopify_domain = _workspace_is_shopify_connected(db, workspace)
     if not is_shopify:
         return None  # Not a Shopify workspace — leave alone.
+
+    # Backfill the workspace.settings shortcut so future probes (and other
+    # parts of the codebase that key off shopify_domain — e.g. provision
+    # lookups) don't have to re-decrypt the credential each call.
+    settings = dict(workspace.settings or {})
+    if shopify_domain and settings.get("shopify_domain") != shopify_domain:
+        settings["shopify_domain"] = shopify_domain
+        workspace.settings = settings
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(workspace, "settings")
+        db.commit()
+        logger.info(
+            "ensure_shopify_site: backfilled workspace %s settings.shopify_domain=%s",
+            workspace.id, shopify_domain,
+        )
 
     sites = (
         db.query(Site)
