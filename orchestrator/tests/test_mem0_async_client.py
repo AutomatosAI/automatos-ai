@@ -128,14 +128,15 @@ async def test_connection_pooling(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_write_timeout_respected(monkeypatch):
-    """add() (a write) passes the larger write_timeout down to httpx."""
+    """add() (a write) passes the 5.0s write_timeout (US-007) down to httpx."""
     client, _ = _fresh_client(monkeypatch)
-    # Pin the timeouts explicitly. test_unified_memory swaps the global config
-    # for a MagicMock at import time, so when these files run together the
-    # config-derived timeouts would otherwise both collapse to float(MagicMock)
-    # == 1.0 and this assertion (write > read) would fail spuriously.
+    # Pin the timeouts explicitly to the US-007 defaults (read 3.0 / write 5.0).
+    # test_unified_memory swaps the global config for a MagicMock at import time,
+    # so when these files run together the config-derived timeouts would
+    # otherwise both collapse to float(MagicMock) == 1.0 and this assertion
+    # (write > read) would fail spuriously.
     client.timeout = 3.0
-    client.write_timeout = 15.0
+    client.write_timeout = 5.0
     captured = {}
 
     async def fake_request(self, method, url, **kwargs):
@@ -149,8 +150,8 @@ async def test_write_timeout_respected(monkeypatch):
         user_id="u1",
     )
 
-    assert captured["timeout"] == client.write_timeout
-    assert client.write_timeout > client.timeout   # write budget exceeds read
+    assert captured["timeout"] == 5.0             # the 5.0s write timeout is applied
+    assert client.write_timeout > client.timeout  # write budget exceeds read
     await client.aclose()
 
 
@@ -341,3 +342,22 @@ async def test_health_probe_resets_on_recovery(monkeypatch):
     assert not any(b.is_open for b in breakers.values())  # all closed again
     assert all(b.failures == 0 for b in breakers.values())
     await client.aclose()
+
+
+# ── US-007: tightened Mem0 config defaults ──────────────────────────
+
+
+def test_mem0_config_defaults_tightened():
+    """Pin the US-007 default budgets directly on config.py source.
+
+    A source-level check is deliberate: test_unified_memory swaps the global
+    ``config`` for a MagicMock at import time, so reading the live attributes in
+    a combined run is unreliable. Asserting on the source guards the shipped
+    defaults regardless of collection order.
+    """
+    source = (_ROOT / "config.py").read_text()
+    assert 'MEM0_WRITE_TIMEOUT_SECONDS", "5.0"' in source   # 15.0 -> 5.0
+    assert 'MEM0_CIRCUIT_COOLDOWN_SECONDS", "60"' in source  # 300 -> 60
+    # Unchanged by US-007.
+    assert 'MEM0_TIMEOUT_SECONDS", "3.0"' in source
+    assert 'MEM0_CIRCUIT_THRESHOLD", "3"' in source

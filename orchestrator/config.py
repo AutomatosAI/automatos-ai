@@ -572,13 +572,19 @@ class Config:
     MEM0_API_KEY: str = os.getenv("MEM0_API_KEY")
     # Read path (search/get_all) blocks TTFT — keep short.
     MEM0_TIMEOUT_SECONDS: float = float(os.getenv("MEM0_TIMEOUT_SECONDS", "3.0"))
-    # Write path runs post-LLM; mem0 does sync inference+embedding server-side
-    # (observed 2-7s). 3s causes constant timeouts → CB trips → 5min blackouts.
-    MEM0_WRITE_TIMEOUT_SECONDS: float = float(os.getenv("MEM0_WRITE_TIMEOUT_SECONDS", "15.0"))
+    # Write path runs post-LLM (Mem0 is enrichment, not the critical path).
+    # PRD-137 raised this to 15s because in the SYNC era a too-short write timeout
+    # tripped the single global breaker and caused 5-min blackouts. PRD-141 makes
+    # writes async (no thread held), per-workspace (US-004), with a 60s cooldown
+    # and a reachability probe (US-006) that resets breakers when Mem0 is up — so
+    # a tighter 5s write timeout now fails fast on a down Mem0 without blackouts;
+    # the worst case is losing the slowest (5-7s) enrichment writes.
+    MEM0_WRITE_TIMEOUT_SECONDS: float = float(os.getenv("MEM0_WRITE_TIMEOUT_SECONDS", "5.0"))
     # Open circuit after this many consecutive failures.
     MEM0_CIRCUIT_THRESHOLD: int = int(os.getenv("MEM0_CIRCUIT_THRESHOLD", "3"))
-    # Stay open for this many seconds before allowing a probe.
-    MEM0_CIRCUIT_COOLDOWN_SECONDS: int = int(os.getenv("MEM0_CIRCUIT_COOLDOWN_SECONDS", "300"))
+    # Stay open for this many seconds before allowing a probe. Short now that the
+    # proactive probe (US-006) resets breakers the moment Mem0 is reachable again.
+    MEM0_CIRCUIT_COOLDOWN_SECONDS: int = int(os.getenv("MEM0_CIRCUIT_COOLDOWN_SECONDS", "60"))
     # PRD-141 US-006: proactive Mem0 health probe in the heartbeat. Pings Mem0
     # out-of-band every interval and trips/resets ALL workspace breakers at once,
     # so an outage fails fast everywhere instead of each workspace timing out.

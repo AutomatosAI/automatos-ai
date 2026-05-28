@@ -77,7 +77,7 @@ def _make_breaker() -> _CircuitBreaker:
         from config import config
         return _CircuitBreaker(
             threshold=int(getattr(config, "MEM0_CIRCUIT_THRESHOLD", 3)),
-            cooldown_seconds=int(getattr(config, "MEM0_CIRCUIT_COOLDOWN_SECONDS", 300)),
+            cooldown_seconds=int(getattr(config, "MEM0_CIRCUIT_COOLDOWN_SECONDS", 60)),
         )
     except Exception:
         return _CircuitBreaker()
@@ -137,7 +137,7 @@ class Mem0Client:
         self.api_url = (api_url or config.MEM0_API_URL or "").strip()
         self.api_key = api_key or config.MEM0_API_KEY
         self.timeout = float(getattr(config, "MEM0_TIMEOUT_SECONDS", 3.0))
-        self.write_timeout = float(getattr(config, "MEM0_WRITE_TIMEOUT_SECONDS", 15.0))
+        self.write_timeout = float(getattr(config, "MEM0_WRITE_TIMEOUT_SECONDS", 5.0))
         # Pooled AsyncClient, created lazily inside the running event loop so
         # connections are reused across calls instead of opened per request.
         self._client: Optional[httpx.AsyncClient] = None
