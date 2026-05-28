@@ -528,6 +528,13 @@ class Config:
     TOOL_ROUTING_GRAPH_AGENT_SAMPLE_FLOOR: int = int(os.getenv("TOOL_ROUTING_GRAPH_AGENT_SAMPLE_FLOOR", "50"))
     EDGE_BUILDER_HOUR_UTC: int = int(os.getenv("EDGE_BUILDER_HOUR_UTC", "3"))
     EDGE_BUILDER_WINDOW_DAYS: int = int(os.getenv("EDGE_BUILDER_WINDOW_DAYS", "30"))
+    # PRD-141 US-019: batched incremental tool-execution signal recorder.
+    # Opt-in (default off). Drains an in-process queue with ONE DB session per
+    # flush — never a DB session or task per tool call.
+    TOOL_SIGNAL_RECORDER_ENABLED: bool = os.getenv("TOOL_SIGNAL_RECORDER_ENABLED", "false").lower() == "true"
+    TOOL_SIGNAL_FLUSH_BATCH_SIZE: int = int(os.getenv("TOOL_SIGNAL_FLUSH_BATCH_SIZE", "50"))
+    TOOL_SIGNAL_FLUSH_INTERVAL_SECONDS: float = float(os.getenv("TOOL_SIGNAL_FLUSH_INTERVAL_SECONDS", "5.0"))
+    TOOL_SIGNAL_QUEUE_MAXSIZE: int = int(os.getenv("TOOL_SIGNAL_QUEUE_MAXSIZE", "10000"))
 
     # =============================================================================
     # AWS S3 VECTORS (PRD-42: Cloud Document Sync)

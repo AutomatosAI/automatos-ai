@@ -20,7 +20,9 @@ leaf-load ``graph_router.py`` under a synthetic package and inject a fake
 declarative Base), so ``_query_affinities`` runs against the REAL model with a
 fake DB session.
 """
+import asyncio
 import importlib.util
+import math
 import sys
 import types
 from contextlib import contextmanager
@@ -292,3 +294,238 @@ def test_failed_after_edge_not_expanded():
     assert "next" in to_actions       # used_after IS followed
     assert "bad" not in to_actions    # failed_after is NOT followed
     assert len(edges) == 1
+
+
+# ---------------------------------------------------------------------------
+# PRD-141 US-019: batched incremental tool-execution signal recorder
+# ---------------------------------------------------------------------------
+#
+# signal_recorder.py is stdlib-only at module top, so we leaf-load it under the
+# same synthetic package. _flush()/_upsert_*() lazily import
+# core.database.database (the session) and core.services.edge_builder
+# (wilson_lower_bound); both are injected as fakes per-test via monkeypatch so
+# no DB creds are needed and there is no cross-file sys.modules pollution.
+
+
+def _load_signal_recorder():
+    full = f"{_PKG}.signal_recorder"
+    if full in sys.modules:
+        return sys.modules[full]
+    spec = importlib.util.spec_from_file_location(
+        full, _discovery_dir / "signal_recorder.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    module.__package__ = _PKG
+    sys.modules[full] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+_signal_mod = _load_signal_recorder()
+ToolSignalRecorder = _signal_mod.ToolSignalRecorder
+ToolSignal = _signal_mod.ToolSignal
+
+
+class _Result:
+    def __init__(self, rowcount: int):
+        self.rowcount = rowcount
+
+
+class _CapturingDB:
+    """Records (sql, params) and returns a configurable rowcount for UPDATEs."""
+
+    def __init__(self, update_rowcount: int = 0):
+        self.executed = []  # list of (sql_text, params)
+        self._update_rowcount = update_rowcount
+
+    def execute(self, stmt, params=None):
+        sql = str(stmt)
+        self.executed.append((sql, params or {}))
+        rc = self._update_rowcount if sql.strip().upper().startswith("UPDATE") else 1
+        return _Result(rc)
+
+    def flush(self):
+        pass
+
+
+class _SessionFactory:
+    """Counts how many sessions are opened (must be exactly 1 per flush)."""
+
+    def __init__(self, update_rowcount: int = 0):
+        self.db = _CapturingDB(update_rowcount=update_rowcount)
+        self.enter_count = 0
+
+    @contextmanager
+    def session(self):
+        self.enter_count += 1
+        yield self.db
+
+
+def _wilson_real(successes, total, z=1.96):
+    if total == 0:
+        return 0.0
+    p = successes / total
+    denom = 1 + z**2 / total
+    centre = p + z**2 / (2 * total)
+    spread = z * math.sqrt((p * (1 - p) + z**2 / (4 * total)) / total)
+    return (centre - spread) / denom
+
+
+def _recorder_with_fake_db(monkeypatch, update_rowcount: int = 0):
+    """A ToolSignalRecorder whose lazy core.* imports are faked."""
+    factory = _SessionFactory(update_rowcount=update_rowcount)
+
+    fake_db_mod = types.ModuleType("core.database.database")
+    fake_db_mod.get_db_session = factory.session
+    monkeypatch.setitem(sys.modules, "core.database.database", fake_db_mod)
+
+    fake_eb = types.ModuleType("core.services.edge_builder")
+    fake_eb.wilson_lower_bound = _wilson_real
+    monkeypatch.setitem(sys.modules, "core.services.edge_builder", fake_eb)
+
+    return ToolSignalRecorder(), factory
+
+
+def _edge_stmts(db):
+    return [(s, p) for s, p in db.executed if "tool_routing_edges" in s]
+
+
+def _aff_stmts(db):
+    return [(s, p) for s, p in db.executed if "tool_routing_affinities" in s]
+
+
+def test_incremental_edge_update_success(monkeypatch):
+    """A success signal with a prior action -> used_after edge + agent_prefers
+    affinity. Fresh keys (no existing row) fall through to INSERT."""
+    recorder, factory = _recorder_with_fake_db(monkeypatch, update_rowcount=0)
+
+    asyncio.run(
+        recorder._flush(
+            [ToolSignal("b", True, agent_id=1, workspace_id="ws", prior_action="a")]
+        )
+    )
+
+    edge_inserts = [(s, p) for s, p in _edge_stmts(factory.db) if "INSERT" in s.upper()]
+    assert len(edge_inserts) == 1
+    _, ep = edge_inserts[0]
+    assert ep["from_action"] == "a"
+    assert ep["to_action"] == "b"
+    assert ep["edge_type"] == "used_after"
+
+    aff_inserts = [(s, p) for s, p in _aff_stmts(factory.db) if "INSERT" in s.upper()]
+    assert len(aff_inserts) == 1
+    _, ap = aff_inserts[0]
+    assert ap["action_name"] == "b"
+    assert ap["affinity_type"] == "agent_prefers"
+
+
+def test_incremental_edge_update_failure(monkeypatch):
+    """A failure signal -> failed_after edge + fails_for_intent affinity."""
+    recorder, factory = _recorder_with_fake_db(monkeypatch, update_rowcount=0)
+
+    asyncio.run(
+        recorder._flush(
+            [ToolSignal("b", False, agent_id=1, workspace_id="ws", prior_action="a")]
+        )
+    )
+
+    edge_inserts = [(s, p) for s, p in _edge_stmts(factory.db) if "INSERT" in s.upper()]
+    assert len(edge_inserts) == 1
+    assert edge_inserts[0][1]["edge_type"] == "failed_after"
+
+    aff_inserts = [(s, p) for s, p in _aff_stmts(factory.db) if "INSERT" in s.upper()]
+    assert len(aff_inserts) == 1
+    assert aff_inserts[0][1]["affinity_type"] == "fails_for_intent"
+
+
+def test_edge_upsert_increments_sample_count(monkeypatch):
+    """Repeated identical signals collapse to ONE upsert that INCREMENTS
+    sample_count (no duplicate rows). When the row already exists
+    (update_rowcount=1) only the UPDATE runs — never a second INSERT."""
+    recorder, factory = _recorder_with_fake_db(monkeypatch, update_rowcount=1)
+
+    asyncio.run(
+        recorder._flush(
+            [ToolSignal("b", True, agent_id=1, workspace_id="ws", prior_action="a")
+             for _ in range(3)]
+        )
+    )
+
+    edge_stmts = _edge_stmts(factory.db)
+    updates = [(s, p) for s, p in edge_stmts if s.strip().upper().startswith("UPDATE")]
+    inserts = [(s, p) for s, p in edge_stmts if "INSERT" in s.upper()]
+
+    # 3 dupes collapse to 1 update; row exists so NO insert (no duplicate edge)
+    assert len(updates) == 1
+    assert len(inserts) == 0
+
+    sql, params = updates[0]
+    assert params["inc"] == 3  # aggregated count
+    assert "sample_count = tool_routing_edges.sample_count + :inc" in sql  # increment
+    assert "IS NOT DISTINCT FROM" in sql  # null-safe scope match
+
+
+def test_flush_uses_single_session(monkeypatch):
+    """A mixed batch (multiple edges + affinities) opens exactly ONE DB session."""
+    recorder, factory = _recorder_with_fake_db(monkeypatch, update_rowcount=0)
+
+    batch = [
+        ToolSignal("b", True, agent_id=1, workspace_id="ws", prior_action="a"),
+        ToolSignal("c", False, agent_id=1, workspace_id="ws", prior_action="b"),
+        ToolSignal("d", True, agent_id=2, workspace_id="ws2", prior_action="c"),
+    ]
+    asyncio.run(recorder._flush(batch))
+
+    assert factory.enter_count == 1
+
+
+def test_aggregate_collapses_and_skips_priorless_and_self_edges():
+    """_aggregate is pure: dupes sum, missing/equal prior_action yields no edge
+    (affinity still emitted)."""
+    batch = [
+        ToolSignal("b", True, agent_id=1, workspace_id="ws", prior_action="a"),
+        ToolSignal("b", True, agent_id=1, workspace_id="ws", prior_action="a"),
+        ToolSignal("x", True, agent_id=1, workspace_id="ws", prior_action=None),
+        ToolSignal("y", True, agent_id=1, workspace_id="ws", prior_action="y"),
+    ]
+    edges, affinities = ToolSignalRecorder._aggregate(batch)
+
+    assert edges[("a", "b", "used_after", 1, "ws")] == 2  # dupes summed
+    # no edge for the prior-less signal or the self-transition
+    assert all(ek[1] != "x" for ek in edges)
+    assert ("y", "y", "used_after", 1, "ws") not in edges
+    # affinities are always produced (one per distinct action)
+    assert affinities[("b", "agent_prefers", 1, "ws")] == 2
+    assert affinities[("x", "agent_prefers", 1, "ws")] == 1
+    assert affinities[("y", "agent_prefers", 1, "ws")] == 1
+
+
+def test_record_is_noop_without_running_loop(monkeypatch):
+    """record() from a sync context (no event loop) must not raise and must not
+    create a queue/task — it silently drops."""
+    monkeypatch.setitem(
+        sys.modules, "config",
+        types.ModuleType("config"),
+    )
+    sys.modules["config"].config = SimpleNamespace(TOOL_SIGNAL_RECORDER_ENABLED=True)
+
+    recorder = ToolSignalRecorder()
+    recorder.record(ToolSignal("b", True, agent_id=1, workspace_id="ws", prior_action="a"))
+
+    assert recorder._queue is None
+    assert recorder._drain_task is None
+
+
+def test_record_disabled_is_noop(monkeypatch):
+    """When the flag is off, record() does nothing even on an event loop."""
+    monkeypatch.setitem(sys.modules, "config", types.ModuleType("config"))
+    sys.modules["config"].config = SimpleNamespace(TOOL_SIGNAL_RECORDER_ENABLED=False)
+
+    recorder = ToolSignalRecorder()
+
+    async def _drive():
+        recorder.record(ToolSignal("b", True, agent_id=1))
+        return recorder._queue, recorder._drain_task
+
+    q, t = asyncio.run(_drive())
+    assert q is None and t is None
