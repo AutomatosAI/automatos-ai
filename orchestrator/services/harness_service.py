@@ -39,6 +39,12 @@ _MIN_DATA_DAYS = 7
 _AUTO_APPLY_MAX_RISK = 2
 _HIGH_PRIORITY_RISK = 4
 
+# Sentinel proposed_value meaning "a human must supply the real value" — emitted
+# by _phase_prescribe for changes it can detect but not safely decide (model,
+# description). The apply layer MUST refuse it: writing it literally would set an
+# agent's model/description to the string "review_needed".
+_PLACEHOLDER_PROPOSED_VALUE = "review_needed"
+
 # Convergence thresholds
 _CONVERGED_DELTA = 2.0
 _CONVERGED_VARIANCE = 0.02
@@ -644,7 +650,7 @@ class HarnessService:
                             "target_name": agent_name,
                             "change_type": "model_change_same_tier",
                             "current_value": {"model": agent.get("model", "unknown")},
-                            "proposed_value": {"model": "review_needed"},
+                            "proposed_value": {"model": _PLACEHOLDER_PROPOSED_VALUE},
                             "risk_score": 3,
                             "expected_improvement": f"Potential cost reduction — cost up {cost_delta:.0f}% while success rate is healthy at {success_rate:.0f}%",
                             "rationale": (
@@ -668,7 +674,7 @@ class HarnessService:
                             "target_name": agent_name,
                             "change_type": "description_update",
                             "current_value": {"description": agent.get("description", "")[:100]},
-                            "proposed_value": {"description": "review_needed"},
+                            "proposed_value": {"description": _PLACEHOLDER_PROPOSED_VALUE},
                             "risk_score": 1,
                             "expected_improvement": "Align agent description with actual workload to improve routing",
                             "rationale": (
@@ -772,7 +778,7 @@ class HarnessService:
                     })
 
         # Apply previously approved board tasks (status=done, tag=harness)
-        await self._apply_approved_board_tasks(executor, changelog)
+        await self._apply_approved_board_tasks(executor, workspace_id, changelog)
 
         logger.info(
             "[HARNESS] APPLY done — %d applied, %d queued, %d failed",
@@ -1147,6 +1153,20 @@ class HarnessService:
         target_id = rx.get("target_id")
         proposed = rx.get("proposed_value", {})
 
+        # Refuse placeholder prescriptions — _phase_prescribe emits
+        # {"model"|"description": "review_needed"} when it can flag a problem but
+        # not decide the fix. Applying the sentinel literally would corrupt the
+        # agent. This guard protects BOTH the low-risk auto-apply path and the
+        # approved-board-task path, which both flow through here.
+        if isinstance(proposed, dict) and _PLACEHOLDER_PROPOSED_VALUE in proposed.values():
+            return {
+                "success": False,
+                "error": (
+                    f"proposed_value is a placeholder ('{_PLACEHOLDER_PROPOSED_VALUE}') "
+                    "requiring human input — not auto-applicable"
+                ),
+            }
+
         try:
             if change_type == "heartbeat_tune":
                 result = await executor.execute("platform_configure_agent_heartbeat", {
@@ -1178,9 +1198,26 @@ class HarnessService:
             return {"success": False, "error": str(exc)}
 
     async def _apply_approved_board_tasks(
-        self, executor: "PlatformActionExecutor", changelog: Dict[str, List[Dict[str, Any]]]
+        self,
+        executor: "PlatformActionExecutor",
+        workspace_id: UUID,
+        changelog: Dict[str, List[Dict[str, Any]]],
     ) -> None:
-        """Apply previously approved (done) HARNESS board tasks."""
+        """Auto-apply previously approved (done) HARNESS board tasks.
+
+        Gated on HARNESS_SELF_MANAGEMENT_ENABLED — when off this is a pure no-op,
+        so Phase 5 stays inert by default. When on, each done [HARNESS] task that
+        has not already been applied is parsed, its pre-change value snapshotted
+        (for US-022 rollback), and applied via _auto_apply_prescription. Applied
+        task ids are persisted to /harness/applied_tasks.json; that ledger is the
+        idempotency key because board tasks have no tag-mutation tool, so a task
+        is never re-applied on a later weekly tick.
+        """
+        from config import config
+
+        if not config.HARNESS_SELF_MANAGEMENT_ENABLED:
+            return
+
         try:
             result = await executor.execute("platform_list_tasks", {
                 "tags": ["harness"],
@@ -1191,18 +1228,159 @@ class HarnessService:
             tasks = result.get("data", result.get("tasks", []))
             if not isinstance(tasks, list):
                 return
+
+            ledger = self._read_applied_tasks(workspace_id)
+            # Normalise ids to str: a task id round-trips through JSON and the
+            # task API, so the ledger and the live list could disagree on
+            # int-vs-str. One canonical type makes both the membership check and
+            # the sorted() in _write_applied_tasks total.
+            applied_ids = {str(i) for i in ledger.get("applied_task_ids", [])}
+            agents_by_name = await self._resolve_agents_by_name(executor)
+
+            newly_applied: List[Dict[str, Any]] = []
             for task in tasks:
-                logger.warning(
-                    "[HARNESS] Approved board task not yet auto-applied (v1 limitation): %s",
-                    task.get("title", ""),
+                raw_id = task.get("id")
+                if raw_id is None:
+                    continue
+                task_id = str(raw_id)
+                if task_id in applied_ids:
+                    continue
+
+                rx = self._parse_harness_task(task, agents_by_name=agents_by_name)
+                if not rx or rx.get("target_id") is None:
+                    # Never apply a change to an unresolved / guessed target.
+                    changelog.setdefault("skipped", []).append({
+                        "task_id": task_id,
+                        "title": task.get("title", ""),
+                        "reason": "unparseable or unresolved target",
+                    })
+                    continue
+
+                current_before = self._snapshot_current_value(rx)
+                apply_result = await self._auto_apply_prescription(executor, rx)
+
+                if apply_result.get("success"):
+                    entry = {
+                        "task_id": task_id,
+                        "prescription_id": rx.get("prescription_id"),
+                        "target_id": rx.get("target_id"),
+                        "target_name": rx.get("target_name"),
+                        "change_type": rx.get("change_type"),
+                        "current_value_before": current_before,
+                        "proposed_value": rx.get("proposed_value"),
+                        "applied_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                    applied_ids.add(task_id)
+                    newly_applied.append(entry)
+                    changelog.setdefault("applied_from_approved", []).append(entry)
+                else:
+                    changelog.setdefault("failed", []).append({
+                        "task_id": task_id,
+                        "title": task.get("title", ""),
+                        "error": apply_result.get("error", "unknown"),
+                    })
+
+            if newly_applied:
+                await self._write_applied_tasks(
+                    executor, workspace_id, ledger, applied_ids, newly_applied
                 )
-                changelog.setdefault("approved_pending", []).append({
-                    "task_id": task.get("id"),
-                    "title": task.get("title", ""),
-                    "note": "Approved but not auto-applied — manual action required (v1)",
-                })
         except Exception as exc:
-            logger.warning("[HARNESS] Failed to check approved board tasks: %s", exc)
+            # A failure here means human-approved changes were silently dropped —
+            # surface the trace rather than bury it in a warning.
+            logger.error(
+                "[HARNESS] Failed to apply approved board tasks: %s",
+                exc, exc_info=True,
+            )
+
+    async def _resolve_agents_by_name(
+        self, executor: "PlatformActionExecutor"
+    ) -> Dict[str, Any]:
+        """Build a {agent_name: agent_id} map for resolving board-task targets."""
+        try:
+            result = await executor.execute("platform_list_agents", {})
+        except Exception as exc:
+            logger.warning("[HARNESS] Failed to list agents for self-management: %s", exc)
+            return {}
+        agents = self._extract_agents_list({"agents": result})
+        return {
+            a.get("name"): a.get("id")
+            for a in agents
+            if isinstance(a, dict) and a.get("name") and a.get("id") is not None
+        }
+
+    def _snapshot_current_value(self, rx: Dict[str, Any]) -> Dict[str, Any]:
+        """Capture the value an approved change is about to overwrite.
+
+        Uses the prescription's parsed current_value — the producer wrote it in
+        the same shape _auto_apply_prescription consumes, so it round-trips
+        exactly with no agent-schema coupling. Recorded as current_value_before
+        so US-022 can roll back to it on regression.
+        """
+        current = rx.get("current_value")
+        return current if isinstance(current, dict) else {}
+
+    @staticmethod
+    def _applied_tasks_path(workspace_id: UUID) -> str:
+        from config import config
+        import os
+
+        return os.path.join(
+            config.WORKSPACE_VOLUME_PATH,
+            str(workspace_id),
+            "harness",
+            "applied_tasks.json",
+        )
+
+    def _read_applied_tasks(self, workspace_id: UUID) -> Dict[str, Any]:
+        """Read the cumulative ledger of auto-applied HARNESS board task ids.
+
+        This is the idempotency key for self-management — board tasks have no
+        tag-mutation tool, so a task recorded here is never re-applied. A missing
+        or unreadable ledger yields an empty one; failing open is safe because
+        every applicable change_type sets an absolute value (so re-applying is a
+        harmless no-op) and placeholder prescriptions are refused by
+        _auto_apply_prescription before any write.
+        """
+        import os
+
+        try:
+            path = self._applied_tasks_path(workspace_id)
+            if os.path.exists(path):
+                with open(path, "r") as f:
+                    data = json.load(f)
+                if isinstance(data, dict):
+                    data.setdefault("applied_task_ids", [])
+                    data.setdefault("entries", [])
+                    return data
+        except Exception:
+            logger.warning(
+                "[HARNESS] Failed to read applied_tasks.json for %s",
+                workspace_id, exc_info=True,
+            )
+        return {"applied_task_ids": [], "entries": []}
+
+    async def _write_applied_tasks(
+        self,
+        executor: "PlatformActionExecutor",
+        workspace_id: UUID,
+        ledger: Dict[str, Any],
+        applied_ids: set,
+        newly_applied: List[Dict[str, Any]],
+    ) -> None:
+        """Persist the applied-tasks ledger via the workspace file store."""
+        ledger["applied_task_ids"] = sorted(applied_ids)
+        ledger.setdefault("entries", []).extend(newly_applied)
+        ledger["updated_at"] = datetime.now(timezone.utc).isoformat()
+        try:
+            await executor.execute("workspace_write_file", {
+                "path": "/harness/applied_tasks.json",
+                "content": json.dumps(ledger, indent=2),
+            })
+        except Exception as exc:
+            logger.warning(
+                "[HARNESS] Failed to persist applied_tasks ledger for %s: %s",
+                workspace_id, exc,
+            )
 
     def _parse_harness_task(
         self,

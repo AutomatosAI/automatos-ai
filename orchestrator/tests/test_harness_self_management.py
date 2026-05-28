@@ -5,6 +5,7 @@ takes no DB. Dummy POSTGRES_* satisfies the lazy create_engine in the config
 import chain without opening a connection. The self-management flag is popped
 before import so test_flag_defaults_false sees the real default.
 """
+import asyncio
 import json
 import os
 import sys
@@ -121,3 +122,165 @@ def test_parse_harness_task_unresolved_target_id_is_none():
 
 def test_flag_defaults_false():
     assert config.HARNESS_SELF_MANAGEMENT_ENABLED is False
+
+
+# ---------------------------------------------------------------------------
+# US-021: execute approved board tasks (flag-gated) + snapshot
+# ---------------------------------------------------------------------------
+
+_WS_ID = "00000000-0000-0000-0000-000000000001"
+# A path that does not exist, so _read_applied_tasks finds no ledger and treats
+# every task as un-applied. The ledger WRITE goes through the fake executor's
+# workspace_write_file (in-memory), so no real filesystem I/O occurs.
+_MISSING_VOLUME = "/tmp/harness-self-mgmt-test-no-such-volume"
+
+
+class _FakeExecutor:
+    """Records every execute() call and returns canned results for the actions
+    _apply_approved_board_tasks invokes (list tasks/agents, apply, write file)."""
+
+    def __init__(self, tasks, agents):
+        self._tasks = tasks
+        self._agents = agents
+        self.calls = []
+
+    async def execute(self, action, params):
+        self.calls.append((action, params))
+        if action == "platform_list_tasks":
+            return {"data": self._tasks}
+        if action == "platform_list_agents":
+            return {"data": self._agents}
+        # apply actions + workspace_write_file all report success
+        return {"success": True}
+
+    def actions(self):
+        return [action for action, _ in self.calls]
+
+
+def test_approved_tasks_noop_when_flag_off(monkeypatch):
+    """Flag off -> pure no-op: nothing is listed, nothing is applied."""
+    monkeypatch.setattr(config, "HARNESS_SELF_MANAGEMENT_ENABLED", False)
+    svc = HarnessService()
+    ex = _FakeExecutor(
+        tasks=[_harness_task(task_id=7)],
+        agents=[{"id": 42, "name": "ScribeAgent"}],
+    )
+    changelog = {}
+    asyncio.run(svc._apply_approved_board_tasks(ex, _WS_ID, changelog))
+
+    assert ex.calls == []
+    assert changelog == {}
+
+
+def test_approved_tasks_are_executed(monkeypatch):
+    """Flag on -> a done [HARNESS] task is parsed, its target resolved, and the
+    change applied via _auto_apply_prescription, then the ledger is persisted."""
+    monkeypatch.setattr(config, "HARNESS_SELF_MANAGEMENT_ENABLED", True)
+    monkeypatch.setattr(config, "WORKSPACE_VOLUME_PATH", _MISSING_VOLUME)
+    svc = HarnessService()
+    task = _harness_task(
+        change_type="heartbeat_tune",
+        target_name="ScribeAgent",
+        current={"interval_minutes": 30},
+        proposed={"interval_minutes": 90},
+        task_id=7,
+    )
+    ex = _FakeExecutor(tasks=[task], agents=[{"id": 42, "name": "ScribeAgent"}])
+    changelog = {}
+    asyncio.run(svc._apply_approved_board_tasks(ex, _WS_ID, changelog))
+
+    # The heartbeat change was actually applied to the resolved agent id.
+    assert (
+        "platform_configure_agent_heartbeat",
+        {"agent_id": 42, "interval_minutes": 90},
+    ) in ex.calls
+    applied = changelog.get("applied_from_approved", [])
+    assert len(applied) == 1
+    assert applied[0]["task_id"] == "7"
+    assert applied[0]["target_id"] == 42
+    assert applied[0]["change_type"] == "heartbeat_tune"
+    # Idempotency ledger was persisted via the workspace file store.
+    assert "workspace_write_file" in ex.actions()
+
+
+def test_snapshot_recorded_before_apply(monkeypatch):
+    """The pre-change value is captured as current_value_before so US-022 has a
+    rollback target."""
+    monkeypatch.setattr(config, "HARNESS_SELF_MANAGEMENT_ENABLED", True)
+    monkeypatch.setattr(config, "WORKSPACE_VOLUME_PATH", _MISSING_VOLUME)
+    svc = HarnessService()
+    task = _harness_task(
+        change_type="heartbeat_tune",
+        target_name="ScribeAgent",
+        current={"interval_minutes": 30},
+        proposed={"interval_minutes": 90},
+        task_id=7,
+    )
+    ex = _FakeExecutor(tasks=[task], agents=[{"id": 42, "name": "ScribeAgent"}])
+    changelog = {}
+    asyncio.run(svc._apply_approved_board_tasks(ex, _WS_ID, changelog))
+
+    entry = changelog["applied_from_approved"][0]
+    assert entry["current_value_before"] == {"interval_minutes": 30}
+    assert entry["proposed_value"] == {"interval_minutes": 90}
+
+
+def test_already_applied_task_is_skipped(monkeypatch):
+    """A task whose id is in the ledger is never re-applied (idempotency)."""
+    monkeypatch.setattr(config, "HARNESS_SELF_MANAGEMENT_ENABLED", True)
+    svc = HarnessService()
+    monkeypatch.setattr(
+        svc, "_read_applied_tasks",
+        lambda ws: {"applied_task_ids": [7], "entries": []},
+    )
+    task = _harness_task(change_type="heartbeat_tune", target_name="ScribeAgent", task_id=7)
+    ex = _FakeExecutor(tasks=[task], agents=[{"id": 42, "name": "ScribeAgent"}])
+    changelog = {}
+    asyncio.run(svc._apply_approved_board_tasks(ex, _WS_ID, changelog))
+
+    assert "platform_configure_agent_heartbeat" not in ex.actions()
+    assert changelog.get("applied_from_approved", []) == []
+    # Nothing applied -> no ledger write.
+    assert "workspace_write_file" not in ex.actions()
+
+
+def test_unresolved_target_is_skipped_not_applied(monkeypatch):
+    """A task whose target_name is not in the agents map is skipped, never
+    applied against a guessed/null target."""
+    monkeypatch.setattr(config, "HARNESS_SELF_MANAGEMENT_ENABLED", True)
+    monkeypatch.setattr(config, "WORKSPACE_VOLUME_PATH", _MISSING_VOLUME)
+    svc = HarnessService()
+    task = _harness_task(change_type="heartbeat_tune", target_name="GhostAgent", task_id=9)
+    ex = _FakeExecutor(tasks=[task], agents=[{"id": 42, "name": "ScribeAgent"}])
+    changelog = {}
+    asyncio.run(svc._apply_approved_board_tasks(ex, _WS_ID, changelog))
+
+    assert "platform_configure_agent_heartbeat" not in ex.actions()
+    assert changelog.get("applied_from_approved", []) == []
+    assert len(changelog.get("skipped", [])) == 1
+    assert changelog["skipped"][0]["task_id"] == "9"
+
+
+def test_placeholder_proposed_value_is_refused(monkeypatch):
+    """An approved task whose proposed_value is the 'review_needed' placeholder
+    is never applied — applying it literally would corrupt the agent."""
+    monkeypatch.setattr(config, "HARNESS_SELF_MANAGEMENT_ENABLED", True)
+    monkeypatch.setattr(config, "WORKSPACE_VOLUME_PATH", _MISSING_VOLUME)
+    svc = HarnessService()
+    task = _harness_task(
+        change_type="description_update",
+        target_name="ScribeAgent",
+        current={"description": "old"},
+        proposed={"description": "review_needed"},
+        task_id=11,
+    )
+    ex = _FakeExecutor(tasks=[task], agents=[{"id": 42, "name": "ScribeAgent"}])
+    changelog = {}
+    asyncio.run(svc._apply_approved_board_tasks(ex, _WS_ID, changelog))
+
+    assert "platform_update_agent" not in ex.actions()
+    assert changelog.get("applied_from_approved", []) == []
+    assert len(changelog.get("failed", [])) == 1
+    assert "placeholder" in changelog["failed"][0]["error"]
+    # Not applied -> not ledgered.
+    assert "workspace_write_file" not in ex.actions()
