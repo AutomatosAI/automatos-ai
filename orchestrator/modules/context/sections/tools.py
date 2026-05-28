@@ -203,6 +203,7 @@ class ToolsSection(BaseSection):
                     available_tools=all_tools,
                     conversation_context=conversation_context,
                     tool_hints=tool_hints,
+                    agent_id=agent_id,
                 )
 
                 if not result.should_include_tools:
