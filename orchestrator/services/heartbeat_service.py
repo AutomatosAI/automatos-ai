@@ -80,6 +80,33 @@ class HeartbeatService:
             replace_existing=True,
             max_instances=1,
         )
+
+        # PRD-141 US-006: proactive Mem0 health probe. Pings Mem0 out-of-band on
+        # a fixed interval and trips/resets every workspace breaker at once, so a
+        # Mem0 outage fails fast platform-wide instead of each request timing out.
+        try:
+            from config import config as _app_config
+
+            if getattr(_app_config, "MEM0_HEALTH_PROBE_ENABLED", True):
+                from apscheduler.triggers.interval import IntervalTrigger
+
+                probe_interval = int(
+                    getattr(_app_config, "MEM0_HEALTH_PROBE_INTERVAL_SECONDS", 30)
+                )
+                self._scheduler.add_job(
+                    self._mem0_health_probe_tick,
+                    IntervalTrigger(seconds=probe_interval),
+                    id="mem0_health_probe",
+                    replace_existing=True,
+                    max_instances=1,
+                    coalesce=True,
+                )
+                logger.info(
+                    "[Heartbeat] Mem0 health probe scheduled every %ds", probe_interval
+                )
+        except Exception:
+            logger.error("[Heartbeat] Failed to schedule Mem0 health probe", exc_info=True)
+
         logger.info("[Heartbeat] Service started (daily summary at 01:00 UTC)")
 
     async def stop(self):
@@ -88,6 +115,23 @@ class HeartbeatService:
             self._scheduler.shutdown(wait=True)
             logger.info("[Heartbeat] Standalone scheduler stopped")
         logger.info("[Heartbeat] Service stopped")
+
+    async def _mem0_health_probe_tick(self) -> None:
+        """Probe Mem0 reachability and steer all circuit breakers (PRD-141 US-006).
+
+        Resolves the shared Mem0Client (the one real traffic uses, so probe and
+        traffic agree on breaker state) and delegates the trip/reset decision to
+        ``run_health_probe``. Skips silently when Mem0 is unconfigured.
+        """
+        try:
+            from modules.memory.unified_memory_service import get_unified_memory_service
+
+            client = get_unified_memory_service()._mem0
+            if not getattr(client, "api_url", ""):
+                return  # Mem0 disabled — nothing to probe
+            await client.run_health_probe()
+        except Exception:
+            logger.error("[Heartbeat] Mem0 health probe tick errored", exc_info=True)
 
     # ------------------------------------------------------------------
     # Config loading

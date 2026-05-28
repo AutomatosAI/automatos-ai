@@ -579,6 +579,11 @@ class Config:
     MEM0_CIRCUIT_THRESHOLD: int = int(os.getenv("MEM0_CIRCUIT_THRESHOLD", "3"))
     # Stay open for this many seconds before allowing a probe.
     MEM0_CIRCUIT_COOLDOWN_SECONDS: int = int(os.getenv("MEM0_CIRCUIT_COOLDOWN_SECONDS", "300"))
+    # PRD-141 US-006: proactive Mem0 health probe in the heartbeat. Pings Mem0
+    # out-of-band every interval and trips/resets ALL workspace breakers at once,
+    # so an outage fails fast everywhere instead of each workspace timing out.
+    MEM0_HEALTH_PROBE_ENABLED: bool = os.getenv("MEM0_HEALTH_PROBE_ENABLED", "true").lower() in ("true", "1", "yes")
+    MEM0_HEALTH_PROBE_INTERVAL_SECONDS: int = int(os.getenv("MEM0_HEALTH_PROBE_INTERVAL_SECONDS", "30"))
 
     # =============================================================================
     # QDRANT — PRD-108 Memory Field (Shared Semantic Context)

@@ -264,3 +264,80 @@ def test_unified_memory_no_executor():
             raise AssertionError(f"Mem0 call wrapped in an executor: {line.strip()}")
 
     assert mem0_calls, "expected self._mem0 calls in unified_memory_service.py"
+
+
+# ── US-006: proactive Mem0 health probe ─────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_health_check_bypasses_breaker(monkeypatch):
+    """health_check reaches Mem0 even with the breaker OPEN and maps the result
+    to reachability: any <500 response (incl. 401/404) is up; a transport error
+    is down. The probe must bypass the breaker because it is the signal that
+    decides breaker state."""
+    breaker = _CircuitBreaker(threshold=3, cooldown_seconds=300)
+    breaker.force_open()  # breaker OPEN — would short-circuit a normal _request
+    monkeypatch.setattr(Mem0Client, "_breakers", {"_global": breaker})
+    client = Mem0Client(api_url="http://mem0.test", api_key="test-key")
+
+    async def fake_401(self, method, url, **kwargs):
+        return _FakeResponse(401)
+
+    monkeypatch.setattr(httpx.AsyncClient, "request", fake_401)
+    assert await client.health_check() is True  # reachable despite open breaker
+
+    async def fake_down(self, method, url, **kwargs):
+        raise httpx.ConnectError("connection refused")
+
+    monkeypatch.setattr(httpx.AsyncClient, "request", fake_down)
+    assert await client.health_check() is False  # transport error == down
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_health_probe_trips_all_breakers(monkeypatch):
+    """A failing health probe force-opens every known workspace breaker so the
+    whole platform fails fast at once."""
+    breakers = {
+        "A": _CircuitBreaker(threshold=3, cooldown_seconds=300),
+        "B": _CircuitBreaker(threshold=3, cooldown_seconds=300),
+        "_global": _CircuitBreaker(threshold=3, cooldown_seconds=300),
+    }
+    monkeypatch.setattr(Mem0Client, "_breakers", breakers)
+    client = Mem0Client(api_url="http://mem0.test", api_key="test-key")
+
+    async def fake_unhealthy(self):
+        return False
+
+    monkeypatch.setattr(Mem0Client, "health_check", fake_unhealthy)
+
+    healthy = await client.run_health_probe()
+
+    assert healthy is False
+    assert all(b.is_open for b in breakers.values())  # every workspace tripped
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_health_probe_resets_on_recovery(monkeypatch):
+    """A successful probe closes every breaker that a prior outage had opened."""
+    breakers = {
+        "A": _CircuitBreaker(threshold=3, cooldown_seconds=300),
+        "B": _CircuitBreaker(threshold=3, cooldown_seconds=300),
+    }
+    for b in breakers.values():
+        b.force_open()  # simulate a prior outage that tripped everything
+    monkeypatch.setattr(Mem0Client, "_breakers", breakers)
+    client = Mem0Client(api_url="http://mem0.test", api_key="test-key")
+
+    async def fake_healthy(self):
+        return True
+
+    monkeypatch.setattr(Mem0Client, "health_check", fake_healthy)
+
+    healthy = await client.run_health_probe()
+
+    assert healthy is True
+    assert not any(b.is_open for b in breakers.values())  # all closed again
+    assert all(b.failures == 0 for b in breakers.values())
+    await client.aclose()

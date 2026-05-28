@@ -60,6 +60,17 @@ class _CircuitBreaker:
             return True  # Half-open: allow one probe
         return False
 
+    def force_open(self):
+        """Trip immediately, bypassing the consecutive-failure threshold.
+
+        Used by the proactive health probe (US-006): we already know Mem0 is
+        down, so fail fast now rather than waiting for ``threshold`` organic
+        failures to accumulate.
+        """
+        self.failures = max(self.failures, self.threshold)
+        self.last_failure_time = time.monotonic()
+        self.is_open = True
+
 
 def _make_breaker() -> _CircuitBreaker:
     try:
@@ -94,6 +105,32 @@ class Mem0Client:
             breaker = _make_breaker()
             cls._breakers[key] = breaker
         return breaker
+
+    @classmethod
+    def trip_all_breakers(cls) -> int:
+        """Force every known per-workspace breaker open (US-006 health probe).
+
+        When the proactive probe detects Mem0 down, fail fast for every
+        workspace at once instead of letting each one rediscover the outage
+        through its own timeout. Returns the number of breakers that were
+        closed before this call (i.e. newly tripped).
+        """
+        newly_tripped = sum(1 for b in cls._breakers.values() if not b.is_open)
+        for breaker in cls._breakers.values():
+            breaker.force_open()
+        return newly_tripped
+
+    @classmethod
+    def reset_all_breakers(cls) -> int:
+        """Close every known breaker after Mem0 recovers (US-006 health probe).
+
+        Returns the number of breakers that were open before this call (i.e.
+        cleared by the recovery).
+        """
+        newly_reset = sum(1 for b in cls._breakers.values() if b.is_open)
+        for breaker in cls._breakers.values():
+            breaker.record_success()
+        return newly_reset
 
     def __init__(self, api_url: Optional[str] = None, api_key: Optional[str] = None):
         from config import config
@@ -140,6 +177,51 @@ class Mem0Client:
         if self._client is not None and not self._client.is_closed:
             await self._client.aclose()
         self._client = None
+
+    async def health_check(self) -> bool:
+        """Out-of-band Mem0 reachability probe for the heartbeat (US-006).
+
+        Deliberately bypasses the circuit breaker: the breaker gates normal
+        traffic, but the probe is the signal that *decides* breaker state, so
+        it must reach Mem0 even while breakers are open. Any HTTP response below
+        500 (including 401/404) means Mem0 is reachable; a 5xx or a transport
+        error (timeout/connect/DNS) counts as down. Returns False when Mem0 is
+        unconfigured.
+        """
+        if not self.api_url:
+            return False
+        try:
+            client = self._get_client()
+            resp = await client.request(
+                "GET", f"{self.api_url}/", headers=self.headers, timeout=self.timeout
+            )
+            return resp.status_code < 500
+        except httpx.TransportError:
+            return False
+        except Exception:
+            logger.warning("[Mem0] health_check unexpected error", exc_info=True)
+            return False
+
+    async def run_health_probe(self) -> bool:
+        """Probe Mem0 and steer every breaker accordingly (US-006).
+
+        Returns the observed health. On failure trips all breakers; on success
+        resets any that were open (recovery). Safe to call when Mem0 is
+        unconfigured — returns False without touching breakers.
+        """
+        if not self.api_url:
+            return False
+        healthy = await self.health_check()
+        if healthy:
+            reset = self.reset_all_breakers()
+            if reset:
+                logger.info("[Mem0] Health probe OK — reset %d breaker(s)", reset)
+        else:
+            tripped = self.trip_all_breakers()
+            logger.warning(
+                "[Mem0] Health probe FAILED — tripped %d breaker(s)", tripped
+            )
+        return healthy
 
     async def _request(
         self, method: str, url: str, *, workspace_id: Optional[str] = None, **kwargs
