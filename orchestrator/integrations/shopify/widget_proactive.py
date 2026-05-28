@@ -6,23 +6,23 @@ any workspace whose ``settings.vertical == "shopify"``.
 This module is a **shim**, not a rewrite. It encapsulates the dispatch
 contract — ``handle_widget_message`` matching the
 :class:`integrations.WidgetPlugin` protocol — and delegates to the
-existing inline Shopify helpers still living in
+remaining inline Shopify helpers still living in
 ``orchestrator/api/widgets/chat.py``:
 
-* ``_resolve_graph_related_products`` (product-page FBT / collection /
-  vendor walk)
-* ``_resolve_cart_recommendations`` (cart-idle multi-seed FBT walk)
 * ``_build_proactive_opener_message`` (product-page directive builder)
 * ``_build_cart_idle_opener_message`` (cart-idle directive builder)
 
-US-006/007/008 will move those four helpers into this file. US-010
-will delete the chat.py inline dispatch and route every widget chat
-request through ``PLUGIN_REGISTRY``. At that point the imports below
-become local definitions and this docstring's "shim" framing goes
-away.
+The two graph resolvers (``_resolve_graph_related_products`` lifted in
+US-006, ``_resolve_cart_recommendations`` lifted in US-007) now live
+in this file and the shim calls them locally.
 
-The four chat.py imports happen **inside** ``handle_widget_message``,
-beneath the early-return gate. Two reasons:
+US-008 will move the two builders here. US-010 will delete the chat.py
+inline dispatch and route every widget chat request through
+``PLUGIN_REGISTRY``. At that point the imports below become local
+definitions and this docstring's "shim" framing goes away.
+
+The remaining chat.py imports happen **inside**
+``handle_widget_message``, beneath the early-return gate. Two reasons:
 
 1. Circular-import safety. During Phase 1 there is a window where
    chat.py imports back from this module (US-006/007/008 move helpers
@@ -140,6 +140,107 @@ async def _resolve_graph_related_products(
         return []
 
 
+async def _resolve_cart_recommendations(
+    workspace_id: str,
+    page_context: dict,
+    *,
+    max_recs: int = 3,
+) -> list[dict]:
+    """Pull cross-sell recommendations for the items currently in the cart.
+
+    PRD-008-B Feature C2 (cart-idle): walks FBT edges across every cart
+    line-item, aggregates co_count across overlapping recommendations
+    (an item that pairs with multiple cart items scores higher), removes
+    products already in the cart, returns the top ``max_recs`` by score.
+
+    Empty list when no cart items, no graph, or any failure — caller
+    treats that as "fall back to merchant's static greeting".
+    """
+    cart_items = (page_context or {}).get("cartItems") or []
+    if not isinstance(cart_items, list) or not cart_items:
+        return []
+
+    # Cart items may arrive as [{handle, id, title, qty}, ...] OR as bare
+    # handles/strings — be defensive about shape.
+    seed_handles: set[str] = set()
+    for item in cart_items:
+        if isinstance(item, dict):
+            h = item.get("handle") or item.get("product_handle")
+            if h:
+                seed_handles.add(str(h))
+        elif isinstance(item, str):
+            seed_handles.add(item)
+    if not seed_handles:
+        return []
+
+    try:
+        from modules.knowledge.graph_service import GraphifyService
+
+        gs = GraphifyService()
+        graph = await gs.load_graph(workspace_id)
+        if graph is None:
+            return []
+
+        # Locate every cart-item node by handle. Skip silently if a handle
+        # isn't in the graph (newly-added product, catalog out of sync).
+        seed_node_ids: set = set()
+        cart_node_ids: set = set()  # for exclusion from recs
+        for node_id, attrs in graph.nodes(data=True):
+            node_attrs = attrs.get("attrs") or {}
+            if attrs.get("file_type") == "shopify_product":
+                h = node_attrs.get("handle")
+                if h and h in seed_handles:
+                    seed_node_ids.add(node_id)
+                    cart_node_ids.add(node_id)
+        if not seed_node_ids:
+            return []
+
+        # Aggregate FBT recommendations across all seeds. Score = sum of
+        # co_count across seeds it pairs with. A product paired with 2 of
+        # 3 cart items scores higher than one paired with just 1.
+        candidates: dict = {}  # node_id -> {label, score, total_orders, paired_with}
+        for seed_id in seed_node_ids:
+            for u, v, edata in graph.edges(seed_id, data=True):
+                rel = (edata.get("relation") or "").lower()
+                if rel != "frequently_bought_with":
+                    continue
+                other = v if u == seed_id else u
+                if other in cart_node_ids:
+                    continue  # don't recommend what's already in the cart
+                other_attrs = graph.nodes[other]
+                if other_attrs.get("file_type") != "shopify_product":
+                    continue
+                edge_attrs = edata.get("attrs") or {}
+                co_count = edge_attrs.get("co_count") or 0
+                entry = candidates.setdefault(other, {
+                    "label": other_attrs.get("label") or other,
+                    "handle": (other_attrs.get("attrs") or {}).get("handle"),
+                    "score": 0,
+                    "total_orders": edge_attrs.get("total_orders") or 0,
+                    "paired_with_count": 0,
+                })
+                entry["score"] += co_count
+                entry["paired_with_count"] += 1
+                # Track the widest total_orders denominator seen (for citation).
+                if edge_attrs.get("total_orders", 0) > entry["total_orders"]:
+                    entry["total_orders"] = edge_attrs["total_orders"]
+
+        if not candidates:
+            return []
+
+        # Rank: prefer items paired with the MOST cart items (cross-cutting
+        # adds = strongest signal), break ties on aggregate score.
+        ranked = sorted(
+            candidates.values(),
+            key=lambda c: (-c["paired_with_count"], -c["score"]),
+        )
+        return ranked[:max_recs]
+
+    except Exception as e:  # noqa: BLE001
+        logger.warning("_resolve_cart_recommendations failed: %s", e)
+        return []
+
+
 async def handle_widget_message(
     *,
     message: str,
@@ -173,10 +274,7 @@ async def handle_widget_message(
     workspace_str = str(workspace_id)
 
     if trigger_reason == "cart_idle":
-        from api.widgets.chat import (
-            _build_cart_idle_opener_message,
-            _resolve_cart_recommendations,
-        )
+        from api.widgets.chat import _build_cart_idle_opener_message
 
         recommendations = await _resolve_cart_recommendations(
             workspace_str, page_context,

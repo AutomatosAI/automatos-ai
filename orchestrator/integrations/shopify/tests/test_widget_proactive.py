@@ -55,11 +55,11 @@ def fake_chat(monkeypatch):
 
     * ``_resolve_graph_related_products`` — local to ``widget_proactive``
       since PRD-141 US-006; patched in place via ``monkeypatch.setattr``.
-    * ``_resolve_cart_recommendations`` — still in ``api.widgets.chat``
-      (until US-007); patched via a fake module in ``sys.modules``.
+    * ``_resolve_cart_recommendations`` — local to ``widget_proactive``
+      since PRD-141 US-007; patched in place via ``monkeypatch.setattr``.
     * ``_build_proactive_opener_message`` /
       ``_build_cart_idle_opener_message`` — still in ``api.widgets.chat``
-      (until US-008); same fake-module treatment.
+      (until US-008); patched via a fake module in ``sys.modules``.
 
     The fake records every call so tests can assert the shim forwards
     ``workspace_id`` and ``page_context`` correctly, and returns a
@@ -108,7 +108,6 @@ def fake_chat(monkeypatch):
         })
         return "FAKE_CART_IDLE_OPENER_MESSAGE"
 
-    fake._resolve_cart_recommendations = fake_resolve_cart
     fake._build_proactive_opener_message = fake_build_product
     fake._build_cart_idle_opener_message = fake_build_cart
 
@@ -117,6 +116,11 @@ def fake_chat(monkeypatch):
         widget_proactive,
         "_resolve_graph_related_products",
         fake_resolve_products,
+    )
+    monkeypatch.setattr(
+        widget_proactive,
+        "_resolve_cart_recommendations",
+        fake_resolve_cart,
     )
     return calls
 

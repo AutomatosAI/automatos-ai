@@ -54,15 +54,14 @@ _CHAT_PY = _ORCH_ROOT / "api" / "widgets" / "chat.py"
 # PRD-141 US-005; they're now imported directly into the exec namespace
 # (see ``_extract_chat_helpers``) so the function bodies can close over
 # them without NameError. ``_resolve_graph_related_products`` was lifted
-# to ``integrations/shopify/widget_proactive.py`` in PRD-141 US-006; the
-# shim's product-page path now resolves it locally, so it no longer
-# needs AST extraction from chat.py. As US-007/008 move each remaining
-# helper into ``widget_proactive.py``, drop it from this set in
-# lockstep.
+# to ``integrations/shopify/widget_proactive.py`` in PRD-141 US-006 and
+# ``_resolve_cart_recommendations`` was lifted there in US-007; the
+# shim's resolver paths now run locally, so neither needs AST
+# extraction from chat.py. As US-008 moves the remaining builders into
+# ``widget_proactive.py``, drop them from this set in lockstep.
 _WANTED_NAMES = frozenset({
     "_build_proactive_opener_message",
     "_build_cart_idle_opener_message",
-    "_resolve_cart_recommendations",
 })
 
 
@@ -107,7 +106,7 @@ def expected_cart_idle_opener() -> str:
 
 
 def _extract_chat_helpers() -> dict:
-    """Pull the four proactive helpers out of chat.py via AST.
+    """Pull the remaining proactive builders out of chat.py via AST.
 
     Returns a namespace dict containing:
 
@@ -119,22 +118,17 @@ def _extract_chat_helpers() -> dict:
       story as the field mapping.
     * ``_build_proactive_opener_message`` — product-page directive.
     * ``_build_cart_idle_opener_message`` — cart-idle directive.
-    * ``_resolve_cart_recommendations`` — multi-seed cart FBT walk.
 
-    ``_resolve_graph_related_products`` was lifted to
-    ``integrations.shopify.widget_proactive`` in PRD-141 US-006 and is
-    no longer extracted here — the shim calls the local function and
-    the local function does the same lazy ``GraphifyService`` import
-    the caller (``real_chat_with_graph``) arranges.
-
-    The remaining cart resolver does ``from
-    modules.knowledge.graph_service import GraphifyService`` lazily;
-    the caller (``real_chat_with_graph``) arranges that fake module
-    before invoking it.
+    ``_resolve_graph_related_products`` (US-006) and
+    ``_resolve_cart_recommendations`` (US-007) were lifted to
+    ``integrations.shopify.widget_proactive`` and are no longer
+    extracted here — the shim calls the local functions and they do
+    the same lazy ``GraphifyService`` import the caller
+    (``real_chat_with_graph``) arranges.
 
     Why AST instead of ``import``: chat.py is a FastAPI router that drags
     in SQLAlchemy, Redis, RAG, multimodal, etc. Loading it just to read
-    four helpers is wasteful and brittle. AST extraction reads the
+    two builders is wasteful and brittle. AST extraction reads the
     source verbatim and execs only the wanted nodes into an isolated
     namespace, so the test exercises identical bytes to the running
     server without paying the import cost. ``context_fields`` has none
@@ -177,10 +171,10 @@ def _extract_chat_helpers() -> dict:
     missing = _WANTED_NAMES - set(ns)
     if missing:
         raise RuntimeError(
-            "chat.py is missing expected proactive helpers "
-            f"{sorted(missing)}. If a US-005/006/007/008 lift moved them, "
-            "update conftest.py to point the AST extractor at the new "
-            "location (likely integrations/shopify/widget_proactive.py)."
+            "chat.py is missing expected proactive builders "
+            f"{sorted(missing)}. If a US-008 lift moved them, update "
+            "conftest.py to point the AST extractor at the new location "
+            "(likely integrations/shopify/widget_proactive.py)."
         )
     return ns
 
@@ -209,7 +203,6 @@ def real_chat_with_graph(monkeypatch, inbuild_graph):
     ns = _extract_chat_helpers()
 
     fake_chat = types.ModuleType("api.widgets.chat")
-    fake_chat._resolve_cart_recommendations = ns["_resolve_cart_recommendations"]
     fake_chat._build_proactive_opener_message = ns["_build_proactive_opener_message"]
     fake_chat._build_cart_idle_opener_message = ns["_build_cart_idle_opener_message"]
 
