@@ -27,6 +27,30 @@ from .intent_classifier import Intent, IntentResult, get_intent_classifier
 logger = logging.getLogger(__name__)
 
 
+# Intent → ActionRegistry *category* names (PRD-141 US-015).
+# Replaces the old hardcoded per-tool category dicts: instead of pinning literal
+# tool names, each tool-requiring intent maps to one or more ActionRegistry
+# categories, and the matching action names are pulled from the registry at call
+# time. An action registered under an already-mapped category is therefore
+# auto-discoverable with no edit to this router.
+# Values are REAL registry category names (verified against modules/tools/).
+# GREETING / CHITCHAT / FACTUAL are intentionally absent — they classify as
+# requires_tools=False and never reach the filter.
+_INTENT_TO_REGISTRY_CATEGORIES: Dict[Intent, List[str]] = {
+    Intent.DATA_QUERY: ["analytics", "database", "graph", "field", "reports"],
+    Intent.SEARCH: ["discovery", "documents", "graph", "memory", "workspace_files"],
+    Intent.EXTERNAL_ACTION: ["integrations", "notifications", "marketplace", "skills"],
+    Intent.CREATION: ["documents", "reports", "blog", "workspace_files", "playbooks"],
+    Intent.MEMORY_RECALL: ["memory", "field"],
+    Intent.MULTI_STEP: [
+        "agents", "missions", "tasks", "playbooks", "workspace", "workspace_files",
+        "analytics", "reports", "documents", "graph", "memory", "field",
+        "marketplace", "skills", "monitoring", "infrastructure", "integrations",
+        "discovery", "scheduling", "governance", "notifications", "blog",
+    ],
+}
+
+
 @dataclass
 class ToolRoutingResult:
     """Result of tool routing decision."""
@@ -76,58 +100,6 @@ class SmartToolRouter:
         "platform_field_query",
         "platform_field_inject",
     })
-
-    # Tool categories
-    TOOL_CATEGORIES = {
-        "data": ["query_database", "smart_query_database", "sql_query"],
-        "search": ["search_knowledge", "semantic_search", "search_codebase", "search_multimodal",
-                    "search_tables", "search_images", "search_formulas"],
-        "web_search": [
-            "TAVILY_TAVILY_SEARCH", "COMPOSIO_SEARCH_FETCH_URL_CONTENT",
-            "COMPOSIO_SEARCH_SEC_FILINGS", "composio_execute",
-        ],
-        "files": ["workspace_read_file", "workspace_write_file", "workspace_list_dir", "workspace_grep"],
-        "external": ["composio_execute", "composio_actions"],
-        "creation": ["workspace_write_file", "generate_document"],
-        "document": ["generate_document", "workspace_write_file"],
-        "code": ["search_codebase", "execute_code", "run_command"],
-        # Promoted platform tool categories (PRD-122 US-010)
-        "platform_management": [
-            "platform_list_agents", "platform_get_agent",
-            "platform_create_agent", "platform_update_agent",
-        ],
-        "marketplace": [
-            "platform_browse_marketplace_agents",
-            "platform_browse_marketplace_skills",
-            "platform_browse_marketplace_plugins",
-            "platform_install_skill", "platform_install_plugin",
-        ],
-        "monitoring": [
-            "platform_get_system_health", "platform_get_activity_feed",
-        ],
-        "memory": [
-            "platform_search_memory", "platform_store_memory",
-        ],
-        "fields": [
-            "platform_field_query", "platform_field_inject",
-        ],
-    }
-
-    # Intent to tool category mapping
-    INTENT_TO_TOOLS = {
-        Intent.DATA_QUERY: ["data", "search", "web_search", "fields"],
-        Intent.SEARCH: ["search", "web_search", "code", "memory"],
-        Intent.EXTERNAL_ACTION: ["external", "web_search", "document", "platform_management"],
-        Intent.CREATION: ["files", "creation", "document", "external", "platform_management"],
-        Intent.MULTI_STEP: [
-            "data", "search", "web_search", "files", "external", "document", "code",
-            "platform_management", "marketplace", "monitoring", "memory", "fields",
-        ],
-        Intent.MEMORY_RECALL: ["memory"],  # Memory tools for recall intents
-        Intent.GREETING: [],  # No tools needed
-        Intent.CHITCHAT: [],  # No tools needed
-        Intent.FACTUAL: [],  # Try without tools first
-    }
 
     def __init__(self):
         self.classifier = get_intent_classifier()
@@ -236,17 +208,8 @@ class SmartToolRouter:
                     agent_id=agent_id,
                 )
 
-        # Fallback: keyword-based category matching
-        relevant_categories = self.INTENT_TO_TOOLS.get(
-            intent_result.primary_intent,
-            []
-        )
-
-        filtered = self._filter_tools_by_categories(
-            available_tools,
-            relevant_categories,
-            intent_result.suggested_tools
-        )
+        # Fallback: ActionRegistry category matching (PRD-141 US-015)
+        filtered = self._filter_tools_by_intent(available_tools, intent_result)
 
         tool_choice = self._determine_tool_choice(intent_result, filtered)
         priority = intent_result.suggested_tools or []
@@ -259,42 +222,56 @@ class SmartToolRouter:
             reasoning=intent_result.reasoning
         )
 
-    def _filter_tools_by_categories(
+    def _filter_tools_by_intent(
         self,
         all_tools: List[Dict[str, Any]],
-        categories: List[str],
-        suggested: List[str]
+        intent_result: IntentResult,
     ) -> List[Dict[str, Any]]:
-        """Filter tools to only include relevant categories."""
+        """Filter tools to the ActionRegistry categories mapped to the intent.
+
+        PRD-141 US-015: maps the classified intent to ActionRegistry *category
+        names* via ``_INTENT_TO_REGISTRY_CATEGORIES`` and pulls the matching
+        action names from the registry at call time. The kept set is unioned
+        with the classifier's suggested tools plus the always-on CORE_TOOLS /
+        ALWAYS_INCLUDE sets, so an action registered under an already-mapped
+        category is auto-discoverable with no edit to this router.
+        """
+        categories = _INTENT_TO_REGISTRY_CATEGORIES.get(intent_result.primary_intent, [])
+        suggested = set(intent_result.suggested_tools or [])
+
+        # Nothing to narrow on (unmapped intent, no suggestions) — can't filter
+        # meaningfully, so keep the full set.
         if not categories and not suggested:
-            # For multi-step or complex queries, include all tools
             return all_tools
 
-        # Build set of relevant tool names
-        relevant_names = set(suggested) if suggested else set()
-        for category in categories:
-            relevant_names.update(self.TOOL_CATEGORIES.get(category, []))
+        relevant_names = suggested | set(self.CORE_TOOLS) | set(self.ALWAYS_INCLUDE)
 
-        # Always include core tools and promoted always-include tools
-        relevant_names.update(self.CORE_TOOLS)
-        relevant_names.update(self.ALWAYS_INCLUDE)
+        if categories:
+            # Lazy import — the registry pulls in heavy modules.tools.* deps.
+            # This is already the fallback-of-last-resort (the graph path failed
+            # or is off), so a registry hiccup must not crash routing: degrade
+            # to suggested ∪ CORE_TOOLS ∪ ALWAYS_INCLUDE.
+            try:
+                from modules.tools.discovery.action_registry import get_action_registry
+                registry = get_action_registry()
+                for category in categories:
+                    for action in registry.get_by_category(category):
+                        relevant_names.add(action.name)
+            except Exception:
+                logger.warning(
+                    "[ToolRouter] ActionRegistry lookup failed during category "
+                    "fallback — degrading to core/always/suggested tools",
+                    exc_info=True,
+                )
 
-        # Filter
-        filtered = []
-        for tool in all_tools:
-            if not isinstance(tool, dict):
-                continue
-            fn = tool.get("function", {})
-            name = fn.get("name", "")
+        filtered = [
+            t for t in all_tools
+            if isinstance(t, dict)
+            and t.get("function", {}).get("name", "") in relevant_names
+        ]
 
-            if name in relevant_names:
-                filtered.append(tool)
-            elif self._tool_matches_query(name, fn.get("description", ""), categories):
-                filtered.append(tool)
-
-        # Limit to reasonable number
+        # Limit to a reasonable number, keeping suggested + core first.
         if len(filtered) > 30:
-            # Keep suggested + core + first N others
             priority_tools = []
             other_tools = []
             for tool in filtered:
@@ -307,26 +284,6 @@ class SmartToolRouter:
 
         logger.debug(f"[ToolRouter] Filtered {len(all_tools)} tools to {len(filtered)}")
         return filtered
-
-    def _tool_matches_query(self, name: str, description: str, categories: List[str]) -> bool:
-        """Check if a tool might be relevant based on its name/description."""
-        text = f"{name} {description}".lower()
-
-        category_keywords = {
-            "data": ["database", "query", "sql", "data", "analytics"],
-            "search": ["search", "find", "lookup", "knowledge"],
-            "files": ["file", "directory", "folder", "write", "read"],
-            "external": ["email", "slack", "github", "compose"],
-            "document": ["document", "report", "pdf", "docx", "xlsx", "invoice", "export", "generate"],
-            "code": ["code", "execute", "run", "command"],
-        }
-
-        for category in categories:
-            keywords = category_keywords.get(category, [])
-            if any(kw in text for kw in keywords):
-                return True
-
-        return False
 
     def _determine_tool_choice(
         self,
