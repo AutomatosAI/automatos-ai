@@ -10,10 +10,12 @@ Includes:
 - Circuit breaker: after N consecutive failures, fail fast for a cooldown period
 """
 
+import asyncio
 import logging
 import time
 from typing import List, Dict, Any, Optional
-import requests
+
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +87,9 @@ class Mem0Client:
         self.api_key = api_key or config.MEM0_API_KEY
         self.timeout = float(getattr(config, "MEM0_TIMEOUT_SECONDS", 3.0))
         self.write_timeout = float(getattr(config, "MEM0_WRITE_TIMEOUT_SECONDS", 15.0))
+        # Pooled AsyncClient, created lazily inside the running event loop so
+        # connections are reused across calls instead of opened per request.
+        self._client: Optional[httpx.AsyncClient] = None
 
         if not self.api_url:
             logger.info(
@@ -105,9 +110,26 @@ class Mem0Client:
 
         logger.info(f"Initialized Mem0Client with URL: {self.api_url}")
 
-    def _request(self, method: str, url: str, **kwargs) -> Optional[requests.Response]:
+    def _get_client(self) -> httpx.AsyncClient:
+        """Return the pooled AsyncClient, creating it lazily for connection reuse.
+
+        Created on first use (inside the running loop) and recreated if a prior
+        ``aclose()`` closed it. ``follow_redirects=True`` preserves the implicit
+        redirect-following behaviour the old ``requests`` client had.
         """
-        Make an HTTP request with retry + circuit breaker.
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(follow_redirects=True)
+        return self._client
+
+    async def aclose(self) -> None:
+        """Close the pooled client and its connections (call on shutdown)."""
+        if self._client is not None and not self._client.is_closed:
+            await self._client.aclose()
+        self._client = None
+
+    async def _request(self, method: str, url: str, **kwargs) -> Optional[httpx.Response]:
+        """
+        Make an async HTTP request with retry + circuit breaker.
 
         Returns None early if api_url is not configured.
         Returns the response or None if all attempts fail.
@@ -122,11 +144,11 @@ class Mem0Client:
 
         kwargs.setdefault("timeout", self.timeout)
         kwargs.setdefault("headers", self.headers)
-        last_exc = None
+        client = self._get_client()
 
         for attempt in range(_MAX_RETRIES + 1):
             try:
-                resp = requests.request(method, url, **kwargs)
+                resp = await client.request(method, url, **kwargs)
 
                 if resp.status_code < 400:
                     _breaker.record_success()
@@ -153,7 +175,7 @@ class Mem0Client:
                         "[Mem0] Transient %d (attempt %d/%d) — retrying in %.1fs",
                         resp.status_code, attempt + 1, _MAX_RETRIES + 1, wait,
                     )
-                    time.sleep(wait)
+                    await asyncio.sleep(wait)
                     continue
 
                 logger.error(
@@ -163,14 +185,16 @@ class Mem0Client:
                 _breaker.record_failure()
                 return resp
 
-            except (requests.Timeout, requests.ConnectionError) as e:
+            except httpx.TransportError as e:
+                # TransportError covers TimeoutException + NetworkError/ConnectError
+                # (the async analog of requests.Timeout + requests.ConnectionError).
                 if attempt < _MAX_RETRIES:
                     wait = 1.5 ** attempt
                     logger.warning(
                         "[Mem0] Request failed (attempt %d/%d): %s — retrying in %.1fs",
                         attempt + 1, _MAX_RETRIES + 1, e, wait,
                     )
-                    time.sleep(wait)
+                    await asyncio.sleep(wait)
                 else:
                     logger.error("[Mem0] Request failed after %d attempts: %s", _MAX_RETRIES + 1, e, exc_info=True)
                     _breaker.record_failure()
@@ -181,7 +205,7 @@ class Mem0Client:
 
         return None
 
-    def add(self, messages: List[Dict[str, str]], user_id: str, metadata: Optional[Dict] = None) -> Dict:
+    async def add(self, messages: List[Dict[str, str]], user_id: str, metadata: Optional[Dict] = None) -> Dict:
         """
         Add memories from messages.
 
@@ -214,7 +238,7 @@ class Mem0Client:
 
         logger.debug("[Mem0] Adding memory for user_id=%s (text_len=%d)", user_id, len(text))
 
-        resp = self._request("POST", url, json=payload, timeout=self.write_timeout)
+        resp = await self._request("POST", url, json=payload, timeout=self.write_timeout)
         if resp is None:
             return {"success": False, "error": "Mem0 unavailable (circuit breaker or timeout)"}
 
@@ -239,7 +263,7 @@ class Mem0Client:
             logger.info("[Mem0] Memory accepted (status=%s) for user_id=%s", resp.status_code, user_id)
             return {"success": True}
 
-    def search(self, query: str, user_id: str, limit: int = 5) -> List[Dict]:
+    async def search(self, query: str, user_id: str, limit: int = 5) -> List[Dict]:
         """
         Search for relevant memories.
 
@@ -264,7 +288,7 @@ class Mem0Client:
 
         logger.debug("[Mem0] Searching memories for user=%s query=%r", user_id, query)
 
-        resp = self._request("GET", url, params=params)
+        resp = await self._request("GET", url, params=params)
         if resp is None:
             return []
 
@@ -320,12 +344,12 @@ class Mem0Client:
         )
         return results[:limit]
 
-    def get_all(self, user_id: str, limit: int = 100) -> List[Dict]:
+    async def get_all(self, user_id: str, limit: int = 100) -> List[Dict]:
         """Get all memories for a user."""
         url = f"{self.api_url}/memories/"
         params = {"user_id": user_id}
 
-        resp = self._request("GET", url, params=params)
+        resp = await self._request("GET", url, params=params)
         if resp is None:
             return []
 
@@ -350,11 +374,11 @@ class Mem0Client:
             return data[:limit]
         return data.get("memories", data.get("results", data.get("items", [])))[:limit]
 
-    def delete(self, memory_id: str) -> bool:
+    async def delete(self, memory_id: str) -> bool:
         """Delete a specific memory."""
         url = f"{self.api_url}/memories/{memory_id}/"
 
-        resp = self._request("DELETE", url)
+        resp = await self._request("DELETE", url)
         if resp is None:
             return False
 

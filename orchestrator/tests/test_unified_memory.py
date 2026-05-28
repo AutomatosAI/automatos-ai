@@ -87,14 +87,17 @@ def _reset_singleton():
 
 @pytest.fixture
 def mock_mem0():
+    # Mem0Client is async (PRD-141 US-003): add/search/get_all/delete are
+    # coroutines, so they must be AsyncMock to be awaitable. api_url stays a
+    # plain attribute (read synchronously by is_mem0_configured).
     m = MagicMock()
     m.api_url = "http://mem0.test"
-    m.add.return_value = {"success": True, "id": "mem-001"}
-    m.search.return_value = [
-        {"id": "m1", "memory": "user likes dark mode", "score": 0.9}
-    ]
-    m.get_all.return_value = [{"id": "m1", "memory": "user likes dark mode"}]
-    m.delete.return_value = True
+    m.add = AsyncMock(return_value={"success": True, "id": "mem-001"})
+    m.search = AsyncMock(
+        return_value=[{"id": "m1", "memory": "user likes dark mode", "score": 0.9}]
+    )
+    m.get_all = AsyncMock(return_value=[{"id": "m1", "memory": "user likes dark mode"}])
+    m.delete = AsyncMock(return_value=True)
     return m
 
 

@@ -339,11 +339,7 @@ class UnifiedMemoryService:
         messages = [{"role": "user", "content": content}]
 
         try:
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                None,
-                lambda: self._mem0.add(messages=messages, user_id=user_id, metadata=meta or None),
-            )
+            result = await self._mem0.add(messages=messages, user_id=user_id, metadata=meta or None)
             logger.info(
                 "[UnifiedMemoryService] store_long_term user_id=%s len=%d",
                 user_id,
@@ -399,11 +395,7 @@ class UnifiedMemoryService:
 
         # --- Cache miss: call Mem0 ---
         try:
-            loop = asyncio.get_event_loop()
-            results = await loop.run_in_executor(
-                None,
-                lambda: self._mem0.search(query=query, user_id=user_id, limit=limit),
-            )
+            results = await self._mem0.search(query=query, user_id=user_id, limit=limit)
             logger.debug(
                 "[UnifiedMemoryService] search_long_term user_id=%s query=%r → %d results",
                 user_id,
@@ -442,11 +434,7 @@ class UnifiedMemoryService:
         user_id = ns.resolve(agent_id)
 
         try:
-            loop = asyncio.get_event_loop()
-            results = await loop.run_in_executor(
-                None,
-                lambda: self._mem0.get_all(user_id=user_id, limit=limit),
-            )
+            results = await self._mem0.get_all(user_id=user_id, limit=limit)
             logger.debug(
                 "[UnifiedMemoryService] get_all_memories user_id=%s → %d items",
                 user_id,
@@ -472,11 +460,7 @@ class UnifiedMemoryService:
             True if deleted, False on failure.
         """
         try:
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                None,
-                lambda: self._mem0.delete(memory_id=memory_id),
-            )
+            result = await self._mem0.delete(memory_id=memory_id)
             logger.info("[UnifiedMemoryService] delete_memory id=%s success=%s", memory_id, result)
             return result
         except Exception:
@@ -513,11 +497,7 @@ class UnifiedMemoryService:
             Mem0 response dict, or error dict on failure.
         """
         try:
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                None,
-                lambda: self._mem0.add(messages=messages, user_id=user_id, metadata=metadata),
-            )
+            result = await self._mem0.add(messages=messages, user_id=user_id, metadata=metadata)
             logger.info(
                 "[UnifiedMemoryService] store_long_term_messages user_id=%s",
                 user_id,
@@ -551,11 +531,7 @@ class UnifiedMemoryService:
             List of memory item dicts (may be empty on failure).
         """
         try:
-            loop = asyncio.get_event_loop()
-            results = await loop.run_in_executor(
-                None,
-                lambda: self._mem0.search(query=query, user_id=user_id, limit=limit),
-            )
+            results = await self._mem0.search(query=query, user_id=user_id, limit=limit)
             logger.debug(
                 "[UnifiedMemoryService] search_long_term_scoped user_id=%s query=%r → %d results",
                 user_id,
@@ -589,11 +565,7 @@ class UnifiedMemoryService:
             List of memory item dicts.
         """
         try:
-            loop = asyncio.get_event_loop()
-            results = await loop.run_in_executor(
-                None,
-                lambda: self._mem0.get_all(user_id=user_id, limit=limit),
-            )
+            results = await self._mem0.get_all(user_id=user_id, limit=limit)
             logger.debug(
                 "[UnifiedMemoryService] get_all_memories_scoped user_id=%s → %d items",
                 user_id,
@@ -636,11 +608,7 @@ class UnifiedMemoryService:
         messages = [{"role": "system", "content": content}]
 
         try:
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                None,
-                lambda: self._mem0.add(messages=messages, user_id=user_id, metadata=metadata),
-            )
+            result = await self._mem0.add(messages=messages, user_id=user_id, metadata=metadata)
             logger.info(
                 "[UnifiedMemoryService] store_daily_log user_id=%s len=%d",
                 user_id,
@@ -674,11 +642,7 @@ class UnifiedMemoryService:
         user_id = ns.daily()
 
         try:
-            loop = asyncio.get_event_loop()
-            results = await loop.run_in_executor(
-                None,
-                lambda: self._mem0.get_all(user_id=user_id, limit=limit),
-            )
+            results = await self._mem0.get_all(user_id=user_id, limit=limit)
             logger.debug(
                 "[UnifiedMemoryService] get_all_daily_logs user_id=%s → %d items",
                 user_id,
@@ -725,13 +689,7 @@ class UnifiedMemoryService:
         async def _store(user_id: str, tier_name: str) -> tuple:
             meta = {**base_meta, "tier": tier_name}
             try:
-                loop = asyncio.get_event_loop()
-                result = await loop.run_in_executor(
-                    None,
-                    lambda uid=user_id, m=meta: self._mem0.add(
-                        messages=messages, user_id=uid, metadata=m
-                    ),
-                )
+                result = await self._mem0.add(messages=messages, user_id=user_id, metadata=meta)
                 return (tier_name, result)
             except Exception:
                 logger.error(
