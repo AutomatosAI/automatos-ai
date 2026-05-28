@@ -188,7 +188,7 @@ class GraphRouter:
             all_action_names = set(entry_action_names)
             for edge in edges:
                 all_action_names.add(edge["to_action"])
-            affinities = self._query_affinities(
+            positive_boosts, negative_penalties = self._query_affinities(
                 db, list(all_action_names),
                 agent_id if use_agent_scope else None,
             )
@@ -204,12 +204,15 @@ class GraphRouter:
             cosine = cosine_by_name.get(from_action, 0.0)
             edge_confidence = edge["confidence"]
 
-            # Affinity boosts for the chain actions
+            # Affinity boosts (succeeds/prefers) lift the chain; negative
+            # penalties (fails_for_intent) lower it — PRD-141 US-017.
             boost = 0.0
+            penalty = 0.0
             for action in (from_action, to_action):
-                boost += affinities.get(action, 0.0)
+                boost += positive_boosts.get(action, 0.0)
+                penalty += negative_penalties.get(action, 0.0)
 
-            score = cosine * edge_confidence + boost
+            score = cosine * edge_confidence + boost - penalty
             chains.append((from_action, score, [from_action, to_action]))
             expanded += 1
 
@@ -288,13 +291,23 @@ class GraphRouter:
         db,
         action_names: List[str],
         agent_id: Optional[int],
-    ) -> dict:
-        """Query tool_routing_affinities and return action_name -> total boost."""
+    ) -> Tuple[dict, dict]:
+        """Query tool_routing_affinities, returning (positive_boosts, negative_penalties).
+
+        PRD-141 US-017: positive and negative signals are kept in separate dicts
+        rather than netted into one, so the caller can apply them explicitly as
+        ``score = cosine * edge_confidence + boost - penalty``.
+
+        * ``succeeds_for_intent`` / ``agent_prefers`` -> positive_boosts[action]
+          += weight*confidence.
+        * ``fails_for_intent`` -> negative_penalties[action] += weight*confidence,
+          recorded as a POSITIVE magnitude (the caller subtracts it).
+        """
         from sqlalchemy import and_, or_
         from core.models.tool_routing import ToolRoutingAffinity
 
         if not action_names:
-            return {}
+            return {}, {}
 
         filters = [
             ToolRoutingAffinity.action_name.in_(action_names),
@@ -316,17 +329,16 @@ class GraphRouter:
             .all()
         )
 
-        boosts: dict = {}
+        positive_boosts: dict = {}
+        negative_penalties: dict = {}
         for r in rows:
-            # succeeds_for_intent adds positive boost; fails subtracts
-            if r.affinity_type == "succeeds_for_intent":
-                boosts[r.action_name] = boosts.get(r.action_name, 0.0) + r.weight * r.confidence
+            magnitude = r.weight * r.confidence
+            if r.affinity_type in ("succeeds_for_intent", "agent_prefers"):
+                positive_boosts[r.action_name] = positive_boosts.get(r.action_name, 0.0) + magnitude
             elif r.affinity_type == "fails_for_intent":
-                boosts[r.action_name] = boosts.get(r.action_name, 0.0) - r.weight * r.confidence
-            elif r.affinity_type == "agent_prefers":
-                boosts[r.action_name] = boosts.get(r.action_name, 0.0) + r.weight * r.confidence
+                negative_penalties[r.action_name] = negative_penalties.get(r.action_name, 0.0) + magnitude
 
-        return boosts
+        return positive_boosts, negative_penalties
 
     # ------------------------------------------------------------------
     # Helpers
