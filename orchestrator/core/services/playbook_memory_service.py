@@ -92,7 +92,7 @@ class PlaybookMemoryService:
                 "playbook_id": playbook_id,
                 "workspace_id": workspace_id,
                 "status": execution.status,
-            })
+            }, workspace_id=workspace_id)
             if result.get("error"):
                 errors.append(f"Playbook scope: {result['error']}")
             else:
@@ -151,7 +151,7 @@ class PlaybookMemoryService:
                     "agent_id": agent_id,
                     "step_index": idx,
                     "workspace_id": workspace_id,
-                })
+                }, workspace_id=workspace_id)
                 if result.get("error"):
                     errors.append(f"Agent {agent_id} step {idx}: {result['error']}")
                 else:
@@ -250,6 +250,7 @@ class PlaybookMemoryService:
         query = self._build_retrieval_query(context)
         playbook_memories = await self._unified.search_long_term_scoped(
             user_id=playbook_user_id, query=query, limit=10,
+            workspace_id=workspace_id,
         )
 
         # 2. Retrieve per-agent memories for agents in the playbook steps
@@ -270,6 +271,7 @@ class PlaybookMemoryService:
             agent_user_id = ns.recipe_agent(template_id, aid)
             return aid, await self._unified.search_long_term_scoped(
                 user_id=agent_user_id, query=query, limit=5,
+                workspace_id=workspace_id,
             )
 
         if agent_ids:
@@ -306,6 +308,7 @@ class PlaybookMemoryService:
         user_id: str,
         text: str,
         metadata: Optional[Dict[str, Any]] = None,
+        workspace_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Store a memory in Mem0 via UnifiedMemoryService.
 
@@ -318,6 +321,7 @@ class PlaybookMemoryService:
         ]
         return await self._unified.store_long_term_messages(
             user_id=user_id, messages=messages, metadata=metadata,
+            workspace_id=workspace_id,
         )
 
     def _build_playbook_memory(

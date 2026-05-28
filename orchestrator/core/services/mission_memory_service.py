@@ -75,6 +75,7 @@ class MissionMemoryService:
             ns = MemoryNamespace(workspace_id=workspace_id)
             l3_result = await self._unified.store_long_term_messages(
                 user_id=ns.workspace(),
+                workspace_id=workspace_id,
                 messages=[
                     {
                         "role": "user",
@@ -171,6 +172,7 @@ class MissionMemoryService:
             ns = MemoryNamespace(workspace_id=workspace_id)
             l3_result = await self._unified.store_long_term_messages(
                 user_id=ns.workspace(),
+                workspace_id=workspace_id,
                 messages=[
                     {
                         "role": "user",
