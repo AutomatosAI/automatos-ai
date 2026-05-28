@@ -102,6 +102,69 @@ def _aff(action_name, affinity_type, weight, confidence):
     )
 
 
+def _extract_edge_type(filter_clause):
+    """Pull the `edge_type == X` literal out of the and_() expression that
+    GraphRouter._query_edges passes to db.query(...).filter(...).
+
+    Walks the BooleanClauseList for the binary expression whose left column is
+    `edge_type` and returns its bound value, so the fake DB can honour the same
+    filter the real query would apply.
+    """
+    for clause in getattr(filter_clause, "clauses", [filter_clause]):
+        left = getattr(clause, "left", None)
+        right = getattr(clause, "right", None)
+        if getattr(left, "key", None) == "edge_type" and right is not None:
+            return getattr(right, "value", None)
+    return None
+
+
+class _FakeEdgeQuery:
+    """query(...).filter(...).order_by(...).limit(...).all() that respects the
+    edge_type filter built by _query_edges (so failed_after rows are excluded
+    exactly as the real SQL would exclude them)."""
+
+    def __init__(self, rows):
+        self._rows = rows
+        self._edge_type = None
+
+    def filter(self, *clauses):
+        for c in clauses:
+            et = _extract_edge_type(c)
+            if et is not None:
+                self._edge_type = et
+        return self
+
+    def order_by(self, *a, **k):
+        return self
+
+    def limit(self, *a, **k):
+        return self
+
+    def all(self):
+        if self._edge_type is None:
+            return list(self._rows)
+        return [r for r in self._rows if r.edge_type == self._edge_type]
+
+
+class _FakeEdgeDB:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def query(self, *a, **k):
+        return _FakeEdgeQuery(self._rows)
+
+
+def _edge(from_action, to_action, edge_type, confidence=1.0, weight=1.0, agent_id=None):
+    return SimpleNamespace(
+        from_action=from_action,
+        to_action=to_action,
+        edge_type=edge_type,
+        confidence=confidence,
+        weight=weight,
+        agent_id=agent_id,
+    )
+
+
 @pytest.fixture
 def router(monkeypatch):
     """A GraphRouter with the lazy `core.database.database` import faked out."""
@@ -206,3 +269,26 @@ def test_positive_boost_still_applies(router, monkeypatch):
     expanded = [c for c in chains if c[2] == ["tool_a", "x"]]
     # 0.5 * 1.0 + 0.3 - 0 = 0.8
     assert expanded[0][1] == pytest.approx(0.8)
+
+
+# ---------------------------------------------------------------------------
+# PRD-141 US-018: failed_after edges are never expanded into chains
+# ---------------------------------------------------------------------------
+
+def test_failed_after_edge_not_expanded():
+    """_query_edges only ever requests edge_type == 'used_after', so a
+    failed_after edge sitting in the same table is filtered out at the DB layer
+    and can never become a recommended chain.
+    """
+    rows = [
+        _edge("good", "next", "used_after", confidence=1.0),
+        _edge("good", "bad", "failed_after", confidence=1.0),
+    ]
+    fake_db = _FakeEdgeDB(rows)
+
+    edges = GraphRouter._query_edges(fake_db, ["good"], 0.6, None)
+
+    to_actions = {e["to_action"] for e in edges}
+    assert "next" in to_actions       # used_after IS followed
+    assert "bad" not in to_actions    # failed_after is NOT followed
+    assert len(edges) == 1
