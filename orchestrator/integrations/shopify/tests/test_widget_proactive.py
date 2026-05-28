@@ -269,3 +269,111 @@ async def test_cart_idle_delegates_to_chat_helpers(fake_chat, db, workspace_id):
         "trigger_reason": "cart_idle",
         "related_count": 2,
     }
+
+
+# ---- US-011 snapshot equivalence (PRD-007 + PRD-008-B byte-equality) --------
+#
+# These tests are the byte-equality safety net that gates every Phase 1
+# lift (US-005/006/007/008/010). At US-011 commit time the Shopify plugin
+# is still the US-003 shim that delegates back into ``api.widgets.chat``;
+# the ``real_chat_with_graph`` fixture in ``conftest.py`` injects the
+# REAL helpers (AST-extracted from chat.py) plus a fixture-bound
+# GraphifyService so the test exercises the production code path while
+# remaining deterministic.
+#
+# Through US-005/006/007/008 the helpers progressively move into
+# ``integrations/shopify/widget_proactive.py``. These tests must KEEP
+# PASSING through every lift. If one fails, the lift broke equivalence —
+# fix the lift, NOT the golden fixture (per US-011 notes).
+
+
+@pytest.mark.asyncio
+async def test_product_page_opener_byte_equality(
+    real_chat_with_graph,
+    product_page_context,
+    expected_product_page_opener,
+    db,
+    workspace_id,
+):
+    """PRD-007 product-page opener — byte-equal to the US-004 fixture.
+
+    Exercises the proactive_opener path end-to-end: shim gates on
+    (trigger_reason, page_context), calls ``_resolve_graph_related_products``
+    against the fixture graph, calls ``_build_proactive_opener_message``,
+    returns the directive as ``result.message``.
+
+    The fixture graph encodes the by_vendor-overrides-FBT quirk
+    (NetworkX undirected storage) documented in ``fixtures/README.md`` —
+    that's WHY the expected opener mentions "Hochiki Banshee Wall Sounder"
+    as a same-vendor sibling rather than as an FBT pair.
+    """
+    result = await widget_proactive.handle_widget_message(
+        message="(placeholder synthesized by SDK)",
+        page_context=product_page_context,
+        trigger_reason="proactive_opener",
+        workspace_id=workspace_id,
+        db=db,
+    )
+
+    assert result.message == expected_product_page_opener
+    assert result.context_note == "shopify shim: proactive_opener rewrite"
+
+
+@pytest.mark.asyncio
+async def test_cart_idle_opener_byte_equality(
+    real_chat_with_graph,
+    cart_idle_context,
+    expected_cart_idle_opener,
+    db,
+    workspace_id,
+):
+    """PRD-008-B cart-idle opener — byte-equal to the US-004 fixture.
+
+    Exercises the cart_idle path end-to-end: multi-seed FBT walk across
+    every cart line item, aggregation by (paired_with_count, score),
+    top-3 recommendations rendered into the cart-idle directive.
+
+    The fixture's three cart items (hochiki-aln/-acb/-atg) produce a
+    deterministic top-3 of (base-ybn, mxpro5, banshee). Banshee is in
+    the cart-idle output via the elif branch (added together in 15 of
+    31 orders) because it pairs with only ONE cart item — the aln-banshee
+    FBT edge was overwritten by by_vendor in the synthetic graph (a
+    quirk of NetworkX undirected storage; see fixtures/README.md).
+    """
+    result = await widget_proactive.handle_widget_message(
+        message="(placeholder synthesized by SDK)",
+        page_context=cart_idle_context,
+        trigger_reason="cart_idle",
+        workspace_id=workspace_id,
+        db=db,
+    )
+
+    assert result.message == expected_cart_idle_opener
+    assert result.context_note == "shopify shim: cart_idle rewrite"
+
+
+@pytest.mark.parametrize(
+    "trigger",
+    [None, "proactive_opener", "cart_idle", "unknown_trigger"],
+    ids=["no_trigger", "proactive_opener", "cart_idle", "unknown"],
+)
+@pytest.mark.asyncio
+async def test_no_context_no_rewrite(trigger, db, workspace_id):
+    """US-011 AC test 4: page_context=None ⇒ message returned unchanged.
+
+    Parametrised across every trigger value (including ``None`` and an
+    unknown trigger) because the shim's gate is symmetric — either side
+    short-circuits the rewrite. This is a regression guard for the
+    chat.py ``is_proactive`` semantics replicated in the shim.
+    """
+    result = await widget_proactive.handle_widget_message(
+        message="user message verbatim",
+        page_context=None,
+        trigger_reason=trigger,
+        workspace_id=workspace_id,
+        db=db,
+    )
+
+    assert result.message == "user message verbatim"
+    assert result.context_note is None
+    assert result.telemetry == {}
