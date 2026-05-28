@@ -111,7 +111,7 @@ def test_build_widget_config_returns_none_when_no_public_keys_set():
 # ---------------------------------------------------------------------------
 
 def test_opener_message_includes_product_title_when_present():
-    from api.widgets.chat import _build_proactive_opener_message
+    from integrations.shopify.widget_proactive import _build_proactive_opener_message
 
     msg = _build_proactive_opener_message({
         "pageType": "product",
@@ -125,7 +125,7 @@ def test_opener_message_includes_product_title_when_present():
 
 
 def test_opener_message_falls_back_to_handle_without_title():
-    from api.widgets.chat import _build_proactive_opener_message
+    from integrations.shopify.widget_proactive import _build_proactive_opener_message
 
     msg = _build_proactive_opener_message({
         "pageType": "product",
@@ -135,7 +135,7 @@ def test_opener_message_falls_back_to_handle_without_title():
 
 
 def test_opener_message_handles_collection_pages():
-    from api.widgets.chat import _build_proactive_opener_message
+    from integrations.shopify.widget_proactive import _build_proactive_opener_message
 
     msg = _build_proactive_opener_message({
         "pageType": "collection",
@@ -148,7 +148,7 @@ def test_opener_message_handles_collection_pages():
 def test_opener_message_includes_full_grounding_context():
     """PRD-007 v0.4: rich page context grounds the agent so it stops
     inventing facts. Every populated field should reach the directive."""
-    from api.widgets.chat import _build_proactive_opener_message
+    from integrations.shopify.widget_proactive import _build_proactive_opener_message
 
     msg = _build_proactive_opener_message({
         "pageType": "product",
@@ -175,7 +175,7 @@ def test_opener_message_includes_full_grounding_context():
 
 def test_opener_message_skips_empty_zero_false_fields():
     """Don't pollute the directive with empty / zero / false signals."""
-    from api.widgets.chat import _build_proactive_opener_message
+    from integrations.shopify.widget_proactive import _build_proactive_opener_message
 
     msg = _build_proactive_opener_message({
         "pageType": "product",
@@ -194,7 +194,7 @@ def test_opener_message_skips_empty_zero_false_fields():
 def test_opener_message_quotes_values_with_spaces():
     """Multi-word values (like product titles) need quoting so the agent
     parses them as single tokens."""
-    from api.widgets.chat import _build_proactive_opener_message
+    from integrations.shopify.widget_proactive import _build_proactive_opener_message
 
     msg = _build_proactive_opener_message({
         "pageType": "product",
@@ -204,7 +204,7 @@ def test_opener_message_quotes_values_with_spaces():
 
 
 def test_opener_message_handles_empty_context():
-    from api.widgets.chat import _build_proactive_opener_message
+    from integrations.shopify.widget_proactive import _build_proactive_opener_message
 
     msg = _build_proactive_opener_message({})
     assert msg.startswith("[PROACTIVE_OPENER]")
@@ -256,7 +256,7 @@ def test_proactive_trigger_reason_constant_includes_cart_idle():
 # ---------------------------------------------------------------------------
 
 def test_cart_idle_message_includes_cart_summary():
-    from api.widgets.chat import _build_cart_idle_opener_message
+    from integrations.shopify.widget_proactive import _build_cart_idle_opener_message
 
     msg = _build_cart_idle_opener_message(
         {"cartItemCount": 3, "cartTotalPrice": 14299, "shopCurrency": "GBP"},
@@ -269,7 +269,7 @@ def test_cart_idle_message_includes_cart_summary():
 
 
 def test_cart_idle_message_renders_recommendations_with_provenance():
-    from api.widgets.chat import _build_cart_idle_opener_message
+    from integrations.shopify.widget_proactive import _build_cart_idle_opener_message
 
     recs = [
         {"label": "Elta 4A Actuator", "paired_with_count": 2, "score": 24, "total_orders": 87},
@@ -288,7 +288,7 @@ def test_cart_idle_message_renders_recommendations_with_provenance():
 
 
 def test_cart_idle_message_falls_back_when_no_recommendations():
-    from api.widgets.chat import _build_cart_idle_opener_message
+    from integrations.shopify.widget_proactive import _build_cart_idle_opener_message
 
     msg = _build_cart_idle_opener_message({"cartItemCount": 1}, recommendations=[])
     # Directive still tells the agent to nudge toward checkout without
@@ -298,7 +298,7 @@ def test_cart_idle_message_falls_back_when_no_recommendations():
 
 
 def test_cart_idle_message_skips_zero_cart_total():
-    from api.widgets.chat import _build_cart_idle_opener_message
+    from integrations.shopify.widget_proactive import _build_cart_idle_opener_message
 
     msg = _build_cart_idle_opener_message({"cartItemCount": 1}, recommendations=None)
     assert "cart_total" not in msg

@@ -9,24 +9,24 @@ This test file pins three things:
   ``trigger_reason in ("proactive_opener", "cart_idle")`` AND
   ``page_context is not None`` returns the message unchanged.
 * Delegation contract — when the shim DOES rewrite, it calls the
-  matching chat.py helper with the right arguments and returns the
-  builder's output verbatim as ``message``. Combined with the fact
-  that the chat.py builders themselves are unchanged in US-003, this
-  is the transitive equivalence guarantee that US-011 will then pin
-  byte-for-byte against captured INBUILD fixtures.
+  matching resolver + builder with the right arguments and returns the
+  builder's output verbatim as ``message``. After PRD-141 US-008 the
+  four helpers all live in :mod:`integrations.shopify.widget_proactive`,
+  so the delegation contract is now a pure intra-module wiring check;
+  US-011's snapshot tests pin the actual builder output byte-for-byte
+  against the US-004 INBUILD fixtures.
 
-The delegation tests inject a **fake** ``api.widgets.chat`` module
-into ``sys.modules`` via ``monkeypatch`` rather than loading the real
-one. The real module pulls in the entire FastAPI / RAG / multimodal
-dependency tree which is overkill for a unit test of a 60-line shim.
-US-011 will exercise the real path against captured production
-fixtures — that is where byte-equivalence is enforced.
+The delegation tests monkey-patch the four helpers directly on
+:mod:`widget_proactive` rather than running the real graph/builder
+code. The real resolvers traverse the Shopify graph and the real
+builders close over the context-field mapping — overkill for a unit
+test of the dispatch contract. US-011 exercises the real path against
+the deterministic fixture graph; that is where byte-equivalence is
+enforced.
 """
 
 from __future__ import annotations
 
-import sys
-import types
 from unittest.mock import MagicMock
 from uuid import uuid4
 
@@ -48,26 +48,26 @@ def workspace_id():
 
 @pytest.fixture
 def fake_chat(monkeypatch):
-    """Replace the shim's downstream dependencies with fakes.
+    """Replace the shim's downstream helpers with sentinels.
 
-    The shim calls a mix of LOCAL and chat.py helpers depending on the
-    trigger path and the current state of the Phase 1 lift:
+    Since PRD-141 US-008 all four helpers live on
+    :mod:`widget_proactive` itself:
 
-    * ``_resolve_graph_related_products`` — local to ``widget_proactive``
-      since PRD-141 US-006; patched in place via ``monkeypatch.setattr``.
-    * ``_resolve_cart_recommendations`` — local to ``widget_proactive``
-      since PRD-141 US-007; patched in place via ``monkeypatch.setattr``.
-    * ``_build_proactive_opener_message`` /
-      ``_build_cart_idle_opener_message`` — still in ``api.widgets.chat``
-      (until US-008); patched via a fake module in ``sys.modules``.
+    * ``_resolve_graph_related_products`` (local since US-006)
+    * ``_resolve_cart_recommendations`` (local since US-007)
+    * ``_build_proactive_opener_message`` (local since US-008)
+    * ``_build_cart_idle_opener_message`` (local since US-008)
 
-    The fake records every call so tests can assert the shim forwards
+    Each is patched in place via ``monkeypatch.setattr``. The fake
+    records every call so tests can assert the shim forwards
     ``workspace_id`` and ``page_context`` correctly, and returns a
     sentinel message so tests can assert the shim wires the builder's
     output into ``WidgetPluginResult.message`` unmodified.
-    """
-    fake = types.ModuleType("api.widgets.chat")
 
+    Fixture name kept as ``fake_chat`` for git-history continuity
+    through the Phase 1 lift; the historical "chat" reference now means
+    "the proactive helpers that used to live in chat.py".
+    """
     calls: dict[str, list] = {
         "resolve_products": [],
         "resolve_cart": [],
@@ -108,10 +108,6 @@ def fake_chat(monkeypatch):
         })
         return "FAKE_CART_IDLE_OPENER_MESSAGE"
 
-    fake._build_proactive_opener_message = fake_build_product
-    fake._build_cart_idle_opener_message = fake_build_cart
-
-    monkeypatch.setitem(sys.modules, "api.widgets.chat", fake)
     monkeypatch.setattr(
         widget_proactive,
         "_resolve_graph_related_products",
@@ -121,6 +117,16 @@ def fake_chat(monkeypatch):
         widget_proactive,
         "_resolve_cart_recommendations",
         fake_resolve_cart,
+    )
+    monkeypatch.setattr(
+        widget_proactive,
+        "_build_proactive_opener_message",
+        fake_build_product,
+    )
+    monkeypatch.setattr(
+        widget_proactive,
+        "_build_cart_idle_opener_message",
+        fake_build_cart,
     )
     return calls
 
@@ -293,17 +299,18 @@ async def test_cart_idle_delegates_to_chat_helpers(fake_chat, db, workspace_id):
 # ---- US-011 snapshot equivalence (PRD-007 + PRD-008-B byte-equality) --------
 #
 # These tests are the byte-equality safety net that gates every Phase 1
-# lift (US-005/006/007/008/010). At US-011 commit time the Shopify plugin
-# is still the US-003 shim that delegates back into ``api.widgets.chat``;
-# the ``real_chat_with_graph`` fixture in ``conftest.py`` injects the
-# REAL helpers (AST-extracted from chat.py) plus a fixture-bound
-# GraphifyService so the test exercises the production code path while
-# remaining deterministic.
+# lift (US-005/006/007/008/010). After US-008 all four proactive helpers
+# live in :mod:`integrations.shopify.widget_proactive` and the snapshot
+# tests call ``handle_widget_message`` directly. The
+# ``real_chat_with_graph`` fixture in ``conftest.py`` provides only one
+# piece of indirection — a fixture-bound ``GraphifyService`` stub that
+# returns the US-004 synthetic INBUILD graph — so the test exercises
+# the exact production code path while remaining deterministic.
 #
-# Through US-005/006/007/008 the helpers progressively move into
-# ``integrations/shopify/widget_proactive.py``. These tests must KEEP
-# PASSING through every lift. If one fails, the lift broke equivalence —
-# fix the lift, NOT the golden fixture (per US-011 notes).
+# These tests must KEEP PASSING through every remaining lift (US-010 in
+# particular rewires chat.py to dispatch via the registry — same shim
+# entry point, same expected output). If one fails, the lift broke
+# equivalence — fix the lift, NOT the golden fixture (per US-011 notes).
 
 
 @pytest.mark.asyncio

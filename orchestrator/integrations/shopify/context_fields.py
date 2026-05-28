@@ -13,9 +13,10 @@ directive builder closes over:
   that contain whitespace or embedded quotes.
 
 These were extracted verbatim from chat.py with no value or behaviour
-changes. ``_build_proactive_opener_message`` (still in chat.py through
-US-008) imports both from here so its rendered output is byte-equal to
-the pre-lift baseline captured in
+changes. ``_build_proactive_opener_message`` (lifted to
+``integrations/shopify/widget_proactive.py`` in US-008) imports both
+from here so its rendered output is byte-equal to the pre-lift
+baseline captured in
 ``orchestrator/integrations/shopify/tests/fixtures/``.
 
 Why this module exists at all: chat.py is the generic widget-chat

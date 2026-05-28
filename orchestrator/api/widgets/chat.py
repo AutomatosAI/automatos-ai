@@ -27,11 +27,9 @@ from sqlalchemy.orm import Session
 
 from api.widgets.auth import WidgetAuthContext, require_permission, widget_auth
 from core.database.database import get_db
-from integrations.shopify.context_fields import (
-    _OPENER_CONTEXT_FIELDS,
-    _format_opener_context_value,
-)
 from integrations.shopify.widget_proactive import (
+    _build_cart_idle_opener_message,
+    _build_proactive_opener_message,
     _resolve_cart_recommendations,
     _resolve_graph_related_products,
 )
@@ -80,149 +78,6 @@ PROACTIVE_TRIGGER_REASONS: frozenset[str] = frozenset({
     "proactive_opener",  # product-page contextual opener (PRD-007)
     "cart_idle",         # cart-page idle nudge w/ FBT recs (PRD-008-B Feature C2)
 })
-
-
-def _build_proactive_opener_message(
-    page_context: dict,
-    related_products: Optional[list] = None,
-) -> str:
-    """Synthesize the user-side message for a proactive opener request.
-
-    The widget never sends real user text for proactive openers — instead
-    we synthesize a directive carrying the FULL page context the agent
-    needs to ground a contextual one-line opener.
-
-    PRD-007 v0.4: previously only pageType + productTitle/Type leaked into
-    the directive; agents had to make up everything else (price, vendor,
-    availability). Now every populated page_context field is forwarded so
-    the agent can lean on real facts before reaching for a tool call.
-
-    PRD-007 addendum (post PRD-009 Layer 2): when ``related_products`` is
-    supplied — top FBT pair, top in-collection sibling, top vendor sibling
-    — they're appended as facts the agent can weave into the opener. The
-    agent is instructed to lead with FBT signal when present (real
-    customer co-purchase pattern, highest leverage) and fall back to the
-    catalog siblings otherwise. Always real data; never invented.
-    """
-    parts: list[str] = []
-    for src_key, label in _OPENER_CONTEXT_FIELDS:
-        rendered = _format_opener_context_value(label, page_context.get(src_key))
-        if rendered is not None:
-            parts.append(rendered)
-    summary = ", ".join(parts) if parts else "no context"
-
-    related_block = ""
-    if related_products:
-        # Render each related product as a one-line fact with provenance,
-        # so the agent can cite naturally (e.g. "often bought with X — 12 of
-        # 57 orders"). Order matters: FBT first (strongest signal), then
-        # collection / vendor siblings as fall-backs.
-        rel_order = {
-            "frequently_bought_with": 0,
-            "in_collection": 1,
-            "by_vendor": 2,
-        }
-        sorted_rel = sorted(
-            related_products,
-            key=lambda p: rel_order.get(p.get("relation", ""), 99),
-        )
-        rendered_rel = []
-        for p in sorted_rel:
-            label = p.get("label", "?")
-            rel = p.get("relation", "")
-            if rel == "frequently_bought_with" and p.get("co_count"):
-                rendered_rel.append(
-                    f'"{label}" (bought together in {p["co_count"]} '
-                    f'of {p.get("total_orders", "?")} orders)'
-                )
-            elif rel == "in_collection":
-                rendered_rel.append(f'"{label}" (same collection)')
-            elif rel == "by_vendor":
-                rendered_rel.append(f'"{label}" (same vendor)')
-            else:
-                rendered_rel.append(f'"{label}"')
-        related_block = (
-            " Related from order/catalog graph (use these naturally — "
-            "prefer the order-pair signal when present, else mention the "
-            "collection/vendor sibling as a starter for conversation): "
-            + "; ".join(rendered_rel)
-        )
-
-    return (
-        "[PROACTIVE_OPENER] Generate a contextual one-sentence opener "
-        "(≤140 chars). RETURN PLAIN TEXT ONLY — no tool calls, no JSON, "
-        "no markdown, no greetings. Use the facts below as your source of "
-        "truth — do NOT invent specs, compatibility, or pricing the context "
-        "doesn't include. If a fact you'd want isn't here, ask a question "
-        "instead of fabricating. "
-        f"Context: {summary}.{related_block}"
-    )
-
-
-def _build_cart_idle_opener_message(
-    page_context: dict,
-    recommendations: Optional[list] = None,
-) -> str:
-    """Synthesize the directive for a cart-idle proactive popup.
-
-    PRD-008-B Feature C2: a shopper has been idle on the cart page for
-    `idle_seconds`. We want a graph-grounded nudge that references real
-    FBT pairings — "customers who bought your stuff also added X" — not
-    a generic "still there?" line.
-
-    When ``recommendations`` is empty (no graph, cold start, or no FBT
-    signal for cart items), the directive still produces a contextual
-    nudge based on cart size/total — never fabricates products.
-    """
-    cart_count = page_context.get("cartItemCount") or 0
-    cart_total = page_context.get("cartTotalPrice")
-    currency = page_context.get("shopCurrency") or ""
-
-    cart_summary_parts: list[str] = []
-    if cart_count:
-        cart_summary_parts.append(f"cart_item_count={cart_count}")
-    if cart_total:
-        # Shopify amounts are minor units (cents/pence). Render as e.g. "362.18 GBP".
-        try:
-            major = float(cart_total) / 100.0
-            cart_summary_parts.append(f"cart_total={major:.2f} {currency}".strip())
-        except (TypeError, ValueError):
-            cart_summary_parts.append(f"cart_total={cart_total}")
-    cart_summary = ", ".join(cart_summary_parts) if cart_summary_parts else "cart_idle"
-
-    rec_block = ""
-    if recommendations:
-        rendered = []
-        for r in recommendations:
-            label = r.get("label", "?")
-            paired = r.get("paired_with_count", 0)
-            if paired > 1:
-                rendered.append(
-                    f'"{label}" (bought with {paired} of the items in this cart)'
-                )
-            elif r.get("score") and r.get("total_orders"):
-                rendered.append(
-                    f'"{label}" (added together in {r["score"]} '
-                    f'of {r["total_orders"]} orders)'
-                )
-            else:
-                rendered.append(f'"{label}"')
-        rec_block = (
-            " Frequently bought with what's in this cart (real order-graph "
-            "data — pick ONE to mention, prefer the one paired with multiple "
-            "cart items): "
-            + "; ".join(rendered)
-        )
-
-    return (
-        "[PROACTIVE_OPENER] [CART_IDLE] The shopper has been idle on the cart "
-        "page. Generate a single helpful sentence (≤140 chars) that nudges "
-        "them toward checkout OR offers a relevant add-on. RETURN PLAIN TEXT "
-        "ONLY — no tool calls, no markdown, no greetings. Do NOT invent "
-        "products that aren't named below. If no recommendation is provided, "
-        "ask if they need help finishing their order — don't fabricate. "
-        f"Context: {cart_summary}.{rec_block}"
-    )
 
 
 class WidgetMessageOut(BaseModel):

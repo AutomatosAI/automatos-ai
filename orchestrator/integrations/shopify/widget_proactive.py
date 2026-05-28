@@ -1,42 +1,33 @@
-"""Shopify vertical plugin — TEMPORARY shim delegating to chat.py.
+"""Shopify vertical plugin — proactive opener + cart-idle directive builders.
 
 PRD-141 US-003. Registered as ``PLUGIN_REGISTRY["shopify"]`` and used by
 any workspace whose ``settings.vertical == "shopify"``.
 
-This module is a **shim**, not a rewrite. It encapsulates the dispatch
-contract — ``handle_widget_message`` matching the
-:class:`integrations.WidgetPlugin` protocol — and delegates to the
-remaining inline Shopify helpers still living in
-``orchestrator/api/widgets/chat.py``:
+The module encapsulates the dispatch contract — ``handle_widget_message``
+matching the :class:`integrations.WidgetPlugin` protocol — together with
+the four Shopify-specific helpers it needs:
 
-* ``_build_proactive_opener_message`` (product-page directive builder)
-* ``_build_cart_idle_opener_message`` (cart-idle directive builder)
+* :func:`_resolve_graph_related_products` (lifted in US-006) — single-seed
+  FBT / collection / vendor traversal for the product-page opener.
+* :func:`_resolve_cart_recommendations` (lifted in US-007) — multi-seed
+  FBT aggregation for the cart-idle nudge.
+* :func:`_build_proactive_opener_message` (lifted in US-008) — product-page
+  directive builder, closes over ``_OPENER_CONTEXT_FIELDS`` and
+  ``_format_opener_context_value`` from :mod:`.context_fields`.
+* :func:`_build_cart_idle_opener_message` (lifted in US-008) — cart-idle
+  directive builder; no context-field dependency.
 
-The two graph resolvers (``_resolve_graph_related_products`` lifted in
-US-006, ``_resolve_cart_recommendations`` lifted in US-007) now live
-in this file and the shim calls them locally.
+``orchestrator/api/widgets/chat.py`` still drives the proactive rewrite
+inline through US-009/010 — it imports the four helpers from this module
+to keep production behaviour unchanged until the dispatch is rewired to
+``PLUGIN_REGISTRY``. After US-010 the only entry point is
+``handle_widget_message`` and chat.py contains zero Shopify identifiers.
 
-US-008 will move the two builders here. US-010 will delete the chat.py
-inline dispatch and route every widget chat request through
-``PLUGIN_REGISTRY``. At that point the imports below become local
-definitions and this docstring's "shim" framing goes away.
-
-The remaining chat.py imports happen **inside**
-``handle_widget_message``, beneath the early-return gate. Two reasons:
-
-1. Circular-import safety. During Phase 1 there is a window where
-   chat.py imports back from this module (US-006/007/008 move helpers
-   progressively). Lazy imports avoid that window without changing
-   behaviour.
-2. Pass-through paths must not pay the cost of loading the FastAPI
-   router module (which pulls in database / auth dependencies). The
-   gate is the hot path; the rewrite is the rare path.
-
-The ``PROACTIVE_TRIGGER_REASONS`` frozenset from chat.py is
-intentionally NOT imported here — the two trigger strings are
-hardcoded inline so the gate works without touching chat.py. The
-duplication disappears in US-010 when the constant moves alongside
-the helpers it gates.
+The ``PROACTIVE_TRIGGER_REASONS`` frozenset still lives in chat.py and
+is intentionally NOT imported here — the two trigger strings are
+hardcoded inline so the gate works without circular imports. The
+duplication disappears in US-010 when the constant moves alongside the
+dispatch.
 """
 
 from __future__ import annotations
@@ -48,6 +39,10 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from integrations import WidgetPluginResult
+from integrations.shopify.context_fields import (
+    _OPENER_CONTEXT_FIELDS,
+    _format_opener_context_value,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -241,6 +236,149 @@ async def _resolve_cart_recommendations(
         return []
 
 
+def _build_proactive_opener_message(
+    page_context: dict,
+    related_products: Optional[list] = None,
+) -> str:
+    """Synthesize the user-side message for a proactive opener request.
+
+    The widget never sends real user text for proactive openers — instead
+    we synthesize a directive carrying the FULL page context the agent
+    needs to ground a contextual one-line opener.
+
+    PRD-007 v0.4: previously only pageType + productTitle/Type leaked into
+    the directive; agents had to make up everything else (price, vendor,
+    availability). Now every populated page_context field is forwarded so
+    the agent can lean on real facts before reaching for a tool call.
+
+    PRD-007 addendum (post PRD-009 Layer 2): when ``related_products`` is
+    supplied — top FBT pair, top in-collection sibling, top vendor sibling
+    — they're appended as facts the agent can weave into the opener. The
+    agent is instructed to lead with FBT signal when present (real
+    customer co-purchase pattern, highest leverage) and fall back to the
+    catalog siblings otherwise. Always real data; never invented.
+    """
+    parts: list[str] = []
+    for src_key, label in _OPENER_CONTEXT_FIELDS:
+        rendered = _format_opener_context_value(label, page_context.get(src_key))
+        if rendered is not None:
+            parts.append(rendered)
+    summary = ", ".join(parts) if parts else "no context"
+
+    related_block = ""
+    if related_products:
+        # Render each related product as a one-line fact with provenance,
+        # so the agent can cite naturally (e.g. "often bought with X — 12 of
+        # 57 orders"). Order matters: FBT first (strongest signal), then
+        # collection / vendor siblings as fall-backs.
+        rel_order = {
+            "frequently_bought_with": 0,
+            "in_collection": 1,
+            "by_vendor": 2,
+        }
+        sorted_rel = sorted(
+            related_products,
+            key=lambda p: rel_order.get(p.get("relation", ""), 99),
+        )
+        rendered_rel = []
+        for p in sorted_rel:
+            label = p.get("label", "?")
+            rel = p.get("relation", "")
+            if rel == "frequently_bought_with" and p.get("co_count"):
+                rendered_rel.append(
+                    f'"{label}" (bought together in {p["co_count"]} '
+                    f'of {p.get("total_orders", "?")} orders)'
+                )
+            elif rel == "in_collection":
+                rendered_rel.append(f'"{label}" (same collection)')
+            elif rel == "by_vendor":
+                rendered_rel.append(f'"{label}" (same vendor)')
+            else:
+                rendered_rel.append(f'"{label}"')
+        related_block = (
+            " Related from order/catalog graph (use these naturally — "
+            "prefer the order-pair signal when present, else mention the "
+            "collection/vendor sibling as a starter for conversation): "
+            + "; ".join(rendered_rel)
+        )
+
+    return (
+        "[PROACTIVE_OPENER] Generate a contextual one-sentence opener "
+        "(≤140 chars). RETURN PLAIN TEXT ONLY — no tool calls, no JSON, "
+        "no markdown, no greetings. Use the facts below as your source of "
+        "truth — do NOT invent specs, compatibility, or pricing the context "
+        "doesn't include. If a fact you'd want isn't here, ask a question "
+        "instead of fabricating. "
+        f"Context: {summary}.{related_block}"
+    )
+
+
+def _build_cart_idle_opener_message(
+    page_context: dict,
+    recommendations: Optional[list] = None,
+) -> str:
+    """Synthesize the directive for a cart-idle proactive popup.
+
+    PRD-008-B Feature C2: a shopper has been idle on the cart page for
+    `idle_seconds`. We want a graph-grounded nudge that references real
+    FBT pairings — "customers who bought your stuff also added X" — not
+    a generic "still there?" line.
+
+    When ``recommendations`` is empty (no graph, cold start, or no FBT
+    signal for cart items), the directive still produces a contextual
+    nudge based on cart size/total — never fabricates products.
+    """
+    cart_count = page_context.get("cartItemCount") or 0
+    cart_total = page_context.get("cartTotalPrice")
+    currency = page_context.get("shopCurrency") or ""
+
+    cart_summary_parts: list[str] = []
+    if cart_count:
+        cart_summary_parts.append(f"cart_item_count={cart_count}")
+    if cart_total:
+        # Shopify amounts are minor units (cents/pence). Render as e.g. "362.18 GBP".
+        try:
+            major = float(cart_total) / 100.0
+            cart_summary_parts.append(f"cart_total={major:.2f} {currency}".strip())
+        except (TypeError, ValueError):
+            cart_summary_parts.append(f"cart_total={cart_total}")
+    cart_summary = ", ".join(cart_summary_parts) if cart_summary_parts else "cart_idle"
+
+    rec_block = ""
+    if recommendations:
+        rendered = []
+        for r in recommendations:
+            label = r.get("label", "?")
+            paired = r.get("paired_with_count", 0)
+            if paired > 1:
+                rendered.append(
+                    f'"{label}" (bought with {paired} of the items in this cart)'
+                )
+            elif r.get("score") and r.get("total_orders"):
+                rendered.append(
+                    f'"{label}" (added together in {r["score"]} '
+                    f'of {r["total_orders"]} orders)'
+                )
+            else:
+                rendered.append(f'"{label}"')
+        rec_block = (
+            " Frequently bought with what's in this cart (real order-graph "
+            "data — pick ONE to mention, prefer the one paired with multiple "
+            "cart items): "
+            + "; ".join(rendered)
+        )
+
+    return (
+        "[PROACTIVE_OPENER] [CART_IDLE] The shopper has been idle on the cart "
+        "page. Generate a single helpful sentence (≤140 chars) that nudges "
+        "them toward checkout OR offers a relevant add-on. RETURN PLAIN TEXT "
+        "ONLY — no tool calls, no markdown, no greetings. Do NOT invent "
+        "products that aren't named below. If no recommendation is provided, "
+        "ask if they need help finishing their order — don't fabricate. "
+        f"Context: {cart_summary}.{rec_block}"
+    )
+
+
 async def handle_widget_message(
     *,
     message: str,
@@ -249,9 +387,9 @@ async def handle_widget_message(
     workspace_id: UUID,
     db: Session,
 ) -> WidgetPluginResult:
-    """Shim — replicates the inline chat.py proactive-rewrite block.
+    """Replicates the inline chat.py proactive-rewrite block byte-for-byte.
 
-    Behaviour mirrors ``api/widgets/chat.py`` byte-for-byte:
+    Behaviour mirrors ``api/widgets/chat.py``:
 
     * ``trigger_reason`` is ``"proactive_opener"`` or ``"cart_idle"``
       (the two members of chat.py's ``PROACTIVE_TRIGGER_REASONS``
@@ -274,8 +412,6 @@ async def handle_widget_message(
     workspace_str = str(workspace_id)
 
     if trigger_reason == "cart_idle":
-        from api.widgets.chat import _build_cart_idle_opener_message
-
         recommendations = await _resolve_cart_recommendations(
             workspace_str, page_context,
         )
@@ -291,8 +427,6 @@ async def handle_widget_message(
                 "related_count": len(recommendations),
             },
         )
-
-    from api.widgets.chat import _build_proactive_opener_message
 
     related_products = await _resolve_graph_related_products(
         workspace_str, page_context,
