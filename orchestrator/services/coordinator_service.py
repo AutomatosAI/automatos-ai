@@ -17,6 +17,7 @@ Source: PRD-82A Sections 6, 8, 9, 12 (US-014)
 """
 
 import asyncio
+import json
 import logging
 import re
 from datetime import datetime, timedelta, timezone
@@ -28,6 +29,7 @@ from sqlalchemy.orm import Session
 
 from config import COMPLEXITY_TOKEN_BUDGET, Config, config
 from core.models.core import Agent
+from core.models.system_settings import SystemSetting
 from core.models.orchestration import (
     OrchestrationArchive,
     OrchestrationEvent,
@@ -72,12 +74,55 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Mission Power Modes — per-mode caps for model, tokens, and tool iterations.
 # "standard" is the default when power_mode is absent from mission config.
+# These are the hardcoded FALLBACK only. Operators retune live values via
+# system_settings (category 'power_modes', key '<mode>'); see
+# _get_power_mode_caps(). Stored settings win; absent keys fall back here.
 # ---------------------------------------------------------------------------
-_POWER_MODE_CAPS: Dict[str, Dict[str, Any]] = {
+_POWER_MODE_DEFAULTS: Dict[str, Dict[str, Any]] = {
     "light":    {"max_tokens": 2_000,  "max_tool_iterations": 5,  "force_llm_tier": "system_llm"},
     "standard": {"max_tokens": 4_000,  "max_tool_iterations": 10, "force_llm_tier": None},
     "max":      {"max_tokens": 16_000, "max_tool_iterations": 50, "force_llm_tier": "orchestrator_llm"},
 }
+
+
+def _get_power_mode_caps(power_mode: str, db: Session) -> Dict[str, Any]:
+    """Resolve power-mode caps: ``system_settings('power_modes', <mode>)`` merged
+    over ``_POWER_MODE_DEFAULTS``.
+
+    Operators can retune caps at runtime (no deploy) by storing a JSON object
+    under category ``power_modes``, key ``<mode>`` — e.g.
+    ``{"max_tool_iterations": 20}``. Stored keys override the defaults; absent
+    keys fall back. An unknown mode falls back to ``standard``.
+
+    Must run on the serial DB path (e.g. ``_prepare_task``). Do NOT call from
+    ``_run_agent_io`` — that runs concurrently via ``asyncio.gather`` with no DB
+    access; pass the already-resolved caps down instead.
+    """
+    defaults = _POWER_MODE_DEFAULTS.get(power_mode, _POWER_MODE_DEFAULTS["standard"])
+    caps: Dict[str, Any] = dict(defaults)  # copy — never mutate the module default
+
+    try:
+        setting = (
+            db.query(SystemSetting)
+            .filter(
+                SystemSetting.category == "power_modes",
+                SystemSetting.key == power_mode,
+            )
+            .first()
+        )
+        if setting and setting.value:
+            override = json.loads(setting.value)
+            if isinstance(override, dict):
+                caps.update(override)
+    except Exception:
+        logger.warning(
+            "Could not load power_mode caps for '%s' from system_settings; "
+            "using hardcoded defaults.",
+            power_mode,
+            exc_info=True,
+        )
+
+    return caps
 
 
 # ---------------------------------------------------------------------------
@@ -1017,7 +1062,7 @@ class CoordinatorService:
                 agent_coros = [
                     self._run_agent_io(p["factory"], p["agent_id"], p["prompt"],
                                        p["task"], p["attachment_ids"],
-                                       run_config=p.get("run_config"),
+                                       mode_caps=p["mode_caps"],
                                        agent_runtime=p.get("agent_runtime"))
                     for p in prepared
                 ]
@@ -1321,7 +1366,7 @@ class CoordinatorService:
         factory = AgentFactory(db_session=db)
         run_config = run.config or {}
         power_mode = run_config.get("power_mode", "standard")
-        mode_caps = _POWER_MODE_CAPS.get(power_mode, _POWER_MODE_CAPS["standard"])
+        mode_caps = _get_power_mode_caps(power_mode, db)
 
         force_tier = mode_caps.get("force_llm_tier")
         if force_tier:
@@ -1360,7 +1405,9 @@ class CoordinatorService:
             "prompt": prompt,
             "factory": factory,
             "attachment_ids": task_attachment_ids,
-            "run_config": run_config,
+            # Caps resolved here (serial DB path) so the concurrent I/O phase
+            # never touches the DB — see _get_power_mode_caps / _run_agent_io.
+            "mode_caps": mode_caps,
         }
 
     async def _run_agent_io(
@@ -1370,16 +1417,17 @@ class CoordinatorService:
         prompt: str,
         task: Any,
         attachment_ids: List[str],
-        run_config: Optional[Dict[str, Any]] = None,
+        mode_caps: Optional[Dict[str, Any]] = None,
         agent_runtime: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """Execute agent I/O — safe to run concurrently via asyncio.gather().
 
-        No DB access here — only the LLM + tool loop.
+        No DB access here — only the LLM + tool loop. ``mode_caps`` is resolved
+        upstream in _prepare_task (the serial DB phase) and passed in, so this
+        concurrent path never reads system_settings.
         """
-        power_mode = (run_config or {}).get("power_mode", "standard")
-        mode_caps = _POWER_MODE_CAPS.get(power_mode, _POWER_MODE_CAPS["standard"])
-        max_iters = mode_caps["max_tool_iterations"]
+        caps = mode_caps or _POWER_MODE_DEFAULTS["standard"]
+        max_iters = caps["max_tool_iterations"]
 
         # Pass runtime directly when we have it so the factory cache can't
         # swap in a stale cached runtime under us mid-flight.
@@ -1481,6 +1529,18 @@ class CoordinatorService:
                     actor_type=ActorType.COORDINATOR,
                     actor_id="coordinator",
                     payload={
+                        # US-009 user-facing fields: tell the user what limit was
+                        # hit and how to raise it, before any budget-driven pause.
+                        "limit_type": "mission_token_budget",
+                        "spent": run.tokens_used,
+                        "limit": run.token_budget_estimate,
+                        "message": (
+                            f"This mission has used {run.tokens_used:,} tokens, over its "
+                            f"estimated budget of {run.token_budget_estimate:,}. It will keep "
+                            "running; an admin can raise the mission token budget or the "
+                            "power-mode caps in Settings > Coordination."
+                        ),
+                        # Established diagnostic fields (parity with reconciler emit).
                         "tokens_used": run.tokens_used,
                         "token_budget_estimate": run.token_budget_estimate,
                         "ratio": round(run.tokens_used / run.token_budget_estimate, 2),

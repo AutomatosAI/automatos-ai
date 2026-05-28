@@ -1482,6 +1482,16 @@ class StreamingChatService:
         # Max iterations reached
         if iteration >= max_iterations:
             logger.warning(f"Max tool iterations ({max_iterations}) reached. Forcing final response.")
+            yield self.streaming_handler.format_aisdk_limit_reached(
+                limit="max_tool_iterations",
+                value=max_iterations,
+                message=(
+                    f"I reached the maximum of {max_iterations} tool steps for a "
+                    "single response, so I'm answering with what I have so far. "
+                    "An admin can raise this via the CHATBOT_MAX_TOOL_ITERATIONS "
+                    "setting (or the workspace power-mode caps)."
+                ),
+            )
             final = await agent_runtime.llm_manager.generate_response(
                 messages=llm_messages, tools=None,
             )

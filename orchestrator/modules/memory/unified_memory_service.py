@@ -1662,6 +1662,7 @@ class UnifiedMemoryService:
         agent_id: int,
         query: str,
         conversation_id: Optional[str] = None,
+        context_window: Optional[int] = None,
     ) -> "ContextBundle":
         """
         Assemble a budget-constrained context bundle across all memory layers.
@@ -1683,6 +1684,7 @@ class UnifiedMemoryService:
                 agent_id=agent_id,
                 query=query,
                 conversation_id=conversation_id,
+                context_window=context_window,
             )
         except Exception:
             logger.error(

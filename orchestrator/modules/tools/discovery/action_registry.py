@@ -93,6 +93,12 @@ class ActionRegistry:
         self._ensure_initialized()
         return [a for a in self._actions.values() if a.category == category]
 
+    def get_by_tags(self, tags: List[str]) -> List[ActionDefinition]:
+        """Get actions whose tags intersect any of *tags* (OR semantics)."""
+        self._ensure_initialized()
+        wanted = set(tags)
+        return [a for a in self._actions.values() if wanted.intersection(a.tags)]
+
     def get_by_permission(self, level: str) -> List[ActionDefinition]:
         """Get actions filtered by permission level."""
         self._ensure_initialized()
