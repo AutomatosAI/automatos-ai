@@ -4,10 +4,15 @@ This test file pins three things:
 
 * Registration — importing ``integrations`` populates
   ``PLUGIN_REGISTRY["shopify"]`` with this module.
-* Pass-through gating — the plugin matches chat.py's old
-  ``is_proactive`` guard: anything other than
-  ``trigger_reason in ("proactive_opener", "cart_idle")`` AND
-  ``page_context is not None`` returns the message unchanged.
+* Gating — for a proactive trigger
+  (``proactive_opener`` / ``cart_idle``) with ``page_context`` the
+  plugin rewrites the message into a directive. For a REGULAR turn with
+  ``page_context`` the message is returned verbatim but a
+  ``system_preamble`` is attached so the agent is grounded on the page
+  the shopper is viewing (the dispatcher injects it into history for
+  that turn only — never persisted, so the stored transcript keeps the
+  shopper's words). Only when ``page_context`` is ``None`` — or carries
+  nothing renderable — is there no grounding at all.
 * Wiring contract — when the plugin DOES rewrite, it calls the
   matching resolver + builder with the right arguments and returns the
   builder's output verbatim as ``message``. All four helpers live in
@@ -156,11 +161,13 @@ async def test_no_trigger_no_context_passes_through(db, workspace_id):
 
 
 @pytest.mark.asyncio
-async def test_no_trigger_with_context_passes_through(db, workspace_id):
-    # Mid-conversation message on a Shopify workspace: the Shopify
-    # plugin must NOT prepend an opaque "(Context: ...)" JSON block.
-    # That behaviour is owned by the generic plugin only — Shopify's
-    # context-handling lives in the skill prompt + proactive directive.
+async def test_no_trigger_with_context_grounds_via_preamble(db, workspace_id):
+    # Mid-conversation message on a Shopify workspace WITH page context.
+    # The persisted `message` stays the shopper's verbatim words — the
+    # Shopify plugin still never prepends an opaque "(Context: ...)" block
+    # to it (that is the generic plugin's job). Instead the page facts
+    # ride on `system_preamble`, which the dispatcher injects into the LLM
+    # history for this turn only.
     result = await widget_proactive.handle_widget_message(
         message="Tell me about Hochiki detectors",
         page_context={"productHandle": "hochiki-aln", "productTitle": "Hochiki ALN"},
@@ -168,12 +175,20 @@ async def test_no_trigger_with_context_passes_through(db, workspace_id):
         workspace_id=workspace_id,
         db=db,
     )
+    # Message unchanged — this is what gets persisted and titled.
     assert result.message == "Tell me about Hochiki detectors"
-    assert result.context_note is None
+    # Grounding attached out-of-band.
+    assert result.context_note == "shopify: page_context grounding"
+    assert result.system_preamble is not None
+    assert 'product="Hochiki ALN"' in result.system_preamble
+    assert "product_handle=hochiki-aln" in result.system_preamble
+    assert result.telemetry == {}
 
 
 @pytest.mark.asyncio
-async def test_unknown_trigger_passes_through(db, workspace_id):
+async def test_unknown_trigger_with_context_grounds_via_preamble(db, workspace_id):
+    # An unknown trigger is treated as a regular turn: message stays
+    # verbatim, page context rides on system_preamble.
     result = await widget_proactive.handle_widget_message(
         message="agent will see this verbatim",
         page_context={"pageType": "product"},
@@ -182,7 +197,26 @@ async def test_unknown_trigger_passes_through(db, workspace_id):
         db=db,
     )
     assert result.message == "agent will see this verbatim"
+    assert result.context_note == "shopify: page_context grounding"
+    assert result.system_preamble is not None
+    assert "page_type=product" in result.system_preamble
+
+
+@pytest.mark.asyncio
+async def test_regular_turn_empty_context_passes_through(db, workspace_id):
+    # Regular turn, page_context present but nothing renderable (all
+    # empty/zero/false values, plus an unknown key) → no grounding.
+    result = await widget_proactive.handle_widget_message(
+        message="just a question",
+        page_context={"productTitle": "", "cartItemCount": 0, "unknownKey": "x"},
+        trigger_reason=None,
+        workspace_id=workspace_id,
+        db=db,
+    )
+    assert result.message == "just a question"
     assert result.context_note is None
+    assert result.system_preamble is None
+    assert result.telemetry == {}
 
 
 @pytest.mark.asyncio
@@ -401,3 +435,73 @@ async def test_no_context_no_rewrite(trigger, db, workspace_id):
     assert result.message == "user message verbatim"
     assert result.context_note is None
     assert result.telemetry == {}
+
+
+# ---- Regular-turn grounding (preamble builder) -------------------------------
+#
+# `_build_page_context_preamble` is the pure function behind the
+# `system_preamble` returned for regular Shopify turns. It reuses the same
+# `_OPENER_CONTEXT_FIELDS` / `_format_opener_context_value` machinery as the
+# proactive opener, so a product page grounds the agent on the same facts
+# whether it opened proactively or the shopper typed first — but it carries
+# NO tool/output directives (it rides on a real user message).
+
+
+def test_build_page_context_preamble_renders_product_facts():
+    preamble = widget_proactive._build_page_context_preamble({
+        "pageType": "product",
+        "productTitle": "Hochiki ALN",
+        "productVendor": "Hochiki",
+        "productPrice": "42.00",
+        "productAvailable": True,
+        "productHandle": "hochiki-aln",
+    })
+    assert preamble is not None
+    # Multiword string values are quoted; single-token values are bare.
+    assert 'product="Hochiki ALN"' in preamble
+    assert "vendor=Hochiki" in preamble
+    assert "product_handle=hochiki-aln" in preamble
+    assert "page_type=product" in preamble
+    # Boolean True renders (only False/0/"" are skipped).
+    assert "in_stock=True" in preamble
+
+
+def test_build_page_context_preamble_has_deixis_and_anti_invention():
+    preamble = widget_proactive._build_page_context_preamble({"productTitle": "Widget"})
+    assert preamble is not None
+    # Deixis resolution instruction for "this"/"it".
+    assert '"this"' in preamble
+    assert '"it"' in preamble
+    # Anti-invention guardrail.
+    assert "do not invent" in preamble.lower()
+    # No proactive/opener directive leaks in — this rides on a real user turn.
+    assert "PROACTIVE_OPENER" not in preamble
+    assert "RETURN PLAIN TEXT" not in preamble
+
+
+def test_build_page_context_preamble_skips_empty_zero_false():
+    preamble = widget_proactive._build_page_context_preamble({
+        "productTitle": "Widget",
+        "productPrice": "",         # empty → skipped
+        "cartItemCount": 0,         # zero → skipped
+        "productAvailable": False,  # false → skipped
+        "shopCurrency": "GBP",      # kept
+    })
+    assert preamble is not None
+    assert "product=Widget" in preamble
+    assert "currency=GBP" in preamble
+    assert "price" not in preamble
+    assert "cart_item_count" not in preamble
+    assert "in_stock" not in preamble
+
+
+def test_build_page_context_preamble_none_when_nothing_usable():
+    # Empty dict, and a dict whose every known field is empty/zero/false
+    # (plus an unknown key the field map ignores) both yield None.
+    assert widget_proactive._build_page_context_preamble({}) is None
+    assert widget_proactive._build_page_context_preamble({
+        "productTitle": "",
+        "cartItemCount": 0,
+        "productAvailable": False,
+        "unknownKey": "ignored",
+    }) is None
