@@ -38,7 +38,7 @@ Single source of truth for Ralph progress. Tick `- [x]` only after a story's acc
 
 ## Phase 4 — Docs
 
-- [ ] US-018 — Write docs/integrations/README.md explaining how to add a new vertical
+- [x] US-018 — Write docs/integrations/README.md explaining how to add a new vertical
 - [ ] US-019 — Write hypothetical barbershop walkthrough doc as architecture validation
 
 ## Release gate
