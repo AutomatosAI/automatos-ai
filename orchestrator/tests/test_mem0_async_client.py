@@ -237,6 +237,37 @@ async def test_breaker_half_open_probe(monkeypatch):
     await client.aclose()
 
 
+@pytest.mark.asyncio
+async def test_half_open_404_closes_breaker(monkeypatch):
+    """A half-open probe that lands on an empty namespace (404) must close.
+
+    Regression for the case where a recovered Mem0 answers a search for a
+    workspace that simply has no memories yet: that 404 means "reachable, no
+    rows", so it has to count as a healthy call. If a 404 were treated as a
+    non-success the breaker would stay OPEN forever for any empty namespace,
+    because every half-open probe would keep landing on the same empty 404.
+    """
+    breaker = _CircuitBreaker(threshold=3, cooldown_seconds=300)
+    breaker.is_open = True
+    breaker.failures = 3
+    breaker.last_failure_time = mem0_mod.time.monotonic() - (breaker.cooldown + 1)
+    monkeypatch.setattr(Mem0Client, "_breakers", {"ws": breaker})
+    client = Mem0Client(api_url="http://mem0.test", api_key="test-key")
+
+    async def fake_404(self, method, url, **kwargs):
+        return _FakeResponse(404, payload=[])
+
+    monkeypatch.setattr(httpx.AsyncClient, "request", fake_404)
+
+    resp = await client._request(
+        "GET", "http://mem0.test/api/v1/memories/", workspace_id="ws"
+    )
+    assert resp.status_code == 404
+    assert not breaker.is_open      # empty-namespace 404 still closed the breaker
+    assert breaker.failures == 0
+    await client.aclose()
+
+
 # ── US-005: UnifiedMemoryService awaits Mem0 directly (no executor) ──
 
 

@@ -452,7 +452,7 @@ async def get_system_health(db: Session, workspace_id: UUID, params: Dict[str, A
                 "status": "unhealthy",
                 "error": "circuit breaker open",
                 "failures": mem0_breaker.failures,
-                "cooldown_remaining_s": max(0, int(60 - elapsed)),
+                "cooldown_remaining_s": max(0, int(mem0_breaker.cooldown - elapsed)),
             }
         else:
             # Probe with a lightweight search (empty query, limit 1)

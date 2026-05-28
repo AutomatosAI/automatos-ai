@@ -480,6 +480,7 @@ class UnifiedMemoryService:
         user_id: str,
         messages: List[Dict[str, str]],
         metadata: Optional[Dict[str, Any]] = None,
+        workspace_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Store messages in L3 long-term memory with a pre-built namespace user_id.
@@ -492,12 +493,18 @@ class UnifiedMemoryService:
             user_id: Pre-built user_id from MemoryNamespace (e.g., ns.recipe(id)).
             messages: Mem0-format messages list.
             metadata: Optional metadata dict.
+            workspace_id: Scopes the circuit breaker. Callers with a workspace in
+                scope (mission/playbook memory) pass it so a failure here doesn't
+                trip the shared "_global" breaker for every other workspace.
 
         Returns:
             Mem0 response dict, or error dict on failure.
         """
         try:
-            result = await self._mem0.add(messages=messages, user_id=user_id, metadata=metadata)
+            result = await self._mem0.add(
+                messages=messages, user_id=user_id, metadata=metadata,
+                workspace_id=workspace_id,
+            )
             logger.info(
                 "[UnifiedMemoryService] store_long_term_messages user_id=%s",
                 user_id,
@@ -516,6 +523,7 @@ class UnifiedMemoryService:
         user_id: str,
         query: str,
         limit: int = 5,
+        workspace_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         Search L3 long-term memory with a pre-built namespace user_id.
@@ -526,12 +534,15 @@ class UnifiedMemoryService:
             user_id: Pre-built user_id from MemoryNamespace.
             query: Natural-language search query.
             limit: Maximum results to return.
+            workspace_id: Scopes the circuit breaker (see store_long_term_messages).
 
         Returns:
             List of memory item dicts (may be empty on failure).
         """
         try:
-            results = await self._mem0.search(query=query, user_id=user_id, limit=limit)
+            results = await self._mem0.search(
+                query=query, user_id=user_id, limit=limit, workspace_id=workspace_id
+            )
             logger.debug(
                 "[UnifiedMemoryService] search_long_term_scoped user_id=%s query=%r → %d results",
                 user_id,
@@ -551,6 +562,7 @@ class UnifiedMemoryService:
         self,
         user_id: str,
         limit: int = 100,
+        workspace_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         Retrieve all L3 long-term memories with a pre-built namespace user_id.
@@ -560,12 +572,15 @@ class UnifiedMemoryService:
         Args:
             user_id: Pre-built user_id from MemoryNamespace.
             limit: Maximum items.
+            workspace_id: Scopes the circuit breaker (see store_long_term_messages).
 
         Returns:
             List of memory item dicts.
         """
         try:
-            results = await self._mem0.get_all(user_id=user_id, limit=limit)
+            results = await self._mem0.get_all(
+                user_id=user_id, limit=limit, workspace_id=workspace_id
+            )
             logger.debug(
                 "[UnifiedMemoryService] get_all_memories_scoped user_id=%s → %d items",
                 user_id,

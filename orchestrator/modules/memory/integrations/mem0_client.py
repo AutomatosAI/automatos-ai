@@ -254,6 +254,11 @@ class Mem0Client:
                     return resp
 
                 if resp.status_code == 404:
+                    # A 404 means Mem0 is reachable and answered (just an empty
+                    # result), so it counts as a healthy call — record_success so
+                    # a half-open probe that lands on an empty namespace still
+                    # closes the breaker instead of leaving is_open stuck True.
+                    breaker.record_success()
                     logger.debug(
                         "[Mem0] 404 on %s %s — treating as empty result",
                         method.upper(), url,
