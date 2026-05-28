@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -1202,6 +1203,86 @@ class HarnessService:
                 })
         except Exception as exc:
             logger.warning("[HARNESS] Failed to check approved board tasks: %s", exc)
+
+    def _parse_harness_task(
+        self,
+        task: Dict[str, Any],
+        agents_by_name: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Reconstruct a prescription from an approved [HARNESS] board task.
+
+        Inverse of the producer in _phase_apply(): parses the
+        '[HARNESS] {change_type} for {target_name}' title and the
+        '**Current:** {json}' / '**Proposed:** {json}' description sections,
+        and resolves target_id from target_name via agents_by_name (name -> id).
+        Returns None for any task that is not a well-formed HARNESS task.
+
+        target_id is None when the name cannot be resolved — callers MUST treat
+        an unresolved (None) target as non-applicable and skip it, never apply a
+        change to a guessed/null target.
+        """
+        title = (task.get("title") or "").strip()
+        prefix = "[HARNESS] "
+        if not title.startswith(prefix):
+            return None
+
+        # change_type is a space-free snake_case identifier, so partitioning on
+        # the first " for " cleanly splits it from target_name (which may itself
+        # contain spaces or even " for ").
+        change_type, sep, target_name = title[len(prefix):].partition(" for ")
+        change_type = change_type.strip()
+        target_name = target_name.strip()
+        if not sep or not change_type or not target_name:
+            return None
+
+        description = task.get("description") or ""
+        agents_by_name = agents_by_name or {}
+
+        return {
+            "prescription_id": f"rx-task-{task.get('id')}",
+            "target_type": "agent",
+            "target_id": agents_by_name.get(target_name),
+            "target_name": target_name,
+            "change_type": change_type,
+            "current_value": self._extract_json_section(description, "Current"),
+            "proposed_value": self._extract_json_section(description, "Proposed"),
+            "risk_score": self._extract_risk_score(description, task.get("tags")),
+            "rationale": self._extract_text_section(description, "Rationale"),
+            "expected_improvement": self._extract_text_section(description, "Expected Improvement"),
+        }
+
+    @staticmethod
+    def _extract_json_section(description: str, label: str) -> Dict[str, Any]:
+        """Pull a single-line '**{label}:** {json}' section and json.loads it."""
+        match = re.search(rf"\*\*{re.escape(label)}:\*\*\s*(.+)", description)
+        if not match:
+            return {}
+        try:
+            value = json.loads(match.group(1).strip())
+        except (ValueError, TypeError):
+            return {}
+        return value if isinstance(value, dict) else {}
+
+    @staticmethod
+    def _extract_text_section(description: str, label: str) -> str:
+        """Pull the trailing text of a '**{label}:** {text}' section."""
+        match = re.search(rf"\*\*{re.escape(label)}:\*\*\s*(.+)", description)
+        return match.group(1).strip() if match else ""
+
+    @staticmethod
+    def _extract_risk_score(description: str, tags: Optional[List[str]]) -> int:
+        """Recover the risk score from the description, falling back to a
+        'risk-{n}' tag. Unknown -> 5 (max risk; never qualifies for auto-apply)."""
+        match = re.search(r"\*\*Risk Score:\*\*\s*(\d+)", description)
+        if match:
+            return int(match.group(1))
+        for tag in (tags or []):
+            if isinstance(tag, str) and tag.startswith("risk-"):
+                try:
+                    return int(tag.split("-", 1)[1])
+                except ValueError:
+                    continue
+        return 5
 
     def _compute_convergence_status(
         self,

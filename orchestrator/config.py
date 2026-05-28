@@ -435,6 +435,10 @@ class Config:
     RECIPE_SCHEDULER_ENABLED: bool = os.getenv("RECIPE_SCHEDULER_ENABLED", "true").lower() == "true"
     COORDINATOR_ENABLED: bool = os.getenv("COORDINATOR_ENABLED", "true").lower() == "true"
     HARNESS_ENABLED: bool = os.getenv("HARNESS_ENABLED", "true").lower() == "true"
+    # PRD-141 Phase 5: gates HARNESS self-management (auto-applying approved
+    # config changes back onto the platform). HIGH RISK — default OFF. Nothing
+    # in Phase 5 may take effect unless this is true.
+    HARNESS_SELF_MANAGEMENT_ENABLED: bool = os.getenv("HARNESS_SELF_MANAGEMENT_ENABLED", "false").lower() == "true"
 
     # =============================================================================
     # PRD-130 — Business Intake Wizard (PoC)
