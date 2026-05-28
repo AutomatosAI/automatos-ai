@@ -84,3 +84,9 @@ __all__ = [
     "WidgetPlugin",
     "WidgetPluginResult",
 ]
+
+
+# Sub-packages self-register into PLUGIN_REGISTRY at import time. Imports go
+# here, after the registry is defined, so each vertical can do
+# ``from integrations import PLUGIN_REGISTRY`` without circularity.
+from . import generic  # noqa: E402,F401  (registers "generic")
