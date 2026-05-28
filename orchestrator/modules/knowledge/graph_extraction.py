@@ -552,7 +552,6 @@ def map_shopify_catalog(jsonl_iter, *, bulk_op_id: str | None = None) -> dict[st
                 "total_inventory": obj.get("totalInventory"),
                 "tracks_inventory": obj.get("tracksInventory"),
                 "image_url": (obj.get("featuredImage") or {}).get("url"),
-                "product_url": obj.get("onlineStoreUrl"),
                 "shopify_gid": gid,
                 "updated_at": obj.get("updatedAt"),
             }

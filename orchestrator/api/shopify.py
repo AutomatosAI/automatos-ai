@@ -530,7 +530,6 @@ _SHOPIFY_BULK_CATALOG_QUERY = """{
         publishedAt
         priceRangeV2 { minVariantPrice { amount currencyCode } maxVariantPrice { amount currencyCode } }
         featuredImage { url altText }
-        onlineStoreUrl
         totalInventory
         tracksInventory
         variants { edges { node { id sku title price compareAtPrice inventoryQuantity availableForSale selectedOptions { name value } barcode } } }
