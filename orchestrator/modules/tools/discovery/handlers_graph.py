@@ -222,21 +222,26 @@ async def handle_graph_neighbors(
             if relation_filter and relation.lower() != relation_filter:
                 continue
             target = v if u == node_id else u
-            target_attrs = graph.nodes.get(target, {})
+            target_attrs = dict(graph.nodes.get(target, {}))
+            edge_attrs = dict(edge_data.get("attrs") or {})
             neighbors.append(
                 {
                     "target": str(target),
                     "target_label": target_attrs.get("label", str(target)),
+                    "target_attrs": target_attrs,
                     "relation": relation,
                     "confidence": edge_data.get("confidence", edge_data.get("weight", 1.0)),
+                    "weight": edge_data.get("weight"),
+                    "edge_attrs": edge_attrs,
                 }
             )
 
-        node_attrs = graph.nodes.get(node_id, {})
+        node_attrs = dict(graph.nodes.get(node_id, {}))
         return {
             "success": True,
             "node": str(node_id),
             "node_label": node_attrs.get("label", str(node_id)),
+            "node_attrs": node_attrs,
             "neighbor_count": len(neighbors),
             "neighbors": neighbors,
         }
