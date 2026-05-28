@@ -46,6 +46,13 @@ class WidgetPluginResult:
     surface (e.g. "applied shopify proactive_opener rewrite"). It is not
     sent to the agent.
 
+    `system_preamble` is an optional grounding block the dispatcher injects
+    into the LLM message history for the CURRENT turn only — prepended to
+    the latest user message in-memory. Unlike `message`, it is never
+    persisted to the transcript nor used for conversation titling, so it
+    grounds the agent fresh each turn without polluting stored history or
+    accumulating stale context. `None` (the default) means no grounding.
+
     `telemetry` is a free-form dict for the dispatcher to attach to its
     structured log line (e.g. counts of related products resolved,
     fixture identifiers used). Plugins should keep keys short and
@@ -54,6 +61,7 @@ class WidgetPluginResult:
 
     message: str
     context_note: Optional[str] = None
+    system_preamble: Optional[str] = None
     telemetry: Dict[str, Any] = field(default_factory=dict)
 
 

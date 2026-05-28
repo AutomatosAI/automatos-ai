@@ -379,6 +379,41 @@ def _build_cart_idle_opener_message(
     )
 
 
+def _build_page_context_preamble(page_context: dict) -> Optional[str]:
+    """Render the Shopify page context into a grounding preamble for a
+    regular (non-proactive) chat turn.
+
+    Reuses the same ordered field map and value formatter as the proactive
+    opener (:data:`_OPENER_CONTEXT_FIELDS`,
+    :func:`_format_opener_context_value`) so a product page grounds the
+    agent on identical facts whether it opened proactively or the shopper
+    typed first. Empty / zero / false fields are skipped by the formatter.
+
+    Returns ``None`` when nothing usable is present (e.g. a bare cart page
+    with no populated fields) — the caller then passes the turn through
+    ungrounded rather than emitting an empty ``Currently viewing:`` line.
+
+    Unlike :func:`_build_proactive_opener_message`, this carries NO tool /
+    output directives: it is prepended to a real user message, so it must
+    only supply facts and deixis resolution, never hijack the turn into
+    opener mode.
+    """
+    parts: list[str] = []
+    for src_key, label in _OPENER_CONTEXT_FIELDS:
+        rendered = _format_opener_context_value(label, (page_context or {}).get(src_key))
+        if rendered is not None:
+            parts.append(rendered)
+    if not parts:
+        return None
+    return (
+        "[PAGE_CONTEXT] The visitor is viewing this page right now. Treat "
+        'references like "this", "this product", "it" as the item below, and '
+        "use these as ground-truth facts — do not invent specs, pricing, or "
+        "availability beyond them. "
+        f"Currently viewing: {', '.join(parts)}."
+    )
+
+
 async def handle_widget_message(
     *,
     message: str,
@@ -395,19 +430,34 @@ async def handle_widget_message(
       (mirrors chat.py's ``PROACTIVE_TRIGGER_REASONS`` frozenset) AND
       ``page_context`` is not ``None`` → call the matching resolver +
       builder and return the rewritten directive as ``message``.
-    * any other case (no trigger, unknown trigger, missing context) →
-      return ``message`` unchanged. This includes mid-conversation
-      messages: the Shopify vertical does NOT prepend an opaque
-      ``(Context: ...)`` block — that behaviour is owned by the
-      generic plugin only.
+    * a regular turn (no / unknown trigger) WITH ``page_context`` → leave
+      ``message`` untouched and attach a ``system_preamble`` so the agent
+      is grounded on the page the shopper is looking at. The preamble is
+      injected into the LLM history for this turn only; it is never
+      persisted, so the stored transcript keeps the shopper's verbatim
+      words. The Shopify vertical still does NOT prepend an opaque
+      ``(Context: ...)`` block to the persisted ``message`` — that
+      behaviour is owned by the generic plugin only.
+    * ``page_context`` is ``None`` (or carries nothing renderable) →
+      return ``message`` unchanged with no grounding.
 
     ``telemetry`` carries the counts chat.py's ``PROACTIVE_REWRITE``
     log line surfaces (``trigger_reason``, ``related_count``) so the
     dispatcher rebuilds the log line from the plugin result without
     losing observability.
     """
-    if page_context is None or trigger_reason not in ("proactive_opener", "cart_idle"):
+    if page_context is None:
         return WidgetPluginResult(message=message)
+
+    if trigger_reason not in ("proactive_opener", "cart_idle"):
+        preamble = _build_page_context_preamble(page_context)
+        if preamble is None:
+            return WidgetPluginResult(message=message)
+        return WidgetPluginResult(
+            message=message,
+            context_note="shopify: page_context grounding",
+            system_preamble=preamble,
+        )
 
     workspace_str = str(workspace_id)
 

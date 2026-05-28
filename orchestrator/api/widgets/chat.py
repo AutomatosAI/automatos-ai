@@ -305,6 +305,36 @@ async def widget_chat(
         "%s HISTORY_LOADED: %d messages", log_extra, len(message_history)
     )
 
+    # PRD-141: a plugin MAY return a per-turn grounding preamble (e.g. the
+    # page the visitor is viewing). It rides on `system_preamble`, not
+    # `message`, so the persisted transcript and title stay the verbatim
+    # user text — we prepend it to the latest user turn in-memory only.
+    # Fully vertical-agnostic: chat.py never inspects the preamble's shape.
+    if (
+        plugin_result.system_preamble
+        and message_history
+        and message_history[-1].get("role") == "user"
+    ):
+        _last_parts = message_history[-1].get("parts") or [{"type": "text", "text": ""}]
+        _orig_text = next(
+            (p.get("text", "") for p in _last_parts
+             if isinstance(p, dict) and p.get("type") == "text"),
+            "",
+        )
+        message_history = message_history[:-1] + [{
+            "role": "user",
+            "parts": [{
+                "type": "text",
+                "text": f"{plugin_result.system_preamble}\n\n{_orig_text}",
+            }],
+        }]
+        logger.info(
+            "%s PAGE_CONTEXT_GROUNDED: vertical=%s preamble_len=%d",
+            log_extra,
+            vertical,
+            len(plugin_result.system_preamble),
+        )
+
     # API key can lock the agent — ignore client-provided agent_id when set
     # Resolve public_id (UUID) or legacy int to internal id
     from core.utils.agent_resolver import resolve_agent_id as _resolve_aid

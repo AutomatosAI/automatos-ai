@@ -47,13 +47,14 @@ def test_widget_plugin_result_is_a_dataclass():
 
 def test_widget_plugin_result_field_names():
     names = {f.name for f in fields(WidgetPluginResult)}
-    assert names == {"message", "context_note", "telemetry"}
+    assert names == {"message", "context_note", "system_preamble", "telemetry"}
 
 
 def test_widget_plugin_result_defaults():
     result = WidgetPluginResult(message="hello")
     assert result.message == "hello"
     assert result.context_note is None
+    assert result.system_preamble is None
     assert result.telemetry == {}
 
 
@@ -61,9 +62,11 @@ def test_widget_plugin_result_accepts_full_construction():
     result = WidgetPluginResult(
         message="rewritten",
         context_note="applied shopify rewrite",
+        system_preamble="[PAGE_CONTEXT] Currently viewing: product=Widget.",
         telemetry={"related": 3},
     )
     assert result.context_note == "applied shopify rewrite"
+    assert result.system_preamble == "[PAGE_CONTEXT] Currently viewing: product=Widget."
     assert result.telemetry == {"related": 3}
 
 
