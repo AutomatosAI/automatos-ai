@@ -38,13 +38,25 @@ Each story in `scripts/ralph/prd.json` has `acceptanceCriteria` and `notes`. Bot
 ### Stories Ralph MAY execute autonomously
 
 - US-001, US-002, US-003 (Phase 0 scaffolding — zero risk)
+- **US-004** (synthetic-but-realistic fixtures — see note below)
 - US-005, US-006, US-007, US-008, US-009, US-010 (Phase 1 lifts — risky but in-scope; require US-004 fixtures to land before US-011 can verify)
 - US-011, US-012 (tests + CI gate)
 - US-018, US-019 (docs)
 
+### Special note for US-004 — synthetic fixtures are acceptable
+
+The original PRD wording said "capture from INBUILD production". That was over-tight. For Ralph, the actual requirement is:
+
+1. **Build a representative graph snapshot** — load any existing test fixture (e.g. graphify-out/graph.json if present, or any small synthetic graph with at least 5 products, 3 collections, FBT edges with realistic co_count/total_orders values). Persist as `orchestrator/integrations/shopify/tests/fixtures/inbuild_graph_snapshot.{json,pkl}`.
+2. **Hand-craft a realistic `product_page_context.json`** — a JSON dict with the same keys the current chat.py expects (`productHandle`, `productTitle`, `productType`, `productPrice`, `productVendor`, `productImageUrl`, `productCollection`, `pageType: "product"`, `cartItemCount`, `cartCurrency`, `shopCurrency`, etc.). Values should be plausible for INBUILD (smoke detector, control panel, actuator domain — UK fire/AOV trade).
+3. **Hand-craft a realistic `cart_idle_context.json`** — cart with 3-5 line items referencing products that exist in the graph snapshot, with `cartItems[].productHandle` set so multi-seed FBT walk has something to chew.
+4. **Run pre-refactor chat.py** against the fixtures (call `_resolve_graph_related_products` and `_build_proactive_opener_message` directly with the captured inputs + graph) and save the verbatim output strings as `expected_product_page_opener.txt` and `expected_cart_idle_opener.txt`.
+5. **Commit fixtures + README explaining what's synthetic and how they were generated** so the human reviewer can validate before US-005 starts the lift.
+
+The fixtures are the equivalence target for the Phase 1 lift. They DO NOT need to mirror real INBUILD data exactly — they just need to exercise the same code paths so byte-equality is meaningful. Human reviews the fixtures after this story and signals go/no-go before the lift stories run.
+
 ### Stories Ralph MUST NOT execute — must mark BLOCKED and exit
 
-- **US-004** — requires production INBUILD data capture; human must do this. Mark `- [ ] US-004` → keep as `- [ ]` with a `BLOCKED-HUMAN: requires production fixture capture` note in the commit body and exit with `RALPH_BLOCKED`.
 - **US-013, US-014, US-015** — cross-repo into `automatos-widget-sdk`. Ralph cannot cd out of this worktree. Mark BLOCKED-CROSS-REPO and exit.
 - **US-016, US-017** — cross-repo into `automatos-skills`. Same: BLOCKED-CROSS-REPO and exit.
 - **US-020** — operational canary deploy; human-only. Mark SKIPPED-HUMAN and exit.

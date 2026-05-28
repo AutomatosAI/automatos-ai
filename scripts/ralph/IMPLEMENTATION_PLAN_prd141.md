@@ -15,7 +15,7 @@ Single source of truth for Ralph progress. Tick `- [x]` only after a story's acc
 
 ## Phase 1 — Lift Shopify into the plugin (the risky one)
 
-- [ ] US-004 — Capture INBUILD proactive opener + cart-idle fixtures from production *(MANUAL PREP — Ralph cannot run; flag for human)*
+- [ ] US-004 — Capture proactive opener + cart-idle fixtures *(synthetic-but-realistic acceptable — see PROMPT_build_prd141.md "Special note for US-004"; human reviews after Ralph generates)*
 - [ ] US-005 — Move PROACTIVE_OPENER_FIELDS constant into the Shopify integration folder
 - [ ] US-006 — Move _resolve_graph_related_products into Shopify plugin
 - [ ] US-007 — Move _resolve_cart_recommendations into Shopify plugin
@@ -48,7 +48,7 @@ Single source of truth for Ralph progress. Tick `- [x]` only after a story's acc
 ## Notes for Ralph
 
 - Phase 0 stories (US-001/002/003) are safe to run autonomously
-- US-004 requires production data access; Ralph should mark BLOCKED and exit if it reaches this story
+- US-004 now executable with synthetic fixtures (see PROMPT_build_prd141.md "Special note for US-004"). Human reviews fixtures after this story before US-005 starts.
 - US-013/014/015 are in a different repo (automatos-widget-sdk); Ralph should mark BLOCKED-CROSS-REPO and exit (human will set up a separate Ralph worktree for SDK work)
 - US-016/017 are in automatos-skills; same — BLOCKED-CROSS-REPO and exit
 - US-020 is operational; Ralph should mark SKIPPED-HUMAN and exit
