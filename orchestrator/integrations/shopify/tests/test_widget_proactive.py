@@ -1,22 +1,21 @@
-"""PRD-141 US-003 — Shopify shim plugin behaviour.
+"""PRD-141 — Shopify plugin behaviour.
 
 This test file pins three things:
 
 * Registration — importing ``integrations`` populates
   ``PLUGIN_REGISTRY["shopify"]`` with this module.
-* Pass-through gating — the shim matches the existing chat.py
+* Pass-through gating — the plugin matches chat.py's old
   ``is_proactive`` guard: anything other than
   ``trigger_reason in ("proactive_opener", "cart_idle")`` AND
   ``page_context is not None`` returns the message unchanged.
-* Delegation contract — when the shim DOES rewrite, it calls the
+* Wiring contract — when the plugin DOES rewrite, it calls the
   matching resolver + builder with the right arguments and returns the
-  builder's output verbatim as ``message``. After PRD-141 US-008 the
-  four helpers all live in :mod:`integrations.shopify.widget_proactive`,
-  so the delegation contract is now a pure intra-module wiring check;
-  US-011's snapshot tests pin the actual builder output byte-for-byte
-  against the US-004 INBUILD fixtures.
+  builder's output verbatim as ``message``. All four helpers live in
+  :mod:`integrations.shopify.widget_proactive`, so the wiring contract
+  is a pure intra-module check; US-011's snapshot tests pin the actual
+  builder output byte-for-byte against the US-004 INBUILD fixtures.
 
-The delegation tests monkey-patch the four helpers directly on
+The wiring tests monkey-patch the four helpers directly on
 :mod:`widget_proactive` rather than running the real graph/builder
 code. The real resolvers traverse the Shopify graph and the real
 builders close over the context-field mapping — overkill for a unit
@@ -48,10 +47,9 @@ def workspace_id():
 
 @pytest.fixture
 def fake_chat(monkeypatch):
-    """Replace the shim's downstream helpers with sentinels.
+    """Replace the plugin's downstream helpers with sentinels.
 
-    Since PRD-141 US-008 all four helpers live on
-    :mod:`widget_proactive` itself:
+    All four helpers live on :mod:`widget_proactive` itself:
 
     * ``_resolve_graph_related_products`` (local since US-006)
     * ``_resolve_cart_recommendations`` (local since US-007)
@@ -59,9 +57,9 @@ def fake_chat(monkeypatch):
     * ``_build_cart_idle_opener_message`` (local since US-008)
 
     Each is patched in place via ``monkeypatch.setattr``. The fake
-    records every call so tests can assert the shim forwards
+    records every call so tests can assert the plugin forwards
     ``workspace_id`` and ``page_context`` correctly, and returns a
-    sentinel message so tests can assert the shim wires the builder's
+    sentinel message so tests can assert the plugin wires the builder's
     output into ``WidgetPluginResult.message`` unmodified.
 
     Fixture name kept as ``fake_chat`` for git-history continuity
@@ -249,7 +247,7 @@ async def test_proactive_opener_delegates_to_chat_helpers(fake_chat, db, workspa
 
     # 4. Result wires the builder output verbatim into message.
     assert result.message == "FAKE_PRODUCT_OPENER_MESSAGE"
-    assert result.context_note == "shopify shim: proactive_opener rewrite"
+    assert result.context_note == "shopify: proactive_opener rewrite"
     assert result.telemetry == {
         "trigger_reason": "proactive_opener",
         "related_count": 1,
@@ -289,7 +287,7 @@ async def test_cart_idle_delegates_to_chat_helpers(fake_chat, db, workspace_id):
     assert fake_chat["build_product"] == []
 
     assert result.message == "FAKE_CART_IDLE_OPENER_MESSAGE"
-    assert result.context_note == "shopify shim: cart_idle rewrite"
+    assert result.context_note == "shopify: cart_idle rewrite"
     assert result.telemetry == {
         "trigger_reason": "cart_idle",
         "related_count": 2,
@@ -308,7 +306,7 @@ async def test_cart_idle_delegates_to_chat_helpers(fake_chat, db, workspace_id):
 # the exact production code path while remaining deterministic.
 #
 # These tests must KEEP PASSING through every remaining lift (US-010 in
-# particular rewires chat.py to dispatch via the registry — same shim
+# particular rewires chat.py to dispatch via the registry — same plugin
 # entry point, same expected output). If one fails, the lift broke
 # equivalence — fix the lift, NOT the golden fixture (per US-011 notes).
 
@@ -323,7 +321,7 @@ async def test_product_page_opener_byte_equality(
 ):
     """PRD-007 product-page opener — byte-equal to the US-004 fixture.
 
-    Exercises the proactive_opener path end-to-end: shim gates on
+    Exercises the proactive_opener path end-to-end: plugin gates on
     (trigger_reason, page_context), calls ``_resolve_graph_related_products``
     against the fixture graph, calls ``_build_proactive_opener_message``,
     returns the directive as ``result.message``.
@@ -342,7 +340,7 @@ async def test_product_page_opener_byte_equality(
     )
 
     assert result.message == expected_product_page_opener
-    assert result.context_note == "shopify shim: proactive_opener rewrite"
+    assert result.context_note == "shopify: proactive_opener rewrite"
 
 
 @pytest.mark.asyncio
@@ -375,7 +373,7 @@ async def test_cart_idle_opener_byte_equality(
     )
 
     assert result.message == expected_cart_idle_opener
-    assert result.context_note == "shopify shim: cart_idle rewrite"
+    assert result.context_note == "shopify: cart_idle rewrite"
 
 
 @pytest.mark.parametrize(
@@ -388,9 +386,9 @@ async def test_no_context_no_rewrite(trigger, db, workspace_id):
     """US-011 AC test 4: page_context=None ⇒ message returned unchanged.
 
     Parametrised across every trigger value (including ``None`` and an
-    unknown trigger) because the shim's gate is symmetric — either side
+    unknown trigger) because the plugin's gate is symmetric — either side
     short-circuits the rewrite. This is a regression guard for the
-    chat.py ``is_proactive`` semantics replicated in the shim.
+    chat.py ``is_proactive`` semantics now owned by the plugin.
     """
     result = await widget_proactive.handle_widget_message(
         message="user message verbatim",

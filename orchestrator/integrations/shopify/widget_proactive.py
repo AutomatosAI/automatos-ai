@@ -1,33 +1,33 @@
 """Shopify vertical plugin — proactive opener + cart-idle directive builders.
 
-PRD-141 US-003. Registered as ``PLUGIN_REGISTRY["shopify"]`` and used by
-any workspace whose ``settings.vertical == "shopify"``.
+PRD-141. Registered as ``PLUGIN_REGISTRY["shopify"]`` and used by any
+workspace whose ``settings.vertical == "shopify"``.
 
 The module encapsulates the dispatch contract — ``handle_widget_message``
 matching the :class:`integrations.WidgetPlugin` protocol — together with
 the four Shopify-specific helpers it needs:
 
-* :func:`_resolve_graph_related_products` (lifted in US-006) — single-seed
-  FBT / collection / vendor traversal for the product-page opener.
-* :func:`_resolve_cart_recommendations` (lifted in US-007) — multi-seed
-  FBT aggregation for the cart-idle nudge.
-* :func:`_build_proactive_opener_message` (lifted in US-008) — product-page
-  directive builder, closes over ``_OPENER_CONTEXT_FIELDS`` and
+* :func:`_resolve_graph_related_products` — single-seed FBT / collection /
+  vendor traversal for the product-page opener.
+* :func:`_resolve_cart_recommendations` — multi-seed FBT aggregation for
+  the cart-idle nudge.
+* :func:`_build_proactive_opener_message` — product-page directive
+  builder, closes over ``_OPENER_CONTEXT_FIELDS`` and
   ``_format_opener_context_value`` from :mod:`.context_fields`.
-* :func:`_build_cart_idle_opener_message` (lifted in US-008) — cart-idle
-  directive builder; no context-field dependency.
+* :func:`_build_cart_idle_opener_message` — cart-idle directive builder;
+  no context-field dependency.
 
-``orchestrator/api/widgets/chat.py`` still drives the proactive rewrite
-inline through US-009/010 — it imports the four helpers from this module
-to keep production behaviour unchanged until the dispatch is rewired to
-``PLUGIN_REGISTRY``. After US-010 the only entry point is
-``handle_widget_message`` and chat.py contains zero Shopify identifiers.
+After PRD-141 US-010, ``orchestrator/api/widgets/chat.py`` calls this
+module only through ``PLUGIN_REGISTRY["shopify"].handle_widget_message``
+— there are no direct imports of the underlying helpers from outside
+this package, and chat.py contains zero Shopify identifiers.
 
-The ``PROACTIVE_TRIGGER_REASONS`` frozenset still lives in chat.py and
-is intentionally NOT imported here — the two trigger strings are
-hardcoded inline so the gate works without circular imports. The
-duplication disappears in US-010 when the constant moves alongside the
-dispatch.
+The two proactive trigger strings (``proactive_opener``, ``cart_idle``)
+are hardcoded inline below for the gate check. They mirror the
+``PROACTIVE_TRIGGER_REASONS`` frozenset in chat.py, which controls the
+generic LLM-call shape (text-only, no composio) and is deliberately
+kept on the generic side: a barbershop opener would use the same
+``proactive_opener`` value to flip the agent into opener mode.
 """
 
 from __future__ import annotations
@@ -387,24 +387,24 @@ async def handle_widget_message(
     workspace_id: UUID,
     db: Session,
 ) -> WidgetPluginResult:
-    """Replicates the inline chat.py proactive-rewrite block byte-for-byte.
+    """Build the Shopify proactive opener / cart-idle directive.
 
-    Behaviour mirrors ``api/widgets/chat.py``:
+    Behaviour:
 
     * ``trigger_reason`` is ``"proactive_opener"`` or ``"cart_idle"``
-      (the two members of chat.py's ``PROACTIVE_TRIGGER_REASONS``
-      frozenset) AND ``page_context`` is not ``None`` → call the
-      matching resolver + builder and return the rewritten directive
-      as ``message``.
+      (mirrors chat.py's ``PROACTIVE_TRIGGER_REASONS`` frozenset) AND
+      ``page_context`` is not ``None`` → call the matching resolver +
+      builder and return the rewritten directive as ``message``.
     * any other case (no trigger, unknown trigger, missing context) →
       return ``message`` unchanged. This includes mid-conversation
       messages: the Shopify vertical does NOT prepend an opaque
-      ``(Context: ...)`` block today; that behaviour is owned by the
+      ``(Context: ...)`` block — that behaviour is owned by the
       generic plugin only.
 
-    ``telemetry`` carries the same counts chat.py's current
-    ``PROACTIVE_REWRITE`` log line captures so US-010 can rebuild that
-    log line from the plugin result without losing observability.
+    ``telemetry`` carries the counts chat.py's ``PROACTIVE_REWRITE``
+    log line surfaces (``trigger_reason``, ``related_count``) so the
+    dispatcher rebuilds the log line from the plugin result without
+    losing observability.
     """
     if page_context is None or trigger_reason not in ("proactive_opener", "cart_idle"):
         return WidgetPluginResult(message=message)
@@ -421,7 +421,7 @@ async def handle_widget_message(
         )
         return WidgetPluginResult(
             message=rewritten,
-            context_note="shopify shim: cart_idle rewrite",
+            context_note="shopify: cart_idle rewrite",
             telemetry={
                 "trigger_reason": trigger_reason,
                 "related_count": len(recommendations),
@@ -437,7 +437,7 @@ async def handle_widget_message(
     )
     return WidgetPluginResult(
         message=rewritten,
-        context_note="shopify shim: proactive_opener rewrite",
+        context_note="shopify: proactive_opener rewrite",
         telemetry={
             "trigger_reason": trigger_reason,
             "related_count": len(related_products),

@@ -27,12 +27,7 @@ from sqlalchemy.orm import Session
 
 from api.widgets.auth import WidgetAuthContext, require_permission, widget_auth
 from core.database.database import get_db
-from integrations.shopify.widget_proactive import (
-    _build_cart_idle_opener_message,
-    _build_proactive_opener_message,
-    _resolve_cart_recommendations,
-    _resolve_graph_related_products,
-)
+from integrations import PLUGIN_REGISTRY
 from modules.tools.widget_callback import (
     WIDGET_OPEN_CALLBACK_FORM_NAME,
     WIDGET_SIGNAL_KEY,
@@ -109,6 +104,22 @@ def _get_widget_user_id(db: Session) -> int:
     return result[0]
 
 
+def _resolve_workspace_vertical(db: Session, workspace_id: str) -> str:
+    """PRD-141: read ``workspace.settings.vertical`` for plugin dispatch.
+
+    Returns ``"generic"`` when the workspace has no row, no settings,
+    or no ``vertical`` field — that's the default pass-through plugin.
+    Same raw-SQL pattern as ``channels/sender.py`` so we don't pull the
+    full ORM object just to read one JSONB key.
+    """
+    row = db.execute(
+        text("SELECT settings FROM workspaces WHERE id = :ws"),
+        {"ws": workspace_id},
+    ).fetchone()
+    settings = row.settings if (row and isinstance(row.settings, dict)) else {}
+    return settings.get("vertical") or "generic"
+
+
 # ---------------------------------------------------------------------------
 # POST /chat — send message, get SSE stream back
 # ---------------------------------------------------------------------------
@@ -173,55 +184,55 @@ async def widget_chat(
     workspace_id = str(auth.workspace_id)
     user_id = _get_widget_user_id(db)
 
-    # PRD-007 / PRD-008-B: rewrite ``message`` for proactive opener requests
-    # so the agent sees a directive, not an empty / placeholder user
-    # utterance from the SDK.
+    # PRD-141: dispatch the message through the per-workspace vertical
+    # plugin. Generic surfaces (this file) hold zero vertical-specific
+    # keys — all rewrite logic lives under ``integrations/<vertical>/``.
+    #
+    # ``is_proactive`` stays defined on the request shape (a known
+    # proactive trigger + populated context) because it controls the
+    # downstream LLM-call shape (force_text_only, skip_composio); the
+    # plugin's decision to rewrite or pass through is independent of
+    # whether the agent should run in opener mode.
+    vertical = _resolve_workspace_vertical(db, workspace_id)
+    plugin = PLUGIN_REGISTRY.get(vertical)
+    if plugin is None:
+        logger.warning(
+            "%s UNKNOWN_VERTICAL: %s — falling back to generic plugin",
+            log_extra,
+            vertical,
+        )
+        vertical = "generic"
+        plugin = PLUGIN_REGISTRY["generic"]
     is_proactive = (
         body.trigger_reason in PROACTIVE_TRIGGER_REASONS
         and body.page_context is not None
     )
+    original_msg_len = len(body.message or "")
+    plugin_result = await plugin.handle_widget_message(
+        message=body.message,
+        page_context=body.page_context,
+        trigger_reason=body.trigger_reason,
+        workspace_id=auth.workspace_id,
+        db=db,
+    )
+    body.message = plugin_result.message
     if is_proactive:
-        original_len = len(body.message or "")
-        pctx = body.page_context or {}
-        if body.trigger_reason == "cart_idle":
-            # PRD-008-B Feature C2: walk FBT edges across every cart line
-            # item, dedupe, score by cross-cutting hits, return top recs.
-            # Empty list ⇒ generic "anything else?" nudge with no fabricated
-            # products. Heavier than the product-page resolver (multi-seed
-            # traversal) — still bounded by 1-hop on a small graph.
-            recommendations = await _resolve_cart_recommendations(
-                workspace_id, pctx,
-            )
-            body.message = _build_cart_idle_opener_message(
-                pctx,
-                recommendations=recommendations,
-            )
-            related_count = len(recommendations)
-        else:
-            # PRD-007 addendum (post PRD-009 Layer 2): single-seed traversal
-            # — top 1 FBT pair + collection sibling + vendor sibling.
-            related_products = await _resolve_graph_related_products(
-                workspace_id, pctx,
-            )
-            body.message = _build_proactive_opener_message(
-                pctx,
-                related_products=related_products,
-            )
-            related_count = len(related_products)
         logger.info(
-            "%s PROACTIVE_REWRITE: trigger=%s original_msg_len=%d new_msg_len=%d related=%d new_preview=%s",
+            "%s PROACTIVE_REWRITE: vertical=%s trigger=%s original_msg_len=%d new_msg_len=%d telemetry=%s new_preview=%s",
             log_extra,
+            vertical,
             body.trigger_reason,
-            original_len,
+            original_msg_len,
             len(body.message),
-            related_count,
+            plugin_result.telemetry,
             _short(body.message),
         )
     elif body.trigger_reason:
         logger.warning(
-            "%s UNKNOWN_TRIGGER_REASON: %s (page_context=%s) — proceeding as normal chat",
+            "%s UNKNOWN_TRIGGER_REASON: %s vertical=%s (page_context=%s) — proceeding as normal chat",
             log_extra,
             body.trigger_reason,
+            vertical,
             "present" if body.page_context else "missing",
         )
 
@@ -460,11 +471,14 @@ async def widget_chat(
                                 not callback_form_emitted
                                 and inner.get(WIDGET_SIGNAL_KEY) == WIDGET_SIGNAL_OPEN_CALLBACK_FORM
                             ):
+                                # PRD-141: ``product_context`` is sourced from
+                                # the LLM tool call (tool-data first, tool-start
+                                # input args second). The previous Shopify-key
+                                # fallback on ``body.page_context`` is gone —
+                                # generic surfaces hold no vertical knowledge.
                                 product_context = (
                                     inner.get("product_context")
                                     or callback_form_args.get("product_context")
-                                    or (body.page_context or {}).get("productTitle")
-                                    or (body.page_context or {}).get("productHandle")
                                 )
                                 yield _emit_open_callback_form(product_context)
                                 callback_form_emitted = True

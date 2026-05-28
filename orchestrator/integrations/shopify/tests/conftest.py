@@ -14,8 +14,7 @@ After PRD-141 US-008 every proactive helper
 ``_build_proactive_opener_message``, ``_build_cart_idle_opener_message``)
 lives in :mod:`integrations.shopify.widget_proactive`. The fixture
 imports them directly — no more AST extraction from chat.py, and no
-more ``api.widgets.chat`` injection into ``sys.modules`` (the shim no
-longer reaches back into chat.py for anything). Only the
+more ``api.widgets.chat`` injection into ``sys.modules``. Only the
 ``GraphifyService`` stub is still needed.
 
 Synthetic-fixture caveat: the graph is hand-crafted to exercise the
@@ -85,7 +84,7 @@ def expected_cart_idle_opener() -> str:
 def real_chat_with_graph(monkeypatch, inbuild_graph):
     """Inject a fixture-bound ``GraphifyService`` for the lifted resolvers.
 
-    The Shopify shim's resolvers (``_resolve_graph_related_products``,
+    The Shopify plugin's resolvers (``_resolve_graph_related_products``,
     ``_resolve_cart_recommendations``) do ``from
     modules.knowledge.graph_service import GraphifyService`` lazily at
     call time. This fixture replaces that import with a deterministic
@@ -94,10 +93,9 @@ def real_chat_with_graph(monkeypatch, inbuild_graph):
     side-channel: the graph source.
 
     Fixture name kept for git-history continuity through the Phase 1
-    lift (US-005/006/007/008). After US-008 there is no longer any
-    chat.py injection — the shim calls local builders directly — so
-    "real chat" in the name is now historical. US-010's dispatch
-    rewire is a candidate moment to rename.
+    lift (US-005/006/007/008/010). After US-008 there is no longer any
+    chat.py injection — the plugin calls local builders directly — so
+    "real chat" in the name is now historical.
     """
     fake_graph_service_mod = types.ModuleType("modules.knowledge.graph_service")
 
