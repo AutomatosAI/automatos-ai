@@ -1,0 +1,343 @@
+{
+  "directed": false,
+  "edges": [
+    {
+      "attrs": {
+        "co_count": 42,
+        "total_orders": 57
+      },
+      "confidence_score": 0.85,
+      "relation": "frequently_bought_with",
+      "source": "hochiki-aln",
+      "target": "hochiki-base-ybn",
+      "weight": 42
+    },
+    {
+      "attrs": {
+        "co_count": 18,
+        "total_orders": 57
+      },
+      "confidence_score": 0.85,
+      "relation": "frequently_bought_with",
+      "source": "hochiki-aln",
+      "target": "hochiki-atg",
+      "weight": 18
+    },
+    {
+      "attrs": {
+        "co_count": 12,
+        "total_orders": 57
+      },
+      "confidence_score": 0.85,
+      "relation": "frequently_bought_with",
+      "source": "hochiki-aln",
+      "target": "advanced-mxpro5-4loop",
+      "weight": 12
+    },
+    {
+      "attrs": {
+        "co_count": 9,
+        "total_orders": 57
+      },
+      "confidence_score": 0.85,
+      "relation": "frequently_bought_with",
+      "source": "hochiki-aln",
+      "target": "hochiki-ybo",
+      "weight": 9
+    },
+    {
+      "attrs": {},
+      "confidence_score": 0.6,
+      "relation": "by_vendor",
+      "source": "hochiki-aln",
+      "target": "hochiki-banshee",
+      "weight": 1.0
+    },
+    {
+      "attrs": {},
+      "confidence_score": 0.9,
+      "relation": "in_collection",
+      "source": "hochiki-aln",
+      "target": "col-addressable-fire-systems",
+      "weight": 1.0
+    },
+    {
+      "attrs": {},
+      "confidence_score": 0.9,
+      "relation": "in_collection",
+      "source": "hochiki-aln",
+      "target": "col-hochiki-range",
+      "weight": 1.0
+    },
+    {
+      "attrs": {},
+      "confidence_score": 0.6,
+      "relation": "by_vendor",
+      "source": "hochiki-aln",
+      "target": "hochiki-acb",
+      "weight": 1.0
+    },
+    {
+      "attrs": {
+        "co_count": 24,
+        "total_orders": 31
+      },
+      "confidence_score": 0.85,
+      "relation": "frequently_bought_with",
+      "source": "hochiki-acb",
+      "target": "hochiki-base-ybn",
+      "weight": 24
+    },
+    {
+      "attrs": {
+        "co_count": 15,
+        "total_orders": 31
+      },
+      "confidence_score": 0.85,
+      "relation": "frequently_bought_with",
+      "source": "hochiki-acb",
+      "target": "hochiki-banshee",
+      "weight": 15
+    },
+    {
+      "attrs": {
+        "co_count": 8,
+        "total_orders": 31
+      },
+      "confidence_score": 0.85,
+      "relation": "frequently_bought_with",
+      "source": "hochiki-acb",
+      "target": "advanced-mxpro5-4loop",
+      "weight": 8
+    },
+    {
+      "attrs": {},
+      "confidence_score": 0.9,
+      "relation": "in_collection",
+      "source": "hochiki-acb",
+      "target": "col-addressable-fire-systems",
+      "weight": 1.0
+    },
+    {
+      "attrs": {},
+      "confidence_score": 0.9,
+      "relation": "in_collection",
+      "source": "hochiki-acb",
+      "target": "col-hochiki-range",
+      "weight": 1.0
+    },
+    {
+      "attrs": {},
+      "confidence_score": 0.6,
+      "relation": "by_vendor",
+      "source": "hochiki-acb",
+      "target": "hochiki-atg",
+      "weight": 1.0
+    },
+    {
+      "attrs": {
+        "co_count": 20,
+        "total_orders": 31
+      },
+      "confidence_score": 0.85,
+      "relation": "frequently_bought_with",
+      "source": "hochiki-atg",
+      "target": "hochiki-base-ybn",
+      "weight": 20
+    },
+    {
+      "attrs": {
+        "co_count": 11,
+        "total_orders": 31
+      },
+      "confidence_score": 0.85,
+      "relation": "frequently_bought_with",
+      "source": "hochiki-atg",
+      "target": "advanced-mxpro5-4loop",
+      "weight": 11
+    },
+    {
+      "attrs": {},
+      "confidence_score": 0.9,
+      "relation": "in_collection",
+      "source": "hochiki-atg",
+      "target": "col-hochiki-range",
+      "weight": 1.0
+    },
+    {
+      "attrs": {},
+      "confidence_score": 0.9,
+      "relation": "in_collection",
+      "source": "hochiki-ybo",
+      "target": "col-hochiki-range",
+      "weight": 1.0
+    },
+    {
+      "attrs": {},
+      "confidence_score": 0.9,
+      "relation": "in_collection",
+      "source": "hochiki-banshee",
+      "target": "col-hochiki-range",
+      "weight": 1.0
+    },
+    {
+      "attrs": {},
+      "confidence_score": 0.9,
+      "relation": "in_collection",
+      "source": "hochiki-base-ybn",
+      "target": "col-hochiki-range",
+      "weight": 1.0
+    },
+    {
+      "attrs": {},
+      "confidence_score": 0.6,
+      "relation": "by_vendor",
+      "source": "apollo-xp95-optical",
+      "target": "apollo-xp95-heat",
+      "weight": 1.0
+    },
+    {
+      "attrs": {
+        "co_count": 7,
+        "total_orders": 22
+      },
+      "confidence_score": 0.85,
+      "relation": "frequently_bought_with",
+      "source": "apollo-xp95-optical",
+      "target": "kentec-syncro-2loop",
+      "weight": 7
+    },
+    {
+      "attrs": {},
+      "confidence_score": 0.9,
+      "relation": "in_collection",
+      "source": "apollo-xp95-optical",
+      "target": "col-addressable-fire-systems",
+      "weight": 1.0
+    },
+    {
+      "attrs": {},
+      "confidence_score": 0.9,
+      "relation": "in_collection",
+      "source": "apollo-xp95-heat",
+      "target": "col-addressable-fire-systems",
+      "weight": 1.0
+    },
+    {
+      "attrs": {},
+      "confidence_score": 0.9,
+      "relation": "in_collection",
+      "source": "advanced-mxpro5-4loop",
+      "target": "col-addressable-fire-systems",
+      "weight": 1.0
+    },
+    {
+      "attrs": {},
+      "confidence_score": 0.9,
+      "relation": "in_collection",
+      "source": "kentec-syncro-2loop",
+      "target": "col-addressable-fire-systems",
+      "weight": 1.0
+    }
+  ],
+  "graph": {},
+  "multigraph": false,
+  "nodes": [
+    {
+      "attrs": {
+        "handle": "hochiki-aln"
+      },
+      "file_type": "shopify_product",
+      "id": "hochiki-aln",
+      "label": "Hochiki ALN Optical Smoke Detector"
+    },
+    {
+      "attrs": {
+        "handle": "hochiki-acb"
+      },
+      "file_type": "shopify_product",
+      "id": "hochiki-acb",
+      "label": "Hochiki ACB Multi-Sensor Detector"
+    },
+    {
+      "attrs": {
+        "handle": "hochiki-atg"
+      },
+      "file_type": "shopify_product",
+      "id": "hochiki-atg",
+      "label": "Hochiki ATG Heat Detector"
+    },
+    {
+      "attrs": {
+        "handle": "hochiki-ybo"
+      },
+      "file_type": "shopify_product",
+      "id": "hochiki-ybo",
+      "label": "Hochiki YBO Manual Call Point"
+    },
+    {
+      "attrs": {
+        "handle": "hochiki-banshee"
+      },
+      "file_type": "shopify_product",
+      "id": "hochiki-banshee",
+      "label": "Hochiki Banshee Wall Sounder"
+    },
+    {
+      "attrs": {
+        "handle": "hochiki-base-ybn"
+      },
+      "file_type": "shopify_product",
+      "id": "hochiki-base-ybn",
+      "label": "Hochiki YBN Detector Base"
+    },
+    {
+      "attrs": {
+        "handle": "apollo-xp95-optical"
+      },
+      "file_type": "shopify_product",
+      "id": "apollo-xp95-optical",
+      "label": "Apollo XP95 Optical Detector"
+    },
+    {
+      "attrs": {
+        "handle": "apollo-xp95-heat"
+      },
+      "file_type": "shopify_product",
+      "id": "apollo-xp95-heat",
+      "label": "Apollo XP95 Heat Detector"
+    },
+    {
+      "attrs": {
+        "handle": "advanced-mxpro5-4loop"
+      },
+      "file_type": "shopify_product",
+      "id": "advanced-mxpro5-4loop",
+      "label": "Advanced MxPro5 4-Loop Panel"
+    },
+    {
+      "attrs": {
+        "handle": "kentec-syncro-2loop"
+      },
+      "file_type": "shopify_product",
+      "id": "kentec-syncro-2loop",
+      "label": "Kentec Syncro 2-Loop Panel"
+    },
+    {
+      "attrs": {
+        "handle": "addressable-fire-systems"
+      },
+      "file_type": "shopify_collection",
+      "id": "col-addressable-fire-systems",
+      "label": "Addressable Fire Systems"
+    },
+    {
+      "attrs": {
+        "handle": "hochiki-range"
+      },
+      "file_type": "shopify_collection",
+      "id": "col-hochiki-range",
+      "label": "Hochiki Range"
+    }
+  ]
+}
