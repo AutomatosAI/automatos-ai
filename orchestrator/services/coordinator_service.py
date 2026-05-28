@@ -1481,6 +1481,18 @@ class CoordinatorService:
                     actor_type=ActorType.COORDINATOR,
                     actor_id="coordinator",
                     payload={
+                        # US-009 user-facing fields: tell the user what limit was
+                        # hit and how to raise it, before any budget-driven pause.
+                        "limit_type": "mission_token_budget",
+                        "spent": run.tokens_used,
+                        "limit": run.token_budget_estimate,
+                        "message": (
+                            f"This mission has used {run.tokens_used:,} tokens, over its "
+                            f"estimated budget of {run.token_budget_estimate:,}. It will keep "
+                            "running; an admin can raise the mission token budget or the "
+                            "power-mode caps in Settings > Coordination."
+                        ),
+                        # Established diagnostic fields (parity with reconciler emit).
                         "tokens_used": run.tokens_used,
                         "token_budget_estimate": run.token_budget_estimate,
                         "ratio": round(run.tokens_used / run.token_budget_estimate, 2),
