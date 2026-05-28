@@ -157,7 +157,7 @@ class ProjectContextAnalyzer:
                     return "python", "flask"
                 elif "django" in content:
                     return "python", "django"
-            except:
+            except Exception:
                 pass
         
         # Check pyproject.toml
@@ -171,7 +171,7 @@ class ProjectContextAnalyzer:
                     return "python", "flask"
                 elif "django" in content:
                     return "python", "django"
-            except:
+            except Exception:
                 pass
         
         return "python", "generic"
@@ -206,7 +206,7 @@ class ProjectContextAnalyzer:
                     return lang, "nestjs"
                 else:
                     return lang, "generic"
-        except:
+        except Exception:
             return "javascript", "generic"
     
     def _detect_by_files(self, project_path: Path) -> Tuple[str, str]:
@@ -246,7 +246,7 @@ class ProjectContextAnalyzer:
         
         try:
             subdirs = {d.name.lower() for d in project_path.iterdir() if d.is_dir()}
-        except:
+        except Exception:
             return "unknown"
         
         # MVC pattern
@@ -296,7 +296,7 @@ class ProjectContextAnalyzer:
                             # Extract package name
                             pkg = line.split('==')[0].split('>=')[0].split('<=')[0].split('[')[0]
                             dependencies.append(pkg)
-                except:
+                except Exception:
                     pass
         
         elif language in ("javascript", "typescript"):
@@ -307,7 +307,7 @@ class ProjectContextAnalyzer:
                     with open(pkg_file) as f:
                         data = json.load(f)
                         dependencies.extend(data.get("dependencies", {}).keys())
-                except:
+                except Exception:
                     pass
         
         return dependencies[:50]  # Limit to first 50

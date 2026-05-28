@@ -471,7 +471,7 @@ async def get_system_health(ctx: RequestContext = Depends(get_request_context_hy
             # Verify we can access document chunks (if table exists)
             try:
                 chunk_count = db.execute("SELECT COUNT(*) FROM document_chunks").scalar()
-            except:
+            except Exception:
                 chunk_count = 0
             
             latency_ms = (time.time() - start) * 1000

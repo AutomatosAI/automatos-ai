@@ -306,7 +306,7 @@ async def get_item(
             try:
                 schema_fields = cred_type.schema_definition
                 field_names = [field.get('name', '') for field in schema_fields if field.get('name')]
-            except:
+            except Exception:
                 field_names = []
             
             responses.append(CredentialResponse(
@@ -370,7 +370,7 @@ async def get_credential(
         try:
             decrypted = store.encryption_service.decrypt_dict(cred.encrypted_data)
             field_names = list(decrypted.keys())
-        except:
+        except Exception:
             field_names = []
             decrypted = {}
 
