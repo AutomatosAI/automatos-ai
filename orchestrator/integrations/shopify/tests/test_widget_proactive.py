@@ -1,32 +1,31 @@
-"""PRD-141 US-003 — Shopify shim plugin behaviour.
+"""PRD-141 — Shopify plugin behaviour.
 
 This test file pins three things:
 
 * Registration — importing ``integrations`` populates
   ``PLUGIN_REGISTRY["shopify"]`` with this module.
-* Pass-through gating — the shim matches the existing chat.py
+* Pass-through gating — the plugin matches chat.py's old
   ``is_proactive`` guard: anything other than
   ``trigger_reason in ("proactive_opener", "cart_idle")`` AND
   ``page_context is not None`` returns the message unchanged.
-* Delegation contract — when the shim DOES rewrite, it calls the
-  matching chat.py helper with the right arguments and returns the
-  builder's output verbatim as ``message``. Combined with the fact
-  that the chat.py builders themselves are unchanged in US-003, this
-  is the transitive equivalence guarantee that US-011 will then pin
-  byte-for-byte against captured INBUILD fixtures.
+* Wiring contract — when the plugin DOES rewrite, it calls the
+  matching resolver + builder with the right arguments and returns the
+  builder's output verbatim as ``message``. All four helpers live in
+  :mod:`integrations.shopify.widget_proactive`, so the wiring contract
+  is a pure intra-module check; US-011's snapshot tests pin the actual
+  builder output byte-for-byte against the US-004 INBUILD fixtures.
 
-The delegation tests inject a **fake** ``api.widgets.chat`` module
-into ``sys.modules`` via ``monkeypatch`` rather than loading the real
-one. The real module pulls in the entire FastAPI / RAG / multimodal
-dependency tree which is overkill for a unit test of a 60-line shim.
-US-011 will exercise the real path against captured production
-fixtures — that is where byte-equivalence is enforced.
+The wiring tests monkey-patch the four helpers directly on
+:mod:`widget_proactive` rather than running the real graph/builder
+code. The real resolvers traverse the Shopify graph and the real
+builders close over the context-field mapping — overkill for a unit
+test of the dispatch contract. US-011 exercises the real path against
+the deterministic fixture graph; that is where byte-equivalence is
+enforced.
 """
 
 from __future__ import annotations
 
-import sys
-import types
 from unittest.mock import MagicMock
 from uuid import uuid4
 
@@ -48,15 +47,25 @@ def workspace_id():
 
 @pytest.fixture
 def fake_chat(monkeypatch):
-    """Replace ``api.widgets.chat`` in ``sys.modules`` with a fake.
+    """Replace the plugin's downstream helpers with sentinels.
 
-    The fake records every call so tests can assert the shim forwards
+    All four helpers live on :mod:`widget_proactive` itself:
+
+    * ``_resolve_graph_related_products`` (local since US-006)
+    * ``_resolve_cart_recommendations`` (local since US-007)
+    * ``_build_proactive_opener_message`` (local since US-008)
+    * ``_build_cart_idle_opener_message`` (local since US-008)
+
+    Each is patched in place via ``monkeypatch.setattr``. The fake
+    records every call so tests can assert the plugin forwards
     ``workspace_id`` and ``page_context`` correctly, and returns a
-    sentinel message so tests can assert the shim wires the builder's
+    sentinel message so tests can assert the plugin wires the builder's
     output into ``WidgetPluginResult.message`` unmodified.
-    """
-    fake = types.ModuleType("api.widgets.chat")
 
+    Fixture name kept as ``fake_chat`` for git-history continuity
+    through the Phase 1 lift; the historical "chat" reference now means
+    "the proactive helpers that used to live in chat.py".
+    """
     calls: dict[str, list] = {
         "resolve_products": [],
         "resolve_cart": [],
@@ -97,12 +106,26 @@ def fake_chat(monkeypatch):
         })
         return "FAKE_CART_IDLE_OPENER_MESSAGE"
 
-    fake._resolve_graph_related_products = fake_resolve_products
-    fake._resolve_cart_recommendations = fake_resolve_cart
-    fake._build_proactive_opener_message = fake_build_product
-    fake._build_cart_idle_opener_message = fake_build_cart
-
-    monkeypatch.setitem(sys.modules, "api.widgets.chat", fake)
+    monkeypatch.setattr(
+        widget_proactive,
+        "_resolve_graph_related_products",
+        fake_resolve_products,
+    )
+    monkeypatch.setattr(
+        widget_proactive,
+        "_resolve_cart_recommendations",
+        fake_resolve_cart,
+    )
+    monkeypatch.setattr(
+        widget_proactive,
+        "_build_proactive_opener_message",
+        fake_build_product,
+    )
+    monkeypatch.setattr(
+        widget_proactive,
+        "_build_cart_idle_opener_message",
+        fake_build_cart,
+    )
     return calls
 
 
@@ -224,7 +247,7 @@ async def test_proactive_opener_delegates_to_chat_helpers(fake_chat, db, workspa
 
     # 4. Result wires the builder output verbatim into message.
     assert result.message == "FAKE_PRODUCT_OPENER_MESSAGE"
-    assert result.context_note == "shopify shim: proactive_opener rewrite"
+    assert result.context_note == "shopify: proactive_opener rewrite"
     assert result.telemetry == {
         "trigger_reason": "proactive_opener",
         "related_count": 1,
@@ -264,8 +287,117 @@ async def test_cart_idle_delegates_to_chat_helpers(fake_chat, db, workspace_id):
     assert fake_chat["build_product"] == []
 
     assert result.message == "FAKE_CART_IDLE_OPENER_MESSAGE"
-    assert result.context_note == "shopify shim: cart_idle rewrite"
+    assert result.context_note == "shopify: cart_idle rewrite"
     assert result.telemetry == {
         "trigger_reason": "cart_idle",
         "related_count": 2,
     }
+
+
+# ---- US-011 snapshot equivalence (PRD-007 + PRD-008-B byte-equality) --------
+#
+# These tests are the byte-equality safety net that gates every Phase 1
+# lift (US-005/006/007/008/010). After US-008 all four proactive helpers
+# live in :mod:`integrations.shopify.widget_proactive` and the snapshot
+# tests call ``handle_widget_message`` directly. The
+# ``real_chat_with_graph`` fixture in ``conftest.py`` provides only one
+# piece of indirection — a fixture-bound ``GraphifyService`` stub that
+# returns the US-004 synthetic INBUILD graph — so the test exercises
+# the exact production code path while remaining deterministic.
+#
+# These tests must KEEP PASSING through every remaining lift (US-010 in
+# particular rewires chat.py to dispatch via the registry — same plugin
+# entry point, same expected output). If one fails, the lift broke
+# equivalence — fix the lift, NOT the golden fixture (per US-011 notes).
+
+
+@pytest.mark.asyncio
+async def test_product_page_opener_byte_equality(
+    real_chat_with_graph,
+    product_page_context,
+    expected_product_page_opener,
+    db,
+    workspace_id,
+):
+    """PRD-007 product-page opener — byte-equal to the US-004 fixture.
+
+    Exercises the proactive_opener path end-to-end: plugin gates on
+    (trigger_reason, page_context), calls ``_resolve_graph_related_products``
+    against the fixture graph, calls ``_build_proactive_opener_message``,
+    returns the directive as ``result.message``.
+
+    The fixture graph encodes the by_vendor-overrides-FBT quirk
+    (NetworkX undirected storage) documented in ``fixtures/README.md`` —
+    that's WHY the expected opener mentions "Hochiki Banshee Wall Sounder"
+    as a same-vendor sibling rather than as an FBT pair.
+    """
+    result = await widget_proactive.handle_widget_message(
+        message="(placeholder synthesized by SDK)",
+        page_context=product_page_context,
+        trigger_reason="proactive_opener",
+        workspace_id=workspace_id,
+        db=db,
+    )
+
+    assert result.message == expected_product_page_opener
+    assert result.context_note == "shopify: proactive_opener rewrite"
+
+
+@pytest.mark.asyncio
+async def test_cart_idle_opener_byte_equality(
+    real_chat_with_graph,
+    cart_idle_context,
+    expected_cart_idle_opener,
+    db,
+    workspace_id,
+):
+    """PRD-008-B cart-idle opener — byte-equal to the US-004 fixture.
+
+    Exercises the cart_idle path end-to-end: multi-seed FBT walk across
+    every cart line item, aggregation by (paired_with_count, score),
+    top-3 recommendations rendered into the cart-idle directive.
+
+    The fixture's three cart items (hochiki-aln/-acb/-atg) produce a
+    deterministic top-3 of (base-ybn, mxpro5, banshee). Banshee is in
+    the cart-idle output via the elif branch (added together in 15 of
+    31 orders) because it pairs with only ONE cart item — the aln-banshee
+    FBT edge was overwritten by by_vendor in the synthetic graph (a
+    quirk of NetworkX undirected storage; see fixtures/README.md).
+    """
+    result = await widget_proactive.handle_widget_message(
+        message="(placeholder synthesized by SDK)",
+        page_context=cart_idle_context,
+        trigger_reason="cart_idle",
+        workspace_id=workspace_id,
+        db=db,
+    )
+
+    assert result.message == expected_cart_idle_opener
+    assert result.context_note == "shopify: cart_idle rewrite"
+
+
+@pytest.mark.parametrize(
+    "trigger",
+    [None, "proactive_opener", "cart_idle", "unknown_trigger"],
+    ids=["no_trigger", "proactive_opener", "cart_idle", "unknown"],
+)
+@pytest.mark.asyncio
+async def test_no_context_no_rewrite(trigger, db, workspace_id):
+    """US-011 AC test 4: page_context=None ⇒ message returned unchanged.
+
+    Parametrised across every trigger value (including ``None`` and an
+    unknown trigger) because the plugin's gate is symmetric — either side
+    short-circuits the rewrite. This is a regression guard for the
+    chat.py ``is_proactive`` semantics now owned by the plugin.
+    """
+    result = await widget_proactive.handle_widget_message(
+        message="user message verbatim",
+        page_context=None,
+        trigger_reason=trigger,
+        workspace_id=workspace_id,
+        db=db,
+    )
+
+    assert result.message == "user message verbatim"
+    assert result.context_note is None
+    assert result.telemetry == {}

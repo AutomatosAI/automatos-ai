@@ -1,0 +1,26 @@
+name: check-shopify-isolation
+
+# PRD-141 §12 Integration Coupling Rules — CI gate that prevents
+# Shopify-specific identifiers from leaking into generic widget /
+# context / chatbot surfaces. See
+# scripts/ci/check-no-shopify-in-generic.sh for the gated paths and
+# allowlist rules.
+
+on:
+  push:
+    branches:
+      - main
+      - "ralph/**"
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  check-shopify-isolation:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Shopify-isolation gate
+        run: bash scripts/ci/check-no-shopify-in-generic.sh

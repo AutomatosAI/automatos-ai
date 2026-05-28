@@ -232,9 +232,13 @@ CART_IDLE_CONTEXT: dict = {
 # Extract the proactive helpers from chat.py and exec them in isolation
 # ---------------------------------------------------------------------------
 
+# PRD-141 US-005 moved ``_OPENER_CONTEXT_FIELDS`` and
+# ``_format_opener_context_value`` to
+# ``orchestrator/integrations/shopify/context_fields.py``. They're no
+# longer extractable from chat.py but the AST-exec'd function bodies
+# still close over them — ``_extract_chat_helpers`` imports them from
+# their new home and seeds the namespace before exec'ing.
 WANTED_NAMES = {
-    "_OPENER_CONTEXT_FIELDS",
-    "_format_opener_context_value",
     "_build_proactive_opener_message",
     "_build_cart_idle_opener_message",
     "_resolve_graph_related_products",
@@ -243,12 +247,24 @@ WANTED_NAMES = {
 
 
 def _extract_chat_helpers(graph: nx.Graph) -> dict:
-    """Parse chat.py with ast, return a namespace containing the six helpers.
+    """Parse chat.py with ast, return a namespace containing the four helpers.
 
     Stubs ``modules.knowledge.graph_service.GraphifyService`` to hand back
     the supplied in-memory graph so ``_resolve_graph_related_products`` /
     ``_resolve_cart_recommendations`` can run without a real workspace.
+
+    Seeds the namespace with ``_OPENER_CONTEXT_FIELDS`` and
+    ``_format_opener_context_value`` (lifted to
+    ``integrations.shopify.context_fields`` in US-005) so the exec'd
+    ``_build_proactive_opener_message`` body can resolve them.
     """
+    if str(ORCHESTRATOR_ROOT) not in sys.path:
+        sys.path.insert(0, str(ORCHESTRATOR_ROOT))
+    from integrations.shopify.context_fields import (
+        _OPENER_CONTEXT_FIELDS,
+        _format_opener_context_value,
+    )
+
     src = CHAT_PY.read_text()
     tree = ast.parse(src)
 
@@ -258,6 +274,8 @@ def _extract_chat_helpers(graph: nx.Graph) -> dict:
         "Optional": Optional,
         "logger": logging.getLogger("fixture_generator"),
         "__name__": "_chat_extracted",
+        "_OPENER_CONTEXT_FIELDS": _OPENER_CONTEXT_FIELDS,
+        "_format_opener_context_value": _format_opener_context_value,
     }
 
     for node in tree.body:

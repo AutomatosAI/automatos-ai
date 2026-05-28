@@ -6,10 +6,11 @@ Importing this package self-registers the ``"shopify"`` plugin into
 calls — its module-level ``handle_widget_message`` satisfies the
 :class:`integrations.WidgetPlugin` protocol structurally.
 
-US-003 ships this as a SHIM that delegates to existing chat.py
-helpers. US-006/007/008 move those helpers into this folder and US-010
-deletes the shim layer. See ``widget_proactive.py`` for the current
-behaviour and migration story. PRD-141 US-003.
+After PRD-141 US-010 the plugin owns the full proactive opener and
+cart-idle path end-to-end: resolvers, builders, and message dispatch.
+``orchestrator/api/widgets/chat.py`` calls this module only through
+``PLUGIN_REGISTRY["shopify"].handle_widget_message`` — no direct
+imports of the underlying helpers from outside this package.
 """
 
 from __future__ import annotations
