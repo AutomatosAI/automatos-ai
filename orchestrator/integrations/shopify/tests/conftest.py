@@ -48,13 +48,14 @@ _ORCH_ROOT = _THIS_DIR.parents[2]
 _CHAT_PY = _ORCH_ROOT / "api" / "widgets" / "chat.py"
 
 
-# Names AST-extracted from chat.py. The two non-function entries
-# (``_OPENER_CONTEXT_FIELDS`` and ``_format_opener_context_value``) are
-# closed over by ``_build_proactive_opener_message``; without them the
-# extracted function bodies raise ``NameError`` at call time.
+# Names AST-extracted from chat.py — the four still-inline proactive
+# helpers. ``_OPENER_CONTEXT_FIELDS`` and ``_format_opener_context_value``
+# were lifted to ``integrations/shopify/context_fields.py`` in
+# PRD-141 US-005; they're now imported directly into the exec namespace
+# (see ``_extract_chat_helpers``) so the function bodies can close over
+# them without NameError. As US-006/007/008 move each remaining helper
+# into ``widget_proactive.py``, drop it from this set in lockstep.
 _WANTED_NAMES = frozenset({
-    "_OPENER_CONTEXT_FIELDS",
-    "_format_opener_context_value",
     "_build_proactive_opener_message",
     "_build_cart_idle_opener_message",
     "_resolve_graph_related_products",
@@ -103,13 +104,16 @@ def expected_cart_idle_opener() -> str:
 
 
 def _extract_chat_helpers() -> dict:
-    """Pull the six proactive helpers out of chat.py via AST.
+    """Pull the four proactive helpers out of chat.py via AST.
 
     Returns a namespace dict containing:
 
-    * ``_OPENER_CONTEXT_FIELDS`` — the field-mapping tuple used by the
-      product-page directive builder.
-    * ``_format_opener_context_value`` — single-value formatter.
+    * ``_OPENER_CONTEXT_FIELDS`` — field-mapping tuple, imported from
+      ``integrations.shopify.context_fields`` (US-005 lifted it out of
+      chat.py; it's still required in the namespace because the AST-
+      extracted ``_build_proactive_opener_message`` closes over it).
+    * ``_format_opener_context_value`` — single-value formatter, same
+      story as the field mapping.
     * ``_build_proactive_opener_message`` — product-page directive.
     * ``_build_cart_idle_opener_message`` — cart-idle directive.
     * ``_resolve_graph_related_products`` — single-seed FBT/collection/
@@ -125,8 +129,14 @@ def _extract_chat_helpers() -> dict:
     four helpers is wasteful and brittle. AST extraction reads the
     source verbatim and execs only the wanted nodes into an isolated
     namespace, so the test exercises identical bytes to the running
-    server without paying the import cost.
+    server without paying the import cost. ``context_fields`` has none
+    of that baggage, so we import it normally.
     """
+    from integrations.shopify.context_fields import (
+        _OPENER_CONTEXT_FIELDS,
+        _format_opener_context_value,
+    )
+
     src = _CHAT_PY.read_text()
     tree = ast.parse(src)
 
@@ -134,6 +144,8 @@ def _extract_chat_helpers() -> dict:
         "Optional": Optional,
         "logger": logging.getLogger("us011_snapshot"),
         "__name__": "_chat_extracted_for_us011",
+        "_OPENER_CONTEXT_FIELDS": _OPENER_CONTEXT_FIELDS,
+        "_format_opener_context_value": _format_opener_context_value,
     }
 
     for node in tree.body:

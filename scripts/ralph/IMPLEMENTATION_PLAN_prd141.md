@@ -17,7 +17,7 @@ Single source of truth for Ralph progress. Tick `- [x]` only after a story's acc
 
 - [x] US-004 — Capture proactive opener + cart-idle fixtures *(synthetic-but-realistic acceptable — see PROMPT_build_prd141.md "Special note for US-004"; human reviews after Ralph generates)*
 - [x] US-011 — Add snapshot equivalence tests for product-page opener and cart-idle opener *(REORDERED ahead of the lifts — runs against the US-003 shim so byte-equality guards every move; must pass now and stay green through US-005–US-010)*
-- [ ] US-005 — Move PROACTIVE_OPENER_FIELDS constant into the Shopify integration folder
+- [x] US-005 — Move PROACTIVE_OPENER_FIELDS constant into the Shopify integration folder
 - [ ] US-006 — Move _resolve_graph_related_products into Shopify plugin
 - [ ] US-007 — Move _resolve_cart_recommendations into Shopify plugin
 - [ ] US-008 — Move _build_proactive_opener_message and _build_cart_idle_opener_message into Shopify plugin

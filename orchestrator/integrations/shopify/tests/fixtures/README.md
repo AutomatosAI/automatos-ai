@@ -66,7 +66,7 @@ PYTHONHASHSEED=0 python3 regenerate.py
 
 You only need to regenerate if:
 
-- `chat.py`'s proactive helpers change before the lift (e.g. a new field is added to `_OPENER_CONTEXT_FIELDS`), and you want the fixtures to track. **Be careful** — once the lift starts (US-005), the fixtures must NOT be regenerated against the moving code; they are the frozen target.
+- The Shopify proactive helpers change before the lift completes (e.g. a new field is added to `_OPENER_CONTEXT_FIELDS` in `integrations/shopify/context_fields.py`, which US-005 lifted out of `chat.py`), and you want the fixtures to track. **Be careful** — the lift is now in progress (US-005+), so the fixtures must NOT be regenerated against the moving code; they are the frozen target.
 - You want to extend the synthetic graph to cover an additional code path that US-011's snapshot tests should pin.
 
 ## Known fixture quirks
@@ -74,9 +74,9 @@ You only need to regenerate if:
 - The graph is `networkx.Graph` (undirected). When two products had both an FBT and a by_vendor edge between them in the source data, the by_vendor edge overwrites the FBT edge in NetworkX undirected storage. This is *deterministic* but means the captured outputs reflect that loss. Production may use `MultiDiGraph` — the byte-equality contract still holds against THIS fixture, which is all US-011 needs.
 - Iteration order within FBT and by_vendor groups depends on Python dict insertion order, which is stable since 3.7+ and reproduced exactly by `regenerate.py`.
 
-## Files chat.py reads from page_context
+## Files the Shopify proactive helpers read from page_context
 
-For reference (extracted from `_OPENER_CONTEXT_FIELDS` in `api/widgets/chat.py`):
+For reference (extracted from `_OPENER_CONTEXT_FIELDS` in `integrations/shopify/context_fields.py`, lifted from `api/widgets/chat.py` in PRD-141 US-005):
 
 ```
 pageType, template,

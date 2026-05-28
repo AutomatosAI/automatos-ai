@@ -27,6 +27,10 @@ from sqlalchemy.orm import Session
 
 from api.widgets.auth import WidgetAuthContext, require_permission, widget_auth
 from core.database.database import get_db
+from integrations.shopify.context_fields import (
+    _OPENER_CONTEXT_FIELDS,
+    _format_opener_context_value,
+)
 from modules.tools.widget_callback import (
     WIDGET_OPEN_CALLBACK_FORM_NAME,
     WIDGET_SIGNAL_KEY,
@@ -72,44 +76,6 @@ PROACTIVE_TRIGGER_REASONS: frozenset[str] = frozenset({
     "proactive_opener",  # product-page contextual opener (PRD-007)
     "cart_idle",         # cart-page idle nudge w/ FBT recs (PRD-008-B Feature C2)
 })
-
-
-# Fields from page_context that the agent gets to ground openers on.
-# Order matters — first match per group wins. Numeric/boolean fields are
-# coerced to strings only when present + non-default.
-_OPENER_CONTEXT_FIELDS: tuple[tuple[str, str], ...] = (
-    ("pageType",          "page_type"),
-    ("template",          "template"),
-    # Product
-    ("productTitle",      "product"),
-    ("productType",       "product_type"),
-    ("productVendor",     "vendor"),
-    ("productPrice",      "price"),
-    ("productAvailable",  "in_stock"),
-    ("productHandle",     "product_handle"),
-    # Collection (when on a collection page)
-    ("collectionTitle",   "collection"),
-    ("collectionHandle",  "collection_handle"),
-    # Shop / locale
-    ("shopDomain",        "shop"),
-    ("shopCurrency",      "currency"),
-    ("shopLocale",        "locale"),
-    # Customer / cart
-    ("customerId",        "logged_in_customer_id"),
-    ("customerTags",      "customer_tags"),
-    ("cartItemCount",     "cart_item_count"),
-    ("cartTotalPrice",    "cart_total"),
-)
-
-
-def _format_opener_context_value(key: str, value) -> Optional[str]:
-    """Render a single page-context value into the directive. Returns None
-    if the value is empty/zero/false and shouldn't be sent to the agent."""
-    if value is None or value == "" or value == 0 or value is False:
-        return None
-    if isinstance(value, str):
-        return f'{key}="{value}"' if " " in value or '"' in value else f"{key}={value}"
-    return f"{key}={value}"
 
 
 def _build_proactive_opener_message(
