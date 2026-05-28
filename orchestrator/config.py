@@ -87,12 +87,17 @@ class Config:
     MEMORY_SESSION_CONSOLIDATION_TTL_SECONDS: int = int(os.getenv("MEMORY_SESSION_CONSOLIDATION_TTL_SECONDS", "3600"))
     # L3 Cache: TTL for Mem0 search result caching in Redis
     MEMORY_CACHE_TTL_SECONDS: int = int(os.getenv("MEMORY_CACHE_TTL_SECONDS", "300"))
-    # Context Router: per-source sub-budgets (tokens)
+    # Context Router: per-source sub-budgets (tokens).
+    # Fallback only — used when the model context window is unknown. When the
+    # window is known, ContextRouter._compute_budgets derives budgets as a
+    # proportion of the usable window instead (PRD-141 US-011).
     CONTEXT_BUDGET_SESSION: int = int(os.getenv("CONTEXT_BUDGET_SESSION", "500"))
     CONTEXT_BUDGET_LONG_TERM: int = int(os.getenv("CONTEXT_BUDGET_LONG_TERM", "800"))
     CONTEXT_BUDGET_TEMPORAL: int = int(os.getenv("CONTEXT_BUDGET_TEMPORAL", "600"))
     CONTEXT_BUDGET_DAILY: int = int(os.getenv("CONTEXT_BUDGET_DAILY", "400"))
     CONTEXT_BUDGET_AWARENESS: int = int(os.getenv("CONTEXT_BUDGET_AWARENESS", "200"))
+    CONTEXT_BUDGET_TOOLS: int = int(os.getenv("CONTEXT_BUDGET_TOOLS", "1000"))
+    CONTEXT_BUDGET_SYSTEM_PROMPT: int = int(os.getenv("CONTEXT_BUDGET_SYSTEM_PROMPT", "600"))
     # Knowledge awareness: TTL for per-workspace capability map cached in Redis
     MEMORY_AWARENESS_CACHE_TTL_SECONDS: int = int(os.getenv("MEMORY_AWARENESS_CACHE_TTL_SECONDS", "600"))
     # L2 Decay: Ebbinghaus decay rate (higher = faster forgetting)

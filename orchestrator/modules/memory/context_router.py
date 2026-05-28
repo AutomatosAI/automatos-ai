@@ -34,6 +34,27 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Context budget weights (PRD-141 US-011)
+# ---------------------------------------------------------------------------
+# Each section gets a fixed proportion of the *usable* context window
+# (usable = 80% of the raw window, reserving 20% for the model's response).
+# Weights sum to 0.80 of the usable window — the remaining 0.20 is slack for
+# estimator error and untracked overhead. ``tools`` and ``system_prompt`` are
+# reserved headroom the router does not fill itself — they keep the memory
+# sections from claiming space the prompt assembler needs.
+_CONTEXT_BUDGET_WEIGHTS: Dict[str, float] = {
+    "session": 0.10,
+    "long_term": 0.15,
+    "temporal": 0.10,
+    "daily": 0.08,
+    "awareness": 0.05,
+    "tools": 0.20,
+    "system_prompt": 0.12,
+}
+_USABLE_WINDOW_FRACTION = 0.80
+
+
+# ---------------------------------------------------------------------------
 # ContextSignals — output of query analysis
 # ---------------------------------------------------------------------------
 
@@ -346,6 +367,41 @@ class ContextRouter:
         return len(text) // 4 if text else 0
 
     @staticmethod
+    def _compute_budgets(context_window: Optional[int]) -> Dict[str, int]:
+        """Resolve per-section token budgets for context assembly.
+
+        When the model's ``context_window`` is known (a positive int), each
+        section gets a fixed proportion of the *usable* window
+        (``usable = int(context_window * 0.80)``), so budgets scale with the
+        model — a 128K model gets far larger sections than an 8K model.
+
+        When the window is unknown (``None`` / non-positive), fall back to the
+        static ``CONTEXT_BUDGET_*`` config values. The config values are
+        therefore a fallback only, never the primary source when a window is
+        available.
+
+        Returns a dict keyed by section name with token budgets.
+        """
+        from config import config
+
+        if not context_window or context_window <= 0:
+            return {
+                "session": config.CONTEXT_BUDGET_SESSION,
+                "long_term": config.CONTEXT_BUDGET_LONG_TERM,
+                "temporal": config.CONTEXT_BUDGET_TEMPORAL,
+                "daily": config.CONTEXT_BUDGET_DAILY,
+                "awareness": config.CONTEXT_BUDGET_AWARENESS,
+                "tools": config.CONTEXT_BUDGET_TOOLS,
+                "system_prompt": config.CONTEXT_BUDGET_SYSTEM_PROMPT,
+            }
+
+        usable = int(context_window * _USABLE_WINDOW_FRACTION)
+        return {
+            name: int(usable * weight)
+            for name, weight in _CONTEXT_BUDGET_WEIGHTS.items()
+        }
+
+    @staticmethod
     def _truncate_to_budget(text: str, token_budget: int) -> str:
         """Truncate *text* so its estimated token count fits within *token_budget*."""
         max_chars = token_budget * 4
@@ -384,6 +440,7 @@ class ContextRouter:
         agent_id: int,
         query: str,
         conversation_id: Optional[str] = None,
+        context_window: Optional[int] = None,
     ) -> ContextBundle:
         """
         Assemble a budget-constrained context bundle by fetching from L1/L2/L3
@@ -400,17 +457,17 @@ class ContextRouter:
         All layer fetches are concurrent via ``asyncio.gather``.
         Any single-layer failure is logged and skipped — never breaks the bundle.
         """
-        from config import config
         from modules.memory.unified_memory_service import get_unified_memory_service
 
         service = get_unified_memory_service()
         signals = self.analyze_query(query)
 
-        budget_session = config.CONTEXT_BUDGET_SESSION
-        budget_long_term = config.CONTEXT_BUDGET_LONG_TERM
-        budget_temporal = config.CONTEXT_BUDGET_TEMPORAL
-        budget_daily = config.CONTEXT_BUDGET_DAILY
-        budget_awareness = config.CONTEXT_BUDGET_AWARENESS
+        budgets = self._compute_budgets(context_window)
+        budget_session = budgets["session"]
+        budget_long_term = budgets["long_term"]
+        budget_temporal = budgets["temporal"]
+        budget_daily = budgets["daily"]
+        budget_awareness = budgets["awareness"]
 
         # ----- Determine which fetches to launch -----
         fetch_session = (
