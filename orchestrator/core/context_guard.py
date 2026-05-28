@@ -7,8 +7,11 @@ when it approaches the model's context limit.
 
 Strategy:
 1. Count tokens in the full message payload (system + user + assistant + tool)
-2. If below 80% of model context → pass through unchanged
-3. If above 80% → compact: summarize older turns, keep recent context
+2. Resolve a model-aware compaction threshold + kept-turns from the context
+   window (_thresholds_for_model): bigger windows compact later and keep more
+   turns; small windows compact earlier and keep fewer
+3. If below the threshold → pass through unchanged; above → compact: summarize
+   older turns, keep recent context
 4. Flush key facts to Mem0 before discarding messages
 
 This prevents context_length_exceeded errors and keeps conversations going
@@ -137,10 +140,41 @@ def get_context_window(model_name: str, db_session=None) -> int:
 # Context Guard
 # ---------------------------------------------------------------------------
 
-# Thresholds
+# Thresholds — static fallbacks only. The model-aware values come from
+# _thresholds_for_model(); these are used when the context window is unknown.
 COMPACT_THRESHOLD = 0.80   # Compact when >80% of context used
 KEEP_RECENT_TURNS = 6      # Always keep the last N user+assistant messages
 SUMMARY_MAX_TOKENS = 500   # Max tokens for the compaction summary
+
+
+def _thresholds_for_model(context_window: int) -> Tuple[float, int]:
+    """Resolve (compact_threshold, keep_recent_turns) for a model's window.
+
+    Large-context models can safely fill a higher fraction of the window and
+    keep more recent turns; small-context models must compact earlier and keep
+    fewer turns to avoid context_length_exceeded (provider 400s).
+
+    Tiers (PRD-141 US-012):
+        >=200K -> (0.90, 12)
+        >=100K -> (0.85, 8)
+        >= 32K -> (0.80, 6)
+        >=  8K -> (0.75, 4)
+        else   -> (0.70, 3)
+
+    An unknown / non-positive window falls back to the static COMPACT_THRESHOLD
+    and KEEP_RECENT_TURNS constants.
+    """
+    if not context_window or context_window <= 0:
+        return COMPACT_THRESHOLD, KEEP_RECENT_TURNS
+    if context_window >= 200_000:
+        return 0.90, 12
+    if context_window >= 100_000:
+        return 0.85, 8
+    if context_window >= 32_000:
+        return 0.80, 6
+    if context_window >= 8_000:
+        return 0.75, 4
+    return 0.70, 3
 
 # PRD-123 Pattern #7: Proactive compaction thresholds
 PROACTIVE_COMPACT_AFTER_TURNS = int(
@@ -182,10 +216,11 @@ class ContextGuard:
             (messages, was_compacted, tools) — tools may be None if they don't fit
         """
         context_window = get_context_window(model_name, db_session)
+        compact_threshold, keep_recent_turns = _thresholds_for_model(context_window)
         tool_tokens = count_tool_tokens(tools)
         current_tokens = count_message_tokens(messages)
         total_tokens = current_tokens + tool_tokens
-        threshold = int(context_window * COMPACT_THRESHOLD)
+        threshold = int(context_window * compact_threshold)
 
         logger.debug(
             "[ContextGuard] tokens=%d (msgs=%d tools=%d) / %d (%.0f%% of %d window)",
@@ -217,6 +252,7 @@ class ContextGuard:
             llm_manager=llm_manager,
             workspace_id=workspace_id,
             agent_id=agent_id,
+            keep_recent_turns=keep_recent_turns,
         )
 
         new_tokens = count_message_tokens(compacted)
@@ -233,6 +269,7 @@ class ContextGuard:
         llm_manager: Any,
         workspace_id: Optional[str] = None,
         agent_id: Optional[int] = None,
+        keep_recent_turns: int = KEEP_RECENT_TURNS,
     ) -> List[Dict[str, Any]]:
         """
         Compact messages by summarizing older turns.
@@ -253,12 +290,12 @@ class ContextGuard:
                 conversation.append(msg)
 
         # If conversation is short enough, keep everything
-        if len(conversation) <= KEEP_RECENT_TURNS:
+        if len(conversation) <= keep_recent_turns:
             return messages
 
         # Split: old turns (to summarize) | recent turns (to keep)
-        old_turns = conversation[:-KEEP_RECENT_TURNS]
-        recent_turns = conversation[-KEEP_RECENT_TURNS:]
+        old_turns = conversation[:-keep_recent_turns]
+        recent_turns = conversation[-keep_recent_turns:]
 
         # Build text from old turns for summarization
         old_text = self._turns_to_text(old_turns)
@@ -283,8 +320,8 @@ class ContextGuard:
             "_compact_tombstone": {
                 "compacted_count": len(old_turns),
                 "compacted_roles": [m.get("role") for m in old_turns],
-                "summary_token_est": self.count_tokens(summary),
-                "original_token_est": sum(self.count_message_tokens(m) for m in old_turns),
+                "summary_token_est": count_tokens(summary),
+                "original_token_est": count_message_tokens(old_turns),
             },
         }
 
