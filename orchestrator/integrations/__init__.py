@@ -90,3 +90,4 @@ __all__ = [
 # here, after the registry is defined, so each vertical can do
 # ``from integrations import PLUGIN_REGISTRY`` without circularity.
 from . import generic  # noqa: E402,F401  (registers "generic")
+from . import shopify  # noqa: E402,F401  (registers "shopify")

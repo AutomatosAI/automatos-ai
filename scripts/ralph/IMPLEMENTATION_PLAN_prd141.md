@@ -11,7 +11,7 @@ Single source of truth for Ralph progress. Tick `- [x]` only after a story's acc
 
 - [x] US-001 — Scaffold plugin registry and base protocol
 - [x] US-002 — Create generic pass-through plugin
-- [ ] US-003 — Create shim Shopify plugin that delegates to existing chat.py code
+- [x] US-003 — Create shim Shopify plugin that delegates to existing chat.py code
 
 ## Phase 1 — Lift Shopify into the plugin (the risky one)
 

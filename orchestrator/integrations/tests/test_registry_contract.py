@@ -112,6 +112,9 @@ def test_generic_plugin_registered_or_pending():
 
 
 def test_shopify_plugin_registered_or_pending():
+    # US-003 has landed — Phase 0 is complete. The skip-tolerance
+    # remains in case a downstream story restructures the package, but
+    # the assertion side is what gates Phase 1.
     if "shopify" not in PLUGIN_REGISTRY:
         pytest.skip("shopify plugin not yet registered (US-003 lands it)")
     plugin = PLUGIN_REGISTRY["shopify"]
