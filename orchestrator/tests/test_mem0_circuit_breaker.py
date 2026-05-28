@@ -42,8 +42,12 @@ async def _instant_sleep(_delay):
 
 
 def _fresh_client(monkeypatch):
+    # PRD-141 US-004: the module-level _breaker singleton is gone; breakers are
+    # now per-workspace on Mem0Client._breakers. These tests call _request with
+    # no workspace_id, so they share the "_global" breaker — seed a fresh one and
+    # let monkeypatch restore the registry afterwards.
     breaker = _CircuitBreaker(threshold=3, cooldown_seconds=300)
-    monkeypatch.setattr(mem0_mod, "_breaker", breaker)
+    monkeypatch.setattr(Mem0Client, "_breakers", {"_global": breaker})
     return Mem0Client(api_url="http://mem0.test", api_key="test-key"), breaker
 
 
@@ -186,8 +190,6 @@ async def test_no_api_url_disables_client(monkeypatch):
     # config fallback too, since __init__ uses (arg or config.MEM0_API_URL or "").
     from config import config as _config
     monkeypatch.setattr(_config, "MEM0_API_URL", "")
-    breaker = _CircuitBreaker(threshold=3, cooldown_seconds=300)
-    monkeypatch.setattr(mem0_mod, "_breaker", breaker)
     client = Mem0Client(api_url="", api_key="")
     assert client.api_url == ""
 

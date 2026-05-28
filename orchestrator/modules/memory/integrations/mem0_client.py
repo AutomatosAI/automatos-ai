@@ -72,14 +72,28 @@ def _make_breaker() -> _CircuitBreaker:
         return _CircuitBreaker()
 
 
-# Shared circuit breaker instance
-_breaker = _make_breaker()
-
-
 class Mem0Client:
     """
     Client for interacting with Mem0 server.
     """
+
+    # Per-workspace circuit breakers, keyed by workspace_id. A failure in one
+    # workspace's Mem0 path must not fail-fast every other workspace, so each
+    # gets its own breaker. Calls without a workspace scope share "_global".
+    # Class-level so the single shared Mem0Client (and any others) agree on a
+    # workspace's breaker state. The global health probe (US-006) operates over
+    # this whole registry to trip/reset all breakers at once.
+    _breakers: Dict[str, _CircuitBreaker] = {}
+
+    @classmethod
+    def _get_breaker(cls, workspace_id: Optional[str] = None) -> _CircuitBreaker:
+        """Return the circuit breaker for a workspace, creating it on first use."""
+        key = workspace_id or "_global"
+        breaker = cls._breakers.get(key)
+        if breaker is None:
+            breaker = _make_breaker()
+            cls._breakers[key] = breaker
+        return breaker
 
     def __init__(self, api_url: Optional[str] = None, api_key: Optional[str] = None):
         from config import config
@@ -127,9 +141,11 @@ class Mem0Client:
             await self._client.aclose()
         self._client = None
 
-    async def _request(self, method: str, url: str, **kwargs) -> Optional[httpx.Response]:
+    async def _request(
+        self, method: str, url: str, *, workspace_id: Optional[str] = None, **kwargs
+    ) -> Optional[httpx.Response]:
         """
-        Make an async HTTP request with retry + circuit breaker.
+        Make an async HTTP request with retry + per-workspace circuit breaker.
 
         Returns None early if api_url is not configured.
         Returns the response or None if all attempts fail.
@@ -138,7 +154,8 @@ class Mem0Client:
             logger.warning("[Mem0] No API URL configured — skipping request to %s", url)
             return None
 
-        if not _breaker.allow_request():
+        breaker = self._get_breaker(workspace_id)
+        if not breaker.allow_request():
             logger.warning("[Mem0] Circuit breaker open — skipping request to %s", url)
             return None
 
@@ -151,7 +168,7 @@ class Mem0Client:
                 resp = await client.request(method, url, **kwargs)
 
                 if resp.status_code < 400:
-                    _breaker.record_success()
+                    breaker.record_success()
                     return resp
 
                 if resp.status_code == 404:
@@ -182,7 +199,7 @@ class Mem0Client:
                     "[Mem0] Transient %d after %d attempts on %s %s",
                     resp.status_code, _MAX_RETRIES + 1, method.upper(), url,
                 )
-                _breaker.record_failure()
+                breaker.record_failure()
                 return resp
 
             except httpx.TransportError as e:
@@ -197,15 +214,21 @@ class Mem0Client:
                     await asyncio.sleep(wait)
                 else:
                     logger.error("[Mem0] Request failed after %d attempts: %s", _MAX_RETRIES + 1, e, exc_info=True)
-                    _breaker.record_failure()
+                    breaker.record_failure()
             except Exception as e:
                 logger.error("[Mem0] Unexpected request error: %s", e, exc_info=True)
-                _breaker.record_failure()
+                breaker.record_failure()
                 return None
 
         return None
 
-    async def add(self, messages: List[Dict[str, str]], user_id: str, metadata: Optional[Dict] = None) -> Dict:
+    async def add(
+        self,
+        messages: List[Dict[str, str]],
+        user_id: str,
+        metadata: Optional[Dict] = None,
+        workspace_id: Optional[str] = None,
+    ) -> Dict:
         """
         Add memories from messages.
 
@@ -213,6 +236,8 @@ class Mem0Client:
             messages: List of message dicts [{"role": "user", "content": "..."}]
             user_id: Unique user identifier
             metadata: Optional metadata to attach
+            workspace_id: Scopes the circuit breaker so one workspace's Mem0
+                outage does not trip the breaker for every other workspace.
 
         Returns:
             Response dict from server
@@ -238,7 +263,7 @@ class Mem0Client:
 
         logger.debug("[Mem0] Adding memory for user_id=%s (text_len=%d)", user_id, len(text))
 
-        resp = await self._request("POST", url, json=payload, timeout=self.write_timeout)
+        resp = await self._request("POST", url, json=payload, timeout=self.write_timeout, workspace_id=workspace_id)
         if resp is None:
             return {"success": False, "error": "Mem0 unavailable (circuit breaker or timeout)"}
 
@@ -263,7 +288,13 @@ class Mem0Client:
             logger.info("[Mem0] Memory accepted (status=%s) for user_id=%s", resp.status_code, user_id)
             return {"success": True}
 
-    async def search(self, query: str, user_id: str, limit: int = 5) -> List[Dict]:
+    async def search(
+        self,
+        query: str,
+        user_id: str,
+        limit: int = 5,
+        workspace_id: Optional[str] = None,
+    ) -> List[Dict]:
         """
         Search for relevant memories.
 
@@ -271,6 +302,7 @@ class Mem0Client:
             query: Search query
             user_id: User identifier to scope search
             limit: Max results
+            workspace_id: Scopes the circuit breaker (see ``add``).
 
         Returns:
             List of memory items
@@ -288,7 +320,7 @@ class Mem0Client:
 
         logger.debug("[Mem0] Searching memories for user=%s query=%r", user_id, query)
 
-        resp = await self._request("GET", url, params=params)
+        resp = await self._request("GET", url, params=params, workspace_id=workspace_id)
         if resp is None:
             return []
 
@@ -344,12 +376,14 @@ class Mem0Client:
         )
         return results[:limit]
 
-    async def get_all(self, user_id: str, limit: int = 100) -> List[Dict]:
+    async def get_all(
+        self, user_id: str, limit: int = 100, workspace_id: Optional[str] = None
+    ) -> List[Dict]:
         """Get all memories for a user."""
         url = f"{self.api_url}/memories/"
         params = {"user_id": user_id}
 
-        resp = await self._request("GET", url, params=params)
+        resp = await self._request("GET", url, params=params, workspace_id=workspace_id)
         if resp is None:
             return []
 
@@ -374,11 +408,11 @@ class Mem0Client:
             return data[:limit]
         return data.get("memories", data.get("results", data.get("items", [])))[:limit]
 
-    async def delete(self, memory_id: str) -> bool:
+    async def delete(self, memory_id: str, workspace_id: Optional[str] = None) -> bool:
         """Delete a specific memory."""
         url = f"{self.api_url}/memories/{memory_id}/"
 
-        resp = await self._request("DELETE", url)
+        resp = await self._request("DELETE", url, workspace_id=workspace_id)
         if resp is None:
             return False
 

@@ -444,7 +444,8 @@ async def get_system_health(db: Session, workspace_id: UUID, params: Dict[str, A
 
     # 3. Mem0 (long-term memory service)
     try:
-        from modules.memory.integrations.mem0_client import _breaker as mem0_breaker
+        from modules.memory.integrations.mem0_client import Mem0Client
+        mem0_breaker = Mem0Client._get_breaker(str(workspace_id))
         if mem0_breaker.is_open:
             elapsed = _t.monotonic() - mem0_breaker.last_failure_time
             components["mem0"] = {
