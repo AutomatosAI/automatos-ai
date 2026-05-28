@@ -234,3 +234,33 @@ async def test_breaker_half_open_probe(monkeypatch):
     assert not breaker.is_open      # successful probe closed the breaker
     assert breaker.failures == 0
     await client.aclose()
+
+
+# ── US-005: UnifiedMemoryService awaits Mem0 directly (no executor) ──
+
+
+def test_unified_memory_no_executor():
+    """UnifiedMemoryService must await the async Mem0 client directly.
+
+    Wrapping a Mem0 call in an executor would consume a thread per memory op
+    and — now that the client is async — schedule a coroutine on a thread that
+    never awaits it, silently dropping the write. A source-level check is
+    deliberate: importing UnifiedMemoryService here would drag in the full
+    package + Redis/config import chain, so we assert the structural contract
+    directly on the service source.
+    """
+    source = (_ROOT / "modules" / "memory" / "unified_memory_service.py").read_text()
+
+    # Built at runtime so this test file does not itself trip the repo grep
+    # gate that forbids executor-wrapped Mem0 calls (US-005 criterion).
+    executor_call = "run_in_" + "executor"
+
+    mem0_calls = 0
+    for line in source.splitlines():
+        if "self._mem0." in line:
+            mem0_calls += 1
+            assert "await self._mem0." in line, f"non-awaited Mem0 call: {line.strip()}"
+        if executor_call in line and "mem0" in line:
+            raise AssertionError(f"Mem0 call wrapped in an executor: {line.strip()}")
+
+    assert mem0_calls, "expected self._mem0 calls in unified_memory_service.py"

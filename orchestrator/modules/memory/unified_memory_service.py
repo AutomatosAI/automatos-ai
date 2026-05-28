@@ -339,7 +339,7 @@ class UnifiedMemoryService:
         messages = [{"role": "user", "content": content}]
 
         try:
-            result = await self._mem0.add(messages=messages, user_id=user_id, metadata=meta or None)
+            result = await self._mem0.add(messages=messages, user_id=user_id, metadata=meta or None, workspace_id=workspace_id)
             logger.info(
                 "[UnifiedMemoryService] store_long_term user_id=%s len=%d",
                 user_id,
@@ -395,7 +395,7 @@ class UnifiedMemoryService:
 
         # --- Cache miss: call Mem0 ---
         try:
-            results = await self._mem0.search(query=query, user_id=user_id, limit=limit)
+            results = await self._mem0.search(query=query, user_id=user_id, limit=limit, workspace_id=workspace_id)
             logger.debug(
                 "[UnifiedMemoryService] search_long_term user_id=%s query=%r → %d results",
                 user_id,
@@ -434,7 +434,7 @@ class UnifiedMemoryService:
         user_id = ns.resolve(agent_id)
 
         try:
-            results = await self._mem0.get_all(user_id=user_id, limit=limit)
+            results = await self._mem0.get_all(user_id=user_id, limit=limit, workspace_id=workspace_id)
             logger.debug(
                 "[UnifiedMemoryService] get_all_memories user_id=%s → %d items",
                 user_id,
@@ -608,7 +608,7 @@ class UnifiedMemoryService:
         messages = [{"role": "system", "content": content}]
 
         try:
-            result = await self._mem0.add(messages=messages, user_id=user_id, metadata=metadata)
+            result = await self._mem0.add(messages=messages, user_id=user_id, metadata=metadata, workspace_id=workspace_id)
             logger.info(
                 "[UnifiedMemoryService] store_daily_log user_id=%s len=%d",
                 user_id,
@@ -642,7 +642,7 @@ class UnifiedMemoryService:
         user_id = ns.daily()
 
         try:
-            results = await self._mem0.get_all(user_id=user_id, limit=limit)
+            results = await self._mem0.get_all(user_id=user_id, limit=limit, workspace_id=workspace_id)
             logger.debug(
                 "[UnifiedMemoryService] get_all_daily_logs user_id=%s → %d items",
                 user_id,
@@ -689,7 +689,7 @@ class UnifiedMemoryService:
         async def _store(user_id: str, tier_name: str) -> tuple:
             meta = {**base_meta, "tier": tier_name}
             try:
-                result = await self._mem0.add(messages=messages, user_id=user_id, metadata=meta)
+                result = await self._mem0.add(messages=messages, user_id=user_id, metadata=meta, workspace_id=workspace_id)
                 return (tier_name, result)
             except Exception:
                 logger.error(
