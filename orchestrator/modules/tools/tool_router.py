@@ -29,6 +29,7 @@ from uuid import UUID, uuid4
 from modules.tools.registry import ToolCategory, get_tool_registry as registry_get_tool_registry
 from modules.tools.execution import UnifiedToolExecutor
 from modules.tools.formatting.result_formatter import ToolResultFormatter
+from modules.tools.discovery.signal_recorder import ToolSignal, get_tool_signal_recorder
 from core.database.database import SessionLocal
 
 # Capability-based filtering imports (PRD-37)
@@ -608,6 +609,10 @@ class ToolRouter:
                 or bool(result.get("results"))
             )
 
+            # PRD-141 US-019: fold this outcome into the routing graph via the
+            # batched recorder (non-blocking enqueue; no DB / no task per call).
+            self._record_tool_signal(tool_name, success, agent_id, workspace_id, caller_context)
+
             if success:
                 frontend_data = self.formatter.format_for_frontend(result, tool_name)
                 llm_context = self.formatter.format_for_llm(result, tool_name)
@@ -650,6 +655,8 @@ class ToolRouter:
                 else error_msg
             )
             logger.error(f"[tool-trace {trace_id}] {tool_name} exception: {error_msg}")
+            # PRD-141 US-019: a thrown tool is a failure outcome too.
+            self._record_tool_signal(tool_name, False, agent_id, workspace_id, caller_context)
             return {
                 "success": False,
                 "frontend_data": {},
@@ -658,6 +665,35 @@ class ToolRouter:
                 "fatal_error": fatal_error,
                 "error_type": "dependency_missing" if fatal_error else None,
             }
+
+    @staticmethod
+    def _record_tool_signal(
+        tool_name: str,
+        success: bool,
+        agent_id: Optional[int],
+        workspace_id: Optional[UUID],
+        caller_context: Optional[Dict[str, Any]],
+    ) -> None:
+        """Enqueue a routing-graph signal. Best-effort: never raises into the
+        tool hot path. ``prior_action`` (the previous tool in the turn) is read
+        from caller_context when the caller threads it through."""
+        try:
+            prior_action = (
+                caller_context.get("prior_action")
+                if isinstance(caller_context, dict)
+                else None
+            )
+            get_tool_signal_recorder().record(
+                ToolSignal(
+                    action_name=tool_name,
+                    success=bool(success),
+                    agent_id=agent_id,
+                    workspace_id=str(workspace_id) if workspace_id else None,
+                    prior_action=prior_action,
+                )
+            )
+        except Exception:
+            pass  # telemetry is best-effort; never break a tool call
 
     def truncate_for_llm(
         self,

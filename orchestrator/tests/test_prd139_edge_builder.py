@@ -16,7 +16,6 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from unittest.mock import MagicMock, patch, AsyncMock
 from uuid import uuid4
 
 import numpy as np
@@ -29,12 +28,13 @@ if _orchestrator_root not in sys.path:
 
 
 # ---------------------------------------------------------------------------
-# Import modules under test (with mocks for DB/embedding dependencies)
+# Import modules under test
 # ---------------------------------------------------------------------------
-
-# Mock the database and models before importing edge_builder
-_mock_base = MagicMock()
-sys.modules.setdefault("core.database.base", _mock_base)
+# NOTE: do NOT mock core.database.base here. These tests exercise pure helpers
+# but import the REAL ToolRoutingEdge/ToolRoutingAffinity models (via
+# edge_builder), and a MagicMock Base would build Mock-based model classes that
+# corrupt sibling tests sharing the same process (e.g. test_graph_router_negative
+# uses the real models with a fake DB session). Real Base imports cleanly.
 
 
 # Import intent_clustering directly (pure numpy, no DB deps)
@@ -48,6 +48,7 @@ from core.services.intent_clustering import (
 from core.services.edge_builder import (
     wilson_lower_bound,
     _compute_used_after_edges,
+    _compute_failed_after_edges,
     _derive_session_key,
     _split_by_time_window,
     _compute_affinities,
@@ -92,6 +93,22 @@ class TestWilsonLowerBound:
         r2 = wilson_lower_bound(50, 100)
         r3 = wilson_lower_bound(90, 100)
         assert r1 < r2 < r3
+
+    def test_wilson_lower_bound_with_failures(self):
+        """PRD-141 US-018: failed_after confidence is the Wilson lower bound of
+        the FAILURE RATE (failures / co-occurrences), so failures < total.
+
+        3 failures out of 10 co-occurrences = point estimate 0.3; the
+        conservative lower bound sits below that, and more failures at the same
+        total raise the bound (so a consistently-failing transition outranks a
+        rarely-failing one when both are penalised).
+        """
+        partial = wilson_lower_bound(3, 10)
+        assert 0.0 < partial < 0.3  # conservative: below the 0.3 point estimate
+        # Monotonic in the failure count at fixed total
+        assert wilson_lower_bound(2, 10) < wilson_lower_bound(8, 10)
+        # A single failure in many co-occurrences is barely-confident (near 0)
+        assert wilson_lower_bound(1, 50) < 0.1
 
 
 # ---------------------------------------------------------------------------
@@ -280,6 +297,121 @@ class TestUsedAfterEdges:
         edges = _compute_used_after_edges(logs)
         # No edge because they're in different turns
         assert ("A", "B", "ws1", 1) not in edges
+
+
+# ---------------------------------------------------------------------------
+# Test: failed_after edge computation (PRD-141 US-018)
+# ---------------------------------------------------------------------------
+
+
+class TestFailedAfterEdges:
+    """failed_after(A, B): A SUCCEEDED and a tool B within the next 2 steps in
+    the same session ERRORED. Tracks (failed, total) co-occurrence so confidence
+    is the Wilson lower bound of the failure rate, not a raw count.
+    """
+
+    def _make_log(self, action: str, status: str, turn_id: str = "t1",
+                  agent_id: int = 1, workspace_id: str = "ws1",
+                  offset_seconds: int = 0) -> Dict[str, Any]:
+        return {
+            "id": offset_seconds,
+            "action_name": action,
+            "agent_id": agent_id,
+            "workspace_id": workspace_id,
+            "status": status,
+            "user_query": f"do {action}",
+            "turn_id": turn_id,
+            "conversation_id": None,
+            "executed_at": datetime(2026, 1, 1) + timedelta(seconds=offset_seconds),
+        }
+
+    def test_basic_failed_after(self):
+        """A succeeds, B errors right after → (A,B) = (1 failed, 1 total)."""
+        logs = [
+            self._make_log("A", "success", offset_seconds=0),
+            self._make_log("B", "error", offset_seconds=1),
+        ]
+        failed = _compute_failed_after_edges(logs)
+        assert failed[("A", "B", "ws1", 1)] == (1, 1)
+
+    def test_requires_a_to_succeed(self):
+        """If A did not succeed, no failed_after edge originates from it."""
+        logs = [
+            self._make_log("A", "error", offset_seconds=0),
+            self._make_log("B", "error", offset_seconds=1),
+        ]
+        failed = _compute_failed_after_edges(logs)
+        assert ("A", "B", "ws1", 1) not in failed
+
+    def test_within_two_steps(self):
+        """B two steps after a successful A still counts; the gap tool that
+        succeeded does not produce a failed edge."""
+        logs = [
+            self._make_log("A", "success", offset_seconds=0),
+            self._make_log("C", "success", offset_seconds=1),
+            self._make_log("B", "error", offset_seconds=2),
+        ]
+        failed = _compute_failed_after_edges(logs)
+        assert failed[("A", "B", "ws1", 1)] == (1, 1)   # B is 2 steps after A
+        assert failed[("C", "B", "ws1", 1)] == (1, 1)   # B is 1 step after C
+        assert ("A", "C", "ws1", 1) not in failed       # C succeeded, no failure
+
+    def test_beyond_two_steps_excluded(self):
+        """A failure 3+ steps after A is not attributed to A."""
+        logs = [
+            self._make_log("A", "success", offset_seconds=0),
+            self._make_log("X", "success", offset_seconds=1),
+            self._make_log("Y", "success", offset_seconds=2),
+            self._make_log("B", "error", offset_seconds=3),
+        ]
+        failed = _compute_failed_after_edges(logs)
+        assert ("A", "B", "ws1", 1) not in failed   # B is 3 steps after A
+        assert failed[("Y", "B", "ws1", 1)] == (1, 1)  # adjacent
+        assert failed[("X", "B", "ws1", 1)] == (1, 1)  # 2 steps
+
+    def test_failure_rate_accumulates(self):
+        """Repeated A→B pairs build a (failed, total) rate across sessions."""
+        logs = []
+        # 3 turns where B errors after A
+        for i in range(3):
+            logs.append(self._make_log("A", "success", turn_id=f"t{i}", offset_seconds=i * 10))
+            logs.append(self._make_log("B", "error", turn_id=f"t{i}", offset_seconds=i * 10 + 1))
+        # 7 turns where B succeeds after A
+        for i in range(3, 10):
+            logs.append(self._make_log("A", "success", turn_id=f"t{i}", offset_seconds=i * 10))
+            logs.append(self._make_log("B", "success", turn_id=f"t{i}", offset_seconds=i * 10 + 1))
+
+        failed = _compute_failed_after_edges(logs)
+        # 3 failures out of 10 co-occurrences
+        assert failed[("A", "B", "ws1", 1)] == (3, 10)
+
+    def test_self_edge_skipped(self):
+        """A→A is never an edge, even when the second A errors."""
+        logs = [
+            self._make_log("A", "success", offset_seconds=0),
+            self._make_log("A", "error", offset_seconds=1),
+            self._make_log("B", "error", offset_seconds=2),
+        ]
+        failed = _compute_failed_after_edges(logs)
+        assert ("A", "A", "ws1", 1) not in failed
+        # First A succeeded; B errors 2 steps later → (A,B) counted once
+        assert failed[("A", "B", "ws1", 1)] == (1, 1)
+
+    def test_no_failures_returns_empty(self):
+        """All-success sessions yield no failed_after edges."""
+        logs = [
+            self._make_log("A", "success", offset_seconds=0),
+            self._make_log("B", "success", offset_seconds=1),
+        ]
+        assert _compute_failed_after_edges(logs) == {}
+
+    def test_different_turns_isolated(self):
+        """A success and a B failure in different sessions are not linked."""
+        logs = [
+            self._make_log("A", "success", turn_id="t1", offset_seconds=0),
+            self._make_log("B", "error", turn_id="t2", offset_seconds=1),
+        ]
+        assert ("A", "B", "ws1", 1) not in _compute_failed_after_edges(logs)
 
 
 # ---------------------------------------------------------------------------
