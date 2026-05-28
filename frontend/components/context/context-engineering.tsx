@@ -105,7 +105,7 @@ export function ContextEngineering() {
       value: (contextStats as any)?.avgResponseTime || '0.00s',
       change: 'Real-time measurement',
       icon: Zap,
-      color: 'text-orange-400'
+      color: 'text-primary'
     },
     {
       label: 'Vector Embeddings',
@@ -213,7 +213,7 @@ export function ContextEngineering() {
               Refresh
             </Button>
             <Button
-              className="gradient-accent hover:opacity-90"
+              className="hover:opacity-90"
               onClick={() => setConfigureModalOpen(true)}
             >
               <Settings className="w-4 h-4 mr-2" />
@@ -241,7 +241,7 @@ export function ContextEngineering() {
           >
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-3 min-w-0">
-                <div className="w-10 h-10 rounded-2xl bg-black/20 border border-orange-500/10 flex items-center justify-center shrink-0">
+                <div className="w-10 h-10 rounded-2xl bg-black/20 border border-primary/10 flex items-center justify-center shrink-0">
                   <stat.icon className={`w-5 h-5 ${stat.color}`} />
                 </div>
                 <div className="min-w-0">

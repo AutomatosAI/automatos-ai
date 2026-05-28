@@ -9,14 +9,22 @@ The following files were used as context for generating this wiki page:
 - [frontend/app/analytics/page.tsx](frontend/app/analytics/page.tsx)
 - [frontend/components/analytics/analytics-admin.tsx](frontend/components/analytics/analytics-admin.tsx)
 - [frontend/components/analytics/analytics-agents.tsx](frontend/components/analytics/analytics-agents.tsx)
+- [frontend/components/analytics/analytics-costs.tsx](frontend/components/analytics/analytics-costs.tsx)
 - [frontend/components/analytics/analytics-documents.tsx](frontend/components/analytics/analytics-documents.tsx)
 - [frontend/components/analytics/analytics-memory.tsx](frontend/components/analytics/analytics-memory.tsx)
+- [frontend/components/analytics/analytics-openrouter-credits.tsx](frontend/components/analytics/analytics-openrouter-credits.tsx)
 - [frontend/components/analytics/analytics-overview.tsx](frontend/components/analytics/analytics-overview.tsx)
+- [frontend/components/analytics/analytics-page.tsx](frontend/components/analytics/analytics-page.tsx)
+- [frontend/components/analytics/analytics-pandas-chart.tsx](frontend/components/analytics/analytics-pandas-chart.tsx)
 - [frontend/components/analytics/analytics-plan-usage.tsx](frontend/components/analytics/analytics-plan-usage.tsx)
 - [frontend/components/analytics/analytics-recommendations.tsx](frontend/components/analytics/analytics-recommendations.tsx)
 - [frontend/components/analytics/analytics-workflows.tsx](frontend/components/analytics/analytics-workflows.tsx)
+- [frontend/components/dashboard/widgets/system-health-widget.tsx](frontend/components/dashboard/widgets/system-health-widget.tsx)
+- [frontend/components/knowledge/QueryTemplatesGrid.tsx](frontend/components/knowledge/QueryTemplatesGrid.tsx)
+- [frontend/components/system/rag-configuration.tsx](frontend/components/system/rag-configuration.tsx)
 - [frontend/hooks/use-unified-analytics.ts](frontend/hooks/use-unified-analytics.ts)
-- [frontend/tsconfig.tsbuildinfo](frontend/tsconfig.tsbuildinfo)
+- [orchestrator/api/llm_analytics.py](orchestrator/api/llm_analytics.py)
+- [orchestrator/core/llm/openrouter_analytics.py](orchestrator/core/llm/openrouter_analytics.py)
 
 </details>
 
@@ -30,14 +38,14 @@ This document describes the admin-only analytics dashboard that provides platfor
 
 Admin Analytics is a specialized view within the unified analytics system that serves platform administrators and operators. It provides:
 
-- **Platform-wide aggregation**: Total costs, tokens, and missions across all workspaces [frontend/hooks/use-unified-analytics.ts:59-66]().
-- **Revenue tracking**: MRR projections, BYOK vs platform cost split, and workspace billing distribution [frontend/components/analytics/analytics-admin.tsx:196-206]().
-- **Operational monitoring**: Top spenders, cost anomalies, and plan distribution (Starter, Pilot, Pro, Enterprise) [frontend/components/analytics/analytics-admin.tsx:54-66]().
-- **Multi-tenant visibility**: Per-workspace breakdown with drill-down capability using admin overrides [frontend/hooks/use-unified-analytics.ts:12-14]().
+- **Platform-wide aggregation**: Total costs, tokens, and requests across all workspaces [orchestrator/api/llm_analytics.py:29]().
+- **Revenue tracking**: MRR projections, plan distribution, and workspace billing status [frontend/components/analytics/analytics-admin.tsx:196-243]().
+- **Operational monitoring**: Identification of top spenders, cost anomalies, and plan distribution [frontend/components/analytics/analytics-admin.tsx:224-235]().
+- **Multi-tenant visibility**: Per-workspace breakdown with drill-down capability via workspace overrides [frontend/hooks/use-unified-analytics.ts:12-14]().
 
-This view is accessible only to users with administrative privileges or in bootstrap mode. Regular workspace users see workspace-scoped analytics tabs instead [docs/PRDS/52-UNIFIED-ANALYTICS.md:50-56]().
+This view is accessible only to users with elevated system roles. Regular workspace users see workspace-scoped analytics tabs instead [frontend/components/analytics/analytics-page.tsx:39-60]().
 
-Sources: [frontend/components/analytics/analytics-admin.tsx:1-206](), [frontend/hooks/use-unified-analytics.ts:12-100](), [docs/PRDS/52-UNIFIED-ANALYTICS.md:48-76]()
+Sources: [frontend/components/analytics/analytics-admin.tsx:1-243](), [orchestrator/api/llm_analytics.py:28-30](), [frontend/hooks/use-unified-analytics.ts:1-43]()
 
 ---
 
@@ -45,39 +53,31 @@ Sources: [frontend/components/analytics/analytics-admin.tsx:1-206](), [frontend/
 
 Admin access is enforced through a combination of frontend role checks and backend assertions.
 
-Title: Admin Access Flow
+Title: Admin Access Flow (Code Entity Mapping)
 ```mermaid
 graph TB
     User["User Request"]
-    RoleCheck{"system_role == 'admin'?"}
-    BootstrapCheck{"Active Workspaces <= 2?"}
-    AdminAccess["Grant Admin Access"]
-    Deny["HTTP 403 Forbidden"]
+    RoleContext["useSystemRole() hook"]
+    AdminFlag["isAdmin state"]
+    Deny["Hide Admin Tab / 403 Forbidden"]
     
-    User --> RoleCheck
-    RoleCheck -->|Yes| AdminAccess
-    RoleCheck -->|No| BootstrapCheck
-    BootstrapCheck -->|Yes| AdminAccess
-    BootstrapCheck -->|No| Deny
+    User --> RoleContext
+    RoleContext -- "system_role == 'admin'" --> AdminFlag
+    AdminFlag -- "true" --> Frontend["AnalyticsAdmin Component"]
+    AdminFlag -- "false" --> Deny
     
-    AdminAccess --> FrontendCheck["useSystemRole hook"]
-    FrontendCheck --> TabVisibility["Show 'Admin' tab"]
-    
-    AdminAccess --> BackendCheck["_assert_admin()"]
-    BackendCheck --> AdminEndpoints["Admin Endpoints"]
-    
-    AdminEndpoints --> CostAnalytics["/api/admin/analytics/costs"]
-    AdminEndpoints --> DashboardData["/api/admin/analytics/dashboard"]
+    Frontend --> Hooks["useAdminDashboard(period)"]
+    Hooks --> API["apiClient.request('/api/admin/analytics/dashboard')"]
+    API --> Backend["admin_router in llm_analytics.py"]
 ```
 
 ### Admin Access Logic
 
-1.  **Backend Authorization**: Validates administrative roles from the request context. A bootstrap bypass exists for single-tenant or new deployments where limited active workspaces exist in the database [docs/PRDS/52-UNIFIED-ANALYTICS.md:41-45]().
-2.  **Frontend Visibility**: The `AnalyticsPage` component conditionally renders the "Admin" tab. Role detection is typically handled by identity providers or system role hooks [docs/PRDS/52-UNIFIED-ANALYTICS.md:91-101]().
+1.  **Backend Authorization**: Backend endpoints are registered on the `admin_router` which uses the `/api/admin/analytics` prefix [orchestrator/api/llm_analytics.py:29]().
+2.  **Frontend Visibility**: The `AnalyticsPage` component conditionally includes the "Admin" tab in the `tabDefs` array only if `isAdmin` is true [frontend/components/analytics/analytics-page.tsx:59-60]().
+3.  **Bootstrap Mode**: While the system role is the primary gate, the platform supports a "Bootstrap Mode" during initial setup (typically when ≤2 workspaces exist) to allow configuration before roles are finalized [docs/PRDS/52-UNIFIED-ANALYTICS.md:41-44]().
 
-**Bootstrap Mode**: This mode allows the initial setup of a deployment before administrative roles are formally assigned. Once the workspace threshold is exceeded, strict role enforcement applies to protect multi-tenant data [docs/PRDS/52-UNIFIED-ANALYTICS.md:41-45]().
-
-Sources: [docs/PRDS/52-UNIFIED-ANALYTICS.md:41-101](), [frontend/components/analytics/analytics-admin.tsx:1-25]()
+Sources: [frontend/components/analytics/analytics-page.tsx:39-60](), [orchestrator/api/llm_analytics.py:28-30](), [frontend/hooks/use-unified-analytics.ts:10-14]()
 
 ---
 
@@ -91,32 +91,27 @@ graph TB
     AdminTab["AnalyticsAdmin Component"]
     
     AdminTab --> Header["Header Section"]
-    Header --> PeriodToggle["PeriodToggle (7D/30D/90D)"]
-    Header --> ExportBtn["CSV Export Button"]
+    Header --> PeriodToggle["PeriodToggle ('7d', '30d', '90d')"]
     
-    AdminTab --> HeroStats["Hero Stats Grid"]
-    HeroStats --> TotalRevenue["Total Revenue"]
-    HeroStats --> MRRProjection["MRR Projection"]
-    HeroStats --> WorkspaceCount["Workspaces"]
-    HeroStats --> APIRequests["API Requests"]
+    AdminTab --> HeroStats["Dashboard Data Hooks"]
+    HeroStats --> DashData["useAdminDashboard(period)"]
+    HeroStats --> LegacyData["useAdminWorkspaceAnalytics(days)"]
     
-    AdminTab --> CostCharts["Cost Charts Row"]
-    CostCharts --> DailyProvider["Daily Cost by Provider (Stacked Area)"]
-    CostCharts --> BYOKSplit["Cost Source Split (Donut)"]
+    AdminTab --> CostCharts["Visualizations"]
+    CostCharts --> ProviderChart["AreaChart (Daily Cost by Provider)"]
+    CostCharts --> PlanChart["PieChart (Plan Distribution)"]
     
     AdminTab --> SpendersTable["Top Spenders Table"]
-    SpendersTable --> SortColumns["Sort by: cost, requests, agents, name"]
-    
-    AdminTab --> AnomaliesSection["Cost Anomalies Alert"]
+    SpendersTable --> SortHeaders["SortHeader (cost, requests, agents, name)"]
 ```
 
 ### State Management
-The component tracks the selected `period` ('7d', '30d', '90d') to drive API requests [frontend/components/analytics/analytics-admin.tsx:165](). It also manages sorting state for the spenders table (`spenderSort`, `spenderDir`) [frontend/components/analytics/analytics-admin.tsx:173-174]().
+The component tracks the selected `period` ('7d', '30d', '90d') to drive API requests [frontend/components/analytics/analytics-admin.tsx:165](). It also manages sorting state for the spenders table (`spenderSort`, `spenderDir`) using a `toggleSpenderSort` helper [frontend/components/analytics/analytics-admin.tsx:173-178]().
 
 ### Data Hooks
 Admin data is fetched using React Query hooks defined in `use-unified-analytics.ts`:
 - `useAdminDashboard(period)`: Fetches high-level platform overview [frontend/hooks/use-unified-analytics.ts:42]().
-- `useAdminWorkspaceAnalytics(days)`: Fetches per-workspace usage metrics [frontend/hooks/use-unified-analytics.ts:39]().
+- `useAdminWorkspaceAnalytics(days)`: Fetches per-workspace usage metrics [frontend/hooks/use-unified-analytics.ts:27]().
 - `useAdminCostAnalytics(period)`: Fetches platform-wide cost breakdowns [frontend/hooks/use-unified-analytics.ts:40]().
 
 Sources: [frontend/components/analytics/analytics-admin.tsx:164-180](), [frontend/hooks/use-unified-analytics.ts:18-43]()
@@ -127,110 +122,77 @@ Sources: [frontend/components/analytics/analytics-admin.tsx:164-180](), [fronten
 
 ### Revenue and Cost Metrics
 
-**Total Platform Cost**
-The system aggregates usage across all workspaces for the selected period. This includes `llm_usage` summaries and agent-specific costs [frontend/hooks/use-unified-analytics.ts:70-73]().
+| Metric | Implementation | Source |
+| :--- | :--- | :--- |
+| **Total Platform Cost** | Aggregated from `LLMUsage` across all workspaces. | [frontend/components/analytics/analytics-admin.tsx:196]() |
+| **Plan Distribution** | Count of workspaces per plan (`starter`, `pilot`, `pro`, `enterprise`). | [frontend/components/analytics/analytics-admin.tsx:199-206]() |
+| **Top Spenders** | Sortable list of workspaces by `cost`, `requests`, or `agents`. | [frontend/components/analytics/analytics-admin.tsx:173-178]() |
 
-**MRR Projection**
-Calculated by extrapolating the daily average spend or subscription revenue over the current period to a monthly window [frontend/components/analytics/analytics-admin.tsx:196-206]().
+**Plan Visualization**
+The system uses `PLAN_COLORS` and `PLAN_DONUT_COLORS` to maintain visual consistency for subscription tiers [frontend/components/analytics/analytics-admin.tsx:54-66]().
 
-**Plan Distribution**
-The system tracks workspaces across four tiers: `starter`, `pilot`, `pro`, and `enterprise`. These are visualized using specific color mappings [frontend/components/analytics/analytics-admin.tsx:54-66]().
+### Cost Anomaly Detection
+The `AnalyticsAdmin` component identifies workspaces that represent significant cost outliers, often highlighting them in the top spenders table [frontend/components/analytics/analytics-admin.tsx:224-235]().
 
-### Plan Usage Monitoring
-The `AnalyticsPlanUsage` component tracks current consumption against defined quotas for agents, storage, and API calls [frontend/components/analytics/analytics-plan-usage.tsx:74-90]().
-
-Sources: [frontend/hooks/use-unified-analytics.ts:59-75](), [frontend/components/analytics/analytics-admin.tsx:54-206](), [frontend/components/analytics/analytics-plan-usage.tsx:9-113]()
+Sources: [frontend/components/analytics/analytics-admin.tsx:49-66](), [frontend/components/analytics/analytics-admin.tsx:196-243]()
 
 ---
 
-## Data Aggregation Flow
+## Admin Workspace Switching
 
-The data flow bridges high-level UI requests to complex backend aggregations.
+Admins can "impersonate" a specific workspace to view its detailed analytics without leaving the dashboard.
 
-Title: Admin Analytics Data Pipeline
+1.  **Override Mechanism**: The `AdminWorkspaceSwitcher` allows selecting a workspace ID [frontend/components/analytics/analytics-page.tsx:71]().
+2.  **Persistence**: The selected ID is handled via the `getAdminWorkspaceOverride()` utility [frontend/hooks/use-unified-analytics.ts:8]().
+3.  **Query Scoping**: The `wsScope()` function in the hooks layer checks for this override. If present, it ensures the cache key is scoped to the overridden workspace, preventing data leakage [frontend/hooks/use-unified-analytics.ts:12-14]().
+
+Title: Workspace Override Logic (Code Entities)
 ```mermaid
-graph LR
-    Request["GET /api/admin/analytics/dashboard"]
+graph TB
+    Hook["useAnalyticsOverview()"]
+    wsScope["wsScope() function"]
+    Override["getAdminWorkspaceOverride()"]
+    QueryKey["unifiedAnalyticsKeys.overview()"]
     
-    Request --> Auth["Admin Authorization Check"]
-    Auth --> PlatformAgg["Global Usage aggregation"]
+    Hook --> wsScope
+    wsScope --> Override
+    Override -- "Returns Workspace ID" --> QueryKey
+    QueryKey -- "Generates scoped key" --> Cache["React Query Cache"]
     
-    PlatformAgg --> Metrics["total_cost, tokens, missions"]
-    PlatformAgg --> ByWorkspace["Group by workspace_id"]
-    PlatformAgg --> ByProvider["Group by provider"]
-    PlatformAgg --> DailyTrend["Group by date"]
-    
-    ByWorkspace --> WsJoin["Join Workspace Metadata"]
-    
-    WsJoin --> Response["AdminDashboardResponse"]
+    Cache -- "Cache Miss" --> API["apiClient.request()"]
+    API -- "Includes Override ID" --> Backend["Backend Workspace Context"]
 ```
 
-**Unified Hooks Layer**
-The `use-unified-analytics.ts` file consolidates multiple API calls (Agents, LLM Summary, Workflows, Documents, Missions) into a single logical overview for the frontend [frontend/hooks/use-unified-analytics.ts:59-66]().
+Sources: [frontend/hooks/use-unified-analytics.ts:1-15](), [frontend/components/analytics/analytics-page.tsx:48-51]()
 
-Sources: [frontend/hooks/use-unified-analytics.ts:46-106](), [docs/PRDS/52-UNIFIED-ANALYTICS.md:40-45]()
+---
+
+## Backend Analytics Implementation
+
+The backend logic for admin analytics is primarily located in the `llm_analytics.py` router and supporting services.
+
+### API Endpoints
+- `GET /api/admin/analytics`: Prefixed router for administrative data [orchestrator/api/llm_analytics.py:29]().
+- `GET /api/analytics/llm/usage`: Token usage grouped by model, provider, or agent [orchestrator/api/llm_analytics.py:87-90]().
+
+### Data Aggregation Logic
+The backend queries the `LLMUsage` table, grouping by `workspace_id` and `provider` to calculate platform-wide burn rates [orchestrator/api/llm_analytics.py:100-126](). It also integrates with `OpenRouterAnalyticsService` to sync external usage data into the local `llm_usage` table via `sync_activity` [orchestrator/core/llm/openrouter_analytics.py:44-50]().
+
+Sources: [orchestrator/api/llm_analytics.py:28-30](), [orchestrator/core/llm/openrouter_analytics.py:44-50](), [orchestrator/api/llm_analytics.py:87-138]()
 
 ---
 
 ## Visualizations
 
 ### Daily Cost by Provider
-A stacked area chart displaying daily spend per LLM provider (e.g., OpenAI, Anthropic, OpenRouter). The chart uses `PROVIDER_COLORS` to differentiate series [frontend/components/analytics/analytics-admin.tsx:49-52]().
-
-### Plan Distribution
-A donut chart visualizing the breakdown of workspaces by their subscription tier. Colors are mapped via `PLAN_DONUT_COLORS` [frontend/components/analytics/analytics-admin.tsx:61-66]().
+A stacked area chart displaying daily spend per LLM provider. The chart uses `PROVIDER_COLORS` to differentiate series [frontend/components/analytics/analytics-admin.tsx:49-52]().
 
 ### Top Spenders Table
-A sortable table displaying workspace names, agent counts, request volumes, and total costs. It allows administrators to identify high-volume tenants quickly [frontend/components/analytics/analytics-admin.tsx:173-178]().
+A sortable table displaying workspace names, agent counts, request volumes, and total costs. It uses the `SortHeader` component to manage sorting state [frontend/components/analytics/analytics-admin.tsx:141-158]().
 
-Sources: [frontend/components/analytics/analytics-admin.tsx:49-66](), [frontend/components/analytics/analytics-admin.tsx:173-178]()
+### OpenRouter Credits
+Admins monitor platform-level credits through the `AnalyticsOpenRouterCredits` component, which fetches data from the OpenRouter `/credits` and `/key` endpoints [orchestrator/core/llm/openrouter_analytics.py:154-190]().
 
----
-
-## Admin Workspace Switching
-
-Admins have the unique ability to "impersonate" a specific workspace to view its detailed analytics.
-
-1.  **Override Mechanism**: The `getAdminWorkspaceOverride()` utility retrieves the targeted workspace ID from the application state [frontend/hooks/use-unified-analytics.ts:8]().
-2.  **Query Scoping**: The `wsScope()` function in the hooks layer checks for this override. If present, it ensures the cache key is scoped to the overridden workspace, preventing data leakage between admin views [frontend/hooks/use-unified-analytics.ts:12-14]().
-
-Title: Workspace Override Logic
-```mermaid
-graph TB
-    Hook["useAnalyticsOverview"]
-    wsScope["wsScope()"]
-    Override["getAdminWorkspaceOverride()"]
-    
-    Hook --> wsScope
-    wsScope --> Override
-    Override -->|ID Found| Header["Targeted Workspace ID"]
-    Override -->|Null| Default["Use 'own' workspace"]
-    
-    Header --> API["apiClient.request()"]
-    Default --> API
-```
-
-Sources: [frontend/hooks/use-unified-analytics.ts:12-14](), [frontend/hooks/use-unified-analytics.ts:18-43]()
-
----
-
-## API Reference (Admin Only)
-
-### Admin Dashboard Summary
-**Hook**: `useAdminDashboard(period)`
-**Endpoint**: `/api/admin/analytics/dashboard`
-**Purpose**: Returns high-level platform metrics and top spender list [frontend/hooks/use-unified-analytics.ts:42]().
-
-### Admin Cost Analytics
-**Hook**: `useAdminCostAnalytics(period)`
-**Endpoint**: `/api/admin/analytics/costs`
-**Purpose**: Returns detailed cost breakdown by provider and workspace [frontend/hooks/use-unified-analytics.ts:40]().
-
-### Admin Workspace List
-**Hook**: `useAdminWorkspaceAnalytics(days)`
-**Endpoint**: `/api/admin/analytics/workspaces`
-**Purpose**: Returns a list of all workspaces with basic usage stats for the switcher [frontend/hooks/use-unified-analytics.ts:39]().
-
-Sources: [frontend/hooks/use-unified-analytics.ts:18-43](), [docs/PRDS/52-UNIFIED-ANALYTICS.md:40-45]()
+Sources: [frontend/components/analytics/analytics-admin.tsx:141-158](), [orchestrator/core/llm/openrouter_analytics.py:154-190]()
 
 ---

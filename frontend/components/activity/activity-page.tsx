@@ -89,7 +89,8 @@ export function ActivityPage() {
   const [activeTab, setActiveTab] = useState('summary')
   const [period, setPeriod] = useState('1d')
 
-  // Deep-link: /activity?tab=board&task_id=123 or /activity?openExecution=X&recipeId=Y
+  // Deep-link: /activity?tab=board&task_id=123
+  // (Live execution deep-link is /activity/execution?id=<execId>&recipeId=<recipeId>)
   const searchParams = useSearchParams()
   const openExecution = searchParams.get('openExecution')
   const deepLinkRecipeId = searchParams.get('recipeId')
@@ -101,6 +102,9 @@ export function ActivityPage() {
     if (tabParam && TAB_DEFS.some((t) => t.value === tabParam)) {
       setActiveTab(tabParam)
     } else if (openExecution) {
+      // Legacy deep-link from old /activity?openExecution=... URLs that
+      // got redirected here. Land on the feed; ActivityFeed will open the
+      // slide-over for the matching item as a fallback.
       setActiveTab('feed')
     }
   }, [tabParam, openExecution])
@@ -130,7 +134,8 @@ export function ActivityPage() {
         <PageHeader
           title="Command"
           titleAccent="Centre"
-          subtitle="Your AI workforce at a glance"
+          eyebrow="Operations · daily glance"
+          lede="What your workforce is running right now, what cleared, and what needs your eyes. Everything streams live; replay any window to the second."
           actions={
             <>
               <Select value={period} onValueChange={setPeriod}>

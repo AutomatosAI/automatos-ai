@@ -10,7 +10,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Dict, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -36,6 +36,127 @@ _PRIORITY_SLA_HOURS: dict[str, int] = {
     "medium": 24,
     "low": 72,
 }
+
+
+# ── Auto-report creation (mirrors heartbeat_service._auto_create_report) ───
+async def _auto_create_task_report(
+    db: Session,
+    workspace_id: str,
+    task: BoardTask,
+    exec_result: Dict[str, Any],
+) -> None:
+    """
+    Persist an agent_reports row for a completed task so it shows up in
+    Reports / Deliverables / Activity Feed — same pattern heartbeats use.
+    Always non-blocking: never raises, just warns on failure.
+    """
+    try:
+        from services.report_service import ReportService, compute_execution_metrics
+
+        agent_name = "Unknown Agent"
+        if task.assigned_agent_id:
+            agent = db.query(Agent).filter(Agent.id == task.assigned_agent_id).first()
+            if agent:
+                agent_name = agent.name
+
+        # Source the body from the agent's actual response, falling back to whatever
+        # text was captured in task.result.
+        llm_text = (
+            exec_result.get("result")
+            or exec_result.get("response")
+            or exec_result.get("output")
+            or exec_result.get("content")
+            or task.result
+            or ""
+        )
+
+        # Pull cost/model/duration rollup from llm_usage (window = task started→completed)
+        exec_metrics = compute_execution_metrics(
+            db,
+            workspace_id,
+            agent_id=task.assigned_agent_id,
+            execution_id=getattr(task, "execution_id", None),
+            started_at=getattr(task, "started_at", None),
+            completed_at=getattr(task, "completed_at", None),
+            extra={
+                "task_id": task.id,
+                "task_status": task.status,
+                "trigger": "task",
+            },
+        )
+
+        # Honour upstream-supplied tokens if the rollup found nothing
+        if not exec_metrics.get("tokens_used"):
+            usage = exec_result.get("usage") or {}
+            fallback_tokens = (
+                usage.get("total_tokens")
+                or exec_result.get("tokens_used")
+                or 0
+            )
+            if fallback_tokens:
+                exec_metrics["tokens_used"] = fallback_tokens
+
+        report_status = "ok" if task.status in ("done", "review") else "warning"
+        if task.error_message:
+            report_status = "critical"
+
+        # Render the same shape heartbeat reports use so consumers stay uniform.
+        lines = [
+            f"# {agent_name} — Task Report",
+            f"**Task:** {task.title}",
+            f"**Status:** {task.status}",
+            "",
+        ]
+        if task.error_message:
+            lines.append("## Error")
+            lines.append(str(task.error_message))
+            lines.append("")
+        if llm_text:
+            lines.append("## Result")
+            lines.append(str(llm_text))
+            lines.append("")
+        lines.append("## Execution Metrics")
+        lines.append(f"- Model: {exec_metrics.get('model') or 'unknown'}")
+        lines.append(f"- LLM calls: {exec_metrics.get('llm_calls', 0)}")
+        lines.append(f"- Tokens (in/out/total): "
+                     f"{exec_metrics.get('input_tokens', 0)} / "
+                     f"{exec_metrics.get('output_tokens', 0)} / "
+                     f"{exec_metrics.get('tokens_used', 0)}")
+        lines.append(f"- Cost: ${exec_metrics.get('cost_usd', 0):.4f}")
+        if exec_metrics.get("duration_ms") is not None:
+            lines.append(f"- Duration: {exec_metrics['duration_ms']} ms")
+        content = "\n".join(lines)
+
+        # Summary is the first non-empty body line — same convention as heartbeat reports.
+        summary = None
+        for line in str(llm_text).split("\n"):
+            stripped = line.strip().lstrip("#").strip()
+            if stripped:
+                summary = (stripped[:497] + "...") if len(stripped) > 497 else stripped
+                break
+
+        svc = ReportService(db, workspace_id)
+        report_result = await svc.create_report(
+            agent_id=task.assigned_agent_id,
+            agent_name=agent_name,
+            title=f"Task: {task.title}",
+            content=content,
+            report_type="task",
+            status=report_status,
+            summary=summary,
+            metrics=exec_metrics,
+        )
+        if not report_result.get("success"):
+            logger.warning(
+                "[BoardTasks] Auto-report creation failed for task=%s: %s",
+                task.id, report_result.get("error"),
+            )
+    except Exception:
+        logger.error(
+            "[BoardTasks] _auto_create_task_report raised for task=%s",
+            getattr(task, "id", "?"),
+            exc_info=True,
+        )
 
 
 # ── PRD-128: Unified notification dispatch ─────────────────────────
@@ -424,6 +545,38 @@ async def approve_task(
                     "url": f"/api/widgets/blog/posts/{post.slug}?workspace_id={ctx.workspace_id}",
                 }
                 logger.info("[BoardTasks] Approved: published blog post %s (%s)", post.id, post.title)
+            elif action_type == "create_blog":
+                # Used by VECTOR (and any agent) to suggest a blog topic for
+                # founder approval. On approve, fire the standard blog mission.
+                from modules.tools.discovery.handlers_blog import (
+                    create_blog_post_from_topic,
+                )
+                topic = approval_action.get("topic")
+                category = approval_action.get("category") or "AI & Automation"
+                if not topic:
+                    raise HTTPException(status_code=422, detail="approval_action missing topic")
+                user_id = ctx.user.clerk_user_id if ctx.user else None
+                result = await create_blog_post_from_topic(
+                    db,
+                    ctx.workspace_id,
+                    {"topic": topic, "category": category, "_user_id": user_id},
+                )
+                if not result.get("success"):
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Blog mission start failed: {result.get('error', 'unknown')}",
+                    )
+                action_result = {
+                    "type": "create_blog",
+                    "mission_id": result.get("mission_id"),
+                    "topic": topic,
+                    "category": category,
+                    "task_count": result.get("task_count", 0),
+                }
+                logger.info(
+                    "[BoardTasks] Approved: created blog mission %s for topic '%s'",
+                    result.get("mission_id"), topic,
+                )
             else:
                 logger.warning("[BoardTasks] Unknown approval_action type: %s", action_type)
                 action_result = {"type": action_type, "warning": "Unknown action type, task approved without side-effect"}
@@ -601,6 +754,9 @@ def _launch_task_execution(
                 # PRD-128: dispatch task_complete only on terminal 'done'
                 if task.status == "done":
                     await _dispatch_task_complete(db, workspace_id, task)
+                # Persist a report row for every completed task so it surfaces
+                # in Reports / Deliverables / Activity Feed (mirrors heartbeats).
+                await _auto_create_task_report(db, workspace_id, task, exec_result)
                 db.commit()
 
             logger.info(
@@ -613,10 +769,16 @@ def _launch_task_execution(
             )
             try:
                 task = db.query(BoardTask).get(task_id)
-                if task:
-                    task.status = "inbox"
+                if task and task.status == "in_progress":
+                    task.status = "done"
                     task.error_message = str(e)[:500]
-                    task.started_at = None
+                    task.completed_at = datetime.now(timezone.utc)
+                    db.commit()
+                    # Surface failures the same way successes are surfaced.
+                    await _auto_create_task_report(
+                        db, workspace_id, task,
+                        {"result": "", "tokens_used": 0},
+                    )
                     db.commit()
             except Exception:
                 db.rollback()

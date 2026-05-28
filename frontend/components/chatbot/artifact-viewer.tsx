@@ -128,7 +128,7 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
           {artifact.kind === 'document' && (
             <div className="space-y-4">
               <div className="flex items-center gap-3">
-                <FileText className="h-8 w-8 text-orange-500" />
+                <FileText className="h-8 w-8 text-primary" />
                 <div>
                   <h3 className="font-semibold">{artifact.title}</h3>
                   <p className="text-sm text-muted-foreground">
@@ -147,7 +147,7 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
                 {artifact.metadata?.download_url && (
                   <Button
                     onClick={() => window.open(artifact.metadata!.download_url, '_blank')}
-                    className="bg-orange-500 hover:bg-orange-600 text-white"
+                    className="bg-primary hover:bg-primary/90 text-primary-foreground"
                   >
                     <Download className="h-4 w-4 mr-2" />
                     Download {artifact.metadata?.format?.toUpperCase()}

@@ -9,10 +9,15 @@ def register_harness_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_harness_status",
         description=(
-            "Returns current HARNESS optimization loop state: last run date, "
-            "convergence status (exploring/converging/converged/diverging), "
-            "iteration count, and next scheduled run. Use when asked about "
-            "team performance, optimization status, or org health."
+            "Returns granular HARNESS optimization loop state. Status is one of: "
+            "disabled (workspace opted out), running (tick in flight), failed "
+            "(last tick errored — check `error`), dormant_insufficient_agents / "
+            "dormant_insufficient_data (waiting for the workspace to grow — see "
+            "`active_agents`, `heartbeat_days_available`), scheduled_not_run_yet "
+            "(eligible but cron has not fired), or completed (with iteration "
+            "count, convergence, last_run_at, and per-artifact write outcomes). "
+            "Use when asked about team performance, optimization status, or org "
+            "health."
         ),
         category="harness",
         parameters={
@@ -27,6 +32,7 @@ def register_harness_actions(registry: ActionRegistry) -> None:
             "what's the optimization status?",
             "harness status",
             "org health check",
+            "why hasn't harness run yet?",
         ],
     ))
 

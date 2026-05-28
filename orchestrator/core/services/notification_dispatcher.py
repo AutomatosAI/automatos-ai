@@ -95,18 +95,61 @@ class NotificationDispatcher:
         agent_name: Optional[str] = None,
         status: str = "ok",
         user_id: Optional[int] = None,
+        severity: Optional[str] = None,
     ) -> dict[str, Any]:
         """Raise ``event_type`` against the configured preferences.
+
+        Wave 2: when ``workspace.settings.auto_reporting`` is configured,
+        ``routes`` overrides the per-event prefs and ``quiet_hours`` forces
+        non-urgent traffic onto in_app. ``security`` and ``urgent`` severities
+        always go through, even during quiet hours.
 
         Returns a dict with a ``dispatched_to`` list naming every
         destination that was actually fired (``in_app``, ``telegram``,
         ``slack``, ``webhook``, ``channel:<uuid>``). Silent and failed
         destinations are not included.
         """
+        # Wave 2 — auto_reporting overrides.
+        # If settings load fails, _load_auto_reporting returns {}; treat that
+        # as disabled rather than enabled, otherwise a transient load error
+        # would silently engage routing logic with empty state.
+        ar_settings = self._load_auto_reporting()
+        ar_enabled = bool(ar_settings) and bool(ar_settings.get("enabled", False))
+
+        override_destination: Optional[str] = None
+        if ar_enabled:
+            override_destination = self._auto_reporting_destination(
+                ar_settings, event_type, severity
+            )
+
         prefs = self._get_preferences(event_type, user_id)
 
-        # No preferences configured at all → default to a single in_app row.
-        if not prefs:
+        if override_destination:
+            prefs = [
+                {
+                    "destination": override_destination,
+                    "enabled": True,
+                    "channel_connection_id": None,
+                    "user_id": user_id,
+                }
+            ]
+        elif not prefs:
+            # No preferences configured at all → default to a single in_app row.
+            prefs = [
+                {
+                    "destination": "in_app",
+                    "enabled": True,
+                    "channel_connection_id": None,
+                    "user_id": user_id,
+                }
+            ]
+
+        # Quiet hours — funnel non-urgent traffic to in_app
+        if (
+            ar_enabled
+            and severity not in {"urgent", "security"}
+            and self._is_quiet_hours(ar_settings)
+        ):
             prefs = [
                 {
                     "destination": "in_app",
@@ -193,6 +236,32 @@ class NotificationDispatcher:
                 )
 
         return {"dispatched_to": dispatched}
+
+    # -------------------------------------------------------- auto_reporting
+
+    def _load_auto_reporting(self) -> dict[str, Any]:
+        """Return the workspace's effective auto_reporting settings (Wave 2)."""
+        try:
+            from core.services.auto_reporting import load_auto_reporting_settings
+            return load_auto_reporting_settings(self.db, self.workspace_id)
+        except Exception:
+            logger.warning(
+                "[Dispatcher] Failed to load auto_reporting for ws=%s — falling back to prefs only",
+                self.workspace_id, exc_info=True,
+            )
+            return {}
+
+    @staticmethod
+    def _auto_reporting_destination(
+        settings: dict[str, Any], event_type: str, severity: Optional[str]
+    ) -> Optional[str]:
+        from core.services.auto_reporting import route_for_event
+        return route_for_event(settings, event_type, severity)
+
+    @staticmethod
+    def _is_quiet_hours(settings: dict[str, Any]) -> bool:
+        from core.services.auto_reporting import is_quiet_hours
+        return is_quiet_hours(settings)
 
     # -------------------------------------------------------- preferences
 

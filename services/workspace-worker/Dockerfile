@@ -26,11 +26,6 @@ RUN pip install --no-cache-dir \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Headless Chromium for workspace_html_to_png tool (PRD-social-render).
-# Installed AFTER pip so the playwright CLI is on PATH; --with-deps pulls
-# the Debian libs Chromium needs (libnss3, libatk1.0-0, libxkbcommon0, etc).
-RUN playwright install --with-deps chromium
-
 # Worker code (includes automatos_logging.py + automatos_metrics.py for observability)
 COPY . .
 
@@ -38,6 +33,20 @@ COPY . .
 RUN useradd -m -u 1000 worker \
     && mkdir -p /workspaces \
     && chown -R worker:worker /app /workspaces
+
+# Headless Chromium for workspace_html_to_png tool (PRD-social-render).
+# Install deps manually (--with-deps fails on Debian Trixie due to renamed font pkgs).
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libnss3 libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 libdrm2 \
+    libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 \
+    libpango-1.0-0 libcairo2 libasound2t64 libxshmfence1 \
+    fonts-liberation fonts-noto-color-emoji fonts-unifont \
+    && rm -rf /var/lib/apt/lists/* \
+    && PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers playwright install chromium \
+    && chmod -R o+rx /opt/playwright-browsers \
+    && mkdir -p /home/worker/.cache && ln -sf /opt/playwright-browsers /home/worker/.cache/ms-playwright \
+    && mkdir -p /root/.cache && ln -sf /opt/playwright-browsers /root/.cache/ms-playwright
 
 # Entrypoint fixes volume ownership then drops to worker user
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh

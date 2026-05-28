@@ -101,7 +101,15 @@ export interface FieldMetrics {
   queries_by_agent: Record<number, number>
 }
 
+export type MissionFieldStatus =
+  | 'not_created'
+  | 'missing'
+  | 'empty'
+  | 'active'
+  | 'unavailable'
+
 export interface MissionFieldResponse {
+  status?: MissionFieldStatus
   field_id: string | null
   backend: string | null
   patterns: FieldPattern[]

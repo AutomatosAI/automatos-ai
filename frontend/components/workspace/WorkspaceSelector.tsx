@@ -154,7 +154,7 @@ export function WorkspaceSelector({
             {/* Unsaved changes indicator */}
             {hasUnsavedChanges && (
               <span
-                className="h-2 w-2 rounded-full bg-orange-500 flex-shrink-0"
+                className="h-2 w-2 rounded-full bg-primary flex-shrink-0"
                 title="Unsaved changes"
               />
             )}

@@ -22,8 +22,10 @@ def _get_graph_extraction_model() -> str:
     """Read graph extraction model from system_settings (knowledge_graph category)."""
     return Config().GRAPHIFY_MODEL
 
-# Per-document LLM timeout (seconds). Prevents silent hangs on dropped connections.
-_EXTRACTION_TIMEOUT = 90
+def _extraction_timeout() -> int:
+    from core.llm.manager import get_system_setting
+    return int(get_system_setting("knowledge_graph", "extraction_timeout", "90"))
+
 
 logger = logging.getLogger(__name__)
 
@@ -297,11 +299,11 @@ async def extract_from_document(
                 {"role": "system", "content": "You are a knowledge-graph extraction engine. Output valid JSON only."},
                 {"role": "user", "content": prompt},
             ]),
-            timeout=_EXTRACTION_TIMEOUT,
+            timeout=_extraction_timeout(),
         )
         raw_text = response.content if hasattr(response, "content") else str(response)
     except asyncio.TimeoutError:
-        logger.error("LLM call timed out after %ds for %s", _EXTRACTION_TIMEOUT, doc_path)
+        logger.error("LLM call timed out after %ds for %s", _extraction_timeout(), doc_path)
         return _empty_graph()
     except Exception:
         logger.exception("LLM call failed during document extraction for %s", doc_path)
@@ -352,11 +354,11 @@ async def extract_from_report(
                 {"role": "system", "content": "You are a knowledge-graph extraction engine. Output valid JSON only."},
                 {"role": "user", "content": prompt},
             ]),
-            timeout=_EXTRACTION_TIMEOUT,
+            timeout=_extraction_timeout(),
         )
         raw_text = response.content if hasattr(response, "content") else str(response)
     except asyncio.TimeoutError:
-        logger.error("LLM call timed out after %ds for %s", _EXTRACTION_TIMEOUT, report_path)
+        logger.error("LLM call timed out after %ds for %s", _extraction_timeout(), report_path)
         return _empty_graph()
     except Exception:
         logger.exception("LLM call failed during report extraction for %s", report_path)
@@ -377,6 +379,7 @@ _ROSTER_SOURCE = "platform://agent_roster"
 _BLUEPRINT_SOURCE = "platform://blueprints"
 _SCHEMA_SOURCE = "platform://db_schemas"
 _APPS_SOURCE = "platform://connected_apps"
+_SHOPIFY_SOURCE = "shopify://catalog"
 
 
 def map_agent_roster(agents: list[dict]) -> dict[str, list]:
@@ -475,4 +478,322 @@ def map_connected_apps(apps: list[dict]) -> dict[str, list]:
             file_type="integration",
             source_file=_APPS_SOURCE,
         ))
+    return result
+
+
+# ---------------------------------------------------------------------------
+# PRD-009 Layer 2 — Shopify catalog → knowledge graph
+# ---------------------------------------------------------------------------
+# Input is the JSONL stream Shopify Bulk Operations writes (one object per
+# line, nested children carry __parentId). We deterministically translate it
+# into the same {nodes, edges} shape every other mapper here uses, then hand
+# off to GraphifyService.import_graph for clustering/persistence/embeddings.
+
+def _shopify_gid_tail(gid: str) -> str:
+    """gid://shopify/Product/12345 → '12345'."""
+    return (gid or "").rsplit("/", 1)[-1] if gid else ""
+
+
+def _shopify_type(gid: str) -> str:
+    """gid://shopify/Product/12345 → 'Product'."""
+    m = re.match(r"gid://shopify/([A-Za-z]+)/", gid or "")
+    return m.group(1) if m else ""
+
+
+def map_shopify_catalog(jsonl_iter, *, bulk_op_id: str | None = None) -> dict[str, list]:
+    """Map a Shopify Bulk Operation JSONL stream into a knowledge graph.
+
+    Args:
+        jsonl_iter: Iterable yielding decoded dicts (one per Bulk Op line) OR
+                    an iterable of raw JSON strings. We auto-detect.
+        bulk_op_id: Optional Bulk Operation id for the ``source_file`` tag.
+
+    Output node ``file_type`` values:
+      - ``shopify_product`` / ``shopify_variant`` / ``shopify_collection``
+      - ``shopify_vendor``  (derived — one node per unique vendor)
+      - ``shopify_metafield``
+
+    Output edge ``relation`` values:
+      - ``variant_of``  (Variant → Product)
+      - ``in_collection``  (Product → Collection)
+      - ``by_vendor``  (Product → Vendor)
+      - ``has_metafield``  (Product → Metafield)
+
+    Pure function — no IO, no embeddings, deterministic.
+    """
+    result = _empty_graph()
+    source_tag = f"{_SHOPIFY_SOURCE}#{bulk_op_id}" if bulk_op_id else _SHOPIFY_SOURCE
+    seen_vendor: set[str] = set()
+    seen_collection: set[str] = set()
+
+    def _ingest(obj: dict) -> None:
+        gid = obj.get("id") or ""
+        kind = _shopify_type(gid)
+        tail = _shopify_gid_tail(gid)
+        if not tail:
+            return
+
+        if kind == "Product":
+            pid = _make_id("shopify_product", tail)
+            label = obj.get("title") or pid
+            description = obj.get("descriptionHtml") or ""
+            price_range = obj.get("priceRangeV2") or {}
+            min_price = (price_range.get("minVariantPrice") or {}).get("amount")
+            currency = (price_range.get("minVariantPrice") or {}).get("currencyCode")
+            attrs = {
+                "handle": obj.get("handle"),
+                "product_type": obj.get("productType"),
+                "vendor": obj.get("vendor"),
+                "status": obj.get("status"),
+                "tags": obj.get("tags") or [],
+                "description": _strip_html(description),
+                "price_min": min_price,
+                "currency": currency,
+                "total_inventory": obj.get("totalInventory"),
+                "tracks_inventory": obj.get("tracksInventory"),
+                "image_url": (obj.get("featuredImage") or {}).get("url"),
+                "product_url": obj.get("onlineStoreUrl"),
+                "shopify_gid": gid,
+                "updated_at": obj.get("updatedAt"),
+            }
+            result["nodes"].append({
+                **_node(node_id=pid, label=label, file_type="shopify_product", source_file=source_tag),
+                "attrs": {k: v for k, v in attrs.items() if v not in (None, "", [])},
+            })
+            # Derive a Vendor node + by_vendor edge (deduped)
+            vendor = (obj.get("vendor") or "").strip()
+            if vendor:
+                vid = _make_id("shopify_vendor", vendor)
+                if vendor not in seen_vendor:
+                    result["nodes"].append(_node(
+                        node_id=vid, label=vendor, file_type="shopify_vendor",
+                        source_file=source_tag,
+                    ))
+                    seen_vendor.add(vendor)
+                result["edges"].append(_edge(
+                    source=pid, target=vid, relation="by_vendor", source_file=source_tag,
+                ))
+            return
+
+        if kind == "ProductVariant":
+            parent_pid_tail = _shopify_gid_tail(obj.get("__parentId", ""))
+            if not parent_pid_tail:
+                return
+            vid = _make_id("shopify_variant", tail)
+            label = obj.get("title") or obj.get("sku") or vid
+            attrs = {
+                "sku": obj.get("sku"),
+                "price": obj.get("price"),
+                "compare_at_price": obj.get("compareAtPrice"),
+                "inventory_quantity": obj.get("inventoryQuantity"),
+                "available_for_sale": obj.get("availableForSale"),
+                "options": obj.get("selectedOptions") or [],
+                "barcode": obj.get("barcode"),
+                "shopify_gid": gid,
+            }
+            result["nodes"].append({
+                **_node(node_id=vid, label=label, file_type="shopify_variant", source_file=source_tag),
+                "attrs": {k: v for k, v in attrs.items() if v not in (None, "", [])},
+            })
+            result["edges"].append(_edge(
+                source=vid,
+                target=_make_id("shopify_product", parent_pid_tail),
+                relation="variant_of",
+                source_file=source_tag,
+            ))
+            return
+
+        if kind == "Collection":
+            parent_pid_tail = _shopify_gid_tail(obj.get("__parentId", ""))
+            cid = _make_id("shopify_collection", tail)
+            if tail not in seen_collection:
+                result["nodes"].append(_node(
+                    node_id=cid,
+                    label=obj.get("title") or cid,
+                    file_type="shopify_collection",
+                    source_file=source_tag,
+                ))
+                seen_collection.add(tail)
+            if parent_pid_tail:
+                result["edges"].append(_edge(
+                    source=_make_id("shopify_product", parent_pid_tail),
+                    target=cid,
+                    relation="in_collection",
+                    source_file=source_tag,
+                ))
+            return
+
+        if kind == "Metafield":
+            parent_pid_tail = _shopify_gid_tail(obj.get("__parentId", ""))
+            if not parent_pid_tail:
+                return
+            mid = _make_id("shopify_metafield", tail)
+            label = f"{obj.get('namespace', '')}.{obj.get('key', '')}"
+            result["nodes"].append({
+                **_node(
+                    node_id=mid, label=label, file_type="shopify_metafield",
+                    source_file=source_tag,
+                ),
+                "attrs": {
+                    "namespace": obj.get("namespace"),
+                    "key": obj.get("key"),
+                    "value": obj.get("value"),
+                    "type": obj.get("type"),
+                    "shopify_gid": gid,
+                },
+            })
+            result["edges"].append(_edge(
+                source=_make_id("shopify_product", parent_pid_tail),
+                target=mid,
+                relation="has_metafield",
+                source_file=source_tag,
+            ))
+
+    # Stream-iterate either raw strings or pre-decoded dicts
+    for item in jsonl_iter:
+        if isinstance(item, (bytes, str)):
+            line = item.decode() if isinstance(item, bytes) else item
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                logger.warning("Skipping malformed JSONL line: %s", line[:120])
+                continue
+        elif isinstance(item, dict):
+            obj = item
+        else:
+            continue
+        _ingest(obj)
+
+    return result
+
+
+def _strip_html(html: str | None) -> str:
+    """Minimal HTML-to-text for product description embedding. No deps."""
+    if not html:
+        return ""
+    # Drop tags, collapse whitespace. Good enough for embedding.
+    no_tags = re.sub(r"<[^>]+>", " ", html)
+    return re.sub(r"\s+", " ", no_tags).strip()
+
+
+# ---------------------------------------------------------------------------
+# PRD-009 Phase 2 — Shopify orders → FREQUENTLY_BOUGHT_WITH edges
+# ---------------------------------------------------------------------------
+# Privacy by design: this mapper accepts ONLY order id, createdAt, line items
+# with product references. Even if a customer-identifying field were
+# accidentally included in the JSONL we ignore it — no customer or order
+# nodes are created. Only aggregated Product↔Product co-occurrence edges.
+
+_ORDERS_SOURCE = "shopify://orders"
+
+
+def map_shopify_orders(
+    jsonl_iter,
+    *,
+    bulk_op_id: str | None = None,
+    min_support: int = 2,
+) -> dict[str, list]:
+    """Map a Shopify Orders Bulk Op JSONL stream into FBT edges.
+
+    Args:
+        jsonl_iter: Iterable of decoded dicts OR JSON strings (auto-detected).
+        bulk_op_id: Optional Bulk Operation id for the source_file tag.
+        min_support: Minimum number of orders a (Product A, Product B) pair
+                     must co-appear in before we emit an edge. Filters one-off
+                     coincidences. Default 2 = appeared in 2+ orders.
+
+    Output:
+        ``{nodes: [], edges: [...], hyperedges: []}`` — only edges; nodes are
+        assumed to already exist in the workspace graph (from the catalog
+        sync). Edge fields:
+          source = shopify_product_<id_A>  (canonical: lower id first)
+          target = shopify_product_<id_B>
+          relation = "frequently_bought_with"
+          confidence_score = co_count / total_orders   (0..1)
+          weight = co_count                            (raw)
+          attrs = {co_count, total_orders}
+    """
+    source_tag = f"{_ORDERS_SOURCE}#{bulk_op_id}" if bulk_op_id else _ORDERS_SOURCE
+
+    # Build: order_id → set(product_ids). We collect line items grouped by
+    # their parent order. The JSONL stream interleaves Orders + LineItems
+    # in arbitrary order; LineItems carry __parentId pointing at their Order.
+    order_products: dict[str, set[str]] = {}
+    cancelled_orders: set[str] = set()
+
+    for item in jsonl_iter:
+        if isinstance(item, (bytes, str)):
+            line = item.decode() if isinstance(item, bytes) else item
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+        elif isinstance(item, dict):
+            obj = item
+        else:
+            continue
+
+        gid = obj.get("id") or ""
+        kind_match = re.match(r"gid://shopify/([A-Za-z]+)/", gid)
+        if not kind_match:
+            continue
+        kind = kind_match.group(1)
+
+        if kind == "Order":
+            # Skip cancelled orders from co-occurrence math — they don't
+            # represent revealed customer preference.
+            if obj.get("cancelledAt"):
+                cancelled_orders.add(gid)
+            else:
+                order_products.setdefault(gid, set())
+            continue
+
+        if kind == "LineItem":
+            parent_order = obj.get("__parentId", "")
+            if not parent_order or parent_order in cancelled_orders:
+                continue
+            product_gid = (obj.get("variant") or {}).get("product", {}).get("id")
+            if not product_gid:
+                continue
+            product_tail = product_gid.rsplit("/", 1)[-1]
+            order_products.setdefault(parent_order, set()).add(product_tail)
+
+    # Filter out single-item orders — they contribute nothing to co-occurrence
+    valid_orders = {oid: pids for oid, pids in order_products.items() if len(pids) >= 2}
+    total_orders = len(valid_orders)
+
+    # Pair counts: (sorted_tuple_of_product_ids) → co_occurrence_count
+    from itertools import combinations
+    pair_counts: dict[tuple[str, str], int] = {}
+    for pids in valid_orders.values():
+        for a, b in combinations(sorted(pids), 2):
+            pair_counts[(a, b)] = pair_counts.get((a, b), 0) + 1
+
+    result = _empty_graph()
+    if total_orders == 0:
+        return result
+
+    for (a, b), count in pair_counts.items():
+        if count < min_support:
+            continue
+        src = _make_id("shopify_product", a)
+        tgt = _make_id("shopify_product", b)
+        confidence = count / total_orders
+        edge = _edge(
+            source=src,
+            target=tgt,
+            relation="frequently_bought_with",
+            source_file=source_tag,
+            confidence_score=confidence,
+            weight=float(count),
+        )
+        edge["attrs"] = {"co_count": count, "total_orders": total_orders}
+        result["edges"].append(edge)
+
     return result

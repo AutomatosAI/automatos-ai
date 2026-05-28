@@ -9,6 +9,7 @@ import WebhooksSettingsTab from './WebhooksSettingsTab'
 import { ApiKeysSettingsTab } from './ApiKeysSettingsTab'
 import { ChannelsSettingsTab } from './ChannelsSettingsTab'
 import { ApiKeyManager } from './ApiKeyManager'
+import { WidgetSdkTab } from './WidgetSdkTab'
 import { VoiceProfilesSettingsTab } from './VoiceProfilesSettingsTab'
 import { NotificationsSettingsTab } from './NotificationsSettingsTab'
 import { useSystemRole } from '@/contexts/role-context'
@@ -36,7 +37,8 @@ export function SettingsPanel() {
         <PageHeader
           title="System"
           titleAccent="Settings"
-          subtitle="Manage system configuration, credentials, and security"
+          eyebrow="Workspace · configuration"
+          lede="Defaults that apply across every agent, mission, and routing decision. Workspace inherits to teams; teams to individuals."
         />
       </div>
 
@@ -88,9 +90,9 @@ export function SettingsPanel() {
           <VoiceProfilesSettingsTab />
         </TabsContent>
 
-        {/* PRD-38.4: Widget SDK API Keys */}
+        {/* PRD-008-A: Widget SDK — sites, behaviour, callback, API keys */}
         <TabsContent value="widget-sdk">
-          <ApiKeyManager />
+          <WidgetSdkTab />
         </TabsContent>
       </FilterTabs>
     </div>

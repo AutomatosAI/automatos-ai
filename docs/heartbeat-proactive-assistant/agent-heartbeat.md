@@ -5,37 +5,14 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/components/activity/board/board-agent-sidebar.tsx](frontend/components/activity/board/board-agent-sidebar.tsx)
-- [frontend/components/activity/board/board-card.tsx](frontend/components/activity/board/board-card.tsx)
-- [frontend/components/activity/board/board-column.tsx](frontend/components/activity/board/board-column.tsx)
-- [frontend/components/activity/board/board-filters.tsx](frontend/components/activity/board/board-filters.tsx)
-- [frontend/components/activity/board/board-task-viewer.tsx](frontend/components/activity/board/board-task-viewer.tsx)
-- [frontend/components/activity/board/board-view.tsx](frontend/components/activity/board/board-view.tsx)
-- [frontend/components/activity/board/index.ts](frontend/components/activity/board/index.ts)
-- [frontend/components/agents/agent-configuration-modal.tsx](frontend/components/agents/agent-configuration-modal.tsx)
-- [frontend/components/agents/agent-configuration.tsx](frontend/components/agents/agent-configuration.tsx)
-- [frontend/components/agents/agent-details-modal.tsx](frontend/components/agents/agent-details-modal.tsx)
-- [frontend/components/agents/agent-management.tsx](frontend/components/agents/agent-management.tsx)
-- [frontend/components/agents/agent-performance.tsx](frontend/components/agents/agent-performance.tsx)
-- [frontend/components/agents/agent-roster.tsx](frontend/components/agents/agent-roster.tsx)
-- [frontend/components/agents/agent-skills.tsx](frontend/components/agents/agent-skills.tsx)
-- [frontend/components/agents/agent-status-control-modal.tsx](frontend/components/agents/agent-status-control-modal.tsx)
-- [frontend/components/agents/create-agent-modal.tsx](frontend/components/agents/create-agent-modal.tsx)
-- [frontend/components/agents/create-skill-modal.tsx](frontend/components/agents/create-skill-modal.tsx)
-- [frontend/components/agents/skill-configuration-modal.tsx](frontend/components/agents/skill-configuration-modal.tsx)
-- [frontend/components/documents/analytics-tab.tsx](frontend/components/documents/analytics-tab.tsx)
-- [frontend/components/documents/processing-tab.tsx](frontend/components/documents/processing-tab.tsx)
-- [frontend/hooks/use-agent-api.ts](frontend/hooks/use-agent-api.ts)
-- [frontend/hooks/use-board-tasks.ts](frontend/hooks/use-board-tasks.ts)
-- [frontend/hooks/use-document-api.ts](frontend/hooks/use-document-api.ts)
-- [frontend/types/board.ts](frontend/types/board.ts)
-- [orchestrator/api/agents.py](orchestrator/api/agents.py)
-- [orchestrator/api/board_tasks.py](orchestrator/api/board_tasks.py)
-- [orchestrator/core/models/__init__.py](orchestrator/core/models/__init__.py)
-- [orchestrator/core/models/core.py](orchestrator/core/models/core.py)
-- [orchestrator/services/board_task_bridge.py](orchestrator/services/board_task_bridge.py)
+- [orchestrator/alembic/versions/wave3_escalation_level.py](orchestrator/alembic/versions/wave3_escalation_level.py)
+- [orchestrator/core/services/escalation.py](orchestrator/core/services/escalation.py)
+- [orchestrator/modules/tools/discovery/actions_reports.py](orchestrator/modules/tools/discovery/actions_reports.py)
+- [orchestrator/modules/tools/discovery/actions_workspace.py](orchestrator/modules/tools/discovery/actions_workspace.py)
+- [orchestrator/modules/tools/discovery/handlers_reports.py](orchestrator/modules/tools/discovery/handlers_reports.py)
+- [orchestrator/modules/tools/discovery/handlers_workspace.py](orchestrator/modules/tools/discovery/handlers_workspace.py)
 - [orchestrator/services/heartbeat_service.py](orchestrator/services/heartbeat_service.py)
-- [orchestrator/services/orchestration_board_bridge.py](orchestrator/services/orchestration_board_bridge.py)
+- [orchestrator/services/report_service.py](orchestrator/services/report_service.py)
 
 </details>
 
@@ -51,73 +28,77 @@ This page details the implementation of the `Agent Heartbeat` logic, its integra
 
 ## System Architecture
 
-The heartbeat system is managed by the `HeartbeatService`, which uses `AsyncIOScheduler` (APScheduler) with a `RedisJobStore` for persistent, distributed scheduling [orchestrator/services/heartbeat_service.py:24-31](). It manages both workspace-level "Orchestrator Heartbeats" and agent-specific "Agent Heartbeats" [orchestrator/services/heartbeat_service.py:96-121]().
+The heartbeat system is managed by the `HeartbeatService`, which uses `APScheduler` with a `RedisJobStore` for persistent, distributed scheduling [orchestrator/services/heartbeat_service.py:24-31](). It manages both workspace-level "Orchestrator Heartbeats" and agent-specific "Agent Heartbeats" [orchestrator/services/heartbeat_service.py:96-121]().
 
 ### Agent Heartbeat Data Flow
 
 The diagram below maps the heartbeat lifecycle from the scheduling trigger to the final task status update in the database.
 
-**Heartbeat to Code Entity Mapping**
+**Heartbeat Execution Flow**
 ```mermaid
 graph TD
-    subgraph "Scheduling Layer (Code Entity Space)"
-        APS["AsyncIOScheduler<br/>(orchestrator/services/heartbeat_service.py)"]
-        Cron["CronTrigger<br/>(_interval_to_cron_trigger)"]
+    subgraph "Scheduling_Layer"
+        ["APScheduler"]
+        ["CronTrigger"]
     end
 
-    subgraph "HeartbeatService (Logic Space)"
-        AgentTick["_agent_tick(agent_id)<br/>Line 615"]
-        Guard["_is_within_active_hours()<br/>Line 530"]
-        Scanner["BoardTask Scanner<br/>(status='assigned')"]
+    subgraph "HeartbeatService_Logic"
+        ["_agent_tick"]
+        ["_is_within_active_hours"]
+        ["BoardTask_Scanner"]
     end
 
-    subgraph "Execution Layer (Code Entity Space)"
-        Factory["AgentFactory.execute_with_prompt()<br/>(orchestrator/modules/agents/factory/agent_factory.py)"]
-        Context["ContextService<br/>(mode=HEARTBEAT)"]
-        Bridge["OrchestrationBoardBridge<br/>(orchestrator/services/orchestration_board_bridge.py)"]
+    subgraph "Execution_Runtime"
+        ["AgentFactory_execute_with_prompt"]
+        ["ContextService_HEARTBEAT_mode"]
+        ["OrchestrationBoardBridge"]
     end
 
-    subgraph "Persistence (Data Space)"
-        DB_Agent[("Agent Table<br/>(core/models/core.py)")]
-        DB_Task[("BoardTask Table<br/>(core/models/core.py)")]
-        DB_Result[("heartbeat_results<br/>(JSONB)")]
+    subgraph "Persistence_Layer"
+        ["Agent_Table"]
+        ["BoardTask_Table"]
+        ["heartbeat_results"]
     end
 
-    APS -->|Trigger| AgentTick
-    Cron --> APS
-    AgentTick --> Guard
-    Guard -->|Within Hours| Scanner
-    Scanner -->|Fetch Tasks| DB_Task
-    AgentTick -->|Activate| Factory
-    Factory -->|Build| Context
-    Context -->|Inject Task Metadata| Factory
-    Factory -->|Update| Bridge
-    Bridge -->|assigned -> in_progress -> done| DB_Task
-    AgentTick -->|Log Result| DB_Result
+    ["APScheduler"] -->|Trigger| ["_agent_tick"]
+    ["CronTrigger"] --> ["APScheduler"]
+    ["_agent_tick"] --> ["_is_within_active_hours"]
+    ["_is_within_active_hours"] -->|Within Hours| ["BoardTask_Scanner"]
+    ["BoardTask_Scanner"] -->|Fetch Tasks| ["BoardTask_Table"]
+    ["_agent_tick"] -->|Activate| ["AgentFactory_execute_with_prompt"]
+    ["AgentFactory_execute_with_prompt"] -->|Build| ["ContextService_HEARTBEAT_mode"]
+    ["ContextService_HEARTBEAT_mode"] -->|Inject Task Metadata| ["AgentFactory_execute_with_prompt"]
+    ["AgentFactory_execute_with_prompt"] -->|Update| ["OrchestrationBoardBridge"]
+    ["OrchestrationBoardBridge"] -->|assigned to in_progress to done| ["BoardTask_Table"]
+    ["_agent_tick"] -->|Log Result| ["heartbeat_results"]
 ```
 
-**Sources:** [orchestrator/services/heartbeat_service.py:17-31](), [orchestrator/services/heartbeat_service.py:59-63](), [orchestrator/services/heartbeat_service.py:129-161](), [orchestrator/services/orchestration_board_bridge.py:49-57]()
+**Sources:** [orchestrator/services/heartbeat_service.py:17-31](), [orchestrator/services/heartbeat_service.py:59-63](), [orchestrator/services/heartbeat_service.py:129-161]()
 
 ---
 
 ## BoardTask Integration
 
-The primary function of the Agent Heartbeat is to process tasks from the workspace board. The service identifies tasks where `assigned_agent_id` matches the current agent and the status is specifically `assigned` [orchestrator/services/heartbeat_service.py:646-660]().
+The primary function of the Agent Heartbeat is to process tasks from the workspace board. The service identifies tasks where `assigned_agent_id` matches the current agent and the status is specifically `assigned`.
 
 ### Task Status Transitions
 
-The heartbeat logic enforces a strict state machine for tasks to ensure visibility in the UI and prevent double-processing. The `OrchestrationBoardBridge` handles the mapping between internal orchestration states and Kanban board statuses [orchestrator/services/orchestration_board_bridge.py:49-68]().
+The heartbeat logic enforces a strict state machine for tasks to ensure visibility in the UI and prevent double-processing. The `BoardTask` model includes an `escalation_level` column (L0-L4) to allow for unified triaging of heartbeat-driven tasks [orchestrator/alembic/versions/wave3_escalation_level.py:20-24]().
 
 | Transition | Event | Implementation |
 |:---|:---|:---|
-| `assigned` → `in_progress` | Heartbeat selects task for execution. | Sets `started_at` timestamp and updates `BoardTask.status`. [orchestrator/services/heartbeat_service.py:680-685]() |
-| `in_progress` → `done` | Agent execution completes successfully. | Sets `completed_at` and `result`. [orchestrator/services/heartbeat_service.py:700-708]() |
-| `in_progress` → `failed` | Agent execution encounters an exception. | Sets `error_message` and status to `done` (terminal). [orchestrator/services/heartbeat_service.py:715-725]() |
+| `assigned` → `in_progress` | Heartbeat selects task for execution. | Sets `started_at` timestamp and updates `BoardTask.status`. |
+| `in_progress` → `done` | Agent execution completes successfully. | Sets `completed_at` and `result`. |
+| `in_progress` → `review` | Task requires human approval or has failed. | Status changed to `review` based on `requires_approval` flag. [orchestrator/core/services/escalation.py:95-96]() |
 
-### Selection Logic
-The service scans for up to 3 tasks per tick, ordered by priority (Urgent to Low) and then by creation date (FIFO) [orchestrator/services/heartbeat_service.py:646-660]().
+### Escalation and Classification
+During heartbeat execution, if an agent encounters an issue or completes a critical task, the event is processed through the `classify` function [orchestrator/core/services/escalation.py:72-85](). This function maps event payloads to the `EscalationLevel` ladder:
+- **L0 FYI**: Informational only.
+- **L1 TASK**: Needs execution/work.
+- **L2 APPROVAL**: Requires human intervention [orchestrator/core/services/escalation.py:29]().
+- **L3 URGENT**: Immediate attention required [orchestrator/core/services/escalation.py:30]().
 
-**Sources:** [orchestrator/api/board_tasks.py:28-30](), [orchestrator/services/orchestration_board_bridge.py:49-57](), [orchestrator/services/heartbeat_service.py:646-660]()
+**Sources:** [orchestrator/core/services/escalation.py:26-31](), [orchestrator/core/services/escalation.py:72-113](), [orchestrator/alembic/versions/wave3_escalation_level.py:20-39]()
 
 ---
 
@@ -126,82 +107,80 @@ The service scans for up to 3 tasks per tick, ordered by priority (Urgent to Low
 When a heartbeat tick occurs, the agent is provided with a specific execution context designed for autonomous work.
 
 ### Context Injection
-The `HeartbeatService` constructs a specialized prompt that includes the task's `title`, `description`, and `planning_data`. This is passed to the `AgentFactory` using the `HEARTBEAT` context mode.
+The `HeartbeatService` triggers a tick that activates the agent via `AgentFactory.execute_with_prompt` using the `HEARTBEAT` context mode.
 
-1. **Identity & Skills**: The agent's core persona and capabilities are loaded via the `AgentRuntime` [orchestrator/modules/agents/factory/agent_factory.py:155-172]().
-2. **Task Context**: Specific `BoardTask` details are injected into the system prompt to focus the agent on the assigned work [orchestrator/services/heartbeat_service.py:663-675]().
-3. **Tool Loop**: The agent enters an execution loop to complete the task using assigned tools or Composio-backed actions [orchestrator/modules/agents/factory/agent_factory.py:9-11]().
+1. **Identity & Configuration**: The agent's core persona and heartbeat settings are loaded from the `Agent.configuration` JSONB field [orchestrator/services/heartbeat_service.py:126-131]().
+2. **Task Context**: If a task is assigned, metadata is injected. The agent can also use `platform_submit_report` to persist its findings [orchestrator/modules/tools/discovery/actions_reports.py:9-16]().
+3. **Report Generation**: Agents are encouraged to submit reports after significant heartbeat work using `platform_submit_report`, which stores the content in the workspace filesystem and database [orchestrator/services/report_service.py:156-173]().
 
-**Agent Heartbeat Code Entities**
+**Code Entity Mapping: Agent Actions to Persistence**
 ```mermaid
 graph LR
-    subgraph "Natural Language Space"
-        UserGoal["'Write a blog post about AI'"]
-        StatusLabel["'In Progress'"]
+    subgraph "Agent_Runtime"
+        ["HeartbeatService"]
+        ["PlatformActionExecutor"]
     end
 
-    subgraph "Code Entity Space"
-        BT["BoardTask (core/models/core.py)"]
-        AS["Agent (core/models/core.py)"]
-        HS["HeartbeatService (orchestrator/services/heartbeat_service.py)"]
-        AF["AgentFactory (orchestrator/modules/agents/factory/agent_factory.py)"]
-        OBB["OrchestrationBoardBridge (orchestrator/services/orchestration_board_bridge.py)"]
+    subgraph "Action_Handlers"
+        ["submit_report"]
+        ["store_memory"]
     end
 
-    UserGoal -.->|Stored in| BT
-    HS -->|Queries| BT
-    HS -->|Triggers| AF
-    AF -->|Executes for| AS
-    AF -->|Updates via| OBB
-    OBB -->|Writes| StatusLabel
-    StatusLabel -.->|Persisted in| BT
+    subgraph "Data_Persistence"
+        ["ReportService"]
+        ["UnifiedMemoryService"]
+        ["agent_reports_table"]
+    end
+
+    ["HeartbeatService"] -->|Triggers Tick| ["PlatformActionExecutor"]
+    ["PlatformActionExecutor"] -->|Calls| ["submit_report"]
+    ["PlatformActionExecutor"] -->|Calls| ["store_memory"]
+    ["submit_report"] -->|Invokes| ["ReportService"]
+    ["store_memory"] -->|Invokes| ["UnifiedMemoryService"]
+    ["ReportService"] -->|Writes to| ["agent_reports_table"]
 ```
 
-**Sources:** [orchestrator/services/heartbeat_service.py:663-694](), [orchestrator/modules/agents/factory/agent_factory.py:102-115]()
+**Sources:** [orchestrator/services/heartbeat_service.py:129-161](), [orchestrator/modules/tools/discovery/handlers_reports.py:14-64](), [orchestrator/services/report_service.py:156-173]()
 
 ---
 
 ## Configuration & Scheduling
 
-Heartbeat behavior is controlled via the `agent.configuration` JSONB field in the `Agent` model [orchestrator/services/heartbeat_service.py:114-121]().
+Heartbeat behavior is controlled via the `agent.configuration` JSONB field in the `Agent` model [orchestrator/services/heartbeat_service.py:126-131]().
 
 ### Configuration Schema
 
-| Field | Type | Description |
-|:---|:---|:---|
-| `enabled` | `bool` | Enables/disables the scheduler for this agent [orchestrator/services/heartbeat_service.py:118](). |
-| `interval_minutes` | `int` | Frequency of ticks (converted to Cron via `_interval_to_cron_trigger`) [orchestrator/services/heartbeat_service.py:168](). |
-| `active_hours_start` | `str` | HH:MM format for start of autonomous window [frontend/components/agents/agent-configuration-modal.tsx:160](). |
-| `active_hours_end` | `str` | HH:MM format for end of autonomous window [frontend/components/agents/agent-configuration-modal.tsx:161](). |
-| `timezone` | `str` | TZ identifier (e.g., "UTC", "America/New_York") [orchestrator/services/heartbeat_service.py:30](). |
-
-**Sources:** [orchestrator/services/heartbeat_service.py:129-161](), [orchestrator/services/heartbeat_service.py:190-192](), [frontend/components/agents/agent-configuration-modal.tsx:156-167]()
+| Field | Description |
+|:---|:---|
+| `enabled` | Enables/disables the scheduler for this agent [orchestrator/services/heartbeat_service.py:128](). |
+| `interval_minutes` | Frequency of ticks (default 30-60m) [orchestrator/services/heartbeat_service.py:178](). |
+| `active_hours` | Timezone-aware window for autonomous activity [orchestrator/services/heartbeat_service.py:30](). |
 
 ### Interval to Cron Conversion
-To ensure agents fire at predictable times, intervals are converted to fixed cron patterns using the `_interval_to_cron_trigger` helper [orchestrator/services/heartbeat_service.py:129-161]().
+To ensure agents fire at predictable times, intervals are converted to fixed cron patterns using the `_interval_to_cron_trigger` helper [orchestrator/services/heartbeat_service.py:139-151]().
 
 | Interval | Resulting Cron Logic |
 |:---|:---|
-| 15 min | `0,15,30,45 * * * *` (Sub-hour distribution) |
-| 60 min | `0 * * * *` (Top of every hour) |
-| 1440 min (Daily) | `0 9 * * *` (Fixed to 9 AM) |
-| 10080 min (Weekly) | `0 9 * * 1` (Monday 9 AM) |
+| < 60 min | Distribute evenly within the hour (e.g., 15m → `0,15,30,45`) [orchestrator/services/heartbeat_service.py:155-159](). |
+| 1440 min (Daily) | Fixed at 9 AM daily [orchestrator/services/heartbeat_service.py:163-165](). |
+| 10080 min (Weekly)| Fixed at Monday 9 AM [orchestrator/services/heartbeat_service.py:160-162](). |
 
-**Sources:** [orchestrator/services/heartbeat_service.py:145-161]()
+**Sources:** [orchestrator/services/heartbeat_service.py:139-172](), [orchestrator/services/heartbeat_service.py:178-183]()
 
 ---
 
-## Monitoring and Results
+## Reporting and Memory Persistence
 
-Every heartbeat execution is logged to provide auditability for autonomous actions.
+During a heartbeat, agents often generate long-term value through reports and memory storage.
 
-### UI Visualization and Polling
-The frontend `BoardCard` and `BoardView` components provide real-time updates on autonomous actions. 
+### Report Submission
+Agents use the `platform_submit_report` tool to document their heartbeat activity. The `ReportService` handles the dual-write pattern:
+1. **Workspace File**: A markdown file is written to `reports/{agent_slug}/{timestamp}_{title}.md` [orchestrator/services/report_service.py:179-181]().
+2. **Database Row**: Metadata including `escalation_level`, `status`, and `metrics` is inserted into the `agent_reports` table [orchestrator/services/report_service.py:211-220]().
 
-1. **Progress Tracking**: If the task includes `step_progress` in its `planning_data`, a progress bar is rendered in the `BoardCard` [frontend/components/activity/board/board-card.tsx:160-173]().
-2. **SLA Monitoring**: The `SlaIndicator` component calculates time remaining against the `sla_deadline` set during task creation [frontend/components/activity/board/board-card.tsx:18-52]().
-3. **Task Type Recognition**: The board differentiates between standard tasks, missions (orchestration), and playbooks (recipes) using the `source_type` field [frontend/hooks/use-board-tasks.ts:189-193]().
+### Memory Storage
+Agents can also persist facts discovered during heartbeat ticks using `platform_store_memory` [orchestrator/modules/tools/discovery/actions_workspace.py:61-70](). This tool allows agents to set `source_type` (e.g., `platform_verified`, `inference`) and `confidence` levels, which are stored in the `UnifiedMemoryService` [orchestrator/modules/tools/discovery/handlers_workspace.py:145-182]().
 
-**Sources:** [frontend/components/activity/board/board-card.tsx:18-52](), [frontend/hooks/use-board-tasks.ts:184-210](), [orchestrator/api/board_tasks.py:119-120]()
+**Sources:** [orchestrator/services/report_service.py:156-200](), [orchestrator/modules/tools/discovery/handlers_workspace.py:145-185](), [orchestrator/modules/tools/discovery/actions_reports.py:9-110]()
 
 ---

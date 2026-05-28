@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { useInView } from 'react-intersection-observer'
 import { Badge } from '@/components/ui/badge'
@@ -12,10 +12,10 @@ import {
   Users,
   Zap,
   AlertTriangle,
-  ChefHat,
   RefreshCw,
   Network,
   Activity,
+  Brain,
 } from 'lucide-react'
 
 // Shared components
@@ -30,8 +30,7 @@ import { useViewMode } from '@/hooks/use-view-mode'
 import { AgentRoster } from './agent-roster'
 
 import { AgentConfiguration } from './agent-configuration'
-import { AgentCoordination } from './agent-coordination'
-import { PlaybooksTab } from '@/components/workflows/playbooks-tab'
+import { WorkspaceSkillsTab } from './skills/workspace-skills-tab'
 import { CreateAgentModal } from './create-agent-modal'
 import { AgentDetailsModal } from './agent-details-modal'
 import { OrgChartTab } from './org-chart-tab'
@@ -128,19 +127,11 @@ export function AgentManagement() {
     }
   }
 
-  // Navigate to ExecutionKitchen when a recipe is cooked
-  const handleExecuteRecipe = useCallback((_workflowId: number, info?: { recipeExecutionId: string; recipeId: string }) => {
-    if (info) {
-      window.location.href = `/activity/execution?id=${info.recipeExecutionId}&recipeId=${info.recipeId}`
-    }
-  }, [])
-
   const tabDefs = [
     { value: 'roster', label: 'Agent Roster', icon: Users },
     { value: 'org-chart', label: 'Org Chart', icon: Network },
     { value: 'configuration', label: 'Configuration', icon: Settings },
-    { value: 'coordination', label: 'Coordination', icon: Users },
-    { value: 'recipes', label: 'Playbooks', icon: ChefHat },
+    { value: 'skills', label: 'Skills', icon: Brain },
   ]
 
   return (
@@ -150,7 +141,8 @@ export function AgentManagement() {
       <PageHeader
         title="Agent"
         titleAccent="Management"
-        subtitle="Manage your AI agents, capabilities, and coordination strategies"
+        eyebrow="Workforce · roster"
+        lede="Your agents, what they're good at, and what they're doing. Configure capabilities, swap models, install skills, retire the ones you no longer need."
         actions={
           <>
             {!!agentsError && (
@@ -275,15 +267,8 @@ export function AgentManagement() {
             />
           </TabsContent>
 
-          <TabsContent value="coordination" className="space-y-6">
-            <AgentCoordination
-              agents={agents as any[]}
-              selectedAgentId={selectedAgentId}
-            />
-          </TabsContent>
-
-          <TabsContent value="recipes" className="space-y-6">
-            <PlaybooksTab onUseRecipe={() => {}} onExecuteRecipe={handleExecuteRecipe} />
+          <TabsContent value="skills" className="space-y-6">
+            <WorkspaceSkillsTab viewMode={viewMode} />
           </TabsContent>
         </FilterTabs>
       </motion.div>

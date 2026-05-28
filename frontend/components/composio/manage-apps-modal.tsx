@@ -189,19 +189,19 @@ export function ManageAppsModal({ agentId, open, onClose }: ManageAppsModalProps
 
     return (
         <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
-            <DialogContent className="max-w-4xl bg-slate-900 border-slate-700">
+            <DialogContent className="max-w-4xl bg-card border-border">
                 <DialogHeader>
-                    <DialogTitle className="text-xl text-slate-100">Manage Apps</DialogTitle>
-                    <DialogDescription className="text-slate-400">
+                    <DialogTitle className="text-xl text-foreground">Manage Apps</DialogTitle>
+                    <DialogDescription className="text-muted-foreground">
                         Enable or disable which features your agent can use for each app
                     </DialogDescription>
                 </DialogHeader>
 
                 {loadingConnections ? (
-                    <div className="py-8 text-center text-slate-400">Loading connected apps...</div>
+                    <div className="py-8 text-center text-muted-foreground">Loading connected apps...</div>
                 ) : appTabs.length === 0 ? (
                     <div className="py-12 text-center">
-                        <p className="text-slate-400 mb-4">No apps connected yet</p>
+                        <p className="text-muted-foreground mb-4">No apps connected yet</p>
                         <Button variant="outline" onClick={onClose}>
                             <ExternalLink className="h-4 w-4 mr-2" />
                             Connect Apps in Settings
@@ -217,7 +217,7 @@ export function ManageAppsModal({ agentId, open, onClose }: ManageAppsModalProps
                         />
 
                         {/* Bulk Actions */}
-                        <div className="flex items-center gap-3 border-b border-slate-700/50 pb-4">
+                        <div className="flex items-center gap-3 border-b border-border/50 pb-4">
                             <Button
                                 variant="ghost"
                                 size="sm"
@@ -233,7 +233,7 @@ export function ManageAppsModal({ agentId, open, onClose }: ManageAppsModalProps
                                 size="sm"
                                 onClick={handleDisableAll}
                                 disabled={!selectedApp || disableAllFeatures.isPending}
-                                className="text-slate-400 hover:text-slate-300 hover:bg-slate-700/50"
+                                className="text-muted-foreground hover:text-foreground hover:bg-secondary/50"
                             >
                                 <X className="h-4 w-4 mr-1.5" />
                                 Disable all

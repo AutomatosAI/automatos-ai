@@ -41,6 +41,7 @@ def register_workspace_actions(registry: ActionRegistry) -> None:
             "required": ["path"],
         },
         permission_level="read",
+        promoted=True,
         tags=["workspace", "files", "read", "code"],
         examples=[
             "read src/main.py",
@@ -79,6 +80,7 @@ def register_workspace_actions(registry: ActionRegistry) -> None:
             "required": ["path", "content"],
         },
         permission_level="write",
+        promoted=True,
         tags=["workspace", "files", "write", "code"],
         examples=[
             "fix the bug on line 42 of main.py",
@@ -109,6 +111,7 @@ def register_workspace_actions(registry: ActionRegistry) -> None:
             "required": [],
         },
         permission_level="read",
+        promoted=True,
         tags=["workspace", "files", "list", "directory"],
         examples=[
             "what files are in the repo?",
@@ -148,6 +151,7 @@ def register_workspace_actions(registry: ActionRegistry) -> None:
             "required": ["pattern"],
         },
         permission_level="read",
+        promoted=True,
         tags=["workspace", "search", "grep", "code"],
         examples=[
             "search for 'def handle_error' in the code",
@@ -190,6 +194,7 @@ def register_workspace_actions(registry: ActionRegistry) -> None:
             "required": ["command"],
         },
         permission_level="write",
+        promoted=True,
         tags=["workspace", "exec", "shell", "test", "build"],
         examples=[
             "run the tests",
@@ -279,9 +284,9 @@ def register_workspace_actions(registry: ActionRegistry) -> None:
         name="workspace_git",
         description=(
             "Execute a git operation in the workspace repository. Allowed operations: "
-            "status, diff, add, commit, push, pull, log, branch, checkout, stash, "
-            "show, blame, fetch. Use to check changes, commit fixes, push code, "
-            "or inspect git history."
+            "clone, status, diff, add, commit, push, pull, log, branch, checkout, stash, "
+            "show, blame, fetch. For clone, pass the repo HTTPS URL as 'args' — the repo "
+            "is cloned into repos/{repo-name}."
         ),
         category="workspace_git",
         parameters={
@@ -290,7 +295,7 @@ def register_workspace_actions(registry: ActionRegistry) -> None:
                 "operation": {
                     "type": "string",
                     "enum": [
-                        "status", "diff", "add", "commit", "push", "pull",
+                        "clone", "status", "diff", "add", "commit", "push", "pull",
                         "log", "branch", "checkout", "stash", "show", "blame", "fetch",
                     ],
                     "description": "The git operation to perform.",
@@ -314,11 +319,45 @@ def register_workspace_actions(registry: ActionRegistry) -> None:
             "required": ["operation"],
         },
         permission_level="write",
+        promoted=True,
         tags=["workspace", "git", "vcs", "commit", "push"],
         examples=[
             "check git status",
             "commit the changes with message 'fix login bug'",
             "push to remote",
             "show the last 5 commits",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
+        name="workspace_get_public_url",
+        description=(
+            "Get a publicly accessible URL for a workspace file (image or document). "
+            "Use when you need to share a workspace file with an external service "
+            "that requires a public URL — e.g. posting an image to Instagram, "
+            "Twitter, or LinkedIn. The file is uploaded to a CDN-backed store and "
+            "the returned URL is accessible without authentication."
+        ),
+        category="workspace_files",
+        parameters={
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": (
+                        "Relative path to the file inside the workspace "
+                        "(e.g. 'content/social/instagram/post.png')."
+                    ),
+                },
+            },
+            "required": ["path"],
+        },
+        permission_level="read",
+        promoted=True,
+        tags=["workspace", "files", "share", "public", "url", "social", "instagram"],
+        examples=[
+            "get a public URL for the rendered image",
+            "I need a shareable link to this PNG",
+            "make this image publicly accessible for Instagram",
         ],
     ))

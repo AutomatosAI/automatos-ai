@@ -285,6 +285,27 @@ _PLATFORM_KEYWORDS = {
         "install skill", "enable skill", "add skill",
         "activate skill",
     ],
+    "platform_get_skill_content": [
+        "show skill content", "read skill", "open skill",
+        "view skill content", "get skill content",
+        "what does the skill say", "show me the skill",
+        "inspect skill", "read SKILL.md",
+    ],
+    "platform_create_workspace_skill": [
+        "create skill", "create a new skill", "new skill",
+        "draft a skill", "make a skill", "build a skill",
+        "save this as a skill", "create workspace skill",
+    ],
+    "platform_update_skill": [
+        "update skill", "edit skill", "modify skill",
+        "change skill", "improve skill", "rewrite skill",
+        "fork and edit skill", "update SKILL.md",
+        "edit the workspace skill", "change skill content",
+    ],
+    "platform_delete_workspace_skill": [
+        "delete skill", "remove skill", "drop skill",
+        "delete workspace skill", "remove my skill",
+    ],
     "platform_install_model": [
         "install model", "enable model", "add model",
         "activate model",
@@ -307,6 +328,22 @@ _PLATFORM_KEYWORDS = {
         "agent heartbeat", "heartbeat schedule", "enable heartbeat",
         "disable heartbeat", "heartbeat interval", "set active hours",
         "heartbeat config",
+    ],
+    "platform_get_agent_heartbeat": [
+        "show heartbeat", "read heartbeat", "view heartbeat",
+        "what's the heartbeat", "show agent heartbeat", "current heartbeat",
+        "heartbeat for agent", "is heartbeat enabled",
+    ],
+    "platform_unassign_skill_from_agent": [
+        "unassign skill from agent", "remove skill from agent",
+        "drop skill from agent", "detach skill from agent",
+        "take skill off agent", "delete skill assignment",
+    ],
+    "platform_unassign_tool_from_agent": [
+        "unassign tool from agent", "remove tool from agent",
+        "drop tool from agent", "detach tool from agent",
+        "take tool off agent", "deactivate tool on agent",
+        "remove app from agent", "unassign app from agent",
     ],
     "platform_create_agent": [
         "create agent", "create an agent", "build agent", "build an agent",
@@ -455,6 +492,16 @@ _PLATFORM_KEYWORDS = {
         "update blog post", "edit blog post", "revise article",
         "improve draft", "edit article", "update post",
         "change blog post", "set cover image",
+    ],
+    "platform_create_blog_post": [
+        "create blog post about", "write a blog about", "new blog post",
+        "start blog mission", "blog post topic", "create blog on",
+        "research and write blog", "produce blog post",
+    ],
+    "platform_generate_cover_image": [
+        "generate cover image", "create cover art", "blog cover image",
+        "make a cover for", "design cover image", "add cover to post",
+        "generate cover for blog",
     ],
     # PRD-82A: Missions
     "platform_create_mission": [

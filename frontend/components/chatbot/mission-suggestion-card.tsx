@@ -67,15 +67,15 @@ export function MissionSuggestionCard({
   }
 
   return (
-    <div className="bg-card/50 backdrop-blur border border-orange-500/20 rounded-xl p-4 space-y-3 max-w-md">
+    <div className="bg-card/50 backdrop-blur border border-primary/20 rounded-xl p-4 space-y-3 max-w-md">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Target className="w-4 h-4 text-orange-500" />
-          <span className="text-xs font-medium text-orange-400">
+          <Target className="w-4 h-4 text-primary" />
+          <span className="text-xs font-medium text-primary">
             Mission Suggested
           </span>
-          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-orange-500/10 text-orange-400 font-medium">
+          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary font-medium">
             {complexityLabel[complexity] ?? complexity}
           </span>
         </div>
@@ -101,7 +101,7 @@ export function MissionSuggestionCard({
         <Button
           variant="outline"
           size="sm"
-          className="border-orange-500/30 text-orange-400 hover:bg-orange-500/10"
+          className="border-primary/30 text-primary hover:bg-primary/10"
           onClick={handleLaunch}
           disabled={createMission.isLoading}
         >

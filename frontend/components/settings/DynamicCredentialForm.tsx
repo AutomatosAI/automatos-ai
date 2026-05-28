@@ -33,6 +33,71 @@ interface DynamicCredentialFormProps {
   onCancel?: () => void
 }
 
+// Field-label overrides for credential types where the canonical schema in the
+// DB ships with terse names ("Access Token", "APP Secret Key" — useless when
+// the platform has multiple token types). Overlay clearer labels + inline
+// hints at render time so merchants know exactly which value to paste where
+// without us touching the shared credential_types DB rows.
+type FieldOverride = {
+  displayName?: string
+  description?: string
+  placeholder?: string
+}
+const CREDENTIAL_FIELD_OVERRIDES: Record<string, Record<string, FieldOverride>> = {
+  shopifyAccessTokenApi: {
+    shopSubdomain: {
+      displayName: 'Shop Subdomain',
+      description:
+        'Just the subdomain — e.g. innobuilduk for innobuilduk.myshopify.com. No https:// and no .myshopify.com.',
+      placeholder: 'innobuilduk',
+    },
+    accessToken: {
+      displayName: 'Partner App Client ID  (or Admin API Token shpat_…)',
+      description:
+        'From your Shopify Partner Dashboard → Apps → your app → Configuration → Client ID. ' +
+        'Alternatively, if you already have a per-store Admin API token (shpat_…) from a Custom App, paste that here instead.',
+    },
+    appSecretKey: {
+      displayName: 'Partner App Client Secret  (leave blank if using shpat_)',
+      description:
+        'From the same Configuration screen, next to Client ID (shpss_…). Required when using Partner App credentials so we can complete the Shopify install bounce. Leave blank if you pasted an shpat_ token above.',
+    },
+  },
+  shopifyOAuth2Api: {
+    shopSubdomain: {
+      displayName: 'Shop Subdomain',
+      description:
+        'Just the subdomain — e.g. innobuilduk for innobuilduk.myshopify.com.',
+      placeholder: 'innobuilduk',
+    },
+    clientId: {
+      displayName: 'Partner App Client ID',
+      description:
+        'From your Shopify Partner Dashboard → Apps → your app → Configuration → Client ID.',
+    },
+    clientSecret: {
+      displayName: 'Partner App Client Secret',
+      description:
+        'From the same Configuration screen, next to Client ID. Treat as a password.',
+    },
+  },
+}
+
+function applyFieldOverride(
+  typeName: string | undefined,
+  field: CredentialFieldDefinition,
+): CredentialFieldDefinition {
+  if (!typeName) return field
+  const overrides = CREDENTIAL_FIELD_OVERRIDES[typeName]?.[field.name]
+  if (!overrides) return field
+  return {
+    ...field,
+    displayName: overrides.displayName ?? field.displayName,
+    description: overrides.description ?? field.description,
+    placeholder: overrides.placeholder ?? field.placeholder,
+  }
+}
+
 export function DynamicCredentialForm({
   credentialId,
   lockCredentialTypeId,
@@ -183,24 +248,76 @@ export function DynamicCredentialForm({
     try {
       setSaving(true)
 
-      if (credentialId) {
-        // Update existing credential
-        await updateCredential(credentialId, {
-          name: credentialMetadata.name,
-          credential_data: formData,
-          description: credentialMetadata.description || undefined,
-          tags: credentialMetadata.tags ? credentialMetadata.tags.split(',').map(t => t.trim()) : []
-        })
-      } else {
-        // Create new credential
-        await createCredential({
-          name: credentialMetadata.name,
-          credential_type_id: selectedTypeId,
-          credential_data: formData,
-          environment: credentialMetadata.environment,
-          description: credentialMetadata.description || undefined,
-          tags: credentialMetadata.tags ? credentialMetadata.tags.split(',').map(t => t.trim()) : []
-        })
+      const saved = credentialId
+        ? await updateCredential(credentialId, {
+            name: credentialMetadata.name,
+            credential_data: formData,
+            description: credentialMetadata.description || undefined,
+            tags: credentialMetadata.tags
+              ? credentialMetadata.tags.split(',').map(t => t.trim())
+              : [],
+          })
+        : await createCredential({
+            name: credentialMetadata.name,
+            credential_type_id: selectedTypeId,
+            credential_data: formData,
+            environment: credentialMetadata.environment,
+            description: credentialMetadata.description || undefined,
+            tags: credentialMetadata.tags
+              ? credentialMetadata.tags.split(',').map(t => t.trim())
+              : [],
+          })
+
+      // Surface backend integration-bridge result (Shopify→Composio etc.).
+      switch (saved.connection_status) {
+        case 'pending_oauth':
+          if (saved.oauth_redirect_url) {
+            // Try popup first — but ALWAYS surface the URL on screen too. Popups
+            // get blocked silently in many browsers (especially after save flows
+            // not triggered by a direct click event), and merchants can't see
+            // why the install screen never appears. Showing the URL in a
+            // confirm() dialog lets them either keep the popup or click the
+            // URL directly. The URL also lands in clipboard via prompt() fallback.
+            const popup = window.open(
+              saved.oauth_redirect_url,
+              'shopify-oauth',
+              'width=600,height=720,menubar=no,toolbar=no,location=no',
+            )
+            const popupBlocked = !popup || popup.closed || typeof popup.closed === 'undefined'
+            if (popupBlocked) {
+              // Use prompt() so the URL is selectable/copyable in a single click.
+              window.prompt(
+                'Shopify install popup was blocked. Copy this URL and open it in a new tab to complete Shopify install:',
+                saved.oauth_redirect_url,
+              )
+            } else {
+              // Popup opened — confirm the merchant sees it and knows what to do.
+              const stayOpen = window.confirm(
+                'A Shopify install popup has opened — click "Install app" on that page to finish connecting.\n\n' +
+                  'If you do not see the popup, click OK to copy the install URL and open it manually.',
+              )
+              if (stayOpen) {
+                window.prompt(
+                  'Open this URL in a new tab to complete Shopify install:',
+                  saved.oauth_redirect_url,
+                )
+              }
+            }
+          }
+          break
+        case 'unsupported':
+          alert(
+            saved.connection_error ||
+              'This credential type isn\'t supported by the integration platform — it was saved but no live connection was created.',
+          )
+          break
+        case 'bridge_error':
+          alert(
+            'Credential saved, but the platform connection failed:\n\n' +
+              (saved.connection_error || 'Unknown error'),
+          )
+          break
+        // case 'connected' or null — silent success
       }
 
       onSuccess?.()
@@ -466,7 +583,9 @@ export function DynamicCredentialForm({
             </div>
           )}
 
-          {selectedType.schema_definition.map(field => renderField(field))}
+          {selectedType.schema_definition.map(field =>
+            renderField(applyFieldOverride(selectedType.name, field))
+          )}
         </div>
       )}
 

@@ -1,26 +1,57 @@
 
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { Sidebar } from './sidebar'
 import { MobileSidebar } from './mobile-sidebar'
 import { Header } from './header'
+import { StudioSidebar } from './studio-sidebar'
+import { StudioHeader } from './studio-header'
+import { StudioTicker } from './studio-ticker'
+import { StudioPageTabs } from './studio-page-tabs'
 import { AutoWidget } from '../chatbot/chat-widget'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { useIsTabletOrBelow } from '@/hooks/use-mobile'
 import { useAutoTour } from '@/hooks/use-auto-tour'
+import { useIsStudio } from '@/hooks/use-studio-theme'
 
 interface MainLayoutProps {
   children: React.ReactNode
+  /**
+   * When true, render the main content area with no padding and no max-width
+   * cap so the page can take the full available width and height. Use for
+   * full-canvas surfaces like chat. Studio shell only — classic layout still
+   * applies its own padding.
+   */
+  fullBleed?: boolean
 }
 
-export function MainLayout({ children }: MainLayoutProps) {
+export function MainLayout({ children, fullBleed = false }: MainLayoutProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [studioSidebarCollapsed, setStudioSidebarCollapsed] = useState(false)
   const isMobileLayout = useIsTabletOrBelow()
+  const isStudio = useIsStudio()
   const pathname = usePathname()
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('studioSidebarCollapsed')
+      if (stored === '1') setStudioSidebarCollapsed(true)
+    } catch {}
+  }, [])
+
+  const toggleStudioSidebar = () => {
+    setStudioSidebarCollapsed((prev) => {
+      const next = !prev
+      try {
+        localStorage.setItem('studioSidebarCollapsed', next ? '1' : '0')
+      } catch {}
+      return next
+    })
+  }
 
   // Auto-start page tour on first visit (per-user, per-page)
   useAutoTour()
@@ -58,6 +89,48 @@ export function MainLayout({ children }: MainLayoutProps) {
     }
   }
 
+  // ────────────────────────────────────────────────────────────────────
+  // Studio shell — render the CD round-4 chrome (sidebar + header + ticker)
+  // when .studio is active and we're on desktop. Mobile keeps the existing
+  // sheet pattern for now. Falls through to classic layout below.
+  // ────────────────────────────────────────────────────────────────────
+  if (isStudio && !isMobileLayout) {
+    return (
+      <div className="sh-shell">
+        <StudioSidebar
+          collapsed={studioSidebarCollapsed}
+          onToggle={toggleStudioSidebar}
+        />
+        <div className="sh-main">
+          <StudioTicker />
+          <StudioHeader />
+          {!fullBleed && <StudioPageTabs />}
+          {fullBleed ? (
+            <main className="sh-fullbleed flex-1 min-h-0 flex flex-col">
+              {children}
+            </main>
+          ) : (
+            <main className="px-4 py-4 md:px-6 md:py-6 lg:px-12 lg:py-8 2xl:px-16">
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5 }}
+                className="max-w-[1720px] mx-auto"
+              >
+                {children}
+              </motion.div>
+            </main>
+          )}
+        </div>
+        <AutoWidget
+          position="bottom-right"
+          currentPage={currentPage}
+          visible={showAutoWidget}
+        />
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen gradient-bg overflow-x-hidden">
       {/* Desktop Sidebar — hidden below lg */}
@@ -76,14 +149,22 @@ export function MainLayout({ children }: MainLayoutProps) {
         </>
       )}
 
-      {/* Mobile Navigation Sheet */}
+      {/* Mobile Navigation Sheet — Studio uses the labelled rail, classic uses the existing MobileSidebar */}
       {isMobileLayout && (
         <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
           <SheetContent
             side="left"
-            className="w-[280px] p-0 glass-card border-r border-primary/15 bg-background/95 backdrop-blur-lg"
+            className={
+              isStudio
+                ? 'w-[260px] p-0 bg-secondary border-r border-border'
+                : 'w-[280px] p-0 glass-card border-r border-primary/15 bg-background/95 backdrop-blur-lg'
+            }
           >
-            <MobileSidebar onNavigate={() => setMobileMenuOpen(false)} />
+            {isStudio ? (
+              <StudioSidebar />
+            ) : (
+              <MobileSidebar onNavigate={() => setMobileMenuOpen(false)} />
+            )}
           </SheetContent>
         </Sheet>
       )}
@@ -96,12 +177,12 @@ export function MainLayout({ children }: MainLayoutProps) {
       }>
         <Header onMenuClick={handleMenuClick} />
 
-        <main className="p-4 md:p-6">
+        <main className="px-4 py-4 md:px-6 md:py-6 lg:px-14 lg:py-8 2xl:px-16">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: isMobileLayout ? 0.2 : 0.5 }}
-            className="max-w-7xl mx-auto"
+            className="max-w-[1720px] mx-auto"
           >
             {children}
           </motion.div>

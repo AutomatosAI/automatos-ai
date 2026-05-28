@@ -28,7 +28,8 @@ export default function ExecutionPage() {
         <PageHeader
           title="Playbook"
           titleAccent="Execution"
-          subtitle="Monitor live playbook run progress"
+          eyebrow="Activity · live run"
+          lede="Every step, tool call, handoff, and decision streamed as it happens. Pause, replay, or branch the run from any row."
         />
         <ExecutionKitchen
           workflowId={0}

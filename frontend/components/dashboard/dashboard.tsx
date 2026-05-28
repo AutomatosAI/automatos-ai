@@ -92,7 +92,8 @@ export function Dashboard() {
       <PageHeader
         title="System"
         titleAccent="Dashboard"
-        subtitle="Monitor your multi-agent orchestration platform in real-time"
+        eyebrow="Operations · real-time"
+        lede="The platform's vitals: health, throughput, and what your workforce is moving right now. Replays available for the last 7 days."
         actions={
           <>
             <Badge variant="outline" className="text-brand-primary border-brand-primary/30">

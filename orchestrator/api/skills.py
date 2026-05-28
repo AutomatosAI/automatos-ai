@@ -473,8 +473,14 @@ async def list_skills(
         GET /api/v1/skills?search=security&tags=authentication,authorization
     """
     try:
+        # Marketplace endpoint: only surface system-owned skills (workspace_id IS NULL).
+        # Workspace-owned skills (forks, custom) are listed via /workspaces/{id}/skills,
+        # which already shadows marketplace originals when a fork exists. Admins see all.
+        is_admin = getattr(ctx.user, "system_role", "user") == "admin"
         query = db.query(Skill).filter(Skill.is_active == True)
-        
+        if not is_admin:
+            query = query.filter(Skill.workspace_id.is_(None))
+
         # Apply filters
         if category:
             query = query.filter(Skill.category == category)

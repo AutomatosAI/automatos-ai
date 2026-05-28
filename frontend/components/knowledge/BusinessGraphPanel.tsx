@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useMemo, useCallback } from 'react'
+import { useState, useRef, useMemo, useCallback, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
 import { useWorkspace } from '@/hooks/use-workspace'
@@ -8,10 +8,15 @@ import { Input } from '@/components/ui/input'
 import { Slider } from '@/components/ui/slider'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { BusinessGraphVisualization } from './BusinessGraphVisualization'
+import BusinessGraphVisualization, {
+  type BusinessGraphHandle,
+  type ColorMode,
+} from './BusinessGraphVisualization'
+import { GraphErrorBoundary } from './GraphErrorBoundary'
 import {
   Network, Loader2, Search, X, ChevronRight,
   FileText, Clock, Layers, Upload, RefreshCw, Plus,
+  Maximize2, Minimize2, Palette,
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 
@@ -70,6 +75,14 @@ export function BusinessGraphPanel() {
   const [importError, setImportError] = useState<string | null>(null)
   const [building, setBuilding] = useState(false)
   const [dragActive, setDragActive] = useState(false)
+
+  // PRD-009 Phase-2 polish state
+  const [visibleTypes, setVisibleTypes] = useState<Set<string>>(new Set())  // empty = all
+  const [visibleRelations, setVisibleRelations] = useState<Set<string>>(new Set())  // empty = all
+  const [colorMode, setColorMode] = useState<ColorMode>('community')
+  const [isFullscreen, setIsFullscreen] = useState(false)
+  const vizRef = useRef<BusinessGraphHandle>(null)
+  const graphContainerRef = useRef<HTMLDivElement>(null)
 
   // ── File handling (matches document-management.tsx pattern) ──
 
@@ -188,32 +201,42 @@ export function BusinessGraphPanel() {
   // ── Data fetching ──
 
   const {
+    data: meta,
+    isLoading: metaLoading,
+    error: metaError,
+  } = useQuery<GraphMeta>({
+    queryKey: graphQueryKeys.meta(workspaceId ?? ''),
+    queryFn: async () => {
+      const result: any = await apiClient.getWorkspaceFileContent(workspaceId!, 'graph/meta.json')
+      const content = result?.content ?? result
+      return typeof content === 'string' ? JSON.parse(content) : content
+    },
+    enabled: !!workspaceId,
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  })
+
+  // The Canvas-based ForceGraph2D renderer handles tens of thousands of nodes
+  // smoothly (Obsidian-tier perf). Cap raised from 5,000 (old SVG/d3 limit)
+  // to 50,000 — high enough for InbuildUK (~24k) but low enough that the
+  // graph.json fetch + parse stays safely under ~30MB. Higher catalogs
+  // (~100k+) should switch to the cluster-first drill-in pattern instead.
+  const vizSafe = !!meta && (meta.node_count ?? 0) <= 50000
+
+  const {
     data: graphData,
     isLoading: graphLoading,
     error: graphError,
   } = useQuery<GraphData>({
     queryKey: graphQueryKeys.data(workspaceId ?? ''),
     queryFn: async () => {
-      const result = await apiClient.getWorkspaceFileContent(workspaceId!, 'graph/graph.json')
+      const result: any = await apiClient.getWorkspaceFileContent(workspaceId!, 'graph/graph.json')
       const content = result?.content ?? result
       return typeof content === 'string' ? JSON.parse(content) : content
     },
-    enabled: !!workspaceId,
+    enabled: !!workspaceId && vizSafe,
     staleTime: 5 * 60 * 1000,
-  })
-
-  const {
-    data: meta,
-    isLoading: metaLoading,
-  } = useQuery<GraphMeta>({
-    queryKey: graphQueryKeys.meta(workspaceId ?? ''),
-    queryFn: async () => {
-      const result = await apiClient.getWorkspaceFileContent(workspaceId!, 'graph/meta.json')
-      const content = result?.content ?? result
-      return typeof content === 'string' ? JSON.parse(content) : content
-    },
-    enabled: !!workspaceId,
-    staleTime: 5 * 60 * 1000,
+    retry: false,
   })
 
   // ── Derived data ──
@@ -230,6 +253,137 @@ export function BusinessGraphPanel() {
       .sort((a, b) => b[1] - a[1])
       .map(([id, count]) => ({ id, count }))
   }, [graphData])
+
+  // Per-type counts for the filter chips. We pre-compute once so the chip
+  // row stays static even while the user toggles things off.
+  const typeCounts = useMemo(() => {
+    if (!graphData?.nodes) return new Map<string, number>()
+    const m = new Map<string, number>()
+    for (const n of graphData.nodes) {
+      const t = n.file_type ?? 'unknown'
+      m.set(t, (m.get(t) ?? 0) + 1)
+    }
+    return m
+  }, [graphData])
+
+  // Pretty label for each node type — sortable for chip ordering.
+  const TYPE_DISPLAY: Record<string, { label: string; color: string; order: number }> = {
+    shopify_product:    { label: 'Products',    color: '#ff5e3a', order: 1 },
+    shopify_variant:    { label: 'Variants',    color: '#ffb347', order: 2 },
+    shopify_vendor:     { label: 'Vendors',     color: '#c084fc', order: 3 },
+    shopify_collection: { label: 'Collections', color: '#10e89e', order: 4 },
+    shopify_metafield:  { label: 'Metafields',  color: '#38bdf8', order: 5 },
+  }
+
+  const typeChips = useMemo(() => {
+    return Array.from(typeCounts.entries())
+      .map(([t, n]) => ({
+        type: t,
+        count: n,
+        label: TYPE_DISPLAY[t]?.label ?? t.replace(/_/g, ' '),
+        color: TYPE_DISPLAY[t]?.color ?? '#94a3b8',
+        order: TYPE_DISPLAY[t]?.order ?? 99,
+      }))
+      .sort((a, b) => a.order - b.order || b.count - a.count)
+  }, [typeCounts])
+
+  const toggleType = useCallback((t: string) => {
+    setVisibleTypes((prev) => {
+      const next = new Set(prev)
+      // Empty set = "show all". First click on any chip switches into
+      // explicit mode with ONLY the others removed.
+      if (next.size === 0) {
+        for (const ct of typeChips) {
+          if (ct.type !== t) next.add(ct.type)
+        }
+      } else if (next.has(t)) {
+        next.delete(t)
+      } else {
+        next.add(t)
+      }
+      // If user re-enables everything, fall back to "show all" sentinel.
+      if (next.size === typeChips.length) next.clear()
+      return next
+    })
+  }, [typeChips])
+
+  const isTypeVisible = useCallback(
+    (t: string) => visibleTypes.size === 0 || visibleTypes.has(t),
+    [visibleTypes],
+  )
+
+  // Relation chips — toggle catalog vs order-relationship edges.
+  // Counts derived from graphData.links (lazy — empty until data loads).
+  const relationCounts = useMemo(() => {
+    if (!graphData?.links) return new Map<string, number>()
+    const m = new Map<string, number>()
+    for (const l of graphData.links) {
+      const r = l.relation ?? 'related_to'
+      m.set(r, (m.get(r) ?? 0) + 1)
+    }
+    return m
+  }, [graphData])
+
+  const RELATION_DISPLAY: Record<string, { label: string; color: string; order: number }> = {
+    frequently_bought_with: { label: 'Order pairs',  color: '#ff3d8c', order: 1 },
+    variant_of:             { label: 'Variants',     color: '#ffb347', order: 2 },
+    in_collection:          { label: 'Collections',  color: '#10e89e', order: 3 },
+    by_vendor:              { label: 'Vendors',      color: '#c084fc', order: 4 },
+    has_metafield:          { label: 'Metafields',   color: '#38bdf8', order: 5 },
+  }
+
+  const relationChips = useMemo(() => {
+    return Array.from(relationCounts.entries())
+      .map(([r, n]) => ({
+        relation: r,
+        count: n,
+        label: RELATION_DISPLAY[r]?.label ?? r.replace(/_/g, ' '),
+        color: RELATION_DISPLAY[r]?.color ?? '#94a3b8',
+        order: RELATION_DISPLAY[r]?.order ?? 99,
+      }))
+      .sort((a, b) => a.order - b.order || b.count - a.count)
+  }, [relationCounts])
+
+  const toggleRelation = useCallback((r: string) => {
+    setVisibleRelations((prev) => {
+      const next = new Set(prev)
+      if (next.size === 0) {
+        for (const cr of relationChips) {
+          if (cr.relation !== r) next.add(cr.relation)
+        }
+      } else if (next.has(r)) {
+        next.delete(r)
+      } else {
+        next.add(r)
+      }
+      if (next.size === relationChips.length) next.clear()
+      return next
+    })
+  }, [relationChips])
+
+  const isRelationVisible = useCallback(
+    (r: string) => visibleRelations.size === 0 || visibleRelations.has(r),
+    [visibleRelations],
+  )
+
+  // Native HTML5 fullscreen on the graph container.
+  const handleFullscreen = useCallback(() => {
+    const el = graphContainerRef.current
+    if (!el) return
+    if (!document.fullscreenElement) {
+      el.requestFullscreen?.().then(() => setIsFullscreen(true)).catch(() => {})
+    } else {
+      document.exitFullscreen?.().then(() => setIsFullscreen(false)).catch(() => {})
+    }
+  }, [])
+
+  // Keep isFullscreen in sync if the user ESC-exits without clicking the
+  // toggle — otherwise the icon shows the wrong state.
+  useEffect(() => {
+    const onChange = () => setIsFullscreen(!!document.fullscreenElement)
+    document.addEventListener('fullscreenchange', onChange)
+    return () => document.removeEventListener('fullscreenchange', onChange)
+  }, [])
 
   const filteredData = useMemo((): GraphData | null => {
     if (!graphData) return null
@@ -284,8 +438,9 @@ export function BusinessGraphPanel() {
   }
 
   // ── Empty state — drag-and-drop zone (matches document upload pattern) ──
+  // Only show when there's genuinely no graph (meta missing/errored)
 
-  if (graphError || !graphData?.nodes?.length) {
+  if (!meta && (metaError || !metaLoading)) {
     return (
       <div className="space-y-6">
         {/* Hidden file input — same pattern as document-management.tsx */}
@@ -364,8 +519,8 @@ export function BusinessGraphPanel() {
 
   // ── Stats ──
 
-  const nodeCount = meta?.node_count ?? graphData.nodes.length
-  const edgeCount = meta?.edge_count ?? graphData.links.length
+  const nodeCount = meta?.node_count ?? graphData?.nodes?.length ?? 0
+  const edgeCount = meta?.edge_count ?? graphData?.links?.length ?? 0
   const communityCount = meta?.community_count ?? communities.length
   const lastBuilt = meta?.last_built
     ? formatDistanceToNow(new Date(meta.last_built * 1000), { addSuffix: true })
@@ -437,59 +592,161 @@ export function BusinessGraphPanel() {
         )}
       </div>
 
+      {/* Large graph info */}
+      {!vizSafe && meta && (
+        <div className="glass-card bg-white/5 backdrop-blur-sm border border-white/10 rounded-lg p-6 text-center">
+          <Network className="w-8 h-8 mx-auto mb-2 text-success" />
+          <h3 className="text-base font-semibold mb-1">Knowledge Graph Active</h3>
+          <p className="text-sm text-muted-foreground">
+            {nodeCount.toLocaleString()} nodes · {edgeCount.toLocaleString()} edges · {communityCount} communities.
+            Browser visualization is disabled for graphs over 5,000 nodes.
+            Agents can query this graph via platform tools.
+          </p>
+        </div>
+      )}
+
       {/* Main Layout: Sidebar + Graph */}
-      <div className="flex flex-col md:flex-row gap-4 min-h-[500px]">
-        {/* Community Sidebar */}
-        <div className="w-full md:w-48 shrink-0 glass-card bg-white/5 backdrop-blur-sm border border-white/10 rounded-lg p-3 space-y-1 max-h-[500px] overflow-y-auto">
-          <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
-            <Layers className="w-3.5 h-3.5" />
-            Communities
+      {vizSafe && <div className="flex flex-col md:flex-row gap-4 min-h-[500px]">
+        {/* Community Sidebar — at 800+ clusters a flat list is useless. We
+            hide tiny long-tail clusters (<5 nodes) and cap the visible
+            list at 30. 'Show all' expands. Sorted by size descending. */}
+        <ClusterSidebar
+          communities={communities}
+          selectedCommunity={selectedCommunity}
+          onSelect={setSelectedCommunity}
+        />
+
+        {/* Graph Visualization + controls — wrapped in a localised error
+            boundary so a renderer-level exception doesn't take down the
+            whole dashboard. Container is the fullscreen target. */}
+        <div
+          ref={graphContainerRef}
+          className="flex-1 glass-card bg-white/5 backdrop-blur-sm border border-white/10 rounded-lg overflow-hidden min-h-[400px] relative"
+        >
+          {/* Top-right controls — color-mode toggle + fullscreen */}
+          <div className="absolute top-3 right-3 z-10 flex items-center gap-2">
+            <div className="flex items-center bg-black/50 backdrop-blur-sm rounded-md border border-white/10 overflow-hidden">
+              <button
+                onClick={() => setColorMode('community')}
+                className={`px-2.5 py-1 text-xs flex items-center gap-1 transition ${
+                  colorMode === 'community'
+                    ? 'bg-white/15 text-foreground'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-white/5'
+                }`}
+                title="Color by cluster"
+              >
+                <Layers className="w-3 h-3" /> Cluster
+              </button>
+              <button
+                onClick={() => setColorMode('type')}
+                className={`px-2.5 py-1 text-xs flex items-center gap-1 transition border-l border-white/10 ${
+                  colorMode === 'type'
+                    ? 'bg-white/15 text-foreground'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-white/5'
+                }`}
+                title="Color by node type"
+              >
+                <Palette className="w-3 h-3" /> Type
+              </button>
+            </div>
+            <button
+              onClick={handleFullscreen}
+              className="p-1.5 rounded-md bg-black/50 backdrop-blur-sm border border-white/10 text-muted-foreground hover:text-foreground hover:bg-white/10 transition"
+              title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+            >
+              {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+            </button>
           </div>
 
-          <button
-            onClick={() => setSelectedCommunity(null)}
-            className={`w-full text-left text-sm px-2 py-1.5 rounded transition-colors ${
-              selectedCommunity === null
-                ? 'bg-primary/20 text-primary'
-                : 'text-muted-foreground hover:bg-white/5'
-            }`}
-          >
-            All clusters
-          </button>
+          {/* Filter chips — Nodes (top row) + Relations (bottom row).
+              Bottom-right so they don't compete with the hover tooltip. */}
+          {(typeChips.length > 0 || relationChips.length > 0) && (
+            <div className="absolute bottom-3 right-3 z-10 flex flex-col items-end gap-1.5 max-w-[65%]">
+              {typeChips.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 justify-end">
+                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground/70 self-center mr-1">
+                    Nodes
+                  </span>
+                  {typeChips.map(({ type, label, color, count }) => {
+                    const visible = isTypeVisible(type)
+                    return (
+                      <button
+                        key={type}
+                        onClick={() => toggleType(type)}
+                        className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-xs border transition ${
+                          visible
+                            ? 'bg-white/10 border-white/20 text-foreground'
+                            : 'bg-black/40 border-white/10 text-muted-foreground/60 line-through'
+                        }`}
+                        title={`${count.toLocaleString()} ${label.toLowerCase()}`}
+                      >
+                        <span
+                          className="w-2 h-2 rounded-full"
+                          style={{ backgroundColor: visible ? color : '#52525b' }}
+                        />
+                        {label}
+                        <span className="text-[10px] text-muted-foreground">
+                          {count.toLocaleString()}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+              {relationChips.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 justify-end">
+                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground/70 self-center mr-1">
+                    Edges
+                  </span>
+                  {relationChips.map(({ relation, label, color, count }) => {
+                    const visible = isRelationVisible(relation)
+                    // FBT chip gets a slightly bigger 'pop' since that's the
+                    // recommendation surface — pulse subtly when visible.
+                    const isFbt = relation === 'frequently_bought_with'
+                    return (
+                      <button
+                        key={relation}
+                        onClick={() => toggleRelation(relation)}
+                        className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-xs border transition ${
+                          visible
+                            ? `bg-white/10 border-white/20 text-foreground ${isFbt ? 'shadow-[0_0_8px_rgba(255,61,140,0.25)]' : ''}`
+                            : 'bg-black/40 border-white/10 text-muted-foreground/60 line-through'
+                        }`}
+                        title={`${count.toLocaleString()} ${label.toLowerCase()} edges`}
+                      >
+                        <span
+                          className="w-2 h-2 rounded-full"
+                          style={{ backgroundColor: visible ? color : '#52525b' }}
+                        />
+                        {label}
+                        <span className="text-[10px] text-muted-foreground">
+                          {count.toLocaleString()}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )}
 
-          {communities.map(({ id, count }) => (
-            <button
-              key={id}
-              onClick={() =>
-                setSelectedCommunity(selectedCommunity === id ? null : id)
-              }
-              className={`w-full text-left text-sm px-2 py-1.5 rounded flex items-center justify-between transition-colors ${
-                selectedCommunity === id
-                  ? 'bg-primary/20 text-primary'
-                  : 'text-muted-foreground hover:bg-white/5'
-              }`}
-            >
-              <span>Cluster {id}</span>
-              <Badge variant="secondary" className="text-[10px] h-5">
-                {count}
-              </Badge>
-            </button>
-          ))}
+          <GraphErrorBoundary>
+            <BusinessGraphVisualization
+              ref={vizRef}
+              graphData={(filteredData ?? { nodes: [], links: [] }) as any}
+              onNodeSelect={handleNodeSelect}
+              selectedCommunity={selectedCommunity}
+              minConfidence={confidenceMin}
+              visibleTypes={visibleTypes.size > 0 ? visibleTypes : undefined}
+              visibleRelations={visibleRelations.size > 0 ? visibleRelations : undefined}
+              colorMode={colorMode}
+            />
+          </GraphErrorBoundary>
         </div>
-
-        {/* Graph Visualization */}
-        <div className="flex-1 glass-card bg-white/5 backdrop-blur-sm border border-white/10 rounded-lg overflow-hidden min-h-[400px]">
-          <BusinessGraphVisualization
-            graphData={filteredData ?? { nodes: [], links: [] }}
-            onNodeSelect={handleNodeSelect}
-            selectedCommunity={selectedCommunity}
-            minConfidence={confidenceMin}
-          />
-        </div>
-      </div>
+      </div>}
 
       {/* Search + Confidence Controls */}
-      <div className="glass-card bg-white/5 backdrop-blur-sm border border-white/10 rounded-lg px-4 py-3 flex flex-col sm:flex-row items-start sm:items-center gap-4">
+      {vizSafe && <div className="glass-card bg-white/5 backdrop-blur-sm border border-white/10 rounded-lg px-4 py-3 flex flex-col sm:flex-row items-start sm:items-center gap-4">
         <div className="relative flex-1 w-full sm:max-w-xs">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input
@@ -524,10 +781,10 @@ export function BusinessGraphPanel() {
             {confidenceMin.toFixed(2)}
           </span>
         </div>
-      </div>
+      </div>}
 
       {/* Node Detail Panel */}
-      {selectedNode && (
+      {vizSafe && selectedNode && (
         <div className="glass-card bg-white/5 backdrop-blur-sm border border-white/10 rounded-lg p-4 space-y-3">
           <div className="flex items-start justify-between">
             <div className="space-y-1">
@@ -586,6 +843,108 @@ export function BusinessGraphPanel() {
               </div>
             </div>
           )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Cluster Sidebar ───────────────────────────────────────────────────
+// Lives in this file because it's panel-specific and shares the same
+// types. At 800+ clusters a flat list is unusable. Filters tiny clusters,
+// sorts by size, paginates, and offers a search box.
+
+interface ClusterSidebarProps {
+  communities: Array<{ id: number; count: number }>
+  selectedCommunity: number | null
+  onSelect: (id: number | null) => void
+}
+
+function ClusterSidebar({ communities, selectedCommunity, onSelect }: ClusterSidebarProps) {
+  const [query, setQuery] = useState('')
+  const [showAll, setShowAll] = useState(false)
+  const MIN_SIZE = 5  // hide singleton/pair clusters — pure long-tail noise
+  const PAGE = 30
+
+  const filtered = useMemo(() => {
+    const min = communities.filter((c) => c.count >= MIN_SIZE)
+    const q = query.trim()
+    if (!q) return min
+    // Allow searching by cluster id (e.g. "47") or size threshold ">100".
+    if (/^>\s*\d+$/.test(q)) {
+      const threshold = parseInt(q.replace(/^>\s*/, ''), 10)
+      return min.filter((c) => c.count > threshold)
+    }
+    return min.filter((c) => String(c.id).includes(q))
+  }, [communities, query])
+
+  const visible = showAll ? filtered : filtered.slice(0, PAGE)
+  const totalNodes = communities.reduce((a, b) => a + b.count, 0)
+  const hiddenLongTail = communities.length - filtered.length
+
+  return (
+    <div className="w-full md:w-56 shrink-0 glass-card bg-white/5 backdrop-blur-sm border border-white/10 rounded-lg p-3 space-y-2 max-h-[500px] overflow-y-auto">
+      <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+        <Layers className="w-3.5 h-3.5" />
+        Clusters
+        <span className="ml-auto text-[10px] text-muted-foreground/70">
+          {communities.length} total
+        </span>
+      </div>
+
+      <div className="relative">
+        <Search className="w-3.5 h-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search… or >100"
+          className="h-8 pl-7 text-xs bg-black/30 border-white/10"
+        />
+      </div>
+
+      <button
+        onClick={() => onSelect(null)}
+        className={`w-full text-left text-xs px-2 py-1.5 rounded transition-colors ${
+          selectedCommunity === null
+            ? 'bg-primary/25 text-primary'
+            : 'text-muted-foreground hover:bg-white/5'
+        }`}
+      >
+        All clusters
+        <span className="ml-1.5 text-[10px] text-muted-foreground/70">
+          {totalNodes.toLocaleString()} nodes
+        </span>
+      </button>
+
+      {visible.map(({ id, count }) => (
+        <button
+          key={id}
+          onClick={() => onSelect(selectedCommunity === id ? null : id)}
+          className={`w-full text-left text-xs px-2 py-1.5 rounded flex items-center justify-between transition-colors ${
+            selectedCommunity === id
+              ? 'bg-primary/25 text-primary'
+              : 'text-muted-foreground hover:bg-white/5'
+          }`}
+        >
+          <span>Cluster {id}</span>
+          <Badge variant="secondary" className="text-[10px] h-5">
+            {count}
+          </Badge>
+        </button>
+      ))}
+
+      {!showAll && filtered.length > PAGE && (
+        <button
+          onClick={() => setShowAll(true)}
+          className="w-full text-xs px-2 py-1.5 rounded text-muted-foreground hover:bg-white/5 transition-colors"
+        >
+          + {filtered.length - PAGE} more clusters
+        </button>
+      )}
+
+      {hiddenLongTail > 0 && (
+        <div className="text-[10px] text-muted-foreground/60 px-2 pt-1 border-t border-white/5">
+          {hiddenLongTail} tiny clusters hidden (&lt;{MIN_SIZE} nodes each)
         </div>
       )}
     </div>

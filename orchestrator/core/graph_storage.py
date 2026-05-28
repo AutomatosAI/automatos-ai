@@ -73,7 +73,19 @@ class DbWorkspaceClient:
 
         if row is None:
             return {"success": False, "error": "not_found", "status_code": 404}
-        return {"success": True, "content": row[0]}
+        content = row[0]
+        name = path.rsplit("/", 1)[-1] if "/" in path else path
+        import mimetypes
+        mime, _ = mimetypes.guess_type(name)
+        return {
+            "success": True,
+            "path": path,
+            "name": name,
+            "content": content,
+            "size": len(content) if content else 0,
+            "language": _guess_language_simple(name),
+            "mime_type": mime or "text/plain",
+        }
 
     async def write_file(self, path: str, content: str) -> Dict[str, Any]:
         """Upsert an artefact into ``workspace_graphs``."""
@@ -131,16 +143,22 @@ class DbWorkspaceClient:
             )
             return {"success": False, "error": str(exc), "entries": []}
 
-        entries: list[Dict[str, str]] = []
+        entries: list[Dict[str, Any]] = []
         seen: set[str] = set()
         for (row_path,) in rows:
             remainder = row_path[len(prefix):] if prefix else row_path
-            # Only keep direct children (strip any further path segments)
             name = remainder.split("/", 1)[0]
             if name and name not in seen:
                 seen.add(name)
-                entries.append({"name": name})
-        return {"success": True, "entries": entries}
+                is_dir = "/" in remainder
+                entry_path = f"{prefix}{name}" if prefix else name
+                entries.append({
+                    "name": name,
+                    "path": entry_path,
+                    "type": "directory" if is_dir else "file",
+                    "size": 0,
+                })
+        return {"success": True, "path": path, "entries": entries, "truncated": False}
 
     async def delete_file(self, path: str) -> Dict[str, Any]:
         """Remove a single artefact by path."""
@@ -163,3 +181,14 @@ class DbWorkspaceClient:
             )
             return {"success": False, "error": str(exc)}
         return {"success": True}
+
+
+def _guess_language_simple(filename: str) -> str:
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    return {
+        "json": "json", "md": "markdown", "py": "python",
+        "ts": "typescript", "tsx": "typescriptreact",
+        "js": "javascript", "jsx": "javascriptreact",
+        "html": "html", "css": "css", "yaml": "yaml", "yml": "yaml",
+        "txt": "plaintext", "csv": "plaintext",
+    }.get(ext, "plaintext")

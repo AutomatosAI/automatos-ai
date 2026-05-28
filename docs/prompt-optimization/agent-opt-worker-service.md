@@ -14,11 +14,8 @@ The following files were used as context for generating this wiki page:
 - [services/agent-opt-worker/requirements.txt](services/agent-opt-worker/requirements.txt)
 - [services/shared/automatos_logging.py](services/shared/automatos_logging.py)
 - [services/shared/automatos_metrics.py](services/shared/automatos_metrics.py)
-- [services/workspace-worker/Dockerfile](services/workspace-worker/Dockerfile)
 - [services/workspace-worker/automatos_logging.py](services/workspace-worker/automatos_logging.py)
 - [services/workspace-worker/automatos_metrics.py](services/workspace-worker/automatos_metrics.py)
-- [services/workspace-worker/entrypoint.sh](services/workspace-worker/entrypoint.sh)
-- [services/workspace-worker/requirements.txt](services/workspace-worker/requirements.txt)
 
 </details>
 
@@ -132,9 +129,9 @@ graph LR
     Toxicity -.->|"Requires"| OutputOnly
 ```
 
-The `TEMPLATE_CONFIG` dictionary maps each template to its requirements: [services/agent-opt-worker/main.py:129-141]().
+The `TEMPLATE_CONFIG` dictionary maps each template to its requirements and target models like `turing_large` or `protect`: [services/agent-opt-worker/main.py:129-141]().
 
-Sources: [services/agent-opt-worker/main.py:129-141]()
+Sources: [services/agent-opt-worker/main.py:129-141](), [services/agent-opt-worker/main.py:158-159]()
 
 ---
 
@@ -146,7 +143,7 @@ Simple health check endpoint returning service status and version. [services/age
 
 ### POST /assess
 
-Evaluates a prompt using multiple quality metric templates concurrently. Used for synchronous prompt assessment in the admin UI.
+Evaluates a prompt using multiple quality metric templates concurrently. Used for synchronous prompt assessment in the admin UI [frontend/components/settings/SystemPromptsTab.tsx:114-114]().
 
 **Execution Flow**:
 The endpoint uses a `ThreadPoolExecutor` to run multiple SDK templates in parallel, significantly reducing total latency for multi-metric assessments.
@@ -154,20 +151,17 @@ The endpoint uses a `ThreadPoolExecutor` to run multiple SDK templates in parall
 **Output Parsing**:
 The `_run_single_template` function handles both Pass/Fail templates (output="Passed"/"Failed") and numeric score templates (output=0.0-1.0): [services/agent-opt-worker/main.py:59-126](). It uses the `fi.evals.Evaluator` from the FutureAGI SDK: [services/agent-opt-worker/main.py:63-65]().
 
-Sources: [services/agent-opt-worker/main.py:59-126](), [services/agent-opt-worker/main.py:166-171]()
+Sources: [services/agent-opt-worker/main.py:59-126](), [services/agent-opt-worker/main.py:166-171](), [frontend/components/settings/SystemPromptsTab.tsx:114-114]()
 
 ---
 
 ### POST /safety
 
-Runs safety-focused templates (toxicity, prompt_injection, content_moderation) concurrently.
+Runs safety-focused templates (`toxicity`, `prompt_injection`, `content_moderation`) concurrently.
 
-**Safety Preamble**:
-The worker prepends instructional context to distinguish system prompts from user content when necessary. This significantly reduces false positives when scanning prompts that contain instructional language about handling sensitive topics.
+**Aggregate Safety Decision**: Returns `safe: true` only if all checks pass. The orchestrator triggers this via `FutureAGIService.safety_check()`: [orchestrator/core/services/futureagi_service.py:151-155]().
 
-**Aggregate Safety Decision**: Returns `safe: true` only if all checks pass.
-
-Sources: [services/agent-opt-worker/main.py:173-175]()
+Sources: [services/agent-opt-worker/main.py:173-175](), [orchestrator/core/services/futureagi_service.py:151-155]()
 
 ---
 
@@ -187,12 +181,9 @@ Sources: [services/agent-opt-worker/main.py:177-182](), [orchestrator/core/servi
 Starts an asynchronous prompt optimization job using the `agent-opt` SDK. Returns a `job_id` immediately for polling.
 
 **Background Thread Execution**:
-Jobs run in daemon threads to avoid blocking the HTTP response.
+Jobs run in daemon threads to avoid blocking the HTTP response. The orchestrator initiates this via `FutureAGIService.optimize_prompt()`: [orchestrator/core/services/futureagi_service.py:161-187]().
 
-**In-Memory Job Store**:
-Jobs are typically stored in a module-level dictionary with automatic cleanup.
-
-Sources: [services/agent-opt-worker/main.py:185-192]()
+Sources: [services/agent-opt-worker/main.py:185-192](), [orchestrator/core/services/futureagi_service.py:161-187]()
 
 ---
 
@@ -213,10 +204,10 @@ Sources: [services/agent-opt-worker/main.py:13](), [orchestrator/core/services/f
 
 The worker integrates with the shared `automatos_logging` and `automatos_metrics` modules for centralized observability.
 
-*   **Logging**: Uses `setup_logging` to initialize structured logging for the `agent-opt-worker` service: [services/agent-opt-worker/main.py:34-35]().
-*   **Metrics**: Exposes a `/metrics` endpoint via `add_fastapi_metrics` for Prometheus scraping: [services/agent-opt-worker/main.py:40]().
+*   **Logging**: Uses `setup_logging` to initialize structured logging for the `agent-opt-worker` service: [services/agent-opt-worker/main.py:34-35](). The `LogRelayHandler` ships these to a central relay: [services/agent-opt-worker/automatos_logging.py:132-161]().
+*   **Metrics**: Exposes a `/metrics` endpoint via `add_fastapi_metrics` for Prometheus scraping: [services/agent-opt-worker/main.py:40](). This includes request counts and duration histograms: [services/agent-opt-worker/automatos_metrics.py:49-60]().
 
-Sources: [services/agent-opt-worker/main.py:32-40](), [services/agent-opt-worker/automatos_logging.py:132-161](), [services/agent-opt-worker/automatos_metrics.py:79-129]()
+Sources: [services/agent-opt-worker/main.py:32-40](), [services/agent-opt-worker/automatos_logging.py:132-161](), [services/agent-opt-worker/automatos_metrics.py:49-129]()
 
 ### Deployment
 

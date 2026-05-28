@@ -94,10 +94,20 @@ class HeartbeatService:
     # ------------------------------------------------------------------
 
     async def _load_heartbeat_configs(self):
-        """Load all active heartbeat configs from DB and schedule jobs."""
+        """Load all active heartbeat configs from DB and schedule jobs.
+
+        Clears stale heartbeat jobs first (e.g. from Redis jobstore persistence)
+        so disabled agents don't keep running after a restart.
+        """
         from core.database.database import SessionLocal
         from core.models.workspaces import Workspace
         from core.models import Agent
+
+        # Remove any leftover heartbeat jobs from previous runs before
+        # re-adding only the currently-enabled ones.
+        for job in list(self._scheduler.get_jobs()):
+            if job.id.startswith("agent_hb_") or job.id.startswith("orch_hb_"):
+                self._scheduler.remove_job(job.id)
 
         db = SessionLocal()
         try:
@@ -374,7 +384,11 @@ class HeartbeatService:
             return {"status": "skipped", "reason": "outside_active_hours"}
 
         interval_minutes = hb_config.get("interval_minutes", 30)
-        if await self._was_recently_executed("orchestrator", workspace_id, interval_minutes):
+        # Manual UI triggers (run_orchestrator_heartbeat) set force_run=True to
+        # bypass the cooldown — clicking "Run Now" should always execute.
+        if not hb_config.get("force_run") and await self._was_recently_executed(
+            "orchestrator", workspace_id, interval_minutes
+        ):
             return {"status": "skipped", "reason": "already_ran_this_period"}
 
         self._running_ticks[tick_key] = True
@@ -479,10 +493,15 @@ class HeartbeatService:
         if checklist and checklist.strip():
             checklist_block = f"\n\nChecklist to review:\n{checklist}"
 
+        # Wave 4 — opt-in cadence loops (Daily Brief / Weekly Review /
+        # Monday HARNESS / Post-change / Incident review). Default off.
+        from core.services.auto_cadence import build_cadence_block
+        cadence_block = build_cadence_block(hb_config)
+
         task_description = (
             f"Perform a scheduled health check for this workspace.\n"
             f"Personality: {personality_mode}.\n\n"
-            f"Analyze your workspace using the tools provided.{checklist_block}\n\n"
+            f"Analyze your workspace using the tools provided.{checklist_block}{cadence_block}\n\n"
             f"{level_instruction}{style_suffix}\n\n"
             f"Reply with a SHORT plain-text summary (max 500 chars). No markdown."
         )
@@ -672,10 +691,16 @@ class HeartbeatService:
             return {"status": "skipped", "reason": "outside_active_hours"}
 
         interval_minutes = hb_config.get("interval_minutes", 60)
-        if await self._was_recently_executed("agent", str(agent_id), interval_minutes):
+        # Manual UI triggers (run_agent_heartbeat) set force_run=True to bypass
+        # the cooldown — without this, daily-interval agents could only be
+        # tested once a day. Scheduled ticks never set force_run.
+        if not hb_config.get("force_run") and await self._was_recently_executed(
+            "agent", str(agent_id), interval_minutes
+        ):
             return {"status": "skipped", "reason": "already_ran_this_period"}
 
         self._running_ticks[tick_key] = True
+        run_started_at = datetime.utcnow()
         result: Dict[str, Any] = {
             "source_type": "agent",
             "source_id": str(agent_id),
@@ -684,6 +709,7 @@ class HeartbeatService:
             "findings": [],
             "actions_taken": [],
             "tokens_used": 0,
+            "_run_started_at": run_started_at,
         }
 
         try:
@@ -753,9 +779,16 @@ class HeartbeatService:
                         task_err,
                     )
 
+                # PRD-140 Phase 1 — opt-in cadence blocks (e.g. team_review
+                # when this agent has team_lead_enabled=True). Same module as
+                # Auto's cadence so we don't run two parallel mechanisms.
+                from core.services.auto_cadence import build_cadence_block
+                cadence_block = build_cadence_block(hb_config)
+
                 prompt = (
                     f"Scheduled heartbeat check. {heartbeat_prompt}\n"
-                    "Use your tools to check. Reply with a SHORT plain-text summary (max 500 chars), no markdown.\n"
+                    + (cadence_block + "\n\n" if cadence_block else "")
+                    + "Use your tools to check. Reply with a SHORT plain-text summary (max 500 chars), no markdown.\n"
                     + (
                         "You may take action if needed."
                         if auto_act
@@ -837,6 +870,7 @@ class HeartbeatService:
             finally:
                 db.close()
 
+            result["_run_completed_at"] = datetime.utcnow()
             await self._store_heartbeat_result(result)
             await self._dispatch_heartbeat_notification(result)
             await self._auto_create_report(agent_id, workspace_id, result)
@@ -850,6 +884,7 @@ class HeartbeatService:
             )
             result["status"] = "error"
             result["findings"].append({"check": "error", "detail": str(e)})
+            result["_run_completed_at"] = datetime.utcnow()
             await self._store_heartbeat_result(result)
             await self._dispatch_heartbeat_notification(result)
             await self._auto_create_report(agent_id, workspace_id, result)
@@ -982,10 +1017,12 @@ class HeartbeatService:
                         """
                         INSERT INTO heartbeat_results
                             (source_type, source_id, workspace_id, status,
-                             findings, actions_taken, tokens_used, created_at)
+                             findings, actions_taken, tokens_used,
+                             objective_met, evidence_ref, created_at)
                         VALUES
                             (:source_type, :source_id, :workspace_id, :status,
-                             :findings, :actions_taken, :tokens_used, NOW())
+                             :findings, :actions_taken, :tokens_used,
+                             :objective_met, :evidence_ref, NOW())
                         RETURNING id
                         """
                     ),
@@ -997,6 +1034,8 @@ class HeartbeatService:
                         "findings": json.dumps(result["findings"]),
                         "actions_taken": json.dumps(result["actions_taken"]),
                         "tokens_used": result.get("tokens_used", 0),
+                        "objective_met": self._infer_objective_met(result),
+                        "evidence_ref": result.get("evidence_ref"),
                     },
                 ).fetchone()
                 db.commit()
@@ -1008,6 +1047,32 @@ class HeartbeatService:
         except Exception as e:
             logger.error("[Heartbeat] Failed to store result: %s", e)
             return None
+
+    @staticmethod
+    def _infer_objective_met(result: dict) -> Optional[bool]:
+        """Best-effort objective completion classifier — Wave 1.B.
+
+        ``True``  — status=success and there is observable output (actions
+                    taken, findings recorded, or an explicit evidence_ref).
+        ``False`` — status indicates failure (error / failed / timeout).
+        ``None``  — cannot be determined (silent success with no output).
+
+        Callers may override by setting ``result["objective_met"]`` directly
+        before persistence.
+        """
+        if "objective_met" in result:
+            return result.get("objective_met")
+        status = (result.get("status") or "").lower()
+        if status in {"error", "failed", "timeout"}:
+            return False
+        if status == "success":
+            has_output = bool(
+                result.get("actions_taken")
+                or result.get("findings")
+                or result.get("evidence_ref")
+            )
+            return True if has_output else None
+        return None
 
     # ------------------------------------------------------------------
     # Notification delivery (PRD-128: unified dispatcher)
@@ -1049,9 +1114,10 @@ class HeartbeatService:
                 ]
                 message_body = "\n".join(details) if details else "No findings."
 
-            # Resolve agent metadata (agent tick only)
+            # Resolve agent metadata + per-agent report_to override (agent tick only)
             agent_id: Optional[int] = None
             agent_name: Optional[str] = None
+            agent_hb_config: dict = {}
             if source_type == "agent":
                 try:
                     agent_id = int(result.get("source_id"))
@@ -1064,6 +1130,8 @@ class HeartbeatService:
 
                         agent = db_lookup.query(Agent).get(agent_id)
                         agent_name = agent.name if agent else f"agent-{agent_id}"
+                        if agent and agent.configuration:
+                            agent_hb_config = (agent.configuration or {}).get("heartbeat", {}) or {}
                     finally:
                         db_lookup.close()
                 title = f"{agent_name or 'Agent'} Heartbeat"
@@ -1072,6 +1140,39 @@ class HeartbeatService:
                 title = "Orchestrator Heartbeat"
 
             link_id = result.get("_heartbeat_result_id")
+
+            # Per-agent ``report_to`` overrides the workspace dispatch path.
+            #   - "auto"     → assign a board task to the workspace's Auto, so
+            #                  Auto picks it up on its next tick (PRD-72 loop).
+            #   - "webhook"  → POST directly to the agent's stored webhook_url,
+            #                  bypassing workspace prefs.
+            #   - anything else (orchestrator/telegram/slack/empty) falls
+            #                  through to the workspace-level NotificationDispatcher.
+            report_to = (agent_hb_config.get("report_to") or "").strip().lower()
+
+            if report_to == "auto" and source_type == "agent":
+                await self._route_heartbeat_to_auto(
+                    workspace_id=workspace_id,
+                    source_agent_id=agent_id,
+                    source_agent_name=agent_name,
+                    title=title,
+                    message=message_body,
+                    link_id=link_id,
+                    status=dispatch_status,
+                )
+                return
+
+            if report_to == "webhook" and agent_hb_config.get("webhook_url"):
+                await self._route_heartbeat_to_webhook(
+                    webhook_url=agent_hb_config["webhook_url"],
+                    title=title,
+                    message=message_body,
+                    agent_id=agent_id,
+                    agent_name=agent_name,
+                    link_id=link_id,
+                    status=dispatch_status,
+                )
+                return
 
             db = SessionLocal()
             try:
@@ -1104,6 +1205,131 @@ class HeartbeatService:
             )
 
     # ------------------------------------------------------------------
+    # report_to routing — per-agent overrides (PRD-72 follow-up)
+    # ------------------------------------------------------------------
+
+    async def _route_heartbeat_to_auto(
+        self,
+        *,
+        workspace_id: str,
+        source_agent_id: Optional[int],
+        source_agent_name: Optional[str],
+        title: str,
+        message: str,
+        link_id: Optional[Any],
+        status: str,
+    ) -> None:
+        """Create a BoardTask for Auto to pick up on its next tick.
+
+        ``report_to=auto`` means "the manager should look at this." Auto's
+        heartbeat already scans assigned board tasks
+        (heartbeat_service:730-765) and ingests them as priority work, so
+        creating a task here is enough — no new scheduler, no notification.
+        """
+        from core.database.database import SessionLocal
+        from core.models import Agent
+        from core.models.core import BoardTask
+
+        db = SessionLocal()
+        try:
+            auto = (
+                db.query(Agent)
+                .filter(
+                    Agent.workspace_id == workspace_id,
+                    Agent.is_system_agent.is_(True),
+                    Agent.name == "Auto",
+                )
+                .first()
+            )
+            if not auto:
+                logger.warning(
+                    "[Heartbeat] report_to=auto but no canonical Auto found for ws=%s — "
+                    "falling back to silent (DB only).",
+                    workspace_id,
+                )
+                return
+
+            summary_line = (message or "").strip().splitlines()[0] if message else ""
+            summary_line = summary_line[:200] or "no findings"
+
+            description = (
+                f"{source_agent_name or 'Agent'} heartbeat completed (status={status}).\n\n"
+                f"Findings:\n{(message or '(no findings)')[:2000]}\n\n"
+                f"Read the full report with `platform_get_latest_report` "
+                f"(agent_name=\"{source_agent_name}\")."
+            )
+
+            priority = "high" if status in ("error", "critical") else "medium"
+
+            task = BoardTask(
+                workspace_id=workspace_id,
+                title=f"Review {source_agent_name or 'agent'} heartbeat — {summary_line}"[:500],
+                description=description,
+                status="assigned",
+                priority=priority,
+                assigned_agent_id=auto.id,
+                created_by_type="agent",
+                created_by_id=str(source_agent_id) if source_agent_id else None,
+                source_type="heartbeat",
+                source_id=str(link_id) if link_id is not None else None,
+            )
+            db.add(task)
+            db.commit()
+            logger.info(
+                "[Heartbeat] report_to=auto: created BoardTask id=%s assigned to Auto "
+                "(agent_id=%s) for source_agent=%s",
+                task.id, auto.id, source_agent_id,
+            )
+        except Exception as e:
+            db.rollback()
+            logger.error(
+                "[Heartbeat] _route_heartbeat_to_auto failed for ws=%s: %s",
+                workspace_id, e, exc_info=True,
+            )
+        finally:
+            db.close()
+
+    async def _route_heartbeat_to_webhook(
+        self,
+        *,
+        webhook_url: str,
+        title: str,
+        message: str,
+        agent_id: Optional[int],
+        agent_name: Optional[str],
+        link_id: Optional[Any],
+        status: str,
+    ) -> None:
+        """POST the heartbeat result directly to a per-agent webhook URL.
+
+        Bypasses the workspace-level NotificationDispatcher because the
+        agent has its own destination. Failure is logged but never raised
+        — heartbeat completion isn't blocked by a flaky downstream URL.
+        """
+        try:
+            import httpx
+            payload = {
+                "event": "heartbeat_complete",
+                "title": title,
+                "message": (message or "")[:4000],
+                "agent_id": agent_id,
+                "agent_name": agent_name,
+                "status": status,
+                "report_id": str(link_id) if link_id is not None else None,
+            }
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(webhook_url, json=payload)
+                logger.info(
+                    "[Heartbeat] report_to=webhook: POST %s → %s (agent=%s)",
+                    webhook_url, resp.status_code, agent_id,
+                )
+        except Exception as e:
+            logger.warning(
+                "[Heartbeat] Per-agent webhook delivery failed for agent=%s: %s",
+                agent_id, e,
+            )
+
+    # ------------------------------------------------------------------
     # Public API (manual triggers)
     # ------------------------------------------------------------------
 
@@ -1125,12 +1351,14 @@ class HeartbeatService:
         finally:
             db.close()
 
-        # Force run regardless of active hours
+        # Force run regardless of active hours AND cooldown — clicking Run
+        # Now from the UI should always trigger a tick.
         hb_config_override = {
             **hb_config,
             "active_hours_start": "00:00",
             "active_hours_end": "23:59",
             "inherit_active_hours": False,  # manual runs always execute
+            "force_run": True,
         }
         return await self._orchestrator_tick(workspace_id, hb_config_override)
 
@@ -1154,6 +1382,7 @@ class HeartbeatService:
             "active_hours_start": "00:00",
             "active_hours_end": "23:59",
             "inherit_active_hours": False,  # manual runs always execute
+            "force_run": True,             # bypass cooldown so daily agents are testable
         }
         return await self._agent_tick(agent_id, workspace_id, hb_config_override)
 
@@ -1199,7 +1428,7 @@ class HeartbeatService:
         try:
             from core.database.database import SessionLocal
             from core.models import Agent
-            from services.report_service import ReportService
+            from services.report_service import ReportService, compute_execution_metrics
 
             db = SessionLocal()
             try:
@@ -1211,6 +1440,24 @@ class HeartbeatService:
                 actions = result.get("actions_taken", [])
                 hb_status = result.get("status", "success")
                 tokens = result.get("tokens_used", 0)
+                started_at = result.get("_run_started_at")
+                completed_at = result.get("_run_completed_at")
+
+                # Pull cost/model/duration rollup from llm_usage
+                exec_metrics = compute_execution_metrics(
+                    db,
+                    workspace_id,
+                    agent_id=agent_id,
+                    started_at=started_at,
+                    completed_at=completed_at,
+                    extra={
+                        "findings_count": len(findings),
+                        "actions_count": len(actions),
+                        "trigger": "heartbeat",
+                    },
+                )
+                if exec_metrics.get("tokens_used"):
+                    tokens = exec_metrics["tokens_used"]
 
                 lines = [
                     f"# {agent_name} — Heartbeat Report",
@@ -1235,8 +1482,17 @@ class HeartbeatService:
                             lines.append(f"- {a}")
                     lines.append("")
 
-                lines.append("## Metrics")
-                lines.append(f"- Tokens used: {tokens}")
+                lines.append("## Execution Metrics")
+                lines.append(f"- Model: {exec_metrics.get('model') or 'unknown'}")
+                lines.append(f"- LLM calls: {exec_metrics.get('llm_calls', 0)}")
+                lines.append(f"- Tokens (in/out/total): "
+                             f"{exec_metrics.get('input_tokens', 0)} / "
+                             f"{exec_metrics.get('output_tokens', 0)} / "
+                             f"{exec_metrics.get('tokens_used', tokens)}")
+                lines.append(f"- Cost: ${exec_metrics.get('cost_usd', 0):.4f}")
+                duration_ms = exec_metrics.get('duration_ms')
+                if duration_ms is not None:
+                    lines.append(f"- Duration: {duration_ms} ms")
                 lines.append(f"- Findings: {len(findings)}")
                 lines.append(f"- Actions: {len(actions)}")
 
@@ -1264,11 +1520,7 @@ class HeartbeatService:
                     report_type="standup",
                     status=report_status,
                     summary=summary,
-                    metrics={
-                        "tokens_used": tokens,
-                        "findings_count": len(findings),
-                        "actions_count": len(actions),
-                    },
+                    metrics=exec_metrics,
                     heartbeat_result_id=result.get("_heartbeat_result_id"),
                 )
 

@@ -5,24 +5,15 @@
 
 The following files were used as context for generating this wiki page:
 
-- [docs/reviews/COMPOSIO-TOOL-REGRESSION-REVIEW.md](docs/reviews/COMPOSIO-TOOL-REGRESSION-REVIEW.md)
-- [orchestrator/api/chat.py](orchestrator/api/chat.py)
-- [orchestrator/api/chat_voice.py](orchestrator/api/chat_voice.py)
-- [orchestrator/consumers/chatbot/auto.py](orchestrator/consumers/chatbot/auto.py)
-- [orchestrator/consumers/chatbot/intent_classifier.py](orchestrator/consumers/chatbot/intent_classifier.py)
-- [orchestrator/consumers/chatbot/personality.py](orchestrator/consumers/chatbot/personality.py)
-- [orchestrator/consumers/chatbot/service.py](orchestrator/consumers/chatbot/service.py)
-- [orchestrator/consumers/chatbot/smart_tool_router.py](orchestrator/consumers/chatbot/smart_tool_router.py)
-- [orchestrator/core/llm/manager.py](orchestrator/core/llm/manager.py)
+- [orchestrator/api/routing.py](orchestrator/api/routing.py)
 - [orchestrator/core/routing/engine.py](orchestrator/core/routing/engine.py)
-- [orchestrator/core/services/intent_classifier.py](orchestrator/core/services/intent_classifier.py)
-- [orchestrator/modules/orchestrator/service.py](orchestrator/modules/orchestrator/service.py)
-- [orchestrator/modules/tools/discovery/actions_analytics_enhanced.py](orchestrator/modules/tools/discovery/actions_analytics_enhanced.py)
-- [orchestrator/modules/tools/discovery/handlers_analytics_enhanced.py](orchestrator/modules/tools/discovery/handlers_analytics_enhanced.py)
+- [orchestrator/modules/context/sections/tools.py](orchestrator/modules/context/sections/tools.py)
+- [orchestrator/modules/tools/discovery/action_registry.py](orchestrator/modules/tools/discovery/action_registry.py)
 - [orchestrator/modules/tools/discovery/handlers_search.py](orchestrator/modules/tools/discovery/handlers_search.py)
-- [orchestrator/modules/tools/discovery/platform_actions.py](orchestrator/modules/tools/discovery/platform_actions.py)
-- [orchestrator/modules/tools/discovery/platform_executor.py](orchestrator/modules/tools/discovery/platform_executor.py)
 - [orchestrator/modules/tools/tool_router.py](orchestrator/modules/tools/tool_router.py)
+- [orchestrator/scripts/setup_jira_trigger.py](orchestrator/scripts/setup_jira_trigger.py)
+- [orchestrator/tests/test_action_registry_filtered.py](orchestrator/tests/test_action_registry_filtered.py)
+- [orchestrator/tests/test_tool_router_semantic.py](orchestrator/tests/test_tool_router_semantic.py)
 
 </details>
 
@@ -38,7 +29,7 @@ For the complete routing hierarchy, see [Routing Architecture](10.1).
 
 ## Overview
 
-Tier 3 LLM Classification serves as the "brain" of the routing engine. It leverages the workspace's configured LLM to perform high-reasoning classification. Unlike Tier 2.5 (Semantic Similarity), which uses vector embeddings for fast retrieval, Tier 3 provides the LLM with the full context of available agents, their descriptions, and their integrated tools to make an informed decision.
+Tier 3 LLM Classification serves as the high-reasoning fallback of the routing engine. It leverages the workspace's configured LLM to perform intent classification. Unlike Tier 2.5 (Semantic Similarity), which uses vector embeddings for fast retrieval, Tier 3 provides the LLM with the full context of available agents, their descriptions, and their integrated tools (apps) to make an informed decision.
 
 The classification process produces:
 1.  **Agent ID**: The selected agent to handle the request.
@@ -51,14 +42,14 @@ The classification process produces:
 
 ## Tier 3 Implementation Flow
 
-The `UniversalRouter._classify_with_llm` method executes the following logic:
+The `UniversalRouter._classify_with_llm` method executes the logic for deep intent analysis. It is triggered when `semantic_candidates` from Tier 2.5 are passed to Tier 3 or when no candidates were found and a full workspace scan is required [orchestrator/core/routing/engine.py:141-158]().
 
 ### Implementation Logic
 1. **Agent Discovery**: Queries the database for all active `Agent` entities within the current `workspace_id` [orchestrator/core/routing/engine.py:332-345]().
 2. **Context Enrichment**: Joins agents with `AgentAppAssignment` to identify which third-party tools (via Composio) the agent can access [orchestrator/core/routing/engine.py:435-445]().
 3. **Prompt Construction**: Assembles a system prompt containing the user's message and the formatted list of available agents [orchestrator/core/routing/engine.py:460-475]().
-4. **LLM Inference**: Calls the LLM (typically via `OpenRouterProvider` or `OpenAIProvider`) to get a structured JSON response [orchestrator/core/routing/engine.py:380-405]().
-5. **Threshold Validation**: Compares the returned `confidence` against `config.ROUTING_LLM_CONFIDENCE_THRESHOLD` [orchestrator/core/routing/engine.py:410-428]().
+4. **LLM Inference**: Calls the LLM (typically via `OpenRouterProvider` or `OpenAIProvider`) to get a structured JSON response [orchestrator/core/routing/engine.py:380-400]().
+5. **Threshold Validation**: Compares the returned `confidence` against `config.ROUTING_LLM_CONFIDENCE_THRESHOLD` (default 0.5) [orchestrator/core/routing/engine.py:47-48](), [orchestrator/core/routing/engine.py:410-420]().
 
 ### Sequence Diagram
 Title: Tier 3 LLM Classification Logic Flow
@@ -113,47 +104,59 @@ The `_build_agent_descriptions` helper creates a string representation for the p
 
 ---
 
-## Classification Prompting
+## Semantic Tool Narrowing (PRD-138)
 
-The system uses a strict JSON-output prompt to ensure machine-readability.
+A significant enhancement in Tier 3 routing and tool selection is the introduction of semantic narrowing for platform actions. This ensures that when the LLM is acting as a router or dispatcher, it is not overwhelmed by the full list of ~47 platform actions.
 
-### Prompt Selection Logic
-1.  **PromptRegistry**: It first attempts to fetch a dynamic template with the slug `routing-classifier`.
-2.  **Hardcoded Fallback**: If no registry entry exists, it uses a default template [orchestrator/core/routing/engine.py:460-475]().
+### Action Registry & Semantic Index
+The `ActionRegistry` provides the schema for platform operations [orchestrator/modules/tools/discovery/action_registry.py:55-61](). When `SEMANTIC_TOOL_ROUTING` is enabled, the system uses `ActionSemanticIndex.rank_actions` to filter the `platform_execute` dispatcher's enum to the top-K relevant actions based on the user's query [orchestrator/modules/tools/tool_router.py:124-138]().
 
-### Fallback Template Structure
-```text
-You are a request router. Given the user's request, select the best agent to handle it.
-User request: {content}
-Available agents:
-- ID: 1, Name: Support, Description: Handles tickets, Apps: [Zendesk]
-...
-Respond with ONLY a JSON object: {"agent_id": <int>, "confidence": <float>}
+### ToolsSection Integration
+The `ToolsSection` in the context service manages this logic via `_load_dispatcher_only`. It calls `_rank_actions_for_dispatcher` to trim the `action.enum` in the OpenAI function schema [orchestrator/modules/context/sections/tools.py:112-142]().
+
+Title: Semantic Narrowing Code Bridge
+```mermaid
+graph TD
+    subgraph "Natural Language Space"
+        UserQuery["'Search my recent chat history'"]
+    end
+
+    subgraph "Code Entity Space"
+        TS["ToolsSection (sections/tools.py)"]
+        TR["tool_router.py (_rank_actions_for_dispatcher)"]
+        ASI["ActionSemanticIndex (discovery/action_semantic_index.py)"]
+        AREG["ActionRegistry (discovery/action_registry.py)"]
+        SCH["platform_execute Schema"]
+    end
+
+    UserQuery --> TS
+    TS -->|query| TR
+    TR --> ASI
+    ASI -->|ranked action names| AREG
+    AREG -->|filtered enum| SCH
+    SCH -->|ContextResult.tools| LLM["Tier 3 LLM"]
 ```
 
-**Sources:** [orchestrator/core/routing/engine.py:460-493]()
+**Sources:** [orchestrator/modules/context/sections/tools.py:112-142](), [orchestrator/modules/tools/tool_router.py:124-138](), [orchestrator/modules/tools/discovery/action_registry.py:136-160]()
 
 ---
 
 ## Complexity Assessment (AutoBrain)
 
-In the context of the `ChatbotIngestor`, Tier 3 routing is often preceded or supplemented by `AutoBrain` complexity assessment. While the `UniversalRouter` decides **who** handles the message, `AutoBrain` (Tier 3 LLM classification in `auto.py`) decides **how complex** the task is, ranging from `ATOM` to `ORGANISM` [orchestrator/consumers/chatbot/auto.py:5-22]().
+In the context of the `ChatbotIngestor`, Tier 3 routing is often preceded or supplemented by `AutoBrain` complexity assessment. 
 
-`AutoBrain` utilizes a 3-tier assessment:
-1. **Tier 1**: Redis cache lookup [orchestrator/consumers/chatbot/auto.py:15]().
-2. **Tier 2**: Regex fast-paths for greetings and platform keywords [orchestrator/consumers/chatbot/auto.py:92-114]().
-3. **Tier 3**: LLM classification for deep reasoning [orchestrator/consumers/chatbot/auto.py:17]().
+While the `UniversalRouter` decides **who** handles the message, `AutoBrain` decides **how complex** the task is, ranging from `ATOM` to `ORGANISM`. It also detects "Platform Actions" (e.g., "list my agents") and uses `to_dispatcher_schema` with `allowed_names` to narrow the LLM's focus [orchestrator/modules/tools/discovery/action_registry.py:164-180]().
 
 Title: Complexity and Routing Logic Bridge
 ```mermaid
 graph TD
     subgraph "Code Entity Space"
         API["api/chat.py"]
-        AB["AutoBrain (consumers/chatbot/auto.py)"]
-        UR["UniversalRouter (core/routing/engine.py)"]
-        Decision["RoutingDecision (core/models/routing.py)"]
-        Assess["ComplexityAssessment (consumers/chatbot/auto.py)"]
-        PLAT["PlatformActionExecutor (modules/tools/discovery/platform_executor.py)"]
+        AB["AutoBrain (auto.py)"]
+        UR["UniversalRouter (engine.py)"]
+        Decision["RoutingDecision (models/routing.py)"]
+        AR["ActionRegistry (action_registry.py)"]
+        PLAT["PlatformActionExecutor (platform_executor.py)"]
     end
 
     subgraph "Natural Language Space"
@@ -162,41 +165,26 @@ graph TD
 
     UserMsg --> API
     API --> AB
-    AB -- "Tier 3 LLM (Complexity)" --> Assess
+    AB -- "Tier 3 LLM (Complexity)" --> AB_Output
+    AB_Output -->|detects platform keyword| AR
     API --> UR
     UR -- "Tier 3 LLM (Agent Selection)" --> Decision
     
-    Assess -->|tool_hints| PLAT
+    AR -->|tool_hints| PLAT
     Decision -->|agent_id| PLAT
 ```
 
-**Sources:** [orchestrator/consumers/chatbot/auto.py:14-22](), [orchestrator/consumers/chatbot/auto.py:59-82](), [orchestrator/modules/tools/discovery/platform_executor.py:164-173]()
-
----
-
-## Tool Loop Prevention & Routing
-
-Tier 3 routing is the gatekeeper for the `SmartChatOrchestrator`. Once a route is established, the system must prevent infinite tool loops. The `ToolExecutionTracker` implements exact and semantic deduplication to ensure the LLM doesn't repeatedly call the same tools for the same intent [orchestrator/consumers/chatbot/service.py:78-85]().
-
-### Tool Retry Limits
-| Tool Name | Limit |
-| :--- | :--- |
-| `composio_execute` | 2 |
-| `search_knowledge` | 2 |
-| `read_file` | 3 |
-| `default` | 3 |
-
-**Sources:** [orchestrator/consumers/chatbot/service.py:93-104](), [orchestrator/consumers/chatbot/service.py:114-140]()
+**Sources:** [orchestrator/modules/tools/discovery/action_registry.py:164-180](), [orchestrator/core/routing/engine.py:148-158](), [orchestrator/api/routing.py:110-154]()
 
 ---
 
 ## Persistence & Learning
 
 Tier 3 decisions are persisted to the `routing_decisions` table via `RoutingDecisionRecord`. This enables:
-- **Audit Trails**: Understanding why the LLM chose a specific agent [orchestrator/core/routing/engine.py:560-580]().
+- **Audit Trails**: Understanding why the LLM chose a specific agent via the `reasoning` field [orchestrator/core/routing/engine.py:560-580]().
 - **Cache Warming**: Tier 1 (Cache) uses the hash of successful Tier 3 decisions to bypass future LLM calls [orchestrator/core/routing/engine.py:102-107]().
-- **Correction Loop**: If a user corrects a Tier 3 decision via the UI, the system updates the `RoutingCache` and marks the `RoutingDecisionRecord` as `was_corrected`.
+- **Correction Loop**: If a user corrects a Tier 3 decision via the UI (`POST /api/routing/corrections`), the system updates the `RoutingCache` and marks the `RoutingDecisionRecord` as `was_corrected` [orchestrator/api/routing.py:81-84]().
 
-**Sources:** [orchestrator/core/routing/engine.py:560-585](), [orchestrator/api/chat.py:143-150](), [orchestrator/consumers/chatbot/auto.py:74-83]()
+**Sources:** [orchestrator/core/routing/engine.py:560-585](), [orchestrator/api/routing.py:81-84](), [orchestrator/core/routing/engine.py:87-100]()
 
 ---

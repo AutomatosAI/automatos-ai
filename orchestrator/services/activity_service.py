@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from core.models.core import (
     Agent,
+    BoardTask,
     Chat,
     Message,
     RecipeExecution,
@@ -72,6 +73,9 @@ class ActivityService:
 
         if want_all or "recipe" in want_types:
             items.extend(self._fetch_recipes(since, limit + offset))
+
+        if want_all or "task" in want_types:
+            items.extend(self._fetch_board_tasks(since, limit + offset))
 
         # Apply status filter after merge
         if status:
@@ -269,10 +273,13 @@ class ActivityService:
                 # Map trigger
                 trigger = self._map_recipe_trigger(ex.triggered_by)
 
-                # Build deep-link to ExecutionKitchen
+                # Build deep-link to ExecutionKitchen.
+                # /activity/execution renders ExecutionKitchen directly. The
+                # old /activity?openExecution=... pattern only changed the
+                # feed tab — it never opened the live run screen.
                 exec_id = getattr(ex, "execution_id", None) or str(ex.id)
                 recipe_template_id = recipe.template_id if recipe else str(ex.recipe_id)
-                source_url = f"/activity?openExecution={exec_id}&recipeId={recipe_template_id}"
+                source_url = f"/activity/execution?id={exec_id}&recipeId={recipe_template_id}"
 
                 # Aggregate tokens and duration from step_results
                 total_tokens = 0
@@ -307,6 +314,92 @@ class ActivityService:
             return items
         except Exception as e:
             logger.error("Failed to fetch recipes for activity feed: %s", e, exc_info=True)
+            self.db.rollback()
+            return []
+
+    # ── Board Task Fetching ───────────────────────────────────────
+
+    def _fetch_board_tasks(self, since: datetime, max_rows: int) -> List[Dict[str, Any]]:
+        """
+        Fetch recent board tasks (kanban) as activity items so completions and
+        in-flight work surface alongside heartbeats and chats.
+        """
+        try:
+            tasks = (
+                self.db.query(BoardTask)
+                .filter(
+                    BoardTask.workspace_id == self.workspace_id,
+                    # started_at OR completed_at OR created_at within window;
+                    # we use the most-recent of those for ordering downstream.
+                    (
+                        (BoardTask.started_at >= since) |
+                        (BoardTask.completed_at >= since) |
+                        (BoardTask.updated_at >= since)
+                    ),
+                    # Only show tasks an agent has actually touched. inbox/assigned
+                    # tasks aren't "activity" yet — they're queued.
+                    BoardTask.status.in_(("in_progress", "review", "done", "blocked")),
+                )
+                .order_by(desc(BoardTask.updated_at))
+                .limit(max_rows)
+                .all()
+            )
+
+            agent_ids = {t.assigned_agent_id for t in tasks if t.assigned_agent_id}
+            agents_by_id: Dict[int, Agent] = {}
+            if agent_ids:
+                rows = self.db.query(Agent).filter(Agent.id.in_(agent_ids)).all()
+                agents_by_id = {a.id: a for a in rows}
+
+            items: List[Dict[str, Any]] = []
+            for t in tasks:
+                # Map kanban statuses to the activity feed's internal status
+                # vocabulary (running/completed/failed/pending) — same shape
+                # heartbeats and recipes use, so STATUS_MAP / STATUS_VARIANT_MAP
+                # / _map_status_filter all work without special-casing.
+                feed_status = {
+                    "in_progress": "running",
+                    "review": "pending",
+                    "done": "completed",
+                    "blocked": "failed",
+                }.get(t.status, "completed")
+
+                agent = agents_by_id.get(t.assigned_agent_id) if t.assigned_agent_id else None
+                agent_info = None
+                if agent:
+                    agent_info = {
+                        "id": agent.id,
+                        "name": agent.name,
+                        "avatar_url": getattr(agent, "marketplace_icon", None),
+                    }
+
+                summary = ""
+                if t.error_message:
+                    summary = str(t.error_message)
+                elif t.result:
+                    summary = str(t.result)
+                elif t.description:
+                    summary = str(t.description)
+
+                items.append(
+                    self._build_feed_item(
+                        id=f"task-{t.id}",
+                        item_type="task",
+                        name=t.title or f"Task #{t.id}",
+                        status=feed_status,
+                        started_at=t.started_at or t.created_at,
+                        completed_at=t.completed_at,
+                        agent=agent_info,
+                        summary=summary,
+                        source_id=str(t.id),
+                        source_url=f"/command-center?tab=board&task={t.id}",
+                        trigger=t.source_type,
+                        error_message=t.error_message,
+                    )
+                )
+            return items
+        except Exception as e:
+            logger.error("Failed to fetch board tasks for activity feed: %s", e, exc_info=True)
             self.db.rollback()
             return []
 

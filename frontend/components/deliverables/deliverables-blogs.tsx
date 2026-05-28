@@ -357,7 +357,7 @@ export function DeliverablesBlog() {
         </TabsContent>
       </FilterTabs>
 
-      {/* Blog editor */}
+      {/* Blog editor — single entry point, has Write Manually / Have Agents Write It modes */}
       {isEditorOpen && (
         <BlogEditor
           postId={editingPostId}

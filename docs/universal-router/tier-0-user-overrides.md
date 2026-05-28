@@ -5,23 +5,15 @@
 
 The following files were used as context for generating this wiki page:
 
-- [docs/reviews/COMPOSIO-TOOL-REGRESSION-REVIEW.md](docs/reviews/COMPOSIO-TOOL-REGRESSION-REVIEW.md)
-- [orchestrator/api/chat.py](orchestrator/api/chat.py)
-- [orchestrator/api/chat_voice.py](orchestrator/api/chat_voice.py)
-- [orchestrator/consumers/chatbot/auto.py](orchestrator/consumers/chatbot/auto.py)
-- [orchestrator/consumers/chatbot/intent_classifier.py](orchestrator/consumers/chatbot/intent_classifier.py)
-- [orchestrator/consumers/chatbot/personality.py](orchestrator/consumers/chatbot/personality.py)
-- [orchestrator/consumers/chatbot/service.py](orchestrator/consumers/chatbot/service.py)
-- [orchestrator/consumers/chatbot/smart_tool_router.py](orchestrator/consumers/chatbot/smart_tool_router.py)
-- [orchestrator/core/llm/manager.py](orchestrator/core/llm/manager.py)
+- [orchestrator/api/routing.py](orchestrator/api/routing.py)
 - [orchestrator/core/routing/engine.py](orchestrator/core/routing/engine.py)
-- [orchestrator/modules/orchestrator/service.py](orchestrator/modules/orchestrator/service.py)
-- [orchestrator/modules/tools/discovery/actions_analytics_enhanced.py](orchestrator/modules/tools/discovery/actions_analytics_enhanced.py)
-- [orchestrator/modules/tools/discovery/handlers_analytics_enhanced.py](orchestrator/modules/tools/discovery/handlers_analytics_enhanced.py)
+- [orchestrator/modules/context/sections/tools.py](orchestrator/modules/context/sections/tools.py)
+- [orchestrator/modules/tools/discovery/action_registry.py](orchestrator/modules/tools/discovery/action_registry.py)
 - [orchestrator/modules/tools/discovery/handlers_search.py](orchestrator/modules/tools/discovery/handlers_search.py)
-- [orchestrator/modules/tools/discovery/platform_actions.py](orchestrator/modules/tools/discovery/platform_actions.py)
-- [orchestrator/modules/tools/discovery/platform_executor.py](orchestrator/modules/tools/discovery/platform_executor.py)
 - [orchestrator/modules/tools/tool_router.py](orchestrator/modules/tools/tool_router.py)
+- [orchestrator/scripts/setup_jira_trigger.py](orchestrator/scripts/setup_jira_trigger.py)
+- [orchestrator/tests/test_action_registry_filtered.py](orchestrator/tests/test_action_registry_filtered.py)
+- [orchestrator/tests/test_tool_router_semantic.py](orchestrator/tests/test_tool_router_semantic.py)
 
 </details>
 
@@ -29,7 +21,7 @@ The following files were used as context for generating this wiki page:
 
 ## Purpose and Scope
 
-Tier 0 is the highest-priority routing mechanism in the **Universal Router**, allowing explicit specification of which agent or workflow should handle a request. When an override is provided (typically via the UI or a specific API parameter), the router bypasses all intelligent routing logic—including cache lookups, rule matching, semantic similarity, and LLM classification—and immediately routes to the specified target with a confidence of 1.0.
+Tier 0 is the highest-priority routing mechanism in the **Universal Router**, allowing explicit specification of which agent or workflow should handle a request. When an override is provided (typically via the UI or a specific API parameter), the router bypasses all intelligent routing logic—including cache lookups, rule matching, and LLM classification—and immediately routes to the specified target with a confidence of 1.0.
 
 This tier ensures that user intent (e.g., selecting a specific agent from a dropdown or clicking a "Run Workflow" button) is respected without interference from the autonomous routing logic or complexity assessment.
 
@@ -81,17 +73,17 @@ graph TD
 ## Core Implementation
 
 ### RequestEnvelope and Overrides
-The routing process begins when an external consumer constructs a `RequestEnvelope`. This object contains the optional fields `override_agent_id` and `override_workflow_id`. These fields are populated during the ingestion phase (e.g., via `ChatbotIngestor`).
+The routing process begins when an external consumer constructs a `RequestEnvelope`. This object contains the optional fields `override_agent_id` and `override_workflow_id`.
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `override_agent_id` | `Optional[int]` | Explicit ID of the agent to handle the request. |
 | `override_workflow_id` | `Optional[int]` | Explicit ID of the workflow/recipe to trigger. |
 
-**Sources**: [orchestrator/core/routing/engine.py:170-184](), [orchestrator/core/routing/engine.py:35-42](), [orchestrator/core/routing/ingestors/chatbot.py:1-30]()
+**Sources**: [orchestrator/core/routing/engine.py:170-184](), [orchestrator/core/models/routing.py:1-50]()
 
 ### The `_tier0_override` Function
-The implementation is a lightweight check within the `UniversalRouter` class. It returns a `RoutingDecision` immediately if either override is present, setting `confidence` to `1.0`.
+The implementation is a lightweight check within the `UniversalRouter` class defined in `core/routing/engine.py`. It returns a `RoutingDecision` immediately if either override is present, setting `confidence` to `1.0`.
 
 ```python
 def _tier0_override(self, envelope: RequestEnvelope) -> Optional[RoutingDecision]:
@@ -124,73 +116,77 @@ This diagram bridges the "Natural Language Space" (User interaction) to the "Cod
 sequenceDiagram
     participant User as "User (UI)"
     participant Hook as "useChat (frontend/lib/chat/hooks.ts)"
+    participant Proxy as "Chat Proxy (frontend/app/api/chat/route.ts)"
     participant API as "Chat API (orchestrator/api/chat.py)"
-    participant Ingestor as "ChatbotIngestor (core/routing/ingestors/chatbot.py)"
-    participant Router as "UniversalRouter (core/routing/engine.py)"
+    participant Router as "UniversalRouter (orchestrator/core/routing/engine.py)"
 
     User->>User: Selects Agent from Dropdown
     User->>Hook: sendMessage("Hello")
-    Note over Hook: Includes agentId in request body
-    Hook->>API: POST /api/chat
-    API->>Ingestor: ingest(message, agent_id=selectedId)
-    Ingestor-->>API: RequestEnvelope(override_agent_id=selectedId)
+    Note over Hook: Includes selectedAgentId in body
+    Hook->>Proxy: POST /api/chat
+    Proxy->>API: Forward POST /api/chat
+    API->>API: Create RequestEnvelope<br/>(override_agent_id = agentId)
     API->>Router: route(envelope)
     Router->>Router: _tier0_override(envelope)
     Router-->>API: RoutingDecision(confidence=1.0, reasoning="User override")
-    API-->>Hook: StreamingResponse with x-routing-agent-id header
+    API-->>Proxy: StreamingResponse with x-routing-agent-id header
+    Proxy-->>Hook: Response Headers
     Hook->>User: Display "Routed to [Agent Name]"
 ```
 
-**Sources**: [orchestrator/core/routing/engine.py:95-101](), [orchestrator/core/routing/engine.py:170-184](), [orchestrator/api/chat.py:63-120]()
+**Sources**: [orchestrator/core/routing/engine.py:95-101](), [orchestrator/core/routing/engine.py:170-184](), [orchestrator/api/chat.py:1-25]()
 
 ---
 
 ## Use Cases and Triggers
 
 ### 1. Manual Agent Selection
-In the chat interface, if a user specifically selects an agent from the model/agent picker, the `agentId` is passed in the request body. The `ChatbotIngestor` maps this to `override_agent_id` in the `RequestEnvelope`.
+In the chat interface, if a user specifically selects an agent from the model/agent picker, the `agentId` is passed in the request body. The API layer in `orchestrator/api/chat.py` maps this to `override_agent_id` in the `RequestEnvelope`.
 
-### 2. Workflow Bridge
-When a message is identified as requiring an `ORGAN` or `ORGANISM` complexity level, the system may trigger a `_stream_workflow_bridge`. If the user manually triggers a specific workflow ID, Tier 0 ensures that the `WorkflowExecution` is tied to the correct `Workflow` model.
+### 2. Workflow Buttons
+When a user clicks a "Run" button on a specific Recipe page or via a Marketplace install, the `override_workflow_id` is populated to ensure the correct sequence executes, bypassing the `IntentClassifier` and keyword matching.
 
-### 3. Voice Chat Overrides
-In the `voice_chat` endpoint (`POST /api/chat/voice`), an `agent_id` can be provided as a form parameter. If present, the `_collect_streaming_response` logic respects this `effective_agent_id`, bypassing the `AutoBrain` assessment for routing purposes.
+### 3. System Agent Routing
+Certain system-level messages (like those involving `AutoBrain` assessment or platform-level maintenance) may bypass standard routing to ensure stability. For example, specific internal triggers might force a route to a maintenance agent or the `auto-cto` agent.
 
-**Sources**: [orchestrator/core/routing/engine.py:170-184](), [orchestrator/api/chat.py:70-140](), [orchestrator/api/chat_voice.py:150-180]()
+**Sources**: [orchestrator/core/routing/engine.py:170-184](), [orchestrator/api/chat.py:38-60]()
 
 ---
 
 ## Observability and Logging
 
-Every Tier 0 decision is logged to the `routing_decisions` table via the `_log_decision` helper. This allows admins to audit how often users are manually overriding the autonomous routing logic through the `RoutingDecisionRecord` model.
+Every Tier 0 decision is logged to the `routing_decisions` table via the `_log_decision` helper in `UniversalRouter`. This allows admins to audit how often users are manually overriding the autonomous routing logic.
 
 | Field | Tier 0 Value | Code Reference |
 |-------|--------------|----------------|
 | `route_type` | `"agent"` or `"workflow"` | [orchestrator/core/routing/engine.py:172-179]() |
 | `confidence` | `1.0` | [orchestrator/core/routing/engine.py:174-181]() |
 | `reasoning` | `"User override"` | [orchestrator/core/routing/engine.py:175-182]() |
+| `cached` | `False` | [orchestrator/core/routing/engine.py:102-107]() |
 
-**Sources**: [orchestrator/core/routing/engine.py:95-101](), [orchestrator/core/models/routing.py:35-45]()
+The `RoutingDecisionRecord` model stores these logs, which can be retrieved via the `GET /api/routing/decisions` endpoint.
+
+**Sources**: [orchestrator/core/routing/engine.py:169-184](), [orchestrator/core/models/routing.py:35-42](), [orchestrator/api/routing.py:110-155]()
 
 ---
 
 ## Comparison with Complexity Assessment (AutoBrain)
 
-While Tier 0 overrides the *routing* (which agent/workflow is picked), the system still performs a complexity assessment via `AutoBrain` (PRD-68) if the override is not present or if the orchestrator needs to decide on the execution mode (e.g., `ATOM` vs `ORGANISM`). 
-
-In `api/chat_voice.py`, if an `agent_id` is provided, `AutoBrain` is bypassed for the selection of the `effective_agent_id`, but the `complexity_assessment` may still be used to determine if certain tool loops or memory strategies are required.
+While Tier 0 overrides the *routing* (which agent/workflow is picked), the system still performs a complexity assessment via `AutoBrain` (PRD-68). Even if a user overrides the agent, `AutoBrain` may determine if the task is an `ATOM` (simple chitchat) or an `ORGANISM` (complex workflow). If the complexity is high (`ORGAN` or `ORGANISM`), the system may bridge the chat message to the workflow engine via `_stream_workflow_bridge` in `api/chat.py`.
 
 ```mermaid
 graph LR
     UserOverride["Tier 0: User Override<br/>(agent_id=42)"]
     AutoBrain["AutoBrain Assessment<br/>(complexity=ORGANISM)"]
-    Executor["StreamingChatService<br/>(consumers/chatbot/service.py)"]
+    Executor["SmartChatOrchestrator<br/>(orchestrator/consumers/chatbot/service.py)"]
+    Bridge["Workflow Bridge<br/>(orchestrator/api/chat.py)"]
     
     UserOverride --> Executor
     AutoBrain --> Executor
-    Executor --> Workflow["PRD-59 Neural Swarm Pipeline"]
+    Executor --> Bridge
+    Bridge --> Workflow["PRD-59 Neural Swarm Pipeline"]
 ```
 
-**Sources**: [orchestrator/consumers/chatbot/auto.py:1-22](), [orchestrator/core/routing/engine.py:169-184](), [orchestrator/api/chat_voice.py:76-121]()
+**Sources**: [orchestrator/core/routing/engine.py:169-184](), [orchestrator/api/chat.py:70-88]()
 
 ---

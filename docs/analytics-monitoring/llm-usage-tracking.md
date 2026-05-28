@@ -5,20 +5,25 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/components/analytics/analytics-composio.tsx](frontend/components/analytics/analytics-composio.tsx)
+- [docs/PRDS/52-UNIFIED-ANALYTICS.md](docs/PRDS/52-UNIFIED-ANALYTICS.md)
+- [frontend/app/analytics/page.tsx](frontend/app/analytics/page.tsx)
+- [frontend/components/analytics/analytics-admin.tsx](frontend/components/analytics/analytics-admin.tsx)
+- [frontend/components/analytics/analytics-agents.tsx](frontend/components/analytics/analytics-agents.tsx)
+- [frontend/components/analytics/analytics-costs.tsx](frontend/components/analytics/analytics-costs.tsx)
+- [frontend/components/analytics/analytics-documents.tsx](frontend/components/analytics/analytics-documents.tsx)
+- [frontend/components/analytics/analytics-memory.tsx](frontend/components/analytics/analytics-memory.tsx)
 - [frontend/components/analytics/analytics-openrouter-credits.tsx](frontend/components/analytics/analytics-openrouter-credits.tsx)
+- [frontend/components/analytics/analytics-overview.tsx](frontend/components/analytics/analytics-overview.tsx)
+- [frontend/components/analytics/analytics-page.tsx](frontend/components/analytics/analytics-page.tsx)
 - [frontend/components/analytics/analytics-pandas-chart.tsx](frontend/components/analytics/analytics-pandas-chart.tsx)
-- [frontend/components/context/context-engineering.tsx](frontend/components/context/context-engineering.tsx)
+- [frontend/components/analytics/analytics-plan-usage.tsx](frontend/components/analytics/analytics-plan-usage.tsx)
+- [frontend/components/analytics/analytics-recommendations.tsx](frontend/components/analytics/analytics-recommendations.tsx)
+- [frontend/components/analytics/analytics-workflows.tsx](frontend/components/analytics/analytics-workflows.tsx)
 - [frontend/components/dashboard/widgets/system-health-widget.tsx](frontend/components/dashboard/widgets/system-health-widget.tsx)
 - [frontend/components/knowledge/QueryTemplatesGrid.tsx](frontend/components/knowledge/QueryTemplatesGrid.tsx)
-- [frontend/components/team/team-management.tsx](frontend/components/team/team-management.tsx)
-- [frontend/lib/api-config.ts](frontend/lib/api-config.ts)
-- [orchestrator/api/analytics.py](orchestrator/api/analytics.py)
-- [orchestrator/api/analytics_real.py](orchestrator/api/analytics_real.py)
-- [orchestrator/api/execution_history.py](orchestrator/api/execution_history.py)
+- [frontend/components/system/rag-configuration.tsx](frontend/components/system/rag-configuration.tsx)
+- [frontend/hooks/use-unified-analytics.ts](frontend/hooks/use-unified-analytics.ts)
 - [orchestrator/api/llm_analytics.py](orchestrator/api/llm_analytics.py)
-- [orchestrator/api/workflow_history.py](orchestrator/api/workflow_history.py)
-- [orchestrator/consumers/workflows/__init__.py](orchestrator/consumers/workflows/__init__.py)
 - [orchestrator/core/llm/openrouter_analytics.py](orchestrator/core/llm/openrouter_analytics.py)
 
 </details>
@@ -27,243 +32,142 @@ The following files were used as context for generating this wiki page:
 
 ## Purpose and Scope
 
-This document describes the LLM usage tracking system that records every LLM API call for cost calculation, analytics, and optimization. The system captures token counts, latency, model information, and calculates costs based on a model pricing registry. Usage data is workspace-scoped and powers the analytics dashboard.
+This document describes the LLM usage tracking system that records every LLM API call for cost calculation, analytics, and optimization. The system captures token counts, latency, model information, and calculates costs based on a model pricing registry. Usage data is workspace-scoped and powers the unified analytics dashboard.
 
-The tracking system integrates with multiple LLM providers (OpenAI, Anthropic, OpenRouter, Google, Azure OpenAI, xAI, Cohere, DeepSeek) and supports both platform-provided keys and user-provided BYOK (Bring Your Own Key) credentials. All tracked usage is attributed to workspaces and optionally to specific agents or workflow executions.
+The tracking system integrates with multiple LLM providers (OpenAI, Anthropic, OpenRouter, Google, Azure OpenAI, xAI, etc.) and supports both platform-provided keys and user-provided BYOK (Bring Your Own Key) credentials. All tracked usage is attributed to workspaces and optionally to specific agents or workflow executions.
 
 **Key Capabilities:**
-- Per-request token and cost tracking for all LLM providers [orchestrator/api/llm_analytics.py:87-138]().
-- Workspace-scoped analytics with admin override for platform-wide views [orchestrator/api/llm_analytics.py:739-820]().
-- Cost projections and optimization recommendations [orchestrator/api/llm_analytics.py:490-602]().
-- BYOK vs platform key usage differentiation [orchestrator/api/llm_analytics.py:105-108]().
-- Error rate and latency monitoring [orchestrator/api/llm_analytics.py:210-221]().
-- Real-time and cached aggregate statistics [orchestrator/api/analytics_real.py:53-110]().
+- Per-request token and cost tracking for all LLM providers [orchestrator/api/llm_analytics.py:87-138]()
+- Dual-source cost calculation: preference for `llm_usage` table with fallback to `agent_statistics` [frontend/hooks/use-unified-analytics.ts:70-73]()
+- OpenRouter management API integration for credits, key info, and activity sync [orchestrator/core/llm/openrouter_analytics.py:5-11]()
+- Workspace-scoped analytics with admin override for platform-wide views [frontend/hooks/use-unified-analytics.ts:12-14]()
+- Automated cost optimization recommendations based on usage patterns [orchestrator/api/llm_analytics.py:254-268]()
 
-**Sources:** [orchestrator/api/llm_analytics.py:1-68](), [orchestrator/api/analytics_real.py:1-50]().
+Sources: [orchestrator/api/llm_analytics.py:1-28](), [frontend/hooks/use-unified-analytics.ts:1-43](), [orchestrator/core/llm/openrouter_analytics.py:1-11]()
 
 ---
 
-## LLM Provider Configuration
+## LLM Provider Tracking Flow
 
-Before usage can be tracked, LLM providers must be configured with API keys. The system supports multiple credential resolution strategies.
+Every LLM request follows a lifecycle where usage is captured from the provider's response and persisted for analytics.
 
-### Configuration Hierarchy
+### Credential Resolution and Tracking Logic
 
+Title: "LLM Request and Usage Capture Flow"
 ```mermaid
 graph TB
-    Request["LLM API Request"]
-    CredResolver["LLM Manager<br/>Credential Resolution"]
+    "Request"["Agent/Workflow Request"]
+    "LLMManager"["LLMManager.generate_response"]
     
-    subgraph "6-Level Credential Fallback"
-        L1["1. Agent model_config<br/>agent_credentials"]
-        L2["2. Agent assigned credentials<br/>AgentCredential table"]
-        L3["3. Workspace BYOK keys<br/>UserApiKey table"]
-        L4["4. System Settings<br/>system_settings table"]
-        L5["5. Environment Variables<br/>config.OPENAI_API_KEY, etc"]
-        L6["6. Provider defaults"]
+    subgraph "Provider_Execution"["Provider Execution"]
+        "OpenAI"["OpenAIProvider"]
+        "OpenRouter"["OpenRouterProvider"]
+        "Grok"["GrokProvider"]
     end
     
-    UsageTracker["UsageTracker.track()<br/>is_byok flag"]
-    LLMUsageTable[("LLMUsage (llm_usage)")]
+    "LLMResponse"["LLMResponse Object"]
+    "UsageTable"[("LLMUsage Table")]
+    "StreamHandler"["StreamingChatService"]
+
+    "Request" --> "LLMManager"
+    "LLMManager" --> "OpenAI"
+    "LLMManager" --> "OpenRouter"
+    "LLMManager" --> "Grok"
     
-    Request --> CredResolver
-    CredResolver --> L1
-    L1 -->|Not found| L2
-    L2 -->|Not found| L3
-    L3 -->|Not found| L4
-    L4 -->|Not found| L5
-    L5 -->|Not found| L6
+    "OpenAI" -->|"usage metadata"| "LLMResponse"
+    "OpenRouter" -->|"usage metadata"| "LLMResponse"
+    "Grok" -->|"usage metadata"| "LLMResponse"
     
-    L1 -->|Found| UsageTracker
-    L2 -->|Found| UsageTracker
-    L3 -->|Found, BYOK| UsageTracker
-    L4 -->|Found| UsageTracker
-    L5 -->|Found| UsageTracker
-    L6 -->|Found| UsageTracker
-    
-    UsageTracker --> LLMUsageTable
+    "LLMResponse" -->|"async write"| "UsageTable"
+    "LLMResponse" -->|"format_aisdk_usage"| "StreamHandler"
+    "StreamHandler" -->|"d:type:usage"| "UserUI"["Frontend Analytics"]
 ```
 
-### Provider Resolution Logic
+### Response Capture
+Providers implement `generate_response` to return a standardized `LLMResponse` object containing a `usage` dictionary with `prompt_tokens`, `completion_tokens`, and `total_tokens`.
+- **OpenAI**: Extracts usage directly from the response object [orchestrator/api/llm_analytics.py:21-25]().
+- **OpenRouter**: Handles usage extraction from the aggregator response [orchestrator/core/llm/openrouter_analytics.py:111-115]().
+- **Sync Logic**: For OpenRouter, the `OpenRouterAnalyticsService` fetches historical activity and upserts it into `LLMUsage` [orchestrator/core/llm/openrouter_analytics.py:44-50]().
 
-The system determines available providers by checking both BYOK keys and the centralized credential store.
-
-```python
-# Logic from orchestrator/api/llm_analytics.py:604-630
-# Helper to check if a workspace has specific provider keys
-@router.get("/providers/available")
-async def get_available_providers(
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db)
-):
-    # Checks UserApiKey table for the current workspace_id
-    keys = db.query(UserApiKey).filter(
-        UserApiKey.workspace_id == ctx.workspace_id,
-        UserApiKey.is_active == True
-    ).all()
-    return [k.provider for k in keys]
-```
-
-**Sources:** [orchestrator/api/llm_analytics.py:604-630](), [orchestrator/api/llm_analytics.py:21-25]().
+Sources: [orchestrator/api/llm_analytics.py:110-126](), [orchestrator/core/llm/openrouter_analytics.py:77-89]()
 
 ---
 
-## Database Schema
+## Database Schema & Analytics API
 
-The usage tracking system uses three primary database constructs.
+### The LLMUsage Model
+The `LLMUsage` table is the source of truth for granular tracking. It records:
+- **Identity**: `workspace_id`, `agent_id`, `execution_id` [orchestrator/api/llm_analytics.py:101-103]()
+- **Metrics**: `input_tokens`, `output_tokens`, `total_tokens`, `latency_ms` [orchestrator/api/llm_analytics.py:114-117]()
+- **Economics**: `input_cost`, `output_cost`, `total_cost`, `is_byok` [orchestrator/api/llm_analytics.py:117-118]()
+- **Metadata**: `model_id`, `provider`, `tier`, `status` [orchestrator/api/llm_analytics.py:101-104]()
 
-| Table/Field | Purpose | Key Columns |
-|------------|---------|-------------|
-| `llm_usage` | Records individual LLM API calls | `workspace_id`, `model_id`, `provider`, `input_tokens`, `output_tokens`, `input_cost`, `output_cost`, `total_cost`, `latency_ms`, `agent_id`, `is_byok`, `status` [orchestrator/api/llm_analytics.py:100-108]() |
-| `llm_models` | Model pricing registry | `model_id`, `provider`, `input_cost_per_1k_tokens`, `output_cost_per_1k_tokens`, `context_window`, `tier` [orchestrator/api/llm_analytics.py:21-23]() |
-| `AgentStatistics` | Cached per-agent aggregates | `total_tokens_used`, `total_cost`, `execution_count` [orchestrator/api/analytics_real.py:18-20]() |
+### Analytics Endpoints
+The `llm_analytics.py` module provides a suite of REST endpoints for the frontend:
+- `GET /api/analytics/llm/usage`: Grouped token usage (by model, provider, agent, etc.) [orchestrator/api/llm_analytics.py:87-108]().
+- `GET /api/analytics/llm/costs`: Financial breakdown, including daily cost trends [orchestrator/api/llm_analytics.py:141-164]().
+- `GET /api/analytics/llm/summary`: High-level dashboard metrics, including error rates and top models [orchestrator/api/llm_analytics.py:194-221]().
 
-### Entity Relationship Diagram
-
-```mermaid
-erDiagram
-    "LLMUsage (llm_usage)" {
-        uuid id PK
-        uuid workspace_id FK
-        string model_id
-        string provider
-        int input_tokens
-        int output_tokens
-        decimal total_cost
-        bool is_byok
-        string status
-        string execution_id
-    }
-    
-    "LLMModel (llm_models)" {
-        string model_id PK
-        string provider
-        decimal input_cost_per_1k
-        decimal output_cost_per_1k
-        int context_window
-    }
-    
-    "Agent (agents)" {
-        int id PK
-        uuid workspace_id FK
-        string status
-    }
-
-    "WorkflowExecution (workflow_executions)" {
-        int id PK
-        uuid workspace_id FK
-        jsonb metadata
-    }
-    
-    "LLMUsage" }o--|| "LLMModel" : "pricing_lookup"
-    "LLMUsage" }o--|| "Agent" : "attributed_to"
-    "LLMUsage" }o--|| "WorkflowExecution" : "links_to"
-```
-
-**Sources:** [orchestrator/api/llm_analytics.py:21-24](), [orchestrator/api/analytics_real.py:16-23](), [orchestrator/api/execution_history.py:19-21]().
-
----
-
-## Dual-Source Strategy (llm_usage vs Agent Stats)
-
-The system employs a dual-source strategy to ensure analytics remain accurate even if granular tracking is partially disabled or during migration.
-
-1.  **Primary Source (`llm_usage`)**: Provides the most accurate, time-series data including input/output breakdown and BYOK status [orchestrator/api/llm_analytics.py:87-138]().
-2.  **Fallback/Historical Source (`WorkflowExecution.metadata`)**: Legacy workflows store analytics in a JSONB metadata field [orchestrator/api/analytics.py:105-110]().
-3.  **Real-time Aggregates (`OrchestrationRun`)**: Modern Mission/Orchestration runs store token usage directly on the run record [orchestrator/api/analytics.py:112-117]().
-
-```python
-# Combined cost calculation from orchestrator/api/analytics.py:101-117
-total_cost = 0
-total_tokens = 0
-for exec_row in recent_wf_executions:
-    analytics_data = exec_row.metadata.get("analytics", {})
-    total_cost += analytics_data.get("total_cost", 0)
-    total_tokens += analytics_data.get("total_tokens_used", 0)
-
-# Add mission token usage
-m_tokens = db.query(func.sum(OrchestrationRun.tokens_used)).filter(...).scalar() or 0
-total_tokens += m_tokens
-```
-
-**Sources:** [orchestrator/api/analytics.py:94-118](), [orchestrator/api/analytics_real.py:59-74]().
-
----
-
-## Cost Breakdown and Analytics
-
-### Analytics API
-
-The `/api/analytics/llm` router provides comprehensive endpoints for cost and usage analysis.
-
--   **Usage Grouping**: `/usage` allows grouping by `model`, `provider`, `agent`, `tier`, or `is_byok` [orchestrator/api/llm_analytics.py:100-108]().
--   **Cost Breakdown**: `/costs` provides cost distribution by dimension or daily trends [orchestrator/api/llm_analytics.py:154-164]().
--   **Dashboard Summary**: `/summary` returns high-level metrics like total cost, error rates, and top models [orchestrator/api/llm_analytics.py:210-221]().
-
-### Success Rate & Performance
-
-Success rates are calculated by combining legacy workflow statuses and modern Mission/Orchestration run states [orchestrator/api/analytics_real.py:59-74]().
-
-```python
-# orchestrator/api/analytics_real.py:72-74
-total_executions = wf_total + m_total
-successful = wf_success + m_success
-success_rate = (successful / total_executions * 100) if total_executions > 0 else 0
-```
-
-**Sources:** [orchestrator/api/llm_analytics.py:141-191](), [orchestrator/api/analytics_real.py:53-110]().
+Sources: [orchestrator/api/llm_analytics.py:34-60](), [orchestrator/api/llm_analytics.py:87-138](), [orchestrator/api/llm_analytics.py:141-191]()
 
 ---
 
 ## OpenRouter Sync Strategy
 
-For OpenRouter, the system can synchronize usage data directly from the provider's API via the `OpenRouterAnalyticsService` [orchestrator/core/llm/openrouter_analytics.py:27](). This is particularly useful for BYOK users to see their external consumption within the Automatos dashboard.
+OpenRouter requires a dual-tracking strategy because it acts as an aggregator for 200+ models.
 
-1.  **Activity Sync**: The `sync_activity` function fetches usage rows from OpenRouter's `/api/v1/activity` endpoint and upserts them into the local `llm_usage` table [orchestrator/core/llm/openrouter_analytics.py:44-58]().
-2.  **Deduplication**: Rows are deduped by `workspace_id`, `model_id`, and `created_at` date to prevent double-counting [orchestrator/core/llm/openrouter_analytics.py:97-109]().
-3.  **Credits & Key Info**: The service also tracks account credit balances and key limits [orchestrator/core/llm/openrouter_analytics.py:154-191]().
+1.  **Direct Tracking**: Captured during real-time inference.
+2.  **Activity Sync**: The `OpenRouterAnalyticsService` periodically fetches data from OpenRouter's `/activity` endpoint to ensure consistency [orchestrator/core/llm/openrouter_analytics.py:44-58]().
+3.  **Deduplication**: The service uses a composite check of `workspace_id`, `model_id`, and `created_at` (date) to avoid double-counting synced rows versus real-time captured rows [orchestrator/core/llm/openrouter_analytics.py:97-109]().
 
-```python
-# orchestrator/core/llm/openrouter_analytics.py:118-136
-usage_row = LLMUsage(
-    workspace_id=workspace_id,
-    model_id=model_id,
-    provider="openrouter",
-    request_type="activity_sync",
-    input_tokens=prompt_tokens,
-    output_tokens=completion_tokens,
-    total_tokens=total_tokens,
-    total_cost=cost,
-    is_byok=is_byok,
-    status="success",
-    execution_id=f"openrouter_sync_{model_id}_{date_str}",
-    created_at=row_date,
-)
-```
+### Credit Monitoring
+The system monitors OpenRouter credit balances and key limits to provide proactive warnings [orchestrator/core/llm/openrouter_analytics.py:154-171]().
 
-**Sources:** [orchestrator/core/llm/openrouter_analytics.py:1-148](), [orchestrator/api/llm_analytics.py:633-660]().
+Sources: [orchestrator/core/llm/openrouter_analytics.py:27-38](), [orchestrator/core/llm/openrouter_analytics.py:44-75](), [orchestrator/core/llm/openrouter_analytics.py:185-200]()
 
 ---
 
-## UI Implementation
+## Dual-Source Strategy
 
-The frontend utilizes a suite of specialized components to visualize usage and costs.
+The frontend analytics dashboard employs a robust "prefer-granular-fallback-to-aggregate" logic to calculate costs.
 
--   **AnalyticsOpenRouterCredits**: Displays remaining balance and usage breakdown for OpenRouter keys [frontend/components/analytics/analytics-openrouter-credits.tsx:97-144]().
--   **AnalyticsPandasChart**: Generates dynamic charts from usage data using natural language queries and AI-driven summarization [frontend/components/analytics/analytics-pandas-chart.tsx:112-151]().
--   **ContextEngineering Dashboard**: Monitors retrieval success rates and latency for RAG-based context assembly [frontend/components/context/context-engineering.tsx:86-115]().
+Title: "Unified Analytics Data Consolidation"
+```mermaid
+graph LR
+    subgraph "Data_Sources"
+        "UsageTable"[("LLMUsage (llm_usage)")]
+        "AgentStats"[("Agent.model_usage_stats")]
+        "OR_API"["OpenRouter Management API"]
+    end
 
-### Analytics Hooks
+    "useAnalyticsOverview"["useAnalyticsOverview Hook"]
+    "UI_Display"["Analytics Dashboard StatsBar"]
 
-The frontend uses specialized hooks from `use-unified-analytics` to fetch data with automatic workspace scoping [frontend/components/analytics/analytics-composio.tsx:28-36]().
-
-```typescript
-// Example usage in frontend/components/analytics/analytics-composio.tsx:96-100
-const { data: execStats, isLoading: execStatsLoading } = useComposioExecStats(days)
-const { data: perfByAction, isLoading: perfLoading } = useComposioPerformance(days)
-const { data: dailyVolume } = useComposioDailyVolume(days)
+    "UsageTable" -->|"llmSummary.total_cost"| "useAnalyticsOverview"
+    "AgentStats" -->|"sum(agent.cost)"| "useAnalyticsOverview"
+    "OR_API" -->|"credits/activity"| "OpenRouterSync"
+    
+    "useAnalyticsOverview" -->|"totalCost logic"| "UI_Display"
 ```
 
-**Sources:** [frontend/components/analytics/analytics-openrouter-credits.tsx:34-185](), [frontend/components/analytics/analytics-pandas-chart.tsx:1-151](), [frontend/components/context/context-engineering.tsx:1-180]().
+In `useAnalyticsOverview`, the system attempts to fetch the `llm_summary`. If `llm_summary.total_cost` is greater than 0, it is used as the primary metric. Otherwise, it falls back to summing the `model_usage_stats` field from the list of all agents [frontend/hooks/use-unified-analytics.ts:70-73]().
+
+Sources: [frontend/hooks/use-unified-analytics.ts:46-75](), [frontend/components/analytics/analytics-costs.tsx:144-152]()
+
+---
+
+## UI Components and Visualization
+
+### Analytics Dashboard
+The dashboard uses `StatsBar` to display real-time metrics and `Recharts` for trend visualization.
+- **Cost Analytics**: Visualizes daily costs by model and model comparisons using `AreaChart` and `BarChart` [frontend/components/analytics/analytics-costs.tsx:206-230]().
+- **Agent Analytics**: Provides an expanded panel showing memory importance vs. token usage per agent [frontend/components/analytics/analytics-agents.tsx:47-72]().
+- **Admin View**: Provides a platform-wide view of top spenders (workspaces) and plan distribution [frontend/components/analytics/analytics-admin.tsx:164-198]().
+- **AI Charts**: Uses `AnalyticsPandasChart` to generate dynamic visualizations from natural language queries [frontend/components/analytics/analytics-pandas-chart.tsx:15-39]().
+
+### Recommendations
+The system provides actionable insights via `AnalyticsRecommendations`, categorized by `cost`, `performance`, `document`, and `quota` [frontend/components/analytics/analytics-recommendations.tsx:46-71]().
+
+Sources: [frontend/components/analytics/analytics-costs.tsx:1-50](), [frontend/components/analytics/analytics-agents.tsx:162-180](), [frontend/components/analytics/analytics-admin.tsx:1-42](), [frontend/components/analytics/analytics-recommendations.tsx:19-31]()
 
 ---

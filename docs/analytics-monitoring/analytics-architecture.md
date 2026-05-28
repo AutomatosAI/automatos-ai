@@ -9,14 +9,22 @@ The following files were used as context for generating this wiki page:
 - [frontend/app/analytics/page.tsx](frontend/app/analytics/page.tsx)
 - [frontend/components/analytics/analytics-admin.tsx](frontend/components/analytics/analytics-admin.tsx)
 - [frontend/components/analytics/analytics-agents.tsx](frontend/components/analytics/analytics-agents.tsx)
+- [frontend/components/analytics/analytics-costs.tsx](frontend/components/analytics/analytics-costs.tsx)
 - [frontend/components/analytics/analytics-documents.tsx](frontend/components/analytics/analytics-documents.tsx)
 - [frontend/components/analytics/analytics-memory.tsx](frontend/components/analytics/analytics-memory.tsx)
+- [frontend/components/analytics/analytics-openrouter-credits.tsx](frontend/components/analytics/analytics-openrouter-credits.tsx)
 - [frontend/components/analytics/analytics-overview.tsx](frontend/components/analytics/analytics-overview.tsx)
+- [frontend/components/analytics/analytics-page.tsx](frontend/components/analytics/analytics-page.tsx)
+- [frontend/components/analytics/analytics-pandas-chart.tsx](frontend/components/analytics/analytics-pandas-chart.tsx)
 - [frontend/components/analytics/analytics-plan-usage.tsx](frontend/components/analytics/analytics-plan-usage.tsx)
 - [frontend/components/analytics/analytics-recommendations.tsx](frontend/components/analytics/analytics-recommendations.tsx)
 - [frontend/components/analytics/analytics-workflows.tsx](frontend/components/analytics/analytics-workflows.tsx)
+- [frontend/components/dashboard/widgets/system-health-widget.tsx](frontend/components/dashboard/widgets/system-health-widget.tsx)
+- [frontend/components/knowledge/QueryTemplatesGrid.tsx](frontend/components/knowledge/QueryTemplatesGrid.tsx)
+- [frontend/components/system/rag-configuration.tsx](frontend/components/system/rag-configuration.tsx)
 - [frontend/hooks/use-unified-analytics.ts](frontend/hooks/use-unified-analytics.ts)
-- [frontend/tsconfig.tsbuildinfo](frontend/tsconfig.tsbuildinfo)
+- [orchestrator/api/llm_analytics.py](orchestrator/api/llm_analytics.py)
+- [orchestrator/core/llm/openrouter_analytics.py](orchestrator/core/llm/openrouter_analytics.py)
 
 </details>
 
@@ -24,7 +32,7 @@ The following files were used as context for generating this wiki page:
 
 ## Purpose and Scope
 
-This document describes the architecture of the unified analytics system in Automatos AI. It covers the frontend-to-backend integration, data aggregation patterns, multi-tenancy implementation via `wsScope`, and the structure of analytics domains. The analytics system provides workspace users with actionable insights about agents, missions, documents, and costs, while giving admins platform-wide visibility across all workspaces.
+This document describes the architecture of the unified analytics system in Automatos AI. It covers the frontend-to-backend integration, data aggregation patterns, multi-tenancy implementation, and the structure of analytics domains. The analytics system provides workspace users with actionable insights about agents, workflows, documents, and costs, while giving admins platform-wide visibility across all workspaces.
 
 The core implementation relies on **React Query** for frontend state management, **FastAPI** for data aggregation, and a dual-source strategy that prefers the `llm_usage` table while falling back to agent-specific statistics.
 
@@ -38,16 +46,16 @@ The analytics system follows a three-tier architecture with React Query-based fr
 
 ```mermaid
 graph TB
-    subgraph "Frontend Layer [Next.js]"
-        AnalyticsPage["AnalyticsPage [components/analytics/analytics-page.tsx]"]
+    subgraph "Frontend Layer [frontend/app/analytics/page.tsx]"
+        AnalyticsPage["AnalyticsPage [frontend/components/analytics/analytics-page.tsx]"]
         Tabs["FilterTabs Component"]
-        OverviewTab["AnalyticsOverview [components/analytics/analytics-overview.tsx]"]
-        AgentsTab["AnalyticsAgents [components/analytics/analytics-agents.tsx]"]
-        WorkflowsTab["AnalyticsWorkflows [components/analytics/analytics-workflows.tsx]"]
-        DocsTab["AnalyticsDocuments [components/analytics/analytics-documents.tsx]"]
-        AdminTab["AnalyticsAdmin [components/analytics/analytics-admin.tsx]"]
+        OverviewTab["AnalyticsOverview [frontend/components/analytics/analytics-overview.tsx]"]
+        AgentsTab["AnalyticsAgents [frontend/components/analytics/analytics-agents.tsx]"]
+        WorkflowsTab["AnalyticsWorkflows [frontend/components/analytics/analytics-workflows.tsx]"]
+        DocsTab["AnalyticsDocuments [frontend/components/analytics/analytics-documents.tsx]"]
+        AdminTab["AnalyticsAdmin [frontend/components/analytics/analytics-admin.tsx]"]
         
-        Hooks["use-unified-analytics.ts [hooks/use-unified-analytics.ts]"]
+        Hooks["use-unified-analytics.ts [frontend/hooks/use-unified-analytics.ts]"]
         
         AnalyticsPage --> Tabs
         Tabs --> OverviewTab & AgentsTab & WorkflowsTab & DocsTab & AdminTab
@@ -56,50 +64,46 @@ graph TB
     
     subgraph "React Query Layer"
         QueryClient["QueryClient"]
-        wsScope["wsScope() function"]
-        QueryKeys["unifiedAnalyticsKeys"]
+        wsScope["wsScope() function [frontend/hooks/use-unified-analytics.ts:12]"]
+        QueryKeys["unifiedAnalyticsKeys [frontend/hooks/use-unified-analytics.ts:18]"]
         
         Hooks --> QueryClient
         Hooks --> wsScope
         Hooks --> QueryKeys
     end
     
-    subgraph "Backend API Layer [FastAPI]"
-        LLMRouter["/api/analytics/llm"]
-        MissionRouter["/api/missions/stats"]
-        HeartbeatRouter["/api/heartbeat/analytics"]
-        AdminRouter["/api/admin/analytics"]
+    subgraph "Backend API Layer [orchestrator/api/]"
+        LLMRouter["/api/analytics/llm [orchestrator/api/llm_analytics.py]"]
+        AdminRouter["/api/admin/analytics [orchestrator/api/llm_analytics.py]"]
+        OR_Service["OpenRouterAnalyticsService [orchestrator/core/llm/openrouter_analytics.py]"]
         
-        AgentAPI["/api/agents"]
-        DocsAPI["/api/analytics/overview"]
+        AgentAPI["apiClient.getAgents()"]
+        WorkflowAPI["apiClient.getWorkflowStatsDashboard()"]
+        DocsAPI["apiClient.getAnalyticsOverview()"]
     end
     
     subgraph "Data Layer"
-        LLMUsageTable["llm_usage table"]
-        AgentTable["agent table"]
-        MissionTable["orchestration_run table"]
-        DocsTable["cloud_document table"]
-        MemoryTable["memory_stats table"]
+        LLMUsageTable["LLMUsage table [core.models.core]"]
+        AgentTable["Agent table [core.models.core]"]
+        WorkflowTable["WorkflowTemplate table [core.models.core]"]
         
         Postgres[("PostgreSQL + pgvector")]
-        Redis[("Redis Cache")]
-        
-        LLMUsageTable & AgentTable & MissionTable & DocsTable & MemoryTable --> Postgres
     end
     
-    QueryClient --> LLMRouter & MissionRouter & HeartbeatRouter & AdminRouter & AgentAPI & DocsAPI
+    QueryClient --> LLMRouter & AdminRouter & AgentAPI & WorkflowAPI & DocsAPI
+    LLMRouter --> OR_Service
     
-    LLMRouter & AdminRouter --> LLMUsageTable & AgentTable
-    MissionRouter --> MissionTable
+    LLMRouter & AdminRouter --> LLMUsageTable & AgentTable & WorkflowTable
+    AgentAPI --> AgentTable
+    DocsAPI --> Postgres
     
     wsScope -.->|"Injects workspace_id"| QueryKeys
-    QueryKeys -.->|"Cache isolation"| Redis
 ```
 
 **Sources:**
-- [frontend/hooks/use-unified-analytics.ts:1-106]()
-- [frontend/components/analytics/analytics-overview.tsx:32-61]()
-- [frontend/components/analytics/analytics-page.tsx:35-127]()
+- [frontend/hooks/use-unified-analytics.ts:1-43]()
+- [orchestrator/api/llm_analytics.py:28-29]()
+- [orchestrator/core/llm/openrouter_analytics.py:27-28]()
 
 ---
 
@@ -107,16 +111,16 @@ graph TB
 
 ### React Query Integration
 
-The frontend uses React Query hooks defined in `use-unified-analytics.ts` [frontend/hooks/use-unified-analytics.ts:1-5]() to fetch data. These hooks handle automatic caching and background refetching.
+The frontend uses React Query hooks defined in `use-unified-analytics.ts` to fetch data. These hooks handle automatic caching and background refetching.
 
-#### Workspace Scoping Mechanism (`wsScope`)
+#### Workspace Scoping Mechanism
 
-The `wsScope()` function [frontend/hooks/use-unified-analytics.ts:12-14]() ensures workspace isolation in the cache by checking for an admin override or defaulting to the current user's workspace.
+The `wsScope()` function [frontend/hooks/use-unified-analytics.ts:12-14]() ensures workspace isolation in the cache by checking for an admin override or defaulting to the current user's workspace via `getAdminWorkspaceOverride()`.
 
 ```mermaid
 graph LR
-    AdminOverride["getAdminWorkspaceOverride() [lib/api-client.ts]"]
-    wsScope["wsScope() function"]
+    AdminOverride["getAdminWorkspaceOverride() [frontend/lib/api-client]"]
+    wsScope["wsScope() function [frontend/hooks/use-unified-analytics.ts]"]
     QueryKey["Query Key Array"]
     ReactQuery["React Query Cache"]
     
@@ -133,80 +137,86 @@ graph LR
     ReactQuery -.-> Insight3
 ```
 
-Every query key in `unifiedAnalyticsKeys` [frontend/hooks/use-unified-analytics.ts:18-43]() includes `wsScope()` as a dynamic component. This ensures that when an admin switches workspaces via the `AdminWorkspaceSwitcher`, the cache for the previous workspace is ignored.
+Every query key in `unifiedAnalyticsKeys` [frontend/hooks/use-unified-analytics.ts:18-43]() includes `wsScope()` as a dynamic component. This ensures that when an admin switches workspaces, the cache for the previous workspace is ignored.
 
 **Sources:**
 - [frontend/hooks/use-unified-analytics.ts:10-43]()
-- [frontend/components/analytics/analytics-page.tsx:47-49]()
+- [frontend/components/analytics/analytics-admin.tsx:168-170]()
 
 ### Component Hierarchy
 
-The `AnalyticsPage` manages a tabbed layout. Each tab utilizes specific hooks to aggregate data from multiple backend endpoints.
+The `AnalyticsPage` manages a tabbed layout. Each tab utilizes specialized hooks for data retrieval.
 
 | Component | Primary Hook | Purpose |
 |-----------|--------------|---------|
-| `AnalyticsOverview` | `useAnalyticsOverview` | High-level summary of agents, missions, docs, and costs [frontend/hooks/use-unified-analytics.ts:46](). |
+| `AnalyticsOverview` | `useAnalyticsOverview` | Aggregated summary of agents, missions, and costs [frontend/hooks/use-unified-analytics.ts:46](). |
 | `AnalyticsAgents` | `useAgentAnalytics` | Performance metrics and memory stats per agent [frontend/hooks/use-unified-analytics.ts:120](). |
-| `AnalyticsWorkflows` | `useWorkflowAnalytics` | Success rates and execution trends for recipes and missions [frontend/hooks/use-unified-analytics.ts:184](). |
-| `AnalyticsDocuments` | `useDocumentAnalyticsUnified` | RAG performance, storage used, and never-accessed alerts [frontend/hooks/use-unified-analytics.ts:246](). |
-| `AnalyticsAdmin` | `useAdminDashboard` | Cross-workspace platform metrics for system administrators [frontend/hooks/use-unified-analytics.ts:586](). |
+| `AnalyticsWorkflows` | `useWorkflowAnalytics` | Success rates and execution trends for recipes [frontend/hooks/use-unified-analytics.ts:184](). |
+| `AnalyticsDocuments` | `useDocumentAnalyticsUnified` | RAG performance and never-accessed document alerts [frontend/hooks/use-unified-analytics.ts:246](). |
+| `AnalyticsAdmin` | `useAdminDashboard` | Platform-wide metrics for system administrators [frontend/hooks/use-unified-analytics.ts:586](). |
+| `AnalyticsPlanUsage` | `usePlanUsage` | Tracks workspace consumption against quotas [frontend/hooks/use-unified-analytics.ts:397](). |
 
 **Sources:**
-- [frontend/components/analytics/analytics-overview.tsx:32-37]()
-- [frontend/components/analytics/analytics-agents.tsx:162-163]()
-- [frontend/components/analytics/analytics-workflows.tsx:36-37]()
 - [frontend/hooks/use-unified-analytics.ts:45-600]()
-
----
-
-## Key Analytics Features
-
-### Multi-Tenancy and Data Isolation
-The architecture enforces multi-tenancy by including the `wsScope()` in all React Query keys. This prevents "data bleeding" where an admin viewing Workspace A might accidentally see cached data from Workspace B [frontend/hooks/use-unified-analytics.ts:10-14]().
-
-### Polling and Real-Time Activity
-For certain metrics, components implement local polling or immediate effect hooks:
-- **Heartbeat & Channel Activity**: `AnalyticsOverview` uses a `useEffect` to fetch `/api/heartbeat/analytics` and `/api/channels/analytics` on mount [frontend/components/analytics/analytics-overview.tsx:43-61]().
-- **Long-Running Jobs**: The system supports polling for long-running analytics jobs (e.g., LLM-generated recommendations) through the `useRecommendations` hook [frontend/hooks/use-unified-analytics.ts:380]().
-
-### Data Aggregation Strategy
-The `useAnalyticsOverview` hook demonstrates a "Safe Request" pattern [frontend/hooks/use-unified-analytics.ts:53-57](). It wraps multiple `apiClient` calls in `Promise.all` but catches individual failures so that a single failing endpoint (e.g., mission stats) does not break the entire overview dashboard [frontend/hooks/use-unified-analytics.ts:59-66]().
-
-```mermaid
-sequenceDiagram
-    participant UI as AnalyticsOverview
-    participant Hook as useAnalyticsOverview
-    participant API as FastAPI Backend
-    UI->>Hook: days=30
-    Hook->>API: GET /api/agents
-    Hook->>API: GET /api/analytics/llm/summary
-    Hook->>API: GET /api/workflow-recipes/stats
-    Hook->>API: GET /api/missions/stats
-    API-->>Hook: [AgentData, LLMData, WorkflowData, MissionData]
-    Hook->>Hook: safeRequest() handles partial failures
-    Hook-->>UI: Combined Analytics Object
-```
-
-**Sources:**
-- [frontend/hooks/use-unified-analytics.ts:46-106]()
-- [frontend/components/analytics/analytics-overview.tsx:43-61]()
+- [frontend/components/analytics/analytics-workflows.tsx:145-150]()
 
 ---
 
 ## Analytics Domains
 
-### Agent & Memory Analytics
-The `useAgentAnalytics` hook combines standard agent definitions with specific memory statistics fetched from `/api/v1/memory/stats/agents` [frontend/hooks/use-unified-analytics.ts:133](). This allows the `AnalyticsAgents` component to display detailed memory importance and access counts alongside execution costs [frontend/components/analytics/analytics-agents.tsx:47-101]().
-
-### Document & RAG Performance
-The `AnalyticsDocuments` component surfaces "Never Accessed" alerts [frontend/components/analytics/analytics-documents.tsx:94-110](). It identifies documents that exist in the knowledge base but have zero RAG retrieval events, helping users optimize their knowledge indexing [frontend/hooks/use-unified-analytics.ts:246-289]().
-
-### Plan & Quota Tracking
-The `AnalyticsPlanUsage` component visualizes workspace consumption against platform limits (e.g., agent count, storage MB, API calls) [frontend/components/analytics/analytics-plan-usage.tsx:74-112](). It uses color-coded progress bars (green/yellow/red) based on usage percentage [frontend/components/analytics/analytics-plan-usage.tsx:20-30]().
+### 1. Overview & Recommendations
+The overview surfaces high-level KPIs and AI-powered recommendations. The `useRecommendations` hook [frontend/hooks/use-unified-analytics.ts:384]() fetches optimization suggestions. The `AnalyticsRecommendations` component handles dismissal logic via local state `dismissed` [frontend/components/analytics/analytics-recommendations.tsx:74]().
 
 **Sources:**
-- [frontend/hooks/use-unified-analytics.ts:120-182]()
-- [frontend/components/analytics/analytics-documents.tsx:86-112]()
-- [frontend/components/analytics/analytics-plan-usage.tsx:38-115]()
+- [frontend/hooks/use-unified-analytics.ts:384-395]()
+- [frontend/components/analytics/analytics-recommendations.tsx:19-76]()
+
+### 2. Agent & Memory Performance
+The Agents tab combines agent metadata with memory statistics. The `useAgentAnalytics` hook [frontend/hooks/use-unified-analytics.ts:123-143]() performs a `Promise.all` fetch across `getAgents()`, `getSystemAgentStatistics()`, and `/api/v1/memory/stats/agents`. It builds a lookup map `memoryMap` by `agent_id` to merge memory stats into the agent list [frontend/hooks/use-unified-analytics.ts:140-141]().
+
+**Sources:**
+- [frontend/hooks/use-unified-analytics.ts:130-134]()
+- [frontend/components/analytics/analytics-agents.tsx:47-101]()
+
+### 3. Workflow & Mission Analytics
+Missions (Workflows) are tracked via execution trends and success rates. The `AnalyticsWorkflows` component [frontend/components/analytics/analytics-workflows.tsx:36]() renders an "Execution Trend" bar chart using `recharts` [frontend/components/analytics/analytics-workflows.tsx:164-179](). It also includes detailed recipe performance metrics [frontend/components/analytics/analytics-workflows.tsx:95-107]().
+
+**Sources:**
+- [frontend/hooks/use-unified-analytics.ts:187-200]()
+- [frontend/components/analytics/analytics-workflows.tsx:153-180]()
+
+### 4. LLM & Cost Analytics
+This domain tracks token consumption and financial spend.
+- **Dual-Source Strategy**: Prefers `llm_usage` table data, falling back to agent `model_usage_stats` [frontend/hooks/use-unified-analytics.ts:71-73]().
+- **OpenRouter Sync**: `OpenRouterAnalyticsService` fetches external activity and upserts it into the local `LLMUsage` table [orchestrator/core/llm/openrouter_analytics.py:44-75]().
+- **Model Comparison**: `useModelComparison` allows benchmarking different models over specific periods [frontend/hooks/use-unified-analytics.ts:39]().
+
+**Sources:**
+- [orchestrator/api/llm_analytics.py:141-191]()
+- [orchestrator/core/llm/openrouter_analytics.py:77-148]()
+- [frontend/components/analytics/analytics-costs.tsx:144-187]()
+
+### 5. Admin & Multi-Tenancy Monitoring
+Super admins have access to the `AnalyticsAdmin` component [frontend/components/analytics/analytics-admin.tsx:164](), which provides platform-wide spend and workspace-level reporting. It uses `useAdminDashboard` [frontend/hooks/use-unified-analytics.ts:586]() to aggregate metrics across the entire platform.
+
+**Sources:**
+- [frontend/hooks/use-unified-analytics.ts:586-605]()
+- [frontend/components/analytics/analytics-admin.tsx:183-194]()
+
+---
+
+## Performance & Reliability
+
+### Safe Request Pattern
+To prevent a single failing API endpoint from breaking the entire dashboard, the analytics hooks utilize a `safeRequest` wrapper [frontend/hooks/use-unified-analytics.ts:53-57](). This pattern resolves to a fallback value (e.g., `null` or `[]`) on failure, allowing the UI to render partial data.
+
+### Data Refreshing & Polling
+- **Stale Time**: Overview data is configured with a `staleTime` of 60,000ms [frontend/hooks/use-unified-analytics.ts:104]().
+- **Polling**: The `AnalyticsPage` provides a manual `handleRefresh` function that calls `queryClient.invalidateQueries` and `refetchQueries` for the `unified-analytics` key [frontend/components/analytics/analytics-page.tsx:43-46]().
+
+**Sources:**
+- [frontend/hooks/use-unified-analytics.ts:53-66]()
+- [frontend/hooks/use-unified-analytics.ts:104]()
+- [frontend/components/analytics/analytics-page.tsx:43-46]()
 
 ---

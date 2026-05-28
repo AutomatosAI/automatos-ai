@@ -458,8 +458,8 @@ async def stream_chat(
 
         if complexity_assessment.action == Action.RESPOND or _platform_hints:
             # Auto handles directly — no routing, no delegation.
+            # Auto uses its own agent model (not orchestrator LLM).
             effective_agent_id = _fallback_agent_id
-            use_orchestrator_llm = True
             if _platform_hints:
                 # Override action so we don't fall into the DELEGATE branch below
                 complexity_assessment.action = Action.RESPOND
@@ -467,12 +467,12 @@ async def stream_chat(
                     f"[Auto] Platform hint detected — Auto handles directly "
                     f"(complexity={complexity_assessment.complexity.value}, "
                     f"hints={complexity_assessment.tool_hints}): "
-                    f"agent_id={effective_agent_id} with orchestrator LLM"
+                    f"agent_id={effective_agent_id}"
                 )
             else:
                 logger.info(
                     f"[Auto] Direct response (complexity={complexity_assessment.complexity.value}): "
-                    f"agent_id={effective_agent_id} with orchestrator LLM"
+                    f"agent_id={effective_agent_id}"
                 )
         elif complexity_assessment.action == Action.MISSION:
             # PRD-125: Complex task detected — suggest mission to user,
@@ -506,19 +506,17 @@ async def stream_chat(
                     f"(confidence={routing_decision.confidence:.2f}, reasoning={routing_decision.reasoning})"
                 )
             elif routing_decision is not None and routing_decision.route_type == "orchestrate":
-                # LLM explicitly chose Auto / orchestrate — use fallback agent with system LLM
+                # LLM explicitly chose Auto / orchestrate — Auto uses its own model
                 effective_agent_id = _fallback_agent_id
-                use_orchestrator_llm = True
                 logger.info(
                     f"[Auto] Router → orchestrate "
                     f"(confidence={routing_decision.confidence:.2f}, "
                     f"reasoning={routing_decision.reasoning}): "
-                    f"agent_id={effective_agent_id} with orchestrator LLM"
+                    f"agent_id={effective_agent_id}"
                 )
             else:
-                # Router couldn't decide — fall back
+                # Router couldn't decide — fall back to Auto with its own model
                 effective_agent_id = _fallback_agent_id
-                use_orchestrator_llm = True
                 logger.info(f"[Auto] Router returned no match — fallback agent_id={effective_agent_id}")
 
     # Build response headers (include routing metadata when available)

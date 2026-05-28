@@ -100,7 +100,7 @@ export function GitHubImportModal({ open, onClose, onImportComplete }: GitHubImp
               <Button
                 onClick={handleImport}
                 disabled={isImporting || !url.trim()}
-                className="bg-orange-600 hover:bg-orange-700 text-white whitespace-nowrap"
+                className="bg-primary hover:bg-primary/90 text-primary-foreground whitespace-nowrap"
               >
                 {isImporting ? (
                   <>

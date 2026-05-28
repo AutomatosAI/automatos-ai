@@ -24,6 +24,7 @@ import {
 import { cn } from '@/lib/utils'
 import type { Deliverable } from '@/hooks/use-deliverables-api'
 import { DeliverableArtwork } from '@/components/deliverables/deliverable-artwork'
+import { useAuthenticatedBlobUrl } from '@/components/widgets/FileWidget/FilePreview'
 
 // ============= STYLE MAPS =============
 
@@ -79,6 +80,7 @@ function DeliverableCardImpl({ deliverable, onClick, className }: DeliverableCar
   const SourceIcon = SOURCE_ICONS[source_type] ?? Calendar
 
   const isImage = artifact_type === 'image' && !!preview_url
+  const { src: authSrc } = useAuthenticatedBlobUrl(isImage ? preview_url : undefined)
   const sizeLabel = formatFileSize(file_size_bytes)
   const timeAgo = formatTimeAgo(created_at)
 
@@ -104,13 +106,16 @@ function DeliverableCardImpl({ deliverable, onClick, className }: DeliverableCar
     >
       {/* Preview area */}
       <div className="relative flex aspect-square items-center justify-center overflow-hidden">
-        {isImage ? (
+        {isImage && authSrc ? (
           <img
-            src={preview_url!}
+            src={authSrc}
             alt={title}
-            loading="lazy"
             className="h-full w-full object-cover"
           />
+        ) : isImage ? (
+          <div className="flex h-full w-full items-center justify-center bg-muted/30">
+            <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+          </div>
         ) : (
           <DeliverableArtwork type={artifact_type} className="absolute inset-0" />
         )}

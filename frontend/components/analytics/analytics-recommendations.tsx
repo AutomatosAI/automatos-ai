@@ -9,6 +9,7 @@ import {
   FileText,
   TrendingUp,
   X,
+  ArrowRight,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -29,11 +30,44 @@ interface Props {
   isLoading: boolean
 }
 
-const typeConfig = {
-  cost: { icon: DollarSign, color: 'text-green-400', bg: 'bg-green-500/10', border: 'border-green-500/20' },
-  performance: { icon: AlertTriangle, color: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/20' },
-  document: { icon: FileText, color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/20' },
-  quota: { icon: TrendingUp, color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/20' },
+interface TypeStyles {
+  icon: typeof DollarSign
+  color: string
+  bg: string
+  border: string
+  // Filled-button styling matched to severity colour — gives the CTA
+  // a real "click me" feel instead of looking like a tag.
+  ctaBg: string
+  ctaBorder: string
+  ctaText: string
+  ctaHoverBg: string
+}
+
+const typeConfig: Record<Recommendation['type'], TypeStyles> = {
+  cost: {
+    icon: DollarSign, color: 'text-green-400',
+    bg: 'bg-green-500/10', border: 'border-green-500/20',
+    ctaBg: 'bg-green-500/15', ctaBorder: 'border-green-500/30',
+    ctaText: 'text-green-300', ctaHoverBg: 'hover:bg-green-500/25',
+  },
+  performance: {
+    icon: AlertTriangle, color: 'text-yellow-400',
+    bg: 'bg-yellow-500/10', border: 'border-yellow-500/20',
+    ctaBg: 'bg-yellow-500/15', ctaBorder: 'border-yellow-500/30',
+    ctaText: 'text-yellow-300', ctaHoverBg: 'hover:bg-yellow-500/25',
+  },
+  document: {
+    icon: FileText, color: 'text-blue-400',
+    bg: 'bg-blue-500/10', border: 'border-blue-500/20',
+    ctaBg: 'bg-blue-500/15', ctaBorder: 'border-blue-500/30',
+    ctaText: 'text-blue-300', ctaHoverBg: 'hover:bg-blue-500/25',
+  },
+  quota: {
+    icon: TrendingUp, color: 'text-orange-400',
+    bg: 'bg-orange-500/10', border: 'border-orange-500/20',
+    ctaBg: 'bg-orange-500/15', ctaBorder: 'border-orange-500/30',
+    ctaText: 'text-orange-300', ctaHoverBg: 'hover:bg-orange-500/25',
+  },
 }
 
 export function AnalyticsRecommendations({ recommendations, isLoading }: Props) {
@@ -98,11 +132,22 @@ export function AnalyticsRecommendations({ recommendations, isLoading }: Props) 
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-sm">{rec.title}</p>
                     <p className="text-sm text-muted-foreground mt-1">{rec.description}</p>
-                    {rec.impact && (
-                      <Badge variant="outline" className="mt-2 text-xs">
-                        {rec.impact}
-                      </Badge>
-                    )}
+                    <div className="flex flex-wrap items-center gap-2 mt-3">
+                      {rec.impact && (
+                        <Badge variant="outline" className="text-xs">
+                          {rec.impact}
+                        </Badge>
+                      )}
+                      {rec.action && (
+                        <button
+                          type="button"
+                          className={`group inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${config.ctaBg} ${config.ctaBorder} ${config.ctaText} ${config.ctaHoverBg}`}
+                        >
+                          <span>{rec.action}</span>
+                          <ArrowRight className="w-3 h-3 transition-transform group-hover:translate-x-0.5" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <Button
                     variant="ghost"

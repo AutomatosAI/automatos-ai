@@ -5,23 +5,15 @@
 
 The following files were used as context for generating this wiki page:
 
-- [docs/reviews/COMPOSIO-TOOL-REGRESSION-REVIEW.md](docs/reviews/COMPOSIO-TOOL-REGRESSION-REVIEW.md)
-- [orchestrator/api/chat.py](orchestrator/api/chat.py)
-- [orchestrator/api/chat_voice.py](orchestrator/api/chat_voice.py)
 - [orchestrator/consumers/chatbot/auto.py](orchestrator/consumers/chatbot/auto.py)
-- [orchestrator/consumers/chatbot/intent_classifier.py](orchestrator/consumers/chatbot/intent_classifier.py)
-- [orchestrator/consumers/chatbot/personality.py](orchestrator/consumers/chatbot/personality.py)
-- [orchestrator/consumers/chatbot/service.py](orchestrator/consumers/chatbot/service.py)
-- [orchestrator/consumers/chatbot/smart_tool_router.py](orchestrator/consumers/chatbot/smart_tool_router.py)
-- [orchestrator/core/llm/manager.py](orchestrator/core/llm/manager.py)
-- [orchestrator/core/routing/engine.py](orchestrator/core/routing/engine.py)
-- [orchestrator/modules/orchestrator/service.py](orchestrator/modules/orchestrator/service.py)
-- [orchestrator/modules/tools/discovery/actions_analytics_enhanced.py](orchestrator/modules/tools/discovery/actions_analytics_enhanced.py)
-- [orchestrator/modules/tools/discovery/handlers_analytics_enhanced.py](orchestrator/modules/tools/discovery/handlers_analytics_enhanced.py)
-- [orchestrator/modules/tools/discovery/handlers_search.py](orchestrator/modules/tools/discovery/handlers_search.py)
+- [orchestrator/core/security/rate_limiter.py](orchestrator/core/security/rate_limiter.py)
+- [orchestrator/core/services/auto_reporting.py](orchestrator/core/services/auto_reporting.py)
+- [orchestrator/core/services/notification_dispatcher.py](orchestrator/core/services/notification_dispatcher.py)
+- [orchestrator/modules/tools/discovery/actions_auto_reporting.py](orchestrator/modules/tools/discovery/actions_auto_reporting.py)
+- [orchestrator/modules/tools/discovery/handlers_auto_reporting.py](orchestrator/modules/tools/discovery/handlers_auto_reporting.py)
 - [orchestrator/modules/tools/discovery/platform_actions.py](orchestrator/modules/tools/discovery/platform_actions.py)
 - [orchestrator/modules/tools/discovery/platform_executor.py](orchestrator/modules/tools/discovery/platform_executor.py)
-- [orchestrator/modules/tools/tool_router.py](orchestrator/modules/tools/tool_router.py)
+- [orchestrator/tests/test_prd128_notification_dispatcher.py](orchestrator/tests/test_prd128_notification_dispatcher.py)
 
 </details>
 
@@ -32,13 +24,13 @@ The following files were used as context for generating this wiki page:
 AutoBrain is the progressive complexity assessor that receives **every** incoming chat message and determines the computational depth required to respond. It implements PRD-68's Progressive Complexity Routing, classifying requests on a five-level scale from simple greetings (`ATOM`) to enterprise-scale multi-agent pipelines (`ORGANISM`). [orchestrator/consumers/chatbot/auto.py:1-22]()
 
 The assessor's output determines three critical downstream behaviors:
-1. **Routing decision** — whether to respond directly, delegate to a specialized agent, or trigger a mission/workflow. [orchestrator/consumers/chatbot/auto.py:51-57]()
-2. **Tool availability** — which tools to load (if any) to avoid overwhelming the LLM via `tool_hints`. [orchestrator/consumers/chatbot/auto.py:68-71]()
+1. **Routing decision** — whether to respond directly, delegate to a specialized agent, or trigger a workflow/mission. [orchestrator/consumers/chatbot/auto.py:51-57]()
+2. **Tool availability** — which tools to load (if any) to avoid overwhelming the LLM via `tool_hints`. [orchestrator/consumers/chatbot/auto.py:69-71]()
 3. **Memory retrieval** — whether to fetch conversation context from the memory system via `needs_memory`. [orchestrator/consumers/chatbot/auto.py:70-70]()
 
-The `ComplexityAssessment` result flows from the chat API (`api/chat.py`) through the `StreamingChatService` and `SmartChatOrchestrator` to drive these behaviors. [orchestrator/consumers/chatbot/auto.py:19-22]()
+The `ComplexityAssessment` result flows through the system wiring, where `needs_memory` and `tool_hints` drive downstream behavior in the `SmartChatOrchestrator`. [orchestrator/consumers/chatbot/auto.py:19-22]()
 
-**Sources**: [orchestrator/consumers/chatbot/auto.py:1-85](), [orchestrator/api/chat.py:18-24]()
+**Sources**: [orchestrator/consumers/chatbot/auto.py:1-85]()
 
 ---
 
@@ -52,7 +44,7 @@ AutoBrain classifies requests into five discrete complexity levels on the Atom �
 | **MOLECULE** | Single Tool | Needs a tool or specific agent skill | ~1K tokens | "send email", "check Jira", "search docs" |
 | **CELL** | Memory + Tools | Needs memory + tool + reasoning | ~3K tokens | "reply to that email we discussed" |
 | **ORGAN** | Multi-Agent | Multi-agent coordination | ~6K tokens | "research bug, plan fix, open PR" |
-| **ORGANISM** | Enterprise Pipeline | Full PRD-59 pipelines, learning + feedback | ~12K tokens | "refactor auth across all services" |
+| **ORGANISM** | Enterprise Pipeline | Full PRD-59 Neural Swarm pipelines | ~12K tokens | "refactor auth across all services" |
 
 **Sources**: [orchestrator/consumers/chatbot/auto.py:42-49]()
 
@@ -81,7 +73,7 @@ _ATOM_PATTERNS = [
 ```
 
 #### Platform Query Detection
-Platform self-awareness queries (PRD-64) are detected via keyword matching in `_PLATFORM_KEYWORDS`. If a match is found, AutoBrain injects specific `tool_hints` to enable the fallback agent to call platform tools. [orchestrator/consumers/chatbot/auto.py:116-181]()
+Platform self-awareness queries (PRD-64) are detected via keyword matching in `_PLATFORM_KEYWORDS`. If a match is found, AutoBrain injects specific `tool_hints` to enable the agent to call platform tools. [orchestrator/consumers/chatbot/auto.py:116-181]()
 
 | Matched Tool Hint | Example Keyword Patterns |
 |-----------|--------------------------|
@@ -89,29 +81,30 @@ Platform self-awareness queries (PRD-64) are detected via keyword matching in `_
 | `platform_get_llm_usage` | "token usage", "llm usage", "my api cost" |
 | `platform_list_documents` | "list my documents", "show my uploaded files" |
 | `platform_query_data` | "query the database", "ask the database" |
-| `platform_execute_recipe` | "run the recipe", "execute recipe", "trigger recipe" |
+| `platform_workspace_stats` | "workspace stats", "usage stats" |
 
 ### Tier 3: LLM Classification
-When both cache and regex patterns fail, AutoBrain invokes an **LLM classifier** (~200ms) to assess complexity. This tier handles nuanced requests and populates the `ComplexityAssessment` dataclass with reasoning and confidence scores. [orchestrator/consumers/chatbot/auto.py:17-17](), [orchestrator/consumers/chatbot/auto.py:60-68]()
+When both cache and regex patterns fail, AutoBrain invokes an **LLM classifier** (~200ms) to assess complexity. This tier populates the `ComplexityAssessment` dataclass with reasoning and confidence scores. [orchestrator/consumers/chatbot/auto.py:59-73]()
 
-**Sources**: [orchestrator/consumers/chatbot/auto.py:14-181](), [orchestrator/core/llm/manager.py:40-41]()
+**Sources**: [orchestrator/consumers/chatbot/auto.py:14-181]()
 
 ---
 
 ## Action Types
 
-AutoBrain maps complexity levels to specific **action types** that control downstream execution: [orchestrator/consumers/chatbot/auto.py:51-57]()
+AutoBrain maps complexity levels to four **action types** that control downstream execution: [orchestrator/consumers/chatbot/auto.py:51-57]()
 
 *   **RESPOND**: Auto responds directly (no delegation). Typically used for `ATOM` complexity. [orchestrator/consumers/chatbot/auto.py:53-53]()
 *   **DELEGATE**: Route to a single sub-agent. Used for `MOLECULE` and `CELL` complexity. [orchestrator/consumers/chatbot/auto.py:54-54]()
-*   **MISSION**: Complex multi-step task requiring the PRD-125 orchestration layer. [orchestrator/consumers/chatbot/auto.py:56-56]()
+*   **MISSION**: Suggests a complex multi-step mission to the user (PRD-125). [orchestrator/consumers/chatbot/auto.py:56-56]()
+*   **WORKFLOW**: (Deprecated) Kept for backward compatibility with PRD-59 pipelines. [orchestrator/consumers/chatbot/auto.py:55-55]()
 
 ---
 
 ## Data Flow & Implementation
 
 ### ComplexityAssessment Data Structure
-The assessment result is encapsulated in a dataclass consumed by the orchestrator: [orchestrator/consumers/chatbot/auto.py:60-73]()
+The assessment result is encapsulated in a dataclass consumed by the orchestrator: [orchestrator/consumers/chatbot/auto.py:59-73]()
 
 ```python
 @dataclass
@@ -129,7 +122,7 @@ class ComplexityAssessment:
 ```
 
 ### Platform Action Integration
-AutoBrain detects platform-specific keywords and injects them into `tool_hints`. These hints are resolved by the `PlatformActionExecutor` which routes to domain-specific handlers. [orchestrator/modules/tools/discovery/platform_executor.py:164-217]()
+AutoBrain detects platform-specific keywords and injects them into `tool_hints`. These hints are resolved by the `PlatformActionExecutor` which routes to domain-specific handlers. [orchestrator/modules/tools/discovery/platform_executor.py:5-177]()
 
 ```mermaid
 graph TD
@@ -145,62 +138,50 @@ graph TD
     subgraph "Code Entity Space"
         Executor["PlatformActionExecutor (platform_executor.py)"]
         Handler["get_llm_usage (handlers_analytics.py)"]
-        ActionDef["platform_get_llm_usage (actions_analytics.py)"]
+        Registry["ActionRegistry (action_registry.py)"]
     end
 
     UserMsg --> Regex
     Regex --> Hints
     Hints --> Executor
     Executor --> Handler
-    ActionDef -.-> Executor
+    Executor --> Registry
 ```
 **Diagram: Mapping Natural Language Platform Queries to Code Handlers**
 
-### Universal Router Integration
-When AutoBrain determines an `Action.DELEGATE`, the `UniversalRouter` takes over. It uses a tiered strategy to resolve the `RequestEnvelope` to a `RoutingDecision`. [orchestrator/core/routing/engine.py:4-16]()
+### Hierarchy Permissions & Security
+Mutating platform actions (e.g., `platform_update_agent`) undergo a hierarchy check before execution. The `_HIERARCHY_TARGETS` map in the executor ensures that actors have sufficient permissions to modify target entities. [orchestrator/modules/tools/discovery/platform_executor.py:182-226]()
+
+Additionally, platform actions are subject to rate limiting. `platform_write` operations are capped at 60 per minute per agent to prevent resource exhaustion. [orchestrator/core/security/rate_limiter.py:52-57]()
 
 ```mermaid
 graph TD
-    subgraph "Routing Tiers"
-        T0["Tier 0: User Override (override_agent_id)"]
-        T1["Tier 1: RoutingCache Lookup"]
-        T2A["Tier 2a: RoutingRule (source_pattern)"]
-        T2B["Tier 2b: TriggerSubscription (jira_trigger)"]
-        T25["Tier 2.5: Semantic Similarity (Agent Embeddings)"]
-        T3["Tier 3: LLM Classification"]
+    subgraph "Execution Pipeline"
+        Exec["PlatformActionExecutor.execute"]
+        Check["can_actor_modify (hierarchy_permissions.py)"]
+        RateLimit["check_rate_limit (rate_limiter.py)"]
+        Dispatch["Handler Dispatch"]
     end
 
-    subgraph "Code Entities"
-        UR["UniversalRouter.route() (engine.py)"]
-        RE["RequestEnvelope (routing.py)"]
-        RD["RoutingDecision (routing.py)"]
-    end
-
-    RE --> UR
-    UR --> T0
-    T0 --> T1
-    T1 --> T2A
-    T2A --> T2B
-    T2B --> T25
-    T25 --> T3
-    T3 --> RD
+    Exec --> Check
+    Check --> RateLimit
+    RateLimit --> Dispatch
 ```
-**Diagram: UniversalRouter Tiered Execution Flow**
+**Diagram: Platform Action Security Middleware**
 
-**Sources**: [orchestrator/consumers/chatbot/auto.py:60-82](), [orchestrator/modules/tools/discovery/platform_executor.py:164-217](), [orchestrator/core/routing/engine.py:4-16](), [orchestrator/core/routing/engine.py:79-163]()
+**Sources**: [orchestrator/consumers/chatbot/auto.py:59-83](), [orchestrator/modules/tools/discovery/platform_executor.py:5-226](), [orchestrator/core/security/rate_limiter.py:45-57]()
 
 ---
 
-## Enhanced Analytics & Monitoring
-AutoBrain also supports advanced platform monitoring through `tool_hints` for enhanced analytics, such as success rates, completion times, and system health. [orchestrator/modules/tools/discovery/platform_executor.py:147-159]()
+## Unified Notification Integration
+AutoBrain and other platform agents can emit notifications via the `platform_send_notification` tool. [orchestrator/modules/tools/discovery/actions_auto_reporting.py:96-103]() This tool invokes the `NotificationDispatcher`, which handles multi-destination fan-out (Telegram, Slack, In-App) based on workspace `auto_reporting` settings. [orchestrator/core/services/notification_dispatcher.py:76-111]()
 
-| Platform Action | Handler Function | Purpose |
-|-----------------|------------------|---------|
-| `platform_get_success_rate` | `get_success_rate` | 7-day trend of workflow success |
-| `platform_get_completion_time` | `get_completion_time` | Avg task completion speed |
-| `platform_get_queue_depth` | `get_queue_depth` | Real-time task backlog |
-| `platform_get_efficiency_score` | `get_efficiency_score` | Composite platform health grade |
+| Action | Function | Purpose |
+|--------|----------|---------|
+| `platform_get_auto_reporting_prefs` | `get_auto_reporting_prefs` | Read workspace notification channels/rules [orchestrator/modules/tools/discovery/handlers_auto_reporting.py:14-16]() |
+| `platform_update_auto_reporting_prefs` | `update_auto_reporting_prefs` | Update quiet hours or routing [orchestrator/modules/tools/discovery/handlers_auto_reporting.py:28-30]() |
+| `platform_send_notification` | `send_notification` | Trigger a manual platform event [orchestrator/modules/tools/discovery/handlers_auto_reporting.py:57-59]() |
 
-**Sources**: [orchestrator/modules/tools/discovery/handlers_analytics_enhanced.py:147-159](), [orchestrator/modules/tools/discovery/platform_executor.py:147-159]()
+**Sources**: [orchestrator/core/services/notification_dispatcher.py:1-111](), [orchestrator/modules/tools/discovery/handlers_auto_reporting.py:1-109](), [orchestrator/modules/tools/discovery/actions_auto_reporting.py:11-154]()
 
 ---

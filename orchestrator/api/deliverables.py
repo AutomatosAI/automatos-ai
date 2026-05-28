@@ -42,6 +42,7 @@ router = APIRouter(prefix="/api/deliverables", tags=["deliverables"])
 async def list_deliverables(
     artifact_type: Optional[str] = Query(None, description="Filter by artifact_type (report, image, document, code, slide, spreadsheet, archive, audio, video)"),
     source_type: Optional[str] = Query(None, description="Filter by source (chat, task, mission, heartbeat, playbook, trigger, upload)"),
+    source_type_exclude: Optional[str] = Query(None, description="Comma-separated source_types to exclude (e.g. 'heartbeat')"),
     agent_id: Optional[int] = Query(None, description="Filter by agent id"),
     date_from: Optional[str] = Query(None, description="ISO timestamp — include rows created_at >= date_from"),
     date_to: Optional[str] = Query(None, description="ISO timestamp — include rows created_at <= date_to"),
@@ -56,6 +57,7 @@ async def list_deliverables(
     return svc.list_deliverables(
         artifact_type=artifact_type,
         source_type=source_type,
+        source_type_exclude=source_type_exclude,
         agent_id=agent_id,
         date_from=date_from,
         date_to=date_to,

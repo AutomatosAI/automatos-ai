@@ -5,23 +5,22 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/components/documents/document-management.tsx](frontend/components/documents/document-management.tsx)
 - [frontend/components/documents/local-storage-browser.tsx](frontend/components/documents/local-storage-browser.tsx)
-- [frontend/components/settings/GeneralSettingsTab.tsx](frontend/components/settings/GeneralSettingsTab.tsx)
 - [orchestrator/api/documents.py](orchestrator/api/documents.py)
-- [orchestrator/api/widgets/docs.py](orchestrator/api/widgets/docs.py)
-- [orchestrator/core/llm/clients/base.py](orchestrator/core/llm/clients/base.py)
+- [orchestrator/api/knowledge_multimodal.py](orchestrator/api/knowledge_multimodal.py)
 - [orchestrator/core/llm/embedding_manager.py](orchestrator/core/llm/embedding_manager.py)
-- [orchestrator/core/seeds/seed_system_settings.py](orchestrator/core/seeds/seed_system_settings.py)
-- [orchestrator/core/team_access.py](orchestrator/core/team_access.py)
 - [orchestrator/modules/agents/services/agent_platform_tools.py](orchestrator/modules/agents/services/agent_platform_tools.py)
 - [orchestrator/modules/memory/__init__.py](orchestrator/modules/memory/__init__.py)
 - [orchestrator/modules/memory/operations/augmentation.py](orchestrator/modules/memory/operations/augmentation.py)
-- [orchestrator/modules/orchestrator/stages/context_engineering.py](orchestrator/modules/orchestrator/stages/context_engineering.py)
+- [orchestrator/modules/rag/chunking/semantic_chunker.py](orchestrator/modules/rag/chunking/semantic_chunker.py)
 - [orchestrator/modules/rag/config.py](orchestrator/modules/rag/config.py)
+- [orchestrator/modules/rag/ingestion/manager.py](orchestrator/modules/rag/ingestion/manager.py)
 - [orchestrator/modules/rag/service.py](orchestrator/modules/rag/service.py)
+- [orchestrator/modules/rag/services/cloud_file_downloader.py](orchestrator/modules/rag/services/cloud_file_downloader.py)
+- [orchestrator/modules/rag/services/cloud_sync_service.py](orchestrator/modules/rag/services/cloud_sync_service.py)
 - [orchestrator/modules/search/config.py](orchestrator/modules/search/config.py)
 - [orchestrator/modules/search/optimization/context_optimizer.py](orchestrator/modules/search/optimization/context_optimizer.py)
+- [orchestrator/modules/search/services/entity_extractor.py](orchestrator/modules/search/services/entity_extractor.py)
 - [orchestrator/modules/search/tests/conftest.py](orchestrator/modules/search/tests/conftest.py)
 - [orchestrator/modules/search/vector_store/backends/s3_vectors_mock.py](orchestrator/modules/search/vector_store/backends/s3_vectors_mock.py)
 - [orchestrator/modules/search/vector_store/store.py](orchestrator/modules/search/vector_store/store.py)
@@ -33,7 +32,7 @@ The following files were used as context for generating this wiki page:
 
 This document describes the RAG (Retrieval-Augmented Generation) retrieval pipeline, which transforms user queries into optimized context for LLM consumption. The system implements a multi-stage retrieval process with query enhancement, vector search, fusion, reranking, and mathematical optimization.
 
-**Scope**: This page covers the retrieval pipeline only. For document ingestion and processing, see [Document Ingestion Pipeline](7.2). For chunking strategies, see [Semantic Chunking Strategies](7.3). For the API surface, see [Documents API Reference](7.7).
+**Scope**: This page covers the retrieval pipeline only. For document ingestion and processing, see [Document Ingestion Pipeline](7.2). For chunking strategies, see [Semantic Chunking Strategies](7.3). For the API surface, see [Documents API Reference](7.8).
 
 ---
 
@@ -47,7 +46,7 @@ graph TB
     Query["User Query"]
     
     subgraph "Stage 1: Query Enhancement"
-        QueryEnhancer["QueryEnhancer"]
+        QueryEnhancer["PromptAnalyzer.extract_search_terms"]
         HyDE["HyDE Generation"]
         Decomp["Query Decomposition"]
         Expansion["Concept Expansion"]
@@ -55,9 +54,9 @@ graph TB
     end
     
     subgraph "Stage 2: Vector Search"
-        VectorStore["EnhancedVectorStore"]
+        S3Backend["S3VectorsBackend / EnhancedVectorStore"]
         EmbeddingMgr["EmbeddingManager"]
-        VectorDB[("PostgreSQL + pgvector")]
+        VectorDB[("PostgreSQL pgvector / S3")]
         Candidates["Candidate Results"]
     end
     
@@ -77,7 +76,7 @@ graph TB
     end
     
     subgraph "Stage 6: Optimization"
-        KnapsackDP["0/1 Knapsack DP"]
+        KnapsackDP["ContextOptimizer (0/1 Knapsack)"]
         ContentQuality["Content Quality Scoring"]
         SourceDiversity["Source Diversity Penalty"]
         OptimizedContext["Optimized Context"]
@@ -91,10 +90,10 @@ graph TB
     Decomp --> EnhancedQueries
     Expansion --> EnhancedQueries
     
-    EnhancedQueries --> VectorStore
+    EnhancedQueries --> S3Backend
     Query --> EmbeddingMgr
-    EmbeddingMgr --> VectorStore
-    VectorStore --> VectorDB
+    EmbeddingMgr --> S3Backend
+    S3Backend --> VectorDB
     VectorDB --> Candidates
     
     Candidates --> RRFAgg
@@ -114,7 +113,7 @@ graph TB
     KnapsackDP --> OptimizedContext
 ```
 
-**Sources**: [orchestrator/modules/rag/service.py:142-208](), [orchestrator/modules/rag/service.py:210-294](), [orchestrator/modules/search/vector_store/store.py:102-132]()
+**Sources**: [orchestrator/modules/rag/service.py:142-208](), [orchestrator/modules/rag/service.py:210-294]()
 
 ---
 
@@ -127,15 +126,14 @@ The `RAGService` class orchestrates the entire retrieval pipeline. It integrates
 | `ContextOptimizer` | [orchestrator/modules/rag/service.py:171-174]() | 0/1 knapsack, MMR, entropy |
 | `SemanticChunker` | [orchestrator/modules/rag/service.py:187-193]() | Adaptive, Parent-Child, and Multi-modal strategies |
 | `EmbeddingManager` | [orchestrator/core/llm/embedding_manager.py:54-62]() | Centralized provider management (OpenAI, OpenRouter, Local) |
-| `EnhancedVectorStore` | [orchestrator/modules/search/vector_store/store.py:102-111]() | Vector storage/search with `pgvector` backend |
-| `VectorStoreAugmenter` | [orchestrator/modules/memory/operations/augmentation.py:45-56]() | Memory augmentation via semantic search |
+| `EnhancedVectorStore` | [orchestrator/modules/search/vector_store/store.py:102-132]() | Advanced vector storage and retrieval with pgvector |
 
 **Key Methods**:
 
 *   `_ensure_initialized()`: Performs lazy loading of `ContextOptimizer`, `EmbeddingManager`, and `SemanticChunker` [orchestrator/modules/rag/service.py:164-197]().
 *   `retrieve_context()`: The main entry point that executes the pipeline from enhancement to knapsack optimization [orchestrator/modules/rag/service.py:210-240]().
 
-**Sources**: [orchestrator/modules/rag/service.py:142-208](), [orchestrator/modules/rag/service.py:210-240](), [orchestrator/core/llm/embedding_manager.py:54-62]()
+**Sources**: [orchestrator/modules/rag/service.py:142-208](), [orchestrator/modules/rag/service.py:210-240](), [orchestrator/core/llm/embedding_manager.py:54-62](), [orchestrator/modules/search/vector_store/store.py:102-132]()
 
 ---
 
@@ -148,63 +146,57 @@ Configuration is dynamically loaded from the `SystemSetting` table in the databa
 class RAGConfig:
     chunk_size: int = None               # From system_settings.chunk_size
     min_chunk_size: int = None           # From system_settings.min_chunk_size
-    max_chunk_size: int = None           # From system_settings.max_chunk_size
     max_tokens: int = None               # From system_settings.max_tokens
     diversity: float = None              # From system_settings.diversity_factor
     min_similarity: float = None         # From system_settings.min_similarity
     
-    enable_query_enhancement: bool = True
-    enable_rrf_fusion: bool = True
     enable_reranking: bool = False       # From system_settings.rag_rerank_enabled
     rrf_k: int = 60                      # Standard RRF constant
+    
+    hybrid_search_enabled: bool = True
+    hybrid_vector_weight: float = 0.7
+    hybrid_keyword_weight: float = 0.3
 ```
 
 | Setting Key | Default | Description |
 |------------|---------|-------------|
-| `chunk_size` | 512 | Target chunk size for embeddings [orchestrator/core/seeds/seed_system_settings.py:147-155]() |
+| `chunk_size` | 500 | Target chunk size in characters [orchestrator/modules/rag/service.py:124-124]() |
 | `max_tokens` | 2000 | Maximum tokens in final context [orchestrator/modules/rag/service.py:130-130]() |
 | `diversity_factor` | 0.3 | MMR diversity parameter [orchestrator/modules/rag/service.py:132-132]() |
 | `min_similarity` | 0.5 | Minimum cosine similarity threshold [orchestrator/modules/rag/service.py:134-134]() |
 | `rag_rerank_enabled` | `"false"` | Enable precision reranking via `RerankManager` [orchestrator/modules/rag/service.py:137-137]() |
-| `vector_store_dimensions` | 2048 | Dimensions for embedding vectors [orchestrator/core/seeds/seed_system_settings.py:135-144]() |
 
-**Sources**: [orchestrator/modules/rag/service.py:47-140](), [orchestrator/core/seeds/seed_system_settings.py:135-193]()
+**Sources**: [orchestrator/modules/rag/service.py:47-140]()
 
 ---
 
 ## Stage 1: Query Enhancement
 
-Query enhancement generates multiple query variations to improve recall. The system uses three techniques: HyDE (Hypothetical Document Embeddings), query decomposition, and concept expansion.
+Query enhancement generates multiple query variations to improve recall. The system utilizes strategies such as query decomposition and concept expansion to ensure high coverage across document indices [orchestrator/modules/rag/service.py:109-110]().
 
 **Query Enhancement Strategy**
 ```mermaid
 graph LR
     Query["Original Query"]
     
-    subgraph QueryEnhancer
-        HyDE["HyDE Generator"]
-        Decomp["Decomposer"]
-        Expand["Concept Expander"]
+    subgraph "Enhancement Logic"
+        Terms["Extract Search Terms"]
+        Expansions["Term Expansion Mapping"]
     end
     
-    Query --> HyDE
-    Query --> Decomp
-    Query --> Expand
+    Query --> Terms
+    Terms --> Expansions
     
-    HyDE --> Q1["Hypothetical Doc 1"]
-    HyDE --> Q2["Hypothetical Doc 2"]
-    Decomp --> Q3["Sub-query 1"]
-    Decomp --> Q4["Sub-query 2"]
-    Expand --> Q5["Expanded Query"]
+    Expansions --> Q1["Variation A"]
+    Expansions --> Q2["Variation B"]
+    Expansions --> Q3["Variation C"]
     
     Q1 --> Enhanced["Enhanced Query Set"]
     Q2 --> Enhanced
     Q3 --> Enhanced
-    Q4 --> Enhanced
-    Q5 --> Enhanced
 ```
 
-**Sources**: [orchestrator/modules/rag/service.py:241-250]()
+**Sources**: [orchestrator/modules/rag/service.py:109-110]()
 
 ---
 
@@ -224,9 +216,9 @@ graph TB
     end
     
     subgraph "Code Entity Space: Retrieval"
-        EVS["EnhancedVectorStore"]
+        EVS["EnhancedVectorStore.pool"]
         PGV[("PostgreSQL + pgvector")]
-        SearchSQL["SELECT ... ORDER BY embedding <=> :vec"]
+        IVF["IVFFLAT Index (vector_cosine_ops)"]
     end
     
     Query --> EM
@@ -234,13 +226,13 @@ graph TB
     Provider --> Vector
     Vector --> EVS
     EVS --> PGV
-    PGV --> SearchSQL
+    PGV --> IVF
 ```
 
 ### Multi-Tenant Isolation
-The `EnhancedVectorStore` initializes with a specific `table_name` and manages metadata filtering [orchestrator/modules/search/vector_store/store.py:102-117](). Most document operations are workspace-scoped via `workspace_id` filters in the `SearchFilter` [orchestrator/modules/search/vector_store/store.py:82-89]().
+The `EnhancedVectorStore` and `DocumentManager` utilize `workspace_id` to filter documents. The `get_document_manager` factory ensures that every manager instance is scoped to a specific workspace, preventing cross-tenant data leakage [orchestrator/api/documents.py:77-86]().
 
-**Sources**: [orchestrator/core/llm/embedding_manager.py:54-155](), [orchestrator/modules/search/vector_store/store.py:102-185]()
+**Sources**: [orchestrator/core/llm/embedding_manager.py:54-155](), [orchestrator/modules/search/vector_store/store.py:102-172](), [orchestrator/api/documents.py:77-86]()
 
 ---
 
@@ -248,81 +240,64 @@ The `EnhancedVectorStore` initializes with a specific `table_name` and manages m
 
 When using query enhancement, multiple query variations produce overlapping results. RRF aggregates these results by scoring documents based on their ranks across all queries.
 
-**Implementation**:
-```python
-# orchestrator/modules/rag/service.py:296-348
-async def _multi_query_retrieval_with_rrf(self, queries, limit_per_query=20, workspace_id=None):
-    all_results = {} # doc_id -> score
-    k = self.config.rrf_k # 60
-    
-    for query in queries:
-        results = await self._get_candidates(query, limit_per_query, ...)
-        for rank, doc in enumerate(results):
-            doc_id = doc['key']
-            all_results[doc_id] = all_results.get(doc_id, 0) + (1.0 / (k + rank))
-```
+**Implementation Logic**:
+The system aggregates candidate documents by calculating scores based on the rank in each sub-query result set. The standard RRF constant `k=60` is used to smooth the ranking impact of individual results [orchestrator/modules/rag/service.py:112-112]().
 
-**Sources**: [orchestrator/modules/rag/service.py:296-348]()
+**Sources**: [orchestrator/modules/rag/service.py:110-112]()
 
 ---
 
 ## Stage 4: Reranking
 
-Optional precision reranking using cross-encoder models. This stage is enabled via `system_settings.rag_rerank_enabled = "true"` [orchestrator/modules/rag/service.py:137-137]().
+Optional precision reranking using cross-encoder models. This stage is enabled via `system_settings.rag_rerank_enabled = "true"` [orchestrator/modules/rag/service.py:137-137](). Reranking improves precision by evaluating the actual semantic relevance of candidates against the original query before final selection.
 
-**Implementation**:
-```python
-# orchestrator/modules/rag/service.py:350-386
-async def _rerank_candidates(self, query, candidates, top_k=10):
-    from core.llm.rerank_manager import get_rerank_manager
-    manager = get_rerank_manager()
-    # ... call manager.rerank(query, documents)
-```
-
-**Sources**: [orchestrator/modules/rag/service.py:350-386]()
+**Sources**: [orchestrator/modules/rag/service.py:137-140]()
 
 ---
 
 ## Stage 6: Context Optimization (0/1 Knapsack)
 
-The final stage uses a **0/1 knapsack dynamic programming algorithm** to select chunks that maximize information value within the token budget.
+The final stage uses a **0/1 knapsack dynamic programming algorithm** to select chunks that maximize information value within the token budget. This ensures that the most relevant information is included without exceeding LLM context windows.
 
 ### Content Quality Scoring
-Chunks are scored on quality to penalize low-information content like ASCII art or repetitive separators [orchestrator/modules/rag/service.py:521-553]().
+Chunks are evaluated based on content quality to ensure that the final context is clean and informative.
 
 ### Knapsack DP Algorithm
-The algorithm selects the optimal subset of chunks where `weights` are token counts and `capacity` is the `max_tokens` budget [orchestrator/modules/rag/service.py:556-614]().
+The algorithm selects the optimal subset of chunks where `weights` are token counts and `capacity` is the `max_tokens` budget.
 
-**Sources**: [orchestrator/modules/rag/service.py:521-614]()
+**Sources**: [orchestrator/modules/rag/service.py:129-132](), [orchestrator/modules/rag/service.py:158-158]()
 
 ---
 
 ## Platform Tool Integration
 
-Agents access the RAG system through `AgentPlatformTools` [orchestrator/modules/agents/services/agent_platform_tools.py:26-30](). These tools provide capabilities for searching the internal knowledge base without external web access [orchestrator/modules/agents/services/agent_platform_tools.py:10-13]().
+Agents access the RAG system through `AgentPlatformTools` [orchestrator/modules/agents/services/agent_platform_tools.py:26-30]().
 
 **Agent to Platform Research Bridge**
 ```mermaid
 graph TB
     Agent["Agent Execution Loop"]
     
-    subgraph "AgentPlatformTools (Routing)"
-        APT["AgentPlatformTools"]
+    subgraph "AgentPlatformTools"
         SK["search_knowledge"]
         SS["semantic_search"]
+        SC["search_codebase"]
     end
     
     subgraph "RAG Implementation"
-        RS["RAGService.retrieve_context"]
+        RS["RAGService"]
+        CGS["CodeGraphService"]
         TRF["ToolResultFormatter"]
     end
     
-    Agent --> APT
-    APT --> SK
-    APT --> SS
+    Agent --> SK
+    Agent --> SS
+    Agent --> SC
     SK --> RS
     SS --> RS
+    SC --> CGS
     RS --> TRF
+    CGS --> TRF
     TRF --> Result["Formatted Markdown Context"]
 ```
 
@@ -330,12 +305,16 @@ graph TB
 
 | Tool | Purpose | Source |
 |------|---------|--------|
-| `search_knowledge` | Search for platform documentation and guides | [orchestrator/modules/agents/services/agent_platform_tools.py:60-77]() |
-| `semantic_search` | Find semantically similar content across all documents | [orchestrator/modules/agents/services/agent_platform_tools.py:79-96]() |
+| `search_knowledge` | Search Automatos knowledge base for platform documentation | [orchestrator/modules/agents/services/agent_platform_tools.py:60-77]() |
+| `semantic_search` | Find semantically similar content across all platform documents | [orchestrator/modules/agents/services/agent_platform_tools.py:79-96]() |
+| `search_codebase` | Search indexed codebase for symbols (functions, classes) | [orchestrator/modules/agents/services/agent_platform_tools.py:98-135]() |
 
 ### Result Formatting
-The `ToolResultFormatter` ensures consistent output for agents by cleaning filenames, extracting useful excerpts, and reassembling chunks from the database if necessary [orchestrator/modules/tools/formatting/result_formatter.py:18-171](). It can fetch full document content by reassembling chunks from the `document_chunks` table [orchestrator/modules/tools/formatting/result_formatter.py:152-166]().
+The `ToolResultFormatter` ensures consistent output for agents by cleaning filenames, extracting useful excerpts, and reassembling chunks from the database if necessary [orchestrator/modules/tools/formatting/result_formatter.py:18-42](). It can reassemble full document content by fetching chunks from `document_chunks` table or downloading original files from S3 [orchestrator/modules/tools/formatting/result_formatter.py:118-171]().
 
-**Sources**: [orchestrator/modules/agents/services/agent_platform_tools.py:56-96](), [orchestrator/modules/tools/formatting/result_formatter.py:18-171]()
+### Cloud Storage Integration
+The `CloudSyncService` orchestrates the synchronization of documents from cloud providers like Google Drive and Dropbox via Composio [orchestrator/modules/rag/services/cloud_sync_service.py:38-48](). Files are downloaded using the `CloudFileDownloader`, which handles provider-specific issues like Google Drive truncation by falling back to SDK-based downloads [orchestrator/modules/rag/services/cloud_file_downloader.py:59-124]().
+
+**Sources**: [orchestrator/modules/agents/services/agent_platform_tools.py:56-135](), [orchestrator/modules/tools/formatting/result_formatter.py:18-171](), [orchestrator/modules/rag/services/cloud_sync_service.py:38-48](), [orchestrator/modules/rag/services/cloud_file_downloader.py:59-124]()
 
 ---

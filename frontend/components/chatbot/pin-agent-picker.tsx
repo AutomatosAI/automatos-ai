@@ -51,7 +51,7 @@ export function PinAgentPicker({
           title="Pin an agent"
           className={cn(pillBase, inactiveStyle)}
         >
-          <Plus className="h-4 w-4 md:h-3.5 md:w-3.5 text-orange-400" />
+          <Plus className="h-4 w-4 md:h-3.5 md:w-3.5 text-primary" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="center" className="w-56">
@@ -79,7 +79,7 @@ export function PinAgentPicker({
                 {agent.agent_type}
               </span>
               {isPinned && (
-                <Check className="h-3.5 w-3.5 text-orange-400 shrink-0" />
+                <Check className="h-3.5 w-3.5 text-primary shrink-0" />
               )}
             </DropdownMenuItem>
           )

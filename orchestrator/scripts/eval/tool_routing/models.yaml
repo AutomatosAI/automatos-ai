@@ -1,0 +1,45 @@
+# Model matrix for PRD-138 tool-routing eval.
+#
+# All models routed through OpenRouter so we can hit the full ladder with
+# one provider/key. Costs in USD per 1M tokens (input/output) — verify
+# against https://openrouter.ai/models before publishing any chart.
+#
+# `tier` is for chart grouping only; it does not affect routing.
+# Drop or comment out a model to skip it for a given run.
+#
+# US-005 production-index parity verification (PRD-138): the active model list
+# below is trimmed to the two models from Appendix A whose filtered-mode
+# baselines anchor the parity check (claude-sonnet-4.6 and gpt-4.1-mini).
+# This keeps the re-run cost ≈ $0.30 vs $9 for the full 9-model matrix.
+# The full 9-model matrix lives in
+# `benchmarks/2026-05-03-full-matrix/models.yaml` alongside that benchmark.
+
+models:
+  # Mid — main production tier. Anchors the parity check at 87.2% / 93.6%.
+  - id: anthropic/claude-sonnet-4.6
+    tier: mid
+    cost_in: 3.00
+    cost_out: 15.00
+
+  # Small — anchors the parity check at 85.1% / 93.6%.
+  - id: openai/gpt-4.1-mini
+    tier: small
+    cost_in: 0.40
+    cost_out: 1.60
+
+# Embedding model used for the semantic-filter mode.
+# Matches production default (qwen3-embedding-8b @ 2048d).
+# Informational only: the production EmbeddingManager reads its own
+# EMBEDDING_PROVIDER / EMBEDDING_MODEL / EMBEDDING_DIMENSION from .env.
+embedding:
+  model: qwen/qwen3-embedding-8b
+  dimension: 2048
+
+# Tunables.
+top_k: 15            # how many actions semantic mode surfaces in the prompt
+temperature: 0.0     # deterministic for reproducibility
+max_tokens: 2048     # reasoning models (GPT-5, GPT-5-mini) burn tokens on
+                     # chain-of-thought BEFORE the tool call — 256 starves them.
+                     # Non-reasoning models stop early on their own; this only
+                     # raises the ceiling, doesn't change typical usage.
+request_timeout: 60

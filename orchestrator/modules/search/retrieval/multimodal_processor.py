@@ -352,7 +352,7 @@ class MultiModalProcessor:
             try:
                 json.loads(content)
                 return True
-            except:
+            except Exception:
                 pass
         if stripped.startswith('<') and stripped.endswith('>'):
             return True

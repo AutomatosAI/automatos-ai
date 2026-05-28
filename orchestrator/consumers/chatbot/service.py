@@ -36,7 +36,12 @@ from consumers.chatbot.streaming import get_streaming_handler
 from consumers.chatbot.tool_router import get_tool_router
 
 # Import from modules — SINGLE SOURCE for tool schemas
-from modules.tools.tool_router import get_tools_for_agent
+from modules.tools.tool_router import (
+    _rank_actions_for_dispatcher,
+    _semantic_routing_enabled,
+    _semantic_routing_top_k,
+    get_tools_for_agent,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +105,7 @@ class ToolExecutionTracker:
         'list_directory': 5,
         'read_file': 8,
         'write_file': 5,
-        'platform_default': 5,
+        'platform_default': 25,
         'workspace_default': 8,
         'default': 5,
     }
@@ -650,17 +655,24 @@ class StreamingChatService:
         self,
         agent_id: int,
         skill_tools: Optional[List[Dict[str, Any]]] = None,
+        query: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         Get all tools for an agent from the SINGLE source: modules.tools.tool_router.
 
         Returns full OpenAI-format tool schemas (ToolRegistry + ActionRegistry + Composio).
         Appends any skill-specific tool schemas from the agent runtime.
+
+        Args:
+            query: Latest user turn — when set and SEMANTIC_TOOL_ROUTING is on,
+                the platform_execute dispatcher's action.enum is narrowed to
+                top-K relevant actions (PRD-138 US-009).
         """
         all_tools = get_tools_for_agent(
             agent_id=agent_id,
             db_session=self.db,
             workspace_id=self.workspace_id,
+            query=query,
         )
         if skill_tools:
             all_tools = (all_tools or []) + skill_tools
@@ -737,20 +749,6 @@ class StreamingChatService:
         # orchestrated system prompt, for both chatbot and non-chatbot modes.
         # Do NOT inject again here — double injection causes the model to echo
         # its intro twice (observed on Shopify widget).
-
-        # Multi-step execution policy
-        llm_messages.insert(
-            1,
-            {
-                "role": "system",
-                "content": (
-                    "Execution policy: If the user requests multiple distinct tasks, you may call tools "
-                    "multiple times to complete ALL tasks before producing your final answer. "
-                    "Prefer data-gathering (read/list/fetch) steps before side-effect (send/post/create/update) steps. "
-                    "Only send/post after you have the final content to send."
-                ),
-            },
-        )
 
         # Plan mode: inject research-focused system prompt, disable tools
         if plan_mode:
@@ -1170,10 +1168,9 @@ class StreamingChatService:
         # Multi-step tools that get a higher retry cap
         _MULTI_STEP_TOOLS = {
             "composio_execute",
-            "read_file", "write_file", "list_directory", "create_directory", "delete_file",
             "generate_document",
             "workspace_read_file", "workspace_grep", "workspace_list_dir",
-            "workspace_write_file", "workspace_create_directory",
+            "workspace_write_file", "workspace_exec", "workspace_git",
         }
 
         while current_response.tool_calls and iteration < max_iterations:
@@ -1824,6 +1821,7 @@ class StreamingChatService:
         plan_mode: bool = False,
         team: Optional[str] = None,
         suggest_mission: bool = False,
+        force_text_only: bool = False,
     ) -> AsyncGenerator[str, None]:
         """
         Stream a chat response produced by the specified agent.
@@ -1915,15 +1913,44 @@ class StreamingChatService:
                 if complexity_assessment
                 else Complexity.MOLECULE
             )
+            # PRD-007 v0.5 — proactive openers force ATOM path. The 45-tool
+            # discovery in _get_tools() takes ~12s and the agent doesn't need
+            # tools to produce a one-sentence opener from the directive.
+            if force_text_only:
+                _complexity = Complexity.ATOM
             agent_ctx = await self._load_agent_context(agent_runtime)
             all_tools = []
             if _complexity != Complexity.ATOM:
-                all_tools = self._get_tools(agent_id, agent_ctx.get("skill_tools"))
+                all_tools = self._get_tools(
+                    agent_id,
+                    agent_ctx.get("skill_tools"),
+                    query=latest_text,
+                )
             else:
+                # ATOM path skips full tool loading, but always include
+                # platform_execute so the agent can respond to platform
+                # queries even when the classifier under-estimates complexity.
+                # PRD-138 US-009: ATOM path also narrows the dispatcher's
+                # action enum when SEMANTIC_TOOL_ROUTING is on, so a model
+                # in the lightweight ATOM lane sees the same focused
+                # surface as the full path.
                 try:
                     from modules.tools.discovery.action_registry import get_action_registry
-                    _dispatcher = get_action_registry().to_dispatcher_schema(exclude_admin=True)
-                    all_tools = [_dispatcher]
+                    _allowed = None
+                    if _semantic_routing_enabled() and latest_text:
+                        _allowed = _rank_actions_for_dispatcher(
+                            query=latest_text,
+                            top_k=_semantic_routing_top_k(),
+                            exclude_admin=True,
+                            exclude_promoted=True,
+                        )
+                    _dispatcher = get_action_registry().to_dispatcher_schema(
+                        exclude_admin=True,
+                        allowed_names=_allowed,
+                    )
+                    # PRD-007 v0.5: proactive openers get zero tools — directive
+                    # is self-contained (page context + graph related products).
+                    all_tools = [] if force_text_only else [_dispatcher]
                 except Exception:
                     logger.debug("[chat] Could not load platform_execute for ATOM path")
 
@@ -1990,6 +2017,17 @@ class StreamingChatService:
                     agent_id, agent_runtime, skip_composio, complexity_assessment,
                 )
             else:
+                _composio_result = None
+
+            # PRD-007 v0.5 — proactive openers must produce plain text, never tool calls.
+            # The skill forbids tools, but with 40+ tools wired in the agent still calls
+            # one and emits 0 text chars (STREAM_NO_TEXT). Force-clear here so the LLM
+            # literally has nothing to call.
+            if force_text_only and use_tools:
+                logger.info(
+                    f"[force_text_only] Clearing {len(use_tools)} tools for text-only generation"
+                )
+                use_tools = None
                 _composio_result = None
 
             # Generate LLM response
@@ -2080,6 +2118,101 @@ class StreamingChatService:
         except Exception as e:
             logger.error(f"Error streaming response with agent: {e}", exc_info=True)
             yield self.streaming_handler.format_aisdk_error(str(e))
+
+    async def stream_response(
+        self,
+        chat_id: str,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Any]] = None
+    ) -> AsyncGenerator[str, None]:
+        """Stream chat response using legacy SSE format."""
+        from core.llm import create_llm_manager
+
+        # Get tools from SINGLE SOURCE if not provided.
+        # PRD-138 US-009: extract latest user turn first so the dispatcher
+        # enum can be narrowed to relevant actions for this query.
+        if tools is None:
+            _query = self.prompt_analyzer.extract_latest_user_text(messages)
+            tools = get_tools_for_agent(query=_query)
+
+        try:
+            llm_manager = create_llm_manager(service_name="chatbot", workspace_id=self.workspace_id, request_type="chat")
+            messages = self._resolve_file_parts(messages)
+            latest_text = self.prompt_analyzer.extract_latest_user_text(messages)
+            if self.prompt_analyzer.is_fresh_start_request(latest_text):
+                messages = [m for m in messages if m.get("role") == "user"][-1:]
+            llm_messages = self.prompt_analyzer.convert_to_llm_messages(
+                messages, available_tools=tools,
+            )
+            assistant_parts = []
+
+            if hasattr(llm_manager, 'generate_response_stream'):
+                async for chunk in llm_manager.generate_response_stream(messages=llm_messages, tools=tools):
+                    yield self.streaming_handler.format_sse_chunk(chunk)
+                    if chunk.get('type') == 'text':
+                        assistant_parts.append({'type': 'text', 'text': chunk.get('text', '')})
+            else:
+                latest_text = self.prompt_analyzer.extract_latest_user_text(messages)
+                is_simple = self.prompt_analyzer.is_simple_message(latest_text)
+                use_tools = None if is_simple else tools
+
+                response = await llm_manager.generate_response(messages=llm_messages, tools=use_tools)
+
+                if response.tool_calls:
+                    tool_data = {}
+                    tool_results = []
+
+                    for tool_call in response.tool_calls:
+                        tool_name = tool_call.get('function', {}).get('name')
+                        tool_args = json.loads(tool_call.get('function', {}).get('arguments', '') or '{}')
+                        tool_id = tool_call.get('id')
+
+                        result = await self.tool_router.execute_and_format(
+                            tool_name, tool_args,
+                            agent_id=1, workspace_id=self.workspace_id,
+                            original_intent=latest_text,
+                        )
+                        if result['success']:
+                            tool_data.update(result['frontend_data'])
+
+                        tool_results.append({
+                            "role": "tool",
+                            "tool_call_id": tool_id,
+                            "content": result['llm_context'],
+                        })
+
+                    if tool_data:
+                        yield self.streaming_handler.format_sse_tool_data(tool_data)
+
+                    llm_messages.append({
+                        "role": "assistant",
+                        "content": response.content or "",
+                        "tool_calls": response.tool_calls,
+                    })
+                    llm_messages.extend(tool_results)
+
+                    final_response = await llm_manager.generate_response(messages=llm_messages, tools=None)
+                    response_text = final_response.content or ""
+                else:
+                    response_text = response.content or ""
+
+                message_id = str(uuid.uuid4())
+                async for chunk in self.streaming_handler.stream_text_legacy(response_text, message_id):
+                    yield chunk
+
+                assistant_parts.append({'type': 'text', 'text': response_text})
+
+            if assistant_parts:
+                self.chat_service.save_message(
+                    chat_id=chat_id, role='assistant',
+                    parts=assistant_parts, workspace_id=self.workspace_id,
+                )
+
+            yield self.streaming_handler.format_sse_done()
+
+        except Exception as e:
+            logger.error(f"Error streaming response: {e}", exc_info=True)
+            yield self.streaming_handler.format_sse_error(str(e))
 
     async def _execute_pretriggered_tools(
         self,

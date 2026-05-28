@@ -254,7 +254,7 @@ export function TemplatesTab({ onUseTemplate, onOpenCreateModal }: TemplatesTabP
 
         <Button 
           onClick={() => setShowCreateModal(true)}
-          className="bg-secondary border border-orange-400/50 hover:border-orange-400 hover:bg-secondary text-white transition-all duration-220"
+          className="bg-secondary border border-primary/50 hover:border-primary hover:bg-secondary text-foreground transition-all duration-220"
         >
           <Plus className="w-4 h-4 mr-2" />
           Create Template
@@ -337,7 +337,7 @@ export function TemplatesTab({ onUseTemplate, onOpenCreateModal }: TemplatesTabP
                   {/* Action Buttons */}
                   <div className="flex gap-2">
                     <Button 
-                      className="flex-1 bg-secondary border border-orange-400/50 hover:border-orange-400 hover:bg-secondary text-white transition-all duration-220"
+                      className="flex-1 bg-secondary border border-primary/50 hover:border-primary hover:bg-secondary text-foreground transition-all duration-220"
                       size="sm"
                       onClick={() => handleUseTemplate(template)}
                     >
@@ -543,7 +543,7 @@ export function TemplatesTab({ onUseTemplate, onOpenCreateModal }: TemplatesTabP
               {/* Action Buttons */}
               <div className="flex gap-3 pt-4 border-t border-secondary">
                 <Button 
-                  className="flex-1 bg-secondary border border-orange-400/50 hover:border-orange-400 hover:bg-secondary text-white transition-all duration-220"
+                  className="flex-1 bg-secondary border border-primary/50 hover:border-primary hover:bg-secondary text-foreground transition-all duration-220"
                   onClick={() => {
                     setShowViewModal(false)
                     handleUseTemplate(selectedTemplate)
@@ -722,7 +722,7 @@ function TemplateForm({ form, onChange, onSubmit, onCancel, isLoading, submitLab
         <p className="text-xs text-muted-foreground mt-1">
           Additional context for execution (JSON format). Useful for CodeGraph integration, PR reviews, etc.
         </p>
-        <div className="mt-2 p-2 bg-orange-500/10 border border-orange-500/20 rounded text-xs text-orange-300 flex items-start gap-2">
+        <div className="mt-2 p-2 bg-primary/10 border border-primary/20 rounded text-xs text-primary flex items-start gap-2">
           <span className="text-sm">⚡</span>
           <span><strong>Pro Tip:</strong> Use <code className="bg-black/30 px-1 py-0.5 rounded">codegraph_project</code> in context to give agents access to indexed code.</span>
         </div>
@@ -802,7 +802,7 @@ function TemplateForm({ form, onChange, onSubmit, onCancel, isLoading, submitLab
         <Button 
           onClick={onSubmit} 
           disabled={isLoading || !form.template_id || !form.name || !form.description}
-          className="bg-secondary border border-orange-400/50 hover:border-orange-400 hover:bg-secondary text-white transition-all duration-220"
+          className="bg-secondary border border-primary/50 hover:border-primary hover:bg-secondary text-foreground transition-all duration-220"
         >
           {isLoading ? 'Saving...' : submitLabel}
         </Button>

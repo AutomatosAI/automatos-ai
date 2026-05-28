@@ -287,7 +287,17 @@ class CredentialResponse(BaseModel):
     has_credentials: bool = Field(default=True, description="Indicates encrypted data exists")
     field_names: List[str] = Field(default=[], description="List of field names")
     credential_data: Optional[Dict[str, Any]] = Field(default=None, description="Decrypted credential values for editing")
-    
+
+    # Integration-bridge result (populated when saving a credential type that
+    # has a backend bridge — e.g. Shopify → Composio). Frontend uses this to
+    # show a "Connected" badge or open the OAuth popup.
+    connection_status: Optional[str] = Field(default=None, description="connected|pending_oauth|unsupported|bridge_error")
+    connection_id: Optional[str] = Field(default=None)
+    auth_config_id: Optional[str] = Field(default=None)
+    auth_scheme: Optional[str] = Field(default=None)
+    oauth_redirect_url: Optional[str] = Field(default=None, description="If status=pending_oauth, open in popup")
+    connection_error: Optional[str] = Field(default=None)
+
     class Config:
         from_attributes = True
 

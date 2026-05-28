@@ -18,7 +18,7 @@ async def harness_status(
     from services.harness_service import get_harness_service
 
     try:
-        status = get_harness_service().get_status(workspace_id)
+        status = get_harness_service().get_status(workspace_id, db=db)
         return {"success": True, "data": status}
     except Exception as exc:
         logger.error("[HARNESS] harness_status failed: %s", exc, exc_info=True)

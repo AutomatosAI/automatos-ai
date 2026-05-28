@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
@@ -99,6 +100,11 @@ class StatsOut(BaseModel):
 class ConnectIn(BaseModel):
     app_name: str
     callback_url: Optional[str] = None
+    # Optional per-workspace overrides for hosted-auth scheme selection.
+    # Use auth_scheme="API_KEY" for Shopify merchants where managed-install
+    # breaks the OAuth bounce; pass auth_config_id for an explicit pin.
+    auth_scheme: Optional[str] = None
+    auth_config_id: Optional[str] = None
 
 
 @router.get("/marketplace", response_model=MarketplaceOut)
@@ -258,6 +264,28 @@ async def connected(
                     conn["status"] = "active"
                     conn["connection_id"] = composio_status.get("id")
                     logger.info(f"[CONNECTED_APPS] Synced {conn.get('app_name')} from pending → active")
+                    # PRD-009 Layer 2 — when SHOPIFY first goes active, kick
+                    # off the catalog → knowledge graph sync. Fire-and-forget
+                    # background task so we don't block this listing endpoint.
+                    if (conn.get("app_name") or "").upper() == "SHOPIFY":
+                        try:
+                            from api.shopify import start_product_sync
+                            import asyncio as _asyncio
+                            _asyncio.create_task(
+                                start_product_sync(
+                                    workspace_id=str(ctx.workspace_id),
+                                    db=db,
+                                )
+                            )
+                            logger.info(
+                                "[PRD-009] Auto-fired Shopify product sync for workspace %s",
+                                ctx.workspace_id,
+                            )
+                        except Exception as sync_err:
+                            logger.warning(
+                                "[PRD-009] Auto-sync trigger failed for workspace %s: %s",
+                                ctx.workspace_id, sync_err,
+                            )
             except Exception as e:
                 logger.debug(f"[CONNECTED_APPS] Pending sync failed for {conn.get('app_name')}: {e}")
 
@@ -429,17 +457,31 @@ async def connect_app(
 
     app_name = payload.app_name.upper()
     try:
-        redirect_url = client.initiate_connection(
+        link = client.initiate_connection(
             entity_id=entity["composio_entity_id"],
             app=app_name,
             callback_url=payload.callback_url,
+            auth_config_id=payload.auth_config_id,
+            auth_scheme=payload.auth_scheme,
         )
     except Exception as e:
         raise HTTPException(status_code=503, detail="Failed to initiate OAuth connection")
 
-    # Store pending connection in DB
-    entity_manager.add_connection(entity_id=entity["id"], app_name=app_name, status="pending")
-    return {"redirect_url": redirect_url, "app_name": app_name}
+    entity_manager.add_connection(
+        entity_id=entity["id"],
+        app_name=app_name,
+        status="pending",
+        metadata={
+            "auth_config_id": link.get("auth_config_id"),
+            "auth_scheme": link.get("auth_scheme"),
+        },
+    )
+    return {
+        "redirect_url": link["redirect_url"],
+        "app_name": app_name,
+        "auth_config_id": link.get("auth_config_id"),
+        "auth_scheme": link.get("auth_scheme"),
+    }
 
 
 @router.get("/workspace")

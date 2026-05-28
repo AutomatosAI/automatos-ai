@@ -54,12 +54,20 @@ MAX_INLINE_CONTENT_BYTES = 1_000_000  # 1 MB
 
 
 def _workspace_file_url(workspace_id: str | UUID, file_path: str) -> str:
-    """Build a URL to the workspace file-content endpoint.
+    """Build a URL to serve a workspace file to the browser.
 
-    This endpoint (`/api/workspaces/{id}/files/content?path=...`) is the canonical
-    way to stream workspace files to the browser — it handles auth, workspace
-    scoping, and MIME types. Used for both image previews and text downloads.
+    Uses `/files/raw` for binary formats (images, PDFs, etc.) which returns
+    actual bytes with correct MIME types. Uses `/files/content` for text files
+    which returns JSON for the code viewer.
     """
+    _, ext = os.path.splitext(file_path)
+    _BINARY_EXTENSIONS = {
+        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico",
+        ".pdf", ".docx", ".xlsx", ".pptx", ".zip", ".tar", ".gz",
+        ".mp4", ".mp3", ".wav", ".ogg", ".webm",
+    }
+    if ext.lower() in _BINARY_EXTENSIONS:
+        return f"/api/workspaces/{workspace_id}/files/raw?path={quote(file_path)}"
     return f"/api/workspaces/{workspace_id}/files/content?path={quote(file_path)}"
 
 
@@ -303,6 +311,7 @@ class DeliverableService:
         *,
         artifact_type: Optional[str] = None,
         source_type: Optional[str] = None,
+        source_type_exclude: Optional[str] = None,
         agent_id: Optional[int] = None,
         date_from: Optional[str] = None,
         date_to: Optional[str] = None,
@@ -310,7 +319,12 @@ class DeliverableService:
         limit: int = 24,
         offset: int = 0,
     ) -> Dict[str, Any]:
-        """List deliverables with filters. Excludes soft-deleted rows."""
+        """List deliverables with filters. Excludes soft-deleted rows.
+
+        ``source_type_exclude`` is a comma-separated list of source_types to
+        exclude (e.g. ``"heartbeat"``). Used by the redesigned Deliverables
+        feed to keep agent self-status noise out of the main grid.
+        """
         limit = max(1, min(int(limit or 24), 100))
         offset = max(0, int(offset or 0))
 
@@ -323,6 +337,13 @@ class DeliverableService:
         if source_type:
             conditions.append("o.source_type = :source_type")
             params["source_type"] = source_type
+        if source_type_exclude:
+            excluded = [s.strip() for s in source_type_exclude.split(",") if s.strip()]
+            if excluded:
+                placeholders = ", ".join(f":excl_src_{i}" for i in range(len(excluded)))
+                conditions.append(f"o.source_type NOT IN ({placeholders})")
+                for i, s in enumerate(excluded):
+                    params[f"excl_src_{i}"] = s
         if agent_id is not None:
             conditions.append("o.agent_id = :agent_id")
             params["agent_id"] = agent_id
@@ -437,9 +458,9 @@ class DeliverableService:
                     data["content"] = (blog_row[0] if blog_row else "") or ""
                     data["content_truncated"] = False
                 elif data["storage_type"] == "workspace" and data["file_path"]:
-                    # Every workspace file has a streamable content URL (used for
-                    # <img src> on images and Download links on everything else).
-                    data["content_url"] = data.get("preview_url") or _workspace_file_url(
+                    # Always compute content_url fresh — older rows may have
+                    # preview_url pointing at /files/content which is JSON, not binary.
+                    data["content_url"] = _workspace_file_url(
                         self.workspace_id, data["file_path"]
                     )
 
@@ -721,7 +742,11 @@ class DeliverableService:
             "file_name": row.file_name,
             "file_type": row.file_type,
             "file_size_bytes": row.file_size_bytes,
-            "preview_url": row.preview_url,
+            "preview_url": (
+                _workspace_file_url(row.workspace_id, row.file_path)
+                if row.storage_type == "workspace" and row.file_path
+                else row.preview_url
+            ),
             "preview_type": row.preview_type,
             "extra": row.extra or {},
             "status": row.status,

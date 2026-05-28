@@ -5,156 +5,165 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/hooks/use-marketplace-api.ts](frontend/hooks/use-marketplace-api.ts)
-- [orchestrator/api/marketplace.py](orchestrator/api/marketplace.py)
-- [orchestrator/modules/coordination/__init__.py](orchestrator/modules/coordination/__init__.py)
-- [orchestrator/modules/coordination/agent_matcher.py](orchestrator/modules/coordination/agent_matcher.py)
-- [orchestrator/modules/coordination/templates.py](orchestrator/modules/coordination/templates.py)
+- [frontend/components/marketplace/llm-model-card.tsx](frontend/components/marketplace/llm-model-card.tsx)
+- [frontend/components/marketplace/llm-model-detail-modal.tsx](frontend/components/marketplace/llm-model-detail-modal.tsx)
+- [frontend/components/marketplace/marketplace-agents-tab.tsx](frontend/components/marketplace/marketplace-agents-tab.tsx)
+- [frontend/components/marketplace/marketplace-homepage.tsx](frontend/components/marketplace/marketplace-homepage.tsx)
+- [frontend/components/marketplace/marketplace-llms-tab.tsx](frontend/components/marketplace/marketplace-llms-tab.tsx)
+- [frontend/components/marketplace/marketplace-plugin-detail-modal.tsx](frontend/components/marketplace/marketplace-plugin-detail-modal.tsx)
+- [frontend/components/marketplace/marketplace-plugins-tab.tsx](frontend/components/marketplace/marketplace-plugins-tab.tsx)
+- [frontend/components/marketplace/marketplace-skills-tab.tsx](frontend/components/marketplace/marketplace-skills-tab.tsx)
+- [frontend/components/marketplace/marketplace-tools-tab.tsx](frontend/components/marketplace/marketplace-tools-tab.tsx)
+- [frontend/hooks/use-openrouter-api.ts](frontend/hooks/use-openrouter-api.ts)
+- [orchestrator/api/llm_marketplace.py](orchestrator/api/llm_marketplace.py)
+- [orchestrator/api/marketplace_plugins.py](orchestrator/api/marketplace_plugins.py)
+- [orchestrator/api/openrouter_marketplace.py](orchestrator/api/openrouter_marketplace.py)
+- [orchestrator/core/database/migrations/042_openrouter_models_cache.sql](orchestrator/core/database/migrations/042_openrouter_models_cache.sql)
+- [orchestrator/scripts/seed_llm_marketplace.py](orchestrator/scripts/seed_llm_marketplace.py)
 
 </details>
 
 
 
-This document provides a comprehensive reference for the Marketplace API endpoints, which enable browsing, installing, and managing marketplace items including agents, recipes, tools, and LLMs.
+This document provides a technical reference for the Marketplace API endpoints, enabling discovery, installation, and management of community-contributed agents, recipes, tools, plugins, and LLMs.
 
 ---
 
 ## Purpose and Scope
 
-The Marketplace API exposes REST endpoints for:
-- **Browsing marketplace items** by type, category, and search query. [orchestrator/api/marketplace.py:122-132]()
-- **Installing items** to workspaces (agents, recipes, LLMs). [orchestrator/api/marketplace.py:453-460]()
-- **Submitting items** for marketplace approval from a private workspace. [orchestrator/api/marketplace.py:688-698]()
-- **Managing installation statistics** and popularity metrics. [orchestrator/api/marketplace.py:62-68]()
-
-All endpoints are authenticated via hybrid authentication (Clerk JWT + API keys) and enforce workspace isolation for installed instances. [orchestrator/api/marketplace.py:130]()
+The Marketplace API serves as the bridge between global community assets and private workspace instances. It handles:
+- **Discovery**: Filtering and searching across multiple entity types (Agents, Recipes, LLMs, Plugins, Skills). [orchestrator/api/marketplace_plugins.py:169-180](), [orchestrator/api/llm_marketplace.py:212-225]()
+- **Installation (Cloning)**: The process of deep-copying a marketplace template into a workspace-private instance. [orchestrator/api/llm_marketplace.py:265-275]()
+- **Plugin Management**: Browsing and enabling specialized agent capabilities via manifest-driven plugins. [orchestrator/api/marketplace_plugins.py:1-10]()
+- **LLM Selection**: Browsing and comparing 400+ models from providers like OpenAI, Anthropic, and OpenRouter. [orchestrator/api/llm_marketplace.py:1-7]()
 
 ---
 
-## Marketplace API Architecture
+## Marketplace Architecture
 
-The marketplace system uses a **single-table architecture** for core entities like agents and recipes, using an `owner_type` discriminator to separate workspace-private items from global marketplace items. [orchestrator/api/marketplace.py:154-157]()
+The system utilizes an `owner_type` discriminator pattern for items. Global templates are marked as `marketplace`, while private instances are tied to a specific `workspace_id`. [frontend/components/marketplace/marketplace-homepage.tsx:36-51]()
 
-### Code Entity Space Mapping
+### Code Entity Mapping
 
-| System Concept | Code Entity (Backend) | Code Entity (Frontend) |
+| System Concept | Backend Entity | Frontend Entity |
 | :--- | :--- | :--- |
-| **Marketplace Router** | `orchestrator/api/marketplace.py` | `useMarketplaceItems` |
-| **Item Model (Out)** | `MarketplaceItemOut` | `MarketplaceItem` |
-| **Item Detail** | `MarketplaceItemDetail` | `useMarketplaceItem` |
-| **Install Logic** | `install_item` | `useInstallMarketplaceItem` |
+| **LLM Marketplace** | `orchestrator/api/llm_marketplace.py` | `MarketplaceLlmsTab` |
+| **Plugin Registry** | `orchestrator/api/marketplace_plugins.py` | `MarketplacePluginsTab` |
+| **Model Model** | `core.models.core.LLMModel` | `LLMModelCard` |
+| **Plugin Summary** | `PluginSummaryOut` | `PluginSummary` |
+| **Skill Registry** | `core.models.core.Skill` | `MarketplaceSkillsTab` |
 
-**Sources:** [orchestrator/api/marketplace.py:29-30](), [orchestrator/api/marketplace.py:53-88](), [frontend/hooks/use-marketplace-api.ts:21-37](), [frontend/hooks/use-marketplace-api.ts:138-144]()
+**Sources:** [orchestrator/api/llm_marketplace.py:25-30](), [orchestrator/api/marketplace_plugins.py:34-40](), [frontend/components/marketplace/marketplace-llms-tab.tsx:161-170](), [frontend/components/marketplace/marketplace-plugins-tab.tsx:52-73]()
 
-### System Flow Diagram
+### LLM Installation and Cache Flow
+
+The marketplace bridges the gap between the `OpenRouterModelCache` (for browsing) and the `LLMModel` table (for workspace installation).
 
 ```mermaid
-graph TB
-    subgraph "Frontend Components"
-        MA["MarketplaceAgentsTab"]
-        MR["MarketplaceRecipesTab"]
-        MI["MarketplaceItemDetailModal"]
-    end
+sequenceDiagram
+    participant UI as MarketplaceLlmsTab
+    participant API as LLM Marketplace API
+    participant ORC as OpenRouterModelCache
+    participant LM as LLMModel (DB)
+    participant WS as WorkspaceModel
 
-    subgraph "API Layer"
-        BaseAPI["/api/marketplace/items"]
-        InstallAPI["/api/marketplace/items/install"]
-        SubmitAPI["/api/marketplace/submit"]
-    end
+    UI->>API: GET /api/marketplace/llm/models
+    API->>ORC: Query available models
+    ORC-->>API: Return cached model data
+    API-->>UI: Return LLMModelOut list
 
-    subgraph "Logic & Storage"
-        ItemService["Marketplace Logic"]
-        Cloning["Deep Clone Logic"]
-        
-        DB_Agents[("agents table<br/>owner_type=marketplace")]
-        DB_Recipes[("workflow_templates table<br/>owner_type=marketplace")]
-        DB_Workspace[("Workspace Instance<br/>owner_type=workspace")]
-    end
-
-    MA --> BaseAPI
-    MR --> BaseAPI
-    MI --> InstallAPI
-
-    BaseAPI --> ItemService
-    InstallAPI --> Cloning
-    SubmitAPI --> ItemService
-
-    ItemService --> DB_Agents
-    ItemService --> DB_Recipes
-    Cloning --> DB_Workspace
+    UI->>API: POST /models/{model_id}/install
+    API->>API: _get_or_create_from_cache(model_id)
+    Note over API: Check if LLMModel exists
+    API->>LM: Create LLMModel from Cache if missing
+    
+    API->>WS: Upsert WorkspaceModel {is_active: true}
+    API->>LM: Increment install_count
+    API-->>UI: Success (InstallResult)
 ```
-**Sources:** [orchestrator/api/marketplace.py:29-30](), [orchestrator/api/marketplace.py:122-132](), [orchestrator/api/marketplace.py:453-460](), [orchestrator/api/marketplace.py:688-698]()
+**Sources:** [orchestrator/api/llm_marketplace.py:101-143](), [orchestrator/api/llm_marketplace.py:265-285](), [frontend/components/marketplace/llm-model-card.tsx:124-147]()
 
 ---
 
-## Core Marketplace Endpoints
+## API Endpoint Reference
 
-### GET /api/marketplace/items
-List and filter marketplace items across all types. [orchestrator/api/marketplace.py:122-132]()
+### LLM Marketplace
+`GET /api/marketplace/llm/models`
+Lists available LLMs. It checks for available providers based on the workspace's configured API keys (BYOK or Credential Store). [orchestrator/api/llm_marketplace.py:212-225]()
 
-**Query Parameters:**
-- `type`: Filter by item type (`agent`, `recipe`, `skill`, `llm`, `tool`). [orchestrator/api/marketplace.py:124]()
-- `category`: Filter by functional category (e.g., `Development`, `Marketing`). [orchestrator/api/marketplace.py:125]()
-- `search`: Full-text search in name and description. [orchestrator/api/marketplace.py:126]()
-- `featured`: Filter for promoted items. [orchestrator/api/marketplace.py:127]()
+- **Provider Detection**: Uses `_get_available_providers` to only show models the user can actually run. [orchestrator/api/llm_marketplace.py:146-160]()
+- **Installation Status**: Per-request check via `_get_installed_ids` to show "Installed" badges in UI. [orchestrator/api/llm_marketplace.py:199-207]()
 
-**Implementation Details:**
-The endpoint performs queries on `Agent` and `WorkflowRecipe` tables where `owner_type == 'marketplace'`. [orchestrator/api/marketplace.py:154-157]() It supports global pagination across types when no specific type is requested by fetching all matching rows and applying global offset/limit. [orchestrator/api/marketplace.py:148-150]()
+### Marketplace Plugins
+`GET /api/marketplace/plugins`
+Lists approved and active plugins. [orchestrator/api/marketplace_plugins.py:169-180]()
 
-### POST /api/marketplace/items/install
-Install a marketplace item to the current workspace. This triggers a **Cloning Operation**. [orchestrator/api/marketplace.py:453-460]()
+- **Content Extraction**: The backend parses the plugin manifest to extract human-readable lists of skills, commands, and agents using `_extract_content_items`. [orchestrator/api/marketplace_plugins.py:133-162]()
+- **Security Status**: Displays `security_status` (safe, review_required, blocked) derived from automated scanners. [frontend/components/marketplace/marketplace-plugin-detail-modal.tsx:197-228]()
 
-**Installation Logic:**
-1. **Validation**: Checks if the source item exists and has `owner_type == 'marketplace'`. [orchestrator/api/marketplace.py:470-474]()
-2. **Deep Copy**: Creates a new instance of the Agent or Recipe. [orchestrator/api/marketplace.py:488-510]()
-3. **Isolation**: Changes `owner_type` to `workspace` and assigns the current `workspace_id` to the new instance. [orchestrator/api/marketplace.py:511-512]()
-4. **Metrics**: Increments the global `install_count` on the original marketplace record. [orchestrator/api/marketplace.py:534-535]()
+### Skills & Capabilities
+`GET /api/workspaces/{workspace_id}/skills/available`
+Lists skills that can be injected into agents within a specific workspace. [frontend/components/marketplace/marketplace-skills-tab.tsx:82-95]()
 
 ---
 
-## Submission and Approval
+## Technical Implementation Details
 
-Users can submit their own workspace items to the community marketplace. [orchestrator/api/marketplace.py:688-698]()
+### Multi-Tier Search & Filtering
+The Marketplace UI implements complex client-side and server-side filtering:
+1. **Category Normalization**: For agents, legacy categories are mapped to a unified system via `normalizeCategory`. [frontend/components/marketplace/marketplace-agents-tab.tsx:39-45]()
+2. **LLM Comparison**: Users can select multiple models to compare costs (input/output) and capabilities (vision, tools, streaming). [frontend/components/marketplace/marketplace-llms-tab.tsx:183-184](), [frontend/components/marketplace/llm-model-card.tsx:154-155]()
+3. **Tool Pagination**: The tools marketplace handles high-volume data (1000+ apps) with a 40-item pagination strategy. [frontend/components/marketplace/marketplace-tools-tab.tsx:77-79]()
 
-### Submission Flow
-1. **Request**: The user provides the `agent_id` or `recipe_id` from their workspace. [orchestrator/api/marketplace.py:100-107]()
-2. **Cloning**: The system clones the item but sets `is_approved = False` (unless the user is an admin). [orchestrator/api/marketplace.py:726-731]()
-3. **Owner Type**: The new record's `owner_type` is set to `marketplace`. [orchestrator/api/marketplace.py:734]()
-4. **Admin Review**: Admin users can view unapproved items via the `list_items` endpoint. [orchestrator/api/marketplace.py:156-157]()
+### Marketplace Tool Execution Flow
+
+This diagram shows how the frontend components interact with the `apiClient` to manage marketplace assets.
+
+```mermaid
+graph TD
+    subgraph "Frontend Components"
+        Home["MarketplaceHomepage"]
+        LTab["MarketplaceLlmsTab"]
+        PTab["MarketplacePluginsTab"]
+        STab["MarketplaceSkillsTab"]
+    end
+
+    subgraph "API Client (lib/api-client)"
+        GET["apiClient.get()"]
+        POST["apiClient.post()"]
+    end
+
+    subgraph "Backend Routers"
+        LLM_R["api/llm_marketplace.py"]
+        PLG_R["api/marketplace_plugins.py"]
+        WS_R["api/workspaces/{id}/skills"]
+    end
+
+    Home --> LTab
+    Home --> PTab
+    Home --> STab
+
+    LTab -- "/api/marketplace/llm/models" --> GET
+    PTab -- "/api/marketplace/plugins" --> GET
+    STab -- "/available" --> GET
+
+    GET --> LLM_R
+    GET --> PLG_R
+    GET --> WS_R
+
+    LTab -- "/install" --> POST
+    POST --> LLM_R
+```
+**Sources:** [frontend/components/marketplace/marketplace-homepage.tsx:53-74](), [frontend/components/marketplace/marketplace-llms-tab.tsx:217-220](), [frontend/components/marketplace/marketplace-plugins-tab.tsx:160-170](), [frontend/components/marketplace/marketplace-skills-tab.tsx:82-90]()
 
 ---
 
-## Marketplace Data Models
+## Security and Admin Operations
 
-### MarketplaceItemOut
-Standardized response model for marketplace browsing. [orchestrator/api/marketplace.py:53-79]()
+- **Admin Visibility**: Admins can see pending items. For plugins, the frontend merges results from `/api/marketplace/plugins` and `/api/admin/plugins/pending`. [frontend/components/marketplace/marketplace-plugins-tab.tsx:174-180]()
+- **Approval Workflow**: Admins approve items via POST requests (e.g., `/api/admin/plugins/{id}/approve`), which updates the `approval_status` and makes the item public. [frontend/components/marketplace/marketplace-plugin-detail-modal.tsx:160-173]()
+- **Data Isolation**: All workspace-specific operations (like enabling a skill) require a `workspace_id` in the URL or payload, ensuring cross-tenant isolation. [frontend/components/marketplace/marketplace-skills-tab.tsx:102-107]()
 
-| Field | Type | Description |
-| :--- | :--- | :--- |
-| `id` | `int` | Unique identifier. |
-| `type` | `str` | `agent`, `recipe`, `skill`, `llm`, or `tool`. |
-| `install_count`| `int` | Total global installations. |
-| `is_approved` | `bool` | Approval status for public listing. |
-| `metadata` | `dict` | Type-specific configuration (e.g., icons, tags). |
-
-### MarketplaceItemDetail
-Extended model providing dependency information for deep inspection. [orchestrator/api/marketplace.py:82-87]()
-
-| Field | Type | Description |
-| :--- | :--- | :--- |
-| `dependencies` | `dict` | Required tools or skills for the item. |
-| `steps` | `list` | (Recipes only) The workflow step definitions. |
-
----
-
-## Frontend Integration
-
-The frontend utilizes React Query hooks defined in `use-marketplace-api.ts` to interact with these endpoints. [frontend/hooks/use-marketplace-api.ts:8-10]()
-
-- **`useMarketplaceItems`**: Fetches the paginated list of items with automatic caching. [frontend/hooks/use-marketplace-api.ts:97-110]()
-- **`useInstallMarketplaceItem`**: Executes the installation mutation and invalidates the `agents` query cache upon success to reflect the new item in the user's workspace. [frontend/hooks/use-marketplace-api.ts:138-160]()
-- **`useSubmitToMarketplace`**: Handles the submission of a workspace agent to the marketplace with success/error toast notifications. [frontend/hooks/use-marketplace-api.ts:61-92]()
-
-**Sources:** [orchestrator/api/marketplace.py:53-88](), [orchestrator/api/marketplace.py:122-132](), [orchestrator/api/marketplace.py:453-460](), [frontend/hooks/use-marketplace-api.ts:13-18](), [frontend/hooks/use-marketplace-api.ts:61-92]()
+**Sources:** [orchestrator/api/marketplace_plugins.py:30-32](), [frontend/components/marketplace/marketplace-agents-tab.tsx:108-122]()
 
 ---

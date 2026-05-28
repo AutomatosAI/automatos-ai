@@ -233,6 +233,7 @@ _ORCHESTRATOR_DEFAULTS = {
     "communication_style": "balanced",
     "proactive_level": "notify",
     "thinking_level": "medium",
+    "preferred_channel": "in_app",
     "heartbeat": {
         "enabled": False,
         "interval_minutes": 30,
@@ -422,6 +423,11 @@ async def save_orchestrator_settings(
         raise HTTPException(400, f"proactive_level must be one of {_VALID_PROACTIVE_LEVELS}")
     if "thinking_level" in payload and payload["thinking_level"] not in _VALID_THINKING_LEVELS:
         raise HTTPException(400, f"thinking_level must be one of {_VALID_THINKING_LEVELS}")
+    if "preferred_channel" in payload and payload["preferred_channel"] is not None:
+        # Allow stored channel keys (e.g. "channel:<uuid>") in addition to platform names.
+        pc = payload["preferred_channel"]
+        if not isinstance(pc, str):
+            raise HTTPException(400, "preferred_channel must be a string")
 
     # Validate heartbeat
     hb = payload.get("heartbeat")
@@ -455,7 +461,7 @@ async def save_orchestrator_settings(
     existing_orch = dict(settings.get("orchestrator", {}))
 
     # Update top-level orchestrator fields
-    for key in ("personality_mode", "custom_soul", "communication_style", "proactive_level", "thinking_level"):
+    for key in ("personality_mode", "custom_soul", "communication_style", "proactive_level", "thinking_level", "preferred_channel"):
         if key in payload:
             existing_orch[key] = payload[key]
 

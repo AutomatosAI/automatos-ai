@@ -14,6 +14,7 @@ import {
   Zap,
   Eye,
   MessageCircle,
+  CheckSquare,
 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { formatDistanceToNow } from 'date-fns'
@@ -188,7 +189,7 @@ export function ActivityFeed({ period = '1d', openExecution, deepLinkRecipeId }:
       setSelectedItem({
         id: `recipe-${openExecution}`,
         type: 'recipe',
-        name: 'Recipe Execution',
+        name: 'Playbook Execution',
         status: 'completed',
         started_at: null,
         completed_at: null,
@@ -233,6 +234,11 @@ export function ActivityFeed({ period = '1d', openExecution, deepLinkRecipeId }:
     // For chats, navigate to the chat
     if (item.type === 'chat' && item.source_id) {
       router.push(`/chat/${item.source_id}`)
+      return
+    }
+    // For tasks, jump to the kanban board with the task highlighted
+    if (item.type === 'task' && item.source_id) {
+      router.push(`/command-center?tab=board&task=${item.source_id}` as any)
       return
     }
     // Fallback to inline detail for routines
@@ -287,7 +293,7 @@ export function ActivityFeed({ period = '1d', openExecution, deepLinkRecipeId }:
           <Activity className="w-12 h-12 mx-auto mb-3 opacity-30" />
           <p className="font-medium">No activity yet</p>
           <p className="text-sm mt-1 max-w-sm mx-auto">
-            Create a routine or run a recipe to see your workforce in action
+            Create a routine or run a playbook to see your workforce in action
           </p>
         </div>
       </div>
@@ -420,15 +426,21 @@ function FeedRow({ item, index, isNew, onView }: FeedRowProps) {
               </Badge>
             )}
             {isRecipe && (
-              <Badge className="text-xs bg-orange-500/20 text-orange-300 border-orange-500/30 shrink-0">
+              <Badge className="text-xs bg-primary/20 text-primary border-primary/30 shrink-0">
                 <Zap className="w-3 h-3 mr-1" />
-                Recipe
+                Playbook
               </Badge>
             )}
             {item.type === 'mission' && (
               <Badge className="text-xs bg-cyan-500/20 text-cyan-300 border-cyan-500/30 shrink-0">
                 <Rocket className="w-3 h-3 mr-1" />
                 Mission
+              </Badge>
+            )}
+            {item.type === 'task' && (
+              <Badge className="text-xs bg-purple-500/20 text-purple-300 border-purple-500/30 shrink-0">
+                <CheckSquare className="w-3 h-3 mr-1" />
+                Task
               </Badge>
             )}
             <Badge className={cn('text-xs shrink-0', statusBadge.className)}>

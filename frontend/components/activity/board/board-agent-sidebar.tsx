@@ -2,7 +2,7 @@
 
 import { Bot } from 'lucide-react'
 import { PremiumIcon } from '@/components/shared'
-import { useAgents } from '@/hooks/use-agent-api'
+import { useAssignableAgents } from '@/hooks/use-agent-api'
 import { cn } from '@/lib/utils'
 
 interface BoardAgentSidebarProps {
@@ -28,7 +28,7 @@ function getRoleBadge(role: string | undefined): { label: string; color: string 
 }
 
 export function BoardAgentSidebar({ selectedAgentId, onSelectAgent, className }: BoardAgentSidebarProps) {
-  const { data: rawAgents, isLoading } = useAgents()
+  const { data: rawAgents, isLoading } = useAssignableAgents()
   const agents = (rawAgents as any[]) ?? []
 
   return (

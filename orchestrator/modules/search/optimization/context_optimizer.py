@@ -91,7 +91,7 @@ logger = logging.getLogger(__name__)
 # Token counter for OpenAI models
 try:
     encoding = tiktoken.encoding_for_model("gpt-4")
-except:
+except Exception:
     encoding = tiktoken.get_encoding("cl100k_base")
 
 @dataclass

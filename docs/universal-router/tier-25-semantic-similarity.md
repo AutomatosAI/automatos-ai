@@ -5,30 +5,21 @@
 
 The following files were used as context for generating this wiki page:
 
-- [docs/reviews/COMPOSIO-TOOL-REGRESSION-REVIEW.md](docs/reviews/COMPOSIO-TOOL-REGRESSION-REVIEW.md)
 - [orchestrator/alembic/versions/20260224_add_semantic_routing_columns.py](orchestrator/alembic/versions/20260224_add_semantic_routing_columns.py)
 - [orchestrator/alembic/versions/20260225_create_marketplace_widgets.py](orchestrator/alembic/versions/20260225_create_marketplace_widgets.py)
 - [orchestrator/alembic/versions/20260225_create_sdk_api_keys.py](orchestrator/alembic/versions/20260225_create_sdk_api_keys.py)
 - [orchestrator/alembic/versions/20260225_create_widget_installs_reviews.py](orchestrator/alembic/versions/20260225_create_widget_installs_reviews.py)
 - [orchestrator/alembic/versions/20260225_create_workspace_shares.py](orchestrator/alembic/versions/20260225_create_workspace_shares.py)
-- [orchestrator/api/chat.py](orchestrator/api/chat.py)
-- [orchestrator/api/chat_voice.py](orchestrator/api/chat_voice.py)
-- [orchestrator/consumers/chatbot/auto.py](orchestrator/consumers/chatbot/auto.py)
-- [orchestrator/consumers/chatbot/intent_classifier.py](orchestrator/consumers/chatbot/intent_classifier.py)
-- [orchestrator/consumers/chatbot/personality.py](orchestrator/consumers/chatbot/personality.py)
-- [orchestrator/consumers/chatbot/service.py](orchestrator/consumers/chatbot/service.py)
-- [orchestrator/consumers/chatbot/smart_tool_router.py](orchestrator/consumers/chatbot/smart_tool_router.py)
-- [orchestrator/core/llm/manager.py](orchestrator/core/llm/manager.py)
+- [orchestrator/api/routing.py](orchestrator/api/routing.py)
 - [orchestrator/core/routing/engine.py](orchestrator/core/routing/engine.py)
 - [orchestrator/core/routing/semantic_indexer.py](orchestrator/core/routing/semantic_indexer.py)
-- [orchestrator/core/seeds/seed_cto_agent.py](orchestrator/core/seeds/seed_cto_agent.py)
-- [orchestrator/modules/orchestrator/service.py](orchestrator/modules/orchestrator/service.py)
-- [orchestrator/modules/tools/discovery/actions_analytics_enhanced.py](orchestrator/modules/tools/discovery/actions_analytics_enhanced.py)
-- [orchestrator/modules/tools/discovery/handlers_analytics_enhanced.py](orchestrator/modules/tools/discovery/handlers_analytics_enhanced.py)
+- [orchestrator/modules/context/sections/tools.py](orchestrator/modules/context/sections/tools.py)
+- [orchestrator/modules/tools/discovery/action_registry.py](orchestrator/modules/tools/discovery/action_registry.py)
 - [orchestrator/modules/tools/discovery/handlers_search.py](orchestrator/modules/tools/discovery/handlers_search.py)
-- [orchestrator/modules/tools/discovery/platform_actions.py](orchestrator/modules/tools/discovery/platform_actions.py)
-- [orchestrator/modules/tools/discovery/platform_executor.py](orchestrator/modules/tools/discovery/platform_executor.py)
 - [orchestrator/modules/tools/tool_router.py](orchestrator/modules/tools/tool_router.py)
+- [orchestrator/scripts/setup_jira_trigger.py](orchestrator/scripts/setup_jira_trigger.py)
+- [orchestrator/tests/test_action_registry_filtered.py](orchestrator/tests/test_action_registry_filtered.py)
+- [orchestrator/tests/test_tool_router_semantic.py](orchestrator/tests/test_tool_router_semantic.py)
 
 </details>
 
@@ -36,17 +27,17 @@ The following files were used as context for generating this wiki page:
 
 ## Purpose and Scope
 
-Tier 2.5 of the Universal Router implements **agent embedding-based cosine similarity** to intelligently route requests to the most relevant agent. This tier sits between rule-based routing (Tier 2a/2b) and keyword-based intent classification (Tier 2c), providing a balance between speed and reasoning.
+Tier 2.5 of the Universal Router implements **agent embedding-based cosine similarity** to intelligently route requests to the most relevant agent. This tier sits between rule-based routing (Tier 2a/2b) and keyword-based intent classification (Tier 2c), providing a balance between speed and accuracy.
 
-Unlike keyword matching, which relies on exact string patterns, semantic similarity understands the **meaning** of the user's request and compares it against pre-computed vector representations of each agent's capabilities. This enables routing based on conceptual overlap rather than lexical overlap, which is critical for complex multi-agent environments.
+Unlike keyword matching, which relies on exact string patterns, semantic similarity understands the **meaning** of the user's request and compares it against pre-computed vector representations of each agent's capabilities. This enables routing based on conceptual overlap rather than lexical overlap.
 
-**Sources:** [orchestrator/core/routing/engine.py:11-16](), [orchestrator/core/routing/engine.py:123-126]()
+**Sources:** [orchestrator/core/routing/engine.py:11-15](), [orchestrator/core/routing/semantic_indexer.py:2-8]()
 
 ---
 
 ## Routing Tier Sequence
 
-Tier 2.5 executes **after** pattern-based tiers (2a, 2b) but **before** keyword matching (2c) and LLM classification (Tier 3). This positioning is intentional: semantic matching is more nuanced than keyword matching but significantly faster and cheaper than full LLM calls.
+Tier 2.5 executes **after** pattern-based tiers (2a, 2b) but **before** keyword matching (2c) and LLM classification (Tier 3). This positioning is intentional: semantic matching is more nuanced than keyword matching but faster than LLM calls.
 
 ### UniversalRouter Execution Flow
 
@@ -66,10 +57,10 @@ flowchart TD
     T2b -->|"trigger matched"| Decision4["Return RoutingDecision"]
     T2b -->|"no match"| T25["Tier 2.5: Semantic Similarity<br/>(_tier2_5_semantic)"]
     
-    T25 -->|"confidence >= DIRECT_ROUTE"| CachePut["Cache decision"]
+    T25 -->|"confidence >= 0.95"| CachePut["Cache decision"]
     CachePut --> Decision5["Return RoutingDecision"]
     
-    T25 -->|"confidence < DIRECT_ROUTE"| Candidates["Build candidate list"]
+    T25 -->|"confidence < 0.95"| Candidates["Build candidate list"]
     Candidates --> T2c["Tier 2c: Intent Classifier<br/>(keyword match)"]
     
     T2c -->|"intent matched"| Decision6["Return RoutingDecision"]
@@ -77,10 +68,10 @@ flowchart TD
     
     T3 --> Decision7["Return RoutingDecision or None"]
     
-    style T25 fill:#ffffff,stroke:#000000,stroke-width:3px
+    style T25 stroke-width:3px
 ```
 
-**Key design decision:** Tier 2.5 runs *before* Tier 2c because semantic matching understands agent capabilities, while keyword matching is coarse-grained and can be hijacked by overly broad rules. If semantic candidates are found, the system can prioritize them in the Tier 3 LLM fallback.
+**Key design decision:** Tier 2.5 runs *before* Tier 2c because semantic matching understands agent capabilities, while keyword matching is coarse-grained and can be hijacked by overly broad rules. When semantic matching finds strong candidates, those are passed directly to Tier 3 (LLM), bypassing keyword matching entirely [orchestrator/core/routing/engine.py:124-126]().
 
 **Sources:** [orchestrator/core/routing/engine.py:123-147]()
 
@@ -88,54 +79,58 @@ flowchart TD
 
 ## Agent Embedding Generation
 
-Each agent's semantic embedding is a **vector representation** of its capabilities. The system aggregates data from multiple internal models to create a comprehensive profile for indexing.
+Each agent's semantic embedding is a **vector representation** of its capabilities. The `build_agent_semantic_text` function in `semantic_indexer.py` aggregates data from multiple database models to create a comprehensive profile for the vector engine.
 
 ### Embedding Input Sources
-- **Core Identity:** Agent `name`, `description`, and `slug` from the `Agent` model.
-- **Persona:** Instructions and personality traits defined in the agent's configuration.
-- **Tools & Skills:** The descriptions of tools associated with the agent via `AgentAppAssignment` or `SkillLoader`.
-- **Platform Actions:** If the agent has platform management capabilities, those actions (e.g., `platform_list_agents`) are included in the semantic text.
+- **Core Identity:** `Agent.name`, `Agent.description`, `Agent.agent_type`, and `Agent.marketplace_category` [orchestrator/core/routing/semantic_indexer.py:42-48]().
+- **Tags:** User-defined labels in `Agent.tags` [orchestrator/core/routing/semantic_indexer.py:51-53]().
+- **Persona:** Data from `core.models.core.Persona` or `Agent.custom_persona_prompt` [orchestrator/core/routing/semantic_indexer.py:56-67]().
+- **Skills:** Names and descriptions of assigned `Agent.skills` [orchestrator/core/routing/semantic_indexer.py:71-78]().
+- **Tools:** Descriptions of connected apps from `ComposioAppCache` resolved via `AgentAppAssignment` [orchestrator/core/routing/semantic_indexer.py:82-108]().
+- **Plugins:** Descriptions of assigned `MarketplacePlugin` items [orchestrator/core/routing/semantic_indexer.py:112-124]().
 
 Title: Natural Language to Code Entity Mapping (Agent Profile)
 ```mermaid
 flowchart LR
     subgraph "Natural Language Space"
-        UserQuery["'How much have I spent on LLMs?'"]
+        UserQuery["'Help me deploy code'"]
     end
 
     subgraph "Code Entity Space"
         Agent["core.models.core.Agent"]
-        Assignment["core.models.composio_cache.AgentAppAssignment"]
-        Action["modules.tools.discovery.platform_executor.PlatformActionExecutor"]
+        Persona["core.models.core.Persona"]
+        Apps["core.models.composio_cache.AgentAppAssignment"]
+        Plugins["core.models.marketplace_plugins.MarketplacePlugin"]
         
-        Agent --- Assignment
-        Agent --- Action
+        Agent --- Persona
+        Agent --- Apps
+        Agent --- Plugins
     end
 
     UserQuery -.->|"Cosine Similarity"| Agent
-    Agent -->|"Aggregated by"| Indexer["core.routing.semantic_indexer"]
+    Agent -->|"Aggregated by"| Indexer["core.routing.semantic_indexer.build_agent_semantic_text"]
 ```
 
-**Sources:** [orchestrator/core/routing/engine.py:33-40](), [orchestrator/modules/tools/discovery/platform_executor.py:164-172](), [orchestrator/consumers/chatbot/intent_classifier.py:78-107]()
+**Sources:** [orchestrator/core/routing/semantic_indexer.py:33-126]()
 
 ---
 
 ## Similarity Calculation and Thresholds
 
-When a request arrives, Tier 2.5 computes cosine similarity between the **query embedding** and each active agent's embedding in the current workspace. The system utilizes the `LLMManager` to interface with embedding providers (typically OpenAI or OpenRouter).
+When a request arrives, the `UniversalRouter` computes cosine similarity between the query embedding and each active agent's `semantic_embedding`. The system utilizes the `EmbeddingManager` (typically `qwen3-embedding-8b`, 2048-dim) to interface with providers [orchestrator/core/routing/semantic_indexer.py:7-8]().
 
 ### Confidence Thresholds
 
-| Threshold | Type | Behavior |
+| Threshold | Constant | Behavior |
 |-----------|----------|----------|
-| **High (e.g. 0.90+)** | `DIRECT_ROUTE` | Direct routing — return `RoutingDecision` immediately and cache the result for Tier 1. |
-| **Medium (e.g. 0.50+)** | `CANDIDATE` | Included in the candidate list passed to Tier 3 (LLM) to narrow the search space. |
-| **Low** | `REJECT` | Ignored; the agent is considered irrelevant to the user's intent. |
+| **0.95** | `SIMILARITY_DIRECT_ROUTE` | Direct routing — return `RoutingDecision` immediately and cache the result [orchestrator/core/routing/semantic_indexer.py:24](). |
+| **0.40** | `SIMILARITY_CANDIDATE_MIN` | Minimum score required for an agent to be included in the candidate list for Tier 3 [orchestrator/core/routing/semantic_indexer.py:25](). |
+| **5** | `MAX_LLM_CANDIDATES` | Maximum number of agents passed to Tier 3 LLM classification [orchestrator/core/routing/semantic_indexer.py:26](). |
 
 Title: Semantic Matching Process
 ```mermaid
 flowchart TB
-    Query["RequestEnvelope.content"] --> Embed["llm_manager.generate_embeddings"]
+    Query["RequestEnvelope.content"] --> Embed["embedding_manager.generate_embedding"]
     Embed --> QueryVec["Query Vector"]
     
     subgraph "Workspace Agents"
@@ -149,50 +144,50 @@ flowchart TB
     
     Sim --> Scores["Ranked List"]
     
-    Scores --> Direct{"Top Score >= Threshold?"}
+    Scores --> Direct{"Top Score >= 0.95?"}
     Direct -->|"Yes"| Route["Direct RoutingDecision"]
-    Direct -->|"No"| Candidates["Pass candidates to Tier 3"]
+    Direct -->|"No"| Candidates["Pass Top 5 to Tier 3"]
 ```
 
-**Sources:** [orchestrator/core/routing/engine.py:129-136](), [orchestrator/core/llm/manager.py:30-41]()
+**Sources:** [orchestrator/core/routing/engine.py:129-137](), [orchestrator/core/routing/semantic_indexer.py:24-26]()
 
 ---
 
 ## Implementation Details
 
-### Intent Integration
-Tier 2.5 is closely coupled with the `SmartIntentClassifier`. If the classifier detects a specific intent (e.g., `DATA_QUERY`), the semantic router prioritizes agents whose toolsets match that intent (e.g., agents with `platform_get_llm_usage` or `query_database`).
-
-### Tool Looping & Semantic Deduplication
-Semantic similarity is also used in the `ToolExecutionTracker` within the `ChatService`. It prevents infinite tool loops by checking if a new tool query is semantically similar to a previous one in the same conversation turn using `_queries_are_similar`.
+### Incremental Reindexing
+The system uses a `semantic_text_hash` stored in the `agents` table to avoid redundant embedding calls [orchestrator/alembic/versions/20260224_add_semantic_routing_columns.py:38](). The hash includes a model identifier (retrieved via `_get_embedding_model_id`) to ensure that if the embedding provider or model changes, all agents are automatically re-embedded [orchestrator/core/routing/semantic_indexer.py:143-152]().
 
 ### Candidate Shortlisting
-If no agent meets the direct routing threshold, Tier 2.5 returns a list of candidates. This list is then used in Tier 3 (LLM Classification) to provide the LLM with "hints," significantly improving the accuracy of the final routing decision compared to a "blind" classification.
+If no agent meets the `SIMILARITY_DIRECT_ROUTE` threshold, Tier 2.5 returns a list of `semantic_candidates` [orchestrator/core/routing/engine.py:129](). This list is then used in Tier 3 (`_classify_with_llm`) to provide the LLM with "hints," significantly improving the accuracy of the final routing decision by narrowing the search space to the top 5 most semantically relevant agents [orchestrator/core/routing/engine.py:149]().
 
-**Sources:** [orchestrator/consumers/chatbot/service.py:57-67](), [orchestrator/consumers/chatbot/service.py:78-85](), [orchestrator/consumers/chatbot/intent_classifier.py:23-34](), [orchestrator/core/routing/engine.py:149-158]()
+### Platform Action Narrowing (PRD-138)
+The semantic logic extends to tool execution. In `ToolsSection`, if `SEMANTIC_TOOL_ROUTING` is enabled, the `platform_execute` tool's action enum is narrowed using `_rank_actions_for_dispatcher` [orchestrator/modules/context/sections/tools.py:118-121](). This uses the `ActionSemanticIndex` to rank the top-K platform actions (default 15) based on the user query [orchestrator/modules/tools/tool_router.py:100-102]().
+
+**Sources:** [orchestrator/core/routing/engine.py:129-149](), [orchestrator/core/routing/semantic_indexer.py:159-187](), [orchestrator/modules/tools/tool_router.py:130-154]()
 
 ---
 
 ## Integration with Chat API
 
-The routing decision (including semantic confidence) is processed within the `api/chat.py` flow. Before streaming a response, the `UniversalRouter` is called to resolve the target agent.
+The routing decision (including semantic confidence) is processed within the chat pipeline. The `UniversalRouter` is called early in the request lifecycle to determine which agent or workflow should handle the message.
 
 Title: Chat to Routing Integration
 ```mermaid
 sequenceDiagram
-    participant UI as "Chat UI"
+    participant UI as "frontend/lib/chat/hooks.ts"
     participant API as "orchestrator/api/chat.py"
     participant Router as "core.routing.engine.UniversalRouter"
-    participant LLM as "core.llm.manager.LLMManager"
+    participant Embed as "core.llm.embedding_manager.EmbeddingManager"
     
     UI->>API: POST /api/chat
     API->>Router: route(RequestEnvelope)
-    Router->>LLM: generate_embeddings(content)
-    LLM-->>Router: vector
+    Router->>Embed: generate_embedding(query)
+    Embed-->>Router: vector
     Router-->>API: RoutingDecision (Tier 2.5)
-    API-->>UI: StreamingResponse with Agent Context
+    API-->>UI: Response + x-routing-confidence header
 ```
 
-**Sources:** [orchestrator/api/chat.py:22-24](), [orchestrator/api/chat.py:103-107](), [orchestrator/core/llm/manager.py:86-117]()
+**Sources:** [orchestrator/core/routing/engine.py:79-80](), [orchestrator/core/routing/engine.py:129-137](), [orchestrator/modules/context/sections/tools.py:185-190]()
 
 ---

@@ -20,10 +20,10 @@ import asyncio
 import logging
 import re
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
-from sqlalchemy import and_
+from sqlalchemy import and_, text
 from sqlalchemy.orm import Session
 
 from config import COMPLEXITY_TOKEN_BUDGET, Config, config
@@ -80,6 +80,8 @@ _POWER_MODE_CAPS: Dict[str, Dict[str, Any]] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Synthesis model override (Fix 1)
 # ---------------------------------------------------------------------------
 # PRD-128: Unified notification dispatch helpers
 # ---------------------------------------------------------------------------
@@ -637,14 +639,19 @@ class CoordinatorService:
             return None
 
     async def _cleanup_terminal_fields(self, db: Session) -> None:
-        """Destroy fields for missions that have ended."""
+        """Destroy fields for missions that have ended.
+
+        Each field is its own Qdrant collection — Qdrant loads all collections
+        into memory on startup, so a backlog OOM-crashes Qdrant. Throttle
+        is intentionally generous to drain the backlog quickly.
+        """
         terminal_with_fields = (
             db.query(OrchestrationRun)
             .filter(
                 OrchestrationRun.state.in_([s.value for s in TERMINAL_RUN_STATES]),
                 OrchestrationRun.config["field_id"].astext.isnot(None),
             )
-            .limit(5)  # Throttle — max 5 cleanups per tick
+            .limit(50)
             .all()
         )
         for run in terminal_with_fields:
@@ -657,6 +664,96 @@ class CoordinatorService:
             updated_config.pop("field_id", None)
             run.config = updated_config
             db.flush()
+
+    async def _cleanup_orphan_field_data(self, db: Session) -> None:
+        """Delete field memory points whose ``field_id`` has no OrchestrationRun.
+
+        Fields now live in a single shared Qdrant collection (``field_memory``)
+        with ``field_id`` as a payload filter. Orphans appear when a run row
+        is purged before its field was destroyed. One delete-by-filter call
+        per orphan id is atomic and cheap.
+
+        Also sweeps any leftover legacy per-mission ``field_<uuid>``
+        collections from the pre-refactor layout. Safe to call repeatedly;
+        becomes a no-op once they're all gone.
+        """
+        field = self._get_field()
+        if not field:
+            return
+
+        # Resolve the inner adapter through the instrumentation wrapper.
+        inner = getattr(field, "_inner", field)
+        client = getattr(inner, "_client", None)
+        if client is None:
+            return
+
+        try:
+            from modules.context.adapters.vector_field import (
+                SHARED_COLLECTION,
+                VectorFieldSharedContext,
+            )
+        except Exception:
+            return
+
+        if not isinstance(inner, VectorFieldSharedContext):
+            return
+
+        referenced_ids = {
+            row[0] for row in db.execute(
+                text(
+                    "SELECT config->>'field_id' FROM orchestration_runs "
+                    "WHERE config->>'field_id' IS NOT NULL"
+                )
+            ).fetchall()
+            if row[0]
+        }
+
+        # --- Pass 1: orphan points in the shared collection ---
+        try:
+            scrolled, _ = await client.scroll(
+                collection_name=SHARED_COLLECTION,
+                limit=10000,
+                with_payload=["field_id"],
+                with_vectors=False,
+            )
+            present_ids = {
+                p.payload.get("field_id") for p in scrolled
+                if p.payload and p.payload.get("field_id")
+            }
+            orphan_ids = present_ids - referenced_ids
+            for fid in orphan_ids:
+                try:
+                    await inner.destroy_context(fid)
+                except Exception:
+                    logger.warning(
+                        "[Coordinator] Failed to destroy orphan field %s",
+                        fid, exc_info=True,
+                    )
+            if orphan_ids:
+                logger.info(
+                    "[Coordinator] Orphan cleanup: removed points for %d field_ids",
+                    len(orphan_ids),
+                )
+        except Exception:
+            logger.debug("[Coordinator] orphan-point sweep skipped", exc_info=True)
+
+        # --- Pass 2: legacy per-mission collections (pre-refactor) ---
+        try:
+            collections_resp = await client.get_collections()
+            legacy = [
+                c.name for c in collections_resp.collections
+                if c.name.startswith("field_") and c.name != SHARED_COLLECTION
+            ]
+            for name in legacy[:20]:  # throttle: 20 per tick
+                try:
+                    await client.delete_collection(name)
+                    logger.info("[Coordinator] Dropped legacy field collection %s", name)
+                except Exception:
+                    logger.warning(
+                        "[Coordinator] Failed to drop legacy %s", name, exc_info=True,
+                    )
+        except Exception:
+            logger.debug("[Coordinator] legacy-collection sweep skipped", exc_info=True)
 
     async def _save_pending_output_documents(self, db: Session) -> None:
         """Save output documents for completed missions that don't have one yet."""
@@ -774,6 +871,15 @@ class CoordinatorService:
                 await self._cleanup_terminal_fields(db)
                 db.commit()  # Persist field_id removal to stop destroy loop
 
+                # --- PRD-108: Drop orphan field data (no mission row) ---
+                # Atomic delete-by-filter inside the shared field_memory
+                # collection; also sweeps any leftover legacy per-mission
+                # collections from the pre-refactor layout.
+                try:
+                    await self._cleanup_orphan_field_data(db)
+                except Exception:
+                    logger.warning("[Coordinator] Orphan field cleanup failed", exc_info=True)
+
                 # --- Save output docs for completed missions ---
                 await self._save_pending_output_documents(db)
                 db.commit()
@@ -803,7 +909,31 @@ class CoordinatorService:
         workspace_id = run.workspace_id
 
         # --- PRD-108: Ensure field exists (lazy create for manual-approve path) ---
-        if not (run.config or {}).get("field_id"):
+        # Validates the underlying Qdrant collection still exists — a stale
+        # field_id can survive in run.config if it was inherited from a parent
+        # mission whose collection was destroyed by _cleanup_terminal_fields.
+        existing_field_id = (run.config or {}).get("field_id")
+        needs_field = not existing_field_id
+
+        if existing_field_id and not needs_field:
+            field = self._get_field()
+            if field and hasattr(field, "context_exists"):
+                try:
+                    if not await field.context_exists(existing_field_id):
+                        logger.warning(
+                            "[PRD-108] Stale field_id %s on mission %s — collection missing, recreating",
+                            existing_field_id, run.id,
+                        )
+                        # Clear the stale id so _create_mission_field assigns a fresh one
+                        updated_config = {**(run.config or {})}
+                        updated_config.pop("field_id", None)
+                        run.config = updated_config
+                        db.flush()
+                        needs_field = True
+                except Exception as e:
+                    logger.debug("[PRD-108] field exists-check raised: %s", e)
+
+        if needs_field:
             field_id = await self._create_mission_field(db, run)
             # Seed field with uploaded document references
             if field_id:
@@ -887,7 +1017,8 @@ class CoordinatorService:
                 agent_coros = [
                     self._run_agent_io(p["factory"], p["agent_id"], p["prompt"],
                                        p["task"], p["attachment_ids"],
-                                       run_config=p.get("run_config"))
+                                       run_config=p.get("run_config"),
+                                       agent_runtime=p.get("agent_runtime"))
                     for p in prepared
                 ]
                 results = await asyncio.gather(*agent_coros, return_exceptions=True)
@@ -1214,9 +1345,18 @@ class CoordinatorService:
                 mode_caps["max_tokens"],
             )
 
+        # Model selection is driven by power_mode + the agent's own configured
+        # model. There is intentionally NO synthesis-specific override:
+        #   light    → force_llm_tier=system_llm   (gemini-2.5-flash)
+        #   standard → agent's own model           (e.g. DeepSeek for QUILL)
+        #   max      → force_llm_tier=orchestrator_llm (Auto's premium model)
+        # System LLM is reserved for codegraph / Mem0 / planner — never
+        # auto-applied to mission tasks just because they're synthesis-typed.
+
         return {
             "task": task,
             "agent_id": agent_id,
+            "agent_runtime": agent_runtime,
             "prompt": prompt,
             "factory": factory,
             "attachment_ids": task_attachment_ids,
@@ -1231,6 +1371,7 @@ class CoordinatorService:
         task: Any,
         attachment_ids: List[str],
         run_config: Optional[Dict[str, Any]] = None,
+        agent_runtime: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """Execute agent I/O — safe to run concurrently via asyncio.gather().
 
@@ -1240,10 +1381,14 @@ class CoordinatorService:
         mode_caps = _POWER_MODE_CAPS.get(power_mode, _POWER_MODE_CAPS["standard"])
         max_iters = mode_caps["max_tool_iterations"]
 
+        # Pass runtime directly when we have it so the factory cache can't
+        # swap in a stale cached runtime under us mid-flight.
+        agent_arg: Any = agent_runtime if agent_runtime is not None else agent_id
+
         try:
             result = await asyncio.wait_for(
                 factory.execute_with_prompt(
-                    agent=agent_id,
+                    agent=agent_arg,
                     prompt=prompt,
                     max_retries=0,
                     max_tool_iterations=max_iters,

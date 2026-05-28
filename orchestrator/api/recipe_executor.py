@@ -83,12 +83,169 @@ async def _dispatch_playbook_event(
 
 
 # ---------------------------------------------------------------------------
+# Auto-report on playbook completion (mirrors heartbeat & task auto-reports)
+# ---------------------------------------------------------------------------
+async def _auto_create_playbook_report(
+    *,
+    db: Session,
+    workspace_id: str,
+    recipe,
+    recipe_execution_id: str,
+    execution,
+    step_results: List[dict],
+    total_duration_ms: int,
+    total_tokens: int,
+    final_output: Any,
+    success: bool,
+) -> None:
+    """Persist an agent_reports row summarising a playbook execution.
+
+    File path: reports/playbook-{slug}/{date}_{exec_id}.md
+    Always non-blocking — never raises.
+    """
+    try:
+        from services.report_service import ReportService, compute_execution_metrics
+
+        recipe_name = getattr(recipe, "name", None) or f"playbook-{recipe.id}"
+        report_agent_name = f"playbook-{recipe_name}"
+
+        # Roll up cost/model/duration across every LLM call in this execution
+        exec_metrics = compute_execution_metrics(
+            db,
+            workspace_id,
+            execution_id=recipe_execution_id,
+            started_at=getattr(execution, "started_at", None),
+            completed_at=getattr(execution, "completed_at", None),
+            extra={
+                "recipe_id": getattr(recipe, "id", None),
+                "recipe_name": recipe_name,
+                "recipe_execution_id": recipe_execution_id,
+                "steps_count": len(step_results),
+                "trigger": "playbook",
+            },
+        )
+        # Honour totals computed by the executor when llm_usage rollup is sparse
+        if not exec_metrics.get("tokens_used"):
+            exec_metrics["tokens_used"] = total_tokens
+        if exec_metrics.get("duration_ms") is None:
+            exec_metrics["duration_ms"] = total_duration_ms
+
+        report_status = "ok" if success else ("warning" if step_results else "critical")
+        any_failed = any(
+            s.get("status") in ("failed", "error") for s in step_results
+        )
+        if any_failed and report_status == "ok":
+            report_status = "warning"
+
+        # Markdown body
+        lines = [
+            f"# {recipe_name} — Playbook Report",
+            f"**Execution:** {recipe_execution_id}",
+            f"**Status:** {'completed' if success else 'failed'}",
+            "",
+            "## Execution Metrics",
+            f"- Primary model: {exec_metrics.get('model') or 'unknown'}",
+            f"- LLM calls: {exec_metrics.get('llm_calls', 0)}",
+            f"- Tokens (in/out/total): "
+            f"{exec_metrics.get('input_tokens', 0)} / "
+            f"{exec_metrics.get('output_tokens', 0)} / "
+            f"{exec_metrics.get('tokens_used', 0)}",
+            f"- Cost: ${exec_metrics.get('cost_usd', 0):.4f}",
+            f"- Duration: {exec_metrics.get('duration_ms', 0)} ms",
+            f"- Steps: {len(step_results)}",
+            "",
+            "## Steps",
+        ]
+        for step in step_results:
+            order = step.get("order") or step.get("step_order") or "?"
+            name = step.get("name") or step.get("agent_name") or "(unnamed)"
+            status = step.get("status", "?")
+            duration = step.get("duration_ms")
+            tokens = step.get("tokens_used", 0)
+            duration_str = f"{duration} ms" if duration is not None else "n/a"
+            lines.append(
+                f"- **#{order} {name}** — {status} · {tokens} tokens · {duration_str}"
+            )
+
+        models_used = exec_metrics.get("models_used") or []
+        if models_used:
+            lines.append("")
+            lines.append("## Models Used")
+            for m in models_used:
+                lines.append(f"- {m}")
+
+        if final_output:
+            preview = str(final_output)[:500]
+            if len(str(final_output)) > 500:
+                preview += "…"
+            lines.append("")
+            lines.append("## Final Output (preview)")
+            lines.append("```")
+            lines.append(preview)
+            lines.append("```")
+
+        content = "\n".join(lines)
+
+        first_step_summary = next(
+            (s.get("output_preview") for s in step_results if s.get("output_preview")),
+            None,
+        )
+        summary = (
+            f"{len(step_results)} steps · "
+            f"${exec_metrics.get('cost_usd', 0):.4f} · "
+            f"{exec_metrics.get('duration_ms', 0)} ms"
+        )
+        if first_step_summary:
+            summary = f"{summary} · {str(first_step_summary)[:100]}"
+
+        svc = ReportService(db, workspace_id)
+        report_result = await svc.create_report(
+            agent_id=None,
+            agent_name=report_agent_name,
+            title=f"Playbook: {recipe_name}",
+            content=content,
+            report_type="summary",
+            status=report_status,
+            summary=summary,
+            metrics=exec_metrics,
+        )
+        if not report_result.get("success"):
+            logger.warning(
+                "[recipe_direct] Playbook auto-report DB insert failed for %s: %s",
+                recipe_execution_id, report_result.get("error"),
+            )
+    except Exception:
+        logger.error(
+            "[recipe_direct] _auto_create_playbook_report raised for %s",
+            recipe_execution_id,
+            exc_info=True,
+        )
+
+
+# ---------------------------------------------------------------------------
 # Per-workspace execution semaphore — allows bounded concurrent recipe
 # execution within a workspace.  Keys are workspace_id strings; values are
 # asyncio.Semaphores created on first access.  The dict itself is
 # process-global but safe because asyncio is single-threaded.
 # ---------------------------------------------------------------------------
 _workspace_semaphores: Dict[str, asyncio.Semaphore] = {}
+
+# Process-local registry of currently running execution tasks. Lets the cancel
+# endpoint signal the in-flight LLM call to abort immediately (httpx propagates
+# CancelledError, which closes the TCP connection mid-request — no more cost
+# burn). Cross-replica cancels are handled by the DB-poll fallback inside
+# _execute_step.
+_running_executions: Dict[str, asyncio.Task] = {}
+
+
+def request_execution_cancel(execution_id: str) -> bool:
+    """Signal a cancel to a locally-running execution. Returns True if the
+    task was found and cancelled on this replica, False otherwise."""
+    task = _running_executions.get(execution_id)
+    if task is None or task.done():
+        return False
+    task.cancel()
+    return True
 
 
 def _get_workspace_semaphore(workspace_id: str, max_concurrent: int = 3) -> asyncio.Semaphore:
@@ -120,6 +277,7 @@ async def _execute_step(
     max_iterations: Optional[int] = None,
     recipe_name: str = "",
     total_steps: int = 1,
+    recipe_execution_id: Optional[str] = None,
 ) -> dict:
     """
     Execute a single recipe step using the chatbot's exact component path.
@@ -151,6 +309,8 @@ async def _execute_step(
     from modules.tools.tool_router import get_tool_router
     from modules.tools.services.composio_hint_service import ComposioHintService
     from modules.tools.services.composio_tool_service import ComposioToolService
+    from core.composio.tool_executor import resolve_file_uploads
+    from core.composio.client import get_composio_client
     from modules.agents.factory.agent_factory import AgentFactory
     from modules.context import ContextService, ContextMode
     from modules.tools.builtin.scratchpad_tool import (
@@ -193,21 +353,13 @@ async def _execute_step(
         agent=agent,
         workspace_id=str(workspace_id),
         recipe_step=recipe_step_dict,
+        query=prompt_for_hints or clean_prompt,
+        input_data=input_data,
+        recipe_memories=recipe_memories if step_order == 1 else None,
     )
 
     messages = [{"role": "system", "content": context.system_prompt}]
     base_tools = context.tools
-
-    # 1b. Recipe step scope — prevent agent from wandering into other steps' tasks
-    scope_instruction = (
-        f"## Recipe Step Scope\n"
-        f"You are executing step {step_order} of a multi-step recipe. "
-        f"Focus ONLY on the task described in the user message below. "
-        f"Do NOT perform tasks that belong to other steps (e.g., sending notifications, "
-        f"creating PRs, or any action not explicitly required by YOUR task). "
-        f"Use ONLY the external app actions that are directly relevant to your specific task."
-    )
-    messages.append({"role": "system", "content": scope_instruction})
 
     # 2. Composio tools — SDK semantic search for per-action function-calling tools.
     #    Falls back to hint-based composio_execute if SDK search returns empty.
@@ -251,34 +403,7 @@ async def _execute_step(
         except Exception as exc:
             logger.warning(f"[recipe_step] Hint injection failed: {exc}", exc_info=True)
 
-    # 3a. Mem0 memories (first step only)
-    if recipe_memories and step_order == 1:
-        summary = recipe_memories.get("summary", "")
-        if summary and summary != "No relevant memories found":
-            messages.append({
-                "role": "system",
-                "content": (
-                    "## Learnings from Previous Runs\n"
-                    f"{summary}"
-                ),
-            })
-            logger.info("[recipe_step] Injected %d Mem0 memories into step 1", recipe_memories.get("total_memories", 0))
-
-    # 3b. Original trigger/input data as persistent context
-    if input_data:
-        input_content = input_data.get("content", "")
-        input_meta = {k: v for k, v in input_data.items() if k not in ("content", "metadata")}
-        if input_content or input_meta:
-            ctx_parts = ["=" * 40, "ORIGINAL REQUEST / TRIGGER DATA", "=" * 40]
-            if input_content:
-                ctx_parts.append(input_content)
-            if input_meta:
-                ctx_parts.append("\nMetadata:")
-                for mk, mv in input_meta.items():
-                    ctx_parts.append(f"  {mk}: {mv}")
-            messages.append({"role": "system", "content": "\n".join(ctx_parts)})
-
-    # 3c. Scratchpad context — now handled via recipe_step.previous_output
+    # 3. Scratchpad context — now handled via recipe_step.previous_output
     #    in ContextService, but we still inject raw scratchpad for steps > 1
     #    in case the RecipeContextSection truncated it.
 
@@ -318,6 +443,8 @@ async def _execute_step(
     llm = agent_runtime.llm_manager
     if hasattr(llm, '_tracking_ctx'):
         llm._tracking_ctx["request_type"] = "recipe"
+        if recipe_execution_id:
+            llm._tracking_ctx["execution_id"] = recipe_execution_id
 
     # 7. Generate + tool loop
     tool_router = get_tool_router()
@@ -326,7 +453,73 @@ async def _execute_step(
     response = None
 
     for iteration in range(max_iterations):
+        if recipe_execution_id:
+            db.expire_all()
+            cancel_status = db.query(RecipeExecution.status).filter(
+                RecipeExecution.execution_id == recipe_execution_id
+            ).scalar()
+            if cancel_status == "cancelled":
+                logger.info(
+                    "[recipe_direct] Step %d cancelled mid-flight at iteration %d (execution=%s)",
+                    step_order, iteration, recipe_execution_id,
+                )
+                return {
+                    "status": "cancelled",
+                    "result": "Cancelled by user",
+                    "error": "Cancelled by user",
+                    "execution": {"tool_calls": all_tool_calls, "messages": messages, "tokens_used": 0},
+                }
+
         response = await llm.generate_response(messages=messages, tools=tools)
+
+        # Detect empty-choices responses (OpenRouter intermittency): the call
+        # returns successfully but with no content AND no tool_calls. Without
+        # retry, the tool loop below would treat empty as "LLM done" and the
+        # step would finish without ever emitting its final tool call (e.g.
+        # platform_submit_report). Retry with backoff, then swap to a fallback
+        # model if the agent's primary model is in a sustained empty-choices
+        # window (e.g. Gemini 2.5 Pro degradation).
+        if response and not response.tool_calls and not (response.content or "").strip():
+            from config import config as _app_config
+            empty_retry_budget = _app_config.RECIPE_EMPTY_COMPLETION_RETRY_BUDGET
+            for retry_idx in range(empty_retry_budget):
+                backoff_s = min(0.5 * (2 ** retry_idx), 4.0)
+                logger.warning(
+                    "[recipe_direct] Empty completion at step %d iter %d (retry %d/%d, backoff=%.1fs) "
+                    "— content+tool_calls both empty, retrying",
+                    step_order, iteration, retry_idx + 1, empty_retry_budget, backoff_s,
+                )
+                await asyncio.sleep(backoff_s)
+                response = await llm.generate_response(messages=messages, tools=tools)
+                if response and (response.tool_calls or (response.content or "").strip()):
+                    break  # got a real response
+
+            # If still empty after same-model retries, swap to fallback model
+            # for one final attempt. This survives sustained per-model provider
+            # degradation that affects the primary model only.
+            if response and not response.tool_calls and not (response.content or "").strip():
+                fallback_model = _app_config.RECIPE_EMPTY_COMPLETION_FALLBACK_MODEL
+                if fallback_model:
+                    logger.warning(
+                        "[recipe_direct] Empty completion persists at step %d iter %d after %d retries "
+                        "— swapping to fallback model %s",
+                        step_order, iteration, empty_retry_budget, fallback_model,
+                    )
+                    try:
+                        from core.llm.manager import create_llm_manager
+                        fallback_llm = create_llm_manager(
+                            service_name="orchestrator",
+                            model=fallback_model,
+                            request_type="recipe_fallback",
+                        )
+                        if recipe_execution_id and hasattr(fallback_llm, "_tracking_ctx"):
+                            fallback_llm._tracking_ctx["execution_id"] = recipe_execution_id
+                        response = await fallback_llm.generate_response(messages=messages, tools=tools)
+                    except Exception as fallback_exc:
+                        logger.error(
+                            "[recipe_direct] Fallback model %s also failed at step %d iter %d: %s",
+                            fallback_model, step_order, iteration, fallback_exc,
+                        )
 
         if not response or not response.tool_calls:
             break  # LLM done, has final text
@@ -345,7 +538,14 @@ async def _execute_step(
 
             try:
                 tool_args = json.loads(tool_args_raw) if isinstance(tool_args_raw, str) else (tool_args_raw or {})
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as jde:
+                logger.warning(
+                    "[recipe_direct] JSON decode failed for %s args (len=%d, first 200=%r): %s",
+                    tool_name,
+                    len(tool_args_raw) if isinstance(tool_args_raw, str) else 0,
+                    tool_args_raw[:200] if isinstance(tool_args_raw, str) else tool_args_raw,
+                    jde,
+                )
                 tool_args = {}
 
             # Handle scratchpad tools inline (no tool_router needed)
@@ -404,8 +604,54 @@ async def _execute_step(
                     exec_ms = 0
                     logger.info(f"[recipe_step] Composio dedup hit: {tool_name} (skipped repeat call)")
                 else:
+                    _temp_files: list = []
                     try:
                         t0 = time.time()
+
+                        # --- WORKAROUND: Composio LinkedIn image upload is broken (#3094, #3113) ---
+                        # Remove when Composio fixes — see linkedin_image_workaround.py
+                        _tool_upper = tool_name.upper()
+                        if _tool_upper == "LINKEDIN_CREATE_LINKED_IN_POST":
+                            from core.composio.linkedin_image_workaround import has_image_params, execute_linkedin_image_post
+                            if has_image_params(tool_args):
+                                logger.info("[LinkedInWorkaround] Intercepting %s in recipe", _tool_upper)
+                                try:
+                                    exec_result = await execute_linkedin_image_post(
+                                        params=tool_args,
+                                        workspace_id=workspace_id,
+                                        entity_id=composio_result.entity_id,
+                                        composio_client=get_composio_client(),
+                                    )
+                                except Exception as wa_exc:
+                                    logger.error("[LinkedInWorkaround] Exception: %s", wa_exc, exc_info=True)
+                                    exec_result = {"success": False, "data": None, "error": str(wa_exc)}
+                                exec_ms = int((time.time() - t0) * 1000)
+                                success = exec_result.get("success", False)
+                                data = exec_result.get("data")
+                                error = exec_result.get("error")
+                                if success:
+                                    result_text = json.dumps(data, default=str) if isinstance(data, (dict, list)) else str(data or "")
+                                    logger.info(f"[recipe_step] LinkedIn workaround OK in {exec_ms}ms")
+                                else:
+                                    result_text = f"Error executing {tool_name}: {error or 'unknown error'}"
+                                    logger.warning(f"[recipe_step] LinkedIn workaround failed: {error}")
+                                _composio_call_cache[_dedup_key] = result_text
+                                all_tool_calls.append({
+                                    "action": tool_name, "params": tool_args,
+                                    "result": result_text[:8000], "duration_ms": exec_ms,
+                                    "composio_direct": True,
+                                })
+                                messages.append({
+                                    "role": "tool", "tool_call_id": tool_id,
+                                    "content": result_text[:20000],
+                                })
+                                continue
+
+                        tool_args, _temp_files = await resolve_file_uploads(
+                            action=tool_name,
+                            params=tool_args,
+                            workspace_id=workspace_id,
+                        )
                         exec_result = tool_service.execute_action(
                             action_name=tool_name,
                             params=tool_args,
@@ -427,6 +673,12 @@ async def _execute_step(
                         exec_ms = int((time.time() - t0) * 1000)
                         result_text = f"Error executing {tool_name}: {exc}"
                         logger.error(f"[recipe_step] Composio direct exception: {tool_name}: {exc}", exc_info=True)
+                    finally:
+                        for tf in _temp_files:
+                            try:
+                                tf.unlink(missing_ok=True)
+                            except Exception:
+                                pass
                     _composio_call_cache[_dedup_key] = result_text
 
                 all_tool_calls.append({
@@ -685,6 +937,11 @@ async def execute_recipe_direct(
             "[recipe_direct] QUEUED — waiting for workspace semaphore %s (execution=%s, recipe=%s)",
             workspace_id, recipe_execution_id, recipe_id,
         )
+
+    current_task = asyncio.current_task()
+    if current_task is not None:
+        _running_executions[recipe_execution_id] = current_task
+
     async with semaphore:
         logger.info(
             "[recipe_direct] Semaphore ACQUIRED for %s (execution=%s, recipe=%s, was_waiting=%s)",
@@ -694,11 +951,49 @@ async def execute_recipe_direct(
             await _execute_recipe_inner(
                 recipe_execution_id, recipe_id, workspace_id, input_data, db_url,
             )
+        except asyncio.CancelledError:
+            logger.info(
+                "[recipe_direct] CancelledError received — execution %s aborted mid-flight",
+                recipe_execution_id,
+            )
+            await _mark_execution_cancelled(recipe_execution_id, db_url)
+            # Do not re-raise — we've handled it cleanly. Task can complete.
         finally:
+            _running_executions.pop(recipe_execution_id, None)
             logger.info(
                 "[recipe_direct] Semaphore RELEASED for %s (execution=%s)",
                 workspace_id, recipe_execution_id,
             )
+
+
+async def _mark_execution_cancelled(execution_id: str, db_url: Optional[str]) -> None:
+    """Ensure the execution row reflects cancellation. The cancel endpoint
+    already writes status='cancelled', but if the kill came via task.cancel()
+    without going through the endpoint (or the endpoint hasn't committed yet),
+    we patch it here defensively."""
+    try:
+        if db_url:
+            _engine = create_engine(db_url)
+            _SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=_engine)
+            db = _SessionLocal()
+        else:
+            db = SessionLocal()
+        try:
+            execution = db.query(RecipeExecution).filter(
+                RecipeExecution.execution_id == execution_id
+            ).first()
+            if execution and execution.status not in ("completed", "failed", "cancelled"):
+                execution.status = "cancelled"
+                execution.error_message = execution.error_message or "Cancelled by user"
+                execution.completed_at = sa_func.now()
+                db.commit()
+        finally:
+            db.close()
+    except Exception:
+        logger.warning(
+            "[recipe_direct] Failed to mark execution %s cancelled (best-effort)",
+            execution_id, exc_info=True,
+        )
 
 
 async def _execute_recipe_inner(
@@ -848,6 +1143,17 @@ async def _execute_recipe_inner(
         execution_start = time.time()
 
         for idx, step in enumerate(steps):
+            # Cancellation check — re-read execution row to detect external cancel
+            db.expire(execution)
+            db.refresh(execution)
+            if execution.status == "cancelled":
+                logger.info(
+                    "[recipe_direct] Cancelled before step %d (execution=%s)",
+                    idx + 1, recipe_execution_id,
+                )
+                _persist_step_results(db, execution, step_results)
+                return
+
             # Total timeout check
             elapsed = time.time() - execution_start
             if elapsed > total_timeout_sec:
@@ -860,12 +1166,31 @@ async def _execute_recipe_inner(
             step_id = step.get('step_id', f'step-{idx + 1}')
             step_order = step.get('order', idx + 1)
             agent_id = step.get('agent_id')
-            prompt_template = step.get('prompt_template', '')
+            prompt_template = (step.get('prompt_template') or '').strip()
             error_handling = step.get('error_handling', 'stop')
             max_retries = step.get('max_retries', 1)
             output_key = step.get('output_key', f'step_{step_order}')
             agent = agent_map.get(agent_id)
             agent_name = agent.name if agent else f"Agent {agent_id}"
+
+            if not prompt_template:
+                msg = f"Step {step_order} ({agent_name}) has no prompt_template — skipping"
+                logger.warning(f"[recipe_direct] {msg}")
+                step_result = {
+                    "step_id": step_id, "order": step_order,
+                    "agent_id": agent_id, "agent_name": agent_name,
+                    "prompt_template": "", "output_key": output_key,
+                    "status": "skipped", "output": msg,
+                    "tool_calls": [], "duration_ms": 0, "tokens_used": 0,
+                    "started_at": datetime.now(timezone.utc).isoformat(),
+                    "completed_at": datetime.now(timezone.utc).isoformat(),
+                    "error": msg, "retries": 0,
+                }
+                step_results.append(step_result)
+                if error_handling == 'stop':
+                    await _fail_execution(db, recipe_execution_id, msg, step_results=step_results)
+                    return
+                continue
 
             agent_cfg = getattr(agent, 'configuration', None) or {}
             step_max_iter = step.get(
@@ -1140,9 +1465,24 @@ async def _execute_recipe_inner(
                             max_iterations=step_max_iter,
                             recipe_name=recipe.name,
                             total_steps=total_steps,
+                            recipe_execution_id=recipe_execution_id,
                         ),
                         timeout=step_timeout_sec,
                     )
+
+                    if result.get("status") == "cancelled":
+                        logger.info(
+                            "[recipe_direct] Step %d returned cancelled — halting execution %s",
+                            step_order, recipe_execution_id,
+                        )
+                        step_result["status"] = "cancelled"
+                        step_result["error"] = "Cancelled by user"
+                        step_result["duration_ms"] = int((time.time() - step_start) * 1000)
+                        step_result["completed_at"] = datetime.now(timezone.utc).isoformat()
+                        step_results.append(_build_compact_step_result(step_result))
+                        _persist_step_results(db, execution, step_results)
+                        # Cancel endpoint already wrote status='cancelled' + completed_at
+                        return
 
                     if result.get("status") == "success":
                         step_result["status"] = "completed"
@@ -1312,6 +1652,26 @@ async def _execute_recipe_inner(
             f"[recipe_direct] Execution {recipe_execution_id} COMPLETED — "
             f"{len(step_results)} steps, {total_duration}ms, {total_tokens} tokens"
         )
+
+        # --- Auto-report (mirrors heartbeat / task auto-report) ---
+        try:
+            await _auto_create_playbook_report(
+                db=db,
+                workspace_id=workspace_id,
+                recipe=recipe,
+                recipe_execution_id=recipe_execution_id,
+                execution=execution,
+                step_results=step_results,
+                total_duration_ms=total_duration,
+                total_tokens=total_tokens,
+                final_output=final_output,
+                success=True,
+            )
+        except Exception as report_err:
+            logger.warning(
+                "[recipe_direct] Playbook auto-report failed (non-blocking) for %s: %s",
+                recipe_execution_id, report_err,
+            )
 
         # --- Post-execution: update agent performance_metrics ---
         _update_agent_performance_metrics(db, step_results, success=True)
@@ -1537,6 +1897,34 @@ async def _fail_execution(
             logger.info(f"[recipe_direct] Execution {execution_id} marked FAILED: {error_message}")
             # Update agent performance_metrics for failure
             _update_agent_performance_metrics(db, step_results or [], success=False)
+
+            # Auto-report on failure too — system admin needs to see these
+            try:
+                recipe = db.query(WorkflowRecipe).filter(WorkflowRecipe.id == execution.recipe_id).first()
+                if recipe:
+                    duration_ms = 0
+                    if execution.started_at and execution.completed_at:
+                        duration_ms = int(
+                            (execution.completed_at - execution.started_at).total_seconds() * 1000
+                        )
+                    total_tokens = sum((s.get("tokens_used", 0) for s in (step_results or [])))
+                    await _auto_create_playbook_report(
+                        db=db,
+                        workspace_id=str(execution.workspace_id),
+                        recipe=recipe,
+                        recipe_execution_id=execution_id,
+                        execution=execution,
+                        step_results=step_results or [],
+                        total_duration_ms=duration_ms,
+                        total_tokens=total_tokens,
+                        final_output=error_message,
+                        success=False,
+                    )
+            except Exception as rep_err:
+                logger.warning(
+                    "[recipe_direct] Failure auto-report skipped for %s: %s",
+                    execution_id, rep_err,
+                )
 
             # Capture failure context into memory so future runs can learn from it
             try:

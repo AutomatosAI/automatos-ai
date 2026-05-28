@@ -179,7 +179,8 @@ export default function WidgetMarketplacePage() {
         <PageHeader
           title="Widget"
           titleAccent="Marketplace"
-          subtitle="Browse, discover, and install widgets to extend your workspace"
+          eyebrow="Workspace · extensions"
+          lede="Browse curated widgets, install them with one click, and extend what your workforce can do. Everything is sandboxed; nothing ships to your workspace without your approval."
         />
 
         {/* Search Bar */}

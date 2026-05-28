@@ -619,6 +619,23 @@ async def import_graph(
     }
 
 
+@router.delete("/graph")
+async def delete_graph(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """Delete the workspace business graph (all artefacts)."""
+    from core.graph_storage import DbWorkspaceClient
+    ws = DbWorkspaceClient(str(ctx.workspace_id))
+    for path in ["graph/graph.json", "graph/meta.json", "graph/communities.json", "graph/graph.html"]:
+        try:
+            await ws.delete_file(path)
+        except Exception:
+            pass
+    from modules.knowledge.graph_service import get_graph_service
+    get_graph_service()._cache.pop(str(ctx.workspace_id), None)
+    return {"success": True, "message": "Graph deleted"}
+
+
 @router.post("/graph/build")
 async def trigger_graph_build(
     ctx: RequestContext = Depends(get_request_context_hybrid),

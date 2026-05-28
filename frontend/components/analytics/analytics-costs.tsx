@@ -186,6 +186,44 @@ export function AnalyticsCosts({ days }: Props) {
     return Math.max(...data.byModel.map((m) => m.totalCost), 0.001)
   }, [data?.byModel])
 
+  // Trim chart legend to the top-4 models by total cost; the rest collapse
+  // to a single "+N more" chip. Most series are noise on a glance view —
+  // 22 dots wrapping onto two lines isn't useful.
+  const LEGEND_TOP_N = 4
+  const topModelsForLegend = useMemo(() => {
+    if (!dailyByModel?.models?.length) return { top: [] as string[], rest: 0 }
+    const totals: Record<string, number> = {}
+    for (const row of dailyByModel.series) {
+      for (const m of dailyByModel.models) {
+        const v = (row as Record<string, unknown>)[m]
+        if (typeof v === 'number') totals[m] = (totals[m] ?? 0) + v
+      }
+    }
+    const ranked = [...dailyByModel.models].sort(
+      (a, b) => (totals[b] ?? 0) - (totals[a] ?? 0),
+    )
+    return {
+      top: ranked.slice(0, LEGEND_TOP_N),
+      rest: Math.max(0, ranked.length - LEGEND_TOP_N),
+    }
+  }, [dailyByModel])
+
+  // Y-axis tick rounding — pick a nice ceiling so 5 evenly-spaced
+  // ticks ($0, ¼, ½, ¾, max) come out as round dollar values.
+  const yAxisMax = useMemo(() => {
+    if (!dailyByModel?.series?.length) return 0
+    let peak = 0
+    for (const row of dailyByModel.series) {
+      for (const m of dailyByModel.models) {
+        const v = (row as Record<string, unknown>)[m]
+        if (typeof v === 'number' && v > peak) peak = v
+      }
+    }
+    if (peak <= 0) return 1
+    // Round up to next 0.5 step so ticks land on $0 / $0.5 / $1 / $1.5 / $2
+    return Math.ceil(peak / 0.5) * 0.5
+  }, [dailyByModel])
+
   if (isLoading) {
     return (
       <div className="space-y-6">
@@ -227,10 +265,17 @@ export function AnalyticsCosts({ days }: Props) {
           iconColor: 'text-[hsl(var(--agent))]',
         },
         {
-          label: 'Top Spender',
-          value: data?.summary?.mostExpensiveAgent?.name || 'None',
+          // Lead with the dollar amount — agent name as suffix in the
+          // label so a long agent name (e.g. "GA ANALYST") never truncates
+          // the headline number.
+          label: data?.summary?.mostExpensiveAgent
+            ? `Top Spender · ${data.summary.mostExpensiveAgent.name}`
+            : 'Top Spender',
+          value: data?.summary?.mostExpensiveAgent
+            ? formatCost(data.summary.mostExpensiveAgent.cost)
+            : '—',
           change: data?.summary?.mostExpensiveAgent
-            ? `${formatCost(data.summary.mostExpensiveAgent.cost)} on ${shortenModelName(data.summary.mostExpensiveAgent.model)}`
+            ? `on ${shortenModelName(data.summary.mostExpensiveAgent.model)}`
             : 'No data',
           icon: AlertTriangle,
           iconColor: 'text-primary',
@@ -290,6 +335,8 @@ export function AnalyticsCosts({ days }: Props) {
                         tickLine={false}
                         tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
                         tickFormatter={(v: number) => formatCost(v)}
+                        domain={[0, yAxisMax || 'auto']}
+                        tickCount={5}
                         width={60}
                       />
                       <Tooltip content={<ModelCostTooltip />} />
@@ -308,17 +355,32 @@ export function AnalyticsCosts({ days }: Props) {
                     </AreaChart>
                   </ResponsiveContainer>
                 </div>
-                {/* Legend */}
-                <div className="flex flex-wrap gap-3 mt-4 px-1">
-                  {dailyByModel.models.map((model, idx) => (
-                    <div key={model} className="flex items-center gap-1.5">
-                      <span
-                        className="w-2.5 h-2.5 rounded-full"
-                        style={{ background: MODEL_COLORS[idx % MODEL_COLORS.length] }}
-                      />
-                      <span className="text-xs text-muted-foreground">{shortenModelName(model)}</span>
-                    </div>
-                  ))}
+                {/* Legend — top-N by total cost; the long tail collapses
+                    into a "+N more" chip so 20+ dots don't wrap. */}
+                <div className="flex flex-wrap items-center gap-3 mt-4 px-1">
+                  {topModelsForLegend.top.map((model) => {
+                    const idx = dailyByModel.models.indexOf(model)
+                    return (
+                      <div key={model} className="flex items-center gap-1.5">
+                        <span
+                          className="w-2.5 h-2.5 rounded-full"
+                          style={{ background: MODEL_COLORS[idx % MODEL_COLORS.length] }}
+                        />
+                        <span className="text-xs text-muted-foreground">{shortenModelName(model)}</span>
+                      </div>
+                    )
+                  })}
+                  {topModelsForLegend.rest > 0 && (
+                    <span
+                      className="text-xs px-2 py-0.5 rounded-full bg-secondary/40 border border-border/50 text-muted-foreground"
+                      title={dailyByModel.models
+                        .filter((m) => !topModelsForLegend.top.includes(m))
+                        .map(shortenModelName)
+                        .join(', ')}
+                    >
+                      +{topModelsForLegend.rest} more
+                    </span>
+                  )}
                 </div>
               </>
             ) : (
@@ -349,6 +411,8 @@ export function AnalyticsCosts({ days }: Props) {
                         tickLine={false}
                         tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
                         tickFormatter={(v: number) => formatCost(v)}
+                        domain={[0, yAxisMax || 'auto']}
+                        tickCount={5}
                         width={60}
                       />
                       <Tooltip
@@ -586,32 +650,62 @@ export function AnalyticsCosts({ days }: Props) {
               </CardTitle>
             </CardHeader>
             <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
-              <table className="w-full">
-                <thead className="sticky top-0 bg-card z-10">
-                  <tr className="border-b border-border/50">
-                    <th className="text-left p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Agent</th>
-                    <th className="text-left p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Model</th>
-                    <th className="text-right p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Tokens</th>
-                    <th className="text-right p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Cost</th>
-                    <th className="text-right p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider hidden md:table-cell">Requests</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.byAgent
-                    .filter(a => a.cost > 0 || a.tokens > 0)
-                    .map((agent) => (
-                      <tr key={agent.id} className="border-b border-border/20 hover:bg-secondary/10 transition-colors">
-                        <td className="p-4 font-medium text-sm">{agent.name}</td>
-                        <td className="p-4">
-                          <Badge variant="secondary" className="font-mono text-xs">{shortenModelName(agent.model)}</Badge>
-                        </td>
-                        <td className="p-4 text-sm text-right tabular-nums">{formatNumber(agent.tokens)}</td>
-                        <td className="p-4 text-sm text-right tabular-nums font-medium">{formatCost(agent.cost)}</td>
-                        <td className="p-4 text-sm text-right tabular-nums hidden md:table-cell text-muted-foreground">{agent.requests}</td>
+              {(() => {
+                const rows = data.byAgent.filter((a) => a.cost > 0 || a.tokens > 0)
+                const maxAgentCost = Math.max(...rows.map((r) => r.cost), 0.001)
+                // Map model→colour matching the chart so the magnitude
+                // bar colour ties back to the legend dot above.
+                const chartModels = dailyByModel?.models ?? []
+                const colorFor = (model: string) => {
+                  const idx = chartModels.indexOf(model)
+                  if (idx >= 0) return MODEL_COLORS[idx % MODEL_COLORS.length]
+                  // Fall back to a stable hash of the model name so out-of-chart
+                  // models still get a consistent (if unrelated) colour.
+                  let h = 0
+                  for (let i = 0; i < model.length; i++) h = (h * 31 + model.charCodeAt(i)) | 0
+                  return MODEL_COLORS[Math.abs(h) % MODEL_COLORS.length]
+                }
+                return (
+                  <table className="w-full">
+                    <thead className="sticky top-0 bg-card z-10">
+                      <tr className="border-b border-border/50">
+                        <th className="text-left p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Agent</th>
+                        <th className="text-left p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Model</th>
+                        <th className="text-right p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Tokens</th>
+                        <th className="text-right p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Cost</th>
+                        <th className="text-right p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider hidden md:table-cell">Requests</th>
                       </tr>
-                    ))}
-                </tbody>
-              </table>
+                    </thead>
+                    <tbody>
+                      {rows.map((agent) => {
+                        const sharePct = Math.max(2, Math.round((agent.cost / maxAgentCost) * 100))
+                        const barColor = colorFor(agent.model)
+                        return (
+                          <tr key={agent.id} className="border-b border-border/20 hover:bg-secondary/10 transition-colors">
+                            <td className="p-4 font-medium text-sm">{agent.name}</td>
+                            <td className="p-4">
+                              <Badge variant="secondary" className="font-mono text-xs">{shortenModelName(agent.model)}</Badge>
+                            </td>
+                            <td className="p-4 text-sm text-right tabular-nums">{formatNumber(agent.tokens)}</td>
+                            <td className="p-4 text-right">
+                              <div className="flex flex-col items-end gap-1.5">
+                                <span className="text-sm tabular-nums font-medium">{formatCost(agent.cost)}</span>
+                                <div className="w-24 h-1 rounded-full bg-white/[0.04] overflow-hidden">
+                                  <div
+                                    className="h-full rounded-full"
+                                    style={{ width: `${sharePct}%`, background: barColor }}
+                                  />
+                                </div>
+                              </div>
+                            </td>
+                            <td className="p-4 text-sm text-right tabular-nums hidden md:table-cell text-muted-foreground">{agent.requests}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                )
+              })()}
             </div>
           </Card>
         </motion.div>

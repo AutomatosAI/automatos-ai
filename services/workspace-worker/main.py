@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import mimetypes
 import os
 import signal
 import sys
@@ -526,19 +527,20 @@ class WorkspaceWorker:
             })
 
         async def list_files_handler(request):
-            """GET /workspaces/{workspace_id}/files?path=. — directory listing."""
+            """GET /workspaces/{workspace_id}/files?path=. — directory listing.
+
+            Provisions the workspace directory tree on first read so non-coder
+            clients see the default folder structure (reports/, content/, etc.)
+            even before any mission has run.
+            """
             from pathlib import Path as P
 
             workspace_id = request.match_info["workspace_id"]
             rel_path = request.query.get("path", ".")
 
             ws_manager = WorkspaceManager(workspace_id, volume_path)
+            ws_manager.ensure_workspace_exists()
             ws_dir = P(volume_path) / workspace_id
-
-            if not ws_dir.is_dir():
-                return web.json_response(
-                    {"error": "Workspace directory not found"}, status=404
-                )
 
             try:
                 target = ws_manager.resolve_safe_path(rel_path)
@@ -780,6 +782,7 @@ class WorkspaceWorker:
             allowed_ops = {
                 "status", "diff", "add", "commit", "push", "pull",
                 "log", "branch", "checkout", "stash", "show", "blame", "fetch",
+                "clone",
             }
             if not operation:
                 return web.json_response({"error": "operation is required"}, status=400)
@@ -789,13 +792,23 @@ class WorkspaceWorker:
                     status=400,
                 )
 
-            cwd = body.get("cwd")
-            args = body.get("args", "")
-            command = f"git {operation} {args}".strip()
-
             ws_manager = WorkspaceManager(workspace_id, volume_path)
             executor = WorkspaceToolExecutor(ws_manager)
-            result = await executor.execute_command(command, timeout=120, cwd=cwd)
+
+            if operation == "clone":
+                repo_url = body.get("args", "").strip()
+                if not repo_url:
+                    return web.json_response({"error": "args must contain the repo URL"}, status=400)
+                result = await executor._git_clone(
+                    repo_url=repo_url,
+                    branch=body.get("branch"),
+                    shallow=True,
+                )
+            else:
+                cwd = body.get("cwd")
+                args = body.get("args", "")
+                command = f"git {operation} {args}".strip()
+                result = await executor.execute_command(command, timeout=120, cwd=cwd)
             return web.json_response(result)
 
         async def html_to_png_handler(request):

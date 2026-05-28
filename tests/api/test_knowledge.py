@@ -1,14 +1,4 @@
-"""Knowledge, multi-agent, field-theory, and templates smoke tests."""
-
-
-def test_multi_agent_health(client):
-    r = client.get("/api/multi-agent/health")
-    assert r.status_code == 200
-
-
-def test_field_theory_health(client):
-    r = client.get("/api/field-theory/health")
-    assert r.status_code == 200
+"""Knowledge and templates smoke tests."""
 
 
 def test_knowledge_stats(client):
@@ -22,22 +12,6 @@ def test_templates_list(client):
 
 
 # ── Deeper knowledge tests ──────────────────────────────────────────
-
-
-def test_multi_agent_health_shape(client):
-    """Multi-agent health should return structured data, not just 200."""
-    r = client.get("/api/multi-agent/health")
-    assert r.status_code == 200
-    data = r.json()
-    assert isinstance(data, dict), "Multi-agent health should return a dict"
-
-
-def test_field_theory_health_shape(client):
-    """Field theory health should return structured data."""
-    r = client.get("/api/field-theory/health")
-    assert r.status_code == 200
-    data = r.json()
-    assert isinstance(data, dict), "Field theory health should return a dict"
 
 
 def test_knowledge_stats_shape(client):

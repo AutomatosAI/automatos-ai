@@ -346,10 +346,6 @@ export function ToolsDashboard() {
       switch (sortBy) {
         case 'name':
           return (a?.name || '').localeCompare(b?.name || '')
-        case 'rating':
-          return (b?.rating || 0) - (a?.rating || 0)
-        case 'usage':
-          return (b?.usageCount || 0) - (a?.usageCount || 0)
         case 'updated':
           return new Date(b?.lastUpdated || 0).getTime() - new Date(a?.lastUpdated || 0).getTime()
         default:
@@ -603,10 +599,10 @@ export function ToolsDashboard() {
   const handleRemoveFromWorkspace = async (tool: Tool) => {
     setLoading(true)
     try {
+      // tool.name is the canonical Composio app name (e.g. "GOOGLEDRIVE"),
+      // mapped from app_name in apiClient.getTools — this is what the backend looks up.
       const appName = tool.name
-      console.log(`Removing ${appName} from workspace`)
-
-      await apiClient.delete(`/api/tools/remove-from-workspace/${appName}`)
+      await apiClient.delete(`/api/tools/remove-from-workspace/${encodeURIComponent(appName)}`)
 
       // Close modal and refresh tools list
       setDetailsModalOpen(false)
@@ -615,7 +611,7 @@ export function ToolsDashboard() {
 
       toast({
         title: 'Removed from Workspace',
-        description: `${appName} has been removed from your workspace.`,
+        description: `${tool.name} has been removed from your workspace.`,
       })
     } catch (error) {
       console.error('Failed to remove from workspace:', error)
@@ -638,7 +634,8 @@ export function ToolsDashboard() {
       <PageHeader
         title="Tools &"
         titleAccent="Integrations"
-        subtitle="Discover, install, and manage tools to extend your AI agents' capabilities"
+        eyebrow="Workforce · what they can reach"
+        lede="The third-party services your agents are authorised to call: GitHub, Slack, Stripe, Shopify, Notion, and the rest. Connect once, scope access, your agents do the work."
         actions={
           <Badge variant="outline" className="text-primary border-primary/30">
             <div className="w-2 h-2 bg-[hsl(var(--success))] rounded-full animate-pulse mr-2" />
@@ -712,8 +709,6 @@ export function ToolsDashboard() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="name">Name</SelectItem>
-                  <SelectItem value="rating">Rating</SelectItem>
-                  <SelectItem value="usage">Usage</SelectItem>
                   <SelectItem value="updated">Updated</SelectItem>
                 </SelectContent>
               </Select>

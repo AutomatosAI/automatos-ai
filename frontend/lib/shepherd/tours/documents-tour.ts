@@ -45,9 +45,9 @@ export function createDocumentsTour(userId: string) {
       ${tabList([
         ['Documents', 'Upload PDFs, Word, Markdown, images. Auto-chunked, embedded, and searchable via RAG.'],
         ['Database', 'Connect Postgres, MySQL, Snowflake and let agents query them in natural language with a semantic layer on top.'],
-        ['Templates', 'Reusable document templates agents can fill in — proposals, reports, briefs.'],
         ['CodeGraph', 'Index a repo into a graph of files, symbols and calls so agents can reason about code structure.'],
         ['Business Graph', 'Your org modelled as entities — customers, products, processes — agents can traverse.'],
+        ['Memory', 'Browse and prune the long-term memories your agents have stored — short-term and Mem0 facts.'],
       ])}
       ${stepProgress(2, TOTAL)}
     `,

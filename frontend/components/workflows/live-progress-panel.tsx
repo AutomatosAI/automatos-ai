@@ -219,7 +219,7 @@ export function LiveProgressPanel({ workflowId, workflowName, isOpen, onClose }:
                     <CardContent className="p-4">
                       <div className="flex items-center space-x-3">
                         <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-                          <Clock className="w-5 h-5 text-orange-400" />
+                          <Clock className="w-5 h-5 text-primary" />
                         </div>
                         <div>
                           <p className="text-sm text-muted-foreground">Elapsed</p>
@@ -340,7 +340,7 @@ export function LiveProgressPanel({ workflowId, workflowName, isOpen, onClose }:
                       </div>
                       
                       <div className="flex items-center space-x-3">
-                        <Cpu className="w-5 h-5 text-orange-400" />
+                        <Cpu className="w-5 h-5 text-primary" />
                         <div>
                           <p className="text-sm text-muted-foreground">CPU</p>
                           <p className="font-medium">{progressData.resources.cpu_usage}</p>

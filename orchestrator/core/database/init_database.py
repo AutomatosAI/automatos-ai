@@ -141,7 +141,7 @@ def init_database():
                     try:
                         table_name = statement.split('CREATE TABLE IF NOT EXISTS')[1].split('(')[0].strip()
                         print(f"  ✅ Table: {table_name}")
-                    except:
+                    except Exception:
                         print(f"  ✅ Table created")
                         
                 elif 'CREATE INDEX' in stmt_upper and 'IF NOT EXISTS' in stmt_upper:
@@ -150,7 +150,7 @@ def init_database():
                         idx_name = statement.split('CREATE INDEX IF NOT EXISTS')[1].split(' ON ')[0].strip()
                         if i % 5 == 0:  # Only print every 5th index to reduce noise
                             print(f"  ✅ Index: {idx_name}")
-                    except:
+                    except Exception:
                         pass
                         
                 elif 'INSERT INTO' in stmt_upper:
@@ -158,7 +158,7 @@ def init_database():
                     try:
                         table_name = statement.split('INSERT INTO')[1].split('(')[0].strip()
                         print(f"  ✅ Seed data: {table_name}")
-                    except:
+                    except Exception:
                         print(f"  ✅ Seed data inserted")
                 
             except psycopg2.errors.DuplicateTable as e:
@@ -256,7 +256,7 @@ def init_database():
             schema_version = cursor.fetchone()
             if schema_version:
                 print(f"\n📌 Schema Version: {schema_version[0]} (applied: {schema_version[1]})")
-        except:
+        except Exception:
             print(f"\n⚠️  Schema version table not found or empty")
         
         # Close connection
@@ -338,7 +338,7 @@ def check_database_status():
                 cursor.execute(f"SELECT COUNT(*) FROM {table};")
                 count = cursor.fetchone()[0]
                 print(f"  {description}: {count} records")
-            except:
+            except Exception:
                 print(f"  {description}: Table not found")
         
         cursor.close()

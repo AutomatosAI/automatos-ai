@@ -1,0 +1,431 @@
+{
+  "project": "Automatos AI Platform",
+  "branchName": "ralph/prd-141-platform-reliability",
+  "description": "PRD-141 — Platform Reliability, Single-Path Consolidation & Auto Self-Management (phased rewrite). Backend-only. Six phases, dependency-ordered by stability payoff (NOT by effort): Phase 0 Error Telemetry Foundation (US-001/002), Phase 1 Mem0 Async Stability — the actual crash fix (US-003..008), Phase 2 Dynamic Resource Limits — kills silent agent bails (US-009..012), Phase 3 Unified Tool Selection Pipeline — removes duplicate ranking (US-013..016), Phase 4 Tool Routing Negative Signals (US-017..019), Phase 5 HARNESS Self-Management — HIGH RISK, behind HARNESS_SELF_MANAGEMENT_ENABLED flag default false, ships LAST (US-020..026). Source PRD: docs/PRDS/PRD-141-PLATFORM-RELIABILITY.md. Original diagnosis by Devin was verified accurate; this rewrite fixes spec bugs found during verification: WS-3 wrong action names (platform_assign_tool -> platform_assign_tool_to_agent), invented method _apply_single_approved_task (use existing _auto_apply_prescription), missing authz on /approve, non-existent platform_create_routing_rule (routing_rule_add dropped for v1), and WS-4 fire-and-forget DB-session-per-call (replaced with batched recorder). Phases 1 and 5 require a single-workspace canary soak before broad rollout. The 1,941 except Exception handlers are OUT OF SCOPE — only the 24 bare except: are fixed.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Create record_error structured telemetry util (Phase 0)",
+      "description": "As the platform, I need a single structured-error logging utility so hot-path exception handlers can emit machine-parseable error records instead of opaque logger.warning calls.",
+      "acceptanceCriteria": [
+        "Create orchestrator/core/utils/exception_telemetry.py",
+        "Define record_error(*, subsystem: str, operation: str, error: Exception, workspace_id: Optional[UUID] = None, agent_id: Optional[int] = None, action_name: Optional[str] = None, extra: Optional[Dict[str, Any]] = None) -> None",
+        "Logs to logging.getLogger('automatos.errors') with exc_info=True and a 'structured_error' extra dict containing subsystem, operation, error_type, error_message, workspace_id, agent_id, action_name",
+        "error_message is truncated to 500 chars; None workspace_id is tolerated (no crash)",
+        "Create orchestrator/tests/test_exception_telemetry.py: test_record_error_logs_structured, test_record_error_truncates_message, test_record_error_handles_none_workspace",
+        "Type checks pass (mypy/pyright)",
+        "pytest orchestrator/tests/test_exception_telemetry.py green"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Pure-additive utility. NO existing handlers are rewritten in this story. This util is the measurement instrument for the whole PRD — Phase 1's success metric (Mem0 error rate <0.1%) is counted via record_error(subsystem='memory'). Do NOT mass-adopt it across the codebase here; that is opportunistic and out of scope."
+    },
+    {
+      "id": "US-002",
+      "title": "Replace all 24 bare except: and add CI gate (Phase 0)",
+      "description": "As the platform, I need zero bare except: blocks (which swallow SystemExit/KeyboardInterrupt) and a CI gate to keep it that way.",
+      "acceptanceCriteria": [
+        "Replace every bare 'except:' with 'except Exception:' across orchestrator/ (exactly 24 occurrences as of 2026-05-28)",
+        "Each replacement is a PURE widening — no logic change, no swallowing change, no re-raise added",
+        "Create scripts/ci/check-no-bare-except.sh that runs: grep -rn 'except:' orchestrator/ --include='*.py' | grep -v 'except ' | grep -v __pycache__ — MUST return zero matches (non-zero exit) for the gate to pass",
+        "Wire the gate into the existing CI test workflow (search .github/workflows/ for the test runner)",
+        "Add test_no_bare_except_in_codebase in orchestrator/tests/test_exception_telemetry.py asserting the grep returns zero",
+        "Type checks pass",
+        "pytest green; existing suites still green"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "This is the ONLY exception-handler rewrite in the PRD. Do NOT touch the ~1,941 'except Exception' blocks — that is out of scope (re-raising previously-swallowed errors is a regression risk). Test the gate by introducing a temporary bare except: and confirming CI fails, then remove it."
+    },
+    {
+      "id": "US-003",
+      "title": "Convert Mem0Client to httpx.AsyncClient (Phase 1)",
+      "description": "As the platform, I need Mem0Client to be natively async so it stops blocking the event loop and starving the thread pool under load.",
+      "acceptanceCriteria": [
+        "In orchestrator/modules/memory/integrations/mem0_client.py replace 'import requests' (line 16) with 'import httpx'",
+        "Convert _request() to 'async def _request()' using a pooled httpx.AsyncClient stored on the client (connection reuse)",
+        "Replace requests.request(method, url, **kwargs) with self._client.request(method, url, **kwargs)",
+        "Replace both time.sleep(wait) calls (lines 156, 173) with 'await asyncio.sleep(wait)'",
+        "Convert add(), search(), get_all(), delete() to 'async def'",
+        "grep -rn 'import requests' orchestrator/modules/memory/ returns ZERO matches",
+        "grep -rn 'time\\.sleep' orchestrator/modules/memory/ returns ZERO matches",
+        "Create orchestrator/tests/test_mem0_async_client.py: test_async_request_success, test_async_retry_with_asyncio_sleep, test_connection_pooling, test_write_timeout_respected",
+        "Type checks pass",
+        "pytest orchestrator/tests/test_mem0_async_client.py green"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "httpx>=0.27.0 is already in requirements.txt. This is the single highest-leverage stability fix in the PRD — synchronous requests + time.sleep inside run_in_executor is the production crash source. Do this story before US-005 (which removes the executor wrappers that currently paper over the sync client)."
+    },
+    {
+      "id": "US-004",
+      "title": "Per-workspace circuit breaker in Mem0Client (Phase 1)",
+      "description": "As a workspace operator, I need my Mem0 failures to not trip the breaker for every other workspace.",
+      "acceptanceCriteria": [
+        "Remove the module-level '_breaker = _make_breaker()' singleton from mem0_client.py",
+        "Add class variable '_breakers: Dict[str, _CircuitBreaker]' on Mem0Client, keyed by workspace_id",
+        "_request() accepts a workspace_id parameter and uses the per-workspace breaker",
+        "Add tests to test_mem0_async_client.py: test_per_workspace_breaker_isolation (workspace A open does not affect B), test_breaker_opens_after_threshold, test_breaker_half_open_probe",
+        "Update orchestrator/tests/test_mem0_circuit_breaker.py to the async interface: mock httpx.AsyncClient.request, not requests.request",
+        "Type checks pass",
+        "pytest orchestrator/tests/test_mem0_async_client.py orchestrator/tests/test_mem0_circuit_breaker.py green"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "Keep the existing half-open probe behaviour. The global health probe (US-006) can still trip ALL breakers at once — that is intentional and separate from per-workspace isolation."
+    },
+    {
+      "id": "US-005",
+      "title": "Drop run_in_executor wrappers in UnifiedMemoryService (Phase 1)",
+      "description": "As the platform, I need UnifiedMemoryService to await the async Mem0 client directly so no executor thread is consumed per memory call.",
+      "acceptanceCriteria": [
+        "In orchestrator/modules/memory/unified_memory_service.py replace every 'loop.run_in_executor(None, lambda: self._mem0.xxx(...))' with 'await self._mem0.xxx(...)'",
+        "Pass workspace_id through to each Mem0 call (for the per-workspace breaker from US-004)",
+        "grep -rn 'run_in_executor.*_mem0\\|run_in_executor.*mem0' orchestrator/ returns ZERO matches",
+        "Add test_unified_memory_no_executor to test_mem0_async_client.py asserting UnifiedMemoryService calls Mem0 directly (no run_in_executor)",
+        "Type checks pass",
+        "pytest green; existing memory tests green"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "BLOCKED by US-003 (client must be async first). There are ~35 run_in_executor sites in the memory module per the audit; the Mem0 ones in unified_memory_service.py are the target. Do NOT remove run_in_executor calls that wrap genuinely-sync non-Mem0 work — only the Mem0 ones."
+    },
+    {
+      "id": "US-006",
+      "title": "Proactive Mem0 health probe in heartbeat (Phase 1)",
+      "description": "As an operator, I need the platform to detect Mem0 downtime proactively and trip breakers before users hit failures.",
+      "acceptanceCriteria": [
+        "In orchestrator/services/heartbeat_service.py extend the existing heartbeat tick to ping Mem0 health every MEM0_HEALTH_PROBE_INTERVAL_SECONDS (default 30)",
+        "On probe failure: trip the circuit breaker for ALL workspaces immediately",
+        "On probe success after a failure: reset all breakers",
+        "Add config MEM0_HEALTH_PROBE_INTERVAL_SECONDS (default 30) and MEM0_HEALTH_PROBE_ENABLED (default true) to orchestrator/config.py — read via config.py only, no os.getenv elsewhere",
+        "Add tests: test_health_probe_trips_all_breakers, test_health_probe_resets_on_recovery",
+        "Type checks pass",
+        "pytest green"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "BLOCKED by US-004 (needs the per-workspace breaker registry to trip/reset all). The probe is a GLOBAL signal; it is allowed to override per-workspace isolation because Mem0 being down is a platform-wide condition."
+    },
+    {
+      "id": "US-007",
+      "title": "Tighten Mem0 timeouts and cooldown in config (Phase 1)",
+      "description": "As an operator, I need shorter Mem0 write timeouts and breaker cooldown so a slow/down Mem0 fails fast instead of holding resources.",
+      "acceptanceCriteria": [
+        "In orchestrator/config.py set MEM0_WRITE_TIMEOUT_SECONDS default 15.0 -> 5.0",
+        "Set MEM0_CIRCUIT_COOLDOWN_SECONDS default 300 -> 60",
+        "Leave MEM0_TIMEOUT_SECONDS (3.0) and MEM0_CIRCUIT_THRESHOLD (3) unchanged",
+        "All values remain overridable via config.py / system_settings (no hardcoding outside config.py)",
+        "Confirm test_write_timeout_respected (US-003) still asserts the 5.0s write timeout is applied",
+        "Type checks pass",
+        "pytest green"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "Tiny config story. Kept separate from US-003 so the timeout change is an isolated, easily-revertable commit if the canary shows 5.0s is too aggressive for enrichment writes."
+    },
+    {
+      "id": "US-008",
+      "title": "GATE: Phase 1 load test, review, and INBUILD canary soak (Phase 1 release gate)",
+      "description": "As the operator, I need proof the Mem0 async migration holds under load and in production before declaring Phase 1 done.",
+      "acceptanceCriteria": [
+        "Load test: 50 concurrent Mem0 searches complete with no thread-pool starvation (capture before/after latency; document method and result)",
+        "code-reviewer agent run on the full Phase 1 diff (US-003..007); CRITICAL/HIGH issues addressed",
+        "Deploy to INBUILD canary workspace only; 24h soak",
+        "During soak, monitor widget/chat error rate via record_error(subsystem='memory') counts in Loki/Grafana — no error-rate regression vs pre-deploy baseline",
+        "Rollback path documented and verified (git-revert of US-003..007; config flags revert cleanly)",
+        "Soak clean -> mark US-008 complete and proceed to Phase 2"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "Operational gate, not a code story. If the canary regresses, file a fix US and re-soak — do NOT batch the fix into Phase 2. This is the most important gate in the PRD because Phase 1 touches the hottest path."
+    },
+    {
+      "id": "US-009",
+      "title": "Report to user when hitting iteration/budget limits (Phase 2)",
+      "description": "As a user, I want to be told when an agent stops because it hit a limit, instead of it silently bailing.",
+      "acceptanceCriteria": [
+        "In orchestrator/consumers/chatbot/service.py, when iteration >= max_iterations, yield a {'type': 'limit_reached', 'message': ..., 'limit': 'max_tool_iterations', 'value': max_iterations} event explaining what happened and how an admin can raise the limit",
+        "In orchestrator/services/coordinator_service.py, when a mission budget is exceeded, emit a BUDGET_WARNING event (with limit_type, spent, limit, message) BEFORE pausing",
+        "Add tests: test_iteration_limit_reports_to_user, test_budget_exceeded_emits_event",
+        "Type checks pass",
+        "pytest green"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": "Safest story in Phase 2 — purely additive user-facing signal. Land it first so 'silent bail rate' becomes measurable (limit_reached event count) before the riskier budget-maths stories change behaviour."
+    },
+    {
+      "id": "US-010",
+      "title": "Configurable power-mode caps via system_settings (Phase 2)",
+      "description": "As an operator, I want to tune power-mode caps without a code change.",
+      "acceptanceCriteria": [
+        "In orchestrator/services/coordinator_service.py replace the hardcoded _POWER_MODE_CAPS dict with a function _get_power_mode_caps(power_mode) that reads system_settings('power_modes', power_mode) and merges over hardcoded defaults",
+        "Defaults: light {max_tokens 2000, max_tool_iterations 5}, standard {max_tokens 4000, max_tool_iterations 10}, max {max_tokens 16000, max_tool_iterations 50}",
+        "Add tests: test_power_mode_reads_system_settings, test_power_mode_falls_back_to_defaults",
+        "Type checks pass",
+        "pytest green"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "_POWER_MODE_CAPS is no longer the sole source of truth — system_settings takes precedence, defaults are the fallback. Delete the bare dict; do not leave both."
+    },
+    {
+      "id": "US-011",
+      "title": "Model-proportional context budgets (Phase 2)",
+      "description": "As the platform, I want context section budgets to scale with the model's context window instead of fixed token counts.",
+      "acceptanceCriteria": [
+        "In orchestrator/modules/memory/context_router.py add _compute_budgets(context_window) returning section budgets as proportions of usable window (usable = int(context_window * 0.80)); session 10%, long_term 15%, temporal 10%, daily 8%, awareness 5%, tools 20%, system_prompt 12%",
+        "Static CONTEXT_BUDGET_* config values are used ONLY as fallback when the model context window is unknown",
+        "Add tests: test_context_budgets_scale_with_model (128K > 8K), test_context_budgets_fallback_to_defaults",
+        "Type checks pass",
+        "pytest green"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": "Keep CONTEXT_BUDGET_* in config.py as the documented fallback — do not delete them, just demote them to fallback-only."
+    },
+    {
+      "id": "US-012",
+      "title": "Adaptive context-guard thresholds (Phase 2)",
+      "description": "As the platform, I want compaction thresholds and kept-turns to adapt to the model's context window so large-context models do not compact wastefully and small-context models do not overflow.",
+      "acceptanceCriteria": [
+        "In orchestrator/core/context_guard.py add _thresholds_for_model(context_window) -> (compact_threshold, keep_recent_turns): >=200K -> (0.90,12), >=100K -> (0.85,8), >=32K -> (0.80,6), >=8K -> (0.75,4), else (0.70,3)",
+        "Replace the static COMPACT_THRESHOLD=0.80 and KEEP_RECENT_TURNS=6 usage with the model-aware values (keep statics as fallback only)",
+        "Update orchestrator/tests/test_context_guard.py for model-aware thresholds; add test_compact_threshold_adapts_to_context and test_keep_recent_turns_adapts",
+        "Type checks pass",
+        "pytest orchestrator/tests/test_context_guard.py green"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": "HIGHEST-RISK story in Phase 2 — wrong thresholds cause provider 400s (context overflow) or OOM. Manually verify against one 8K-context model and one 128K-context model before merge. code-reviewer agent on this story specifically."
+    },
+    {
+      "id": "US-013",
+      "title": "Add get_by_category / get_by_tags to ActionRegistry (Phase 3)",
+      "description": "As the tool pipeline, I need ActionRegistry to expose category/tag lookups so routing can filter without a hardcoded dict.",
+      "acceptanceCriteria": [
+        "In orchestrator/modules/tools/discovery/action_registry.py add get_by_category(category) -> List[ActionDefinition] and get_by_tags(tags) -> List[ActionDefinition]",
+        "Both call _ensure_initialized() first",
+        "Add tests: test_action_registry_get_by_category (get_by_category('harness') returns harness actions), test_action_registry_get_by_tags (get_by_tags(['monitoring']) returns monitoring actions)",
+        "Type checks pass",
+        "pytest green"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": "Pure-additive. This must land before US-015 (which depends on get_by_category). No behaviour change to existing registry consumers."
+    },
+    {
+      "id": "US-014",
+      "title": "SmartToolRouter delegates ranking to GraphRouter; delete embedding path (Phase 3)",
+      "description": "As the platform, I need a single semantic ranking pipeline — SmartToolRouter should delegate to GraphRouter, not run its own embedding/cosine path.",
+      "acceptanceCriteria": [
+        "In orchestrator/consumers/chatbot/smart_tool_router.py delete: _embedding_manager field, _tool_embeddings dict, _embeddings_initialized flag, _embeddings_init_lock, _ensure_embeddings() (lines ~139-182), _rank_tools_by_similarity() (lines ~184-229)",
+        "Replace the semantic ranking block in route() (lines ~294-319) with a call to GraphRouter.rank_chains(query=..., agent_id=..., top_k=30), filtering available_tools to the ranked names and enforcing ALWAYS_INCLUDE",
+        "On GraphRouter failure, fall back to category-based filtering (US-015) — log via record_error(subsystem='routing') not a bare warning",
+        "grep -rn '_embedding_manager\\|_tool_embeddings\\|_embeddings_initialized\\|_rank_tools_by_similarity' orchestrator/consumers/chatbot/smart_tool_router.py returns ZERO matches",
+        "SmartToolRouter has NO import from core.math.vector_operations or core.llm.embedding_manager",
+        "Add/update tests: test_smart_router_delegates_to_graph_router, test_no_embedding_manager_on_smart_router, test_graph_router_fallback_on_failure, test_always_include_tools_present",
+        "Type checks pass",
+        "pytest green; existing chatbot routing tests green"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": "BLOCKED by US-013 (fallback uses get_by_category). Remove the tests that validated _rank_tools_by_similarity (it no longer exists). This deletes the #1 code duplication; do not leave the old embedding path commented out — delete it."
+    },
+    {
+      "id": "US-015",
+      "title": "Delete TOOL_CATEGORIES/INTENT_TO_TOOLS; filter via ActionRegistry (Phase 3)",
+      "description": "As the platform, I need intent->tool filtering to read from ActionRegistry categories so newly-registered tools are auto-discoverable without editing a hardcoded dict.",
+      "acceptanceCriteria": [
+        "Delete TOOL_CATEGORIES (lines ~79-112) and INTENT_TO_TOOLS (lines ~114-128) from smart_tool_router.py",
+        "Replace _filter_tools_by_categories() with _filter_tools_by_intent() that maps intent -> ActionRegistry categories via a new _INTENT_TO_REGISTRY_CATEGORIES dict, unions registry results with intent.suggested_tools, CORE_TOOLS, and ALWAYS_INCLUDE",
+        "grep -rn 'TOOL_CATEGORIES' orchestrator/consumers/chatbot/smart_tool_router.py returns ZERO matches",
+        "Add tests: test_category_filter_uses_registry, test_new_action_auto_discoverable (register an action with category='foo' -> appears in filter with no code change), test_intent_to_registry_categories_mapping (every intent maps to >=1 category)",
+        "Type checks pass",
+        "pytest green"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": "BLOCKED by US-013. _INTENT_TO_REGISTRY_CATEGORIES maps to ActionRegistry CATEGORY names, not tool-name lists — that is the whole point (no more manual dict upkeep when tools are added)."
+    },
+    {
+      "id": "US-016",
+      "title": "GATE: Phase 3 deletion verification + review (Phase 3 release gate)",
+      "description": "As the platform, I need to confirm the duplicate ranking path is fully gone and nothing regressed.",
+      "acceptanceCriteria": [
+        "All Phase 3 acceptance greps return ZERO (no _embedding_manager, _rank_tools_by_similarity, TOOL_CATEGORIES in smart_tool_router.py)",
+        "All tool ranking demonstrably goes through ActionSemanticIndex -> GraphRouter -> result",
+        "code-reviewer agent confirms NO new duplicate ranking path was introduced and the fallback is sound",
+        "Existing chatbot tool-routing tests green; full pytest suite green",
+        "Type checks pass"
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": "Review/verification gate, not new code. The success metric is 'duplicate ranking paths: 2 -> 1'."
+    },
+    {
+      "id": "US-017",
+      "title": "GraphRouter queries and penalizes negative affinities (Phase 4)",
+      "description": "As the tool pipeline, I want tools that historically fail for an intent to score lower.",
+      "acceptanceCriteria": [
+        "In orchestrator/modules/tools/discovery/graph_router.py update _query_affinities() to return (positive_boosts, negative_penalties), querying ToolRoutingAffinity for affinity_type == 'fails_for_intent'",
+        "In _expand_with_graph() compute score = cosine * edge_confidence + boost - penalty",
+        "Add tests in orchestrator/tests/test_graph_router_negative.py: test_negative_affinity_penalizes_score, test_negative_signals_reduce_ranking",
+        "Type checks pass",
+        "pytest orchestrator/tests/test_graph_router_negative.py green"
+      ],
+      "priority": 17,
+      "passes": false,
+      "notes": "Additive — the fails_for_intent affinity already exists in the model but was never queried. This story just makes the router read it. BLOCKED by Phase 3 (unified pipeline must exist first)."
+    },
+    {
+      "id": "US-018",
+      "title": "Add failed_after edge type to batch edge builder (Phase 4)",
+      "description": "As the tool pipeline, I want to record tool sequences that led to failure so they are not recommended as chains.",
+      "acceptanceCriteria": [
+        "In orchestrator/core/services/edge_builder.py compute 'failed_after' edges in the nightly batch: when tool A succeeds and a tool B within the next 2 steps in the same session errors, increment failed_pairs[(A,B)]",
+        "Reuse the existing wilson_lower_bound() (already in edge_builder.py) for confidence",
+        "GraphRouter chain expansion does NOT follow failed_after edges",
+        "Add tests: test_failed_after_edge_not_expanded, test_wilson_lower_bound_with_failures",
+        "Type checks pass",
+        "pytest green"
+      ],
+      "priority": 18,
+      "passes": false,
+      "notes": "Confirmed wilson_lower_bound exists at edge_builder.py:55 — reuse it, do not reimplement. This adds a new edge_type value; no schema migration needed if edge_type is already a free-text/string column (verify before assuming a migration)."
+    },
+    {
+      "id": "US-019",
+      "title": "Batched incremental tool-execution signal recorder — NOT fire-and-forget (Phase 4)",
+      "description": "As the platform, I want tool-execution outcomes to update the routing graph incrementally WITHOUT opening a DB session per tool call.",
+      "acceptanceCriteria": [
+        "In orchestrator/modules/tools/tool_router.py, after tool execution, enqueue a lightweight signal (action_name, success, agent_id, workspace_id, prior_action) onto an in-process asyncio.Queue",
+        "A SINGLE background drain task batches upserts (flush every N signals or T seconds, both config-driven) using ONE DB session per flush",
+        "Do NOT call asyncio.ensure_future(...) per execution; do NOT open get_db_session() per tool call",
+        "Success -> used_after edge + agent_prefers affinity; failure -> failed_after edge + fails_for_intent affinity; repeated signals increment sample_count (no duplicate edges)",
+        "Add tests in test_graph_router_negative.py: test_incremental_edge_update_success, test_incremental_edge_update_failure, test_edge_upsert_increments_sample_count, test_flush_uses_single_session",
+        "Type checks pass",
+        "pytest green"
+      ],
+      "priority": 19,
+      "passes": false,
+      "notes": "This story explicitly FIXES the original draft's bug: it used asyncio.ensure_future to open a DB session on every tool call, which exhausts the connection pool under load (the exact failure Phase 1 fixes). The batched-drain pattern is mandatory. code-reviewer agent must confirm there is no per-call DB session."
+    },
+    {
+      "id": "US-020",
+      "title": "HARNESS self-management feature flag + _parse_harness_task (Phase 5)",
+      "description": "As an operator, I need HARNESS self-management gated behind a flag (default off) and a parser that turns an approved board task back into a prescription.",
+      "acceptanceCriteria": [
+        "Add HARNESS_SELF_MANAGEMENT_ENABLED to orchestrator/config.py, default False (read via config.py only)",
+        "Add _parse_harness_task(task) to orchestrator/services/harness_service.py: parses title format '[HARNESS] {change_type} for {target_name}', extracts Current/Proposed JSON from description, resolves target_id, returns prescription dict or None for non-HARNESS tasks",
+        "Add tests in orchestrator/tests/test_harness_self_management.py: test_parse_harness_task_valid, test_parse_harness_task_invalid, test_flag_defaults_false",
+        "Type checks pass",
+        "pytest orchestrator/tests/test_harness_self_management.py green"
+      ],
+      "priority": 20,
+      "passes": false,
+      "notes": "Phase 5 is HIGH RISK and ships LAST. Nothing in Phase 5 may take effect unless HARNESS_SELF_MANAGEMENT_ENABLED is true for the workspace. This story adds the flag and the parser only — no execution yet."
+    },
+    {
+      "id": "US-021",
+      "title": "Execute approved board tasks (flag-gated) + snapshot current value (Phase 5)",
+      "description": "As Auto, I want approved [HARNESS] board tasks to actually execute (when the flag is on), with the pre-change state snapshotted for rollback.",
+      "acceptanceCriteria": [
+        "In orchestrator/services/harness_service.py replace the warning-only loop (lines ~1193-1202) in _apply_approved_board_tasks(): for each approved task, parse via _parse_harness_task and apply via the EXISTING _auto_apply_prescription(executor, change_spec)",
+        "On success, mark the board task done with a 'harness-applied' tag and add an 'applied_from_approved' changelog entry; on failure add a 'failed' entry",
+        "Before applying, snapshot current state into changelog_entry['current_value_before'] via a _snapshot_current_value helper (rollback prerequisite)",
+        "Execution only runs when HARNESS_SELF_MANAGEMENT_ENABLED is true; otherwise behaviour is unchanged (still just logs)",
+        "Add tests: test_approved_tasks_are_executed (flag on), test_approved_tasks_noop_when_flag_off, test_snapshot_recorded_before_apply",
+        "Type checks pass",
+        "pytest green"
+      ],
+      "priority": 21,
+      "passes": false,
+      "notes": "BLOCKED by US-020. Delete the logger.warning('...not yet auto-applied (v1 limitation)...') (line ~1195) and the approved_pending changelog entry (line ~1201) — replace with real execution. Reuse _auto_apply_prescription; do NOT invent a new apply method."
+    },
+    {
+      "id": "US-022",
+      "title": "Auto-rollback on regression (Phase 5)",
+      "description": "As Auto, I want to automatically revert an auto-applied change if the target agent regresses on the next run.",
+      "acceptanceCriteria": [
+        "In _phase_diagnose(): read the last changelog; for each 'applied' entry whose target agent is now classified REGRESSION, add an issue with root_cause 'auto_applied_regression' and a rollback_spec (change_type + revert_to = current_value_before)",
+        "In _phase_prescribe(): for each auto_applied_regression issue, emit a rollback prescription with risk_score=1 reverting to the snapshot",
+        "Add tests: test_rollback_on_regression, test_rollback_reverts_to_snapshot",
+        "Type checks pass",
+        "pytest green"
+      ],
+      "priority": 22,
+      "passes": false,
+      "notes": "BLOCKED by US-021 (needs current_value_before snapshot). Rollbacks are always risk=1 (safe). This is the safety net for self-applied changes — verify it actually fires in the US-026 canary."
+    },
+    {
+      "id": "US-023",
+      "title": "Expanded prescription vocabulary with CORRECT action names (Phase 5)",
+      "description": "As Auto, I want to prescribe tool-assignment and power-mode changes, not just heartbeat/description tweaks.",
+      "acceptanceCriteria": [
+        "Add handlers in _auto_apply_prescription() for: tool_assignment_add -> executor.execute('platform_assign_tool_to_agent', {agent_id, tool_name}); tool_assignment_remove -> executor.execute('platform_unassign_tool_from_agent', {agent_id, tool_name}); power_mode_upgrade/power_mode_downgrade -> executor.execute('platform_update_agent', {agent_id, configuration:{power_mode}}); rollback (revert to proposed_value)",
+        "routing_rule_add is NOT implemented (no platform_create_routing_rule action exists) — explicitly excluded from v1",
+        "Add prescription generators for these triggers per PRD section 5.3.4 (tool frequently routed but unassigned; tool idle 30+ days; agent hits limits; agent uses <20% budget)",
+        "Add tests: test_tool_assignment_add_prescription, test_power_mode_upgrade_prescription, test_power_mode_downgrade_prescription, test_routing_rule_add_absent",
+        "Verify each action name against modules/tools/discovery/actions_assignments.py — they MUST be platform_assign_tool_to_agent / platform_unassign_tool_from_agent",
+        "Type checks pass",
+        "pytest green"
+      ],
+      "priority": 23,
+      "passes": false,
+      "notes": "FIXES original draft bug: it used platform_assign_tool / platform_unassign_tool which DO NOT EXIST. Correct names are platform_assign_tool_to_agent / platform_unassign_tool_from_agent (verified in actions_assignments.py). routing_rule_add is dropped because platform_create_routing_rule does not exist — adding it is net-new platform-action work outside this PRD."
+    },
+    {
+      "id": "US-024",
+      "title": "Telegram/Slack escalation for high-risk prescriptions (Phase 5)",
+      "description": "As Auto, I want to ask a human for approval via their configured channel when a change is high-risk.",
+      "acceptanceCriteria": [
+        "In _phase_apply(), when a prescription has risk_score >= 4 AND the workspace has a notification channel, call the EXISTING core.services.notification_service.send_workspace_notification(workspace_id, message) with the change summary and '/approve {rx_id}' / '/reject {rx_id}' instructions",
+        "Add an 'escalated' changelog entry; do NOT auto-apply risk>=4 changes — they wait for approval",
+        "Add tests: test_escalation_sends_telegram, test_escalation_skipped_no_channel",
+        "Type checks pass",
+        "pytest green"
+      ],
+      "priority": 24,
+      "passes": false,
+      "notes": "send_workspace_notification confirmed to exist at core/services/notification_service.py:34 — reuse it, do not build a new notifier. The board task carrying the prescription must be tagged 'harness' and 'rx:{rx_id}' so US-025 can find it by tag."
+    },
+    {
+      "id": "US-025",
+      "title": "/approve /reject command handler WITH authorization (Phase 5)",
+      "description": "As an operator, I want to approve or reject a high-risk HARNESS change from my channel, and I need that path to be authorized so no arbitrary inbound payload can mutate platform config.",
+      "acceptanceCriteria": [
+        "Create orchestrator/api/harness_commands.py with handle_harness_command(db, workspace_id, command, rx_id, caller_identity)",
+        "AUTHORIZATION (mandatory): verify caller_identity maps to a workspace ADMIN for workspace_id before ANY mutation; unauthorized/unauthenticated -> reject with an authz error, no state change",
+        "/approve: find the board task by tags contains ['harness', 'rx:{rx_id}'], mark done, apply via the EXISTING _auto_apply_prescription flow (NOT an invented _apply_single_approved_task); idempotent (a second approve does not double-apply)",
+        "/reject: mark the task rejected and block the prescription signature from being re-proposed",
+        "Unknown rx_id -> 'not found' response",
+        "Create orchestrator/tests/test_harness_commands.py: test_handle_approve_command, test_handle_reject_command, test_handle_unknown_rx_id, test_handle_already_applied (idempotent), test_unauthorized_caller_rejected",
+        "Type checks pass",
+        "pytest orchestrator/tests/test_harness_commands.py green"
+      ],
+      "priority": 25,
+      "passes": false,
+      "notes": "FIXES two original draft bugs: (1) it called harness._apply_single_approved_task which DOES NOT EXIST — reuse _auto_apply_prescription; (2) it had NO authz — anyone who could post to the channel webhook could approve a privilege change. The authz check is non-negotiable and is the focus of the US-026 security review."
+    },
+    {
+      "id": "US-026",
+      "title": "GATE: HARNESS self-management canary + security review (Phase 5 release gate)",
+      "description": "As the operator, I need a controlled, reviewed rollout of self-management on ONE workspace before any broader enablement.",
+      "acceptanceCriteria": [
+        "Enable HARNESS_SELF_MANAGEMENT_ENABLED on ONE non-critical workspace only",
+        "Create an approved [HARNESS] board task and verify it executes and is marked harness-applied",
+        "Force a regression on an auto-applied target and verify a risk=1 rollback prescription is generated and reverts to the snapshot",
+        "Verify a risk>=4 prescription escalates via the channel and is NOT auto-applied",
+        "Verify an unauthorized /approve is rejected with no state change; an authorized /approve applies once (idempotent)",
+        "code-reviewer agent on the full Phase 5 diff AND security-auditor agent specifically on api/harness_commands.py (authz path)",
+        "48h soak with no unintended mutations; rollback path verified",
+        "Soak clean + reviews passed -> Phase 5 complete"
+      ],
+      "priority": 26,
+      "passes": false,
+      "notes": "Operational + security gate. Do NOT enable self-management beyond the single canary workspace until this gate passes. If the authz review finds any gap, fix it and re-run the security-auditor before extending enablement. This is the riskiest capability in the platform — treat the gate as mandatory, not optional."
+    }
+  ]
+}

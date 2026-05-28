@@ -5,17 +5,19 @@
 
 The following files were used as context for generating this wiki page:
 
+- [frontend/components/auth/profile-menu.tsx](frontend/components/auth/profile-menu.tsx)
 - [frontend/hooks/use-marketplace-api.ts](frontend/hooks/use-marketplace-api.ts)
-- [orchestrator/api/marketplace.py](orchestrator/api/marketplace.py)
-- [orchestrator/modules/coordination/__init__.py](orchestrator/modules/coordination/__init__.py)
-- [orchestrator/modules/coordination/agent_matcher.py](orchestrator/modules/coordination/agent_matcher.py)
-- [orchestrator/modules/coordination/templates.py](orchestrator/modules/coordination/templates.py)
+- [frontend/hooks/use-playbook-api.ts](frontend/hooks/use-playbook-api.ts)
+- [frontend/lib/shepherd/tour-registry.ts](frontend/lib/shepherd/tour-registry.ts)
+- [orchestrator/alembic/versions/agents_public_id_default.py](orchestrator/alembic/versions/agents_public_id_default.py)
+- [orchestrator/modules/tools/discovery/cascade_installer.py](orchestrator/modules/tools/discovery/cascade_installer.py)
+- [orchestrator/modules/tools/discovery/handlers_marketplace.py](orchestrator/modules/tools/discovery/handlers_marketplace.py)
 
 </details>
 
 
 
-**Purpose and Scope**: This document covers the technical implementation of publishing workspace items (agents, recipes) to the Community Marketplace. It details the "Clone to Marketplace" pattern, the `owner_type` state machine, dependency management during publishing, and the administrative approval workflow.
+**Purpose and Scope**: This document covers the technical implementation of publishing workspace items (agents, recipes) to the Community Marketplace. It details the "Clone to Marketplace" pattern, the `owner_type` state machine, dependency management during publishing, and the cascading installation logic that ensures agents and workflows remain functional across different user environments.
 
 ---
 
@@ -33,104 +35,105 @@ The marketplace publishing system allows users to share their workspace configur
 | `is_featured` | `false` | `false` | Admin-set |
 | `install_count` | `0` | `0` | Incremental |
 
-**Sources**: [orchestrator/api/marketplace.py:53-77](), [orchestrator/api/marketplace.py:154-157]()
+Sources: [orchestrator/modules/tools/discovery/handlers_marketplace.py:86-89](), [orchestrator/modules/tools/discovery/cascade_installer.py:110-119]()
 
 ---
 
 ## The Submission Workflow
 
-When a user submits an agent or recipe, the backend performs a deep clone of the entity and its relational dependencies. This process is initiated via the `useSubmitToMarketplace` hook in the frontend.
+When a user submits an agent or recipe, the backend performs a deep clone of the entity and its relational dependencies. This process is initiated via the frontend components which interface with the Marketplace API.
 
 ### Submission Data Flow
 
-The following diagram illustrates the transition from a private workspace entity to a public marketplace item, mapping frontend hooks to backend API logic.
+The following diagram illustrates the transition from a private workspace entity to a public marketplace item, involving the `Agent` and `WorkflowRecipe` models.
 
 ```mermaid
 sequenceDiagram
-    participant User as "useSubmitToMarketplace (Frontend)"
-    participant API as "Marketplace API (POST /submit)"
-    participant DB as "PostgreSQL (Agent/WorkflowTemplate)"
-    participant Admin as "Admin Dashboard"
+    participant UI as "Marketplace UI (Frontend)"
+    participant Hook as "useSubmitToMarketplace"
+    participant API as "Marketplace API (/submit)"
+    participant DB as "PostgreSQL (Core Models)"
 
-    User->>API: submitToMarketplace(SubmitRequest)
-    Note over API: Verify ownership & item_type
+    UI->>Hook: Trigger Publish (agent_id)
+    Hook->>API: POST /api/marketplace/submit (SubmitToMarketplaceRequest)
+    Note over API: Verify workspace ownership
     
-    API->>DB: Create Marketplace Copy (owner_type='marketplace')
+    API->>DB: Create Marketplace Clone (owner_type='marketplace')
     Note over DB: Set original_creator_id = current_user.id
-    Note over DB: Set is_approved = false
+    Note over DB: Set workspace_id = NULL
     
     rect rgb(240, 240, 240)
-    Note over API, DB: Dependency Cloning (Agents)
-    API->>DB: Copy Agent Skills (agent_skills table)
-    API->>DB: Copy Tool Assignments (agent_tool_assignments)
-    API->>DB: Copy Plugin Configs (agent_plugins)
+    Note over API, DB: Dependency Association
+    API->>DB: Link Skills (M2M agent_skills)
+    API->>DB: Store Model Config (model_id, provider)
     end
 
-    API-->>User: 201 Created (SubmitToMarketplaceResponse)
-    
-    Admin->>API: POST /api/marketplace/items/{id}/approve
-    API->>DB: UPDATE agents SET is_approved = true
-    API-->>Admin: 200 OK (Item Public)
+    API-->>UI: 201 Created (SubmitToMarketplaceResponse)
 ```
 
-**Sources**: [orchestrator/api/marketplace.py:100-107](), [frontend/hooks/use-marketplace-api.ts:39-56](), [frontend/hooks/use-marketplace-api.ts:61-92]()
+Sources: [frontend/hooks/use-marketplace-api.ts:39-56](), [frontend/hooks/use-marketplace-api.ts:61-92](), [orchestrator/modules/tools/discovery/cascade_installer.py:101-122]()
 
 ### Dependency Resolution Logic
 For **Agents**, the publishing process ensures that all associated metadata and capabilities are preserved in the marketplace version:
-1. **Model Config**: Provider, model ID, and temperature settings are stored in the `metadata` or `configuration` fields.
-2. **Tools**: External app IDs (Composio slugs) and specific action filters are captured. The system queries the `composio_apps_cache` to retrieve logos and metadata for the marketplace card.
-3. **Skills**: Custom code-based capabilities associated with the agent are linked via the `agent_skills` relationship.
+1. **Model Config**: Provider, model ID, and temperature settings are stored in the `model_config` field [orchestrator/modules/tools/discovery/cascade_installer.py:107-107]().
+2. **Tools**: External app requirements (Composio slugs) are analyzed. The system checks `ComposioAppCache` to determine if OAuth is required for the tool to function after installation [orchestrator/modules/tools/discovery/cascade_installer.py:40-71]().
+3. **Skills**: Custom code-based capabilities associated with the agent are linked via the `skills` relationship [orchestrator/modules/tools/discovery/cascade_installer.py:125-127]().
 
-**Sources**: [orchestrator/api/marketplace.py:53-68](), [orchestrator/api/marketplace.py:190-205]()
+Sources: [orchestrator/modules/tools/discovery/cascade_installer.py:40-71](), [orchestrator/modules/tools/discovery/cascade_installer.py:101-128]()
+
+---
+
+## Cascading Installation Pattern
+
+When a user installs an item from the marketplace, the `cascade_installer` module ensures that all dependencies are provisioned into the user's workspace automatically.
+
+### Installation Data Flow
+
+```mermaid
+graph TD
+    subgraph "Marketplace Space"
+        MA["Marketplace Agent (owner_type=marketplace)"]
+        MR["Marketplace Recipe"]
+    end
+
+    subgraph "Workspace Space (User)"
+        WA["Cloned Agent (owner_type=workspace)"]
+        WM["LLM Model Instance"]
+        WS["Workspace Skill"]
+        WT["Tool Assignment"]
+    end
+
+    MA -->|clone_agent_to_workspace| WA
+    WA -->|cascade_agent_dependencies| WM
+    WA -->|cascade_agent_dependencies| WS
+    WA -->|cascade_agent_dependencies| WT
+
+    style MA stroke-dasharray: 5 5
+    style MR stroke-dasharray: 5 5
+```
+
+### Key Installation Functions
+- `clone_agent_to_workspace`: Handles the physical duplication of the agent record, ensuring no name collisions occur within the target workspace [orchestrator/modules/tools/discovery/cascade_installer.py:78-128]().
+- `cascade_agent_dependencies`: Orchestrates the installation of LLM models, plugins, skills, and tools required by the agent [orchestrator/modules/tools/discovery/cascade_installer.py:135-148]().
+- `check_oauth_requirements`: Scans the `ComposioAppCache` to warn users if the installed tools require manual OAuth connection (e.g., Gmail, Slack) [orchestrator/modules/tools/discovery/cascade_installer.py:40-71]().
+
+Sources: [orchestrator/modules/tools/discovery/cascade_installer.py:40-148]()
 
 ---
 
 ## Admin Approval & Moderation
 
-Approval is restricted to administrative users. The system identifies admins via the `system_role` field in the `UserModel`.
-
-### Implementation of assert_admin
-
-The `assert_admin` helper ensures that only authorized personnel can transition items from `pending` to `public`.
-
-```python
-# orchestrator/api/marketplace.py:43-47
-def assert_admin(ctx: RequestContext) -> None:
-    """Raise 403 if the current user is not an admin."""
-    if not is_admin(ctx):
-        raise HTTPException(status_code=403, detail="Admin access required")
-```
+Approval is restricted to administrative users. The system uses a toggle mechanism to transition items to a featured state or approve them for public listing.
 
 ### Marketplace Management Logic
 
-The marketplace logic bridges high-level user actions with specific database entities.
+| Code Entity | File Path | Role |
+| :--- | :--- | :--- |
+| `useToggleFeatured` | `frontend/hooks/use-marketplace-api.ts` | Admin hook to feature/unfeature items [frontend/hooks/use-marketplace-api.ts:168-186]() |
+| `useSubmitToMarketplace` | `frontend/hooks/use-marketplace-api.ts` | Handles the `auto_approved` flag logic [frontend/hooks/use-marketplace-api.ts:61-92]() |
+| `browse_marketplace_agents` | `orchestrator/modules/tools/discovery/handlers_marketplace.py` | Filters for `owner_type='marketplace'` and `status='active'` [orchestrator/modules/tools/discovery/handlers_marketplace.py:82-89]() |
 
-```mermaid
-graph TD
-    subgraph "Natural Language Space"
-        Publish["Publish Agent to Community"]
-        Install["Install Recipe from Store"]
-    end
-
-    subgraph "Code Entity Space"
-        HookSub["useSubmitToMarketplace"]
-        HookInst["useInstallMarketplaceItem"]
-        APISub["apiClient.submitToMarketplace"]
-        APIInst["apiClient.installMarketplaceItem"]
-        ModelAgent["Agent Model (owner_type='marketplace')"]
-        ModelRecipe["WorkflowTemplate Model"]
-    end
-
-    Publish --> HookSub
-    HookSub --> APISub
-    APISub --> ModelAgent
-    
-    Install --> HookInst
-    HookInst --> APIInst
-    APIInst --> ModelRecipe
-```
-
-**Sources**: [orchestrator/api/marketplace.py:36-40](), [orchestrator/api/marketplace.py:53-80](), [frontend/hooks/use-marketplace-api.ts:61-68](), [frontend/hooks/use-marketplace-api.ts:138-144]()
+Sources: [frontend/hooks/use-marketplace-api.ts:168-186](), [orchestrator/modules/tools/discovery/handlers_marketplace.py:82-89]()
 
 ---
 
@@ -139,43 +142,24 @@ graph TD
 The marketplace tracks usage and versioning to provide a dynamic ecosystem for users.
 
 ### Install Count
-The `install_count` field is incremented every time a user successfully clones a marketplace item to their workspace. This serves as the primary sorting metric for the marketplace browsing view.
-
-```python
-# orchestrator/api/marketplace.py:172-173
-# Order by install count
-agent_query = agent_query.order_by(desc(Agent.install_count), desc(Agent.created_at))
-```
+The `install_count` field is incremented every time a user successfully clones a marketplace item to their workspace. This serves as the primary sorting metric for the marketplace browsing view [orchestrator/modules/tools/discovery/handlers_marketplace.py:105-105]().
 
 ### Versioning and Updates
-Marketplace items include a `version` string (defaulting to "1.0.0"). The `UpdateInfo` model and `checkMarketplaceUpdates` hook allow the system to notify users when a newer version of an installed agent or recipe is available.
+Marketplace items include a `version` string. The `useMarketplaceUpdates` hook allows the system to notify users when a newer version of an installed agent or recipe is available in the marketplace [frontend/hooks/use-marketplace-api.ts:191-198]().
 
-```typescript
-// frontend/hooks/use-marketplace-api.ts:165-172
-export function useMarketplaceUpdates() {
-  return useQuery({
-    queryKey: marketplaceQueryKeys.updates,
-    queryFn: () => apiClient.checkMarketplaceUpdates(),
-    staleTime: 1000 * 60 * 15, // 15 minutes
-    refetchOnWindowFocus: false,
-  })
-}
-```
-
-**Sources**: [orchestrator/api/marketplace.py:65](), [orchestrator/api/marketplace.py:109-116](), [frontend/hooks/use-marketplace-api.ts:165-172]()
+Sources: [orchestrator/modules/tools/discovery/handlers_marketplace.py:105-105](), [frontend/hooks/use-marketplace-api.ts:191-198]()
 
 ---
 
 ## API Reference: Publishing Endpoints
 
-| Method | Endpoint | Description | Auth |
+| Method | Hook / Endpoint | Description | Auth |
 | :--- | :--- | :--- | :--- |
-| `POST` | `/api/marketplace/submit` | Submits a workspace item to marketplace | User |
-| `GET` | `/api/marketplace/items` | Lists approved marketplace items with filters | Public/User |
-| `GET` | `/api/marketplace/items/{id}` | Retrieves detailed item info including dependencies | User |
-| `POST` | `/api/marketplace/install` | Clones a marketplace item into the current workspace | User |
-| `GET` | `/api/marketplace/updates` | Checks for updates to installed marketplace items | User |
+| `POST` | `useSubmitToMarketplace` | Submits a workspace item to marketplace [frontend/hooks/use-marketplace-api.ts:61-92]() | User |
+| `POST` | `useSubmitPlaybookToMarketplace` | Submits a workflow recipe to marketplace [frontend/hooks/use-playbook-api.ts:135-146]() | User |
+| `POST` | `useInstallMarketplaceItem` | Clones a marketplace item and triggers cascade [frontend/hooks/use-marketplace-api.ts:138-163]() | User |
+| `GET` | `useMarketplaceItems` | Lists approved marketplace items with filters [frontend/hooks/use-marketplace-api.ts:97-110]() | Public/User |
 
-**Sources**: [orchestrator/api/marketplace.py:122-132](), [frontend/hooks/use-marketplace-api.ts:10-173]()
+Sources: [frontend/hooks/use-marketplace-api.ts:61-163](), [frontend/hooks/use-playbook-api.ts:135-146]()
 
 ---

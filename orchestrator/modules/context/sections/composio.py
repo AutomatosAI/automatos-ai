@@ -25,7 +25,12 @@ class ComposioSection(BaseSection):
 
     name: str = "composio"
     priority: int = 5
-    max_tokens: Optional[int] = 1000
+    max_tokens: Optional[int] = None
+
+    def __init__(self) -> None:
+        super().__init__()
+        from config import config
+        self.max_tokens = config.COMPOSIO_SECTION_MAX_TOKENS
 
     async def render(self, ctx: SectionContext) -> str:
         """Render connected Composio apps block."""

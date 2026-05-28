@@ -65,11 +65,14 @@ class ComposioClient:
     Usage:
         client = ComposioClient()
         
-        # Initiate OAuth connection
-        redirect_url = client.initiate_connection(
+        # Initiate hosted-auth connection (returns dict with redirect_url +
+        # the auth_config_id/scheme actually used — persist these against the
+        # workspace's connection row so reconnects reuse the same scheme).
+        result = client.initiate_connection(
             entity_id="workspace_123",
-            app="GITHUB"
+            app="GITHUB",
         )
+        redirect_url = result["redirect_url"]
         
         # Create Tool Router session
         session = client.create_tool_router_session(
@@ -100,7 +103,7 @@ class ComposioClient:
         # Bypasses SDK semantic search (which returns alphabetical, not semantic).
         self._schema_cache: Dict[str, Dict[str, Dict[str, Any]]] = {}  # {APP: {ACTION_NAME: schema}}
         self._schema_cache_ts: Dict[str, float] = {}
-        self._schema_cache_ttl = 3600  # 1 hour
+        self._schema_cache_ttl = 3600
     
     @property
     def composio(self):
@@ -113,7 +116,11 @@ class ComposioClient:
             # billing, and service monitoring. This is part of their service model.
             self._composio = Composio(
                 api_key=self.api_key,
-                toolkit_versions={"default": "latest"},
+                # "latest" is rejected for manual tools.execute() calls — see
+                # docs/SHOPIFY/COMPOSIO-SHOPIFY-SETUP.md gotcha #1. Pin shopify
+                # to the version we've tested PRD-009 sync against; other
+                # toolkits stay on "latest" via the default key.
+                toolkit_versions={"default": "latest", "shopify": "20260414_00"},
             )
         return self._composio
 
@@ -130,7 +137,9 @@ class ComposioClient:
             self._toolset = Composio(
                 api_key=self.api_key,
                 provider=OpenAIProvider(),
-                toolkit_versions={"default": "latest"},
+                # Mirror the pin on `composio` above so the OpenAI-provider
+                # variant doesn't drift back to "latest" for shopify.
+                toolkit_versions={"default": "latest", "shopify": "20260414_00"},
             )
         return self._toolset
     
@@ -154,34 +163,51 @@ class ComposioClient:
         # Return a simple dict for compatibility
         return {"user_id": entity_id, "composio_entity_id": entity_id}
     
-    def _resolve_auth_config_id(self, app_slug: str) -> Optional[str]:
+    def _resolve_auth_config_id(
+        self,
+        app_slug: str,
+        preferred_auth_config_id: Optional[str] = None,
+        preferred_scheme: Optional[str] = None,
+    ) -> Optional[str]:
         """
-        Find existing active Auth Config ID for an app slug.
-        PERFORMANCE: Cached for 1 hour to avoid repeated API calls.
+        Find an ENABLED Auth Config ID for an app slug.
+
+        Selection order:
+          1. preferred_auth_config_id, if passed (caller knows exactly which one)
+          2. ENABLED config matching app_slug AND preferred_scheme (if passed)
+          3. ENABLED config matching app_slug (first hit — legacy behaviour)
+
+        PERFORMANCE: Cached for 1 hour. Scheme is part of the cache key so
+        OAuth lookups don't poison API_KEY lookups for the same toolkit.
         """
-        # Check cache first
-        cache_key = app_slug.lower()
+        if preferred_auth_config_id:
+            return preferred_auth_config_id
+
+        scheme_norm = (preferred_scheme or "_any").upper()
+        cache_key = f"{app_slug.lower()}::{scheme_norm}"
         if cache_key in self._auth_config_cache:
             return self._auth_config_cache[cache_key]
 
         try:
-            # List all auth configs (expensive call)
-            logger.debug(f"Fetching auth_configs from Composio API for {app_slug}")
+            logger.debug(f"Fetching auth_configs from Composio API for {app_slug} scheme={scheme_norm}")
             response = self.composio.auth_configs.list()
             items = response.items if hasattr(response, 'items') else response.data if hasattr(response, 'data') else []
 
             for c in items:
-                # Check for matching toolkit slug and enabled status
-                # Safe access to nested attributes
                 c_slug = getattr(c.toolkit, 'slug', '') if hasattr(c, 'toolkit') else ''
                 c_status = getattr(c, 'status', 'ENABLED')
+                c_scheme = (getattr(c, 'auth_scheme', '') or getattr(c, 'authScheme', '') or '').upper()
 
-                if c_slug.lower() == app_slug.lower() and c_status == 'ENABLED':
-                    # Cache the result
-                    self._auth_config_cache[cache_key] = c.id
-                    return c.id
+                if c_slug.lower() != app_slug.lower():
+                    continue
+                if c_status != 'ENABLED':
+                    continue
+                if preferred_scheme and c_scheme != scheme_norm:
+                    continue
 
-            # Cache None result too (to avoid retrying)
+                self._auth_config_cache[cache_key] = c.id
+                return c.id
+
             self._auth_config_cache[cache_key] = None
             return None
         except Exception as e:
@@ -207,13 +233,25 @@ class ComposioClient:
         schemes = self._get_auth_schemes(app_slug)
         return schemes == ["NO_AUTH"] or (len(schemes) == 1 and "NO_AUTH" in schemes)
 
-    def _ensure_auth_config_id(self, app_slug: str) -> str:
+    def _ensure_auth_config_id(
+        self,
+        app_slug: str,
+        preferred_auth_config_id: Optional[str] = None,
+        preferred_scheme: Optional[str] = None,
+    ) -> str:
         """
         Get existing Auth Config ID or create a new one with correct scheme.
 
+        If preferred_auth_config_id or preferred_scheme is passed, those are
+        threaded through resolution. Creation only happens when nothing exists.
+
         Raises ValueError for NO_AUTH apps — they don't need auth configs.
         """
-        existing_id = self._resolve_auth_config_id(app_slug)
+        existing_id = self._resolve_auth_config_id(
+            app_slug,
+            preferred_auth_config_id=preferred_auth_config_id,
+            preferred_scheme=preferred_scheme,
+        )
         if existing_id:
             return existing_id
 
@@ -229,15 +267,13 @@ class ComposioClient:
             )
 
         try:
-            # Default options
-            options = {"type": "use_composio_managed_auth"}
-
             if "API_KEY" in schemes:
                 options = {"type": "use_custom_auth", "authScheme": "API_KEY"}
             elif "BASIC" in schemes:
                 options = {"type": "use_custom_auth", "authScheme": "BASIC"}
+            else:
+                options = {"type": "use_composio_managed_auth"}
 
-            # Create new auth config
             logger.info(f"Creating new Auth Config for {app_slug} with options={options}")
             config = self.composio.auth_configs.create(
                 toolkit=app_slug,
@@ -245,6 +281,18 @@ class ComposioClient:
             )
             return config.id
         except Exception as e:
+            if "DefaultAuthConfigNotFound" in str(e) and options.get("type") == "use_composio_managed_auth":
+                logger.warning(f"Managed auth unavailable for {app_slug}, falling back to custom OAUTH2")
+                try:
+                    fallback = {"type": "use_custom_auth", "authScheme": "OAUTH2"}
+                    config = self.composio.auth_configs.create(
+                        toolkit=app_slug,
+                        options=fallback
+                    )
+                    return config.id
+                except Exception as e2:
+                    logger.error(f"Custom auth fallback also failed for {app_slug}: {e2}")
+                    raise ValueError(f"Could not setup authentication for {app_slug}: {str(e2)}")
             logger.error(f"Failed to create auth config for {app_slug}: {e}")
             raise ValueError(f"Could not setup authentication for {app_slug}: {str(e)}")
 
@@ -252,37 +300,66 @@ class ComposioClient:
         self,
         entity_id: str,
         app: str,
-        callback_url: Optional[str] = None
-    ) -> str:
+        callback_url: Optional[str] = None,
+        auth_config_id: Optional[str] = None,
+        auth_scheme: Optional[str] = None,
+    ) -> Dict[str, str]:
         """
-        Initiate OAuth connection using Composio's Hosted Auth Link.
-        
-        This returns a URL that the user should be redirected to.
-        Composio handles the OAuth flow and stores the credentials.
-        
+        Initiate a Composio hosted-auth connection.
+
+        Composio's hosted-auth link handles OAuth, API Key, and Bearer Token
+        flows from the same UI — the form Composio renders depends on the
+        auth_config's scheme. Pass auth_scheme or auth_config_id to pin which
+        scheme this workspace uses (e.g. API_KEY for Shopify merchants where
+        managed-install breaks OAuth).
+
         Args:
-            entity_id: Entity identifier (user_id in SDK)
-            app: App name (auth_config_id in SDK, e.g., "GITHUB")
-            callback_url: Optional callback URL after auth completes
-            
+            entity_id: Workspace's Composio user_id.
+            app: App slug (e.g. "SHOPIFY").
+            callback_url: Optional post-auth redirect.
+            auth_config_id: Optional explicit auth_config to use (wins over scheme).
+            auth_scheme: Optional preferred scheme ("API_KEY" | "OAUTH2" | "BASIC").
+
         Returns:
-            Redirect URL for OAuth flow
+            dict with redirect_url + auth_config_id + auth_scheme actually used
+            (so callers can persist the choice against the workspace's connection).
         """
         if not self.composio:
             raise ValueError("Composio client not initialized. Set COMPOSIO_API_KEY.")
-        
+
         try:
-            # Ensure valid Auth Config ID exists for this app
-            auth_config_id = self._ensure_auth_config_id(app)
-            
-            # Use link() for hosted auth UI (handles OAuth, API Key, Bearer Token, etc.)
-            # This redirects users to Composio's page where they can input credentials
+            chosen_id = self._ensure_auth_config_id(
+                app,
+                preferred_auth_config_id=auth_config_id,
+                preferred_scheme=auth_scheme,
+            )
+
             connection_request = self.composio.connected_accounts.link(
                 user_id=entity_id,
-                auth_config_id=auth_config_id,
-                callback_url=callback_url
+                auth_config_id=chosen_id,
+                callback_url=callback_url,
             )
-            return connection_request.redirect_url
+
+            # Best-effort: look up the chosen config's scheme so callers can
+            # persist it. Falls back to whatever the caller asked for.
+            resolved_scheme = (auth_scheme or "").upper() or None
+            try:
+                cfg = self.composio.auth_configs.get(chosen_id)
+                resolved_scheme = (
+                    getattr(cfg, 'auth_scheme', None)
+                    or getattr(cfg, 'authScheme', None)
+                    or resolved_scheme
+                )
+                if resolved_scheme:
+                    resolved_scheme = str(resolved_scheme).upper()
+            except Exception:
+                pass
+
+            return {
+                "redirect_url": connection_request.redirect_url,
+                "auth_config_id": chosen_id,
+                "auth_scheme": resolved_scheme or "",
+            }
         except Exception as e:
             logger.error(f"Failed to initiate Composio connection for {app}: {e}")
             raise
@@ -330,6 +407,28 @@ class ComposioClient:
             logger.error(f"Failed to get connection status: {e}")
             return None
 
+    @staticmethod
+    def _extract_token_from_connection(conn) -> Optional[str]:
+        """Extract OAuth token from a connected account object (Pydantic model or dict)."""
+        for attr in ('access_token', 'token'):
+            val = getattr(conn, attr, None)
+            if val and isinstance(val, str):
+                return val
+
+        cp = getattr(conn, 'connectionParams', None)
+        if cp is None:
+            return None
+        # Pydantic model (SDK returns AuthConnectionParamsModel)
+        token = getattr(cp, 'access_token', None) or getattr(cp, 'token', None)
+        if token and isinstance(token, str):
+            return token
+        # Plain dict fallback
+        if isinstance(cp, dict):
+            token = cp.get('access_token') or cp.get('token')
+            if token:
+                return token
+        return None
+
     def get_app_access_token(self, entity_id: str, app: str) -> Optional[str]:
         """
         Retrieve the OAuth access token for a connected app.
@@ -355,30 +454,27 @@ class ComposioClient:
                 if conn.status not in ('ACTIVE', 'INITIATED'):
                     continue
 
-                # Try common token attributes on the connection object
-                for attr in ('access_token', 'token', 'connectionParams'):
-                    val = getattr(conn, attr, None)
-                    if val and isinstance(val, str):
-                        return val
-                    # connectionParams may be a dict with nested token
-                    if val and isinstance(val, dict):
-                        token = val.get('access_token') or val.get('token')
-                        if token:
-                            return token
+                token = self._extract_token_from_connection(conn)
+                if token:
+                    return token
 
-                # Try .get() if the SDK supports it (returns full details)
+                # Fetch full details if list response was sparse
                 try:
-                    detail = self.composio.connected_accounts.get(nanoid=conn.id)
-                    for attr in ('access_token', 'token', 'connectionParams'):
-                        val = getattr(detail, attr, None)
-                        if val and isinstance(val, str):
-                            return val
-                        if val and isinstance(val, dict):
-                            token = val.get('access_token') or val.get('token')
-                            if token:
-                                return token
-                except Exception:
-                    pass
+                    detail = self.composio.connected_accounts.get(conn.id)
+                    token = self._extract_token_from_connection(detail)
+                    if token:
+                        return token
+                    # Log what the detail object looks like for debugging
+                    cp = getattr(detail, 'connectionParams', None)
+                    cp_debug = {}
+                    if cp:
+                        for f in ('access_token', 'token', 'scope', 'token_type', 'base_url', 'refresh_token'):
+                            v = getattr(cp, f, None) if not isinstance(cp, dict) else cp.get(f)
+                            cp_debug[f] = f"<{len(v)} chars>" if isinstance(v, str) and v else repr(v)
+                    logger.warning("get_app_access_token: conn %s status=%s connectionParams fields: %s",
+                                   conn.id, conn.status, cp_debug)
+                except Exception as detail_err:
+                    logger.warning("get_app_access_token: .get(%s) failed: %s", conn.id, detail_err)
 
             return None
         except Exception as e:
@@ -975,6 +1071,31 @@ class ComposioClient:
                     seen.add(name)
                     break
 
+        # If some explicitly-requested actions weren't in the initial cache,
+        # re-fetch their app with no limit so all actions are available.
+        missing = set(action_names) - seen
+        if missing:
+            refetched_apps: set = set()
+            for name in missing:
+                app_key = name.split("_", 1)[0]
+                if app_key in refetched_apps:
+                    continue
+                refetched_apps.add(app_key)
+                self._populate_schema_cache(
+                    app_key, entity_id,
+                    limit=500,
+                )
+            for name in missing:
+                for app_key, app_cache in self._schema_cache.items():
+                    if name in app_cache:
+                        results.append({
+                            "action_name": name,
+                            "schema": app_cache[name],
+                            "app_name": app_key,
+                        })
+                        seen.add(name)
+                        break
+
         logger.info(
             "[ComposioClient] get_action_schemas_by_name: requested=%d resolved=%d "
             "actions=%s",
@@ -990,7 +1111,8 @@ class ComposioClient:
             app_name: Composio app name (e.g. "GMAIL", "COMPOSIO_SEARCH")
             entity_id: Composio entity/user ID
             limit: Max actions to fetch per app (SDK returns by importance).
-                   Default 30 keeps context manageable for large apps (SLACK=153, GITHUB=874).
+                   Initial fetch uses 30 for performance; fallback re-fetch
+                   uses 500 to get all actions when explicit names are missing.
         """
         import time as _time
         app_upper = app_name.upper()

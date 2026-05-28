@@ -16,20 +16,20 @@ def test_workspace_integrations(client):
 
 
 def test_workspace_exec(client, workspace_id):
-    """POST exec — 200 if worker is up, 503 if offline (both acceptable)."""
+    """POST exec — 200 if worker is up, 404/503 if offline or unprovisioned."""
     r = client.post(
         f"/api/workspaces/{workspace_id}/exec",
         json={"command": "echo nightly-test-ok", "timeout": 10},
     )
-    assert r.status_code in (200, 503)
+    assert r.status_code in (200, 404, 503)
     if r.status_code == 200:
         assert "nightly-test-ok" in r.text
 
 
 def test_workspace_files(client, workspace_id):
-    """GET files — 200 if worker is up, 503 if offline."""
+    """GET files — 200 if worker is up, 404/503 if offline or unprovisioned."""
     r = client.get(f"/api/workspaces/{workspace_id}/files")
-    assert r.status_code in (200, 503)
+    assert r.status_code in (200, 404, 503)
 
 
 def test_workspace_file_content(client, workspace_id):

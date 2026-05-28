@@ -117,7 +117,7 @@ export function AgentSelector({ selectedAgentId, onAgentChange, onAgentData }: A
           variant="ghost"
           size="sm"
           data-tour="chat-agent-selector"
-          className="h-9 px-3 rounded-full border-2 border-orange-500/20 bg-black/20 hover:bg-orange-500/5 hover:border-orange-500/40 text-foreground/90 text-xs gap-2 shadow-[0_0_18px_rgba(249,115,22,0.10)]"
+          className="h-9 px-3 rounded-full border-2 border-primary/20 bg-black/20 hover:bg-primary/5 hover:border-primary/40 text-foreground/90 text-xs gap-2"
         >
           {isLoading ? (
             <Loader2 className="w-3 h-3 animate-spin" />
@@ -132,14 +132,14 @@ export function AgentSelector({ selectedAgentId, onAgentChange, onAgentData }: A
                 </>
               ) : selectedAgent ? (
                 <>
-                  <Bot className="w-3 h-3 text-orange-400" />
+                  <Bot className="w-3 h-3 text-primary" />
                   <span className="truncate max-w-[120px] font-medium">
                     {selectedAgent.name}
                   </span>
                 </>
               ) : (
                 <>
-                  <Bot className="w-3 h-3 text-orange-400" />
+                  <Bot className="w-3 h-3 text-primary" />
                   <span className="truncate max-w-[160px]">
                     Auto
                   </span>
@@ -147,17 +147,17 @@ export function AgentSelector({ selectedAgentId, onAgentChange, onAgentData }: A
               )}
             </>
           )}
-          <ChevronDown className="w-3 h-3 text-orange-400 opacity-50" />
+          <ChevronDown className="w-3 h-3 text-primary opacity-50" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="start"
-        className="w-[380px] max-h-[500px] overflow-y-auto bg-background border-orange-500/20 rounded-2xl"
+        className="w-[380px] max-h-[500px] overflow-y-auto bg-background border-primary/20 rounded-2xl"
         style={{ maxHeight: '70vh' }}
       >
         <DropdownMenuItem
           onClick={() => onAgentChange(null)}
-          className="text-foreground hover:bg-orange-500/10 cursor-pointer rounded-lg py-2"
+          className="text-foreground hover:bg-primary/10 cursor-pointer rounded-lg py-2"
         >
           <div className="flex items-start justify-between w-full">
             <div className="flex-1 min-w-0">
@@ -167,7 +167,7 @@ export function AgentSelector({ selectedAgentId, onAgentChange, onAgentData }: A
               </div>
             </div>
             {!selectedAgentId && (
-              <Check className="w-4 h-4 text-orange-400 ml-2 flex-shrink-0" />
+              <Check className="w-4 h-4 text-primary ml-2 flex-shrink-0" />
             )}
           </div>
         </DropdownMenuItem>
@@ -216,7 +216,7 @@ export function AgentSelector({ selectedAgentId, onAgentChange, onAgentData }: A
             <DropdownMenuItem
               key={agent.id}
               onClick={() => onAgentChange(agent.id)}
-              className="text-foreground hover:bg-orange-500/10 cursor-pointer rounded-lg py-2"
+              className="text-foreground hover:bg-primary/10 cursor-pointer rounded-lg py-2"
             >
               <div className="flex items-start justify-between w-full">
                 <div className="flex-1 min-w-0">
@@ -231,7 +231,7 @@ export function AgentSelector({ selectedAgentId, onAgentChange, onAgentData }: A
                   </div>
                 </div>
                 {isSelected && (
-                  <Check className="w-4 h-4 text-orange-400 ml-2 flex-shrink-0" />
+                  <Check className="w-4 h-4 text-primary ml-2 flex-shrink-0" />
                 )}
               </div>
             </DropdownMenuItem>

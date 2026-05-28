@@ -136,7 +136,8 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
         <PageHeader
           title="Mission"
           titleAccent={(mission.config as Record<string, unknown>)?.name as string || mission.goal.split(':')[0]}
-          subtitle={
+          eyebrow={`Operations · mission ${missionId.slice(0, 8)}`}
+          lede={
             [
               mission.state,
               stats ? `${stats.tasksDone}/${stats.taskCount} tasks` : null,
@@ -393,10 +394,10 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
 
       {/* Plan approval bar */}
       {mission.state === 'awaiting_approval' && (
-        <div className="px-4 md:px-6 py-3 border-b border-orange-500/30 bg-orange-500/5">
+        <div className="px-4 md:px-6 py-3 border-b border-primary/30 bg-primary/5">
           <div className="flex items-center justify-between gap-4">
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 text-sm text-orange-400">
+              <div className="flex items-center gap-2 text-sm text-primary">
                 <Eye className="w-4 h-4 shrink-0" />
                 <span>Review the plan below, then approve or reject</span>
               </div>

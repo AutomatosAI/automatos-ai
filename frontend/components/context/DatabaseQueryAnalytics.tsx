@@ -111,9 +111,9 @@ export function DatabaseQueryAnalytics() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Total Rows Retrieved</p>
-                <p className="text-2xl font-bold text-orange-400">{(stats?.total_rows || 0).toLocaleString()}</p>
+                <p className="text-2xl font-bold text-primary">{(stats?.total_rows || 0).toLocaleString()}</p>
               </div>
-              <TrendingUp className="h-8 w-8 text-orange-400 opacity-50" />
+              <TrendingUp className="h-8 w-8 text-primary opacity-50" />
             </div>
           </CardContent>
         </Card>

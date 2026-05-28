@@ -6,10 +6,13 @@ Shared semantic field where agent knowledge resonates, decays, and
 forms attractors. Implements SharedContextPort so it's swappable
 with RedisSharedContext (PRD-107) for A/B comparison.
 
-Each mission field is a Qdrant collection. Each pattern is a point
-with a 2048-dim embedding and metadata payload. Resonance is computed
-as cosine_similarity² × decayed_strength at query time.
+All fields live in a SINGLE Qdrant collection. Each pattern is a
+point with a 2048-dim embedding and a payload that includes the
+owning ``field_id`` (one UUID per mission). Queries filter by
+``field_id``; destroy = delete-by-filter. One HNSW for the whole
+platform, scales by point count rather than collection count.
 
+Resonance = cosine_similarity² × decayed_strength at query time.
 This is how agents share a brain instead of playing telephone.
 """
 
@@ -27,6 +30,8 @@ from qdrant_client.models import (
     Distance,
     FieldCondition,
     Filter,
+    FilterSelector,
+    HnswConfigDiff,
     MatchValue,
     PayloadSchemaType,
     PointStruct,
@@ -39,14 +44,21 @@ from core.ports.context import SharedContextPort
 
 logger = logging.getLogger(__name__)
 
+# Single shared collection for all field memory. Per-mission isolation
+# is enforced via the ``field_id`` payload filter.
+SHARED_COLLECTION = "field_memory"
+
 
 class VectorFieldSharedContext(SharedContextPort):
     """PRD-108: vector field backend for SharedContextPort.
 
     Patterns injected by one agent become queryable by all agents
-    in the field. Relevance is surfaced by resonance (cosine² × strength),
-    not by recency or insertion order. Old patterns fade. Frequently
-    accessed patterns resist decay. No telephone game.
+    in the same field. Relevance is surfaced by resonance
+    (cosine² × strength), not by recency or insertion order.
+
+    All fields share one Qdrant collection (``field_memory``).
+    Per-mission isolation is enforced via the ``field_id`` payload
+    on every point and a payload index on that key.
     """
 
     def __init__(self) -> None:
@@ -62,6 +74,66 @@ class VectorFieldSharedContext(SharedContextPort):
         self._archival_threshold = config.FIELD_ARCHIVAL_THRESHOLD
         self._boundary_permeability = config.FIELD_BOUNDARY_PERMEABILITY
         self._dimension = config.FIELD_EMBEDDING_DIM
+        self._bootstrap_done = False
+
+    # ── Bootstrap ───────────────────────────────────────────────
+
+    async def ensure_shared_collection(self) -> None:
+        """Idempotent — create the shared collection and its payload
+        indexes if missing. Safe to call on every startup.
+        """
+        if self._bootstrap_done:
+            return
+
+        try:
+            exists = await self._client.collection_exists(SHARED_COLLECTION)
+        except Exception:
+            logger.warning("[Field] collection_exists check failed", exc_info=True)
+            exists = False
+
+        if not exists:
+            await self._client.create_collection(
+                collection_name=SHARED_COLLECTION,
+                vectors_config=VectorParams(
+                    size=self._dimension,
+                    distance=Distance.COSINE,
+                    on_disk=True,
+                ),
+                hnsw_config=HnswConfigDiff(on_disk=True),
+                on_disk_payload=True,
+            )
+            logger.info("[Field] Created shared collection %s", SHARED_COLLECTION)
+
+        # Payload indexes — idempotent in Qdrant, safe to call repeatedly.
+        for field_name, schema in [
+            ("field_id", PayloadSchemaType.KEYWORD),
+            ("content_hash", PayloadSchemaType.KEYWORD),
+            ("agent_id", PayloadSchemaType.INTEGER),
+            ("created_at", PayloadSchemaType.KEYWORD),
+        ]:
+            try:
+                await self._client.create_payload_index(
+                    collection_name=SHARED_COLLECTION,
+                    field_name=field_name,
+                    field_schema=schema,
+                    wait=True,
+                )
+            except Exception:
+                # "already exists" is the expected case after first boot
+                logger.debug("[Field] payload index %s present", field_name)
+
+        self._bootstrap_done = True
+
+    # ── Filter helpers ──────────────────────────────────────────
+
+    @staticmethod
+    def _field_filter(field_id: str, extra: Optional[list[FieldCondition]] = None) -> Filter:
+        must: list[FieldCondition] = [
+            FieldCondition(key="field_id", match=MatchValue(value=field_id)),
+        ]
+        if extra:
+            must.extend(extra)
+        return Filter(must=must)
 
     # ── Create / Destroy ────────────────────────────────────────
 
@@ -70,49 +142,51 @@ class VectorFieldSharedContext(SharedContextPort):
         team_agent_ids: list[int],
         initial_data: Optional[dict[str, Any]] = None,
     ) -> str:
+        await self.ensure_shared_collection()
         field_id = str(uuid.uuid4())
-        collection = f"field_{field_id}"
 
-        await self._client.create_collection(
-            collection_name=collection,
-            vectors_config=VectorParams(
-                size=self._dimension,
-                distance=Distance.COSINE,
-            ),
-        )
-
-        # Payload indexes for filtered queries — wait=True to avoid race
-        # between collection creation and index creation on Qdrant.
-        for field_name, schema in [
-            ("content_hash", PayloadSchemaType.KEYWORD),
-            ("agent_id", PayloadSchemaType.INTEGER),
-            ("created_at", PayloadSchemaType.KEYWORD),
-        ]:
-            await self._client.create_payload_index(
-                collection_name=collection,
-                field_name=field_name,
-                field_schema=schema,
-                wait=True,
-            )
-
-        # Seed with initial data (e.g. mission brief)
         if initial_data:
             for key, value in initial_data.items():
                 await self.inject(field_id, key, str(value), agent_id=0, strength=1.0)
 
         logger.info(
-            "[Field] Created field %s (collection=%s, team=%s)",
-            field_id, collection, team_agent_ids,
+            "[Field] Created field %s (team=%s, seeded=%d)",
+            field_id, team_agent_ids, len(initial_data or {}),
         )
         return field_id
 
     async def destroy_context(self, context_id: str) -> None:
-        collection = f"field_{context_id}"
+        """Delete every point belonging to this field. Atomic."""
         try:
-            await self._client.delete_collection(collection)
+            await self._client.delete(
+                collection_name=SHARED_COLLECTION,
+                points_selector=FilterSelector(
+                    filter=self._field_filter(context_id),
+                ),
+            )
             logger.info("[Field] Destroyed field %s", context_id)
         except Exception:
-            logger.warning("[Field] Failed to delete collection %s", collection, exc_info=True)
+            logger.warning("[Field] Failed to destroy field %s", context_id, exc_info=True)
+
+    async def context_exists(self, context_id: str) -> bool:
+        """A field 'exists' if at least one point references it.
+
+        Used by the coordinator to detect stale field_ids inherited
+        from a parent/template mission whose data has already been
+        destroyed.
+        """
+        try:
+            points, _ = await self._client.scroll(
+                collection_name=SHARED_COLLECTION,
+                scroll_filter=self._field_filter(context_id),
+                limit=1,
+                with_payload=False,
+                with_vectors=False,
+            )
+            return bool(points)
+        except Exception:
+            logger.debug("[Field] context_exists check failed for %s", context_id, exc_info=True)
+            return False
 
     # ── Inject ──────────────────────────────────────────────────
 
@@ -124,13 +198,15 @@ class VectorFieldSharedContext(SharedContextPort):
         agent_id: int,
         strength: float = 1.0,
     ) -> None:
+        await self.ensure_shared_collection()
+
         content = f"{key}: {value}"
         content_hash = hashlib.sha256(content.encode()).hexdigest()
 
-        # Dedup: if same content exists, reinforce instead of duplicating
+        # Dedup within this field only
         existing = await self._find_by_hash(context_id, content_hash)
         if existing:
-            await self._reinforce_single(context_id, existing.id)
+            await self._reinforce_single(existing.id)
             logger.debug("[Field] Deduplicated inject — reinforced existing pattern")
             return
 
@@ -140,11 +216,12 @@ class VectorFieldSharedContext(SharedContextPort):
         point_id = str(uuid.uuid4())
 
         await self._client.upsert(
-            collection_name=f"field_{context_id}",
+            collection_name=SHARED_COLLECTION,
             points=[PointStruct(
                 id=point_id,
                 vector=embedding,
                 payload={
+                    "field_id": context_id,
                     "agent_id": agent_id,
                     "key": key,
                     "value": value,
@@ -167,12 +244,15 @@ class VectorFieldSharedContext(SharedContextPort):
         agent_id: int,
         top_k: int = 10,
     ) -> list[dict[str, Any]]:
+        await self.ensure_shared_collection()
+
         query_embedding = await self._embedder.generate_embedding(query)
 
         # Over-fetch — decay filtering will reduce the set
         response = await self._client.query_points(
-            collection_name=f"field_{context_id}",
+            collection_name=SHARED_COLLECTION,
             query=query_embedding,
+            query_filter=self._field_filter(context_id),
             limit=top_k * 3,
         )
         raw_results = response.points
@@ -213,7 +293,7 @@ class VectorFieldSharedContext(SharedContextPort):
         # Hebbian reinforcement — accessed patterns resist future decay
         accessed_ids = [r["id"] for r in top_results]
         if accessed_ids:
-            await self._reinforce_batch(context_id, accessed_ids)
+            await self._reinforce_batch(accessed_ids)
 
         logger.info(
             "[Field] Query field=%s agent=%s results=%d top_score=%.4f query=%s",
@@ -231,8 +311,15 @@ class VectorFieldSharedContext(SharedContextPort):
         stability = (avg_strength × 0.6) + (organization × 0.4)
         organization = 1 - (stddev / mean) if mean > 0
         """
-        collection = f"field_{context_id}"
-        points, _ = await self._client.scroll(collection, limit=10000)
+        try:
+            points, _ = await self._client.scroll(
+                collection_name=SHARED_COLLECTION,
+                scroll_filter=self._field_filter(context_id),
+                limit=10000,
+            )
+        except Exception:
+            logger.debug("[Field] measure_stability scroll failed for %s", context_id, exc_info=True)
+            return {"stability": 0.0, "pattern_count": 0, "avg_strength": 0.0, "missing": True}
 
         if not points:
             return {"stability": 0.0, "pattern_count": 0, "avg_strength": 0.0}
@@ -272,10 +359,14 @@ class VectorFieldSharedContext(SharedContextPort):
         Used by the field visualizer API to show the live state of the field.
         Does NOT trigger Hebbian reinforcement (read-only).
         """
-        collection = f"field_{context_id}"
         try:
-            points, _ = await self._client.scroll(collection, limit=10000)
+            points, _ = await self._client.scroll(
+                collection_name=SHARED_COLLECTION,
+                scroll_filter=self._field_filter(context_id),
+                limit=10000,
+            )
         except Exception:
+            logger.debug("[Field] get_patterns scroll failed for %s", context_id, exc_info=True)
             return []
 
         now = datetime.now(timezone.utc)
@@ -324,20 +415,27 @@ class VectorFieldSharedContext(SharedContextPort):
         return initial_strength * decay * access_boost
 
     async def _find_by_hash(self, context_id: str, content_hash: str):
-        collection = f"field_{context_id}"
+        """Lookup an existing point in this field with the same content hash.
+
+        Filter is ``field_id AND content_hash``; both are payload-indexed.
+        """
         results, _ = await self._client.scroll(
-            collection_name=collection,
-            scroll_filter=Filter(
-                must=[FieldCondition(key="content_hash", match=MatchValue(value=content_hash))]
+            collection_name=SHARED_COLLECTION,
+            scroll_filter=self._field_filter(
+                context_id,
+                extra=[FieldCondition(key="content_hash", match=MatchValue(value=content_hash))],
             ),
             limit=1,
         )
         return results[0] if results else None
 
-    async def _reinforce_single(self, context_id: str, point_id: str) -> None:
-        """Reinforce a single pattern (used during dedup inject)."""
-        collection = f"field_{context_id}"
-        points = await self._client.retrieve(collection, ids=[point_id])
+    async def _reinforce_single(self, point_id: str) -> None:
+        """Reinforce a single pattern (used during dedup inject).
+
+        Point IDs are globally unique UUIDs across the shared
+        collection, so no field_id filter is needed for the lookup.
+        """
+        points = await self._client.retrieve(SHARED_COLLECTION, ids=[point_id])
         if not points:
             return
 
@@ -346,7 +444,7 @@ class VectorFieldSharedContext(SharedContextPort):
         new_count = point.payload["access_count"] + 1
 
         await self._client.set_payload(
-            collection_name=collection,
+            collection_name=SHARED_COLLECTION,
             payload={
                 "access_count": new_count,
                 "last_accessed": now,
@@ -354,17 +452,16 @@ class VectorFieldSharedContext(SharedContextPort):
             points=[point_id],
         )
 
-    async def _reinforce_batch(self, context_id: str, point_ids: list[str]) -> None:
+    async def _reinforce_batch(self, point_ids: list[str]) -> None:
         """Hebbian reinforcement: accessed patterns resist decay.
 
         Co-access bonus: when multiple patterns are retrieved together,
         each gets +2% per co-accessed pattern (neurons that fire together
         wire together). Capped at reinforce_cap × initial strength.
         """
-        collection = f"field_{context_id}"
         now = datetime.now(timezone.utc).isoformat()
 
-        all_points = await self._client.retrieve(collection, ids=point_ids)
+        all_points = await self._client.retrieve(SHARED_COLLECTION, ids=point_ids)
         if not all_points:
             return
 
@@ -388,7 +485,7 @@ class VectorFieldSharedContext(SharedContextPort):
                 boosted = initial_strength
 
             await self._client.set_payload(
-                collection_name=collection,
+                collection_name=SHARED_COLLECTION,
                 payload={
                     "access_count": new_count,
                     "last_accessed": now,

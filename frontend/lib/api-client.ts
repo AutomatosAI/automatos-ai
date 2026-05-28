@@ -963,6 +963,10 @@ class ApiClient {
     return this.request<T>(endpoint, { ...options, method: 'PUT', body })
   }
 
+  async patch<T = any>(endpoint: string, body?: any, options?: RequestInit) {
+    return this.request<T>(endpoint, { ...options, method: 'PATCH', body })
+  }
+
   async delete<T = any>(endpoint: string, options?: RequestInit) {
     return this.request<T>(endpoint, { ...options, method: 'DELETE' })
   }
@@ -1075,8 +1079,14 @@ class ApiClient {
   }
 
   // ===== AGENT ENDPOINTS =====
-  async getAgents(skip = 0, limit = 100) {
-    return this.request(`/api/agents/?skip=${skip}&limit=${limit}`)
+  async getAgents(
+    skip = 0,
+    limit = 100,
+    options: { includeWorkspaceSystem?: boolean } = {},
+  ) {
+    const params = new URLSearchParams({ skip: String(skip), limit: String(limit) })
+    if (options.includeWorkspaceSystem) params.set('include_workspace_system', 'true')
+    return this.request(`/api/agents/?${params.toString()}`)
   }
 
   async getAgent(id: string) {
@@ -1451,6 +1461,12 @@ class ApiClient {
 
   async getRecipeExecution(recipeId: string, executionId: string) {
     return this.request(`/api/workflow-recipes/${recipeId}/executions/${executionId}`)
+  }
+
+  async cancelRecipeExecution(recipeId: string, executionId: string) {
+    return this.request(`/api/workflow-recipes/${recipeId}/executions/${executionId}/cancel`, {
+      method: 'POST'
+    })
   }
 
   async getRecipeStepFullLogs(recipeId: string, executionId: string, stepOrder: number) {

@@ -5,30 +5,15 @@
 
 The following files were used as context for generating this wiki page:
 
-- [docs/reviews/COMPOSIO-TOOL-REGRESSION-REVIEW.md](docs/reviews/COMPOSIO-TOOL-REGRESSION-REVIEW.md)
+- [frontend/app/api/chat/route.ts](frontend/app/api/chat/route.ts)
+- [frontend/components/chatbot/chat.tsx](frontend/components/chatbot/chat.tsx)
+- [frontend/components/chatbot/mission-suggestion-card.tsx](frontend/components/chatbot/mission-suggestion-card.tsx)
+- [frontend/lib/chat/hooks.ts](frontend/lib/chat/hooks.ts)
+- [frontend/stores/mission-store.ts](frontend/stores/mission-store.ts)
 - [orchestrator/api/chat.py](orchestrator/api/chat.py)
-- [orchestrator/api/chat_voice.py](orchestrator/api/chat_voice.py)
-- [orchestrator/consumers/chatbot/auto.py](orchestrator/consumers/chatbot/auto.py)
-- [orchestrator/consumers/chatbot/intent_classifier.py](orchestrator/consumers/chatbot/intent_classifier.py)
-- [orchestrator/consumers/chatbot/personality.py](orchestrator/consumers/chatbot/personality.py)
+- [orchestrator/api/recipe_executor.py](orchestrator/api/recipe_executor.py)
 - [orchestrator/consumers/chatbot/service.py](orchestrator/consumers/chatbot/service.py)
-- [orchestrator/consumers/chatbot/smart_tool_router.py](orchestrator/consumers/chatbot/smart_tool_router.py)
-- [orchestrator/consumers/chatbot/streaming.py](orchestrator/consumers/chatbot/streaming.py)
-- [orchestrator/core/llm/manager.py](orchestrator/core/llm/manager.py)
-- [orchestrator/core/models/stream_events.py](orchestrator/core/models/stream_events.py)
-- [orchestrator/core/routing/engine.py](orchestrator/core/routing/engine.py)
-- [orchestrator/modules/orchestrator/service.py](orchestrator/modules/orchestrator/service.py)
-- [orchestrator/modules/tools/discovery/actions_analytics_enhanced.py](orchestrator/modules/tools/discovery/actions_analytics_enhanced.py)
-- [orchestrator/modules/tools/discovery/handlers_analytics_enhanced.py](orchestrator/modules/tools/discovery/handlers_analytics_enhanced.py)
-- [orchestrator/modules/tools/discovery/handlers_search.py](orchestrator/modules/tools/discovery/handlers_search.py)
-- [orchestrator/modules/tools/discovery/platform_actions.py](orchestrator/modules/tools/discovery/platform_actions.py)
-- [orchestrator/modules/tools/discovery/platform_executor.py](orchestrator/modules/tools/discovery/platform_executor.py)
-- [orchestrator/modules/tools/execution/exec_composio.py](orchestrator/modules/tools/execution/exec_composio.py)
-- [orchestrator/modules/tools/execution/exec_document.py](orchestrator/modules/tools/execution/exec_document.py)
-- [orchestrator/modules/tools/execution/exec_file_ops.py](orchestrator/modules/tools/execution/exec_file_ops.py)
-- [orchestrator/modules/tools/execution/exec_multimodal.py](orchestrator/modules/tools/execution/exec_multimodal.py)
-- [orchestrator/modules/tools/execution/exec_planning.py](orchestrator/modules/tools/execution/exec_planning.py)
-- [orchestrator/modules/tools/tool_router.py](orchestrator/modules/tools/tool_router.py)
+- [orchestrator/modules/agents/factory/agent_factory.py](orchestrator/modules/agents/factory/agent_factory.py)
 
 </details>
 
@@ -36,15 +21,15 @@ The following files were used as context for generating this wiki page:
 
 ## Purpose and Scope
 
-The Streaming Chat Service provides real-time, token-by-token chat responses using Server-Sent Events (SSE) in the AI SDK Data Stream format. It orchestrates the flow between user input, LLM generation, tool execution, and memory management. The service leverages the `SmartChatOrchestrator` to handle intent classification and the `ContextService` to assemble unified prompts including identity, skills, and memory tiers. It also includes specialized logic for bridging high-complexity requests to the workflow engine via the **AutoBrain** complexity assessor.
+The Streaming Chat Service is the core orchestration layer for real-time, token-by-token chat interactions within the Automatos platform. It leverages Server-Sent Events (SSE) and the AI SDK Data Stream format to provide a responsive user experience. The service bridges high-level user intent with low-level execution by coordinating the `SmartChatOrchestrator` for intent classification, the `ContextService` for unified prompt assembly (Identity, Skills, Memory, Tools), and the `AgentFactory` for execution. It also includes specialized logic for complexity-based routing via `AutoBrain`, potentially bridging high-complexity requests to the full workflow engine.
 
-**Sources:** [orchestrator/consumers/chatbot/service.py:1-13](), [orchestrator/consumers/chatbot/auto.py:1-22](), [orchestrator/api/chat.py:67-88]()
+**Sources:** [orchestrator/consumers/chatbot/service.py:1-13](), [orchestrator/api/chat.py:1-27]()
 
 ---
 
 ## Architecture Overview
 
-The streaming architecture bridges high-level user intent with low-level code execution. The `StreamingChatService` delegates prompt construction to the `ContextService` and execution to the `AgentFactory`.
+The streaming architecture connects "Natural Language Space" (user input and conceptual intent) to "Code Entity Space" (specific service implementations and database models).
 
 ### System Entity Map: Natural Language to Code Space
 
@@ -57,6 +42,7 @@ graph TD
         Context["Context & Memory"]
         Tools["Tool Capabilities"]
         Complexity["Complexity Assessment"]
+        Persona["Agent Personality"]
     end
 
     subgraph "Code Entity Space"
@@ -64,9 +50,10 @@ graph TD
         SCO["SmartChatOrchestrator<br/>(smart_orchestrator.py)"]
         CS["ContextService<br/>(modules/context)"]
         AF["AgentFactory<br/>(agent_factory.py)"]
-        UTE["UnifiedToolExecutor<br/>(modules/tools/execution)"]
+        UTE["UnifiedToolExecutor<br/>(unified_executor.py)"]
         TET["ToolExecutionTracker<br/>(service.py)"]
         AB["AutoBrain<br/>(auto.py)"]
+        AP["AutomatosPersonality<br/>(personality.py)"]
     end
 
     UserIntent -->|"classify()"| SCO
@@ -77,23 +64,25 @@ graph TD
     AF -->|"execute_with_prompt()"| SCS
     SCS -->|"execute_tool()"| UTE
     UTE -->|"should_skip_execution()"| TET
-    Complexity -->|"assess_complexity()"| AB
-    AB -->|"_stream_workflow_bridge()"| AB_API["api/chat.py"]
+    Complexity -->|"_stream_workflow_bridge()"| AB
+    Persona -->|"get_base_system_prompt()"| AP
+    AP -->|"IdentitySection"| CS
 ```
 
-**Sources:** [orchestrator/consumers/chatbot/service.py:12-40](), [orchestrator/consumers/chatbot/auto.py:60-83](), [orchestrator/api/chat.py:70-85](), [orchestrator/modules/tools/tool_router.py:27-29]()
+**Sources:** [orchestrator/consumers/chatbot/service.py:12-40](), [orchestrator/api/chat.py:37-55](), [orchestrator/modules/agents/factory/agent_factory.py:159-176]()
 
 ---
 
 ## SmartChatOrchestrator
 
-The `SmartChatOrchestrator` is the central coordinator for intelligent chat processing. It manages the transition from raw user messages to an `OrchestratedRequest` ready for the LLM.
+The `SmartChatOrchestrator` is the central coordinator for intelligent chat processing. It manages the transition from raw user messages to an `OrchestratedRequest` containing the final system prompt, filtered tools, and memory context.
 
 ### Key Functions
 
-*   **`prepare_request`**: Primary entry point. It extracts the latest query, performs intent classification, and calls the `ContextService` to build the full prompt. It handles the injection of `tool_hints` from the complexity assessment. [orchestrator/consumers/chatbot/smart_orchestrator.py:126-149]()
-*   **Intent Classification**: Uses `SmartIntentClassifier` to determine if the user needs tools (e.g., `Intent.DATA_QUERY`, `Intent.SEARCH`) or memory. This influences `tool_choice` ("auto" vs "none"). [orchestrator/consumers/chatbot/intent_classifier.py:23-46]()
-*   **Memory Decision**: Implements logic to skip memory fetching for simple queries (e.g., `Intent.GREETING`) or when the complexity is assessed as `ATOM`. [orchestrator/consumers/chatbot/smart_orchestrator.py:166-180]()
+*   **`prepare_request`**: The primary entry point. It extracts the latest query, classifies intent, and calls the `ContextService` to build the full prompt. [orchestrator/consumers/chatbot/service.py:11-13]()
+*   **`stream_response_with_agent`**: Orchestrates the LLM generation loop, tool execution, and memory storage. It handles the conversion of raw LLM chunks into the AI SDK Data Stream format. [orchestrator/consumers/chatbot/service.py:12]()
+*   **Intent Classification**: Influences `tool_choice` and memory retrieval depth based on the user's message content.
+*   **Context Assembly**: Utilizes `ContextService` to inject `IdentitySection`, `SkillsSection`, and `MemorySection` into the final system prompt.
 
 ### Data Flow: Request Preparation
 
@@ -101,59 +90,29 @@ The `SmartChatOrchestrator` is the central coordinator for intelligent chat proc
 sequenceDiagram
     participant SCS as StreamingChatService
     participant SCO as SmartChatOrchestrator
-    participant IC as SmartIntentClassifier
     participant CS as ContextService
     participant AF as AgentFactory
 
-    SCS->>SCO: prepare_request(messages, tools, assessment)
-    SCO->>IC: classify(latest_query)
-    IC-->>SCO: IntentResult (requires_tools, requires_memory)
-    SCO->>AF: _load_agent()
-    AF-->>SCO: Agent Object
+    SCS->>SCO: prepare_request(messages, tools)
+    SCO->>AF: activate_agent()
+    AF-->>SCO: AgentRuntime
     SCO->>CS: build_context(mode=CHATBOT, agent, messages)
     Note over CS: Assembles Identity, Skills,<br/>Memory, and Tools sections.
     CS-->>SCO: Assembled Context (System Prompt + Tools)
     SCO-->>SCS: OrchestratedRequest
 ```
 
-**Sources:** [orchestrator/consumers/chatbot/smart_orchestrator.py:150-210](), [orchestrator/consumers/chatbot/intent_classifier.py:48-56]()
-
----
-
-## StreamingChatService Class
-
-The `StreamingChatService` manages the lifecycle of a chat turn, including the tool execution loop and SSE streaming via the `StreamingHandler`.
-
-### `stream_response_with_agent`
-
-This async generator handles the iterative process of LLM generation and tool execution.
-
-1.  **Agent Activation**: Uses `AgentFactory.activate_agent` to initialize the `AgentRuntime` with specific LLM configurations and resolved API keys. [orchestrator/consumers/chatbot/service.py:510-520]()
-2.  **Orchestration**: Calls `SmartChatOrchestrator.prepare_request` to get the system prompt and filtered toolset. [orchestrator/consumers/chatbot/service.py:530-550]()
-3.  **The Tool Loop**: A `while` loop that continues as long as the LLM generates `tool_calls` (capped at 10 iterations to prevent infinite loops). [orchestrator/consumers/chatbot/service.py:750-810]()
-
-### Tool Execution Logic
-
-Tools are executed via the `UnifiedToolExecutor`, which routes requests to specialized modules.
-
-| Executor Module | Responsibility | File Reference |
-| :--- | :--- | :--- |
-| `PlatformActionExecutor` | Platform management (agents, recipes, usage) | [orchestrator/modules/tools/discovery/platform_executor.py:164-168]() |
-| `exec_file_ops` | read_file, write_file, list_directory | [orchestrator/modules/tools/tool_router.py:28]() |
-| `exec_composio` | External App Actions (GitHub, Slack, etc.) | [orchestrator/modules/tools/tool_router.py:28]() |
-| `exec_planning` | Multi-step task planning | [orchestrator/modules/tools/tool_router.py:28]() |
-
-**Sources:** [orchestrator/modules/tools/discovery/platform_executor.py:173-220](), [orchestrator/modules/tools/tool_router.py:129-138]()
+**Sources:** [orchestrator/consumers/chatbot/service.py:12-13](), [orchestrator/modules/agents/factory/agent_factory.py:159-176](), [orchestrator/api/chat.py:186-220]()
 
 ---
 
 ## Tool Loop Prevention
 
-The `ToolExecutionTracker` implements multi-tier deduplication to prevent redundant or circular tool calls within a single conversation turn.
+The `ToolExecutionTracker` implements multi-tier deduplication and safety limits to prevent redundant or circular tool calls within a single conversation turn.
 
-*   **Exact Match**: Hashes tool arguments to detect identical calls. [orchestrator/consumers/chatbot/service.py:111-112]()
-*   **Semantic Match**: Uses `SequenceMatcher` to compare search queries. If a query is >75% similar to a previous one in the same turn, it is skipped. [orchestrator/consumers/chatbot/service.py:57-67]()
-*   **Retry Limits**: Enforces strict limits (e.g., 2 for search, 3 for file reads) to stop agents from "getting stuck." [orchestrator/consumers/chatbot/service.py:93-104]()
+*   **Exact Match**: Hashes tool arguments using MD5 to detect identical calls. [orchestrator/consumers/chatbot/service.py:118-119](), [orchestrator/consumers/chatbot/service.py:165-166]()
+*   **Semantic Match**: Uses `SequenceMatcher` to compare search queries. If a query is >75% similar to a previous one in the same turn, it is skipped. [orchestrator/consumers/chatbot/service.py:62-71](), [orchestrator/consumers/chatbot/service.py:168-176]()
+*   **Retry Limits**: Enforces strict limits (e.g., 5 for `search_knowledge`, 8 for `read_file`, 25 for `platform_default`) to stop agents from infinite execution loops. [orchestrator/consumers/chatbot/service.py:98-111](), [orchestrator/consumers/chatbot/service.py:160-161]()
 
 ```mermaid
 graph LR
@@ -170,20 +129,34 @@ graph LR
     T2 -->|"Similar Query"| Skip["Skip Execution"]
 ```
 
-**Sources:** [orchestrator/consumers/chatbot/service.py:78-156]()
+**Sources:** [orchestrator/consumers/chatbot/service.py:53-185]()
 
 ---
 
 ## Workflow Bridge (PRD-68)
 
-For high-complexity tasks (categorized as `ORGAN` or `ORGANISM` by **AutoBrain**), the chat API can bypass standard streaming and trigger a transient workflow.
+For high-complexity tasks (categorized as `ORGAN` or `ORGANISM` by AutoBrain), the chat API can bypass standard streaming and trigger a transient workflow.
 
-*   **Complexity Assessment**: `AutoBrain` uses a 3-tier assessment (Redis cache, regex fast-paths, and LLM classification) to determine task complexity. [orchestrator/consumers/chatbot/auto.py:14-22]()
-*   **`_stream_workflow_bridge`**: Creates a temporary `Workflow` and `WorkflowExecution` from the user message. [orchestrator/api/chat.py:70-120]()
-*   **Execution**: Kicks off the full PRD-59 pipeline (PLAN → PREPARE → EXECUTE → EVALUATE → LEARN) via `execute_workflow_with_progress`. [orchestrator/api/chat.py:153-159]()
-*   **Event Streaming**: Stage events (e.g., "workflow-update") are streamed back to the chat interface using `StreamingHandler.format_aisdk_data`. [orchestrator/api/chat.py:143-149]()
+*   **`_stream_workflow_bridge`**: Creates a temporary `Workflow` and `WorkflowExecution` from the user message. [orchestrator/api/chat.py:68-105]()
+*   **Transient Execution**: Executes the workflow through the full PRD-59 pipeline (PLAN → PREPARE → EXECUTE → EVALUATE → LEARN) using `execute_workflow_with_progress`. [orchestrator/api/chat.py:120-126]()
+*   **Event Streaming**: Stage events (e.g., "workflow-update") are streamed back to the chat interface using `format_aisdk_data`, ensuring the user sees progress even for long-running background tasks. [orchestrator/api/chat.py:109-117](), [orchestrator/api/chat.py:158-164]()
 
-**Sources:** [orchestrator/api/chat.py:67-189](), [orchestrator/consumers/chatbot/auto.py:42-49]()
+**Sources:** [orchestrator/api/chat.py:37-174]()
+
+---
+
+## Playbook Execution Integration
+
+The chat service can trigger `WorkflowRecipe` (Playbook) executions directly, bypassing the 9-stage pipeline for sequential execution.
+
+| Feature | Implementation | Description |
+| :--- | :--- | :--- |
+| **Executor** | `recipe_executor.py` | Executes steps sequentially using chatbot components. [orchestrator/api/recipe_executor.py:1-19]() |
+| **Context** | `ContextService(RECIPE)` | Unified prompt assembly for recipe steps. [orchestrator/api/recipe_executor.py:9]() |
+| **Reporting** | `_auto_create_playbook_report` | Generates markdown summaries of playbook runs. [orchestrator/api/recipe_executor.py:88-105]() |
+| **Notifications** | `_dispatch_playbook_event` | Fires events via `NotificationDispatcher`. [orchestrator/api/recipe_executor.py:45-55]() |
+
+**Sources:** [orchestrator/api/recipe_executor.py:1-105]()
 
 ---
 
@@ -193,10 +166,13 @@ The service outputs newline-delimited JSON prefixed by type identifiers, followi
 
 | Prefix | Type | Description |
 | :--- | :--- | :--- |
-| `0:` | Text | Incremental text content for the assistant's message. [orchestrator/consumers/chatbot/streaming.py:105-108]() |
-| `d:` | Data | Complex data events (e.g., `chat-id`, `tool-data`, `workflow-update`). [orchestrator/consumers/chatbot/streaming.py:110-115]() |
-| `e:` | Error | JSON-formatted error messages. [orchestrator/consumers/chatbot/streaming.py:174-176]() |
+| `0:` | Text | Incremental text content for the assistant's message. |
+| `8:` | Metadata | Initial chat ID and session info. |
+| `9:` | Tool Call | Signals the start of a tool execution. |
+| `a:` | Tool Result | The output from a tool execution. |
+| `d:` | Complex Data | Used for workflow updates and complexity assessment summaries. |
+| `e:` | Error | Error messages formatted for the frontend. |
 
-**Sources:** [orchestrator/consumers/chatbot/streaming.py:102-177]()
+**Sources:** [orchestrator/api/chat.py:110-116](), [orchestrator/api/chat.py:159-166](), [frontend/lib/chat/hooks.ts:190-210]()
 
 ---

@@ -5,26 +5,39 @@
 
 The following files were used as context for generating this wiki page:
 
+- [frontend/components/marketplace/llm-model-card.tsx](frontend/components/marketplace/llm-model-card.tsx)
+- [frontend/components/marketplace/llm-model-detail-modal.tsx](frontend/components/marketplace/llm-model-detail-modal.tsx)
+- [frontend/components/marketplace/marketplace-agents-tab.tsx](frontend/components/marketplace/marketplace-agents-tab.tsx)
 - [frontend/components/marketplace/marketplace-card.tsx](frontend/components/marketplace/marketplace-card.tsx)
 - [frontend/components/marketplace/marketplace-grid.tsx](frontend/components/marketplace/marketplace-grid.tsx)
+- [frontend/components/marketplace/marketplace-homepage.tsx](frontend/components/marketplace/marketplace-homepage.tsx)
 - [frontend/components/marketplace/marketplace-item-modal.tsx](frontend/components/marketplace/marketplace-item-modal.tsx)
-- [frontend/hooks/use-marketplace-api.ts](frontend/hooks/use-marketplace-api.ts)
-- [orchestrator/api/marketplace.py](orchestrator/api/marketplace.py)
-- [orchestrator/modules/coordination/__init__.py](orchestrator/modules/coordination/__init__.py)
-- [orchestrator/modules/coordination/agent_matcher.py](orchestrator/modules/coordination/agent_matcher.py)
-- [orchestrator/modules/coordination/templates.py](orchestrator/modules/coordination/templates.py)
+- [frontend/components/marketplace/marketplace-llms-tab.tsx](frontend/components/marketplace/marketplace-llms-tab.tsx)
+- [frontend/components/marketplace/marketplace-plugin-detail-modal.tsx](frontend/components/marketplace/marketplace-plugin-detail-modal.tsx)
+- [frontend/components/marketplace/marketplace-plugins-tab.tsx](frontend/components/marketplace/marketplace-plugins-tab.tsx)
+- [frontend/components/marketplace/marketplace-skills-tab.tsx](frontend/components/marketplace/marketplace-skills-tab.tsx)
+- [frontend/components/marketplace/marketplace-tools-tab.tsx](frontend/components/marketplace/marketplace-tools-tab.tsx)
+- [frontend/hooks/use-openrouter-api.ts](frontend/hooks/use-openrouter-api.ts)
+- [orchestrator/alembic/versions/20260201_add_marketplace_to_recipes.py](orchestrator/alembic/versions/20260201_add_marketplace_to_recipes.py)
+- [orchestrator/api/llm_marketplace.py](orchestrator/api/llm_marketplace.py)
+- [orchestrator/api/marketplace_plugins.py](orchestrator/api/marketplace_plugins.py)
+- [orchestrator/api/openrouter_marketplace.py](orchestrator/api/openrouter_marketplace.py)
+- [orchestrator/core/database/init_complete_schema.sql](orchestrator/core/database/init_complete_schema.sql)
+- [orchestrator/core/database/migrations/042_openrouter_models_cache.sql](orchestrator/core/database/migrations/042_openrouter_models_cache.sql)
+- [orchestrator/scripts/seed_llm_marketplace.py](orchestrator/scripts/seed_llm_marketplace.py)
+- [orchestrator/scripts/seed_recipes_marketplace.py](orchestrator/scripts/seed_recipes_marketplace.py)
 
 </details>
 
 
 
-This document describes the technical implementation of the Community Marketplace UI and API. It covers the multi-tab browsing experience, advanced filtering for different item types (Agents, Recipes, Tools, LLMs), and the installation flow that clones marketplace items into a user's workspace while tracking installation metrics.
+This document describes the technical implementation of the Community Marketplace UI and API. It covers the multi-tab browsing experience, advanced filtering for different item types (Agents, Recipes, Tools, LLMs, Plugins, and Skills), and the cascading installation flow that clones marketplace items into a user's workspace while tracking installation metrics and dependencies.
 
 ---
 
 ## Marketplace Interface Overview
 
-The marketplace provides a unified browsing experience for six item types: **Applications** (Composio tools), **Agents**, **Recipes**, **LLMs**, **Capabilities** (plugins), and **Skills**. The interface is organized around a tabbed layout with shared search, category filtering, and view mode controls.
+The marketplace provides a unified browsing experience for six item types. The interface is organized around a tabbed layout with shared search, category filtering, and view mode controls.
 
 ### Component Architecture
 
@@ -34,51 +47,43 @@ The frontend is structured to handle high-volume data (especially for Tools and 
 ```mermaid
 graph TB
     subgraph "Frontend UI Components"
-        [Homepage] --> [StatsBar]
-        [Homepage] --> [SearchInput]
-        [Homepage] --> [TabsList]
-        [Homepage] --> [ViewToggle]
+        Homepage["MarketplaceHomepage<br/>(marketplace-homepage.tsx)"]
+        SearchInput["SearchInput<br/>Shared search query"]
+        TabsList["TabsList<br/>6 item types"]
     end
     
     subgraph "Tab Components"
-        [TabsList] --> [ToolsTab]
-        [TabsList] --> [AgentsTab]
-        [TabsList] --> [RecipesTab]
-        [TabsList] --> [LlmsTab]
+        ToolsTab["MarketplaceToolsTab<br/>Composio Apps"]
+        AgentsTab["MarketplaceAgentsTab<br/>AI Agents"]
+        RecipesTab["MarketplacePlaybooksTab<br/>Workflows"]
+        LlmsTab["MarketplaceLlmsTab<br/>LLM Models"]
+        PluginsTab["MarketplacePluginsTab<br/>Capabilities"]
+        SkillsTab["MarketplaceSkillsTab<br/>Specialized Skills"]
     end
     
-    subgraph "Shared Components"
-        [ToolsTab] --> [Pagination]
-        [AgentsTab] --> [Pagination]
-        [ToolsTab] -. "item click" .-> [ItemModal]
-        [AgentsTab] -. "item click" .-> [ItemModal]
+    subgraph "Backend API & Logic"
+        ItemsAPI["GET /api/marketplace/items<br/>Filter by type, category, search"]
+        LLM_API["GET /api/marketplace/llm/models<br/>OpenRouter Cache Bridge"]
+        PluginAPI["GET /api/marketplace/plugins<br/>S3 Manifest + DB"]
+        InstallAPI["POST /api/marketplace/items/:id/install<br/>Clone to workspace"]
     end
     
-    subgraph "Backend API"
-        [ItemModal] --> [DetailAPI]
-        [ItemModal] --> [InstallAPI]
-        [AgentsTab] --> [ListAPI]
-        [ToolsTab] --> [ToolMarketplaceAPI]
-    end
-
-    [Homepage]["MarketplaceHomepage"]
-    [StatsBar]["StatsBar"]
-    [SearchInput]["SearchInput"]
-    [TabsList]["TabsList"]
-    [ToolsTab]["MarketplaceToolsTab"]
-    [AgentsTab]["MarketplaceAgentsTab"]
-    [RecipesTab]["MarketplaceRecipesTab"]
-    [LlmsTab]["MarketplaceLlmsTab"]
-    [ViewToggle]["ViewToggle"]
-    [ItemModal]["MarketplaceItemModal"]
-    [Pagination]["EnhancedPagination"]
-    [ListAPI]["GET /api/marketplace/items"]
-    [DetailAPI]["GET /api/marketplace/items/:id"]
-    [InstallAPI]["POST /api/marketplace/items/:id/install"]
-    [ToolMarketplaceAPI]["GET /api/tools/marketplace"]
+    Homepage --> TabsList
+    TabsList --> ToolsTab
+    TabsList --> AgentsTab
+    TabsList --> RecipesTab
+    TabsList --> LlmsTab
+    TabsList --> PluginsTab
+    TabsList --> SkillsTab
+    
+    AgentsTab --> ItemsAPI
+    LlmsTab --> LLM_API
+    PluginsTab --> PluginAPI
+    
+    AgentsTab -.trigger.-> InstallAPI
 ```
 
-**Sources:** `[orchestrator/api/marketplace.py:122-137]()`, `[frontend/components/marketplace/marketplace-item-modal.tsx:62-80]()`, `[frontend/components/marketplace/marketplace-grid.tsx:35-51]()`
+**Sources:** [frontend/components/marketplace/marketplace-homepage.tsx:53-74](), [orchestrator/api/llm_marketplace.py:25-25](), [orchestrator/api/marketplace_plugins.py:34-34]()
 
 ---
 
@@ -86,121 +91,97 @@ graph TB
 
 ### Tab Organization
 
-The marketplace uses a six-tab layout with the following item types. Backend queries distinguish items primarily via the `owner_type` and `type` fields.
+The marketplace uses a six-tab layout. Backend queries distinguish items primarily via the `owner_type` and `type` fields.
 
 | Tab | Label | Type Filter | Backend Source |
 |-----|-------|-------------|----------------|
-| Tools | Applications | `type=tool` | `composio_apps_cache` table |
-| Agents | Agents | `type=agent` | `agents` table (`owner_type=marketplace`) |
-| Recipes | Recipes | `type=recipe` | `workflow_templates` table (`owner_type=marketplace`) |
-| LLMs | LLMs | `type=llm` | `openrouter_model_cache` table |
+| Tools | Applications | `type=tool` | `/api/tools/marketplace` (DB cache) |
+| Agents | Agents | `type=agent` | `/api/marketplace/items` (`owner_type=marketplace`) |
+| Recipes | Recipes | `type=recipe` | `/api/marketplace/items` (`type=recipe`) |
+| LLMs | LLMs | `type=llm` | `/api/marketplace/llm/models` (OpenRouter Cache) |
+| Capabilities | Plugins | `type=plugin` | `/api/marketplace/plugins` |
+| Skills | Skills | `type=skill` | `/api/workspaces/:id/skills/available` |
 
-**Sources:** `[orchestrator/api/marketplace.py:53-68]()`, `[orchestrator/api/marketplace.py:154-157]()`, `[frontend/hooks/use-marketplace-api.ts:21-37]()`
+**Sources:** [frontend/components/marketplace/marketplace-agents-tab.tsx:85-89](), [frontend/components/marketplace/marketplace-tools-tab.tsx:112-112](), [frontend/components/marketplace/marketplace-llms-tab.tsx:217-217](), [orchestrator/api/marketplace_plugins.py:170-180]()
 
-### Item Discovery Components
+### LLM Marketplace (PRD-54)
+The LLM tab bridges the `OpenRouterModelCache` (external models) and `LLMModel` (installed models). The `_get_or_create_from_cache` function ensures that if a user installs a model from the OpenRouter cache that doesn't yet exist in the local `llm_models` table, it is auto-created with relevant metadata like `context_window` and `input_cost_per_1k_tokens`.
 
-The `MarketplaceGrid` handles the layout of `MarketplaceCard` components. It utilizes the `useMarketplaceItems` hook to fetch data based on current filters.
+**Sources:** [orchestrator/api/llm_marketplace.py:101-143](), [frontend/components/marketplace/marketplace-llms-tab.tsx:119-147]()
 
-- **MarketplaceCard:** A visual wrapper that displays `item.icon`, `item.name`, `item.creator_name`, and formatted `install_count`. `[frontend/components/marketplace/marketplace-card.tsx:13-78]()`
-- **Install Count Formatting:** Large numbers are abbreviated (e.g., 1000 -> 1.0k) for UI clarity. `[frontend/components/marketplace/marketplace-card.tsx:14-18]()`
-
----
-
-## Searching and Filtering
-
-### Search Implementation
-
-The `list_items` endpoint in `orchestrator/api/marketplace.py` implements search using SQLAlchemy's `or_` and `ilike` operators across the `name` and `description` columns.
-
-- **Agents:** Filters where `Agent.owner_type == 'marketplace'` and name/description matches. `[orchestrator/api/marketplace.py:163-167]()`
-- **Recipes:** Filters where `WorkflowRecipe.owner_type == 'marketplace'` and name/description matches. `[orchestrator/api/marketplace.py:236-240]()`
-
-### Featured and Pagination
-
-Items can be marked as `is_featured` in the database. The API supports a `featured` boolean query parameter to prioritize these items. `[orchestrator/api/marketplace.py:169-170]()`. Pagination is handled via standard `limit` and `offset` parameters. `[orchestrator/api/marketplace.py:128-129]()`
-
----
-
-## Item Detail Modals
-
-When a user clicks a marketplace card, the `MarketplaceItemModal` is triggered. This component performs a specific fetch for extended metadata.
-
-**Detail Fetching & Dependency Resolution**
-```mermaid
-sequenceDiagram
-    participant UI as "MarketplaceItemModal"
-    participant API as "GET /api/marketplace/items/{id}"
-    participant DB as "PostgreSQL"
-    
-    UI->>API: Request ID details (itemId)
-    API->>DB: Query Item (owner_type=marketplace)
-    API->>DB: Resolve Tool Assignments (JOIN composio_apps_cache)
-    API->>DB: Resolve Skill Definitions
-    DB-->>API: MarketplaceItemDetail (Extended Metadata)
-    API-->>UI: JSON response (dependencies, skills, tools)
-```
-
-The modal displays:
-- **Model Config:** Extracted from `item.metadata.model_config` or `item.metadata.configuration.llm_config`. `[frontend/components/marketplace/marketplace-item-modal.tsx:91-101]()`
-- **Tools & Skills:** Renders icons and descriptions for dependencies required by the agent or recipe. `[frontend/components/marketplace/marketplace-item-modal.tsx:83-89]()`
-
-**Sources:** `[orchestrator/api/marketplace.py:82-88]()`, `[frontend/components/marketplace/marketplace-item-modal.tsx:43-60]()`
+### Plugins & Skills (PRD-42)
+Plugins represent bundled capabilities. The `MarketplacePluginsTab` fetches summaries via `/api/marketplace/plugins` and detailed manifests via `MarketplacePluginDetailModal`.
+- **Enriched Content:** The backend `_extract_content_items` function parses the plugin manifest to normalize skills and commands for UI display. [orchestrator/api/marketplace_plugins.py:133-162]()
+- **Security Status:** Plugins display a `security_status` (safe, blocked, review_required) based on automated scanner results. [frontend/components/marketplace/marketplace-plugin-detail-modal.tsx:197-228]()
 
 ---
 
 ## Installation Flow
 
-Installation involves a server-side "clone" operation where a marketplace-owned template is copied into the user's workspace.
+Installation involves cloning the marketplace template into a workspace-specific instance.
 
-### Technical Implementation
+### Item Installation Logic
+When `handleInstall` is triggered from `MarketplaceItemModal`, it calls `POST /api/marketplace/items/:id/install`.
 
-The installation is triggered by the `useInstallMarketplaceItem` hook, which calls the `install_item` endpoint.
-
-1. **Cloning:** The backend creates a new instance of the item (Agent or Recipe).
-2. **Ownership:** The `owner_type` is changed from `marketplace` to `workspace`, and the `workspace_id` is set to the user's current workspace.
-3. **Tracking:** The original item's `install_count` is incremented.
-4. **Invalidation:** On success, the frontend invalidates the `['agents']` query key to refresh the local workspace view. `[frontend/hooks/use-marketplace-api.ts:145-147]()`
-
-**Installation Code Entity Mapping**
+**Installation Data Flow**
 ```mermaid
-graph LR
-    subgraph "API Layer"
-        [Route] --> [Request]
-    end
-    
-    subgraph "Database Models (SQLAlchemy)"
-        [M_Item]
-        [W_Item]
-        [User]
-    end
-    
-    subgraph "Logic (orchestrator/api/marketplace.py)"
-        [Route] --> [CloneFunc]
-        [CloneFunc] --> [W_Item]
-        [CloneFunc] --> [IncrFunc]
+graph TD
+    subgraph "Frontend"
+        Modal["MarketplaceItemModal"]
+        InstallBtn["handleInstall()"]
     end
 
-    [Route]["POST /api/marketplace/items/{item_id}/install"]
-    [Request]["InstallRequest (Pydantic)"]
-    [M_Item]["Marketplace Item (owner_type=marketplace)"]
-    [W_Item]["Workspace Item (owner_type=workspace)"]
-    [User]["UserModel (for original_creator_id)"]
-    [CloneFunc]["db.add(cloned_item)"]
-    [IncrFunc]["item.install_count += 1"]
+    subgraph "Backend API"
+        InstallRoute["POST /api/marketplace/items/{id}/install"]
+        DB["PostgreSQL"]
+    end
+
+    subgraph "Process"
+        Fetch["Fetch Marketplace Template"]
+        Clone["Create New Row (owner_type=workspace)"]
+        Incr["Increment install_count"]
+    end
+
+    InstallBtn --> InstallRoute
+    InstallRoute --> Fetch
+    Fetch --> Clone
+    Clone --> Incr
+    Incr --> DB
 ```
 
-**Sources:** `[orchestrator/api/marketplace.py:89-98]()`, `[frontend/hooks/use-marketplace-api.ts:138-160]()`, `[frontend/components/marketplace/marketplace-item-modal.tsx:62-80]()`
+**Sources:** [frontend/components/marketplace/marketplace-item-modal.tsx:63-81](), [frontend/components/marketplace/llm-model-card.tsx:124-147](), [orchestrator/api/llm_marketplace.py:53-54]()
+
+### Metadata & Dependencies
+Marketplace items include metadata that defines their requirements:
+- **Agents:** Metadata includes `tool_names`, `tool_icons`, and `model_config`. [frontend/components/marketplace/marketplace-item-modal.tsx:83-101]()
+- **Skills:** Skills are enabled for a workspace via `apiClient.post('/api/workspaces/${workspaceId}/skills')`. [frontend/components/marketplace/marketplace-skills-tab.tsx:102-125]()
 
 ---
 
-## Admin & Approval Workflow
+## Search & Filtering Implementation
 
-The marketplace operates on an "Approved" model. Items are not visible to standard users until an admin approves them.
+### Server-Side Filtering
+For Tools and LLMs, the system uses high-performance database queries or external API parameters:
+- **Tools:** `MarketplaceToolsTab` uses a query string with `category` and `limit=1000` against the DB-cached endpoint. [frontend/components/marketplace/marketplace-tools-tab.tsx:106-112]()
+- **LLMs:** `MarketplaceLlmsTab` filters by `selectedProvider`, `selectedTier`, and boolean flags like `filterTools` or `filterVision` via `URLSearchParams`. [frontend/components/marketplace/marketplace-llms-tab.tsx:218-230]()
 
-- **Admin Detection:** Determined by `system_role == 'admin'` in the `RequestContext`. `[orchestrator/api/marketplace.py:36-40]()`
-- **Visibility:** The `list_items` function applies a filter `Agent.is_approved == True` for non-admin users. `[orchestrator/api/marketplace.py:156-157]()`
-- **Approval Check:** Admins can see unapproved items to review them before they are public.
+### Client-Side Search
+Tabs like `MarketplaceSkillsTab` and `MarketplaceAgentsTab` (for categories) implement client-side filtering for immediate UI feedback.
+- **Skills:** `filteredAvailable` uses a `useMemo` hook to filter by name, description, and tags. [frontend/components/marketplace/marketplace-skills-tab.tsx:147-160]()
+- **Agents:** `normalizeCategory` maps legacy categories to unified system IDs for consistent filtering. [frontend/components/marketplace/marketplace-agents-tab.tsx:39-45]()
 
-**Sources:** `[orchestrator/api/marketplace.py:43-47]()`, `[orchestrator/api/marketplace.py:139-140]()`
+---
+
+## Item Detail & Comparison
+
+### LLM Comparison & Costs (PRD-54)
+The `LLMModelDetailModal` provides a "Cost Calculator" allowing users to estimate monthly expenses.
+- **Monthly Cost Calculation:** Multiplies projected input/output tokens by `model.input_cost_per_1k` and `model.output_cost_per_1k`. [frontend/components/marketplace/llm-model-detail-modal.tsx:106-111]()
+- **Capability Visualization:** Uses `CAPABILITY_RATING` to map technical benchmarks to human-readable progress bars (Excellent, Good, Moderate). [frontend/components/marketplace/llm-model-card.tsx:76-82]()
+
+### Featured Showcase
+The `MarketplaceHomepage` features a `FeaturedBanner` that highlights top-performing items using the `install_count` and `is_featured` flags. Admins can toggle the featured status via `useToggleFeatured`.
+
+**Sources:** [frontend/components/marketplace/marketplace-homepage.tsx:78-151](), [frontend/components/marketplace/llm-model-detail-modal.tsx:138-141]()
 
 ---

@@ -138,8 +138,9 @@ class ComposioHintService:
                 "You have these external apps connected (via Composio): "
                 + ", ".join(sorted(set(allowed_apps))) + ".",
                 "IMPORTANT: To interact with these apps, call `composio_execute` with "
-                "the EXACT action name from the list below. Do NOT guess or invent action names — "
-                "only use the exact names listed here. Do NOT use search_codebase to look for code "
+                "the EXACT action name. The most relevant actions are listed below, but you may "
+                "also use any action from your skill instructions for connected apps. "
+                "Do NOT guess or invent action names. Do NOT use search_codebase to look for code "
                 "when your task is to interact with external apps.",
                 "Usage: composio_execute({\"action\": \"ACTION_NAME\", \"params\": {<action-specific fields>}}). "
                 "All action parameters (issue_key, channel, text, etc.) MUST go inside the `params` object.",
@@ -177,10 +178,16 @@ class ComposioHintService:
                 if app_matches:
                     result.strategy_used = "fallback"
 
+            # Step 4b: Enrich params from SDK for actions missing cache schemas.
+            # The cache (marketplace UI) often has empty params; the SDK returns full
+            # OpenAI function-calling schemas at runtime.
+            if app_matches:
+                self._enrich_params_from_sdk(app_matches, top_action_params)
+
             # Step 5: Format output
             app_matches.sort(key=lambda x: (-len(x[1]), x[0]))
             for app, actions in app_matches[:6]:
-                hint_lines.append(f"- {app} available actions (use these EXACT names): {', '.join(actions)}")
+                hint_lines.append(f"- {app} available actions: {', '.join(actions)}")
                 result.matched_actions.extend(actions)
 
             if top_action_params:
@@ -671,3 +678,79 @@ class ComposioHintService:
                 )
         except Exception as exc:
             logger.warning(f"[param_hints] {action_name}: extraction failed: {exc}")
+
+    # ------------------------------------------------------------------
+    # SDK-based parameter enrichment
+    # ------------------------------------------------------------------
+    def _enrich_params_from_sdk(
+        self,
+        app_matches: List[tuple],
+        top_action_params: Dict[str, str],
+    ) -> None:
+        """Fetch live parameter schemas from Composio SDK for matched actions.
+
+        The DB cache stores action names and descriptions but often has empty
+        parameter schemas (Composio's bulk API omits them). The SDK per-app
+        tools.get() endpoint returns full OpenAI function-calling schemas.
+        One call per app, only for apps with matched actions missing params.
+
+        Also expands app_matches with all available SDK actions so the agent
+        can see dependency actions (e.g. TWITTER_UPLOAD_MEDIA alongside
+        TWITTER_CREATION_OF_A_POST).
+        """
+        actions_needing_params = []
+        for app, actions in app_matches:
+            for action in actions:
+                if action not in top_action_params:
+                    actions_needing_params.append((app, action))
+
+        if not actions_needing_params:
+            return
+
+        apps_to_actions: Dict[str, List[str]] = {}
+        for app, action in actions_needing_params:
+            apps_to_actions.setdefault(app, []).append(action)
+
+        from core.composio.client import get_composio_client
+        client = get_composio_client()
+
+        enriched = 0
+        for app, actions in apps_to_actions.items():
+            try:
+                sdk_tools = client.get_app_actions(app)
+                if not sdk_tools:
+                    continue
+
+                param_map = {}
+                all_sdk_actions: List[str] = []
+                for tool in sdk_tools:
+                    name = (tool.get("name") or "").strip()
+                    if not name:
+                        continue
+                    all_sdk_actions.append(name)
+                    params = tool.get("parameters") or {}
+                    if isinstance(params, dict) and params.get("properties"):
+                        param_map[name] = params
+
+                for action in actions:
+                    if action in param_map and len(top_action_params) < MAX_PARAM_HINT_ACTIONS:
+                        self._extract_param_hints_from_json(action, param_map[action], top_action_params)
+                        enriched += 1
+
+                # Expand app_matches: replace token-matched subset with full
+                # SDK action list so the agent sees all available actions
+                # (e.g. TWITTER_UPLOAD_MEDIA alongside TWITTER_CREATION_OF_A_POST)
+                if all_sdk_actions:
+                    for i, (app_name, _) in enumerate(app_matches):
+                        if app_name == app:
+                            # Keep original matched actions first, then add remaining SDK actions
+                            existing = set(app_matches[i][1])
+                            extra = [a for a in all_sdk_actions if a not in existing]
+                            app_matches[i] = (app, list(app_matches[i][1]) + extra)
+                            break
+
+            except Exception as e:
+                logger.warning(f"[ComposioHintService] SDK param fetch failed for {app}: {e}")
+
+        if enriched:
+            logger.info(f"[ComposioHintService] Enriched {enriched} actions with live SDK params")

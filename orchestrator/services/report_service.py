@@ -36,6 +36,116 @@ def _agent_slug(agent_name: str) -> str:
     return _slugify(agent_name)
 
 
+def compute_execution_metrics(
+    db: Session,
+    workspace_id: UUID,
+    *,
+    agent_id: Optional[int] = None,
+    execution_id: Optional[str] = None,
+    started_at: Optional[datetime] = None,
+    completed_at: Optional[datetime] = None,
+    extra: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Aggregate model/cost/duration from llm_usage for a report context.
+
+    Pass either execution_id (preferred — exact match on llm_usage.execution_id)
+    or agent_id + (started_at, completed_at) for a time-window aggregate.
+
+    Always returns a dict with the standard keys, even on no-match (zeros).
+    Caller merges the result into ReportService.create_report(metrics=...).
+    """
+    metrics: Dict[str, Any] = {
+        "model": None,
+        "models_used": [],
+        "llm_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "tokens_used": 0,
+        "cost_usd": 0.0,
+        "duration_ms": None,
+        "started_at": started_at.isoformat() if started_at else None,
+        "completed_at": completed_at.isoformat() if completed_at else None,
+        "llm_errors": 0,
+    }
+
+    if started_at and completed_at:
+        metrics["duration_ms"] = int(
+            (completed_at - started_at).total_seconds() * 1000
+        )
+
+    conditions = ["workspace_id = :workspace_id"]
+    params: Dict[str, Any] = {"workspace_id": str(workspace_id)}
+
+    if execution_id:
+        conditions.append("execution_id = :execution_id")
+        params["execution_id"] = str(execution_id)
+    elif agent_id is not None:
+        conditions.append("agent_id = :agent_id")
+        params["agent_id"] = agent_id
+        if started_at and completed_at:
+            conditions.append("created_at BETWEEN :w_start AND :w_end")
+            params["w_start"] = started_at
+            params["w_end"] = completed_at
+    else:
+        if extra:
+            metrics.update(extra)
+        return metrics
+
+    try:
+        rollup = db.execute(
+            text(
+                f"""
+                SELECT
+                    COUNT(*) AS calls,
+                    COALESCE(SUM(input_tokens), 0) AS in_tok,
+                    COALESCE(SUM(output_tokens), 0) AS out_tok,
+                    COALESCE(SUM(total_tokens), 0) AS tot_tok,
+                    COALESCE(SUM(total_cost), 0) AS cost,
+                    COUNT(*) FILTER (WHERE status NOT IN ('success', NULL)) AS errors
+                FROM llm_usage
+                WHERE {' AND '.join(conditions)}
+                """
+            ),
+            params,
+        ).fetchone()
+
+        if rollup and rollup.calls:
+            metrics["llm_calls"] = int(rollup.calls)
+            metrics["input_tokens"] = int(rollup.in_tok)
+            metrics["output_tokens"] = int(rollup.out_tok)
+            metrics["tokens_used"] = int(rollup.tot_tok)
+            metrics["cost_usd"] = float(rollup.cost)
+            metrics["llm_errors"] = int(rollup.errors)
+
+        models = db.execute(
+            text(
+                f"""
+                SELECT model_id, SUM(total_tokens) AS tok
+                FROM llm_usage
+                WHERE {' AND '.join(conditions)}
+                GROUP BY model_id
+                ORDER BY tok DESC
+                """
+            ),
+            params,
+        ).fetchall()
+
+        if models:
+            metrics["models_used"] = [m.model_id for m in models]
+            metrics["model"] = models[0].model_id
+
+    except Exception as e:
+        logger.warning(
+            "[compute_execution_metrics] rollup failed for ws=%s exec=%s agent=%s: %s",
+            workspace_id, execution_id, agent_id, e,
+        )
+
+    if extra:
+        metrics.update(extra)
+
+    return metrics
+
+
 class ReportService:
     """Service for managing agent reports."""
 
@@ -55,6 +165,10 @@ class ReportService:
         metrics: Optional[Dict[str, Any]] = None,
         attachments: Optional[List[Dict[str, Any]]] = None,
         heartbeat_result_id: Optional[int] = None,
+        recommendations: Optional[List[Dict[str, Any]]] = None,
+        action_items: Optional[List[Dict[str, Any]]] = None,
+        linked_task_ids: Optional[List[int]] = None,
+        requires_approval: bool = False,
     ) -> Dict[str, Any]:
         """Create a report: write file to workspace + insert DB row."""
 
@@ -102,12 +216,18 @@ class ReportService:
                         (workspace_id, agent_id, agent_name, heartbeat_result_id,
                          report_type, title, summary, status,
                          file_path, file_type, file_size_bytes,
-                         metrics, attachments, created_at, updated_at)
+                         metrics, attachments,
+                         recommendations, action_items, linked_task_ids,
+                         requires_approval,
+                         created_at, updated_at)
                     VALUES
                         (:workspace_id, :agent_id, :agent_name, :heartbeat_result_id,
                          :report_type, :title, :summary, :status,
                          :file_path, :file_type, :file_size_bytes,
-                         :metrics, :attachments, NOW(), NOW())
+                         :metrics, :attachments,
+                         :recommendations, :action_items, :linked_task_ids,
+                         :requires_approval,
+                         NOW(), NOW())
                     RETURNING id
                 """),
                 {
@@ -124,6 +244,10 @@ class ReportService:
                     "file_size_bytes": file_size,
                     "metrics": json.dumps(metrics or {}),
                     "attachments": json.dumps(attachments or []),
+                    "recommendations": json.dumps(recommendations or []),
+                    "action_items": json.dumps(action_items or []),
+                    "linked_task_ids": json.dumps(linked_task_ids or []),
+                    "requires_approval": bool(requires_approval),
                 },
             )
             row = result.fetchone()

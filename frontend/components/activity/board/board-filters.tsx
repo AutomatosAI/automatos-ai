@@ -11,7 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { useAgents } from '@/hooks/use-agent-api'
+import { useAssignableAgents } from '@/hooks/use-agent-api'
 import type { BoardFilters } from '@/hooks/use-board-tasks'
 import { cn } from '@/lib/utils'
 
@@ -35,7 +35,7 @@ export function BoardFiltersBar({
   className,
 }: BoardFiltersBarProps) {
   const [searchValue, setSearchValue] = useState(filters.search ?? '')
-  const { data: rawAgents } = useAgents()
+  const { data: rawAgents } = useAssignableAgents()
   const agents = (rawAgents as any[]) ?? []
 
   const handleSearch = (value: string) => {

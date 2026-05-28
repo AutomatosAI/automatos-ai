@@ -290,7 +290,8 @@ export function MarketplaceHomepage() {
       <PageHeader
         title="Community"
         titleAccent="Marketplace"
-        subtitle="Discover tools, agents, and playbooks to supercharge your AI workspace"
+        eyebrow="Workspace · what to install"
+        lede="Tools, agents, skills, and playbooks shared by the community. Install with one click; everything is sandboxed and reversible."
         actions={
           <>
             {isAdmin && (

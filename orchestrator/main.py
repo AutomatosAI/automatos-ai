@@ -43,6 +43,10 @@ try:
     from api.shopify import router as shopify_router
 except ImportError:
     shopify_router = None
+try:
+    from api.sites import router as sites_router
+except ImportError:
+    sites_router = None
 from api.documents import router as documents_router
 from api.cache import router as cache_router
 from api.system import router as system_router
@@ -77,6 +81,7 @@ from api.statistics import router as statistics_router
 from api.permissions import router as permissions_router
 from api.skills import router as skills_router
 from api.templates import router as templates_router
+from api.blog import router as blog_router
 from api.context_summarization import router as context_summarization_router  # Context Engineering 2.0
 from api.team import router as team_router, public_router as team_public_router  # PRD-37: Team Management
 from api.routing import router as routing_router  # PRD-50: Universal Orchestrator Router
@@ -319,6 +324,32 @@ async def _boot_phase_1_core():
         except Exception as e:
             logger.warning("System settings seed: %s", e)
 
+        # Seed credential types (schema changes ship with code)
+        try:
+            from core.database.load_seed_data import load_seed_data
+            load_seed_data(load_credentials=True, load_platform_defaults=False)
+        except Exception as e:
+            logger.warning("Credential types seed: %s", e)
+
+        # Update LinkedIn credential type schema (direct SQL — seed upsert may not fire)
+        try:
+            import json as _json
+            _li_schema = _json.dumps([
+                {"displayName": "Client ID", "name": "client_id", "type": "string", "required": True, "description": "OAuth2 Client ID from LinkedIn Developer Portal"},
+                {"displayName": "Client Secret", "name": "client_secret", "type": "password", "required": True, "description": "OAuth2 Client Secret"},
+                {"displayName": "Access Token", "name": "access_token", "type": "password", "required": True, "description": "OAuth2 access token"},
+                {"displayName": "Refresh Token", "name": "refresh_token", "type": "password", "required": False, "description": "OAuth2 refresh token for automatic renewal"},
+                {"displayName": "Organization URN", "name": "organization_urn", "type": "string", "required": True, "description": "e.g. urn:li:organization:108072660"},
+            ])
+            with engine.connect() as conn:
+                conn.execute(
+                    text("UPDATE credential_types SET schema_definition = :schema, category = 'social', description = 'LinkedIn Community Management API — posts images to organization pages' WHERE name = 'linkedInCommunityManagementOAuth2Api'"),
+                    {"schema": _li_schema},
+                )
+                conn.commit()
+        except Exception as e:
+            logger.warning("LinkedIn credential type update: %s", e)
+
         logger.info("Boot seeds completed (leader worker)")
 
 
@@ -364,6 +395,25 @@ async def _seed_semantic_embeddings():
             logger.warning(f"PRD-64: Startup embedding seed failed (non-fatal): {e}", exc_info=True)
 
     _asyncio.create_task(_embed_all_agents_on_startup())
+
+    # PRD-108 single-collection refactor: ensure the shared field_memory
+    # collection + payload indexes exist before the coordinator boots.
+    async def _ensure_field_memory_collection() -> None:
+        try:
+            from modules.context.factory import get_shared_context
+            from modules.context.adapters.vector_field import VectorFieldSharedContext
+            ctx = get_shared_context()
+            inner = getattr(ctx, "_inner", ctx)
+            if isinstance(inner, VectorFieldSharedContext):
+                await inner.ensure_shared_collection()
+                logger.info("PRD-108: shared field_memory collection ready")
+        except Exception:
+            logger.warning(
+                "PRD-108: shared field_memory bootstrap failed (non-fatal)",
+                exc_info=True,
+            )
+
+    _asyncio.create_task(_ensure_field_memory_collection())
 
 
 class TrustGateError(RuntimeError):
@@ -463,6 +513,14 @@ async def _boot_phase_2_extensions(app_instance: "FastAPI") -> "DeferredInitResu
                         logger.info("MemoryJobScheduler started on unified scheduler")
                     except Exception as _mj_err:
                         logger.warning("Could not start MemoryJobScheduler: %s", _mj_err)
+
+                # PRD-139: Nightly edge builder (populates graph regardless of flag)
+                try:
+                    from services.edge_builder_scheduler import get_edge_builder_scheduler
+                    await get_edge_builder_scheduler().start(scheduler=shared_sched)
+                    logger.info("EdgeBuilderScheduler started on unified scheduler")
+                except Exception as _eb_err:
+                    logger.warning("Could not start EdgeBuilderScheduler: %s", _eb_err)
 
                 # PRD-77: Load agent-scheduled tasks into APScheduler
                 try:
@@ -771,6 +829,18 @@ app = FastAPI(
     }
 )
 
+# Pilot fallback health log — platform OpenRouter key kicks in when a user has no BYOK.
+# If this is missing, new users without a key cannot run agents/chat.
+_platform_or_key = bool((config.OPENROUTER_API_KEY or "").strip())
+if _platform_or_key:
+    logger.info("Platform OpenRouter fallback ACTIVE (OPENROUTER_API_KEY configured)")
+else:
+    logger.error(
+        "Platform OpenRouter fallback MISSING — OPENROUTER_API_KEY env var not set. "
+        "New users without their own BYOK key will fail at first LLM call. "
+        "Set OPENROUTER_API_KEY on the API service to unblock pilot users."
+    )
+
 # CORS middleware - use centralized config
 # Parse and clean CORS origins (handle comma-separated list with whitespace)
 cors_origins = [origin.strip() for origin in config.CORS_ALLOW_ORIGINS.split(",") if origin.strip()]
@@ -929,8 +999,11 @@ app.include_router(general_webhooks_router)  # General workspace webhooks (no au
 app.include_router(marketplace_router)  # Community Marketplace
 if shopify_router is not None:
     app.include_router(shopify_router)  # Shopify App Store provisioning & webhook forwarding
+if sites_router is not None:
+    app.include_router(sites_router)  # PRD-008-A: per-merchant Sites CRUD (any channel type)
 app.include_router(document_generation_router)  # PRD-63: Must be BEFORE documents_router (has /templates, /generated specific routes that would otherwise be caught by documents_router's /{document_id} catch-all → 422)
 app.include_router(documents_router)
+app.include_router(blog_router)  # Authenticated blog management (Deliverables → Blogs)
 app.include_router(cache_router)  # Cache management and monitoring
 app.include_router(system_router)
 app.include_router(context_engineering_router)

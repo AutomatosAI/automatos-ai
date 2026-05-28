@@ -116,7 +116,7 @@ function severityColor(severity: string) {
     case 'critical':
       return 'text-destructive'
     case 'high':
-      return 'text-orange-400'
+      return 'text-primary'
     case 'medium':
       return 'text-warning'
     case 'low':
@@ -382,7 +382,7 @@ export default function AdminPluginsPendingPage() {
 
         {/* Stats Bar */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <Card className="glass-card">
+          <Card className="bg-card border border-border">
             <CardContent className="p-4 flex items-center gap-3">
               <div className="p-2 rounded-lg bg-warning/10">
                 <Clock className="h-5 w-5 text-warning" />
@@ -393,7 +393,7 @@ export default function AdminPluginsPendingPage() {
               </div>
             </CardContent>
           </Card>
-          <Card className="glass-card">
+          <Card className="bg-card border border-border">
             <CardContent className="p-4 flex items-center gap-3">
               <div className="p-2 rounded-lg bg-info/10">
                 <Package className="h-5 w-5 text-info" />
@@ -404,10 +404,10 @@ export default function AdminPluginsPendingPage() {
               </div>
             </CardContent>
           </Card>
-          <Card className="glass-card">
+          <Card className="bg-card border border-border">
             <CardContent className="p-4 flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-orange-500/10">
-                <Shield className="h-5 w-5 text-orange-400" />
+              <div className="p-2 rounded-lg bg-primary/10">
+                <Shield className="h-5 w-5 text-primary" />
               </div>
               <div>
                 <p className="text-2xl font-bold text-white">
@@ -421,7 +421,7 @@ export default function AdminPluginsPendingPage() {
 
         {/* Batch Actions */}
         {selectedIds.size > 0 && (
-          <Card className="glass-card border-orange-500/30">
+          <Card className="bg-card border border-border border-primary/30">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <span className="text-sm text-foreground/90">
@@ -482,13 +482,13 @@ export default function AdminPluginsPendingPage() {
         {/* Loading */}
         {loading && (
           <div className="flex items-center justify-center py-16">
-            <Loader2 className="h-8 w-8 animate-spin text-orange-400" />
+            <Loader2 className="h-8 w-8 animate-spin text-[hsl(var(--info))]" />
           </div>
         )}
 
         {/* Empty State */}
         {!loading && plugins.length === 0 && (
-          <Card className="glass-card">
+          <Card className="bg-card border border-border">
             <CardContent className="p-12 text-center">
               <CheckCircle2 className="h-12 w-12 mx-auto text-success mb-4" />
               <h3 className="text-lg font-medium text-white mb-2">All caught up!</h3>
@@ -529,9 +529,9 @@ export default function AdminPluginsPendingPage() {
               return (
                 <Card
                   key={plugin.id}
-                  className={`glass-card transition-all duration-200 ${
+                  className={`bg-card border border-border transition-all duration-200 ${
                     selectedIds.has(plugin.id)
-                      ? 'border-orange-500/50 shadow-lg shadow-orange-500/5'
+                      ? 'border-primary/50'
                       : 'hover:border-border'
                   }`}
                 >

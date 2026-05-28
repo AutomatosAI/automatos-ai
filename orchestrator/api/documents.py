@@ -1435,7 +1435,7 @@ async def track_usage_event(
         if metadata:
             try:
                 metadata_dict = json.loads(metadata)
-            except:
+            except Exception:
                 pass
         
         # Create usage event record in document_usage table

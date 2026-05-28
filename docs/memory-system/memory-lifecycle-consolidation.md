@@ -5,182 +5,146 @@
 
 The following files were used as context for generating this wiki page:
 
-- [docs/PRDS/39-MEM0-MIGRATION-PRD.md](docs/PRDS/39-MEM0-MIGRATION-PRD.md)
-- [docs/PRDS/55-AUTONOMOUS-ASSISTANT-PLATFORM.md](docs/PRDS/55-AUTONOMOUS-ASSISTANT-PLATFORM.md)
-- [frontend/components/auth/sign-up-form.tsx](frontend/components/auth/sign-up-form.tsx)
-- [orchestrator/alembic/versions/20260215_add_heartbeat_and_channels.py](orchestrator/alembic/versions/20260215_add_heartbeat_and_channels.py)
-- [orchestrator/api/channels.py](orchestrator/api/channels.py)
-- [orchestrator/api/heartbeat.py](orchestrator/api/heartbeat.py)
-- [orchestrator/channels/base.py](orchestrator/channels/base.py)
-- [orchestrator/channels/discord_adapter.py](orchestrator/channels/discord_adapter.py)
-- [orchestrator/channels/google_chat_adapter.py](orchestrator/channels/google_chat_adapter.py)
-- [orchestrator/channels/line_adapter.py](orchestrator/channels/line_adapter.py)
-- [orchestrator/channels/manager.py](orchestrator/channels/manager.py)
-- [orchestrator/channels/slack_adapter.py](orchestrator/channels/slack_adapter.py)
+- [docs/PRDS/137-AUTO-CHATBOT-RECOVERY.md](docs/PRDS/137-AUTO-CHATBOT-RECOVERY.md)
+- [frontend/tsconfig.tsbuildinfo](frontend/tsconfig.tsbuildinfo)
+- [orchestrator/config.py](orchestrator/config.py)
+- [orchestrator/consumers/chatbot/integration.py](orchestrator/consumers/chatbot/integration.py)
+- [orchestrator/consumers/chatbot/prompt_analyzer.py](orchestrator/consumers/chatbot/prompt_analyzer.py)
 - [orchestrator/consumers/chatbot/smart_memory.py](orchestrator/consumers/chatbot/smart_memory.py)
-- [orchestrator/core/models/channels.py](orchestrator/core/models/channels.py)
-- [orchestrator/core/services/plugin_security_scanner.py](orchestrator/core/services/plugin_security_scanner.py)
-- [orchestrator/mem0_openapi.json](orchestrator/mem0_openapi.json)
-- [orchestrator/modules/agents/__init__.py](orchestrator/modules/agents/__init__.py)
-- [orchestrator/modules/agents/factory/__init__.py](orchestrator/modules/agents/factory/__init__.py)
-- [orchestrator/modules/memory/integrations/__init__.py](orchestrator/modules/memory/integrations/__init__.py)
+- [orchestrator/consumers/chatbot/smart_orchestrator.py](orchestrator/consumers/chatbot/smart_orchestrator.py)
+- [orchestrator/main.py](orchestrator/main.py)
+- [orchestrator/modules/agents/queries.py](orchestrator/modules/agents/queries.py)
+- [orchestrator/modules/context/sections/identity.py](orchestrator/modules/context/sections/identity.py)
+- [orchestrator/modules/context/sections/skills.py](orchestrator/modules/context/sections/skills.py)
+- [orchestrator/modules/context/sections/task_context.py](orchestrator/modules/context/sections/task_context.py)
+- [orchestrator/modules/memory/context_router.py](orchestrator/modules/memory/context_router.py)
 - [orchestrator/modules/memory/integrations/mem0_client.py](orchestrator/modules/memory/integrations/mem0_client.py)
-- [orchestrator/modules/memory/operations/__init__.py](orchestrator/modules/memory/operations/__init__.py)
-- [orchestrator/modules/memory/storage/knowledge_system.py](orchestrator/modules/memory/storage/knowledge_system.py)
-- [orchestrator/modules/memory/tests/conftest.py](orchestrator/modules/memory/tests/conftest.py)
-- [orchestrator/modules/memory/tests/test_hierarchical_memory.py](orchestrator/modules/memory/tests/test_hierarchical_memory.py)
-- [orchestrator/modules/nl2sql/tests/test_validator.py](orchestrator/modules/nl2sql/tests/test_validator.py)
+- [orchestrator/modules/memory/unified_memory_service.py](orchestrator/modules/memory/unified_memory_service.py)
+- [orchestrator/tests/test_unified_memory.py](orchestrator/tests/test_unified_memory.py)
+- [scripts/ralph/IMPLEMENTATION_PLAN.md](scripts/ralph/IMPLEMENTATION_PLAN.md)
+- [scripts/ralph/prd.json](scripts/ralph/prd.json)
+- [scripts/ralph/progress.txt](scripts/ralph/progress.txt)
 
 </details>
 
 
 
-This page describes how memories flow through the 5-layer memory stack, from ephemeral session state to long-term facts. Specifically, it covers **session consolidation** (L1→L2), **Ebbinghaus decay** (L2 time-based archiving), and **promotion** (L2→L3 based on access patterns). For memory retrieval and context assembly, see [Context Router](#3.3). For the overall memory architecture, see [Five-Layer Memory Architecture](#3.1).
+This page describes how memories flow through the 5-layer memory stack, from ephemeral session state to long-term facts. Specifically, it covers **session consolidation** (L1→L2), **Ebbinghaus decay** (L2 time-based archiving), and **promotion** (L2→L3 based on importance and access patterns).
 
 ---
 
 ## Overview
 
-Memories in Automatos AI follow a natural lifecycle from working memory to long-term storage:
+The memory lifecycle in Automatos AI is governed by the `UnifiedMemoryService` [orchestrator/modules/memory/unified_memory_service.py:154](), which acts as the central coordinator for the 5-layer stack. Memories move between layers based on temporal relevance, frequency of access, and importance scores.
 
-1.  **L1 (Working/Session)**: Active conversation state and recent task experiences stored in Redis with a capacity limit based on Miller's Law (7 items) [orchestrator/modules/memory/storage/knowledge_system.py:165-166]().
-2.  **L2 (Short-term)**: Recent exchanges and experiences stored in Postgres, subject to decay and windowing (24-hour window) [orchestrator/modules/memory/storage/knowledge_system.py:167-168]().
-3.  **L3 (Long-term)**: Important facts and persistent knowledge stored via `Mem0Client` [orchestrator/modules/memory/integrations/mem0_client.py:66]() or persistent `MemoryItem` records with vector embeddings for semantic search [orchestrator/modules/memory/storage/knowledge_system.py:55-78]().
+1.  **L1 (Working/Session)**: Active conversation state stored in Redis [orchestrator/modules/memory/unified_memory_service.py:120-148]().
+2.  **L2 (Short-term)**: Summarized session results and experiences stored in Postgres, subject to **Ebbinghaus decay** [orchestrator/config.py:98-103]().
+3.  **L3 (Long-term)**: Extracted facts and persistent knowledge stored via Mem0 [orchestrator/modules/memory/integrations/mem0_client.py:77-105]().
+4.  **L4 (Knowledge Graph)**: Deep organizational context; long-term memories are eventually folded into the graph via monthly archival jobs [orchestrator/config.py:116-123]().
 
-The lifecycle is managed by the `HierarchicalMemorySystem` which coordinates transitions between these layers based on importance, recency, and frequency of access.
-
-### Memory Lifecycle Flow
-**Title: Memory Transition Diagram (Code Entity Space)**
+### Memory Transition Architecture
+Title: "Memory Transition Diagram (Code Entity Space)"
 ```mermaid
 graph TB
     subgraph "L1: Working Memory (Redis)"
-        Redis["Redis Hash: working:agent_id:uuid<br/>Miller's Law Capacity: 7<br/>TTL: 300s"]
+        Session["SessionMemory Class<br/>Key: mem:session:ws:conv<br/>TTL: 24h / 1h"]
     end
     
     subgraph "L2: Short-term (Postgres)"
-        MemoryItemL2["MemoryItem Table<br/>memory_level: 'short_term'<br/>decay_rate: 0.1"]
+        DailyLog["Daily Activity Logs<br/>Decay Rate: 0.1<br/>Archive Threshold: 0.3"]
     end
     
-    subgraph "L3: Long-term (Mem0 / Postgres + pgvector)"
-        Mem0["Mem0Client.add()<br/>(External Service)"]
-        MemoryItemL3["MemoryItem Table<br/>memory_level: 'long_term'<br/>embedding: Vector(1024)"]
+    subgraph "L3: Long-term (Mem0)"
+        Mem0["Mem0Client.add()<br/>Namespace: mem:ws:agent<br/>Circuit Breaker Protected"]
     end
 
-    StoreExp["HierarchicalMemorySystem.store_experience()"] -->|Importance < 0.5| Redis
-    StoreExp -->|Importance >= 0.5| MemoryItemL2
+    Chat["StreamingChatService"] -->|store_exchange| Session
+    Session -->|end_session()| Consolidation["Consolidation Job"]
+    Consolidation -->|L1 to L2| DailyLog
     
-    Redis -->|Eviction/Consolidation| MemoryItemL2
+    DailyLog -->|Promotion Logic| Promotion["Promotion Job"]
+    Promotion -->|Importance > 0.7| Mem0
     
-    MemoryItemL2 -->|SmartMemoryManager Classification| Mem0
-    MemoryItemL2 -->|Importance > 0.7 OR Access Count| MemoryItemL3
-    
-    subgraph "Consolidation & Decay Logic"
-        Decay["Ebbinghaus Decay Calculation<br/>importance * e^(-decay_rate * t)"]
-    end
-    
-    MemoryItemL2 -.-> Decay
+    DailyLog -->|Decay Logic| Decay["Decay Job"]
+    Decay -->|Score < 0.3| Archival["Graphify Archival (L4)"]
 ```
-
-**Sources:** [orchestrator/modules/memory/storage/knowledge_system.py:40-45](), [orchestrator/modules/memory/storage/knowledge_system.py:165-170](), [orchestrator/modules/memory/storage/knowledge_system.py:196-203](), [orchestrator/consumers/chatbot/smart_memory.py:51-60]()
-
----
-
-## L1 Working Memory Lifecycle
-
-### Miller's Law Enforcement
-The system enforces a working memory capacity of 7 items, inspired by Miller's Law [orchestrator/modules/memory/storage/knowledge_system.py:165](). When new experiences are added to L1 via Redis, the system checks the current count for the specific agent. If the limit is exceeded, the least important or oldest items are evicted to make room for new context [orchestrator/modules/memory/tests/test_hierarchical_memory.py:102-120]().
-
-### Working Memory TTL
-Working memory items in Redis have a default TTL of 300 seconds (5 minutes) [orchestrator/modules/memory/storage/knowledge_system.py:166](). This ensures that the "immediate focus" of an agent remains fresh and relevant to the current task.
-
-**Sources:** [orchestrator/modules/memory/storage/knowledge_system.py:165-170](), [orchestrator/modules/memory/tests/test_hierarchical_memory.py:102-120]()
+**Sources:** [orchestrator/modules/memory/unified_memory_service.py:38-118](), [orchestrator/modules/memory/unified_memory_service.py:123-148](), [orchestrator/config.py:84-123](), [orchestrator/consumers/chatbot/smart_orchestrator.py:117-120]()
 
 ---
 
-## L2 Short-term Memory & Decay
+## L1 Session Consolidation
 
-### Ebbinghaus Decay Implementation
-Short-term memories stored in the `memory_items` table [orchestrator/modules/memory/storage/knowledge_system.py:57]() undergo a decay process. The `decay_rate` (default 0.1) determines how quickly the memory's retrieval priority drops over time [orchestrator/modules/memory/storage/knowledge_system.py:69]().
+### Working Memory Lifecycle
+Active conversations are managed as `SessionMemory` objects in Redis [orchestrator/modules/memory/unified_memory_service.py:123](). This layer tracks:
+*   **Summary**: A running recap of the current conversation [orchestrator/modules/memory/unified_memory_service.py:132]().
+*   **Decisions & Action Items**: Structured outputs extracted from the exchange [orchestrator/modules/memory/unified_memory_service.py:133-134]().
+*   **Exchange Count**: Used to trigger periodic summarization [orchestrator/modules/memory/unified_memory_service.py:135]().
 
-**Importance Calculation Factors:**
-*   **Success/Failure**: Failures and errors receive higher importance scores to ensure the agent learns from mistakes [orchestrator/modules/memory/tests/test_hierarchical_memory.py:158-163]().
-*   **Novelty**: Novel experiences (`is_novel: True`) are prioritized for retention [orchestrator/modules/memory/tests/test_hierarchical_memory.py:165-171]().
-*   **Goal Relevance**: Items marked as relevant to the current objective are protected from rapid decay.
+### The Consolidation Trigger
+When a session is explicitly ended or the `MEMORY_SESSION_CONSOLIDATION_TTL_SECONDS` (default 3600s) expires [orchestrator/config.py:86-87](), the `UnifiedMemoryService` triggers consolidation. This process takes the L1 `SessionMemory` and flattens it into an L2 record (Daily Log) for the workspace [orchestrator/modules/memory/unified_memory_service.py:72-74]().
 
-### Importance Scaling
-**Title: Importance Scoring Logic (Code to Logic Mapping)**
+**Sources:** [orchestrator/modules/memory/unified_memory_service.py:123-148](), [orchestrator/config.py:84-87]()
+
+---
+
+## L2 Decay & Ebbinghaus Forgetting
+
+### Decay Mechanism
+Short-term memories (L2) are not permanent. They are subject to a decay algorithm based on the Ebbinghaus Forgetting Curve.
+*   **Decay Rate**: Configured via `MEMORY_DECAY_RATE` (default 0.1) [orchestrator/config.py:98-99]().
+*   **Archival Threshold**: When a memory's importance falls below `MEMORY_DECAY_ARCHIVE_THRESHOLD` (default 0.3), it is moved to inactive storage or folded into L4 [orchestrator/config.py:100-101]().
+
+### Background Decay Jobs
+The `MEMORY_DECAY_INTERVAL_SECONDS` (default 3600s) governs how often the background worker scans L2 memories to apply decay [orchestrator/config.py:112](). This ensures the context window isn't cluttered with stale, low-importance information.
+
+**Sources:** [orchestrator/config.py:98-114]()
+
+---
+
+## L2 → L3 Promotion
+
+### Promotion Criteria
+Not all short-term memories are discarded. High-value memories are promoted to L3 (Mem0) based on two primary signals:
+1.  **Importance Score**: Must meet `MEMORY_PROMOTION_MIN_IMPORTANCE` (default 0.7) [orchestrator/config.py:104-105]().
+2.  **Access Frequency**: Frequently retrieved items (`MEMORY_PROMOTION_MIN_ACCESS_COUNT` >= 3) are deemed "facts" and promoted [orchestrator/config.py:106-107]().
+
+### Fact Extraction (Mem0)
+Promotion involves sending the memory content to `Mem0Client.add()` [orchestrator/modules/memory/integrations/mem0_client.py:176](). The `SmartMemoryManager` classifies whether these facts are `global`, `agent-specific`, or `both` [orchestrator/consumers/chatbot/smart_memory.py:92-168]().
+
+Title: "Memory Promotion & Tier Classification"
 ```mermaid
 sequenceDiagram
-    participant HMS as HierarchicalMemorySystem
-    participant Calc as calculate_importance()
-    
-    HMS->>Calc: Input: Experience Dict
-    Note over Calc: Base Importance: 0.5
-    alt is success == True
-        Calc->>Calc: Add 0.1
-    else is success == False
-        Calc->>Calc: Add 0.2 (Error/Failure Priority)
-    end
-    alt is_novel == True
-        Calc->>Calc: Add 0.2
-    end
-    Calc-->>HMS: Final Score (Capped at 1.0)
+    participant SMM as "SmartMemoryManager"
+    participant Classifier as "_classify_memory_tier()"
+    participant Mem0 as "Mem0Client"
+
+    SMM->>Classifier: "User: 'My name is Gerard and I use Slack'"
+    Note over Classifier: "Keywords: 'my name' (Global), 'slack' (Agent)"
+    Classifier-->>SMM: "Tier: 'both'"
+    SMM->>Mem0: "add(messages, user_id='mem:ws:agent')"
+    SMM->>Mem0: "add(messages, user_id='mem:ws')"
 ```
 
-**Sources:** [orchestrator/modules/memory/storage/knowledge_system.py:65-72](), [orchestrator/modules/memory/tests/test_hierarchical_memory.py:148-190]()
+**Sources:** [orchestrator/config.py:104-109](), [orchestrator/consumers/chatbot/smart_memory.py:92-168](), [orchestrator/modules/memory/integrations/mem0_client.py:176-200]()
 
 ---
 
-## Promotion to L3 Long-term Memory
+## Reliability & Background Jobs
 
-### Vectorization and Persistence
-Memories that reach the `LONG_TERM` level [orchestrator/modules/memory/storage/knowledge_system.py:43]() are processed by the `EnhancedVectorStore` [orchestrator/modules/memory/storage/knowledge_system.py:32](). The `HierarchicalMemorySystem` uses a centralized `embedding_manager` to generate vectors matching the DB schema (e.g., 1024-dimension) [orchestrator/modules/memory/storage/knowledge_system.py:66]().
+### Circuit Breaker
+Since L3 promotion and retrieval rely on the external Mem0 API, the system implements a `_CircuitBreaker` [orchestrator/modules/memory/integrations/mem0_client.py:25-60]().
+*   **Threshold**: Opens after 3 consecutive failures [orchestrator/modules/memory/integrations/mem0_client.py:29]().
+*   **Cooldown**: Remains open for 300 seconds to prevent cascading failures in the chat loop [orchestrator/modules/memory/integrations/mem0_client.py:29]().
 
-### Promotion via SmartMemoryManager
-The `SmartMemoryManager` classifies incoming interactions to determine if they should be promoted to L3 (Mem0) [orchestrator/consumers/chatbot/smart_memory.py:81](). 
+### Monthly Archival (L4)
+Monthly archival jobs (`MEMORY_ARCHIVAL_CRON_DAY=1`) fold aged L2 and L3 memories into the workspace Business Knowledge Graph [orchestrator/config.py:116-123](). This represents the final stage of the memory lifecycle, where discrete facts become part of the organizational "God Node" graph.
 
-*   **Global Facts**: Personal facts (name, job, location) are stored in the global tier [orchestrator/consumers/chatbot/smart_memory.py:118-124]().
-*   **Agent Facts**: Tool-specific patterns or workflow preferences are stored in the agent-specific tier [orchestrator/consumers/chatbot/smart_memory.py:102-115]().
-*   **Preferences**: Stored in both tiers to ensure consistent behavior across all agents [orchestrator/consumers/chatbot/smart_memory.py:127-130]().
-
-### Mem0 Integration & Reliability
-Promotion to Mem0 is handled by `Mem0Client` [orchestrator/modules/memory/integrations/mem0_client.py:66](), which includes:
-*   **Circuit Breaker**: Opens after 5 consecutive failures to prevent blocking the ingest pipeline [orchestrator/modules/memory/integrations/mem0_client.py:21-44]().
-*   **Exponential Backoff**: Retries failed requests with a 1.5s multiplier [orchestrator/modules/memory/integrations/mem0_client.py:127]().
-
-**Sources:** [orchestrator/modules/memory/storage/knowledge_system.py:55-78](), [orchestrator/consumers/chatbot/smart_memory.py:81-158](), [orchestrator/modules/memory/integrations/mem0_client.py:20-63]()
-
----
-
-## Implementation Details
-
-### Core Classes and Functions
-
-| Class/Function | File Path | Purpose |
+| Parameter | Default Value | Purpose |
 | :--- | :--- | :--- |
-| `HierarchicalMemorySystem` | [orchestrator/modules/memory/storage/knowledge_system.py:126]() | Main orchestrator for memory lifecycle and multi-tier storage. |
-| `MemoryItem` | [orchestrator/modules/memory/storage/knowledge_system.py:55]() | SQLAlchemy model for L2 and L3 memory entries with pgvector support. |
-| `SmartMemoryManager` | [orchestrator/consumers/chatbot/smart_memory.py:50]() | Logic for intent-based memory classification and background storage. |
-| `Mem0Client` | [orchestrator/modules/memory/integrations/mem0_client.py:66]() | Wrapper for external long-term fact storage with circuit breaking. |
-| `store_experience` | [orchestrator/modules/memory/storage/knowledge_system.py:196]() | Logic for routing a new experience to the correct memory tier. |
+| `MEMORY_JOBS_ENABLED` | `true` | Master toggle for background consolidation/decay [orchestrator/config.py:114](). |
+| `MEMORY_PROMOTION_HOUR_UTC` | `3` | Hour when the daily promotion job runs [orchestrator/config.py:113](). |
+| `MEMORY_ARCHIVAL_L3_RETENTION_DAYS` | `180` | Days before L3 facts are folded into L4 graph [orchestrator/config.py:122](). |
 
-### Memory Operations Pipeline
-**Title: Memory Storage Pipeline (Natural Language to Code)**
-```mermaid
-graph LR
-    Input["'User completed task'"] --> HMS["HierarchicalMemorySystem.store_experience()"]
-    HMS --> Calc["calculate_importance()"]
-    Calc --> Branch{Score?}
-    Branch -- "< 0.5" --> Redis["redis_client.setex(working:...)"]
-    Branch -- ">= 0.5" --> DB["AsyncSession.add(MemoryItem)"]
-    DB --> Vector["generate_embedding(content)"]
-    Vector --> PG["PostgreSQL (pgvector)"]
-    
-    Input --> SMM["SmartMemoryManager._classify_memory_tier()"]
-    SMM --> Mem0Branch{Category?}
-    Mem0Branch -- "global/agent" --> M0C["Mem0Client.add()"]
-```
-
-**Sources:** [orchestrator/modules/memory/storage/knowledge_system.py:126-180](), [orchestrator/consumers/chatbot/smart_memory.py:81-158](), [orchestrator/modules/memory/integrations/mem0_client.py:143-176]()
+**Sources:** [orchestrator/modules/memory/integrations/mem0_client.py:25-60](), [orchestrator/config.py:111-124]()
 
 ---

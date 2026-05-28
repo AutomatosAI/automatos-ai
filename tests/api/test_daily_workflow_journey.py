@@ -124,8 +124,8 @@ def test_daily_10_recent_missions(client):
     assert r.status_code == 200
 
 
-def test_daily_11_available_recipes(client):
-    """Step 11: Browse available workflow recipes."""
+def test_daily_11_available_playbooks(client):
+    """Step 11: Browse available playbooks."""
     r = client.get("/api/workflow-recipes", params={"limit": 10})
     assert r.status_code == 200
 

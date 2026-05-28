@@ -86,15 +86,24 @@ export const agentQueryKeys = {
 import { useSystemIcons } from './use-system-config-api'
 import { LEGACY_CATEGORY_MAP } from '@/lib/agent-constants'
 
+interface UseAgentsOptions {
+  /** Include the workspace's system agents (e.g. Auto). Used by assignee
+   *  pickers — the Roster never sets this. */
+  includeWorkspaceSystem?: boolean
+}
+
 // Get all agents
-export function useAgents() {
+export function useAgents(options: UseAgentsOptions = {}) {
   const { data: iconMappings = {} } = useSystemIcons();
   const iconKeys = Object.keys(iconMappings).sort().join(',')
+  const includeSystem = options.includeWorkspaceSystem === true
 
   return useQuery({
-    queryKey: [...agentQueryKeys.agents, iconKeys],
+    queryKey: [...agentQueryKeys.agents, iconKeys, includeSystem ? 'sys' : 'noSys'],
     queryFn: async () => {
-      const agents = await agentApiClient.getAgents();
+      const agents = (await apiClient.getAgents(0, 100, {
+        includeWorkspaceSystem: includeSystem,
+      })) as any[];
       // Inject icon mapping based on category (normalize legacy Title Case categories)
       return agents.map((agent: any) => {
         const cat = agent.marketplace_category || agent.configuration?.category || agent.agent_type
@@ -109,6 +118,16 @@ export function useAgents() {
     staleTime: 30000, // Cache for 30 seconds, allows manual refresh
     refetchOnWindowFocus: false, // Don't refetch on window focus
   })
+}
+
+/**
+ * Variant of useAgents() that includes the workspace's hidden Auto so it
+ * can be selected as a task assignee. Use this in board pickers, task
+ * dialogs, and agent dropdowns where Auto should appear; never in the
+ * Roster (which deliberately hides it).
+ */
+export function useAssignableAgents() {
+  return useAgents({ includeWorkspaceSystem: true })
 }
 
 // Get single agent

@@ -2566,6 +2566,11 @@ Note: I attempted to query the shared mission field for additional synthesis con
 The final paper "Shared Semantic Fields for Multi-Agent Coordination: Replacing the Telephone Game with Resonance-Based Context" has been successfully converted into a polished PDF document.
 
 You can download the PDF here:
-[20260324_220416_Shared_Semantic_Fields_for_Multi-Agent_Coordination_Replacing_the_Telephone_Game.pdf](https://automatos-ai.s3.amazonaws.com/workspaces/ae8320bc-95e1-4de1-bbe9-396bef19cbf8/generated-documents/20260324_220416_Shared_Semantic_Fields_for_Multi-Agent_Coordination_Replacing_the_Telephone_Game.pdf?response-content-disposition=attachment%3B%20filename%3D%2220260324_220416_Shared_Semantic_Fields_for_Multi-Agent_Coordination_Replacing_the_Telephone_Game.pdf%22&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA3ZLYFH2WTHW2CMN6%2F20260324%2Feu-west-1%2Fs3%2Faws4_request&X-Amz-Date=20260324T220417Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=7b8ab0b1b44ef230c2234cb1c54bfc3c9af6b0a1df9833a90ab4cfc565d7ae6f)
+`workspaces/<workspace_id>/generated-documents/20260324_220416_Shared_Semantic_Fields_for_Multi-Agent_Coordination_Replacing_the_Telephone_Game.pdf`
+
+<!-- The original commit had a Pre-signed S3 URL embedded with an AWS Access
+Key ID. The URL expired after 1 hour; the key ID is queued for rotation as
+part of post-PRD-009 cleanup. -->
+
 
 The PDF preserves heading hierarchy, code formatting, readable equations, and references, suitable for professional sharing on LinkedIn, blogs, or investor/practitioner distribution. Let me know if you need any further assistance!

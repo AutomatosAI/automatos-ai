@@ -148,130 +148,76 @@ def _extract_reply_context(body: Dict[str, Any], platform: str) -> Dict[str, Any
 
 
 # =============================================================================
-# Platform Reply Functions
+# Platform Reply — single entry point
+#
+# All outbound platform messages flow through ``channels.sender.send_to_channel``
+# which delegates to the per-platform driver. The driver reads creds from
+# ``channel_connections`` (with a fallback to the legacy
+# ``workspace.settings.integrations`` bag for not-yet-migrated workspaces).
+#
+# The legacy ``_send_telegram_reply`` / ``_send_slack_reply`` /
+# ``_send_whatsapp_reply`` helpers that used to live here have been removed —
+# nothing should import them. ``notification_service.send_workspace_notification``
+# now calls the sender directly.
 # =============================================================================
-
-async def _send_telegram_reply(
-    chat_id: int,
-    text: str,
-    bot_token: str,
-) -> bool:
-    """Send a message back to a Telegram chat."""
-    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    # Truncate to Telegram's 4096 char limit
-    if len(text) > 4000:
-        text = text[:4000] + "\n\n... (truncated)"
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(url, json={
-                "chat_id": chat_id,
-                "text": text,
-                "parse_mode": "Markdown",
-            })
-            if resp.status_code != 200:
-                # Retry without markdown in case of parse errors
-                resp = await client.post(url, json={
-                    "chat_id": chat_id,
-                    "text": text,
-                })
-            logger.info("[telegram] Reply sent to chat %s: %d", chat_id, resp.status_code)
-            return resp.status_code == 200
-    except Exception:
-        logger.exception("[telegram] Failed to send reply to chat %s", chat_id)
-        return False
-
-
-async def _send_slack_reply(
-    channel: str,
-    text: str,
-    bot_token: str,
-    thread_ts: Optional[str] = None,
-) -> bool:
-    """Send a message back to a Slack channel."""
-    url = "https://slack.com/api/chat.postMessage"
-    payload: Dict[str, Any] = {
-        "channel": channel,
-        "text": text,
-    }
-    if thread_ts:
-        payload["thread_ts"] = thread_ts
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(url, json=payload, headers={
-                "Authorization": f"Bearer {bot_token}",
-                "Content-Type": "application/json",
-            })
-            data = resp.json()
-            ok = data.get("ok", False)
-            logger.info("[slack] Reply sent to %s: ok=%s", channel, ok)
-            return ok
-    except Exception:
-        logger.exception("[slack] Failed to send reply to %s", channel)
-        return False
-
-
-async def _send_whatsapp_reply(
-    to_phone: str,
-    text: str,
-    phone_number_id: str,
-    access_token: str,
-) -> bool:
-    """Send a message back via WhatsApp Business API."""
-    url = f"https://graph.facebook.com/v18.0/{phone_number_id}/messages"
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(url, json={
-                "messaging_product": "whatsapp",
-                "to": to_phone,
-                "type": "text",
-                "text": {"body": text[:4096]},
-            }, headers={
-                "Authorization": f"Bearer {access_token}",
-                "Content-Type": "application/json",
-            })
-            logger.info("[whatsapp] Reply sent to %s: %d", to_phone, resp.status_code)
-            return resp.status_code == 200
-    except Exception:
-        logger.exception("[whatsapp] Failed to send reply to %s", to_phone)
-        return False
 
 
 async def _deliver_reply(
     reply_text: str,
     reply_ctx: Dict[str, Any],
     integrations: Dict[str, str],
+    *,
+    workspace_id: Optional[Any] = None,
 ) -> bool:
-    """Deliver agent response back to the originating platform."""
+    """Deliver agent response back to the originating platform via the
+    unified ``channels.sender`` — which routes through the per-platform
+    driver and reads creds from ``channel_connections`` (with legacy
+    ``integrations`` fallback for pre-migration workspaces).
+
+    Opens its own DB session so it's safe to fire from a background
+    task after the request session has been closed. ``integrations``
+    is accepted for backward compat but unused — the sender reads
+    everything it needs from the DB.
+    """
     platform = reply_ctx.get("platform")
+    if not platform:
+        logger.debug("[reply] No platform in reply_ctx")
+        return False
+    if workspace_id is None:
+        logger.warning("[reply] _deliver_reply: workspace_id is required")
+        return False
 
-    if platform == "telegram":
-        token = integrations.get("telegram_bot_token")
-        chat_id = reply_ctx.get("chat_id")
-        if token and chat_id:
-            return await _send_telegram_reply(chat_id, reply_text, token)
-        logger.warning("[reply] Telegram: missing token or chat_id")
+    target = (
+        reply_ctx.get("chat_id")
+        or reply_ctx.get("channel")
+        or reply_ctx.get("from_phone")
+    )
+    if target is not None:
+        target = str(target)
 
-    elif platform == "slack":
-        token = integrations.get("slack_bot_token")
-        channel = reply_ctx.get("channel")
-        if token and channel:
-            return await _send_slack_reply(
-                channel, reply_text, token, reply_ctx.get("thread_ts"),
-            )
-        logger.warning("[reply] Slack: missing token or channel")
+    from channels.sender import send_to_channel
+    from core.database.database import SessionLocal
 
-    elif platform == "whatsapp":
-        access_token = integrations.get("whatsapp_access_token")
-        phone_id = integrations.get("whatsapp_phone_number_id")
-        from_phone = reply_ctx.get("from_phone")
-        if access_token and phone_id and from_phone:
-            return await _send_whatsapp_reply(from_phone, reply_text, phone_id, access_token)
-        logger.warning("[whatsapp] Missing credentials or from_phone")
+    db = SessionLocal()
+    try:
+        result = await send_to_channel(
+            db=db,
+            workspace_id=workspace_id,
+            platform=platform,
+            text=reply_text,
+            target=target,
+        )
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
 
-    else:
-        logger.debug("[reply] No reply delivery for platform=%s", platform)
-
-    return False
+    if not result.ok:
+        logger.warning(
+            "[reply] platform=%s send failed: %s", platform, result.error,
+        )
+    return result.ok
 
 
 # =============================================================================
@@ -471,7 +417,7 @@ async def general_workspace_webhook(
                 if platform and integrations:
                     reply_text = _extract_response_text(result)
                     task = asyncio.create_task(
-                        _deliver_reply(reply_text, reply_ctx, integrations)
+                        _deliver_reply(reply_text, reply_ctx, integrations, workspace_id=workspace.id)
                     )
                     _background_tasks.add(task)
                     task.add_done_callback(_background_tasks.discard)
@@ -505,6 +451,7 @@ async def general_workspace_webhook(
                     "Please set up agents and routing in the Automatos dashboard.",
                     reply_ctx,
                     integrations,
+                    workspace_id=workspace.id,
                 )
             )
             _background_tasks.add(task)
@@ -531,7 +478,7 @@ async def general_workspace_webhook(
             if platform and integrations:
                 reply_text = _extract_response_text(result)
                 task = asyncio.create_task(
-                    _deliver_reply(reply_text, reply_ctx, integrations)
+                    _deliver_reply(reply_text, reply_ctx, integrations, workspace_id=workspace.id)
                 )
                 _background_tasks.add(task)
                 task.add_done_callback(_background_tasks.discard)
@@ -555,6 +502,7 @@ async def general_workspace_webhook(
                         "Sorry, I encountered an error processing your request. Please try again.",
                         reply_ctx,
                         integrations,
+                        workspace_id=workspace.id,
                     )
                 )
                 _background_tasks.add(task)
@@ -584,6 +532,7 @@ async def general_workspace_webhook(
                     "I'll process it in the background.",
                     reply_ctx,
                     integrations,
+                    workspace_id=workspace.id,
                 )
             )
             _background_tasks.add(task)
@@ -618,7 +567,7 @@ async def general_workspace_webhook(
             if platform and integrations:
                 reply_text = _extract_response_text(result)
                 task = asyncio.create_task(
-                    _deliver_reply(reply_text, reply_ctx, integrations)
+                    _deliver_reply(reply_text, reply_ctx, integrations, workspace_id=workspace.id)
                 )
                 _background_tasks.add(task)
                 task.add_done_callback(_background_tasks.discard)
@@ -644,6 +593,7 @@ async def general_workspace_webhook(
                         "Sorry, I encountered an error processing your request. Please try again.",
                         reply_ctx,
                         integrations,
+                        workspace_id=workspace.id,
                     )
                 )
                 _background_tasks.add(task)

@@ -58,35 +58,12 @@ CONTENT_AGENTS = [
             "- Tie topics back to AI automation, agents, or orchestration when possible"
         ),
     },
-    {
-        "name": "CANVAS",
-        "agent_type": "custom",
-        "description": (
-            "Cover art designer agent. Generates cover images for blog posts using "
-            "AI image generation (DALL-E via Composio when available). Reads the post "
-            "title and excerpt to create a relevant, visually appealing cover image."
-        ),
-        "category": "Content Creation",
-        "tags": ["blog", "design", "cover-image", "dall-e", "image-generation"],
-        "tools": [],
-        "model_id": "mistralai/mistral-small-3.1-24b-instruct",
-        "skills": [],
-        "system_prompt": (
-            "You are CANVAS, a cover art designer for Automatos AI blog posts. You "
-            "generate cover images using the GEMINI tool (Nano Banana).\n\n"
-            "## Workflow\n"
-            "1. Use platform_list_blog_posts(status=draft) to find the latest draft\n"
-            "2. Use platform_get_blog_post to read the title and excerpt\n"
-            "3. Generate a cover image using your GEMINI tool based on the post topic\n"
-            "4. Update the post with platform_update_blog_post(cover_image_url=...)\n\n"
-            "## Design Guidelines\n"
-            "- Cover images should be wide format (16:9 aspect ratio)\n"
-            "- Use clean, modern design aesthetic\n"
-            "- Avoid text in the image (the title overlay is handled by CSS)\n"
-            "- Make the image relevant to the post topic\n"
-            "- Prefer abstract/conceptual imagery over literal illustrations"
-        ),
-    },
+    # CANVAS is a general-purpose image agent — used in chat, social posts,
+    # blog covers, and any other on-demand image creation. It is NOT seeded
+    # by this blog-specific script. The blog playbook uses the
+    # platform_generate_cover_image tool directly (no agent role-binding) so
+    # CANVAS stays free for general use without being coupled to the blog
+    # pipeline.
 ]
 
 
@@ -98,10 +75,11 @@ BLOG_PLAYBOOK = {
     "name": "Blog Pipeline",
     "template_id": "daily-blog-pipeline",
     "description": (
-        "Mission-powered blog pipeline. QUILL scouts a trending topic and launches "
-        "a research mission that handles deep research, writing, and editing via "
-        "multiple agents. CANVAS generates cover art. Finally, a review task is "
-        "created with a one-click publish approval gate. Runs Tue/Fri at 09:00 UTC."
+        "Mission-powered blog pipeline. QUILL scouts a trending topic and "
+        "calls platform_create_blog_post — the tool fires a mission that "
+        "handles research, writing, editing, cover image generation (via "
+        "the configured BLOG_COVER_MODEL), and a human-review board task. "
+        "Runs Tue/Fri at 09:00 UTC."
     ),
     "category": "Content Creation",
     "tags": ["blog", "content", "mission", "autonomous", "writing", "scheduled"],
@@ -130,31 +108,26 @@ BLOG_PLAYBOOK = {
             "order": 1,
             "agent_name": "QUILL",
             "prompt_template": (
-                "Find a fresh, trending topic in the '{input.category}' category for our blog.\n\n"
-                "1. Check platform_search_memory and platform_list_blog_posts to see what "
-                "we've already covered — avoid duplicates.\n"
-                "2. Pick a specific, compelling topic with a clear angle.\n"
-                "3. Launch a mission using platform_create_mission with a goal that covers "
-                "the ENTIRE pipeline end-to-end:\n\n"
-                "   Goal template:\n"
-                "   'Research and write a high-quality blog post about [TOPIC]. "
-                "   Investigate [2-3 specific angles]. Include real-world examples, "
-                "   data points, and expert perspectives. The post should be 1000-2000 words, "
-                "   written for technical professionals.\n\n"
-                "   The mission MUST complete ALL of these steps:\n"
-                "   1. Research the topic thoroughly from multiple angles\n"
-                "   2. Write the blog post draft\n"
-                "   3. Edit and SEO-review for accuracy, clarity, and readability\n"
-                "   4. Publish the draft via platform_publish_blog_post(publish_immediately=false) "
-                "with category: {input.category}, relevant tags as an array, and a compelling "
-                "excerpt under 300 chars\n"
-                "   5. Generate a cover image for the post using the GEMINI tool (Nano Banana) "
-                "and update the post via platform_update_blog_post(cover_image_url=...)\n"
-                "   6. Create a board task for human review via platform_create_task with "
-                "title: Review & Publish: [post title], approval_action: "
-                "{type: publish_blog, post_id: [the post UUID]}, priority: high, "
-                "auto_approve: true, tags: [blog, approval]'\n\n"
-                "The mission handles EVERYTHING — research, writing, images, and publishing."
+                "Pick a fresh, compelling topic in the '{input.category}' "
+                "category for the blog and dispatch a full-pipeline mission to "
+                "write it.\n\n"
+                "## Steps\n"
+                "1. Check platform_search_memory and platform_list_blog_posts to "
+                "see what topics we've already covered. Avoid duplicates.\n"
+                "2. Pick ONE specific, timely topic with a clear angle. Be "
+                "concrete (e.g. 'Multi-agent orchestration for Shopify stores' "
+                "— not 'AI in e-commerce').\n"
+                "3. Call platform_create_blog_post(topic=<your chosen topic>, "
+                "category='{input.category}'). That's it. The tool fires a "
+                "mission that handles research, writing, publishing, cover "
+                "image, and the human-review board task — all server-side.\n\n"
+                "## What you do NOT need to do\n"
+                "- Do NOT call platform_create_mission directly.\n"
+                "- Do NOT build the goal template by hand.\n"
+                "- Do NOT call platform_publish_blog_post — the mission does it.\n"
+                "- Do NOT pick a sub-topic for cover art — the cover step is "
+                "auto-included.\n\n"
+                "Your job is topic selection. The platform handles the rest."
             ),
             "max_iterations": 15,
             "error_handling": "stop",
@@ -350,10 +323,12 @@ def seed_blog_playbook():
                         })
                         print("    Created new playbook in workspace")
 
-                    # Update agent models to use cheap models (topic scouting is lightweight)
+                    # QUILL stays on a cheap tool-capable text model (topic
+                    # scouting + topic selection is text-only). CANVAS is left
+                    # alone — operators may have customized it for general
+                    # image creation use cases beyond blog covers.
                     for name, model in [
                         ("QUILL", "mistralai/mistral-small-3.1-24b-instruct"),
-                        ("CANVAS", "mistralai/mistral-small-3.1-24b-instruct"),
                     ]:
                         if name in agent_map:
                             db.execute(text(

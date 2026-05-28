@@ -6,33 +6,22 @@
 The following files were used as context for generating this wiki page:
 
 - [docs/PRDS/53-WEBHOOK-TRIGGER-SYSTEM-PRD.md](docs/PRDS/53-WEBHOOK-TRIGGER-SYSTEM-PRD.md)
-- [frontend/app/auth/signin/[[...rest]]/page.tsx](frontend/app/auth/signin/[[...rest]]/page.tsx)
-- [frontend/app/auth/signup/[[...rest]]/page.tsx](frontend/app/auth/signup/[[...rest]]/page.tsx)
-- [frontend/app/chat/[id]/page.tsx](frontend/app/chat/[id]/page.tsx)
+- [frontend/app/globals.css](frontend/app/globals.css)
+- [frontend/app/layout.tsx](frontend/app/layout.tsx)
+- [frontend/app/reset-password/page.tsx](frontend/app/reset-password/page.tsx)
 - [frontend/app/sso-callback/page.tsx](frontend/app/sso-callback/page.tsx)
-- [frontend/components/onboarding/first-login-guard.tsx](frontend/components/onboarding/first-login-guard.tsx)
-- [frontend/components/onboarding/welcome-modal.tsx](frontend/components/onboarding/welcome-modal.tsx)
-- [frontend/components/settings/SettingsPanel.tsx](frontend/components/settings/SettingsPanel.tsx)
-- [frontend/components/settings/SystemLLMSettingsTab.tsx](frontend/components/settings/SystemLLMSettingsTab.tsx)
-- [frontend/components/settings/SystemSettingsTab.tsx](frontend/components/settings/SystemSettingsTab.tsx)
+- [frontend/components/auth/sign-in-form.tsx](frontend/components/auth/sign-in-form.tsx)
+- [frontend/components/providers.tsx](frontend/components/providers.tsx)
 - [frontend/components/settings/WebhooksSettingsTab.tsx](frontend/components/settings/WebhooksSettingsTab.tsx)
+- [frontend/components/ui/theme-toggle.tsx](frontend/components/ui/theme-toggle.tsx)
 - [frontend/components/workspace-provider.tsx](frontend/components/workspace-provider.tsx)
-- [frontend/hooks/use-tour-tab-bridge.ts](frontend/hooks/use-tour-tab-bridge.ts)
-- [frontend/lib/shepherd/tour-bridge.ts](frontend/lib/shepherd/tour-bridge.ts)
-- [frontend/lib/shepherd/tour-storage.ts](frontend/lib/shepherd/tour-storage.ts)
 - [frontend/middleware.ts](frontend/middleware.ts)
 - [frontend/next.config.js](frontend/next.config.js)
-- [frontend/styles/shepherd-custom.css](frontend/styles/shepherd-custom.css)
 - [orchestrator/alembic/versions/20260213_add_workspace_webhook_key.py](orchestrator/alembic/versions/20260213_add_workspace_webhook_key.py)
 - [orchestrator/api/webhooks.py](orchestrator/api/webhooks.py)
-- [orchestrator/api/workspaces.py](orchestrator/api/workspaces.py)
-- [orchestrator/core/models/routing.py](orchestrator/core/models/routing.py)
+- [orchestrator/core/auth/hybrid.py](orchestrator/core/auth/hybrid.py)
 - [orchestrator/core/routing/ingestors/webhook.py](orchestrator/core/routing/ingestors/webhook.py)
-- [orchestrator/modules/tools/discovery/actions_harness.py](orchestrator/modules/tools/discovery/actions_harness.py)
-- [orchestrator/modules/tools/discovery/handlers_harness.py](orchestrator/modules/tools/discovery/handlers_harness.py)
-- [orchestrator/modules/tools/discovery/handlers_missions.py](orchestrator/modules/tools/discovery/handlers_missions.py)
-- [orchestrator/scripts/seed_blog_playbook.py](orchestrator/scripts/seed_blog_playbook.py)
-- [orchestrator/services/harness_service.py](orchestrator/services/harness_service.py)
+- [orchestrator/tests/test_invitation_routing.py](orchestrator/tests/test_invitation_routing.py)
 
 </details>
 
@@ -54,44 +43,33 @@ graph TB
     subgraph "Client Layer"
         Browser["Browser Client<br/>(Next.js)"]
         Headless["Headless Client<br/>(Scripts, CI/CD)"]
-        Webhooks["Webhook Sources<br/>(GitHub, Slack, etc.)"]
     end
     
     subgraph "Frontend - Next.js Runtime"
-        EdgeProxy["Edge Proxy<br/>frontend/app/api/chat/route.ts"]
-        ClerkProvider["Clerk Auth Provider<br/>@clerk/nextjs"]
-        Middleware["Middleware<br/>frontend/middleware.ts"]
-        WorkspaceProvider["WorkspaceProvider<br/>frontend/components/workspace-provider.tsx"]
+        SignInForm["SignInForm<br/>frontend/components/auth/sign-in-form.tsx"]
+        ClerkMiddleware["clerkMiddleware<br/>frontend/middleware.ts"]
+        NextConfig["next.config.js<br/>(CSP & Security Headers)"]
     end
     
     subgraph "Backend - FastAPI"
         HybridAuth["get_request_context_hybrid<br/>orchestrator/core/auth/hybrid.py"]
-        ClerkValidator["Clerk JWT Validator<br/>orchestrator/core/auth/clerk.py"]
-        APIKeyValidator["API Key Validator<br/>orchestrator/core/auth/api_key.py"]
-        WebhookAuth["Webhook Validation<br/>orchestrator/api/webhooks.py"]
+        Provisioning["_provision_new_user_workspace<br/>orchestrator/core/auth/hybrid.py"]
     end
     
     subgraph "Context Result"
         ReqContext["RequestContext<br/>workspace_id<br/>user_id<br/>user<br/>system_role"]
     end
     
-    Browser --> ClerkProvider
-    Browser --> Middleware
+    Browser --> SignInForm
+    Browser --> ClerkMiddleware
     Headless -->|x-api-key| HybridAuth
-    Webhooks -->|webhook_key in URL| WebhookAuth
     
-    EdgeProxy -->|Authorization: Bearer| HybridAuth
-    EdgeProxy -->|x-api-key| HybridAuth
-    
-    HybridAuth --> ClerkValidator
-    HybridAuth --> APIKeyValidator
-    
-    ClerkValidator --> ReqContext
-    APIKeyValidator --> ReqContext
-    WebhookAuth --> ReqContext
+    SignInForm -->|JWT| HybridAuth
+    HybridAuth --> Provisioning
+    HybridAuth --> ReqContext
 ```
 
-**Sources:** [frontend/middleware.ts:1-18](), [orchestrator/api/workspaces.py:21-22](), [orchestrator/api/webhooks.py:44-85](), [frontend/components/workspace-provider.tsx:49-122]()
+**Sources:** [frontend/middleware.ts:1-16](), [orchestrator/core/auth/hybrid.py:210-230](), [frontend/components/auth/sign-in-form.tsx:41-81](), [frontend/next.config.js:35-94]()
 
 ---
 
@@ -99,145 +77,113 @@ graph TB
 
 ### Clerk JWT (Interactive Users)
 
-Browser-based users authenticate via Clerk. The frontend Next.js middleware protects all routes except specific public ones like sign-in and webhooks [frontend/middleware.ts:3-14]().
+Browser-based users authenticate via Clerk. The `SignInForm` component handles email/password and OAuth strategies (Google, GitHub) [frontend/components/auth/sign-in-form.tsx:30-38](). Upon successful login, Clerk sets a session [frontend/components/auth/sign-in-form.tsx:61]().
+
+The frontend Next.js middleware protects all routes except specific public ones [frontend/middleware.ts:3-14]().
 
 **Public Routes:**
-- `/sign-in(.*)`
-- `/sign-up(.*)`
-- `/sso-callback(.*)`
-- `/api/webhooks(.*)`
-
-The backend validates the Clerk JWT token to extract user identity and system roles. This is primarily handled via the `get_request_context_hybrid` dependency [orchestrator/api/workspaces.py:40-44]().
+- `/sign-in(.*)` [frontend/middleware.ts:4]()
+- `/sign-up(.*)` [frontend/middleware.ts:5]()
+- `/reset-password(.*)` [frontend/middleware.ts:6]()
+- `/sso-callback(.*)` [frontend/middleware.ts:7]()
+- `/accept-invitation(.*)` [frontend/middleware.ts:8]()
+- `/api/webhooks(.*)` [frontend/middleware.ts:9]()
 
 ### API Key (Headless & External)
 
-API keys are used for programmatic access. The system supports three tiers of API key resolution:
-1. **BYOK (Bring Your Own Key):** Managed via workspace settings [orchestrator/api/workspaces.py:164-183]().
-2. **Platform Credentials:** Stored in the encrypted credential store.
-3. **Environment Variables:** Fallback for system-level operations.
+Programmatic access is supported via the `get_request_context_hybrid` dependency. It checks for an `x-api-key` header and validates it against the configured system `API_KEY`.
 
-### Webhook Authentication (URL-as-Secret)
+### Workspace Identification & Multi-Tenancy
 
-Webhooks use a "URL-as-secret" pattern. General workspace webhooks are authenticated via a `workspace_key` (a unique UUID) embedded in the URL path: `/api/webhooks/ws/{workspace_key}` [orchestrator/api/webhooks.py:6-8]().
+The backend resolves the `workspace_id` from the request using a prioritized resolution strategy in `_get_workspace_id_from_request` [orchestrator/core/auth/hybrid.py:47-86]():
+1. Header: `x-workspace-id` [orchestrator/core/auth/hybrid.py:66]()
+2. Header: `x-workspace` [orchestrator/core/auth/hybrid.py:67]()
+3. Query Parameter: `workspace_id` [orchestrator/core/auth/hybrid.py:74]()
+4. Environment Variable: `WORKSPACE_ID` or `DEFAULT_WORKSPACE_ID` [orchestrator/core/auth/hybrid.py:78-82]()
 
-For higher security, the system supports HMAC-SHA256 signature verification for platforms like GitHub, Slack, and Composio [orchestrator/api/webhooks.py:44-85]().
-
-**Sources:** [orchestrator/api/webhooks.py:6-12](), [orchestrator/api/workspaces.py:62-69](), [orchestrator/api/workspaces.py:164-203]()
+**Sources:** [orchestrator/core/auth/hybrid.py:47-86](), [frontend/middleware.ts:1-20](), [frontend/components/auth/sign-in-form.tsx:17-81]()
 
 ---
 
 ## Request Flow: Frontend to Backend
 
-The authentication flow follows a sequence from the browser through the Next.js middleware to the FastAPI backend.
+When a request hits the backend, `get_request_context_hybrid` performs authentication and then ensures the user has access to the specific workspace.
 
 ```mermaid
 sequenceDiagram
     participant Browser
-    participant Middleware as "Next.js Middleware<br/>frontend/middleware.ts"
+    participant Middleware as "Clerk Middleware<br/>frontend/middleware.ts"
     participant Backend as "FastAPI Backend"
-    participant HybridAuth as "get_request_context_hybrid"
+    participant HybridAuth as "get_request_context_hybrid<br/>orchestrator/core/auth/hybrid.py"
+    participant DB as "PostgreSQL"
     
-    Browser->>Middleware: Request to /api/workspaces/current
-    Middleware->>Middleware: isPublicRoute? No
+    Browser->>Middleware: GET /api/agents
     Middleware->>Middleware: auth.protect()
     
-    Browser->>Backend: GET /api/workspaces/current<br/>Authorization: Bearer {jwt}
+    Browser->>Backend: GET /api/agents (Header: Authorization, x-workspace-id)
+    Backend->>HybridAuth: Resolve Context
     
-    Backend->>HybridAuth: Depends(get_request_context_hybrid)
-    
-    alt Clerk JWT Valid
-        HybridAuth->>HybridAuth: Decode Claims
-    else API Key Valid
-        HybridAuth->>HybridAuth: DB Lookup
+    alt JWT Auth
+        HybridAuth->>HybridAuth: get_clerk_auth()
+    else API Key Auth
+        HybridAuth->>HybridAuth: Validate x-api-key
     end
     
-    HybridAuth-->>Backend: RequestContext(workspace_id, ...)
+    HybridAuth->>DB: _user_has_workspace_access()
+    Note right of DB: Checks if user is owner or active member
+    
+    alt User is New
+        HybridAuth->>DB: _provision_new_user_workspace()
+        Note right of DB: Creates User, Workspace, & Default Notifications
+    end
+    
+    HybridAuth-->>Backend: RequestContext
 ```
 
-**Sources:** [frontend/middleware.ts:10-14](), [orchestrator/api/workspaces.py:40-44](), [frontend/components/workspace-provider.tsx:65-75]()
+**Sources:** [orchestrator/core/auth/hybrid.py:144-163](), [orchestrator/core/auth/hybrid.py:210-230](), [frontend/middleware.ts:12-16]()
 
 ---
 
-## Backend Authentication Pipeline
+## Automatic Provisioning & Defaults
 
-The `get_request_context_hybrid` function is the central gateway. It is used across various API modules including workspaces, agents, and chat.
+For new users signing in via Clerk, the system automatically provisions a personal workspace.
 
-### Endpoint Integration Pattern
+### Workspace Provisioning
+The `_provision_new_user_workspace` function performs an atomic upsert of the user record and creates a default workspace [orchestrator/core/auth/hybrid.py:210-230](). It ensures the user is assigned the `owner` role in the `workspace_members` table [orchestrator/core/auth/hybrid.py:255-264]().
 
-```python
-# Example from orchestrator/api/workspaces.py:40-43
-@router.get("/current")
-async def get_current_workspace(
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db),
-):
-    # ctx.workspace_id is used to fetch the active workspace
-    workspace = db.query(Workspace).get(ctx.workspace_id)
-```
+### Default Notification Seeding
+Upon workspace creation, the system seeds default notification preferences via `_seed_default_notification_preferences` [orchestrator/core/auth/hybrid.py:154-192](). This is idempotent and uses `WHERE NOT EXISTS` to avoid duplicates [orchestrator/core/auth/hybrid.py:176-182]().
 
-### Workspace Context Resolution
+**Default Preferences (PRD-128):**
+| Event Type | Default Destination |
+| :--- | :--- |
+| `heartbeat_complete` | `in_app` [orchestrator/core/auth/hybrid.py:202]() |
+| `task_complete` | `in_app` [orchestrator/core/auth/hybrid.py:203]() |
+| `mission_complete` | `in_app` [orchestrator/core/auth/hybrid.py:205]() |
+| `playbook_complete` | `in_app` [orchestrator/core/auth/hybrid.py:207]() |
 
-The `RequestContext` provides the following critical fields:
-- `workspace_id`: The UUID of the active workspace [orchestrator/api/workspaces.py:42]().
-- `user`: The authenticated user object (contains `role`) [orchestrator/api/workspaces.py:87]().
-- `system_role`: Extracted from the user profile for RBAC.
-
-**Sources:** [orchestrator/api/workspaces.py:40-54](), [frontend/components/workspace-provider.tsx:11-30]()
+**Sources:** [orchestrator/core/auth/hybrid.py:154-208](), [orchestrator/core/auth/hybrid.py:210-230](), [orchestrator/tests/test_invitation_routing.py:3-12]()
 
 ---
 
-## Workspace Context Injection
+## Edge Proxy & Frontend Security
 
-The workspace ID flows through the entire request lifecycle to enforce multi-tenant isolation.
-
-### Frontend Workspace Management
-The `WorkspaceProvider` [frontend/components/workspace-provider.tsx:49-122]() manages the active workspace state. The frontend identifies the "current" workspace via `GET /api/workspaces/current` [orchestrator/api/workspaces.py:40-44](). Upon successful fetch, the `workspace_id` is persisted in `localStorage` as `last_active_workspace` [frontend/components/workspace-provider.tsx:96-98]().
-
-### Backend Isolation
-Every database query is filtered by the `workspace_id` provided in the `RequestContext`.
-
-| Component | Usage of RequestContext | File Reference |
-|-----------|-------------------------|----------------|
-| **Workspaces** | Filters settings and integration tokens | [orchestrator/api/workspaces.py:54-61]() |
-| **Routing** | Scopes routing rules and decisions | [orchestrator/core/models/routing.py:95]() |
-| **Harness** | Filters active workspaces for optimization | [orchestrator/services/harness_service.py:104-108]() |
-
-**Sources:** [orchestrator/api/workspaces.py:54-61](), [orchestrator/core/models/routing.py:113](), [orchestrator/services/harness_service.py:104-108]()
-
----
-
-## Edge Proxy Security
-
-Security is enforced at the Next.js layer via strict headers and CSP.
+Security is enforced at the Next.js layer via strict headers and Content Security Policy (CSP) in `next.config.js`.
 
 ### Content Security Policy (CSP)
-The system enforces a strict CSP via `next.config.js` to prevent XSS and unauthorized data exfiltration [frontend/next.config.js:62-77]().
+The system enforces a strict CSP to prevent XSS and unauthorized data exfiltration [frontend/next.config.js:75-90]().
 
-- `connect-src`: Restricted to self, `*.automatos.app`, Clerk auth endpoints, and `cdn.jsdelivr.net` [frontend/next.config.js:69]().
-- `frame-ancestors`: Set to `none` to prevent clickjacking [frontend/next.config.js:75]().
-- `script-src`: Restricts execution to trusted domains (Clerk, Cloudflare) and prevents inline scripts except where necessary for Next.js [frontend/next.config.js:65]().
+- `connect-src`: Restricted to `self`, `*.automatos.app`, Clerk auth endpoints, and WebSocket connections [frontend/next.config.js:82]().
+- `script-src`: Restricts execution to trusted domains (Clerk, Cloudflare, jsdelivr) and allows `unsafe-eval` only for Next.js development mode [frontend/next.config.js:78]().
+- `img-src`: Allows Clerk avatars, Google user content, and Composio logos [frontend/next.config.js:80]().
 
 ### Security Headers
-Additional headers are applied to all routes [frontend/next.config.js:23-51]():
-- `X-Frame-Options: DENY` [frontend/next.config.js:29-31]()
-- `X-Content-Type-Options: nosniff` [frontend/next.config.js:33-35]()
-- `Strict-Transport-Security`: Enforces HTTPS for one year (`max-age=31536000`) [frontend/next.config.js:45-47]().
-- `Referrer-Policy`: Set to `strict-origin-when-cross-origin` [frontend/next.config.js:37-39]().
+Additional headers are applied to all routes [frontend/next.config.js:36-94]():
+- `X-Frame-Options: DENY`: Prevents clickjacking [frontend/next.config.js:42-44]().
+- `X-Content-Type-Options: nosniff`: Prevents MIME type sniffing [frontend/next.config.js:46-48]().
+- `Strict-Transport-Security`: Enforces HTTPS for one year [frontend/next.config.js:58-60]().
+- `X-Powered-By`: Disabled to hide technology stack details [frontend/next.config.js:8]().
 
-**Sources:** [frontend/next.config.js:22-81]()
-
----
-
-## Management UI
-
-Users manage their authentication and security settings through various settings tabs in the `SettingsPanel` [frontend/components/settings/SettingsPanel.tsx:14-103]().
-
-### Security Tabs
-- **BYOK Preferences:** Manage per-provider API key overrides (OpenAI, Anthropic, etc.) via `ApiKeysSettingsTab` [frontend/components/settings/SettingsPanel.tsx:77-79]() and backend preferences [orchestrator/api/workspaces.py:164-203]().
-- **Webhooks:** View the workspace-specific webhook URL and key in `WebhooksSettingsTab` [frontend/components/settings/WebhooksSettingsTab.tsx:24-40]().
-- **Integrations:** Save platform-specific credentials like `telegram_bot_token` or `slack_bot_token` [orchestrator/api/workspaces.py:118-156]().
-- **Credentials:** General credential management via `CredentialsTab` [frontend/components/settings/SettingsPanel.tsx:82-84]().
-
-**Sources:** [frontend/components/settings/SettingsPanel.tsx:14-103](), [frontend/components/settings/WebhooksSettingsTab.tsx:24-38](), [orchestrator/api/workspaces.py:30-37](), [orchestrator/api/workspaces.py:118-156]()
+**Sources:** [frontend/next.config.js:4-95](), [frontend/middleware.ts:1-20]()
 
 ---

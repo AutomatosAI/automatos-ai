@@ -417,7 +417,7 @@ Then provide a helpful, technical response based on the search results."""
                                 tool_input = json.loads(tool_input_str)
                             else:
                                 tool_input = tool_input_str
-                        except:
+                        except Exception:
                             tool_input = {"query": str(tool_input_str)}
                         
                         tool_id = tool_call.get("id", "")

@@ -5,105 +5,72 @@
 
 The following files were used as context for generating this wiki page:
 
-- [docs/PRDS/55-AUTONOMOUS-ASSISTANT-PLATFORM.md](docs/PRDS/55-AUTONOMOUS-ASSISTANT-PLATFORM.md)
-- [frontend/components/auth/sign-up-form.tsx](frontend/components/auth/sign-up-form.tsx)
-- [frontend/components/marketplace/marketplace-agents-tab.tsx](frontend/components/marketplace/marketplace-agents-tab.tsx)
-- [frontend/components/marketplace/marketplace-homepage.tsx](frontend/components/marketplace/marketplace-homepage.tsx)
-- [frontend/components/marketplace/marketplace-tools-tab.tsx](frontend/components/marketplace/marketplace-tools-tab.tsx)
-- [frontend/components/shared/stats-bar.tsx](frontend/components/shared/stats-bar.tsx)
-- [frontend/components/tools/tools-dashboard.tsx](frontend/components/tools/tools-dashboard.tsx)
-- [frontend/components/workflows/active-workflows-panel.tsx](frontend/components/workflows/active-workflows-panel.tsx)
-- [frontend/components/workflows/execution-kitchen.tsx](frontend/components/workflows/execution-kitchen.tsx)
-- [frontend/components/workflows/workflow-management.tsx](frontend/components/workflows/workflow-management.tsx)
-- [frontend/lib/tooltips.json](frontend/lib/tooltips.json)
-- [orchestrator/alembic/versions/20260215_add_heartbeat_and_channels.py](orchestrator/alembic/versions/20260215_add_heartbeat_and_channels.py)
-- [orchestrator/api/channels.py](orchestrator/api/channels.py)
-- [orchestrator/api/heartbeat.py](orchestrator/api/heartbeat.py)
-- [orchestrator/api/recipe_executor.py](orchestrator/api/recipe_executor.py)
+- [frontend/components/agents/org-chart-tab.tsx](frontend/components/agents/org-chart-tab.tsx)
+- [orchestrator/api/marketplace.py](orchestrator/api/marketplace.py)
 - [orchestrator/api/workflow_recipes.py](orchestrator/api/workflow_recipes.py)
-- [orchestrator/channels/base.py](orchestrator/channels/base.py)
-- [orchestrator/channels/discord_adapter.py](orchestrator/channels/discord_adapter.py)
-- [orchestrator/channels/google_chat_adapter.py](orchestrator/channels/google_chat_adapter.py)
-- [orchestrator/channels/line_adapter.py](orchestrator/channels/line_adapter.py)
-- [orchestrator/channels/manager.py](orchestrator/channels/manager.py)
-- [orchestrator/channels/slack_adapter.py](orchestrator/channels/slack_adapter.py)
-- [orchestrator/consumers/chatbot/smart_memory.py](orchestrator/consumers/chatbot/smart_memory.py)
-- [orchestrator/core/models/channels.py](orchestrator/core/models/channels.py)
-- [orchestrator/core/services/plugin_security_scanner.py](orchestrator/core/services/plugin_security_scanner.py)
-- [orchestrator/modules/agents/__init__.py](orchestrator/modules/agents/__init__.py)
-- [orchestrator/modules/agents/factory/__init__.py](orchestrator/modules/agents/factory/__init__.py)
-- [orchestrator/modules/learning/tests/conftest.py](orchestrator/modules/learning/tests/conftest.py)
-- [orchestrator/modules/learning/tests/test_learning_system.py](orchestrator/modules/learning/tests/test_learning_system.py)
-- [orchestrator/modules/memory/integrations/mem0_client.py](orchestrator/modules/memory/integrations/mem0_client.py)
+- [orchestrator/core/seeds/platform-management-skill.md](orchestrator/core/seeds/platform-management-skill.md)
 
 </details>
 
 
 
-This page documents the technical implementation of the recipe memory and learning systems. It covers how recipes leverage **Mem0** for long-term task continuity, how **RecipeQualityService** performs 5D assessments of execution performance, and how **RecipeLearningService** extracts patterns to generate improvement suggestions.
+This page documents the technical implementation of the recipe memory and learning systems. It covers how recipes leverage **Mem0** for long-term task continuity, how **RecipeQualityService** performs 5D assessments of execution performance, and how **RecipeLearningService** extracts patterns to generate improvement suggestions within the "Execution Kitchen."
 
 ---
 
 ## Recipe Memory System (Mem0 Integration)
 
-Recipes use a specialized memory path to ensure that multi-step workflows maintain context across steps and across different executions of the same recipe.
+Recipes use a specialized memory path to ensure that multi-step workflows maintain context across steps and across different executions of the same recipe. This integration bypasses the standard chat memory to focus on task-specific state.
 
 ### Memory Lifecycle
 The `RecipeMemoryService` (integrated within the execution flow) manages the interaction with the **Mem0** backend. Unlike standard chat memory, recipe memory is often scoped to the specific `recipe_id` to prevent "cross-talk" between different automated workflows.
 
 1.  **Pre-Execution Retrieval**: Before a recipe starts, `execute_recipe_direct` retrieves relevant memories to inform the initial state [orchestrator/api/recipe_executor.py:18-19]().
-2.  **Context Injection**: These memories are injected into the step's system prompt via the `ContextService` in `RECIPE` mode [orchestrator/api/recipe_executor.py:143-149](). The `ContextService` uses a priority system to ensure memory is included within the token budget [orchestrator/api/recipe_executor.py:9-10]().
-3.  **Post-Execution Storage**: After the final step completes, the summary of the execution is stored back into Mem0 to inform future runs [orchestrator/api/recipe_executor.py:18-19]().
+2.  **Context Injection**: These memories are injected into the step's system prompt via the `ContextService` in `RECIPE` mode [orchestrator/api/recipe_executor.py:187-191]().
+3.  **Step-to-Step Memory**: The `RecipeScratchpad` replaces verbose text dumps, providing 80-90% token savings by allowing agents to explicitly export data via the `scratchpad_write` tool [orchestrator/api/recipe_executor.py:15-16]().
+4.  **Post-Execution Storage**: After the final step completes, the summary of the execution is stored back into Mem0 to inform future runs [orchestrator/api/recipe_executor.py:18-19]().
 
-### Mem0 Client Implementation
-The `Mem0Client` provides a robust wrapper around the Mem0 API with built-in resilience patterns.
-
--   **Circuit Breaker**: Prevents system degradation if the Mem0 service is slow or down. It opens after 5 consecutive failures (`_CB_FAILURE_THRESHOLD`) and cools down for 60 seconds (`_CB_COOLDOWN_SECONDS`) [orchestrator/modules/memory/integrations/mem0_client.py:21-22]().
--   **Scoping**: Memories are stored with a `user_id` that typically maps to the workspace or agent context to ensure strict multi-tenant isolation [orchestrator/modules/memory/integrations/mem0_client.py:143-154]().
--   **Request Handling**: The client handles exponential backoff for timeouts and connection errors [orchestrator/modules/memory/integrations/mem0_client.py:119-132]().
+### Recipe Context Construction
+The `ContextService` builds the prompt for each recipe step, incorporating the `recipe_step_dict` which contains the current step number, total steps, and previous outputs from the scratchpad [orchestrator/api/recipe_executor.py:179-191]().
 
 **Recipe Memory Data Flow**
 ```mermaid
 graph TD
-    subgraph "Execution Engine"
-        [orchestrator/api/recipe_executor.py] --> Executor["execute_recipe_direct"]
-        Executor --> Step["_execute_step"]
+    subgraph "Execution_Engine [orchestrator/api/recipe_executor.py]"
+        [api.recipe_executor] -->|execute_recipe_direct| [Step_Loop]
+        [Step_Loop] -->|_execute_step| [AgentFactory:activate_agent]
     end
 
-    subgraph "Memory Services"
-        RMS["RecipeMemoryService"]
-        M0C["Mem0Client [orchestrator/modules/memory/integrations/mem0_client.py]"]
+    subgraph "Memory_Services [modules/context.py]"
+        [Agent_Activation] -->|ContextMode.RECIPE| [ContextService]
+        [ContextService] -->|Inject| [RecipeMemoryService]
+        [RecipeMemoryService] -->|Query| [Mem0_Integration]
     end
 
-    subgraph "External Storage"
-        Mem0["Mem0 API / OpenMemory"]
+    subgraph "External_Storage"
+        [Mem0_Integration] <-->|Vector_Search| [Mem0_Cloud/Local]
+        [Step_Loop] -->|Write_Summary| [Mem0_Cloud/Local]
     end
 
-    Executor -->|1. Get Memories| RMS
-    RMS -->|2. Search| M0C
-    M0C -->|3. _request(POST)| Mem0
-    Mem0 -->|4. Response JSON| M0C
-    M0C -->|5. List[Dict]| RMS
-    RMS -->|6. recipe_memories| Step
-    Step -->|7. Final Summary| RMS
-    RMS -->|8. add(messages)| M0C
+    [Step_Loop] -->|inter-step_data| [RecipeScratchpad]
+    [RecipeScratchpad] -->|formatted_context| [ContextService]
 ```
-Sources: [orchestrator/api/recipe_executor.py:18-19](), [orchestrator/modules/memory/integrations/mem0_client.py:66-100](), [orchestrator/modules/memory/integrations/mem0_client.py:143-154]()
+Sources: [orchestrator/api/recipe_executor.py:14-19](), [orchestrator/api/recipe_executor.py:179-191](), [orchestrator/api/recipe_executor.py:110-123]()
 
 ---
 
 ## Recipe Quality Service (5D Assessment)
 
-The `RecipeQualityService` evaluates completed executions across five distinct dimensions to provide a quantitative measure of performance.
+The `RecipeQualityService` evaluates completed executions across five distinct dimensions to provide a quantitative measure of performance. This assessment is visualized in the **Execution Kitchen** via the `TheaterSelfLearningPanel` [frontend/components/workflows/execution-kitchen.tsx:39-43]().
 
 ### The 5D Assessment Model
 Each execution is scored from 0.0 to 1.0 based on:
 
 1.  **Completeness**: Percentage of steps that reached `status='completed'`.
 2.  **Accuracy**: LLM-based evaluation of the `output_data` against the original `recipe.instructions`.
-3.  **Efficiency**: Actual duration vs. historical duration for those steps.
+3.  **Efficiency**: Actual duration vs. predicted/historical duration for those steps.
 4.  **Reliability**: Number of retries and tool-loop iterations required to finish.
-5.  **Cost**: Token usage relative to the workspace budget.
+5.  **Cost**: Token usage (input/output) relative to the workspace budget.
 
 ### Quality Grade Mapping
 The service maps the aggregate score to a letter grade displayed in the UI:
@@ -113,7 +80,7 @@ The service maps the aggregate score to a letter grade displayed in the UI:
 - **D**: Score $\ge$ 0.6
 - **F**: Score $<$ 0.6
 
-Sources: [orchestrator/api/workflow_recipes.py:27-28](), [frontend/components/workflows/execution-kitchen.tsx:37-43]()
+Sources: [frontend/components/workflows/execution-kitchen.tsx:39-43](), [orchestrator/api/workflow_recipes.py:25-28]()
 
 ---
 
@@ -128,59 +95,62 @@ The service analyzes the execution logs, including the `step_results` and `execu
 - **Performance Bottlenecks**: Steps that consume disproportionate time or tokens.
 
 ### Learning Data Storage
-Results are persisted in the `workflow_recipes.learning_data` column [orchestrator/api/workflow_recipes.py:25-28]().
+Results are persisted in the `workflow_recipes` table (aliased from `WorkflowTemplate`) [orchestrator/api/workflow_recipes.py:25-27](). The frontend surfaces these as `LearningData` and `SuggestionsData` within the `TheaterSelfLearningPanel` and `PlaybookSuggestionsPanel` [frontend/components/workflows/execution-kitchen.tsx:39-45]().
 
 | Key | Description |
 | :--- | :--- |
-| `latest_suggestions` | Actionable prompt or config changes (e.g., "Increase max_iterations"). |
-| `latest_patterns` | Observed behaviors across multiple runs. |
+| `latest_suggestions` | Actionable prompt or config changes (e.g., "Increase max_iterations for Step 2"). |
+| `latest_patterns` | Observed behaviors (e.g., "Step 1 often requires 'search_knowledge' tool"). |
 | `analysis_count` | Total number of executions analyzed for this recipe. |
 
 **Learning Analysis Logic**
 ```mermaid
 graph LR
-    subgraph "Code Entity Space"
-        DB_RECIPE["WorkflowTemplate [core.models.core]"]
-        DB_EXEC["RecipeExecution [core.models.core]"]
-        LEARN_SVC["RecipeLearningService"]
-        EX_KITCHEN["ExecutionKitchen [frontend/components/workflows/execution-kitchen.tsx]"]
+    subgraph "Natural_Language_Space"
+        [User_Instructions]
+        [Agent_Outputs]
+        [Improvement_Suggestions]
     end
 
-    subgraph "Data Space"
-        STEP_RES["execution_metadata (JSONB)"]
-        LEARN_DATA["learning_data (JSONB)"]
+    subgraph "Code_Entity_Space"
+        [DB_RECIPE:core.models.WorkflowTemplate]
+        [DB_EXEC:core.models.core.RecipeExecution]
+        [LEARN_SVC:RecipeLearningService]
+        [QUALITY_SVC:RecipeQualityService]
+        [TRACKER:WorkflowStageTracker]
     end
 
-    DB_EXEC -->|Contains| STEP_RES
-    STEP_RES -->|Input| LEARN_SVC
-    LEARN_SVC -->|Extracts Patterns| LEARN_SVC
-    LEARN_SVC -->|Generates Suggestions| LEARN_DATA
-    LEARN_DATA -->|Updates| DB_RECIPE
-    EX_KITCHEN -->|Displays| LEARN_DATA
+    [DB_EXEC] -->|step_results| [LEARN_SVC]
+    [DB_EXEC] -->|duration_ms| [QUALITY_SVC]
+    [LEARN_SVC] -->|extracts| [Improvement_Suggestions]
+    [QUALITY_SVC] -->|updates| [DB_RECIPE]
+    [TRACKER] -->|stage_complete| [DB_EXEC]
+    [Improvement_Suggestions] -->|persisted_in| [DB_RECIPE]
 ```
-Sources: [orchestrator/api/workflow_recipes.py:25-28](), [frontend/components/workflows/execution-kitchen.tsx:39-43]()
+Sources: [orchestrator/api/workflow_recipes.py:25-28](), [frontend/components/workflows/execution-kitchen.tsx:39-45](), [orchestrator/api/workflows.py:37-70](), [core/models/core.py:27-27]()
 
 ---
 
-## Workflow Execution Stages
+## Workflow Execution Stages (PRD-59)
 
-Recipe execution is tracked through a structured lifecycle. The `ExecutionKitchen` component visualizes these transitions in real-time [frontend/components/workflows/execution-kitchen.tsx:74-84]().
+Recipe execution is tracked through a structured lifecycle, moving from planning to learning. The `ExecutionKitchen` component and `WorkflowStageTracker` visualize these transitions in real-time [frontend/components/workflows/execution-kitchen.tsx:47-55](), [orchestrator/api/workflows.py:37-68]().
 
 ### Stage Transitions
-1. **PLAN**: Task decomposition and agent selection.
-2. **PREPARE**: Context engineering and prompt optimization.
-3. **EXECUTE**: Agent execution and tool coordination [orchestrator/api/recipe_executor.py:66-79]().
-4. **EVALUATE**: Result aggregation and quality assessment.
-5. **LEARN**: Learning update and memory storage.
+The `WorkflowStageTracker` supports both legacy 9-stage tracking and the PRD-59 dynamic phases:
+1. **PLAN**: Task decomposition (Stage 1), Agent Selection (Stage 2), and Agent Negotiation (Stage 2b) [orchestrator/api/workflows.py:63]().
+2. **PREPARE**: Context engineering (Stage 3) and Prompt Optimization (Stage 3b) [orchestrator/api/workflows.py:64]().
+3. **EXECUTE**: Agent execution (Stage 4) and Inter-Agent Coordination (Stage 4b) [orchestrator/api/workflows.py:65]().
+4. **EVALUATE**: Result aggregation (Stage 5) and Learning Update (Stage 6) [orchestrator/api/workflows.py:66]().
+5. **LEARN**: Quality Assessment (Stage 7), Memory Storage (Stage 8), and Response Generation (Stage 9) [orchestrator/api/workflows.py:67]().
 
 **UI to Code Association**
 | UI Component | Code Entity | Purpose |
 | :--- | :--- | :--- |
-| **TheaterStageProgress** | `STAGE_NAMES` | Displays current phase (Decompose to Response) [frontend/components/workflows/execution-kitchen.tsx:74-84](). |
-| **TheaterSelfLearningPanel**| `QualityData` | Visualizes the result of the `EVALUATE` phase [frontend/components/workflows/execution-kitchen.tsx:41](). |
-| **Learning Insights** | `learning_data` | Surfaced suggestions from the `LEARN` phase [orchestrator/api/workflow_recipes.py:25-28](). |
+| **TheaterStageProgress** | `WorkflowStageTracker` | Visualizes the 9-stage pipeline or PRD-59 phases [frontend/components/workflows/execution-kitchen.tsx:36](). |
+| **TheaterStepExecution** | `_execute_step` | Shows real-time tool calls and LLM turns for a specific step [frontend/components/workflows/execution-kitchen.tsx:37](). |
+| **TheaterSelfLearningPanel** | `RecipeLearningService` | Displays 5D quality metrics and extracted patterns [frontend/components/workflows/execution-kitchen.tsx:39-43](). |
 
-Sources: [frontend/components/workflows/execution-kitchen.tsx:36-46](), [orchestrator/api/recipe_executor.py:127-149]()
+Sources: [frontend/components/workflows/execution-kitchen.tsx:35-46](), [orchestrator/api/workflows.py:41-68](), [orchestrator/api/recipe_executor.py:5-19]()
 
 ---
 
@@ -188,16 +158,19 @@ Sources: [frontend/components/workflows/execution-kitchen.tsx:36-46](), [orchest
 
 ### Trigger Assessment
 `POST /api/workflow-recipes/{recipe_id}/assess-quality`
-Triggers the quality assessment for a specific execution.
+Triggers the quality assessment for a specific execution, updating the `RecipeExecution` record.
 
 ### Trigger Learning
 `POST /api/workflow-recipes/{recipe_id}/learn`
-Triggers the learning service to analyze recent executions and update suggestions.
+Triggers the learning service to analyze recent executions and update the `learning_data` JSONB field in the `WorkflowTemplate` model [orchestrator/api/workflow_recipes.py:25-28]().
 
 ### Get Suggestions
 `GET /api/workflow-recipes/{recipe_id}/suggestions`
-Returns the aggregated insights from the `learning_data` field.
+Returns the aggregated insights from the `learning_data` field for display in the `PlaybookSuggestionsPanel` [frontend/components/workflows/execution-kitchen.tsx:44]().
 
-Sources: [orchestrator/api/workflow_recipes.py:22-28]()
+### Marketplace Integration
+Recipes can be published to the community marketplace. When a recipe is submitted, its metadata and execution history (if approved) are cloned to the marketplace view [orchestrator/api/marketplace.py:123-138](). The `install_count` is tracked to measure the "popularity" of specific automation patterns [orchestrator/api/marketplace.py:174-175]().
+
+Sources: [orchestrator/api/workflow_recipes.py:22-28](), [frontend/components/workflows/execution-kitchen.tsx:44-46](), [orchestrator/api/marketplace.py:123-175]()
 
 ---

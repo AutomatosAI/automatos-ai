@@ -12,10 +12,11 @@ import logging
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from config import config
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db
@@ -180,3 +181,86 @@ async def unpublish_post(
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
     return post.to_dict(include_content=False)
+
+
+# ---------------------------------------------------------------------------
+# Create Blog Mission — single entry point used by the "Create Blog" UI button.
+# Same code path as the platform_create_blog_post agent tool: builds the
+# standardized goal and dispatches to CoordinatorService.
+# ---------------------------------------------------------------------------
+
+class CreateBlogMissionRequest(BaseModel):
+    topic: str = Field(..., min_length=3, max_length=500)
+    category: Optional[str] = Field(None, max_length=100)
+
+
+_ALLOWED_IMAGE_MIMES = {
+    "image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif",
+}
+_MAX_COVER_IMAGE_BYTES = 8 * 1024 * 1024  # 8 MB
+
+
+@router.post("/cover-image/upload")
+async def upload_cover_image(
+    file: UploadFile = File(...),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """
+    Upload a user-supplied cover image for a blog post. Saves to the same
+    image store used by platform_generate_cover_image so the URL pattern is
+    identical (/api/generated-images/{image_id}).
+    """
+    import base64
+
+    from core.services.image_store import get_image_store
+
+    content_type = (file.content_type or "").lower()
+    if content_type not in _ALLOWED_IMAGE_MIMES:
+        raise HTTPException(
+            status_code=415,
+            detail=f"Unsupported image type {content_type!r}. Allowed: {sorted(_ALLOWED_IMAGE_MIMES)}",
+        )
+
+    body_bytes = await file.read()
+    if len(body_bytes) == 0:
+        raise HTTPException(status_code=400, detail="Empty file")
+    if len(body_bytes) > _MAX_COVER_IMAGE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Image too large ({len(body_bytes)} bytes, max {_MAX_COVER_IMAGE_BYTES})",
+        )
+
+    b64 = base64.b64encode(body_bytes).decode("ascii")
+    store = get_image_store()
+    image_id = await store.save_image(b64, mime_type=content_type, workspace_id=str(ctx.workspace_id))
+    return {
+        "image_id": image_id,
+        "cover_image_url": f"{config.BACKEND_URL.rstrip('/')}/api/generated-images/{image_id}",
+        "size_bytes": len(body_bytes),
+        "content_type": content_type,
+    }
+
+
+@router.post("/missions")
+async def create_blog_mission(
+    body: CreateBlogMissionRequest,
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """
+    Fire a research-and-write blog mission for a topic. Same end-to-end
+    pipeline whether triggered from the UI button, an agent, or a scheduled
+    playbook — they all converge on this code path.
+    """
+    from modules.tools.discovery.handlers_blog import create_blog_post_from_topic
+
+    user_id = ctx.user.clerk_user_id if ctx.user else None
+    params = {
+        "topic": body.topic.strip(),
+        "category": (body.category or "AI & Automation").strip(),
+        "_user_id": user_id,
+    }
+    result = await create_blog_post_from_topic(db, ctx.workspace_id, params)
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "Mission failed to start"))
+    return result

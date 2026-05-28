@@ -47,7 +47,8 @@ export function PlaybooksPanel() {
       <PageHeader
         title="My"
         titleAccent="Playbooks"
-        subtitle="Browse and manage your workflow playbooks"
+        eyebrow="Workflows · reusable recipes"
+        lede="Multi-step automations you can run on demand. Pick a playbook, fill in the inputs, and the same sequence of agents runs every time."
         actions={
           <>
             <Button onClick={load} variant="outline" disabled={loading}>{loading ? 'Loading…' : 'Refresh'}</Button>

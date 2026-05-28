@@ -332,3 +332,33 @@ def register_agents_actions(registry: ActionRegistry) -> None:
             "set active hours 9am to 6pm for the monitoring agent",
         ],
     ))
+
+    registry.register(ActionDefinition(
+        name="platform_get_agent_heartbeat",
+        description=(
+            "Read the heartbeat configuration for a specific agent. Returns "
+            "every field the configure endpoint accepts (enabled, interval, "
+            "prompt, checklist, auto_act, active hours, proactive_level, "
+            "notification_channel) plus an is_configured flag. Use this before "
+            "editing a heartbeat so the diff is informed — read current state, "
+            "decide what changes, then call platform_configure_agent_heartbeat "
+            "with only the fields you actually want to change."
+        ),
+        category="agents",
+        parameters={
+            "type": "object",
+            "properties": {
+                "agent_id": {"type": "integer", "description": "Agent id. Either agent_id or agent_name."},
+                "agent_name": {"type": "string", "description": "Agent name (case-insensitive partial match)."},
+            },
+            "required": [],
+        },
+        permission_level="read",
+        tags=["agents", "heartbeat", "read", "schedule"],
+        examples=[
+            "show me VECTOR's heartbeat config",
+            "what's SENTINEL's heartbeat schedule?",
+            "read the heartbeat for agent 188",
+            "is ATLAS heartbeat enabled?",
+        ],
+    ))

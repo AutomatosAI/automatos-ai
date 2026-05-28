@@ -22,6 +22,9 @@ from modules.tools.discovery.handlers_agents import (
     create_agent,
     update_agent,
     delete_agent,
+    get_agent_heartbeat,
+    unassign_skill_from_agent,
+    unassign_tool_from_agent,
 )
 from modules.tools.discovery.handlers_playbooks import (
     list_playbooks,
@@ -83,6 +86,12 @@ from modules.tools.discovery.handlers_marketplace import (
     install_skill,
     install_model,
 )
+from modules.tools.discovery.handlers_skills import (
+    get_skill_content,
+    create_workspace_skill,
+    update_skill,
+    delete_workspace_skill,
+)
 from modules.tools.discovery.handlers_board_tasks import (
     create_board_task,
     list_board_tasks,
@@ -99,12 +108,21 @@ from modules.tools.discovery.handlers_scheduling import (
 from modules.tools.discovery.handlers_reports import (
     submit_report,
     get_latest_report,
+    browse_reports,
+    acknowledge_report,
+    link_report_to_task,
 )
 from modules.tools.discovery.handlers_harness import (
     harness_status,
     harness_trigger,
     harness_history,
 )
+from modules.tools.discovery.handlers_auto_reporting import (
+    get_auto_reporting_prefs,
+    update_auto_reporting_prefs,
+    send_notification,
+)
+from modules.tools.discovery.handlers_notifications import notify_owner
 from modules.tools.discovery.handlers_assignments import (
     assign_tool_to_agent,
     assign_skill_to_agent,
@@ -124,6 +142,8 @@ from modules.tools.discovery.handlers_blog import (
     list_blog_posts,
     get_blog_post,
     update_blog_post,
+    create_blog_post_from_topic,
+    generate_cover_image,
 )
 from modules.tools.discovery.handlers_missions import (
     create_mission,
@@ -160,6 +180,62 @@ from modules.tools.discovery.handlers_analytics_enhanced import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Hierarchy permissions — PRD-140 Phase 1
+# ---------------------------------------------------------------------------
+# Maps mutating action_name → (target_type, param_key).
+#
+#   target_type — one of core.security.hierarchy_permissions.KNOWN_TARGETS
+#   param_key   — name of the field on params that carries the target id
+#                 (the `_agent_id` field is the *actor*; this is a different
+#                 key — the thing being modified).
+#
+# Actions NOT in this map skip the hierarchy check entirely — they are
+# either workspace-scoped (e.g. platform_store_memory) or already protected
+# by admin_only / rate-limit gates. Add an entry here when introducing a new
+# mutating action that targets a specific agent / playbook / task / skill /
+# tool assignment / heartbeat. The CI audit-grep gate enforces this.
+# ---------------------------------------------------------------------------
+
+from core.security.hierarchy_permissions import (  # noqa: E402
+    can_actor_modify,
+    TARGET_AGENT,
+    TARGET_HEARTBEAT,
+    TARGET_PLAYBOOK,
+    TARGET_TASK,
+    TARGET_SKILL,
+    TARGET_TOOL_ASSIGNMENT,
+)
+
+_HIERARCHY_TARGETS: Dict[str, tuple[str, Optional[str]]] = {
+    # Agent edits — owner of the change is the target agent itself.
+    "platform_update_agent":              (TARGET_AGENT, "agent_id"),
+    "platform_delete_agent":              (TARGET_AGENT, "agent_id"),
+    # Heartbeat edits live on the agent row.
+    "platform_configure_agent_heartbeat": (TARGET_HEARTBEAT, "agent_id"),
+    # Tool / skill / plugin assignments — target is the receiving agent.
+    "platform_assign_plugin_to_agent":     (TARGET_TOOL_ASSIGNMENT, "agent_id"),
+    "platform_assign_skill_to_agent":      (TARGET_TOOL_ASSIGNMENT, "agent_id"),
+    "platform_assign_tool_to_agent":       (TARGET_TOOL_ASSIGNMENT, "agent_id"),
+    "platform_unassign_skill_from_agent":  (TARGET_TOOL_ASSIGNMENT, "agent_id"),
+    "platform_unassign_tool_from_agent":   (TARGET_TOOL_ASSIGNMENT, "agent_id"),
+    # Skill content — always escalates for non-system actors regardless of id.
+    "platform_create_workspace_skill":     (TARGET_SKILL, None),
+    "platform_update_skill":               (TARGET_SKILL, "skill_id"),
+    "platform_delete_workspace_skill":     (TARGET_SKILL, "skill_id"),
+    # Playbook edits.
+    "platform_update_playbook":            (TARGET_PLAYBOOK, "playbook_id"),
+    "platform_delete_playbook":            (TARGET_PLAYBOOK, "playbook_id"),
+    "platform_update_recipe":              (TARGET_PLAYBOOK, "recipe_id"),
+    "platform_add_playbook_step":          (TARGET_PLAYBOOK, "playbook_id"),
+    "platform_update_playbook_step":       (TARGET_PLAYBOOK, "playbook_id"),
+    "platform_delete_playbook_step":       (TARGET_PLAYBOOK, "playbook_id"),
+    # Tasks — target is the assigned agent (resolved via the task row).
+    "platform_assign_task":                (TARGET_TASK, "task_id"),
+    "platform_update_task_status":         (TARGET_TASK, "task_id"),
+}
 
 
 class PlatformActionExecutor:
@@ -237,14 +313,28 @@ class PlatformActionExecutor:
             "platform_install_plugin": install_plugin,
             "platform_install_skill": install_skill,
             "platform_install_model": install_model,
+            # Skill editing (read / create / update / delete)
+            "platform_get_skill_content": get_skill_content,
+            "platform_create_workspace_skill": create_workspace_skill,
+            "platform_update_skill": update_skill,
+            "platform_delete_workspace_skill": delete_workspace_skill,
             # Agent assignment (PRD-71)
             "platform_assign_tool_to_agent": assign_tool_to_agent,
             "platform_assign_skill_to_agent": assign_skill_to_agent,
             "platform_assign_plugin_to_agent": assign_plugin_to_agent,
             "platform_configure_agent_heartbeat": configure_agent_heartbeat,
+            "platform_get_agent_heartbeat": get_agent_heartbeat,
+            "platform_unassign_skill_from_agent": unassign_skill_from_agent,
+            "platform_unassign_tool_from_agent": unassign_tool_from_agent,
+            # Owner escalation channel
+            "platform_notify_owner": notify_owner,
             # PRD-76: Agent Reports
             "platform_submit_report": submit_report,
             "platform_get_latest_report": get_latest_report,
+            "platform_browse_reports": browse_reports,
+            # Wave 3 — operating-signal lifecycle
+            "platform_acknowledge_report": acknowledge_report,
+            "platform_link_report_to_task": link_report_to_task,
             # PRD-72: Board Tasks
             "platform_create_task": create_board_task,
             "platform_list_tasks": list_board_tasks,
@@ -270,6 +360,8 @@ class PlatformActionExecutor:
             "platform_list_blog_posts": list_blog_posts,
             "platform_get_blog_post": get_blog_post,
             "platform_update_blog_post": update_blog_post,
+            "platform_create_blog_post": create_blog_post_from_topic,
+            "platform_generate_cover_image": generate_cover_image,
             # PRD-82A: Missions
             "platform_create_mission": create_mission,
             "platform_list_missions": list_missions,
@@ -297,6 +389,10 @@ class PlatformActionExecutor:
             "platform_harness_status": harness_status,
             "platform_harness_trigger": harness_trigger,
             "platform_harness_history": harness_history,
+            # Wave 2: Auto reporting preferences + send-notification wrapper
+            "platform_get_auto_reporting_prefs": get_auto_reporting_prefs,
+            "platform_update_auto_reporting_prefs": update_auto_reporting_prefs,
+            "platform_send_notification": send_notification,
             # PRD-126: Knowledge Graph
             "platform_query_graph": handle_query_graph,
             "platform_graph_neighbors": handle_graph_neighbors,
@@ -430,17 +526,79 @@ class PlatformActionExecutor:
                 "params": params,
             }
 
-        # Rate limit write/destructive actions
+        # PRD-140 Phase 1 — hierarchy permission check. Runs before the
+        # rate limiter so denied calls don't spend rate-limit budget.
+        # Only mutating actions in _HIERARCHY_TARGETS are gated; everything
+        # else (workspace-scoped, admin-only, read) falls through.
+        if action_def and action_def.permission_level in ("write", "destructive"):
+            target_spec = _HIERARCHY_TARGETS.get(action_name)
+            if target_spec is not None:
+                target_type, target_param = target_spec
+                actor_id_raw = params.get("_agent_id") if isinstance(params, dict) else None
+                target_id_raw = (
+                    params.get(target_param)
+                    if (target_param and isinstance(params, dict))
+                    else None
+                )
+                try:
+                    actor_id = int(actor_id_raw) if actor_id_raw is not None else None
+                except (TypeError, ValueError):
+                    actor_id = None
+                try:
+                    target_id = int(target_id_raw) if target_id_raw is not None else None
+                except (TypeError, ValueError):
+                    target_id = target_id_raw  # leave string IDs alone (UUIDs etc.)
+
+                decision = can_actor_modify(
+                    self.db,
+                    actor_agent_id=actor_id,
+                    target_type=target_type,
+                    target_id=target_id,
+                    change_type="update" if action_def.permission_level == "write" else "delete",
+                )
+                if not decision.allowed:
+                    logger.warning(
+                        "[PlatformExecutor] hierarchy_denied action=%s actor=%s target=%s/%s reason=%s",
+                        action_name, actor_id, target_type, target_id, decision.reason,
+                    )
+                    return {
+                        "success": False,
+                        "permission_denied": True,
+                        "reason": decision.reason,
+                        "escalation_target": decision.escalation_target,
+                        "error": (
+                            f"Action '{action_name}' denied — {decision.reason}. "
+                            + (
+                                f"Route this through the {decision.escalation_target} "
+                                "for arbitration."
+                                if decision.escalation_target
+                                else ""
+                            )
+                        ).strip(),
+                    }
+
+        # Rate limit write/destructive actions — scoped per (workspace, agent)
+        # so a chatty Auto session doesn't starve mission tasks of headroom.
         if action_def and action_def.permission_level in ("write", "destructive"):
             try:
-                from core.security.rate_limiter import check_rate_limit
-                await check_rate_limit(str(self.workspace_id), "platform_write")
+                from core.security.rate_limiter import check_rate_limit, DEFAULT_LIMITS
+                _agent_id = params.get("_agent_id") if isinstance(params, dict) else None
+                subject = str(_agent_id) if _agent_id else None
+                await check_rate_limit(
+                    str(self.workspace_id),
+                    "platform_write",
+                    subject_id=subject,
+                )
             except HTTPException as e:
                 if e.status_code == 429:
+                    limit, window = DEFAULT_LIMITS.get("platform_write", (60, 60))
                     return {
                         "success": False,
                         "rate_limited": True,
-                        "error": "Rate limit exceeded: max 10 write actions per minute. Try again shortly.",
+                        "error": (
+                            f"Rate limit exceeded: max {limit} write actions per "
+                            f"{window}s. Try again shortly."
+                        ),
                     }
                 raise
             except Exception as exc:

@@ -128,7 +128,8 @@ export function TeamManagement() {
             <PageHeader
                 title="Team"
                 titleAccent="Management"
-                subtitle="Manage your workspace members, roles, and invitations."
+                eyebrow="Workspace · members"
+                lede="Who has access to this workspace, what they can do, and who's pending an invite. Roles inherit from workspace to team to individual."
                 actions={
                     <>
                         <Badge variant="outline" className="text-brand-primary border-brand-primary/30">

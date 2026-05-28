@@ -187,6 +187,23 @@ async def update_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any
     }
 
 
+async def _validate_agent_id(db: Session, workspace_id: UUID, agent_id) -> tuple:
+    """Validate agent_id exists in workspace. Returns (valid_id: int | None, error: str | None)."""
+    if agent_id is None:
+        return None, None
+    from core.models import Agent
+    try:
+        aid = int(agent_id)
+    except (ValueError, TypeError):
+        return None, f"agent_id must be an integer, got: {agent_id!r}"
+    agent = db.query(Agent).filter(Agent.id == aid, Agent.workspace_id == workspace_id).first()
+    if not agent:
+        valid = db.query(Agent.id, Agent.name).filter(Agent.workspace_id == workspace_id, Agent.status == "active").all()
+        agent_list = ", ".join(f"{a.id}={a.name}" for a in valid[:20])
+        return None, f"agent_id {aid} does not exist in this workspace. Valid agents: [{agent_list}]"
+    return aid, None
+
+
 async def add_playbook_step(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     from core.models.core import WorkflowTemplate
     from sqlalchemy.orm.attributes import flag_modified
@@ -196,6 +213,10 @@ async def add_playbook_step(db: Session, workspace_id: UUID, params: Dict[str, A
     prompt_template = params.get("prompt_template")
     if not playbook_id or not prompt_template:
         return {"success": False, "error": "Missing required: playbook_id and prompt_template"}
+
+    agent_id, err = await _validate_agent_id(db, workspace_id, params.get("agent_id"))
+    if err:
+        return {"success": False, "error": err}
 
     playbook = (
         db.query(WorkflowTemplate)
@@ -215,7 +236,7 @@ async def add_playbook_step(db: Session, workspace_id: UUID, params: Dict[str, A
         "step_id": uuid.uuid4().hex[:12],
         "step_number": order + 1,
         "prompt_template": prompt_template,
-        "agent_id": params.get("agent_id"),
+        "agent_id": agent_id,
         "error_handling": params.get("error_handling", "stop"),
         "output_key": params.get("output_key"),
     }
@@ -267,6 +288,12 @@ async def update_playbook_step(db: Session, workspace_id: UUID, params: Dict[str
     steps = list(playbook.steps or [])
     if step_index < 0 or step_index >= len(steps):
         return {"success": False, "error": f"step_index {step_index} out of range (0-{len(steps)-1})"}
+
+    if "agent_id" in params and params["agent_id"] is not None:
+        valid_id, err = await _validate_agent_id(db, workspace_id, params["agent_id"])
+        if err:
+            return {"success": False, "error": err}
+        params["agent_id"] = valid_id
 
     step = steps[step_index]
     changes = []

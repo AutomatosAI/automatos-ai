@@ -962,7 +962,8 @@ export default function PublishWizardPage() {
         <PageHeader
           title="Publish"
           titleAccent="Widget"
-          subtitle="Submit your widget to the marketplace for review"
+          eyebrow="Marketplace · ship a widget"
+          lede="Five steps. Basic info, technical, media, pricing, review. We'll run a security scan before listing; you'll see the verdict before the widget goes public."
         />
 
         <ProgressIndicator currentStep={step} onStepClick={handleStepClick} />

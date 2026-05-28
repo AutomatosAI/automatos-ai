@@ -24,11 +24,11 @@ interface ChatModeBarProps {
   onAgentSelect?: (agentId: number | null) => void
 }
 
-const activeStyle = 'bg-orange-500/20 ring-1 ring-orange-500/50 text-foreground/90'
+const activeStyle = 'bg-primary/20 ring-1 ring-primary/50 text-foreground/90'
 
 const agentActiveStyle = 'bg-primary/20 ring-1 ring-primary/50 text-foreground/90'
 
-const iconClass = 'h-4 w-4 md:h-3.5 md:w-3.5 text-orange-400'
+const iconClass = 'h-4 w-4 md:h-3.5 md:w-3.5 text-primary'
 const labelClass = 'hidden md:inline'
 
 export function ChatModeBar({

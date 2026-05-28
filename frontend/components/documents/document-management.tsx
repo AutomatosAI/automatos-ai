@@ -40,6 +40,7 @@ import { PageHeader } from '@/components/shared/page-header'
 import { StatsBar } from '@/components/shared/stats-bar'
 import { CodeGraphPanel } from '@/components/knowledge/CodeGraphPanel'
 import { BusinessGraphPanel } from '@/components/knowledge/BusinessGraphPanel'
+import { MemoryTab } from '@/components/knowledge/memory-tab'
 import { GraphDiffBanner } from '@/components/knowledge/GraphDiffBanner'
 import { MultimodalKnowledgePanel } from '@/components/knowledge/MultimodalKnowledgePanel'
 import { DatabaseQueryExplorer } from '@/components/knowledge/DatabaseQueryExplorer'
@@ -333,6 +334,8 @@ export function DocumentManagement() {
   const [documentToDelete, setDocumentToDelete] = useState<{id: number, filename: string} | null>(null)
   const [showAddDatabaseModal, setShowAddDatabaseModal] = useState(false)
   const [showUploadModal, setShowUploadModal] = useState(false)
+  const [graphImporting, setGraphImporting] = useState(false)
+  const graphFileRef = useRef<HTMLInputElement>(null)
 
   // Cloud storage state
   const [selectedProvider, setSelectedProvider] = useState<any>(null)
@@ -486,6 +489,32 @@ export function DocumentManagement() {
     handleFileUpload(e.target.files)
   }
 
+  const handleGraphImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file || !file.name.endsWith('.json')) return
+    if (graphFileRef.current) graphFileRef.current.value = ''
+    setGraphImporting(true)
+    try {
+      const { default: apiClient } = await import('@/lib/api-client')
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('merge', 'false')
+      const headers = await apiClient.getAuthHeaders()
+      const wsId = localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
+      if (wsId) (headers as any)['X-Workspace-ID'] = wsId
+      const res = await fetch(`${apiClient.getBaseUrl()}/api/knowledge/graph/import`, {
+        method: 'POST',
+        headers,
+        body: formData,
+      })
+      if (!res.ok) throw new Error(await res.text())
+    } catch (err: any) {
+      console.error('[GraphImport]', err?.message || err)
+    } finally {
+      setGraphImporting(false)
+    }
+  }
+
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
@@ -604,16 +633,28 @@ export function DocumentManagement() {
         <PageHeader
           title="Knowledge"
           titleAccent="Bases"
-          subtitle="Manage documents, code repositories, and knowledge sources"
+          eyebrow="Workforce · what they know"
+          lede="Documents, code repositories, and references your agents can read. Add a source, scope who sees it, and your workforce becomes more accurate with every search."
           actions={
-            <Button
-              variant="outline"
-              onClick={() => setShowUploadModal(true)}
-              disabled={uploadDocumentMutation.isLoading}
-            >
-              <Upload className={`w-4 h-4 mr-2 ${uploadDocumentMutation.isLoading ? 'animate-spin' : ''}`} />
-              {uploadDocumentMutation.isLoading ? 'Uploading...' : 'Upload Documents'}
-            </Button>
+            <div className="flex items-center gap-2">
+              <input ref={graphFileRef} type="file" accept=".json" onChange={handleGraphImport} className="hidden" />
+              <Button
+                variant="outline"
+                onClick={() => graphFileRef.current?.click()}
+                disabled={graphImporting}
+              >
+                <Network className={`w-4 h-4 mr-2 ${graphImporting ? 'animate-spin' : ''}`} />
+                {graphImporting ? 'Importing...' : 'Import Graph'}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setShowUploadModal(true)}
+                disabled={uploadDocumentMutation.isLoading}
+              >
+                <Upload className={`w-4 h-4 mr-2 ${uploadDocumentMutation.isLoading ? 'animate-spin' : ''}`} />
+                {uploadDocumentMutation.isLoading ? 'Uploading...' : 'Upload Documents'}
+              </Button>
+            </div>
           }
         />
       </div>
@@ -644,6 +685,10 @@ export function DocumentManagement() {
             <TabsTrigger value="businessgraph" className="flex items-center space-x-2">
               <Network className="w-4 h-4" />
               <span>Business Graph</span>
+            </TabsTrigger>
+            <TabsTrigger value="memory" className="flex items-center space-x-2">
+              <Brain className="w-4 h-4" />
+              <span>Memory</span>
             </TabsTrigger>
             {/* Analytics tab removed — see /analytics */}
           </TabsList>
@@ -1097,6 +1142,10 @@ export function DocumentManagement() {
           <TabsContent value="businessgraph" className="space-y-6">
             <GraphDiffBanner />
             <BusinessGraphPanel />
+          </TabsContent>
+
+          <TabsContent value="memory" className="space-y-6">
+            <MemoryTab />
           </TabsContent>
         </Tabs>
       </motion.div>

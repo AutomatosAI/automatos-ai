@@ -495,6 +495,14 @@ async def list_agents(
     agent_type: Optional[AgentType] = None,
     priority_level: Optional[PriorityLevel] = None,
     search: Optional[str] = None,
+    include_workspace_system: bool = Query(
+        False,
+        description=(
+            "When true, include the workspace's system agents (e.g. Auto) in "
+            "the result set. Used by task assignee pickers so Auto can be "
+            "assigned work without being shown in the main Roster."
+        ),
+    ),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
@@ -522,12 +530,17 @@ async def list_agents(
             db.query(Agent)
             .options(joinedload(Agent.skills), subqueryload(Agent.assigned_plugins))
             .filter(scope_filter)
-            # Hide per-workspace Auto agents from the Roster — they are managed
-            # in Settings > Orchestrator, not in the agent list.  Global system
-            # agents (CTO, workspace_id=None) remain visible to admins.
-            .filter(~and_(Agent.is_system_agent.is_(True), Agent.workspace_id.isnot(None)))
             .filter(Agent.agent_type != "ephemeral")  # Hide Mission Zero ephemeral clones
         )
+
+        # By default hide per-workspace system agents (Auto) from the Roster —
+        # they are managed in Settings > Orchestrator. Assignee pickers pass
+        # ``include_workspace_system=true`` so Auto is selectable as a task
+        # owner without being listed alongside regular agents.
+        if not include_workspace_system:
+            query = query.filter(
+                ~and_(Agent.is_system_agent.is_(True), Agent.workspace_id.isnot(None))
+            )
 
         # Apply filters uniformly to all agents (workspace + system)
         if status:
@@ -571,12 +584,18 @@ async def get_org_chart(
     try:
         from core.models.composio_cache import AgentAppAssignment
 
-        # Fetch active workspace agents (inactive and system agents don't belong on the org chart)
+        # Fetch active workspace agents — the workspace Auto (slug=auto-{ws_id})
+        # is included so the chart has a single root. Excludes the global
+        # Auto CTO defensively (slug=auto-cto is supposed to be workspace_id=NULL
+        # but stale data has leaked in the past — keep this filter even if
+        # the data is correct, so a future drift doesn't surface it again).
+        # NOTE: most workspace agents have slug=NULL, and `slug != 'auto-cto'`
+        # excludes NULLs in SQL three-valued logic. The OR clause keeps them in.
         agents = (
             db.query(Agent)
             .filter(Agent.workspace_id == ctx.workspace_id)
             .filter(Agent.status == "active")
-            .filter(Agent.is_system_agent == False)
+            .filter(or_(Agent.slug.is_(None), Agent.slug != "auto-cto"))
             .all()
         )
 

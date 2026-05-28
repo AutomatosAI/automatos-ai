@@ -73,6 +73,13 @@ ENV NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=${NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL}
 # Install ALL dependencies (including devDependencies for build)
 RUN npm install --legacy-peer-deps
 
+# Cache bust marker — bump this value (or pass --build-arg FRONTEND_CACHE_BUST=...)
+# to force a clean rebuild of the COPY + npm run build layers. Used when
+# Railway's Docker layer cache produces stale or inconsistent output, e.g.
+# .next/static missing chunks the standalone server HTML references.
+ARG FRONTEND_CACHE_BUST=2026-05-28T13-00-00Z
+RUN echo "Frontend cache bust: $FRONTEND_CACHE_BUST"
+
 # Copy source code (Dockerfile is in frontend/, so copy from current dir)
 COPY . .
 

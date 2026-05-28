@@ -75,7 +75,7 @@ function statusDotClass(status: string): string {
       return 'bg-warning'
     case 'ok':
     default:
-      return 'bg-orange-500'
+      return 'bg-primary'
   }
 }
 
@@ -106,8 +106,8 @@ function NotificationItem({ row, onClick, onDismiss }: NotificationItemProps) {
           onClick(row)
         }
       }}
-      className={`group relative flex gap-3 px-4 py-3 border-b border-border/30 cursor-pointer transition-colors hover:bg-orange-500/5 ${
-        unread ? 'bg-orange-500/[0.03]' : ''
+      className={`group relative flex gap-3 px-4 py-3 border-b border-border/30 cursor-pointer transition-colors hover:bg-primary/5 ${
+        unread ? 'bg-primary/[0.03]' : ''
       }`}
     >
       <span
@@ -131,7 +131,7 @@ function NotificationItem({ row, onClick, onDismiss }: NotificationItemProps) {
           </p>
         )}
         {row.agent_name && (
-          <p className="text-[11px] text-orange-400/80 mt-1">
+          <p className="text-[11px] text-primary/80 mt-1">
             {row.agent_name}
           </p>
         )}
@@ -205,11 +205,11 @@ export function NotificationBell() {
           variant="ghost"
           size="icon"
           aria-label={`Notifications${unreadCount > 0 ? ` (${unreadCount} unread)` : ''}`}
-          className="relative text-orange-400 hover:text-orange-300 hover:bg-orange-500/5"
+          className="relative text-primary hover:text-primary/80 hover:bg-primary/5"
         >
           <Bell className="w-5 h-5" />
           {unreadCount > 0 && (
-            <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 bg-orange-500 rounded-full text-[10px] font-semibold flex items-center justify-center text-black">
+            <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 bg-primary rounded-full text-[10px] font-semibold flex items-center justify-center text-black">
               {badgeLabel}
             </span>
           )}
@@ -222,7 +222,7 @@ export function NotificationBell() {
       >
         <div className="flex items-center justify-between px-4 py-3 border-b border-border/40">
           <div className="flex items-center gap-2">
-            <Bell className="w-4 h-4 text-orange-400" />
+            <Bell className="w-4 h-4 text-primary" />
             <h3 className="text-sm font-semibold">Notifications</h3>
             {unreadCount > 0 && (
               <span className="text-[11px] text-muted-foreground">
@@ -235,7 +235,7 @@ export function NotificationBell() {
               type="button"
               onClick={handleMarkAll}
               disabled={markAllRead.isLoading}
-              className="inline-flex items-center gap-1 text-[11px] text-orange-400 hover:text-orange-300 disabled:opacity-50"
+              className="inline-flex items-center gap-1 text-[11px] text-primary hover:text-primary/80 disabled:opacity-50"
             >
               <Check className="w-3 h-3" />
               Mark all read

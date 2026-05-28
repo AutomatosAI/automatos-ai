@@ -180,7 +180,6 @@ class Agent(Base):
     public_id = Column(UUID(as_uuid=True), default=uuid4, unique=True, nullable=True, index=True)
     name = Column(String(255), nullable=False)
     description = Column(Text)
-    job_title = Column(String(120), nullable=True)  # Short role label shown on cards (e.g. "Lead Intelligence")
     agent_type = Column(String(100), nullable=False)  # 'custom', 'system', 'specialized'
     status = Column(String(50), default='active')  # 'active', 'inactive', 'training'
     configuration = Column(JSON)  # Agent-specific config
@@ -229,6 +228,11 @@ class Agent(Base):
     team = Column(String(100), nullable=True)       # Department/team name (e.g., "Engineering", "Marketing")
     job_title = Column(String(200), nullable=True)  # Human-readable role (e.g., "Lead Developer", "SEO Analyst")
     reports_to_id = Column(Integer, ForeignKey('agents.id', ondelete='SET NULL'), nullable=True)
+    responsibilities = Column(JSONB, default=list, server_default='[]', nullable=False)  # Wave 1.A: structured ownership list
+    # PRD-140 Phase 1: explicit opt-in for the team-lead feedback loop.
+    # An agent is "a team lead" when it has direct reports (derived); the
+    # loop only runs when the operator also flips this flag.
+    team_lead_enabled = Column(Boolean, default=False, server_default='false', nullable=False)
 
     # PRD-64: Semantic routing embedding
     semantic_embedding = Column(JSONB, nullable=True)       # 2048-float vector for cosine similarity
@@ -291,6 +295,24 @@ class Agent(Base):
     def is_marketplace_item(self) -> bool:
         """Check if this agent is a marketplace item."""
         return self.owner_type == 'marketplace'
+
+    @property
+    def is_team_lead_derived(self) -> bool:
+        """True when this agent has at least one direct report.
+
+        PRD-140 Phase 1: derived capability — an agent CAN be a team lead.
+        The feedback loop only fires when ``team_lead_enabled`` is also True.
+        Uses the loaded ``direct_reports`` backref when present; falls back
+        to a simple count query otherwise.
+        """
+        reports = getattr(self, "direct_reports", None)
+        if reports is None:
+            return False
+        try:
+            return len(list(reports)) > 0
+        except Exception:
+            return False
+
 
 class Skill(Base):
     __tablename__ = 'skills'

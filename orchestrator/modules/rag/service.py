@@ -19,7 +19,7 @@ from dataclasses import dataclass
 try:
     import tiktoken
     _encoding = tiktoken.encoding_for_model("gpt-4")
-except:
+except Exception:
     import tiktoken
     _encoding = tiktoken.get_encoding("cl100k_base")
 

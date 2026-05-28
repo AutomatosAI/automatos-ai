@@ -5,25 +5,20 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/app/globals.css](frontend/app/globals.css)
-- [frontend/app/layout.tsx](frontend/app/layout.tsx)
-- [frontend/components/activity/widgets/command-centre-dashboard.tsx](frontend/components/activity/widgets/command-centre-dashboard.tsx)
-- [frontend/components/agents/skills/skill-browser.tsx](frontend/components/agents/skills/skill-browser.tsx)
-- [frontend/components/marketplace/WidgetCard.tsx](frontend/components/marketplace/WidgetCard.tsx)
-- [frontend/components/marketplace/WidgetGrid.tsx](frontend/components/marketplace/WidgetGrid.tsx)
-- [frontend/components/providers.tsx](frontend/components/providers.tsx)
-- [frontend/components/settings/SystemIconsSettingsTab.tsx](frontend/components/settings/SystemIconsSettingsTab.tsx)
-- [frontend/components/shared/icon-selector.tsx](frontend/components/shared/icon-selector.tsx)
+- [frontend/components/settings/CredentialTypesTab.tsx](frontend/components/settings/CredentialTypesTab.tsx)
+- [frontend/components/settings/CredentialsTab.tsx](frontend/components/settings/CredentialsTab.tsx)
+- [frontend/components/shared/empty-state.tsx](frontend/components/shared/empty-state.tsx)
+- [frontend/components/shared/index.ts](frontend/components/shared/index.ts)
 - [frontend/components/shared/page-header.tsx](frontend/components/shared/page-header.tsx)
-- [frontend/components/shared/premium-icon.tsx](frontend/components/shared/premium-icon.tsx)
+- [frontend/components/shared/stats-bar.tsx](frontend/components/shared/stats-bar.tsx)
 - [frontend/components/ui/dialog.tsx](frontend/components/ui/dialog.tsx)
+- [frontend/components/ui/help-tooltip.tsx](frontend/components/ui/help-tooltip.tsx)
 - [frontend/components/ui/input.tsx](frontend/components/ui/input.tsx)
 - [frontend/components/ui/select.tsx](frontend/components/ui/select.tsx)
 - [frontend/components/ui/tabs.tsx](frontend/components/ui/tabs.tsx)
-- [frontend/config/iconRegistry.json](frontend/config/iconRegistry.json)
-- [frontend/hooks/use-system-config-api.ts](frontend/hooks/use-system-config-api.ts)
-- [frontend/public/assets/icons/connection-integration-plugin.svg](frontend/public/assets/icons/connection-integration-plugin.svg)
-- [frontend/public/assets/icons/recipe-cooking.svg](frontend/public/assets/icons/recipe-cooking.svg)
+- [frontend/lib/design-utils.ts](frontend/lib/design-utils.ts)
+- [frontend/lib/tooltips.json](frontend/lib/tooltips.json)
+- [frontend/lib/use-tooltips.ts](frontend/lib/use-tooltips.ts)
 - [frontend/tailwind.config.ts](frontend/tailwind.config.ts)
 
 </details>
@@ -44,138 +39,123 @@ The frontend uses a library of shared components located in `frontend/components
 
 | Component | Purpose | Implementation Details |
 |-----------|---------|------------------------|
-| `PageHeader` | Page title, subtitle, and action buttons | Supports `titleAccent` for gradient text and `actions` slot for buttons [frontend/components/shared/page-header.tsx:1-50]() |
-| `StatsBar` | Statistics cards with icons and metrics | Uses `framer-motion` for staggered entrance and supports `PremiumIcon` [frontend/components/shared/stats-bar.tsx:10-85]() |
-| `SearchInput` | Search field with icon | Standardized search styling used in Marketplace and Agents [frontend/components/shared/search-input.tsx:1-40]() |
-| `IconSelector` | Popover-based SVG selector | Filters `iconRegistry.json` by name/tags and provides a search interface [frontend/components/shared/icon-selector.tsx:23-137]() |
-| `PremiumIcon` | Icon system with fallback | Resolves custom SVG assets based on system configuration and active style [frontend/components/shared/premium-icon.tsx:8-55]() |
+| `PageHeader` | Page title, subtitle, and action buttons | Supports `titleAccent` for gradient text and `actions` slot for buttons [frontend/components/shared/page-header.tsx:15-40]() |
+| `StatsBar` | Statistics cards with icons and metrics | Uses `framer-motion` for staggered entrance and supports `PremiumIcon` [frontend/components/shared/stats-bar.tsx:34-84]() |
+| `EmptyState` | Fallback UI for empty data lists | Standardized icon, title, description, and action button [frontend/components/shared/empty-state.tsx:15-32]() |
+| `HelpTooltip` | Contextual documentation tooltips | Resolves content from `tooltips.json` using the `useTooltip` hook [frontend/components/ui/help-tooltip.tsx:61-175]() |
+| `PremiumIcon` | Themed system icons | Renders custom SVG icons based on backend configuration mappings [frontend/components/shared/index.ts:8-8]() |
+| `StatusBadge` | Standardized status indicators | Maps string statuses to color variants (success, active, error, etc.) [frontend/lib/design-utils.ts:85-88]() |
 
-Sources: [frontend/components/shared/stats-bar.tsx:34-84](), [frontend/components/shared/icon-selector.tsx:34-43](), [frontend/components/shared/premium-icon.tsx:23-55]()
+**Sources:** [frontend/components/shared/stats-bar.tsx:10-84](), [frontend/components/shared/page-header.tsx:7-40](), [frontend/components/ui/help-tooltip.tsx:16-35](), [frontend/lib/design-utils.ts:3-88]()
 
 ---
 
 ## Dashboard Layout Pattern
 
-All major pages (Agents, Tools, Documents, Marketplace) follow a standardized dashboard layout pattern built on Tailwind CSS and Framer Motion. This pattern ensures that users have a consistent experience when navigating different functional areas of the platform.
+All major pages (Agents, Tools, Activity, Analytics, Marketplace) follow a standardized dashboard layout pattern built on Tailwind CSS and Framer Motion. This pattern ensures that users have a consistent experience when navigating different functional areas of the platform.
 
 ### Standard Dashboard Data Flow
 
 ```mermaid
 graph TB
     subgraph "UI Component Space"
-        Dashboard["Dashboard Component (e.g. AgentManagement)"]
+        Dashboard["Dashboard Component"]
         Stats["StatsBar Component"]
-        Tabs["Tabs/FilterTabs Component"]
-        Grid["Item Grid (Motion.div)"]
+        Tabs["TabsList / TabsTrigger"]
+        Grid["Item Grid (motion.div)"]
     end
 
     subgraph "Code Entity Space"
-        Hook["useAgents() / useAgentStats()"]
-        API["apiClient.get('/api/agents')"]
+        Hook["useSystemIcons()"]
+        API["apiClient.get('/api/credentials')"]
         Store["React Query Cache"]
+        JSON["tooltips.json"]
     end
 
     Dashboard --> Hook
     Hook --> Store
-    Store --> API
     Dashboard --> Stats
     Dashboard --> Tabs
     Tabs --> Grid
-    
-    style Dashboard stroke-width:2px
-    style Hook stroke-dasharray: 5 5
+    Stats -.-> Hook
+    Dashboard -.-> JSON
 ```
 
-**Sources:** [frontend/components/agents/agent-management.tsx:51-116](), [frontend/components/marketplace/marketplace-homepage.tsx:58-91]()
+**Sources:** [frontend/components/shared/stats-bar.tsx:35-40](), [frontend/components/settings/CredentialsTab.tsx:106-147](), [frontend/lib/tooltips.json:1-52]()
 
 ### Implementation Pattern: StatsBar
-The `StatsBar` component dynamically renders a row of metric cards. In the `AgentManagement` view, it displays "Total Agents", "Active Agents", and "Avg Performance" [frontend/components/agents/agent-management.tsx:80-116](). It uses `globalIconKey` to allow the backend to override standard Lucide icons with branded "Premium" icons [frontend/components/shared/stats-bar.tsx:17-40]().
+The `StatsBar` component dynamically renders a row of metric cards. It uses `framer-motion` to provide a staggered entrance animation with a duration of `0.6s` [frontend/components/shared/stats-bar.tsx:43-47](). It integrates with `useSystemIcons` to allow the backend to override standard Lucide icons with branded "Premium" icons via the `globalIconKey` [frontend/components/shared/stats-bar.tsx:35-54]().
 
 ---
 
 ## Shadcn/ui & Glass Integration
 
-The codebase integrates `Shadcn/ui` components built on `Radix UI` primitives, customized with the Automatos "Glass" aesthetic defined in `globals.css`.
+The codebase integrates `Shadcn/ui` components built on `Radix UI` primitives, customized with the Automatos "Glass" aesthetic.
 
 ### Glass Styling (Tailwind)
-Global styles in `globals.css` define the "Glass" look using CSS variables for alpha transparency and backdrop filters.
+The `tailwind.config.ts` file defines custom animations and color extensions to support the glass theme.
 
 | Class | Properties | Purpose |
 |-------|------------|---------|
-| `.glass-card` | `backdrop-filter: blur(18px)`, `border: 1px solid` | Primary container for agents, tools, and documents [frontend/app/globals.css:184-197]() |
-| `.card-glow` | `box-shadow` with primary color accent | Hover effect for interactive cards [frontend/app/globals.css:169-181]() |
-| `.glass-panel` | `background: hsla(var(--card) / 0.92)` | High-opacity background for sidebars and complex panels [frontend/app/globals.css:209-217]() |
+| `.glass-card` | Custom backdrop blur and border | Primary container for dialogs and cards [frontend/components/ui/dialog.tsx:54-54]() |
+| `.card-glow` | `glow-pulse` animation | Hover effect or active state for interactive elements [frontend/components/ui/dialog.tsx:54-54]() |
+| `bg-background/50` | `backdrop-blur` | Semi-transparent backgrounds for inputs and popovers [frontend/components/ui/input.tsx:14-14]() |
 
-**Sources:** [frontend/app/globals.css:184-217]()
+**Sources:** [frontend/tailwind.config.ts:121-145](), [frontend/components/ui/input.tsx:13-16](), [frontend/components/ui/dialog.tsx:51-57]()
 
 ### Component Customizations
-- **Tabs**: The `TabsList` is customized to be `rounded-full` with a `backdrop-blur` and `secondary/40` background [frontend/components/ui/tabs.tsx:10-22]().
-- **Dialogs**: `DialogContent` uses the `glass-card` and `card-glow` classes for consistent overlay appearances [frontend/components/ui/dialog.tsx:35-51]().
-- **Inputs**: Standard `Input` components use `rounded-2xl`, `backdrop-blur`, and a primary-colored ring on focus [frontend/components/ui/input.tsx:8-22]().
+- **Dialogs**: The `DialogContent` component supports multiple sizes (`sm`, `md`, `lg`, `xl`, `full`) and includes a standardized `glass-card` styling [frontend/components/ui/dialog.tsx:32-57]().
+- **Tabs**: `TabsList` is customized with a `rounded-full` border and `secondary/40` background to create a "pill" navigation look [frontend/components/ui/tabs.tsx:10-22]().
+- **Inputs**: Standard `Input` components use `rounded-2xl` and include a `focus-visible` shadow using the primary color [frontend/components/ui/input.tsx:13-16]().
 
 ---
 
-## Iconography and Theming System
+## Tooltip & Documentation Pattern
 
-Automatos AI implements a dynamic iconography system that allows for global style changes (e.g., switching from "Core Gradient" to "Core Line Blue") without modifying individual components.
+The `HelpTooltip` component provides a unified way to show documentation and contextual help. It uses a JSON-driven approach to decouple UI labels from help text.
 
-### Icon Resolution Flow
+### Tooltip Resolution Flow
 
 ```mermaid
 graph LR
     subgraph "Natural Language Space"
-        User["User selects 'Blue Line' Style"]
-        System["System Icons Settings"]
+        User["User hovers over '?' icon"]
+        Context["Context: agents.roster.create_button"]
     end
 
     subgraph "Code Entity Space"
-        Config["useIconStyle() Hook"]
-        PremiumIcon["PremiumIcon Component"]
-        Registry["iconRegistry.json"]
-        Assets["/assets/icons/{style}/{name}.svg"]
+        HT["HelpTooltip(id)"]
+        Hook["useTooltip(id)"]
+        JSON["tooltips.json"]
+        Popover["PopoverContent"]
     end
 
-    User --> System
-    System --> Config
-    Config --> PremiumIcon
-    PremiumIcon --> Registry
-    Registry --> Assets
+    User --> HT
+    HT --> Hook
+    Hook --> JSON
+    JSON --> Popover
+    Popover --> User
 ```
 
-**Sources:** [frontend/components/shared/premium-icon.tsx:16-21](), [frontend/hooks/use-system-config-api.ts:95-109](), [frontend/components/settings/SystemIconsSettingsTab.tsx:36-86]()
+**Sources:** [frontend/components/ui/help-tooltip.tsx:61-93](), [frontend/lib/use-tooltips.ts:1-10](), [frontend/lib/tooltips.json:87-91]()
 
-### Implementation Details:
-1. **System Icon Settings**: The `SystemIconsSettingsTab` allows administrators to map specific platform entities (e.g., `nav_chat`, `global_agent`) to SVG IDs in the registry [frontend/components/settings/SystemIconsSettingsTab.tsx:88-166]().
-2. **Dynamic Styling**: The `PremiumIcon` component checks the `active_icon_style` config via the `useIconStyle` hook [frontend/hooks/use-system-config-api.ts:95-109](). It then resolves the asset path to a specific subdirectory (e.g., `/assets/icons/core-line-blue/brain.svg`) [frontend/components/shared/premium-icon.tsx:16-21]().
-3. **Fallbacks**: If a styled icon fails to load, the component catches the error and falls back to the default gradient icon [frontend/components/shared/premium-icon.tsx:37-41]().
-
----
-
-## Widget and Dashboard Patterns
-
-The "Command Centre" and Marketplace use a widget-based architecture allowing for customization and persistence.
-
-### Command Centre Widgets
-The `CommandCentreDashboard` manages a collection of widgets defined in a `WIDGET_REGISTRY` [frontend/components/activity/widgets/command-centre-dashboard.tsx:37-51]().
-- **Persistence**: Dashboard state (order and visibility) is persisted to `localStorage` under the key `automatos:command-centre-v3` [frontend/components/activity/widgets/command-centre-dashboard.tsx:59-82]().
-- **Interactivity**: Supports drag-and-drop reordering using native `onDragOver` and `onDragStart` events [frontend/components/activity/widgets/command-centre-dashboard.tsx:140-157]().
-
-### Marketplace Item Cards
-Assets in the marketplace are rendered using specialized card components like `WidgetCard`. These cards handle installation flows, display versioning, and use `AnimatePresence` for smooth entry/exit when filtering [frontend/components/marketplace/WidgetCard.tsx:1-100]().
-
-**Sources:** [frontend/components/activity/widgets/command-centre-dashboard.tsx:93-137](), [frontend/components/marketplace/WidgetGrid.tsx:1-50]()
+### Usage Variants:
+1. **ID-Based**: Looks up text and links from `tooltips.json` (e.g., `<HelpTooltip id="agents.roster.create_button" />`) [frontend/components/ui/help-tooltip.tsx:47-47]().
+2. **Inline**: Used inside form labels via the `InlineHelp` or `FieldHelp` wrappers [frontend/components/ui/help-tooltip.tsx:180-197]().
+3. **Direct**: Accepts `text` and `docLink` props directly for one-off tooltips [frontend/components/ui/help-tooltip.tsx:50-53]().
 
 ---
 
 ## Animation Patterns
 
-Framer Motion is used for layout transitions and interaction feedback to make the UI feel "autonomous" and responsive.
+Automatos AI uses `framer-motion` and Tailwind animations to create a fluid, "living" interface.
 
 ### Key Animation Behaviors:
-- **Staggered Lists**: Item grids (Agents, Tools) use `AnimatePresence` and staggered `motion.div` entrance animations [frontend/components/marketplace/marketplace-tools-tab.tsx:11-12]().
-- **Status Transitions**: `StatsBar` metrics animate from `opacity: 0, y: 20` to their final position over 0.6 seconds [frontend/components/shared/stats-bar.tsx:43-47]().
-- **Theme Transitions**: The `ThemeProvider` manages CSS variable transitions, while `disableTransitionOnChange` prevents flashes during initial load [frontend/components/providers.tsx:57-63]().
+- **Staggered Entrance**: Used in `StatsBar` to animate metrics sequentially [frontend/components/shared/stats-bar.tsx:43-47]().
+- **Transitions**: A standard transition duration of `220ms` is used for most interactive state changes [frontend/lib/design-utils.ts:90-90]().
+- **Glow Effects**: The `pulse-glow` and `glow-pulse` keyframes create breathing effects on primary elements [frontend/tailwind.config.ts:121-136]().
+- **Page Transitions**: `PageHeader` uses a `fade-in` and `slide-up` (y: 20 to 0) motion on mount [frontend/components/shared/page-header.tsx:23-26]().
 
-**Sources:** [frontend/components/shared/stats-bar.tsx:43-49](), [frontend/components/analytics/analytics-overview.tsx:118-143](), [frontend/app/layout.tsx:15-29]()
+**Sources:** [frontend/components/shared/stats-bar.tsx:43-47](), [frontend/tailwind.config.ts:121-145](), [frontend/components/shared/page-header.tsx:23-26]()
 
 ---

@@ -502,7 +502,11 @@ class AgentFactory:
         provider = provider_map[effective_provider]
         resolved = await self._resolve_api_key(effective_provider, agent_name, workspace_id=workspace_id)
         if not resolved:
-            raise ValueError(f"API key not found for provider: {effective_provider}")
+            raise ValueError(
+                f"No API key available for {effective_provider}. "
+                f"Add one in Settings → API Keys, or set platform fallback "
+                f"({effective_provider.upper()}_API_KEY env var on the API service)."
+            )
 
         llm_config = LLMConfig(
             provider=provider,
@@ -920,27 +924,6 @@ class AgentFactory:
                     if "assistant_response" in mem:
                         messages.append({"role": "assistant", "content": mem["assistant_response"]})
 
-            # Recipe step context injection
-            _has_step_outputs = context and context.get("step_outputs")
-            _has_step_results = context and context.get("step_results")
-            if _has_step_outputs or _has_step_results:
-                recipe_step = context.get("step", "?")
-                total_steps = context.get("total_steps", "?")
-                if _has_step_outputs:
-                    completed_count = len(context["step_outputs"])
-                else:
-                    completed_count = len([sr for sr in context["step_results"] if sr.get("status") == "completed"])
-
-                if completed_count > 0:
-                    recipe_ctx = (
-                        f"You are executing step {recipe_step} of {total_steps} in a recipe.\n"
-                        "Previous steps have already completed. Their outputs are provided "
-                        "in a separate system context message. When the user's task mentions "
-                        "'results', 'output', 'data', or 'findings', it refers to that "
-                        "previous step content. Use it directly — do not invent or fabricate data."
-                    )
-                    messages.append({"role": "system", "content": recipe_ctx})
-
             # Preserve original prompt for Composio hint generation
             original_user_prompt = prompt
 
@@ -952,10 +935,15 @@ class AgentFactory:
                 # Explicit system_prompt path: load tools directly
                 from modules.tools.tool_router import get_tools_for_agent
 
+                # PRD-138 US-009: pass the user prompt so the dispatcher
+                # enum narrows in lockstep with the prompt summary. Falls
+                # back to the full enum if SEMANTIC_TOOL_ROUTING is off,
+                # the prompt is empty, or ranking fails.
                 tool_schemas = get_tools_for_agent(
                     agent_id=agent_runtime.agent_id,
                     db_session=self.db_session,
                     workspace_id=agent_runtime.workspace_id,
+                    query=prompt,
                 )
 
             # Composio hint injection (enriches composio_execute with action enum + hints)
@@ -1209,8 +1197,15 @@ class AgentFactory:
             try:
                 func_args = json.loads(func_args_str)
                 canonical_args = json.dumps(func_args, sort_keys=True)
-            except json.JSONDecodeError:
-                canonical_args = func_args_str.strip()
+            except json.JSONDecodeError as jde:
+                self.logger.warning(
+                    "[tool_call] JSON decode failed for %s args (len=%d, first 200=%r): %s",
+                    func_name,
+                    len(func_args_str) if isinstance(func_args_str, str) else 0,
+                    func_args_str[:200] if isinstance(func_args_str, str) else func_args_str,
+                    jde,
+                )
+                canonical_args = func_args_str.strip() if isinstance(func_args_str, str) else ""
                 func_args = {}
 
             call_hash = f"{func_name}:{canonical_args}"
