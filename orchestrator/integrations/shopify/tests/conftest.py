@@ -48,17 +48,20 @@ _ORCH_ROOT = _THIS_DIR.parents[2]
 _CHAT_PY = _ORCH_ROOT / "api" / "widgets" / "chat.py"
 
 
-# Names AST-extracted from chat.py — the four still-inline proactive
-# helpers. ``_OPENER_CONTEXT_FIELDS`` and ``_format_opener_context_value``
+# Names AST-extracted from chat.py — the proactive helpers still inline
+# there. ``_OPENER_CONTEXT_FIELDS`` and ``_format_opener_context_value``
 # were lifted to ``integrations/shopify/context_fields.py`` in
 # PRD-141 US-005; they're now imported directly into the exec namespace
 # (see ``_extract_chat_helpers``) so the function bodies can close over
-# them without NameError. As US-006/007/008 move each remaining helper
-# into ``widget_proactive.py``, drop it from this set in lockstep.
+# them without NameError. ``_resolve_graph_related_products`` was lifted
+# to ``integrations/shopify/widget_proactive.py`` in PRD-141 US-006; the
+# shim's product-page path now resolves it locally, so it no longer
+# needs AST extraction from chat.py. As US-007/008 move each remaining
+# helper into ``widget_proactive.py``, drop it from this set in
+# lockstep.
 _WANTED_NAMES = frozenset({
     "_build_proactive_opener_message",
     "_build_cart_idle_opener_message",
-    "_resolve_graph_related_products",
     "_resolve_cart_recommendations",
 })
 
@@ -116,13 +119,18 @@ def _extract_chat_helpers() -> dict:
       story as the field mapping.
     * ``_build_proactive_opener_message`` — product-page directive.
     * ``_build_cart_idle_opener_message`` — cart-idle directive.
-    * ``_resolve_graph_related_products`` — single-seed FBT/collection/
-      vendor walk.
     * ``_resolve_cart_recommendations`` — multi-seed cart FBT walk.
 
-    The resolvers do ``from modules.knowledge.graph_service import
-    GraphifyService`` lazily; the caller (``real_chat_with_graph``)
-    arranges that fake module before invoking them.
+    ``_resolve_graph_related_products`` was lifted to
+    ``integrations.shopify.widget_proactive`` in PRD-141 US-006 and is
+    no longer extracted here — the shim calls the local function and
+    the local function does the same lazy ``GraphifyService`` import
+    the caller (``real_chat_with_graph``) arranges.
+
+    The remaining cart resolver does ``from
+    modules.knowledge.graph_service import GraphifyService`` lazily;
+    the caller (``real_chat_with_graph``) arranges that fake module
+    before invoking it.
 
     Why AST instead of ``import``: chat.py is a FastAPI router that drags
     in SQLAlchemy, Redis, RAG, multimodal, etc. Loading it just to read
@@ -201,7 +209,6 @@ def real_chat_with_graph(monkeypatch, inbuild_graph):
     ns = _extract_chat_helpers()
 
     fake_chat = types.ModuleType("api.widgets.chat")
-    fake_chat._resolve_graph_related_products = ns["_resolve_graph_related_products"]
     fake_chat._resolve_cart_recommendations = ns["_resolve_cart_recommendations"]
     fake_chat._build_proactive_opener_message = ns["_build_proactive_opener_message"]
     fake_chat._build_cart_idle_opener_message = ns["_build_cart_idle_opener_message"]

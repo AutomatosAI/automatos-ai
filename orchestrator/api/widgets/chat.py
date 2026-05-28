@@ -31,6 +31,7 @@ from integrations.shopify.context_fields import (
     _OPENER_CONTEXT_FIELDS,
     _format_opener_context_value,
 )
+from integrations.shopify.widget_proactive import _resolve_graph_related_products
 from modules.tools.widget_callback import (
     WIDGET_OPEN_CALLBACK_FORM_NAME,
     WIDGET_SIGNAL_KEY,
@@ -153,94 +154,6 @@ def _build_proactive_opener_message(
         "instead of fabricating. "
         f"Context: {summary}.{related_block}"
     )
-
-
-async def _resolve_graph_related_products(
-    workspace_id: str,
-    page_context: dict,
-    *,
-    max_per_relation: int = 1,
-) -> list[dict]:
-    """Pull top related products from the workspace knowledge graph.
-
-    Looks up the seed product node by Shopify handle in page_context, then
-    walks 1-hop edges by relation type:
-      - frequently_bought_with (highest co_count wins — real customer signal)
-      - in_collection (most-connected sibling — likely a category anchor)
-      - by_vendor (any same-vendor sibling)
-
-    Returns at most ``max_per_relation`` entries per relation type. Empty
-    list when no seed product, no graph, or any failure — caller treats
-    that as "fall back to plain Layer-1 opener".
-    """
-    handle = (page_context or {}).get("productHandle")
-    title = (page_context or {}).get("productTitle")
-    if not handle and not title:
-        return []  # No seed (cart/checkout/collection page) — nothing to traverse
-
-    try:
-        from modules.knowledge.graph_service import GraphifyService
-
-        gs = GraphifyService()
-        graph = await gs.load_graph(workspace_id)
-        if graph is None:
-            return []
-
-        # Find the seed node by handle (preferred) or label match.
-        seed_id = None
-        for node_id, attrs in graph.nodes(data=True):
-            node_attrs = attrs.get("attrs") or {}
-            if handle and node_attrs.get("handle") == handle:
-                seed_id = node_id
-                break
-        if seed_id is None and title:
-            for node_id, attrs in graph.nodes(data=True):
-                if (attrs.get("file_type") == "shopify_product"
-                        and attrs.get("label") == title):
-                    seed_id = node_id
-                    break
-        if seed_id is None:
-            return []
-
-        # Walk 1-hop, group by relation type, sort each group by signal strength.
-        by_relation: dict[str, list[dict]] = {}
-        for u, v, edata in graph.edges(seed_id, data=True):
-            rel = (edata.get("relation") or "").lower()
-            if rel not in ("frequently_bought_with", "in_collection", "by_vendor"):
-                continue
-            other = v if u == seed_id else u
-            other_attrs = graph.nodes[other]
-            # Only return product nodes (skip variants/vendors as targets —
-            # those aren't recommendable on their own to a shopper)
-            if other_attrs.get("file_type") not in ("shopify_product", "shopify_collection"):
-                # in_collection targets ARE collections; that's fine for catalog framing.
-                if rel != "in_collection":
-                    continue
-            edge_attrs = edata.get("attrs") or {}
-            by_relation.setdefault(rel, []).append({
-                "relation": rel,
-                "label": other_attrs.get("label") or other,
-                "type": other_attrs.get("file_type", ""),
-                "confidence": edata.get("confidence_score", 0),
-                "co_count": edge_attrs.get("co_count"),
-                "total_orders": edge_attrs.get("total_orders"),
-                "weight": edata.get("weight", 0),
-            })
-
-        # FBT: sort by co_count (raw signal strength).
-        by_relation.get("frequently_bought_with", []).sort(
-            key=lambda p: -(p.get("co_count") or 0)
-        )
-        # Collection / vendor: arbitrary — take first.
-
-        out: list[dict] = []
-        for rel in ("frequently_bought_with", "in_collection", "by_vendor"):
-            out.extend(by_relation.get(rel, [])[:max_per_relation])
-        return out
-
-    except Exception as e:  # noqa: BLE001 — opener falls back gracefully
-        logger.warning("_resolve_graph_related_products failed: %s", e)
-        return []
 
 
 async def _resolve_cart_recommendations(

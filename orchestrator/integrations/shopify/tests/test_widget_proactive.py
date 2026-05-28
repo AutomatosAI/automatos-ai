@@ -48,7 +48,18 @@ def workspace_id():
 
 @pytest.fixture
 def fake_chat(monkeypatch):
-    """Replace ``api.widgets.chat`` in ``sys.modules`` with a fake.
+    """Replace the shim's downstream dependencies with fakes.
+
+    The shim calls a mix of LOCAL and chat.py helpers depending on the
+    trigger path and the current state of the Phase 1 lift:
+
+    * ``_resolve_graph_related_products`` — local to ``widget_proactive``
+      since PRD-141 US-006; patched in place via ``monkeypatch.setattr``.
+    * ``_resolve_cart_recommendations`` — still in ``api.widgets.chat``
+      (until US-007); patched via a fake module in ``sys.modules``.
+    * ``_build_proactive_opener_message`` /
+      ``_build_cart_idle_opener_message`` — still in ``api.widgets.chat``
+      (until US-008); same fake-module treatment.
 
     The fake records every call so tests can assert the shim forwards
     ``workspace_id`` and ``page_context`` correctly, and returns a
@@ -97,12 +108,16 @@ def fake_chat(monkeypatch):
         })
         return "FAKE_CART_IDLE_OPENER_MESSAGE"
 
-    fake._resolve_graph_related_products = fake_resolve_products
     fake._resolve_cart_recommendations = fake_resolve_cart
     fake._build_proactive_opener_message = fake_build_product
     fake._build_cart_idle_opener_message = fake_build_cart
 
     monkeypatch.setitem(sys.modules, "api.widgets.chat", fake)
+    monkeypatch.setattr(
+        widget_proactive,
+        "_resolve_graph_related_products",
+        fake_resolve_products,
+    )
     return calls
 
 
