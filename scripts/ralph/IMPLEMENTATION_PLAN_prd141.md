@@ -16,13 +16,13 @@ Single source of truth for Ralph progress. Tick `- [x]` only after a story's acc
 ## Phase 1 — Lift Shopify into the plugin (the risky one)
 
 - [x] US-004 — Capture proactive opener + cart-idle fixtures *(synthetic-but-realistic acceptable — see PROMPT_build_prd141.md "Special note for US-004"; human reviews after Ralph generates)*
+- [ ] US-011 — Add snapshot equivalence tests for product-page opener and cart-idle opener *(REORDERED ahead of the lifts — runs against the US-003 shim so byte-equality guards every move; must pass now and stay green through US-005–US-010)*
 - [ ] US-005 — Move PROACTIVE_OPENER_FIELDS constant into the Shopify integration folder
 - [ ] US-006 — Move _resolve_graph_related_products into Shopify plugin
 - [ ] US-007 — Move _resolve_cart_recommendations into Shopify plugin
 - [ ] US-008 — Move _build_proactive_opener_message and _build_cart_idle_opener_message into Shopify plugin
-- [ ] US-009 — Add Alembic migration backfilling workspace.settings.vertical for Shopify workspaces
+- [ ] US-009 — Add Alembic migration backfilling workspace.settings.vertical for Shopify workspaces *(staging apply deferred to human; Ralph validates offline only)*
 - [ ] US-010 — Rewire chat.py to dispatch via PLUGIN_REGISTRY and delete inline Shopify functions
-- [ ] US-011 — Add snapshot equivalence tests for product-page opener and cart-idle opener
 - [ ] US-012 — Add CI grep gate enforcing no Shopify keys in generic surfaces
 
 ## Phase 2 — SDK sends page_context on regular messages *(automatos-widget-sdk repo)*
@@ -49,6 +49,7 @@ Single source of truth for Ralph progress. Tick `- [x]` only after a story's acc
 
 - Phase 0 stories (US-001/002/003) are safe to run autonomously
 - US-004 now executable with synthetic fixtures (see PROMPT_build_prd141.md "Special note for US-004"). Human reviews fixtures after this story before US-005 starts.
+- US-011 (snapshot tests) is REORDERED ahead of US-005 so the byte-equality net exists before any lift. It runs against the US-003 shim and MUST pass before the lifts start; every lift story (US-005–US-010) must keep `cd orchestrator && python -m pytest integrations/` green or it broke equivalence.
 - US-013/014/015 are in a different repo (automatos-widget-sdk); Ralph should mark BLOCKED-CROSS-REPO and exit (human will set up a separate Ralph worktree for SDK work)
 - US-016/017 are in automatos-skills; same — BLOCKED-CROSS-REPO and exit
 - US-020 is operational; Ralph should mark SKIPPED-HUMAN and exit

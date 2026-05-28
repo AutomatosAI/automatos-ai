@@ -150,7 +150,7 @@
         "Migration is idempotent — running twice doesn't change rowcount on second run",
         "Migration is reviewed by the migration-reviewer agent (no locking risk, no NOT NULL on big table — this is a JSONB update on a small table)",
         "Log/comment in the migration: 'PRD-141 Phase 1 — backfill workspace.settings.vertical for all existing Shopify workspaces. Verify count matches expected Shopify workspace count after upgrade.'",
-        "Migration applied successfully on staging; rowcount logged"
+        "Ralph validates the migration OFFLINE only and MUST NOT connect to or mutate any database: run 'alembic upgrade <rev> --sql' to render the SQL without error, and py_compile the migration file. The actual staging apply + rowcount verification is DEFERRED to the human before merge — note this deferral in the commit body"
       ],
       "priority": 9,
       "passes": false,
@@ -192,7 +192,7 @@
       ],
       "priority": 11,
       "passes": false,
-      "notes": "BLOCKED by US-004. The tests MUST use real fixtures, not synthetic mocks — synthetic data won't catch real-world format bugs. If a snapshot test fails after US-005/006/007/008 lifts, the lift broke equivalence: fix the lift, do not regenerate the fixture. Fixtures are the source of truth for this refactor."
+      "notes": "REORDERED to run BEFORE US-005 (see IMPLEMENTATION_PLAN_prd141.md) so the byte-equality net guards every lift in real time. US-004 fixtures ARE present (synthetic-but-realistic per PROMPT_build_prd141.md). At this point the Shopify plugin is still the US-003 shim delegating to chat.py inline functions, so these tests exercise the real pre-move logic through handle_widget_message and MUST PASS now — then stay green through US-005/006/007/008/010. If one fails after a lift, the lift broke equivalence: fix the lift, do NOT regenerate the golden files. Use the committed fixtures; do NOT mock the graph snapshot."
     },
     {
       "id": "US-012",
@@ -200,7 +200,7 @@
       "description": "As the platform, I need a CI check that fails any PR introducing Shopify-specific identifiers into generic widget/context/RAG/graph code paths.",
       "acceptanceCriteria": [
         "Add a new shell script at scripts/ci/check-no-shopify-in-generic.sh",
-        "Script runs: grep -rE 'productHandle|productTitle|cartItems|cartItemCount|cartTotalPrice|shopify_(?!plugin|integration|sync)|onlineStoreUrl' orchestrator/api/widgets/ orchestrator/modules/context/ orchestrator/modules/knowledge/graph_service.py orchestrator/consumers/chatbot/ — MUST return non-zero exit code (no matches) for PR to pass",
+        "Script checks generic surfaces for forbidden Shopify identifiers using POSIX ERE only — NO PCRE lookahead (grep -E has no (?!...) and macOS has no grep -P). Two passes over paths orchestrator/api/widgets/ orchestrator/modules/context/ orchestrator/modules/knowledge/graph_service.py orchestrator/consumers/chatbot/ : pass A = grep -rnE 'productHandle|productTitle|cartItems|cartItemCount|cartTotalPrice|onlineStoreUrl' ; pass B = grep -rnE 'shopify_' piped through grep -vE 'shopify_(plugin|integration|sync)' to allow those three legitimate forms. If EITHER pass yields any line the script exits non-zero and FAILS the PR; zero hits across both = pass",
         "Exclude orchestrator/integrations/ from the grep (that's where vertical keys are legitimately referenced)",
         "Exclude orchestrator/api/shopify.py (catalog sync — outside this PRD's scope)",
         "Exclude graph_extraction.py's map_shopify_catalog (also outside this PRD's scope)",
