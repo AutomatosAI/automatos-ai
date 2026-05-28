@@ -957,7 +957,7 @@ class AgentExecutionManager:
                     return (low + high) / 2
                 return int(''.join(filter(str.isdigit, str(duration_str))))
             return 30.0
-        except:
+        except Exception:
             return 30.0
     
     def _create_failed_execution(self, subtask_id: str, error: str) -> SubtaskExecution:

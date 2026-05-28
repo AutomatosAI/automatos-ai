@@ -365,7 +365,7 @@ class ToolResultFormatter:
             if isinstance(similarity, str):
                 try:
                     similarity = float(similarity)
-                except:
+                except Exception:
                     similarity = 0.0
             
             formatted.append({

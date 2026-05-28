@@ -1236,7 +1236,7 @@ class DocumentManager:
                 conn.commit()
                 cursor.close()
                 conn.close()
-            except:
+            except Exception:
                 pass
             
             raise
