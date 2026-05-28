@@ -1,0 +1,27 @@
+{
+  "cartCurrency": "GBP",
+  "cartItemCount": 5,
+  "cartItems": [
+    {
+      "handle": "hochiki-aln",
+      "qty": 2,
+      "title": "Hochiki ALN Optical Smoke Detector"
+    },
+    {
+      "handle": "hochiki-acb",
+      "qty": 1,
+      "title": "Hochiki ACB Multi-Sensor Detector"
+    },
+    {
+      "handle": "hochiki-atg",
+      "qty": 2,
+      "title": "Hochiki ATG Heat Detector"
+    }
+  ],
+  "cartTotalPrice": 16250,
+  "cartUrl": "https://inbuild-uk.myshopify.com/cart",
+  "pageType": "cart",
+  "shopCurrency": "GBP",
+  "shopDomain": "inbuild-uk.myshopify.com",
+  "shopLocale": "en-GB"
+}

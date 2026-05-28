@@ -15,7 +15,7 @@ Single source of truth for Ralph progress. Tick `- [x]` only after a story's acc
 
 ## Phase 1 — Lift Shopify into the plugin (the risky one)
 
-- [ ] US-004 — Capture proactive opener + cart-idle fixtures *(synthetic-but-realistic acceptable — see PROMPT_build_prd141.md "Special note for US-004"; human reviews after Ralph generates)*
+- [x] US-004 — Capture proactive opener + cart-idle fixtures *(synthetic-but-realistic acceptable — see PROMPT_build_prd141.md "Special note for US-004"; human reviews after Ralph generates)*
 - [ ] US-005 — Move PROACTIVE_OPENER_FIELDS constant into the Shopify integration folder
 - [ ] US-006 — Move _resolve_graph_related_products into Shopify plugin
 - [ ] US-007 — Move _resolve_cart_recommendations into Shopify plugin
