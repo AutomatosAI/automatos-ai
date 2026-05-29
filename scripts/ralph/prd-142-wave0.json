@@ -53,8 +53,8 @@
         "pytest green; existing analytics tests green"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": "Cheapest honesty win — land it first. The fake 85.0 is the literal symptom Wave 0 exists to kill (analytics_engine.py:118). This also satisfies the no-hardcoded-values rule (CLAUDE.md §4). Do NOT touch _get_workflow_metrics (line 144-174) — its mission success math is already real and correct; only _get_agent_metrics is faked."
+      "passes": true,
+      "notes": "DONE 2026-05-29 (commit 756cbf4b8). Removed BOTH fake blocks: _get_agent_metrics (4 placeholders) and get_agent_analytics (5 placeholders) — the second block was not in the original AC but carried the same 85.0/2.5 fakes. grep '85.0'/'2.5'/'# Placeholder' all return 0. Verified no consumer: GET /api/analytics/agents/{id} has zero frontend callers; frontend performanceTrend at agent-performance.tsx:128 is a local stub reading snake_case agentStats, not this endpoint. _get_workflow_metrics left untouched (real). 2 tests green. Cheapest honesty win — landed first as proof-of-life."
     },
     {
       "id": "US-004",
