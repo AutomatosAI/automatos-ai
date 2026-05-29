@@ -343,10 +343,16 @@ def test_public_widget_config_keys_whitelist_is_minimal():
 
     Keeps the surface area visible during code review so nobody silently
     leaks an internal setting.
+
+    Public keys (all browser-readable feature config, no internal settings):
+    - widget_proactive: PRD-007 product-page opener config
+    - cart_idle:        PRD-008-A C1 cart-idle popup (must be whitelisted or
+                        the SDK silently no-ops and the popup never arms)
+    - callback:         PRD-008-A B/C1 callback-form config
     """
     from api.widgets.config import PUBLIC_WIDGET_CONFIG_KEYS
 
-    assert PUBLIC_WIDGET_CONFIG_KEYS == ("widget_proactive",)
+    assert PUBLIC_WIDGET_CONFIG_KEYS == ("widget_proactive", "cart_idle", "callback")
 
 
 if __name__ == "__main__":

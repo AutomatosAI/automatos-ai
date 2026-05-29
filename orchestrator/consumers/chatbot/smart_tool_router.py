@@ -91,7 +91,18 @@ class SmartToolRouter:
     })
 
     # Promoted platform tools that bypass intent filtering —
-    # always included regardless of detected intent (PRD-122 US-010)
+    # always included regardless of detected intent (PRD-122 US-010).
+    #
+    # widget_open_callback_form is a native *signal* tool: when present in
+    # available_tools (only when the Site has callback.enabled — gated upstream
+    # by validate_tool_access), it MUST survive intent filtering. Without it the
+    # LLM, instructed by its skill to open the form, improvises a
+    # composio_execute(action="widget_open_callback_form") call that fails with
+    # "'WIDGET' is not assigned to agent N". Pinning it here keeps the affordance
+    # available on every widget turn regardless of the classified intent.
+    # Literal (not imported) to keep this hot-path module free of the heavy
+    # modules.tools.* import chain; canonical name lives in
+    # modules/tools/widget_callback.py::WIDGET_OPEN_CALLBACK_FORM_NAME.
     ALWAYS_INCLUDE = frozenset({
         "platform_list_agents",
         "platform_get_agent",
@@ -99,6 +110,7 @@ class SmartToolRouter:
         "platform_store_memory",
         "platform_field_query",
         "platform_field_inject",
+        "widget_open_callback_form",
     })
 
     def __init__(self):
