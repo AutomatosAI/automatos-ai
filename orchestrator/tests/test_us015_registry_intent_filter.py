@@ -184,3 +184,32 @@ def test_no_categories_no_suggested_returns_all(registry_env):
     filtered = r._filter_tools_by_intent(tools, intent)
 
     assert {t["function"]["name"] for t in filtered} == {"a", "b"}
+
+
+# ---------------------------------------------------------------------------
+# Widget callback signal tool survives filtering (production regression)
+# ---------------------------------------------------------------------------
+
+def test_widget_callback_tool_survives_multi_step_filter(registry_env):
+    """The widget callback signal tool must NOT be filtered out of a widget turn.
+
+    Production regression: "Can someone call me back" classified as MULTI_STEP,
+    the registry's mapped categories did not surface widget_open_callback_form,
+    and it was dropped from the LLM's toolset. The LLM then improvised
+    composio_execute(action="widget_open_callback_form"), which fails with
+    "'WIDGET' is not assigned to agent N". Pinning the tool in ALWAYS_INCLUDE
+    guarantees it survives whenever it is present in available_tools (it is only
+    present when the Site has callback.enabled — gated upstream).
+    """
+    # Registry returns categories that do NOT include the widget tool, mirroring
+    # production: nothing in the mapped categories surfaces it.
+    registry_env["by_category"]["agents"] = [SimpleNamespace(name="platform_list_agents")]
+    r = SmartToolRouter()
+    intent = _intent_result(primary=Intent.MULTI_STEP, suggested=[])
+    tools = [_tool("widget_open_callback_form"), _tool("some_unrelated_tool")]
+
+    filtered = r._filter_tools_by_intent(tools, intent)
+
+    names = {t["function"]["name"] for t in filtered}
+    assert "widget_open_callback_form" in names
+    assert "some_unrelated_tool" not in names
