@@ -753,6 +753,7 @@ class HarnessService:
             "applied": [],
             "queued": [],
             "failed": [],
+            "escalated": [],
         }
 
         if not prescriptions:
@@ -800,7 +801,9 @@ class HarnessService:
                             f"**Rationale:** {rx.get('rationale', '')}\n\n"
                             f"**Expected Improvement:** {rx.get('expected_improvement', '')}"
                         ),
-                        "tags": ["harness", "org-review", f"risk-{risk}"],
+                        # rx:{rx_id} lets US-025 /approve resolve the board task
+                        # back to its prescription by tag.
+                        "tags": ["harness", "org-review", f"risk-{risk}", f"rx:{rx_id}"],
                         "priority": priority,
                     })
                     changelog["queued"].append({
@@ -809,6 +812,9 @@ class HarnessService:
                         "change_type": change_type,
                         "board_task_id": task_result.get("data", {}).get("id") if isinstance(task_result, dict) else None,
                     })
+                    # US-024: nudge a human for high-risk changes (board task is
+                    # the durable record; the notification is best-effort).
+                    await self._maybe_escalate(db, workspace_id, rx, changelog)
                 except Exception as exc:
                     logger.error("[HARNESS] Failed to queue rx %s: %s", rx_id, exc, exc_info=True)
                     changelog["failed"].append({
@@ -820,10 +826,75 @@ class HarnessService:
         await self._apply_approved_board_tasks(executor, workspace_id, changelog)
 
         logger.info(
-            "[HARNESS] APPLY done — %d applied, %d queued, %d failed",
-            len(changelog["applied"]), len(changelog["queued"]), len(changelog["failed"]),
+            "[HARNESS] APPLY done — %d applied, %d queued, %d failed, %d escalated",
+            len(changelog["applied"]), len(changelog["queued"]),
+            len(changelog["failed"]), len(changelog.get("escalated", [])),
         )
         return changelog
+
+    async def _maybe_escalate(
+        self,
+        db: "Session",
+        workspace_id: UUID,
+        rx: Dict[str, Any],
+        changelog: Dict[str, List[Dict[str, Any]]],
+    ) -> None:
+        """Notify a human to approve/reject a high-risk queued prescription.
+
+        Only fires for risk >= _HIGH_PRIORITY_RISK, and only when the workspace
+        has a connected channel — otherwise there is nobody to notify and the
+        board task already stands for in-app review (so we skip silently rather
+        than record a phantom escalation). Records an 'escalated' changelog
+        entry with whether delivery actually succeeded. Never raises.
+        """
+        risk = rx.get("risk_score", 5)
+        if risk < _HIGH_PRIORITY_RISK:
+            return
+        if not self._workspace_has_channel(db, workspace_id):
+            return
+        from core.services.notification_service import send_workspace_notification
+
+        notified = await send_workspace_notification(
+            str(workspace_id), self._build_escalation_message(rx, risk), channel="default"
+        )
+        changelog.setdefault("escalated", []).append({
+            "prescription_id": rx.get("prescription_id"),
+            "target_name": rx.get("target_name", "unknown"),
+            "change_type": rx.get("change_type", "unknown"),
+            "risk_score": risk,
+            "notified": notified,
+        })
+
+    def _build_escalation_message(self, rx: Dict[str, Any], risk: int) -> str:
+        """Plain-text approval request with the /approve|/reject instructions."""
+        rx_id = rx.get("prescription_id", "unknown")
+        return (
+            f"HARNESS needs approval (risk {risk}/5)\n"
+            f"{rx.get('change_type', 'unknown')} for {rx.get('target_name', 'unknown')}\n"
+            f"Current: {json.dumps(rx.get('current_value', {}))}\n"
+            f"Proposed: {json.dumps(rx.get('proposed_value', {}))}\n"
+            f"Reply /approve {rx_id} or /reject {rx_id}"
+        )
+
+    def _workspace_has_channel(self, db: "Session", workspace_id: UUID) -> bool:
+        """True if the workspace has any channel_connections row.
+
+        Matches how channels.sender resolves a channel — by row presence, not
+        by the status column (which is 'active' in channels.manager but
+        'connected' elsewhere) — so 'can escalate' agrees with 'can deliver'.
+        """
+        try:
+            from sqlalchemy import text
+            row = db.execute(
+                text("SELECT 1 FROM channel_connections WHERE workspace_id = :ws LIMIT 1"),
+                {"ws": str(workspace_id)},
+            ).fetchone()
+            return row is not None
+        except Exception:
+            logger.debug(
+                "[HARNESS] channel-presence check failed for ws=%s", workspace_id, exc_info=True
+            )
+            return False
 
     # ------------------------------------------------------------------
     # Phase 5: BASELINE
@@ -913,10 +984,7 @@ class HarnessService:
         artifacts: Dict[str, str] = {}
         for label, path, content in files_to_write:
             try:
-                await executor.execute("workspace_write_file", {
-                    "path": path,
-                    "content": content,
-                })
+                self._write_workspace_file(workspace_id, path, content)
                 artifacts[label] = "ok"
             except Exception as exc:
                 logger.error("[HARNESS] Failed to write %s (%s): %s", label, path, exc, exc_info=True)
@@ -1066,6 +1134,30 @@ class HarnessService:
                 "[HARNESS] Failed to write last_run.json for %s: %s",
                 workspace_id, exc,
             )
+
+    def _write_workspace_file(self, workspace_id: UUID, rel_path: str, content: str) -> None:
+        """Persist a HARNESS artifact directly under the workspace volume.
+
+        HARNESS reads (_read_baseline / _read_applied_tasks / _read_last_run) go
+        straight to the workspace volume on disk, so writes MUST hit the same
+        store. ``workspace_write_file`` is an agent tool-execution primitive, not
+        a registered platform action, so routing harness writes through
+        ``executor.execute("workspace_write_file", ...)`` silently returns an
+        "unknown action" error and the ledger / baseline never persist. Writing
+        directly (like _write_last_run) keeps reads and writes on one store and
+        raises on a real I/O error so callers record the failure, never mask it.
+        """
+        from config import config
+        import os
+
+        abs_path = os.path.join(
+            config.WORKSPACE_VOLUME_PATH,
+            str(workspace_id),
+            rel_path.lstrip("/"),
+        )
+        os.makedirs(os.path.dirname(abs_path), exist_ok=True)
+        with open(abs_path, "w") as f:
+            f.write(content)
 
     @staticmethod
     def _resolve_auto_agent(
@@ -1409,8 +1501,8 @@ class HarnessService:
                     })
 
             if newly_applied:
-                await self._write_applied_tasks(
-                    executor, workspace_id, ledger, applied_ids, newly_applied
+                self._write_applied_tasks(
+                    workspace_id, ledger, applied_ids, newly_applied
                 )
         except Exception as exc:
             # A failure here means human-approved changes were silently dropped —
@@ -1499,23 +1591,28 @@ class HarnessService:
             )
         return {"applied_task_ids": [], "entries": []}
 
-    async def _write_applied_tasks(
+    def _write_applied_tasks(
         self,
-        executor: "PlatformActionExecutor",
         workspace_id: UUID,
         ledger: Dict[str, Any],
         applied_ids: set,
         newly_applied: List[Dict[str, Any]],
     ) -> None:
-        """Persist the applied-tasks ledger via the workspace file store."""
+        """Persist the applied-tasks ledger to the workspace volume on disk.
+
+        Writes to the same path _read_applied_tasks reads, so the idempotency
+        key round-trips. See _write_workspace_file for why this is not routed
+        through the executor.
+        """
         ledger["applied_task_ids"] = sorted(applied_ids)
         ledger.setdefault("entries", []).extend(newly_applied)
         ledger["updated_at"] = datetime.now(timezone.utc).isoformat()
         try:
-            await executor.execute("workspace_write_file", {
-                "path": "/harness/applied_tasks.json",
-                "content": json.dumps(ledger, indent=2),
-            })
+            self._write_workspace_file(
+                workspace_id,
+                "/harness/applied_tasks.json",
+                json.dumps(ledger, indent=2),
+            )
         except Exception as exc:
             logger.warning(
                 "[HARNESS] Failed to persist applied_tasks ledger for %s: %s",

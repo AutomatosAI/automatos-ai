@@ -129,15 +129,19 @@ def test_flag_defaults_false():
 # ---------------------------------------------------------------------------
 
 _WS_ID = "00000000-0000-0000-0000-000000000001"
-# A path that does not exist, so _read_applied_tasks finds no ledger and treats
-# every task as un-applied. The ledger WRITE goes through the fake executor's
-# workspace_write_file (in-memory), so no real filesystem I/O occurs.
-_MISSING_VOLUME = "/tmp/harness-self-mgmt-test-no-such-volume"
+
+
+def _ledger_path(volume, workspace_id=_WS_ID):
+    """The applied-tasks ledger path — _write_applied_tasks writes it and
+    _read_applied_tasks reads it (proves they share one on-disk store)."""
+    return os.path.join(str(volume), str(workspace_id), "harness", "applied_tasks.json")
 
 
 class _FakeExecutor:
     """Records every execute() call and returns canned results for the actions
-    _apply_approved_board_tasks invokes (list tasks/agents, apply, write file)."""
+    _apply_approved_board_tasks invokes (list tasks/agents, apply). The ledger
+    write no longer goes through the executor — it is a direct disk write — so
+    the fake never sees a workspace_write_file call."""
 
     def __init__(self, tasks, agents):
         self._tasks = tasks
@@ -150,7 +154,7 @@ class _FakeExecutor:
             return {"data": self._tasks}
         if action == "platform_list_agents":
             return {"data": self._agents}
-        # apply actions + workspace_write_file all report success
+        # apply + status-update actions all report success
         return {"success": True}
 
     def actions(self):
@@ -172,11 +176,12 @@ def test_approved_tasks_noop_when_flag_off(monkeypatch):
     assert changelog == {}
 
 
-def test_approved_tasks_are_executed(monkeypatch):
+def test_approved_tasks_are_executed(monkeypatch, tmp_path):
     """Flag on -> a done [HARNESS] task is parsed, its target resolved, and the
-    change applied via _auto_apply_prescription, then the ledger is persisted."""
+    change applied via _auto_apply_prescription, then the ledger is persisted to
+    disk — the same store _read_applied_tasks reads, so the next tick is idempotent."""
     monkeypatch.setattr(config, "HARNESS_SELF_MANAGEMENT_ENABLED", True)
-    monkeypatch.setattr(config, "WORKSPACE_VOLUME_PATH", _MISSING_VOLUME)
+    monkeypatch.setattr(config, "WORKSPACE_VOLUME_PATH", str(tmp_path))
     svc = HarnessService()
     task = _harness_task(
         change_type="heartbeat_tune",
@@ -199,15 +204,18 @@ def test_approved_tasks_are_executed(monkeypatch):
     assert applied[0]["task_id"] == "7"
     assert applied[0]["target_id"] == 42
     assert applied[0]["change_type"] == "heartbeat_tune"
-    # Idempotency ledger was persisted via the workspace file store.
-    assert "workspace_write_file" in ex.actions()
+    # Idempotency ledger round-tripped to disk: the file exists at the path the
+    # reader uses, and _read_applied_tasks sees task 7 as applied.
+    assert os.path.exists(_ledger_path(tmp_path))
+    ledger = svc._read_applied_tasks(_WS_ID)
+    assert "7" in {str(i) for i in ledger["applied_task_ids"]}
 
 
-def test_snapshot_recorded_before_apply(monkeypatch):
+def test_snapshot_recorded_before_apply(monkeypatch, tmp_path):
     """The pre-change value is captured as current_value_before so US-022 has a
     rollback target."""
     monkeypatch.setattr(config, "HARNESS_SELF_MANAGEMENT_ENABLED", True)
-    monkeypatch.setattr(config, "WORKSPACE_VOLUME_PATH", _MISSING_VOLUME)
+    monkeypatch.setattr(config, "WORKSPACE_VOLUME_PATH", str(tmp_path))
     svc = HarnessService()
     task = _harness_task(
         change_type="heartbeat_tune",
@@ -225,9 +233,10 @@ def test_snapshot_recorded_before_apply(monkeypatch):
     assert entry["proposed_value"] == {"interval_minutes": 90}
 
 
-def test_already_applied_task_is_skipped(monkeypatch):
+def test_already_applied_task_is_skipped(monkeypatch, tmp_path):
     """A task whose id is in the ledger is never re-applied (idempotency)."""
     monkeypatch.setattr(config, "HARNESS_SELF_MANAGEMENT_ENABLED", True)
+    monkeypatch.setattr(config, "WORKSPACE_VOLUME_PATH", str(tmp_path))
     svc = HarnessService()
     monkeypatch.setattr(
         svc, "_read_applied_tasks",
@@ -240,15 +249,15 @@ def test_already_applied_task_is_skipped(monkeypatch):
 
     assert "platform_configure_agent_heartbeat" not in ex.actions()
     assert changelog.get("applied_from_approved", []) == []
-    # Nothing applied -> no ledger write.
-    assert "workspace_write_file" not in ex.actions()
+    # Nothing applied -> the ledger file is never written.
+    assert not os.path.exists(_ledger_path(tmp_path))
 
 
-def test_unresolved_target_is_skipped_not_applied(monkeypatch):
+def test_unresolved_target_is_skipped_not_applied(monkeypatch, tmp_path):
     """A task whose target_name is not in the agents map is skipped, never
     applied against a guessed/null target."""
     monkeypatch.setattr(config, "HARNESS_SELF_MANAGEMENT_ENABLED", True)
-    monkeypatch.setattr(config, "WORKSPACE_VOLUME_PATH", _MISSING_VOLUME)
+    monkeypatch.setattr(config, "WORKSPACE_VOLUME_PATH", str(tmp_path))
     svc = HarnessService()
     task = _harness_task(change_type="heartbeat_tune", target_name="GhostAgent", task_id=9)
     ex = _FakeExecutor(tasks=[task], agents=[{"id": 42, "name": "ScribeAgent"}])
@@ -261,11 +270,11 @@ def test_unresolved_target_is_skipped_not_applied(monkeypatch):
     assert changelog["skipped"][0]["task_id"] == "9"
 
 
-def test_placeholder_proposed_value_is_refused(monkeypatch):
+def test_placeholder_proposed_value_is_refused(monkeypatch, tmp_path):
     """An approved task whose proposed_value is the 'review_needed' placeholder
     is never applied — applying it literally would corrupt the agent."""
     monkeypatch.setattr(config, "HARNESS_SELF_MANAGEMENT_ENABLED", True)
-    monkeypatch.setattr(config, "WORKSPACE_VOLUME_PATH", _MISSING_VOLUME)
+    monkeypatch.setattr(config, "WORKSPACE_VOLUME_PATH", str(tmp_path))
     svc = HarnessService()
     task = _harness_task(
         change_type="description_update",
@@ -282,8 +291,8 @@ def test_placeholder_proposed_value_is_refused(monkeypatch):
     assert changelog.get("applied_from_approved", []) == []
     assert len(changelog.get("failed", [])) == 1
     assert "placeholder" in changelog["failed"][0]["error"]
-    # Not applied -> not ledgered.
-    assert "workspace_write_file" not in ex.actions()
+    # Not applied -> the ledger file is never written.
+    assert not os.path.exists(_ledger_path(tmp_path))
 
 
 # ---------------------------------------------------------------------------
@@ -524,3 +533,93 @@ def test_model_change_uses_model_id_param():
         "platform_update_agent",
         {"agent_id": 42, "model_id": "claude-sonnet-4-6"},
     ) in ex.calls
+
+
+# ---------------------------------------------------------------------------
+# US-024: high-risk escalation
+# ---------------------------------------------------------------------------
+
+
+def _high_risk_rx(rx_id="rx-esc", risk=4):
+    return {
+        "prescription_id": rx_id,
+        "change_type": "model_change_same_tier",
+        "target_name": "ScribeAgent",
+        "current_value": {"model": "haiku"},
+        "proposed_value": {"model": "opus"},
+        "risk_score": risk,
+    }
+
+
+def test_escalation_sends_telegram(monkeypatch):
+    """risk>=4 with a connected channel -> notification sent + escalated entry."""
+    import core.services.notification_service as notif_mod
+    sent = []
+
+    async def _fake_send(workspace_id, message, channel=None):
+        sent.append((workspace_id, message, channel))
+        return True
+
+    monkeypatch.setattr(notif_mod, "send_workspace_notification", _fake_send)
+
+    svc = HarnessService()
+    svc._workspace_has_channel = lambda db, ws: True
+    changelog = {"escalated": []}
+    asyncio.run(svc._maybe_escalate(None, _WS_ID, _high_risk_rx(), changelog))
+
+    assert len(sent) == 1
+    _, message, _ = sent[0]
+    assert "/approve rx-esc" in message and "/reject rx-esc" in message
+    assert len(changelog["escalated"]) == 1
+    assert changelog["escalated"][0]["notified"] is True
+    assert changelog["escalated"][0]["prescription_id"] == "rx-esc"
+
+
+def test_escalation_skipped_no_channel(monkeypatch):
+    """No connected channel -> no send, no phantom escalated entry."""
+    import core.services.notification_service as notif_mod
+    sent = []
+
+    async def _fake_send(workspace_id, message, channel=None):
+        sent.append((workspace_id, message, channel))
+        return True
+
+    monkeypatch.setattr(notif_mod, "send_workspace_notification", _fake_send)
+
+    svc = HarnessService()
+    svc._workspace_has_channel = lambda db, ws: False
+    changelog = {"escalated": []}
+    asyncio.run(svc._maybe_escalate(None, _WS_ID, _high_risk_rx(), changelog))
+
+    assert sent == []
+    assert changelog["escalated"] == []
+
+
+def test_low_risk_is_not_escalated(monkeypatch):
+    """A channel exists but risk < 4 -> not escalated (only high-risk nags)."""
+    import core.services.notification_service as notif_mod
+    sent = []
+
+    async def _fake_send(workspace_id, message, channel=None):
+        sent.append(1)
+        return True
+
+    monkeypatch.setattr(notif_mod, "send_workspace_notification", _fake_send)
+
+    svc = HarnessService()
+    svc._workspace_has_channel = lambda db, ws: True
+    changelog = {"escalated": []}
+    asyncio.run(svc._maybe_escalate(None, _WS_ID, _high_risk_rx(risk=2), changelog))
+
+    assert sent == []
+    assert changelog["escalated"] == []
+
+
+def test_escalation_message_has_approve_reject():
+    """The message carries the /approve|/reject instructions US-025 parses."""
+    svc = HarnessService()
+    msg = svc._build_escalation_message(_high_risk_rx(rx_id="rx-99", risk=5), 5)
+    assert "/approve rx-99" in msg
+    assert "/reject rx-99" in msg
+    assert "risk 5/5" in msg
+    assert "model_change_same_tier" in msg
