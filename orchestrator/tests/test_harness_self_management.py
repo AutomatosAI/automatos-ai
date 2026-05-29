@@ -524,3 +524,93 @@ def test_model_change_uses_model_id_param():
         "platform_update_agent",
         {"agent_id": 42, "model_id": "claude-sonnet-4-6"},
     ) in ex.calls
+
+
+# ---------------------------------------------------------------------------
+# US-024: high-risk escalation
+# ---------------------------------------------------------------------------
+
+
+def _high_risk_rx(rx_id="rx-esc", risk=4):
+    return {
+        "prescription_id": rx_id,
+        "change_type": "model_change_same_tier",
+        "target_name": "ScribeAgent",
+        "current_value": {"model": "haiku"},
+        "proposed_value": {"model": "opus"},
+        "risk_score": risk,
+    }
+
+
+def test_escalation_sends_telegram(monkeypatch):
+    """risk>=4 with a connected channel -> notification sent + escalated entry."""
+    import core.services.notification_service as notif_mod
+    sent = []
+
+    async def _fake_send(workspace_id, message, channel=None):
+        sent.append((workspace_id, message, channel))
+        return True
+
+    monkeypatch.setattr(notif_mod, "send_workspace_notification", _fake_send)
+
+    svc = HarnessService()
+    svc._workspace_has_channel = lambda db, ws: True
+    changelog = {"escalated": []}
+    asyncio.run(svc._maybe_escalate(None, _WS_ID, _high_risk_rx(), changelog))
+
+    assert len(sent) == 1
+    _, message, _ = sent[0]
+    assert "/approve rx-esc" in message and "/reject rx-esc" in message
+    assert len(changelog["escalated"]) == 1
+    assert changelog["escalated"][0]["notified"] is True
+    assert changelog["escalated"][0]["prescription_id"] == "rx-esc"
+
+
+def test_escalation_skipped_no_channel(monkeypatch):
+    """No connected channel -> no send, no phantom escalated entry."""
+    import core.services.notification_service as notif_mod
+    sent = []
+
+    async def _fake_send(workspace_id, message, channel=None):
+        sent.append((workspace_id, message, channel))
+        return True
+
+    monkeypatch.setattr(notif_mod, "send_workspace_notification", _fake_send)
+
+    svc = HarnessService()
+    svc._workspace_has_channel = lambda db, ws: False
+    changelog = {"escalated": []}
+    asyncio.run(svc._maybe_escalate(None, _WS_ID, _high_risk_rx(), changelog))
+
+    assert sent == []
+    assert changelog["escalated"] == []
+
+
+def test_low_risk_is_not_escalated(monkeypatch):
+    """A channel exists but risk < 4 -> not escalated (only high-risk nags)."""
+    import core.services.notification_service as notif_mod
+    sent = []
+
+    async def _fake_send(workspace_id, message, channel=None):
+        sent.append(1)
+        return True
+
+    monkeypatch.setattr(notif_mod, "send_workspace_notification", _fake_send)
+
+    svc = HarnessService()
+    svc._workspace_has_channel = lambda db, ws: True
+    changelog = {"escalated": []}
+    asyncio.run(svc._maybe_escalate(None, _WS_ID, _high_risk_rx(risk=2), changelog))
+
+    assert sent == []
+    assert changelog["escalated"] == []
+
+
+def test_escalation_message_has_approve_reject():
+    """The message carries the /approve|/reject instructions US-025 parses."""
+    svc = HarnessService()
+    msg = svc._build_escalation_message(_high_risk_rx(rx_id="rx-99", risk=5), 5)
+    assert "/approve rx-99" in msg
+    assert "/reject rx-99" in msg
+    assert "risk 5/5" in msg
+    assert "model_change_same_tier" in msg

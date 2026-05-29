@@ -753,6 +753,7 @@ class HarnessService:
             "applied": [],
             "queued": [],
             "failed": [],
+            "escalated": [],
         }
 
         if not prescriptions:
@@ -800,7 +801,9 @@ class HarnessService:
                             f"**Rationale:** {rx.get('rationale', '')}\n\n"
                             f"**Expected Improvement:** {rx.get('expected_improvement', '')}"
                         ),
-                        "tags": ["harness", "org-review", f"risk-{risk}"],
+                        # rx:{rx_id} lets US-025 /approve resolve the board task
+                        # back to its prescription by tag.
+                        "tags": ["harness", "org-review", f"risk-{risk}", f"rx:{rx_id}"],
                         "priority": priority,
                     })
                     changelog["queued"].append({
@@ -809,6 +812,9 @@ class HarnessService:
                         "change_type": change_type,
                         "board_task_id": task_result.get("data", {}).get("id") if isinstance(task_result, dict) else None,
                     })
+                    # US-024: nudge a human for high-risk changes (board task is
+                    # the durable record; the notification is best-effort).
+                    await self._maybe_escalate(db, workspace_id, rx, changelog)
                 except Exception as exc:
                     logger.error("[HARNESS] Failed to queue rx %s: %s", rx_id, exc, exc_info=True)
                     changelog["failed"].append({
@@ -820,10 +826,75 @@ class HarnessService:
         await self._apply_approved_board_tasks(executor, workspace_id, changelog)
 
         logger.info(
-            "[HARNESS] APPLY done — %d applied, %d queued, %d failed",
-            len(changelog["applied"]), len(changelog["queued"]), len(changelog["failed"]),
+            "[HARNESS] APPLY done — %d applied, %d queued, %d failed, %d escalated",
+            len(changelog["applied"]), len(changelog["queued"]),
+            len(changelog["failed"]), len(changelog.get("escalated", [])),
         )
         return changelog
+
+    async def _maybe_escalate(
+        self,
+        db: "Session",
+        workspace_id: UUID,
+        rx: Dict[str, Any],
+        changelog: Dict[str, List[Dict[str, Any]]],
+    ) -> None:
+        """Notify a human to approve/reject a high-risk queued prescription.
+
+        Only fires for risk >= _HIGH_PRIORITY_RISK, and only when the workspace
+        has a connected channel — otherwise there is nobody to notify and the
+        board task already stands for in-app review (so we skip silently rather
+        than record a phantom escalation). Records an 'escalated' changelog
+        entry with whether delivery actually succeeded. Never raises.
+        """
+        risk = rx.get("risk_score", 5)
+        if risk < _HIGH_PRIORITY_RISK:
+            return
+        if not self._workspace_has_channel(db, workspace_id):
+            return
+        from core.services.notification_service import send_workspace_notification
+
+        notified = await send_workspace_notification(
+            str(workspace_id), self._build_escalation_message(rx, risk), channel="default"
+        )
+        changelog.setdefault("escalated", []).append({
+            "prescription_id": rx.get("prescription_id"),
+            "target_name": rx.get("target_name", "unknown"),
+            "change_type": rx.get("change_type", "unknown"),
+            "risk_score": risk,
+            "notified": notified,
+        })
+
+    def _build_escalation_message(self, rx: Dict[str, Any], risk: int) -> str:
+        """Plain-text approval request with the /approve|/reject instructions."""
+        rx_id = rx.get("prescription_id", "unknown")
+        return (
+            f"HARNESS needs approval (risk {risk}/5)\n"
+            f"{rx.get('change_type', 'unknown')} for {rx.get('target_name', 'unknown')}\n"
+            f"Current: {json.dumps(rx.get('current_value', {}))}\n"
+            f"Proposed: {json.dumps(rx.get('proposed_value', {}))}\n"
+            f"Reply /approve {rx_id} or /reject {rx_id}"
+        )
+
+    def _workspace_has_channel(self, db: "Session", workspace_id: UUID) -> bool:
+        """True if the workspace has any channel_connections row.
+
+        Matches how channels.sender resolves a channel — by row presence, not
+        by the status column (which is 'active' in channels.manager but
+        'connected' elsewhere) — so 'can escalate' agrees with 'can deliver'.
+        """
+        try:
+            from sqlalchemy import text
+            row = db.execute(
+                text("SELECT 1 FROM channel_connections WHERE workspace_id = :ws LIMIT 1"),
+                {"ws": str(workspace_id)},
+            ).fetchone()
+            return row is not None
+        except Exception:
+            logger.debug(
+                "[HARNESS] channel-presence check failed for ws=%s", workspace_id, exc_info=True
+            )
+            return False
 
     # ------------------------------------------------------------------
     # Phase 5: BASELINE
