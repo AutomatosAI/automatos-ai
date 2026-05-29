@@ -553,8 +553,10 @@ class PlatformActionExecutor:
                     self.db,
                     actor_agent_id=actor_id,
                     target_type=target_type,
+                    workspace_id=self.workspace_id,
                     target_id=target_id,
                     change_type="update" if action_def.permission_level == "write" else "delete",
+                    source="platform_tool",
                 )
                 if not decision.allowed:
                     logger.warning(
