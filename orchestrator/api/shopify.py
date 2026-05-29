@@ -48,6 +48,28 @@ def _verify_internal_key(authorization: str = Header(...)) -> None:
         raise HTTPException(status_code=401, detail="Invalid internal API key")
 
 
+def _build_allowed_domains(shop: str, metadata: Dict[str, Any]) -> List[str]:
+    """Origins permitted to use the minted widget key.
+
+    Always allows the shop's ``*.myshopify.com`` domains. When the shop has a
+    custom primary domain (e.g. ``www.inbuilduk.com``) the storefront serves
+    the widget from there, so the browser ``Origin`` is the custom domain —
+    not ``*.myshopify.com``. Allow that host plus its apex and sibling
+    subdomains, otherwise the blog/chat widgets 403 on custom-domain stores.
+    """
+    domains = [f"https://{shop}", f"https://*.{shop}", "https://*.myshopify.com"]
+
+    primary = metadata.get("domain")
+    if primary:
+        host = primary.split("://", 1)[-1].strip("/").split("/", 1)[0]
+        if host and "myshopify.com" not in host:
+            apex = host[4:] if host.startswith("www.") else host
+            domains += [f"https://{host}", f"https://{apex}", f"https://*.{apex}"]
+
+    seen: set[str] = set()
+    return [d for d in domains if not (d in seen or seen.add(d))]
+
+
 # ── Pydantic models ─────────────────────────────────────────────────
 
 class ProvisionRequest(BaseModel):
@@ -204,7 +226,7 @@ async def provision_workspace(
         name=f"Shopify Widget Key ({shop})",
         key_type="public",
         permissions=["chat", "documents:read", "agents:read", "agents:execute"],
-        allowed_domains=[f"https://{shop}", f"https://*.{shop}", "https://*.myshopify.com"],
+        allowed_domains=_build_allowed_domains(shop, request.metadata),
     )
 
     db.commit()
