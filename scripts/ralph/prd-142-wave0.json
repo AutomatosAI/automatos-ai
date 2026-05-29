@@ -1,0 +1,145 @@
+{
+  "project": "Automatos AI Platform",
+  "branchName": "ralph/prd-142-wave0-measurement",
+  "description": "PRD-142 Wave 0 — Measurement First (\"Is it working?\" dashboard). Source PRD: docs/PRDS/PRD-142-WAVE0-MEASUREMENT.md. Extension + instrumentation only: surface ONE dashboard section answering the founding question with five real numbers (error rate by subsystem, mission success rate, widget engagement, activation, per-primitive health). REUSE-FIRST (CLAUDE.md §2): record_error (core/utils/exception_telemetry.py) gets a queryable sink; widget_event_log + heartbeat_results + the existing GET /api/analytics/dashboard/success-rate union are reused; the fake successRate:85.0 placeholder in analytics_engine.py is DELETED. NO new frontend page/route — extend frontend/components/dashboard/dashboard.tsx only. NO migrate-and-drop of WorkflowExecution (that is Wave 3 per PLAYBOOK-ENGINE-DESIGN.md §4.2; Wave 0 only reads via the existing union and adds NO new WorkflowExecution reads). NO HARNESS/learning-loop work (Wave 4). NO Grafana board, NO full Playwright net (Wave 2). Phases: A error sink (US-001/002), B reuse+de-fake (US-003/004), C fill gaps (US-005/006), D assemble (US-007), Gate live-verify (US-008). Canonical noun is Mission, never Workflow, in user-facing labels. Every new endpoint is workspace-scoped via get_request_context_hybrid and has a tenant-isolation test.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Persist record_error to a queryable error_events sink (Phase A)",
+      "description": "As the platform, I need structured errors stored in a queryable table so the dashboard can show error rate by subsystem instead of scraping the automatos.errors logger.",
+      "acceptanceCriteria": [
+        "Create an Alembic migration for table error_events: id BIGSERIAL PK, subsystem VARCHAR(64) NOT NULL, operation VARCHAR(128) NOT NULL, error_type VARCHAR(128), error_message VARCHAR(500), workspace_id UUID NULL, agent_id INT NULL, action_name VARCHAR(128) NULL, event_data JSONB NOT NULL DEFAULT '{}', created_at TIMESTAMP NOT NULL DEFAULT now()",
+        "Add indexes idx_error_events_subsystem_created (subsystem, created_at) and idx_error_events_workspace_created (workspace_id, created_at)",
+        "Add a core/models/error_event.py ORM model following the widget_event_log.py / ToolExecutionLog single-table-JSONB pattern (extend_existing=True)",
+        "Add a best-effort persistence path so record_error rows also land in error_events WITHOUT changing record_error's keyword-only signature or its never-raises contract (mirror modules/widgets/telemetry.py log_widget_event: try/except catch-all, rollback, swallow). The existing automatos.errors logger emit MUST remain unchanged",
+        "If the error_events sink is unavailable, record_error logs and returns — it NEVER raises (telemetry must not mask the original failure)",
+        "Create orchestrator/tests/test_error_events_sink.py: test_record_error_persists_row, test_record_error_sink_failure_is_swallowed, test_record_error_truncates_message_in_db, test_none_workspace_persists",
+        "Type checks pass (mypy/pyright)",
+        "pytest orchestrator/tests/test_error_events_sink.py green"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Reuse-checked 2026-05-29: no existing error-event table exists; closest is the automatos.errors logger (core/utils/exception_telemetry.py:22). A focused append-only table is justified and follows the established widget_event_log pattern. Do NOT change record_error's signature — handlers already call it with keyword args. Do NOT mass-adopt record_error across handlers here (that was out of scope in PRD-141 US-001 and stays out). The migration must be online-safe (new table, no backfill, no NOT NULL on an existing large table)."
+    },
+    {
+      "id": "US-002",
+      "title": "Error-rate-by-subsystem aggregation endpoint (Phase A)",
+      "description": "As an operator, I need one endpoint that returns error counts grouped by subsystem over a window so the dashboard can render the error-rate tile.",
+      "acceptanceCriteria": [
+        "Add GET /api/analytics/errors/by-subsystem?window=24h to an existing analytics router (api/analytics_real.py or api/analytics.py — do NOT create a new router file)",
+        "Workspace-scoped via ctx = Depends(get_request_context_hybrid); filter error_events by ctx.workspace_id",
+        "Returns {window, total, by_subsystem: [{subsystem, count, rate}], generated_at}; rate = count/total over the window, 0 when total is 0 (no divide-by-zero)",
+        "Query uses idx_error_events_subsystem_created and the created_at window — no full-table scan",
+        "Create orchestrator/tests/test_errors_by_subsystem_endpoint.py: test_groups_by_subsystem, test_window_filtering, test_empty_window_returns_zero, test_workspace_isolation",
+        "Type checks pass",
+        "pytest orchestrator/tests/test_errors_by_subsystem_endpoint.py green"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "BLOCKED by US-001 (needs the error_events table). Reuse the existing analytics router prefix /api/analytics (api/analytics_real.py:32) — do not add a new router. workspace_id NULL rows (system-level errors) are excluded from the workspace-scoped view by design; that is correct, not a bug."
+    },
+    {
+      "id": "US-003",
+      "title": "Delete the fake agent-metrics placeholders (Phase B)",
+      "description": "As a user, I need the dashboard to show real numbers, not a hardcoded 85% success rate.",
+      "acceptanceCriteria": [
+        "In orchestrator/core/services/analytics_engine.py _get_agent_metrics (line ~107) remove the hardcoded successRate: 85.0, avgExecutionTime: 2.5, totalTokensUsed: 0, recentExecutions: 0 placeholder values",
+        "Replace with real values where a real source exists — mission success via the same OrchestrationRun union used by api/analytics_real.py:53; OMIT any field that has no real source rather than fake it",
+        "grep -n '85.0' orchestrator/core/services/analytics_engine.py returns ZERO matches",
+        "grep -n '# Placeholder' orchestrator/core/services/analytics_engine.py returns ZERO matches",
+        "Before removing any key, verify it is not consumed by frontend/components/dashboard/metric-cards.tsx — keep the return-shape stable for fields the UI reads",
+        "Create orchestrator/tests/test_analytics_engine_real_metrics.py: test_agent_metrics_no_placeholders, test_success_rate_matches_orchestration_runs",
+        "Type checks pass",
+        "pytest green; existing analytics tests green"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Cheapest honesty win — land it first. The fake 85.0 is the literal symptom Wave 0 exists to kill (analytics_engine.py:118). This also satisfies the no-hardcoded-values rule (CLAUDE.md §4). Do NOT touch _get_workflow_metrics (line 144-174) — its mission success math is already real and correct; only _get_agent_metrics is faked."
+    },
+    {
+      "id": "US-004",
+      "title": "Widget-engagement aggregation endpoint (Phase B)",
+      "description": "As an operator, I need widget engagement counts so I can see whether the widgets we ship are actually used.",
+      "acceptanceCriteria": [
+        "Add GET /api/analytics/widget-engagement?window=7d to an existing analytics router (no new router file)",
+        "Workspace-scoped: resolve the sites belonging to ctx.workspace_id, then aggregate widget_event_log for those sites",
+        "Returns {window, by_event_type: [{event_type, count}], sessions, generated_at} grouped over WIDGET_EVENT_TYPES (core/models/widget_event_log.py)",
+        "Query uses idx_widget_event_log_type_created and is read-only — ZERO writes to widget_event_log",
+        "grep -rn 'WidgetEventLog(' orchestrator/api/ in the new endpoint's file returns ZERO matches (read-only; no row construction)",
+        "Create orchestrator/tests/test_widget_engagement_endpoint.py: test_groups_by_event_type, test_window_filtering, test_workspace_site_scoping, test_empty_returns_zero",
+        "Type checks pass",
+        "pytest orchestrator/tests/test_widget_engagement_endpoint.py green"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "Reuse-checked: widget_event_log table + idx_widget_event_log_type_created + writer log_widget_event all exist (PRD-008-A); only the read/aggregation side is missing. Do NOT add new event types or touch the writer modules/widgets/telemetry.py."
+    },
+    {
+      "id": "US-005",
+      "title": "Activation metric — define + compute (Phase C)",
+      "description": "As a founder, I need an activation number so I know whether new workspaces reach first value.",
+      "acceptanceCriteria": [
+        "Add GET /api/analytics/activation to an existing analytics router (no new router file)",
+        "Definition (documented in the endpoint docstring): a workspace is activated when it has >=1 OrchestrationRun with state == 'completed'. Activation rate = activated workspaces / provisioned workspaces",
+        "Returns {activated, total_workspaces, rate, generated_at}; rate is 0 when total_workspaces is 0 (no divide-by-zero); NO fake fallback value",
+        "Computed from OrchestrationRun only — NO new table, NO new WorkflowExecution reads",
+        "Create orchestrator/tests/test_activation_endpoint.py: test_activation_counts_completed_missions, test_rate_zero_when_no_workspaces, test_workspace_with_no_completed_run_not_activated",
+        "Type checks pass",
+        "pytest orchestrator/tests/test_activation_endpoint.py green"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "Use the canonical RunState.COMPLETED.value (core/models/orchestration_enums.py) for the completed check, matching api/analytics_real.py:69 — do not hardcode the string 'completed' if the enum is available. This is a platform-level rate across workspaces; it is the one tile that is intentionally NOT filtered to a single workspace_id."
+    },
+    {
+      "id": "US-006",
+      "title": "Per-primitive health rollup endpoint (Phase C)",
+      "description": "As an operator, I need each of the 8 primitives shown green/degraded/down from the heartbeats we already run.",
+      "acceptanceCriteria": [
+        "Add GET /api/analytics/primitive-health to an existing analytics router (no new router file)",
+        "Roll the latest heartbeat_results findings (api/heartbeat.py) into per-primitive status for: chat, memory, RAG, NL2SQL, graph, missions, playbooks, channels",
+        "Returns {primitives: [{name, status, last_checked}], generated_at}; status in {green, degraded, down, unknown}",
+        "Primitives with no heartbeat coverage report 'unknown' — NOT faked green",
+        "Read-only rollup: NO change to the heartbeat writer, schedule, or heartbeat_results schema",
+        "Create orchestrator/tests/test_primitive_health_endpoint.py: test_maps_findings_to_primitives, test_missing_coverage_is_unknown, test_latest_result_wins",
+        "Type checks pass",
+        "pytest orchestrator/tests/test_primitive_health_endpoint.py green"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "Reuse-checked: heartbeat_results table + GET /api/heartbeat/analytics (api/heartbeat.py:284) exist. If the heartbeat findings do not cleanly map to all 8 primitive names, report the unmapped ones as 'unknown' rather than inventing coverage — honest gaps over fake greens. Keep the primitive name list aligned with PRD-142 §12 Wave 3 (chat/memory/RAG/NL2SQL/graph/missions/playbooks/channels)."
+    },
+    {
+      "id": "US-007",
+      "title": "Assemble the \"Is it working?\" dashboard section (Phase D)",
+      "description": "As a user, I need the five metrics on one screen, on the dashboard I already use — not a new page.",
+      "acceptanceCriteria": [
+        "Add ONE section to frontend/components/dashboard/dashboard.tsx (or a new child component it renders) titled 'Is it working?' with five tiles: Activation, Mission success rate, Per-primitive health, Error rate by subsystem, Widget engagement",
+        "NO new route and NO new page: no new page.tsx is added anywhere under frontend/app/ (verify: git status shows zero new files matching frontend/app/**/page.tsx)",
+        "Add hooks to frontend/hooks/use-analytics-api.ts (or use-unified-analytics.ts) calling the four new endpoints plus the existing /api/analytics/dashboard/success-rate",
+        "Reuse existing Card / MetricCards / recharts patterns and the ApiResponse<T> envelope; tile labels use the canonical noun Mission (never Workflow)",
+        "Loading and empty states handled (no crash on zero data); NO console.log; NO hardcoded metric values in the component",
+        "tsc type checks pass for the frontend",
+        "The section renders without runtime error against the live API (verified in US-008)"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "BLOCKED by US-002, US-003, US-004, US-005, US-006 (renders all five). Extend the existing dashboard — do NOT rewrite the working UI (feedback-ui-changes). Full Playwright E2E for this section is Wave 2 (TEST-PLAN J-series), NOT here. The Dashboard component already wires recharts + react-query hooks (frontend/components/dashboard/dashboard.tsx:65) — follow that exact pattern."
+    },
+    {
+      "id": "US-008",
+      "title": "Live verification gate (operational — not code)",
+      "description": "As Gerard, I need to see five real numbers on a live workspace before Wave 0 is declared done.",
+      "acceptanceCriteria": [
+        "On the deployed Railway frontend, the dashboard 'Is it working?' section renders five REAL values for a workspace with real data (push -> Railway -> verify live URL; never localhost)",
+        "grep -n '85.0' orchestrator/core/services/analytics_engine.py returns ZERO matches (the fake placeholder is gone)",
+        "All four new endpoints return 200 with the documented shapes for that workspace",
+        "Tenant isolation spot-checked live: a second workspace sees its own numbers, not the first's",
+        "passes flips to true ONLY after the live screen is confirmed by Gerard"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "This is an operational gate, not a code story (mirrors PRD-141 US-008/016/026). Do NOT auto-flip passes — it requires Gerard's live confirmation on the Railway URL. This enforces the no-local-builds rule (prod verification only)."
+    }
+  ]
+}
