@@ -409,3 +409,83 @@ def test_applied_rollback_is_not_itself_rolled_back():
     cards = {"42": {"agent_id": "42", "agent_name": "ScribeAgent", "classification": "REGRESSION"}}
     # Still REGRESSION, but the empty snapshot makes it ineligible — no rollback.
     assert svc._detect_auto_applied_regressions(baseline, cards) == []
+
+
+# ---------------------------------------------------------------------------
+# US-023: expanded prescription vocabulary (correct action names)
+# ---------------------------------------------------------------------------
+
+
+def test_tool_assignment_add_prescription():
+    """tool_assignment_add applies via platform_assign_tool_to_agent using the
+    VERIFIED param app_name (not tool_name)."""
+    svc = HarnessService()
+    ex = _FakeExecutor(tasks=[], agents=[])
+    rx = {
+        "prescription_id": "rx-tool-add",
+        "change_type": "tool_assignment_add",
+        "target_id": 42,
+        "proposed_value": {"app_name": "GMAIL"},
+    }
+    result = asyncio.run(svc._auto_apply_prescription(ex, rx))
+
+    assert result["success"] is True
+    assert (
+        "platform_assign_tool_to_agent",
+        {"agent_id": 42, "app_name": "GMAIL"},
+    ) in ex.calls
+
+
+def test_tool_assignment_remove_prescription():
+    """tool_assignment_remove applies via platform_unassign_tool_from_agent."""
+    svc = HarnessService()
+    ex = _FakeExecutor(tasks=[], agents=[])
+    rx = {
+        "prescription_id": "rx-tool-rm",
+        "change_type": "tool_assignment_remove",
+        "target_id": 42,
+        "proposed_value": {"app_name": "GITHUB"},
+    }
+    result = asyncio.run(svc._auto_apply_prescription(ex, rx))
+
+    assert result["success"] is True
+    assert (
+        "platform_unassign_tool_from_agent",
+        {"agent_id": 42, "app_name": "GITHUB"},
+    ) in ex.calls
+
+
+def test_power_mode_change_type_is_not_implemented():
+    """Agents have no power_mode attribute (it is mission-run scoped), so
+    power_mode_* prescriptions are refused, not applied to platform_update_agent."""
+    svc = HarnessService()
+    ex = _FakeExecutor(tasks=[], agents=[])
+    for change_type in ("power_mode_upgrade", "power_mode_downgrade"):
+        rx = {
+            "prescription_id": f"rx-{change_type}",
+            "change_type": change_type,
+            "target_id": 42,
+            "proposed_value": {"power_mode": "max"},
+        }
+        result = asyncio.run(svc._auto_apply_prescription(ex, rx))
+        assert result["success"] is False
+        assert "Unknown auto-apply change_type" in result["error"]
+    # Nothing was written to any agent.
+    assert "platform_update_agent" not in ex.actions()
+
+
+def test_routing_rule_add_is_not_implemented():
+    """routing_rule_add is excluded — no platform_create_routing_rule exists."""
+    svc = HarnessService()
+    ex = _FakeExecutor(tasks=[], agents=[])
+    rx = {
+        "prescription_id": "rx-route",
+        "change_type": "routing_rule_add",
+        "target_id": 42,
+        "proposed_value": {"rule": "x->y"},
+    }
+    result = asyncio.run(svc._auto_apply_prescription(ex, rx))
+
+    assert result["success"] is False
+    assert "Unknown auto-apply change_type" in result["error"]
+    assert ex.calls == []

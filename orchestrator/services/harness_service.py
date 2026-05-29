@@ -1293,7 +1293,27 @@ class HarnessService:
                     "agent_id": target_id,
                     "model_config": {"model": proposed.get("model")},
                 })
+            elif change_type == "tool_assignment_add":
+                # Verified against actions_assignments.py: the param is app_name
+                # (the Composio app identifier), NOT tool_name. Idempotent —
+                # re-activates a previously deactivated assignment.
+                result = await executor.execute("platform_assign_tool_to_agent", {
+                    "agent_id": target_id,
+                    "app_name": proposed.get("app_name"),
+                })
+            elif change_type == "tool_assignment_remove":
+                # Deactivates the assignment (is_active=False) by default, keeping
+                # the audit trail. app_name is accepted by both assign/unassign.
+                result = await executor.execute("platform_unassign_tool_from_agent", {
+                    "agent_id": target_id,
+                    "app_name": proposed.get("app_name"),
+                })
             else:
+                # power_mode_upgrade/downgrade and routing_rule_add are intentionally
+                # NOT handled: agents have no power_mode attribute (power mode is
+                # mission-run scoped via run_config + system_settings, never read off
+                # an agent), and no platform_create_routing_rule action exists. Both
+                # would need net-new platform work outside this PRD.
                 return {"success": False, "error": f"Unknown auto-apply change_type: {change_type}"}
             return result if isinstance(result, dict) else {"success": True}
         except Exception as exc:
