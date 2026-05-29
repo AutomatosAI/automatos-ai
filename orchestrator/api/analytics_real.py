@@ -23,6 +23,7 @@ from core.models.orchestration import OrchestrationRun, OrchestrationTask
 from core.models.orchestration_enums import RunState, TaskState, TERMINAL_RUN_STATES
 from core.models.sites import Site
 from core.models.widget_event_log import WIDGET_EVENT_TYPES, WidgetEventLog
+from core.models.workspaces import Workspace
 import logging
 import psutil
 import time
@@ -263,6 +264,51 @@ async def get_widget_engagement(
         "window": window,
         "by_event_type": by_event_type,
         "sessions": int(sessions),
+        "generated_at": datetime.utcnow().isoformat(),
+    }
+
+
+@router.get("/activation")
+async def get_activation(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Platform-wide activation rate (PRD-142 Wave 0 US-005).
+
+    Definition: a workspace is "activated" when it has >=1
+    ``OrchestrationRun`` with ``state == RunState.COMPLETED.value`` —
+    i.e. at least one mission has reached the canonical terminal success
+    state (``core/models/orchestration_enums.py``). The activation rate
+    is ``activated_workspaces / provisioned_workspaces``.
+
+    This is the one Wave 0 tile that is intentionally NOT filtered to a
+    single ``workspace_id`` — it answers a platform-level founder
+    question ("are new workspaces reaching first value?"), not a tenant
+    question. The endpoint still requires authentication via
+    ``get_request_context_hybrid`` to gate access to the aggregate.
+
+    Computed from ``OrchestrationRun`` only — NO new table, NO
+    ``WorkflowExecution`` reads (Wave 0 scope; the ``WorkflowExecution``
+    drop is owned by Wave 3 per PLAYBOOK-ENGINE-DESIGN.md §4.2).
+
+    Returns ``{activated, total_workspaces, rate, generated_at}``;
+    ``rate = activated / total_workspaces``, 0 when ``total_workspaces``
+    is 0 (no divide-by-zero, no fake fallback value).
+    """
+    activated = (
+        db.query(func.count(func.distinct(OrchestrationRun.workspace_id)))
+        .filter(OrchestrationRun.state == RunState.COMPLETED.value)
+        .scalar()
+    ) or 0
+
+    total_workspaces = db.query(func.count(Workspace.id)).scalar() or 0
+
+    rate = (activated / total_workspaces) if total_workspaces > 0 else 0
+
+    return {
+        "activated": int(activated),
+        "total_workspaces": int(total_workspaces),
+        "rate": rate,
         "generated_at": datetime.utcnow().isoformat(),
     }
 

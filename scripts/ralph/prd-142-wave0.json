@@ -88,8 +88,8 @@
         "pytest orchestrator/tests/test_activation_endpoint.py green"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": "Use the canonical RunState.COMPLETED.value (core/models/orchestration_enums.py) for the completed check, matching api/analytics_real.py:69 — do not hardcode the string 'completed' if the enum is available. This is a platform-level rate across workspaces; it is the one tile that is intentionally NOT filtered to a single workspace_id."
+      "passes": true,
+      "notes": "Use the canonical RunState.COMPLETED.value (core/models/orchestration_enums.py) for the completed check, matching api/analytics_real.py:69 — do not hardcode the string 'completed' if the enum is available. This is a platform-level rate across workspaces; it is the one tile that is intentionally NOT filtered to a single workspace_id. DONE 2026-05-29: GET /api/analytics/activation added to api/analytics_real.py (existing router, no new file). Activation count = COUNT(DISTINCT OrchestrationRun.workspace_id) filtered to state == RunState.COMPLETED.value (canonical enum, never the literal 'completed'); denominator = COUNT(Workspace.id). Returns {activated, total_workspaces, rate, generated_at}; rate=activated/total_workspaces with no divide-by-zero and no fake fallback when zero workspaces. Intentionally platform-level — auth via ctx.Depends(get_request_context_hybrid) but NO workspace_id filter on the data (per US-005 notes). 3 new tests green in tests/test_activation_endpoint.py incl. completed-state-filter guardrail; US-001 (8), US-002 (4), US-003 (2), US-004 (4), exception_telemetry (4) all still green (25 total)."
     },
     {
       "id": "US-006",
