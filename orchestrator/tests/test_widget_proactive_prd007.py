@@ -40,7 +40,7 @@ def test_default_widget_proactive_shape():
     assert cfg["enabled"] is False, "must default to OFF — opt-in"
     assert cfg["page_types"] == ["product"]
     assert cfg["triggers"] == [{"type": "time_on_page", "seconds": 20}]
-    assert cfg["frequency_cap"] == {"scope": "session", "max_pops": 1}
+    assert cfg["frequency_cap"] == {"scope": "product_session", "max_pops": 1}
     assert cfg["greeting_source"] == "agent_with_canned_fallback"
     assert cfg["canned_fallback"] == "Need a hand finding the right product?"
     assert cfg["agent_timeout_ms"] == 1500

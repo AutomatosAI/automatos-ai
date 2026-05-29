@@ -112,7 +112,10 @@ DEFAULT_WIDGET_PROACTIVE_CONFIG: dict = {
     "triggers": [
         {"type": "time_on_page", "seconds": 20},
     ],
-    "frequency_cap": {"scope": "session", "max_pops": 1},
+    # product_session keys the frequency-cap slot by product handle, so the
+    # opener fires once PER product per session rather than once for the whole
+    # session across every product page (the old "session" behaviour).
+    "frequency_cap": {"scope": "product_session", "max_pops": 1},
     "greeting_source": "agent_with_canned_fallback",
     "canned_fallback": "Need a hand finding the right product?",
     "agent_timeout_ms": 1500,
