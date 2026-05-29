@@ -27,6 +27,29 @@ from .intent_classifier import Intent, IntentResult, get_intent_classifier
 
 logger = logging.getLogger(__name__)
 
+# Strong references to in-flight fire-and-forget tasks. Without this the event
+# loop only holds a weak reference and a background write can be garbage
+# collected mid-flight ("Task was destroyed but it is pending").
+_BACKGROUND_TASKS: set = set()
+
+
+def _spawn_background(coro, *, label: str) -> None:
+    """Schedule a coroutine fire-and-forget, retaining a strong reference.
+
+    Memory writes (Mem0 fact extraction, daily summary, L1/L2 persistence) are
+    network-bound and must never block the streaming response. They run on the
+    module-level UnifiedMemoryService, so they are safe to outlive the request's
+    DB session.
+    """
+    try:
+        task = asyncio.create_task(coro)
+    except RuntimeError:
+        # No running event loop (shouldn't happen on the async request path).
+        logger.debug("[Orchestrator] No event loop for background task '%s' — skipping", label)
+        return
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
+
 
 @dataclass
 class OrchestratedRequest:
@@ -347,7 +370,9 @@ class SmartChatOrchestrator:
         """
         Store a conversation exchange in memory.
 
-        Call this after the LLM responds to save the exchange.
+        Call this after the LLM responds to save the exchange. All writes are
+        scheduled fire-and-forget so the response is never held open on memory
+        persistence.
 
         Args:
             user_message: The user's message
@@ -355,64 +380,64 @@ class SmartChatOrchestrator:
             chat_id: Optional chat session ID
 
         Returns:
-            Success status
+            True once the writes have been scheduled (not a persistence ack).
         """
-        stored = await self.memory_manager.store_conversation(
-            workspace_id=self.workspace_id,
-            agent_id=self.agent_id,
-            user_message=user_message,
-            assistant_response=assistant_response,
-            chat_id=chat_id,
-            widget_mode=self.widget_mode
+        # All memory writes are fire-and-forget. Mem0 fact extraction runs a
+        # synchronous server-side LLM call (seconds), and awaiting it here blocks
+        # the streaming generator — and therefore the HTTP connection — long
+        # after the user has seen the full response. None of these writes feed
+        # back into the current turn, so schedule them and return immediately.
+
+        # Mem0 distilled facts (two-tier global/agent memory)
+        _spawn_background(
+            self.memory_manager.store_conversation(
+                workspace_id=self.workspace_id,
+                agent_id=self.agent_id,
+                user_message=user_message,
+                assistant_response=assistant_response,
+                chat_id=chat_id,
+                widget_mode=self.widget_mode,
+            ),
+            label="store_conversation",
         )
 
-        try:
-            await self.memory_manager.store_daily_summary(
+        # Daily activity log entry
+        _spawn_background(
+            self.memory_manager.store_daily_summary(
                 workspace_id=self.workspace_id,
                 user_message=user_message,
                 assistant_response=assistant_response,
                 agent_id=self.agent_id,
-            )
-        except Exception as exc:
-            logger.debug("[Orchestrator] Daily summary storage skipped: %s", exc)
+            ),
+            label="store_daily_summary",
+        )
 
-        # L2: Store raw exchange in Postgres (fire-and-forget — must not block TTFT)
-        try:
-            asyncio.create_task(
-                self._unified_memory.store_exchange(
+        # L2: raw exchange in Postgres
+        _spawn_background(
+            self._unified_memory.store_exchange(
+                workspace_id=self.workspace_id,
+                agent_id=self.agent_id,
+                user_msg=user_message,
+                assistant_msg=assistant_response,
+                conversation_id=chat_id,
+            ),
+            label="l2_store_exchange",
+        )
+
+        # L1: session in Redis
+        if chat_id:
+            _spawn_background(
+                self._unified_memory.update_session(
                     workspace_id=self.workspace_id,
-                    agent_id=self.agent_id,
+                    conversation_id=chat_id,
                     user_msg=user_message,
                     assistant_msg=assistant_response,
-                    conversation_id=chat_id,
-                )
-            )
-        except Exception:
-            logger.warning(
-                "[Orchestrator] L2 store_exchange failed ws=%s — skipping",
-                self.workspace_id,
-                exc_info=True,
+                ),
+                label="l1_update_session",
             )
 
-        # Update L1 session in Redis (fire-and-forget — must not block response)
-        if chat_id:
-            try:
-                asyncio.create_task(
-                    self._unified_memory.update_session(
-                        workspace_id=self.workspace_id,
-                        conversation_id=chat_id,
-                        user_msg=user_message,
-                        assistant_msg=assistant_response,
-                    )
-                )
-            except Exception:
-                logger.warning(
-                    "[Orchestrator] Session update failed for chat_id=%s — skipping",
-                    chat_id,
-                    exc_info=True,
-                )
-
-        return stored
+        # Writes are scheduled; the turn does not wait on their outcome.
+        return True
 
     def get_user_name(self) -> Optional[str]:
         """Get the user's name if known."""

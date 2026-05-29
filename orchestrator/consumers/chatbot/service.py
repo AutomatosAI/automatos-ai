@@ -696,6 +696,7 @@ class StreamingChatService:
         plan_mode: bool = False,
         attachment_ids: Optional[List[str]] = None,
         model_id: Optional[str] = None,
+        force_text_only: bool = False,
     ) -> Tuple[List[Dict[str, Any]], Optional[List[Dict[str, Any]]], Any]:
         """
         Prepare LLM messages with orchestration, persona, CTO override, and context guard.
@@ -721,6 +722,13 @@ class StreamingChatService:
             if complexity_assessment
             else Complexity.MOLECULE
         )
+        # Proactive openers (force_text_only) are self-contained: page-context
+        # directive in, one line of text out. They carry no complexity_assessment,
+        # so without this they'd default to MOLECULE and take the full
+        # ContextService path (internal tool load + Mem0 read) — exactly the
+        # work stream_response_with_agent already decided to skip. Pin to ATOM.
+        if force_text_only:
+            _complexity = Complexity.ATOM
 
         if _complexity == Complexity.ATOM:
             llm_messages, use_tools, orchestrated = await self._prepare_atom_path(
@@ -728,6 +736,7 @@ class StreamingChatService:
                 atom_tools=all_tools,
                 attachment_ids=attachment_ids,
                 model_id=model_id,
+                force_text_only=force_text_only,
             )
         else:
             llm_messages, use_tools, orchestrated = await self._prepare_full_path(
@@ -803,9 +812,18 @@ class StreamingChatService:
         atom_tools: Optional[List[Dict[str, Any]]] = None,
         attachment_ids: Optional[List[str]] = None,
         model_id: Optional[str] = None,
+        force_text_only: bool = False,
     ) -> Tuple[List[Dict[str, Any]], Optional[List[Dict[str, Any]]], None]:
-        """ATOM path: lightweight memory only, but keeps platform_execute tool."""
-        logger.info("[PRD-68] ATOM path — lightweight (tools=%d), retrieving memory", len(atom_tools or []))
+        """ATOM path: lightweight memory only, but keeps platform_execute tool.
+
+        force_text_only (proactive openers) skips memory retrieval entirely —
+        the opener is self-contained and the Mem0 read only adds latency.
+        """
+        logger.info(
+            "[PRD-68] ATOM path — lightweight (tools=%d, memory=%s)",
+            len(atom_tools or []),
+            "skipped" if force_text_only else "on",
+        )
         _now = datetime.utcnow()
         _time_ctx = (
             "Good morning" if _now.hour < 12
@@ -820,7 +838,12 @@ class StreamingChatService:
                  if isinstance(m, dict) and m.get("role") == "user"),
                 ""
             )
-            if _user_msg and smart_chat.orchestrator and smart_chat.orchestrator.memory_manager:
+            if (
+                not force_text_only
+                and _user_msg
+                and smart_chat.orchestrator
+                and smart_chat.orchestrator.memory_manager
+            ):
                 _mem_result = await smart_chat.orchestrator.memory_manager.retrieve_memories(
                     workspace_id=str(self.workspace_id),
                     agent_id=agent_runtime.agent_id,
@@ -1972,6 +1995,7 @@ class StreamingChatService:
                 plan_mode=plan_mode,
                 attachment_ids=_attachment_ids,
                 model_id=_model_id,
+                force_text_only=force_text_only,
             )
 
             if orchestrated:
