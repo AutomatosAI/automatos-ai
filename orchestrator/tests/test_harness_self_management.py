@@ -489,3 +489,38 @@ def test_routing_rule_add_is_not_implemented():
     assert result["success"] is False
     assert "Unknown auto-apply change_type" in result["error"]
     assert ex.calls == []
+
+
+def test_temperature_adjust_uses_top_level_param():
+    """update_agent reads temperature top-level; a nested model_config is ignored,
+    so the handler must pass temperature directly or the change is a silent no-op."""
+    svc = HarnessService()
+    ex = _FakeExecutor(tasks=[], agents=[])
+    rx = {
+        "prescription_id": "rx-temp",
+        "change_type": "temperature_adjust",
+        "target_id": 42,
+        "proposed_value": {"temperature": 0.4},
+    }
+    asyncio.run(svc._auto_apply_prescription(ex, rx))
+
+    assert ("platform_update_agent", {"agent_id": 42, "temperature": 0.4}) in ex.calls
+
+
+def test_model_change_uses_model_id_param():
+    """update_agent reads the new model as top-level model_id (not nested, not
+    'model'), so the handler must map proposed['model'] -> model_id."""
+    svc = HarnessService()
+    ex = _FakeExecutor(tasks=[], agents=[])
+    rx = {
+        "prescription_id": "rx-model",
+        "change_type": "model_change_same_tier",
+        "target_id": 42,
+        "proposed_value": {"model": "claude-sonnet-4-6"},
+    }
+    asyncio.run(svc._auto_apply_prescription(ex, rx))
+
+    assert (
+        "platform_update_agent",
+        {"agent_id": 42, "model_id": "claude-sonnet-4-6"},
+    ) in ex.calls

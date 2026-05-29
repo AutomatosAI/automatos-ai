@@ -1277,9 +1277,11 @@ class HarnessService:
                     "interval_minutes": proposed.get("interval_minutes"),
                 })
             elif change_type == "temperature_adjust":
+                # update_agent reads temperature as a top-level param (it folds it
+                # into model_config itself); a nested model_config is ignored.
                 result = await executor.execute("platform_update_agent", {
                     "agent_id": target_id,
-                    "model_config": {"temperature": proposed.get("temperature")},
+                    "temperature": proposed.get("temperature"),
                 })
             elif change_type in ("tag_update", "description_update"):
                 update_params = {"agent_id": target_id}
@@ -1289,9 +1291,12 @@ class HarnessService:
                     update_params["description"] = proposed.get("description", "")
                 result = await executor.execute("platform_update_agent", update_params)
             elif change_type == "model_change_same_tier":
+                # update_agent reads the new model as the top-level model_id param
+                # (a nested model_config is ignored). The prescription carries it
+                # under "model", so map model -> model_id here.
                 result = await executor.execute("platform_update_agent", {
                     "agent_id": target_id,
-                    "model_config": {"model": proposed.get("model")},
+                    "model_id": proposed.get("model"),
                 })
             elif change_type == "tool_assignment_add":
                 # Verified against actions_assignments.py: the param is app_name
