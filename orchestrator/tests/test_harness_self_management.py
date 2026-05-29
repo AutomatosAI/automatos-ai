@@ -284,3 +284,128 @@ def test_placeholder_proposed_value_is_refused(monkeypatch):
     assert "placeholder" in changelog["failed"][0]["error"]
     # Not applied -> not ledgered.
     assert "workspace_write_file" not in ex.actions()
+
+
+# ---------------------------------------------------------------------------
+# US-022: auto-rollback on regression
+# ---------------------------------------------------------------------------
+
+
+def test_rollback_on_regression():
+    """An auto-applied change whose target agent is now REGRESSION yields an
+    auto_applied_regression issue with a rollback_spec; a non-regressing target
+    yields nothing."""
+    svc = HarnessService()
+    baseline = {
+        "applied_changes": [
+            {
+                "target_id": 42,
+                "target_name": "ScribeAgent",
+                "change_type": "heartbeat_tune",
+                "current_value_before": {"interval_minutes": 30},
+            },
+        ]
+    }
+    cards = {"42": {"agent_id": "42", "agent_name": "ScribeAgent", "classification": "REGRESSION"}}
+    issues = svc._detect_auto_applied_regressions(baseline, cards)
+
+    assert len(issues) == 1
+    assert issues[0]["root_cause"] == "auto_applied_regression"
+    assert issues[0]["rollback_spec"]["change_type"] == "heartbeat_tune"
+    assert issues[0]["rollback_spec"]["revert_to"] == {"interval_minutes": 30}
+
+    # A STABLE target produces no rollback.
+    cards["42"]["classification"] = "STABLE"
+    assert svc._detect_auto_applied_regressions(baseline, cards) == []
+
+    # An entry with no snapshot is skipped (nothing safe to revert to).
+    cards["42"]["classification"] = "REGRESSION"
+    baseline["applied_changes"][0]["current_value_before"] = {}
+    assert svc._detect_auto_applied_regressions(baseline, cards) == []
+
+
+def test_rollback_reverts_to_snapshot():
+    """_phase_prescribe turns an auto_applied_regression issue into a risk-1
+    prescription whose proposed_value is the snapshot."""
+    svc = HarnessService()
+    diagnosis = {
+        "is_first_run": False,
+        "health_cards": {},
+        "issues": [{
+            "agent_id": "42",
+            "agent_name": "ScribeAgent",
+            "root_cause": "auto_applied_regression",
+            "severity": "high",
+            "detail": "ScribeAgent regressed",
+            "rollback_spec": {
+                "change_type": "heartbeat_tune",
+                "target_id": 42,
+                "revert_to": {"interval_minutes": 30},
+            },
+        }],
+    }
+    prescriptions = asyncio.run(
+        svc._phase_prescribe(_WS_ID, diagnosis, {"agents": []}, db=None)
+    )
+
+    rollbacks = [p for p in prescriptions if p.get("risk_score") == 1]
+    assert len(rollbacks) == 1
+    assert rollbacks[0]["change_type"] == "heartbeat_tune"
+    assert rollbacks[0]["target_id"] == 42
+    assert rollbacks[0]["proposed_value"] == {"interval_minutes": 30}
+
+
+def test_duplicate_applied_changes_emit_single_rollback():
+    """The same field can land in applied_changes twice in one tick (a low-risk
+    auto-apply plus an approved-task apply). A regressing target must yield ONE
+    rollback for that field, not a duplicate."""
+    svc = HarnessService()
+    baseline = {
+        "applied_changes": [
+            {
+                "target_id": 42,
+                "target_name": "ScribeAgent",
+                "change_type": "heartbeat_tune",
+                "current_value_before": {"interval_minutes": 30},
+            },
+            {
+                "target_id": 42,
+                "target_name": "ScribeAgent",
+                "change_type": "heartbeat_tune",
+                "current_value_before": {"interval_minutes": 45},
+            },
+        ]
+    }
+    cards = {"42": {"agent_id": "42", "agent_name": "ScribeAgent", "classification": "REGRESSION"}}
+    issues = svc._detect_auto_applied_regressions(baseline, cards)
+
+    assert len(issues) == 1
+    # First-seen snapshot wins — the true pre-change value, before any same-tick edit.
+    assert issues[0]["rollback_spec"]["revert_to"] == {"interval_minutes": 30}
+
+    # Distinct change_types on the same agent each get their own rollback.
+    baseline["applied_changes"][1]["change_type"] = "description_update"
+    baseline["applied_changes"][1]["current_value_before"] = {"description": "old"}
+    assert len(svc._detect_auto_applied_regressions(baseline, cards)) == 2
+
+
+def test_applied_rollback_is_not_itself_rolled_back():
+    """Oscillation guard: an applied rollback is recorded with current_value={},
+    so even if its target stays REGRESSION on the next tick it must NOT spawn
+    another rollback (rollback-of-rollback)."""
+    svc = HarnessService()
+    # This is what a previously-applied rollback looks like in applied_changes:
+    # _snapshot_current_value({"current_value": {}}) -> {} stored as the snapshot.
+    baseline = {
+        "applied_changes": [
+            {
+                "target_id": 42,
+                "target_name": "ScribeAgent",
+                "change_type": "heartbeat_tune",
+                "current_value_before": {},
+            },
+        ]
+    }
+    cards = {"42": {"agent_id": "42", "agent_name": "ScribeAgent", "classification": "REGRESSION"}}
+    # Still REGRESSION, but the empty snapshot makes it ineligible — no rollback.
+    assert svc._detect_auto_applied_regressions(baseline, cards) == []

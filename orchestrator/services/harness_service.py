@@ -549,6 +549,13 @@ class HarnessService:
 
             health_cards[agent_id] = card
 
+        # US-022: queue rollbacks for auto-applied changes whose target agent
+        # has now regressed (skipped on first run — no prior changes exist).
+        if not is_first_run:
+            issues.extend(
+                self._detect_auto_applied_regressions(baseline, health_cards)
+            )
+
         # Org-level diagnosis
         org_diagnosis = self._compute_org_diagnosis(metrics, baseline)
 
@@ -683,6 +690,34 @@ class HarnessService:
                             ),
                         })
 
+        # US-022: emit risk-1 rollback prescriptions for any auto-applied change
+        # whose target regressed (flagged by _phase_diagnose). These revert to the
+        # snapshot and bypass the rejected-signature filter — a rollback is a
+        # safety action, not a new proposal. current_value is left empty so the
+        # rollback is not itself snapshotted, which prevents rollback-of-rollback
+        # oscillation (a rollback can never become a rollback target).
+        for issue in diagnosis.get("issues", []):
+            if issue.get("root_cause") != "auto_applied_regression":
+                continue
+            spec = issue.get("rollback_spec") or {}
+            if not spec.get("change_type") or not spec.get("revert_to"):
+                continue
+            seq += 1
+            prescriptions.append({
+                "prescription_id": f"rx-{today}-{seq:03d}",
+                "target_type": "agent",
+                "target_id": spec.get("target_id"),
+                "target_name": issue.get("agent_name", "unknown"),
+                "change_type": spec["change_type"],
+                "current_value": {},
+                "proposed_value": spec["revert_to"],
+                "risk_score": 1,
+                "expected_improvement": "Revert auto-applied change that preceded a regression",
+                "rationale": issue.get(
+                    "detail", "Auto-applied change regressed; reverting to prior value."
+                ),
+            })
+
         # Sort: risk ascending, then by prescription_id
         prescriptions.sort(key=lambda p: (p["risk_score"], p["prescription_id"]))
 
@@ -736,8 +771,12 @@ class HarnessService:
                 if result.get("success"):
                     changelog["applied"].append({
                         "prescription_id": rx_id,
+                        "target_id": rx.get("target_id"),
                         "target_name": target_name,
                         "change_type": change_type,
+                        # Snapshot so US-022 can revert this change if the agent
+                        # regresses on the next tick.
+                        "current_value_before": self._snapshot_current_value(rx),
                         "result": "applied",
                     })
                 else:
@@ -846,7 +885,11 @@ class HarnessService:
                 "prev_delta_magnitude": prev_delta,
                 "status": convergence_status,
             },
-            "applied_changes": changelog.get("applied", []),
+            # Persist approved-task applications alongside low-risk auto-applies
+            # so the next tick's DIAGNOSE can roll back either kind on regression.
+            "applied_changes": (
+                changelog.get("applied", []) + changelog.get("applied_from_approved", [])
+            ),
             "queued_changes": changelog.get("queued", []),
         }
 
@@ -1145,6 +1188,66 @@ class HarnessService:
                         rejected.add(f"{parts[0].strip()}:{parts[1].strip()}")
         return rejected
 
+    def _detect_auto_applied_regressions(
+        self,
+        baseline: Optional[Dict[str, Any]],
+        health_cards: Dict[str, Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Find auto-applied changes whose target agent is now REGRESSION.
+
+        Reads the previous tick's applied_changes (low-risk auto-applies plus
+        approved-task applications — both carry current_value_before). For each
+        whose target agent's current card is REGRESSION, emit an
+        'auto_applied_regression' issue carrying a rollback_spec that
+        _phase_prescribe turns into a risk-1 revert. Entries without a target_id
+        or a non-empty snapshot are skipped — there is nothing safe to revert to
+        (this also tolerates pre-US-022 baselines that lack the snapshot).
+        """
+        issues: List[Dict[str, Any]] = []
+        if not baseline:
+            return issues
+        # Dedupe by (target_id, change_type): one tick can apply the same field
+        # twice (a low-risk auto-apply plus an approved-task apply both land in
+        # applied_changes), and we must revert each field once — not emit a
+        # duplicate rollback for the same field.
+        seen: set = set()
+        for change in baseline.get("applied_changes", []):
+            if not isinstance(change, dict):
+                continue
+            target_id = change.get("target_id")
+            revert_to = change.get("current_value_before")
+            change_type = change.get("change_type")
+            # An empty snapshot ({}/None) is how a rollback prescription marks
+            # itself ineligible for further rollback (it is written with
+            # current_value={}); skipping it here is what prevents
+            # rollback-of-rollback oscillation.
+            if target_id is None or not revert_to or not change_type:
+                continue
+            dedupe_key = (str(target_id), change_type)
+            if dedupe_key in seen:
+                continue
+            card = health_cards.get(str(target_id))
+            if not card or card.get("classification") != "REGRESSION":
+                continue
+            seen.add(dedupe_key)
+            target_name = change.get("target_name", card.get("agent_name", "unknown"))
+            issues.append({
+                "agent_id": str(target_id),
+                "agent_name": target_name,
+                "root_cause": "auto_applied_regression",
+                "severity": "high",
+                "detail": (
+                    f"{target_name} regressed after HARNESS auto-applied "
+                    f"{change_type} — reverting to prior value"
+                ),
+                "rollback_spec": {
+                    "change_type": change_type,
+                    "target_id": target_id,
+                    "revert_to": revert_to,
+                },
+            })
+        return issues
+
     async def _auto_apply_prescription(
         self, executor: "PlatformActionExecutor", rx: Dict[str, Any]
     ) -> Dict[str, Any]:
@@ -1317,7 +1420,19 @@ class HarnessService:
         so US-022 can roll back to it on regression.
         """
         current = rx.get("current_value")
-        return current if isinstance(current, dict) else {}
+        if isinstance(current, dict):
+            return current
+        # Rollback prescriptions legitimately carry current_value={} (a dict), so
+        # reaching here means a non-dict slipped through (e.g. a mis-parsed board
+        # task). The change stays safe — it just becomes ineligible for rollback —
+        # but log it so the dropped snapshot is visible rather than silent.
+        if current is not None:
+            logger.warning(
+                "[HARNESS] prescription %s has non-dict current_value (%s); "
+                "recording empty snapshot — change will be ineligible for rollback",
+                rx.get("prescription_id"), type(current).__name__,
+            )
+        return {}
 
     @staticmethod
     def _applied_tasks_path(workspace_id: UUID) -> str:
