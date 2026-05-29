@@ -51,8 +51,13 @@ from config import config
 import api.harness_commands as hc
 
 _WS_ID = "00000000-0000-0000-0000-000000000001"
-_MISSING_VOLUME = "/tmp/harness-commands-test-no-such-volume"
 _RX_ID = "rx-esc-1"
+
+
+def _ledger_path(volume, workspace_id=_WS_ID):
+    """The applied-tasks ledger path — _write_applied_tasks writes it and
+    _read_applied_tasks reads it (the command path persists here on /approve)."""
+    return os.path.join(str(volume), str(workspace_id), "harness", "applied_tasks.json")
 
 
 def _harness_task(
@@ -152,10 +157,10 @@ def _patch_executor(monkeypatch, ex):
     monkeypatch.setattr(hc, "_make_executor", lambda db, workspace_id: ex)
 
 
-def test_handle_approve_command(monkeypatch):
+def test_handle_approve_command(monkeypatch, tmp_path):
     """Admin /approve applies the prescription now and records it in the ledger."""
     monkeypatch.setattr(config, "HARNESS_SELF_MANAGEMENT_ENABLED", True)
-    monkeypatch.setattr(config, "WORKSPACE_VOLUME_PATH", _MISSING_VOLUME)
+    monkeypatch.setattr(config, "WORKSPACE_VOLUME_PATH", str(tmp_path))
     task = _harness_task(task_id=7)
     ex = _FakeExecutor(tasks=[task], agents=[{"id": 42, "name": "ScribeAgent"}])
     _patch_executor(monkeypatch, ex)
@@ -171,9 +176,12 @@ def test_handle_approve_command(monkeypatch):
         "platform_configure_agent_heartbeat",
         {"agent_id": 42, "interval_minutes": 90},
     ) in ex.calls
-    # The board task was marked done and the ledger persisted.
+    # The board task was marked done and the ledger persisted to disk — the same
+    # store _read_applied_tasks reads, so a second /approve is a no-op (idempotent).
     assert ("platform_update_task_status", {"task_id": 7, "status": "done"}) in ex.calls
-    assert "workspace_write_file" in ex.actions()
+    assert os.path.exists(_ledger_path(tmp_path))
+    ledger = hc.get_harness_service()._read_applied_tasks(_WS_ID)
+    assert "7" in {str(i) for i in ledger["applied_task_ids"]}
 
 
 def test_handle_reject_command(monkeypatch):
@@ -197,10 +205,10 @@ def test_handle_reject_command(monkeypatch):
     assert "platform_configure_agent_heartbeat" not in ex.actions()
 
 
-def test_handle_unknown_rx_id(monkeypatch):
+def test_handle_unknown_rx_id(monkeypatch, tmp_path):
     """An rx id with no matching queued task returns not-found, no mutation."""
     monkeypatch.setattr(config, "HARNESS_SELF_MANAGEMENT_ENABLED", True)
-    monkeypatch.setattr(config, "WORKSPACE_VOLUME_PATH", _MISSING_VOLUME)
+    monkeypatch.setattr(config, "WORKSPACE_VOLUME_PATH", str(tmp_path))
     task = _harness_task(task_id=7, rx_id="rx-different")
     ex = _FakeExecutor(tasks=[task], agents=[{"id": 42, "name": "ScribeAgent"}])
     _patch_executor(monkeypatch, ex)
@@ -215,10 +223,11 @@ def test_handle_unknown_rx_id(monkeypatch):
     assert "platform_configure_agent_heartbeat" not in ex.actions()
 
 
-def test_handle_already_applied(monkeypatch):
+def test_handle_already_applied(monkeypatch, tmp_path):
     """A second /approve is idempotent: the ledger already has the task id, so
     nothing is applied again."""
     monkeypatch.setattr(config, "HARNESS_SELF_MANAGEMENT_ENABLED", True)
+    monkeypatch.setattr(config, "WORKSPACE_VOLUME_PATH", str(tmp_path))
     task = _harness_task(task_id=7)
     ex = _FakeExecutor(tasks=[task], agents=[{"id": 42, "name": "ScribeAgent"}])
     _patch_executor(monkeypatch, ex)
@@ -237,7 +246,31 @@ def test_handle_already_applied(monkeypatch):
     assert result["success"] is True
     assert result.get("already_applied") is True
     assert "platform_configure_agent_heartbeat" not in ex.actions()
-    assert "workspace_write_file" not in ex.actions()
+    # Nothing re-applied -> no fresh ledger write to disk.
+    assert not os.path.exists(_ledger_path(tmp_path))
+
+
+def test_handle_approve_rejected_task_refused(monkeypatch, tmp_path):
+    """A /reject keeps the board task's harness/rx tags, so it still surfaces in
+    the tag-filtered list and _find_task_by_rx still matches it. A later /approve
+    must NOT resurrect it: refused before any apply or ledger write."""
+    monkeypatch.setattr(config, "HARNESS_SELF_MANAGEMENT_ENABLED", True)
+    monkeypatch.setattr(config, "WORKSPACE_VOLUME_PATH", str(tmp_path))
+    task = _harness_task(task_id=7)
+    task["status"] = "rejected"  # already rejected; tags intact
+    ex = _FakeExecutor(tasks=[task], agents=[{"id": 42, "name": "ScribeAgent"}])
+    _patch_executor(monkeypatch, ex)
+    db = _FakeDB(member=_ADMIN_MEMBER)
+
+    result = asyncio.run(
+        hc.handle_harness_command(db, _WS_ID, "/approve", _RX_ID, _ADMIN)
+    )
+
+    assert result["success"] is False
+    assert "already rejected" in result["message"].lower()
+    # Nothing applied, no ledger written to disk.
+    assert "platform_configure_agent_heartbeat" not in ex.actions()
+    assert not os.path.exists(_ledger_path(tmp_path))
 
 
 def test_unauthorized_caller_rejected(monkeypatch):

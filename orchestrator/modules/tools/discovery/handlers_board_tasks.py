@@ -120,6 +120,16 @@ async def list_board_tasks(db: Session, workspace_id: UUID, params: Dict[str, An
     if priority:
         query = query.filter(BoardTask.priority == priority)
 
+    # Tag filter — return tasks whose tags include ALL requested tags. BoardTask.tags
+    # is JSONB, so .contains([...]) compiles to `tags @> [...]` (array containment).
+    # HARNESS self-management relies on this to find its own '[HARNESS]' tasks
+    # (tagged 'harness' + 'rx:{id}'); without it the lookup returns unrelated tasks.
+    tags = params.get("tags")
+    if isinstance(tags, str):
+        tags = [tags]
+    if isinstance(tags, list) and tags:
+        query = query.filter(BoardTask.tags.contains(tags))
+
     agent_name = params.get("assigned_agent_name")
     if agent_name:
         from core.models import Agent
@@ -149,8 +159,10 @@ async def list_board_tasks(db: Session, workspace_id: UUID, params: Dict[str, An
         result.append({
             "id": t.id,
             "title": t.title,
+            "description": t.description,
             "status": t.status,
             "priority": t.priority,
+            "tags": t.tags or [],
             "assigned_agent": agents_map.get(t.assigned_agent_id, "unassigned"),
             "created_at": str(t.created_at) if t.created_at else None,
             "started_at": str(t.started_at) if t.started_at else None,

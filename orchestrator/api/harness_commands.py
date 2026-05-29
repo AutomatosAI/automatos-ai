@@ -170,6 +170,16 @@ async def handle_harness_command(
             "message": f"No pending HARNESS change found for {rx_id}",
         }
 
+    # A rejected prescription must never be resurrected by a later /approve:
+    # the board task keeps its 'harness'/'rx:' tags after rejection, so it still
+    # surfaces in the tag-filtered list and _find_task_by_rx still matches it.
+    # /reject of an already-rejected task is a harmless idempotent no-op.
+    if cmd == "approve" and str(task.get("status") or "").lower() == "rejected":
+        return {
+            "success": False,
+            "message": f"{rx_id} was already rejected and cannot be approved",
+        }
+
     if cmd == "approve":
         return await _approve(svc, executor, workspace_id, task, rx_id, caller_identity)
     return await _reject(db, workspace_id, task, rx_id, caller_identity)
@@ -235,7 +245,7 @@ async def _approve(
         "approved_by": user_id,
     }
     applied_ids.add(task_id)
-    await svc._write_applied_tasks(executor, workspace_id, ledger, applied_ids, [entry])
+    svc._write_applied_tasks(workspace_id, ledger, applied_ids, [entry])
 
     logger.info(
         "[HARNESS] APPROVED rx=%s (%s for %s) in workspace=%s by user=%s",

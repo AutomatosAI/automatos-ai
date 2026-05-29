@@ -984,10 +984,7 @@ class HarnessService:
         artifacts: Dict[str, str] = {}
         for label, path, content in files_to_write:
             try:
-                await executor.execute("workspace_write_file", {
-                    "path": path,
-                    "content": content,
-                })
+                self._write_workspace_file(workspace_id, path, content)
                 artifacts[label] = "ok"
             except Exception as exc:
                 logger.error("[HARNESS] Failed to write %s (%s): %s", label, path, exc, exc_info=True)
@@ -1137,6 +1134,30 @@ class HarnessService:
                 "[HARNESS] Failed to write last_run.json for %s: %s",
                 workspace_id, exc,
             )
+
+    def _write_workspace_file(self, workspace_id: UUID, rel_path: str, content: str) -> None:
+        """Persist a HARNESS artifact directly under the workspace volume.
+
+        HARNESS reads (_read_baseline / _read_applied_tasks / _read_last_run) go
+        straight to the workspace volume on disk, so writes MUST hit the same
+        store. ``workspace_write_file`` is an agent tool-execution primitive, not
+        a registered platform action, so routing harness writes through
+        ``executor.execute("workspace_write_file", ...)`` silently returns an
+        "unknown action" error and the ledger / baseline never persist. Writing
+        directly (like _write_last_run) keeps reads and writes on one store and
+        raises on a real I/O error so callers record the failure, never mask it.
+        """
+        from config import config
+        import os
+
+        abs_path = os.path.join(
+            config.WORKSPACE_VOLUME_PATH,
+            str(workspace_id),
+            rel_path.lstrip("/"),
+        )
+        os.makedirs(os.path.dirname(abs_path), exist_ok=True)
+        with open(abs_path, "w") as f:
+            f.write(content)
 
     @staticmethod
     def _resolve_auto_agent(
@@ -1480,8 +1501,8 @@ class HarnessService:
                     })
 
             if newly_applied:
-                await self._write_applied_tasks(
-                    executor, workspace_id, ledger, applied_ids, newly_applied
+                self._write_applied_tasks(
+                    workspace_id, ledger, applied_ids, newly_applied
                 )
         except Exception as exc:
             # A failure here means human-approved changes were silently dropped —
@@ -1570,23 +1591,28 @@ class HarnessService:
             )
         return {"applied_task_ids": [], "entries": []}
 
-    async def _write_applied_tasks(
+    def _write_applied_tasks(
         self,
-        executor: "PlatformActionExecutor",
         workspace_id: UUID,
         ledger: Dict[str, Any],
         applied_ids: set,
         newly_applied: List[Dict[str, Any]],
     ) -> None:
-        """Persist the applied-tasks ledger via the workspace file store."""
+        """Persist the applied-tasks ledger to the workspace volume on disk.
+
+        Writes to the same path _read_applied_tasks reads, so the idempotency
+        key round-trips. See _write_workspace_file for why this is not routed
+        through the executor.
+        """
         ledger["applied_task_ids"] = sorted(applied_ids)
         ledger.setdefault("entries", []).extend(newly_applied)
         ledger["updated_at"] = datetime.now(timezone.utc).isoformat()
         try:
-            await executor.execute("workspace_write_file", {
-                "path": "/harness/applied_tasks.json",
-                "content": json.dumps(ledger, indent=2),
-            })
+            self._write_workspace_file(
+                workspace_id,
+                "/harness/applied_tasks.json",
+                json.dumps(ledger, indent=2),
+            )
         except Exception as exc:
             logger.warning(
                 "[HARNESS] Failed to persist applied_tasks ledger for %s: %s",
