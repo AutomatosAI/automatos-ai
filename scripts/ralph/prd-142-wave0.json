@@ -71,8 +71,8 @@
         "pytest orchestrator/tests/test_widget_engagement_endpoint.py green"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": "Reuse-checked: widget_event_log table + idx_widget_event_log_type_created + writer log_widget_event all exist (PRD-008-A); only the read/aggregation side is missing. Do NOT add new event types or touch the writer modules/widgets/telemetry.py."
+      "passes": true,
+      "notes": "Reuse-checked: widget_event_log table + idx_widget_event_log_type_created + writer log_widget_event all exist (PRD-008-A); only the read/aggregation side is missing. Do NOT add new event types or touch the writer modules/widgets/telemetry.py. DONE 2026-05-29: GET /api/analytics/widget-engagement added to api/analytics_real.py (existing router, no new file). Workspace-scoped via Site.workspace_id resolution → site_id.in_(...) on widget_event_log (the log itself has no workspace_id; one workspace = many sites per PRD-008-A); empty-sites short-circuit returns zero. Aggregation filters event_type IN WIDGET_EVENT_TYPES so idx_widget_event_log_type_created is eligible alongside the created_at window; sessions = COUNT(DISTINCT session_id) over the same filter. Returns {window, by_event_type:[{event_type,count}], sessions, generated_at}; window parsing reuses _parse_window. Pure read — grep 'WidgetEventLog(' on analytics_real.py = 0 (no row construction). 4 new tests green in tests/test_widget_engagement_endpoint.py incl. tenant site-scoping + window math; US-001 (6+1 sig+1 rollback), US-002 (4), US-003 (2), and exception_telemetry (4) all still green (22 total)."
     },
     {
       "id": "US-005",

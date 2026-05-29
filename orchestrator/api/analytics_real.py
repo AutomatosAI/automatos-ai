@@ -21,6 +21,8 @@ from core.models.core import LLMUsage
 from core.models.error_event import ErrorEvent
 from core.models.orchestration import OrchestrationRun, OrchestrationTask
 from core.models.orchestration_enums import RunState, TaskState, TERMINAL_RUN_STATES
+from core.models.sites import Site
+from core.models.widget_event_log import WIDGET_EVENT_TYPES, WidgetEventLog
 import logging
 import psutil
 import time
@@ -182,6 +184,85 @@ async def get_errors_by_subsystem(
         "window": window,
         "total": total,
         "by_subsystem": by_subsystem,
+        "generated_at": datetime.utcnow().isoformat(),
+    }
+
+
+@router.get("/widget-engagement")
+async def get_widget_engagement(
+    window: str = "7d",
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Widget engagement counts by event_type + distinct sessions (PRD-142 Wave 0 US-004).
+
+    Backs the dashboard "Widget engagement" tile. Read-only aggregation
+    over ``widget_event_log`` (writer: ``modules/widgets/telemetry.py``;
+    schema: ``core/models/widget_event_log.py``). This endpoint does NOT
+    construct ``WidgetEventLog`` rows — telemetry's writer remains the
+    single source of truth.
+
+    Tenant isolation: ``widget_event_log`` has no ``workspace_id``
+    column, so we resolve the caller's ``sites`` first (one workspace,
+    many sites — PRD-008-A) and restrict the aggregation to that set.
+    A workspace with zero sites short-circuits to an empty payload.
+
+    Index path: the aggregation filters
+    ``event_type IN WIDGET_EVENT_TYPES`` so
+    ``idx_widget_event_log_type_created`` is eligible alongside the
+    ``created_at >= cutoff`` window — no full-table scan.
+
+    Returns ``{window, by_event_type: [{event_type, count}], sessions,
+    generated_at}``.
+    """
+    window_start = datetime.utcnow() - _parse_window(window)
+
+    site_rows = (
+        db.query(Site.id).filter(Site.workspace_id == ctx.workspace_id).all()
+    )
+    site_ids = [row[0] for row in site_rows]
+
+    if not site_ids:
+        return {
+            "window": window,
+            "by_event_type": [],
+            "sessions": 0,
+            "generated_at": datetime.utcnow().isoformat(),
+        }
+
+    agg_rows = (
+        db.query(
+            WidgetEventLog.event_type,
+            func.count(WidgetEventLog.id).label("count"),
+        )
+        .filter(
+            WidgetEventLog.site_id.in_(site_ids),
+            WidgetEventLog.event_type.in_(WIDGET_EVENT_TYPES),
+            WidgetEventLog.created_at >= window_start,
+        )
+        .group_by(WidgetEventLog.event_type)
+        .all()
+    )
+
+    by_event_type = [
+        {"event_type": r.event_type, "count": int(r.count or 0)}
+        for r in agg_rows
+    ]
+
+    sessions = (
+        db.query(func.count(func.distinct(WidgetEventLog.session_id)))
+        .filter(
+            WidgetEventLog.site_id.in_(site_ids),
+            WidgetEventLog.event_type.in_(WIDGET_EVENT_TYPES),
+            WidgetEventLog.created_at >= window_start,
+        )
+        .scalar()
+    ) or 0
+
+    return {
+        "window": window,
+        "by_event_type": by_event_type,
+        "sessions": int(sessions),
         "generated_at": datetime.utcnow().isoformat(),
     }
 
