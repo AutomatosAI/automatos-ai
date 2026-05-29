@@ -35,8 +35,8 @@
         "pytest orchestrator/tests/test_errors_by_subsystem_endpoint.py green"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": "BLOCKED by US-001 (needs the error_events table). Reuse the existing analytics router prefix /api/analytics (api/analytics_real.py:32) — do not add a new router. workspace_id NULL rows (system-level errors) are excluded from the workspace-scoped view by design; that is correct, not a bug."
+      "passes": true,
+      "notes": "BLOCKED by US-001 (needs the error_events table). Reuse the existing analytics router prefix /api/analytics (api/analytics_real.py:32) — do not add a new router. workspace_id NULL rows (system-level errors) are excluded from the workspace-scoped view by design; that is correct, not a bug. DONE 2026-05-29: GET /api/analytics/errors/by-subsystem added to api/analytics_real.py (existing router, no new file). Workspace-scoped via ctx.workspace_id; window arg parsed by new _parse_window helper (h/d units, 24h default on malformed input). Returns {window, total, by_subsystem:[{subsystem,count,rate}], generated_at}; rate=count/total over the window with no divide-by-zero. Query groups by ErrorEvent.subsystem with (workspace_id, created_at >= cutoff) filter — index-eligible via idx_error_events_subsystem_created / idx_error_events_workspace_created. 4 new tests green in tests/test_errors_by_subsystem_endpoint.py incl. tenant isolation + window math; US-001 (8) and US-003 (2) tests still green (no regression)."
     },
     {
       "id": "US-003",

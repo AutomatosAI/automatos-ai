@@ -18,6 +18,7 @@ from core.models import (
     AgentStatistics, SystemMetrics
 )
 from core.models.core import LLMUsage
+from core.models.error_event import ErrorEvent
 from core.models.orchestration import OrchestrationRun, OrchestrationTask
 from core.models.orchestration_enums import RunState, TaskState, TERMINAL_RUN_STATES
 import logging
@@ -107,6 +108,83 @@ async def get_agent_success_rate(ctx: RequestContext = Depends(get_request_conte
     except Exception as e:
         logger.error(f"Error calculating success rate: {e}")
         return {"value": 0, "trend": 0, "total_executions": 0, "successful_executions": 0, "error": str(e)}
+
+def _parse_window(window: str) -> timedelta:
+    """Parse a window string like '24h' or '7d' into a timedelta.
+
+    Supports ``h`` (hours) and ``d`` (days). Falls back to 24h on malformed
+    input — dashboard queries should not 400 because a UI sent a stale param.
+    """
+    try:
+        if not window:
+            return timedelta(hours=24)
+        unit = window[-1].lower()
+        value = int(window[:-1])
+        if value <= 0:
+            return timedelta(hours=24)
+        if unit == "h":
+            return timedelta(hours=value)
+        if unit == "d":
+            return timedelta(days=value)
+    except (ValueError, IndexError):
+        pass
+    return timedelta(hours=24)
+
+
+@router.get("/errors/by-subsystem")
+async def get_errors_by_subsystem(
+    window: str = "24h",
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Error count by subsystem over a rolling window (PRD-142 Wave 0 US-002).
+
+    Backs the dashboard "Error rate by subsystem" tile. Reads from the
+    ``error_events`` sink populated by ``record_error`` (US-001). Filters
+    by the caller's workspace; system-level rows (``workspace_id IS NULL``)
+    are excluded from this workspace-scoped view by design — the
+    dashboard tile shows per-tenant errors only.
+
+    Index path: ``idx_error_events_subsystem_created`` /
+    ``idx_error_events_workspace_created`` cover the ``(workspace_id,
+    created_at)`` filter + ``GROUP BY subsystem`` — no full-table scan.
+
+    Returns ``{window, total, by_subsystem: [{subsystem, count, rate}],
+    generated_at}``. ``rate = count / total`` over the window; 0 when
+    total is 0 (no divide-by-zero).
+    """
+    window_start = datetime.utcnow() - _parse_window(window)
+
+    rows = (
+        db.query(
+            ErrorEvent.subsystem,
+            func.count(ErrorEvent.id).label("count"),
+        )
+        .filter(
+            ErrorEvent.workspace_id == ctx.workspace_id,
+            ErrorEvent.created_at >= window_start,
+        )
+        .group_by(ErrorEvent.subsystem)
+        .all()
+    )
+
+    total = int(sum(int(r.count or 0) for r in rows))
+    by_subsystem = [
+        {
+            "subsystem": r.subsystem,
+            "count": int(r.count or 0),
+            "rate": (int(r.count or 0) / total) if total > 0 else 0,
+        }
+        for r in rows
+    ]
+
+    return {
+        "window": window,
+        "total": total,
+        "by_subsystem": by_subsystem,
+        "generated_at": datetime.utcnow().isoformat(),
+    }
+
 
 @router.get("/dashboard/task-completion-time")
 async def get_avg_task_completion_time(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> Dict[str, Any]:
