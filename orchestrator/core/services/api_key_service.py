@@ -25,6 +25,20 @@ def _hash_key(raw_key: str) -> str:
     return hashlib.sha256(raw_key.encode()).hexdigest()
 
 
+def _host_only(value: str) -> str:
+    """Reduce an origin or allow-list pattern to its host[:port] form.
+
+    Request origins arrive as bare hosts (``_extract_origin`` returns
+    ``parsed.hostname``) while allow-list entries are commonly stored with a
+    scheme (``https://*.myshopify.com``) and sometimes a trailing slash. A
+    scheme-prefixed pattern can never ``fnmatch`` a bare host, so we strip the
+    scheme and trailing slash from both sides before comparing.
+    """
+    if "://" in value:
+        value = value.split("://", 1)[1]
+    return value.rstrip("/")
+
+
 class ApiKeyService:
     """Manages SDK API keys with SHA-256 hashing."""
 
@@ -206,8 +220,9 @@ class ApiKeyService:
         if not api_key.allowed_domains:
             return True
 
+        candidate = _host_only(origin)
         for pattern in api_key.allowed_domains:
-            if fnmatch(origin, pattern):
+            if fnmatch(candidate, _host_only(pattern)):
                 return True
 
         return False
