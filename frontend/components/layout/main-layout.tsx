@@ -59,7 +59,6 @@ export function MainLayout({ children, fullBleed = false }: MainLayoutProps) {
   // Get current page context for the chat
   const getCurrentPage = () => {
     if (pathname === '/') return 'chat'
-    if (pathname.startsWith('/dashboard')) return 'dashboard'
     if (pathname.startsWith('/agents')) return 'agents'
     if (pathname.startsWith('/documents')) return 'documents'
     if (pathname.startsWith('/tools')) return 'tools'

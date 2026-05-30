@@ -100,7 +100,6 @@ export function resolveActiveMenuId(pathname: string): string | null {
   if (pathname.startsWith('/chat')) return 'chat';
   if (pathname.startsWith('/missions/')) return 'assign'; // mission detail nests under Assignments
   if (pathname.startsWith('/activity')) return 'cmd';     // activity panels live under Command Centre
-  if (pathname.startsWith('/dashboard')) return 'cmd';
   if (pathname.startsWith('/marketplace')) return 'market';
   if (pathname.startsWith('/admin')) return 'admin';
   if (pathname.startsWith('/playbooks')) return 'assign';
