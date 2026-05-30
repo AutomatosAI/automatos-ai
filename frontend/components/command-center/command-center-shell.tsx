@@ -24,6 +24,7 @@ import { useActivitySchedule } from '@/hooks/use-activity-api'
 import { useDecisionsNeeded } from '@/hooks/use-kpi-api'
 
 import { StatsStrip } from './stats-strip'
+import { IsItWorkingStrip } from './is-it-working-strip'
 import { SummaryTab } from './summary-tab'
 import { BoardTab } from './board-tab'
 import { CalendarTab } from './calendar-tab'
@@ -138,6 +139,7 @@ export function CommandCenterShell() {
       </div>
 
       <StatsStrip />
+      <IsItWorkingStrip />
 
       <nav className="cc-tabs" aria-label="Command Centre sections">
         {TABS.map((t) => {

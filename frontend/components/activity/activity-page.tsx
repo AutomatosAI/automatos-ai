@@ -15,6 +15,9 @@ import {
   Calendar,
   Rss,
   History,
+  Zap,
+  MessageSquare,
+  Boxes,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -25,6 +28,12 @@ import { ActivityFeed } from './activity-feed'
 import { CommandCenterHistory } from './command-center-history'
 import { ActivityCalendar } from './calendar'
 import { useActivityStats } from '@/hooks/use-activity-api'
+import {
+  useActivationMetrics,
+  useMissionSuccessRate,
+  useErrorsBySubsystem,
+  useWidgetEngagement,
+} from '@/hooks/use-analytics-api'
 import type { StatItem } from '@/components/shared/stats-bar'
 import { cn } from '@/lib/utils'
 
@@ -128,6 +137,66 @@ export function ActivityPage() {
     { label: 'Needs Attention', value: liveStats?.needs_attention ?? 0, icon: AlertTriangle, iconColor: 'text-destructive' },
   ]
 
+  // PRD-142 Wave 0 (US-007) — "Is it working?" platform vitals over the real
+  // measurement endpoints. Per-primitive health (US-006) has no honest data
+  // source yet and renders as an explicit placeholder, not a fake green.
+  const { data: activation } = useActivationMetrics()
+  const { data: mission } = useMissionSuccessRate()
+  const { data: errors } = useErrorsBySubsystem('24h')
+  const { data: widget } = useWidgetEngagement('7d')
+
+  const totalWs = activation?.total_workspaces ?? 0
+  const activationPct = totalWs > 0 ? Math.round((activation?.rate ?? 0) * 100) : 0
+
+  const missionTotal = mission?.total_executions ?? 0
+  const missionPct = missionTotal > 0 ? Math.round(mission?.value ?? 0) : 0
+
+  const errorTotal = errors?.total ?? 0
+  const worstSubsystem = errors?.by_subsystem?.length
+    ? [...errors.by_subsystem].sort((a, b) => b.count - a.count)[0]
+    : null
+
+  const widgetSessions = widget?.sessions ?? 0
+  const widgetEvents = widget?.by_event_type?.reduce((sum, ev) => sum + ev.count, 0) ?? 0
+
+  const vitals: StatItem[] = [
+    {
+      label: 'Activation',
+      value: totalWs > 0 ? `${activationPct}%` : '—',
+      change: totalWs > 0 ? `${activation?.activated ?? 0}/${totalWs} workspaces` : 'No workspaces yet',
+      icon: Zap,
+      iconColor: 'text-primary',
+    },
+    {
+      label: 'Mission success rate',
+      value: missionTotal > 0 ? `${missionPct}%` : '—',
+      change: missionTotal > 0 ? `${mission?.successful_executions ?? 0}/${missionTotal} missions` : 'No missions yet',
+      icon: CheckCircle2,
+      iconColor: 'text-[hsl(var(--success))]',
+    },
+    {
+      label: 'Error rate by subsystem',
+      value: errorTotal,
+      change: errorTotal > 0 && worstSubsystem ? `${worstSubsystem.subsystem} (${worstSubsystem.count}) · 24h` : 'None · 24h',
+      icon: AlertTriangle,
+      iconColor: errorTotal > 0 ? 'text-destructive' : 'text-[hsl(var(--success))]',
+    },
+    {
+      label: 'Widget engagement',
+      value: widgetSessions,
+      change: widgetSessions > 0 ? `${widgetEvents} events · 7d` : 'No widget activity',
+      icon: MessageSquare,
+      iconColor: 'text-[hsl(var(--info))]',
+    },
+    {
+      label: 'Per-primitive health',
+      value: '—',
+      change: 'Not yet measured',
+      icon: Boxes,
+      iconColor: 'text-muted-foreground',
+    },
+  ]
+
   return (
     <div className="space-y-4 sm:space-y-6">
       <div data-tour="activity-page-header">
@@ -162,6 +231,10 @@ export function ActivityPage() {
 
       <div data-tour="activity-stats">
         <StatsBar stats={stats} className="grid gap-3 md:gap-4" />
+      </div>
+
+      <div data-tour="activity-vitals">
+        <StatsBar stats={vitals} glow={false} className="grid gap-3 md:gap-4 lg:grid-cols-5" />
       </div>
 
       <div>
