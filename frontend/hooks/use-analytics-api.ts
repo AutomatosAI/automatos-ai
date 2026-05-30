@@ -1,5 +1,11 @@
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
+import type {
+  ActivationMetric,
+  MissionSuccessRateMetric,
+  ErrorsBySubsystemMetric,
+  WidgetEngagementMetric,
+} from '@/lib/api-client'
 
 export const analyticsQueryKeys = {
   successRate: ['analytics', 'success-rate'],
@@ -50,6 +56,35 @@ export function useAllMetrics() {
   return useQuery({
     queryKey: analyticsQueryKeys.allMetrics,
     queryFn: () => apiClient.getAllMetrics()
+  })
+}
+
+// PRD-142 Wave 0 — "Is it working?" dashboard tiles
+export function useActivationMetrics() {
+  return useQuery<ActivationMetric>({
+    queryKey: ['analytics', 'activation'],
+    queryFn: () => apiClient.getActivationMetrics()
+  })
+}
+
+export function useMissionSuccessRate() {
+  return useQuery<MissionSuccessRateMetric>({
+    queryKey: ['analytics', 'mission-success-rate'],
+    queryFn: () => apiClient.getMissionSuccessRate()
+  })
+}
+
+export function useErrorsBySubsystem(window: string = '24h') {
+  return useQuery<ErrorsBySubsystemMetric>({
+    queryKey: ['analytics', 'errors-by-subsystem', window],
+    queryFn: () => apiClient.getErrorsBySubsystem(window)
+  })
+}
+
+export function useWidgetEngagement(window: string = '7d') {
+  return useQuery<WidgetEngagementMetric>({
+    queryKey: ['analytics', 'widget-engagement', window],
+    queryFn: () => apiClient.getWidgetEngagement(window)
   })
 }
 

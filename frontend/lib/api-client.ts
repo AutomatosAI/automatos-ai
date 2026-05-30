@@ -35,6 +35,38 @@ export interface RAGConfig {
   is_active?: boolean
 }
 
+// PRD-142 Wave 0 — "Is it working?" dashboard tiles. Shapes mirror the
+// analytics_real.py endpoints exactly; the request() helper returns the
+// parsed JSON body directly (no ApiResponse envelope on these routes).
+export interface ActivationMetric {
+  activated: number
+  total_workspaces: number
+  rate: number
+  generated_at: string
+}
+
+export interface MissionSuccessRateMetric {
+  value: number
+  trend: number
+  total_executions: number
+  successful_executions: number
+  sources?: { workflows: number; missions: number }
+}
+
+export interface ErrorsBySubsystemMetric {
+  window: string
+  total: number
+  by_subsystem: Array<{ subsystem: string; count: number; rate: number }>
+  generated_at: string
+}
+
+export interface WidgetEngagementMetric {
+  window: string
+  by_event_type: Array<{ event_type: string; count: number }>
+  sessions: number
+  generated_at: string
+}
+
 // Mock configuration interface
 interface MockConfig {
   enabled: boolean
@@ -2195,6 +2227,23 @@ class ApiClient {
 
   async getAllMetrics() {
     return this.request('/api/metrics/all')
+  }
+
+  // ===== PRD-142 Wave 0 "Is it working?" tiles =====
+  async getActivationMetrics(): Promise<ActivationMetric> {
+    return this.request<ActivationMetric>('/api/analytics/activation')
+  }
+
+  async getMissionSuccessRate(): Promise<MissionSuccessRateMetric> {
+    return this.request<MissionSuccessRateMetric>('/api/analytics/dashboard/success-rate')
+  }
+
+  async getErrorsBySubsystem(window: string = '24h'): Promise<ErrorsBySubsystemMetric> {
+    return this.request<ErrorsBySubsystemMetric>(`/api/analytics/errors/by-subsystem?window=${encodeURIComponent(window)}`)
+  }
+
+  async getWidgetEngagement(window: string = '7d'): Promise<WidgetEngagementMetric> {
+    return this.request<WidgetEngagementMetric>(`/api/analytics/widget-engagement?window=${encodeURIComponent(window)}`)
   }
 
   async getAgentAnalytics(timeRange: string) {

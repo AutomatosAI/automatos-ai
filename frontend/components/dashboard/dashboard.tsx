@@ -56,6 +56,7 @@ const TimeDisplay = dynamic(() => Promise.resolve(() => {
 }), { ssr: false });
 
 import { MetricCards } from './metric-cards'
+import { IsItWorking } from './is-it-working'
 // import { ActivityFeed } from './activity-feed' // Hidden until endpoint implemented
 import { SystemHealth } from './system-health'
 import { QuickActions } from './quick-actions'
@@ -115,6 +116,9 @@ export function Dashboard() {
       >
             <MetricCards />
       </motion.div>
+
+      {/* PRD-142 Wave 0 — "Is it working?" real measurement tiles */}
+      <IsItWorking />
 
       {/* Main Content Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
