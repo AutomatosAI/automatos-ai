@@ -18,8 +18,8 @@
         "pytest orchestrator/tests/test_error_events_sink.py green"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": "Reuse-checked 2026-05-29: no existing error-event table exists; closest is the automatos.errors logger (core/utils/exception_telemetry.py:22). A focused append-only table is justified and follows the established widget_event_log pattern. Do NOT change record_error's signature — handlers already call it with keyword args. Do NOT mass-adopt record_error across handlers here (that was out of scope in PRD-141 US-001 and stays out). The migration must be online-safe (new table, no backfill, no NOT NULL on an existing large table)."
+      "passes": true,
+      "notes": "Reuse-checked 2026-05-29: no existing error-event table exists; closest is the automatos.errors logger (core/utils/exception_telemetry.py:22). A focused append-only table is justified and follows the established widget_event_log pattern. Do NOT change record_error's signature — handlers already call it with keyword args. Do NOT mass-adopt record_error across handlers here (that was out of scope in PRD-141 US-001 and stays out). The migration must be online-safe (new table, no backfill, no NOT NULL on an existing large table). DONE 2026-05-29: error_events table + 2 indexes via alembic/versions/prd142_wave0_error_events.py (down_revision=None standalone, online-safe new-table-only). ORM core/models/error_event.py mirrors widget_event_log (extend_existing=True, JSONB event_data). record_error gets a best-effort sink via _persist_error_event (lazy SessionLocal import, catch-all/rollback/close, never raises) — signature + automatos.errors emit unchanged. 8 new tests green in tests/test_error_events_sink.py incl. signature guardrail; 4 existing test_exception_telemetry.py tests still green (no regression)."
     },
     {
       "id": "US-002",
@@ -35,8 +35,8 @@
         "pytest orchestrator/tests/test_errors_by_subsystem_endpoint.py green"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": "BLOCKED by US-001 (needs the error_events table). Reuse the existing analytics router prefix /api/analytics (api/analytics_real.py:32) — do not add a new router. workspace_id NULL rows (system-level errors) are excluded from the workspace-scoped view by design; that is correct, not a bug."
+      "passes": true,
+      "notes": "BLOCKED by US-001 (needs the error_events table). Reuse the existing analytics router prefix /api/analytics (api/analytics_real.py:32) — do not add a new router. workspace_id NULL rows (system-level errors) are excluded from the workspace-scoped view by design; that is correct, not a bug. DONE 2026-05-29: GET /api/analytics/errors/by-subsystem added to api/analytics_real.py (existing router, no new file). Workspace-scoped via ctx.workspace_id; window arg parsed by new _parse_window helper (h/d units, 24h default on malformed input). Returns {window, total, by_subsystem:[{subsystem,count,rate}], generated_at}; rate=count/total over the window with no divide-by-zero. Query groups by ErrorEvent.subsystem with (workspace_id, created_at >= cutoff) filter — index-eligible via idx_error_events_subsystem_created / idx_error_events_workspace_created. 4 new tests green in tests/test_errors_by_subsystem_endpoint.py incl. tenant isolation + window math; US-001 (8) and US-003 (2) tests still green (no regression)."
     },
     {
       "id": "US-003",
@@ -53,8 +53,8 @@
         "pytest green; existing analytics tests green"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": "Cheapest honesty win — land it first. The fake 85.0 is the literal symptom Wave 0 exists to kill (analytics_engine.py:118). This also satisfies the no-hardcoded-values rule (CLAUDE.md §4). Do NOT touch _get_workflow_metrics (line 144-174) — its mission success math is already real and correct; only _get_agent_metrics is faked."
+      "passes": true,
+      "notes": "DONE 2026-05-29 (commit 756cbf4b8). Removed BOTH fake blocks: _get_agent_metrics (4 placeholders) and get_agent_analytics (5 placeholders) — the second block was not in the original AC but carried the same 85.0/2.5 fakes. grep '85.0'/'2.5'/'# Placeholder' all return 0. Verified no consumer: GET /api/analytics/agents/{id} has zero frontend callers; frontend performanceTrend at agent-performance.tsx:128 is a local stub reading snake_case agentStats, not this endpoint. _get_workflow_metrics left untouched (real). 2 tests green. Cheapest honesty win — landed first as proof-of-life."
     },
     {
       "id": "US-004",
@@ -71,8 +71,8 @@
         "pytest orchestrator/tests/test_widget_engagement_endpoint.py green"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": "Reuse-checked: widget_event_log table + idx_widget_event_log_type_created + writer log_widget_event all exist (PRD-008-A); only the read/aggregation side is missing. Do NOT add new event types or touch the writer modules/widgets/telemetry.py."
+      "passes": true,
+      "notes": "Reuse-checked: widget_event_log table + idx_widget_event_log_type_created + writer log_widget_event all exist (PRD-008-A); only the read/aggregation side is missing. Do NOT add new event types or touch the writer modules/widgets/telemetry.py. DONE 2026-05-29: GET /api/analytics/widget-engagement added to api/analytics_real.py (existing router, no new file). Workspace-scoped via Site.workspace_id resolution → site_id.in_(...) on widget_event_log (the log itself has no workspace_id; one workspace = many sites per PRD-008-A); empty-sites short-circuit returns zero. Aggregation filters event_type IN WIDGET_EVENT_TYPES so idx_widget_event_log_type_created is eligible alongside the created_at window; sessions = COUNT(DISTINCT session_id) over the same filter. Returns {window, by_event_type:[{event_type,count}], sessions, generated_at}; window parsing reuses _parse_window. Pure read — grep 'WidgetEventLog(' on analytics_real.py = 0 (no row construction). 4 new tests green in tests/test_widget_engagement_endpoint.py incl. tenant site-scoping + window math; US-001 (6+1 sig+1 rollback), US-002 (4), US-003 (2), and exception_telemetry (4) all still green (22 total)."
     },
     {
       "id": "US-005",
@@ -88,8 +88,8 @@
         "pytest orchestrator/tests/test_activation_endpoint.py green"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": "Use the canonical RunState.COMPLETED.value (core/models/orchestration_enums.py) for the completed check, matching api/analytics_real.py:69 — do not hardcode the string 'completed' if the enum is available. This is a platform-level rate across workspaces; it is the one tile that is intentionally NOT filtered to a single workspace_id."
+      "passes": true,
+      "notes": "Use the canonical RunState.COMPLETED.value (core/models/orchestration_enums.py) for the completed check, matching api/analytics_real.py:69 — do not hardcode the string 'completed' if the enum is available. This is a platform-level rate across workspaces; it is the one tile that is intentionally NOT filtered to a single workspace_id. DONE 2026-05-29: GET /api/analytics/activation added to api/analytics_real.py (existing router, no new file). Activation count = COUNT(DISTINCT OrchestrationRun.workspace_id) filtered to state == RunState.COMPLETED.value (canonical enum, never the literal 'completed'); denominator = COUNT(Workspace.id). Returns {activated, total_workspaces, rate, generated_at}; rate=activated/total_workspaces with no divide-by-zero and no fake fallback when zero workspaces. Intentionally platform-level — auth via ctx.Depends(get_request_context_hybrid) but NO workspace_id filter on the data (per US-005 notes). 3 new tests green in tests/test_activation_endpoint.py incl. completed-state-filter guardrail; US-001 (8), US-002 (4), US-003 (2), US-004 (4), exception_telemetry (4) all still green (25 total)."
     },
     {
       "id": "US-006",

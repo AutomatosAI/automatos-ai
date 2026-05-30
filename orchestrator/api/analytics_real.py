@@ -18,8 +18,12 @@ from core.models import (
     AgentStatistics, SystemMetrics
 )
 from core.models.core import LLMUsage
+from core.models.error_event import ErrorEvent
 from core.models.orchestration import OrchestrationRun, OrchestrationTask
 from core.models.orchestration_enums import RunState, TaskState, TERMINAL_RUN_STATES
+from core.models.sites import Site
+from core.models.widget_event_log import WIDGET_EVENT_TYPES, WidgetEventLog
+from core.models.workspaces import Workspace
 import logging
 import psutil
 import time
@@ -107,6 +111,207 @@ async def get_agent_success_rate(ctx: RequestContext = Depends(get_request_conte
     except Exception as e:
         logger.error(f"Error calculating success rate: {e}")
         return {"value": 0, "trend": 0, "total_executions": 0, "successful_executions": 0, "error": str(e)}
+
+def _parse_window(window: str) -> timedelta:
+    """Parse a window string like '24h' or '7d' into a timedelta.
+
+    Supports ``h`` (hours) and ``d`` (days). Falls back to 24h on malformed
+    input — dashboard queries should not 400 because a UI sent a stale param.
+    """
+    try:
+        if not window:
+            return timedelta(hours=24)
+        unit = window[-1].lower()
+        value = int(window[:-1])
+        if value <= 0:
+            return timedelta(hours=24)
+        if unit == "h":
+            return timedelta(hours=value)
+        if unit == "d":
+            return timedelta(days=value)
+    except (ValueError, IndexError):
+        pass
+    return timedelta(hours=24)
+
+
+@router.get("/errors/by-subsystem")
+async def get_errors_by_subsystem(
+    window: str = "24h",
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Error count by subsystem over a rolling window (PRD-142 Wave 0 US-002).
+
+    Backs the dashboard "Error rate by subsystem" tile. Reads from the
+    ``error_events`` sink populated by ``record_error`` (US-001). Filters
+    by the caller's workspace; system-level rows (``workspace_id IS NULL``)
+    are excluded from this workspace-scoped view by design — the
+    dashboard tile shows per-tenant errors only.
+
+    Index path: ``idx_error_events_subsystem_created`` /
+    ``idx_error_events_workspace_created`` cover the ``(workspace_id,
+    created_at)`` filter + ``GROUP BY subsystem`` — no full-table scan.
+
+    Returns ``{window, total, by_subsystem: [{subsystem, count, rate}],
+    generated_at}``. ``rate = count / total`` over the window; 0 when
+    total is 0 (no divide-by-zero).
+    """
+    window_start = datetime.utcnow() - _parse_window(window)
+
+    rows = (
+        db.query(
+            ErrorEvent.subsystem,
+            func.count(ErrorEvent.id).label("count"),
+        )
+        .filter(
+            ErrorEvent.workspace_id == ctx.workspace_id,
+            ErrorEvent.created_at >= window_start,
+        )
+        .group_by(ErrorEvent.subsystem)
+        .all()
+    )
+
+    total = int(sum(int(r.count or 0) for r in rows))
+    by_subsystem = [
+        {
+            "subsystem": r.subsystem,
+            "count": int(r.count or 0),
+            "rate": (int(r.count or 0) / total) if total > 0 else 0,
+        }
+        for r in rows
+    ]
+
+    return {
+        "window": window,
+        "total": total,
+        "by_subsystem": by_subsystem,
+        "generated_at": datetime.utcnow().isoformat(),
+    }
+
+
+@router.get("/widget-engagement")
+async def get_widget_engagement(
+    window: str = "7d",
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Widget engagement counts by event_type + distinct sessions (PRD-142 Wave 0 US-004).
+
+    Backs the dashboard "Widget engagement" tile. Read-only aggregation
+    over ``widget_event_log`` (writer: ``modules/widgets/telemetry.py``;
+    schema: ``core/models/widget_event_log.py``). This endpoint does NOT
+    construct ``WidgetEventLog`` rows — telemetry's writer remains the
+    single source of truth.
+
+    Tenant isolation: ``widget_event_log`` has no ``workspace_id``
+    column, so we resolve the caller's ``sites`` first (one workspace,
+    many sites — PRD-008-A) and restrict the aggregation to that set.
+    A workspace with zero sites short-circuits to an empty payload.
+
+    Index path: the aggregation filters
+    ``event_type IN WIDGET_EVENT_TYPES`` so
+    ``idx_widget_event_log_type_created`` is eligible alongside the
+    ``created_at >= cutoff`` window — no full-table scan.
+
+    Returns ``{window, by_event_type: [{event_type, count}], sessions,
+    generated_at}``.
+    """
+    window_start = datetime.utcnow() - _parse_window(window)
+
+    site_rows = (
+        db.query(Site.id).filter(Site.workspace_id == ctx.workspace_id).all()
+    )
+    site_ids = [row[0] for row in site_rows]
+
+    if not site_ids:
+        return {
+            "window": window,
+            "by_event_type": [],
+            "sessions": 0,
+            "generated_at": datetime.utcnow().isoformat(),
+        }
+
+    agg_rows = (
+        db.query(
+            WidgetEventLog.event_type,
+            func.count(WidgetEventLog.id).label("count"),
+        )
+        .filter(
+            WidgetEventLog.site_id.in_(site_ids),
+            WidgetEventLog.event_type.in_(WIDGET_EVENT_TYPES),
+            WidgetEventLog.created_at >= window_start,
+        )
+        .group_by(WidgetEventLog.event_type)
+        .all()
+    )
+
+    by_event_type = [
+        {"event_type": r.event_type, "count": int(r.count or 0)}
+        for r in agg_rows
+    ]
+
+    sessions = (
+        db.query(func.count(func.distinct(WidgetEventLog.session_id)))
+        .filter(
+            WidgetEventLog.site_id.in_(site_ids),
+            WidgetEventLog.event_type.in_(WIDGET_EVENT_TYPES),
+            WidgetEventLog.created_at >= window_start,
+        )
+        .scalar()
+    ) or 0
+
+    return {
+        "window": window,
+        "by_event_type": by_event_type,
+        "sessions": int(sessions),
+        "generated_at": datetime.utcnow().isoformat(),
+    }
+
+
+@router.get("/activation")
+async def get_activation(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Platform-wide activation rate (PRD-142 Wave 0 US-005).
+
+    Definition: a workspace is "activated" when it has >=1
+    ``OrchestrationRun`` with ``state == RunState.COMPLETED.value`` —
+    i.e. at least one mission has reached the canonical terminal success
+    state (``core/models/orchestration_enums.py``). The activation rate
+    is ``activated_workspaces / provisioned_workspaces``.
+
+    This is the one Wave 0 tile that is intentionally NOT filtered to a
+    single ``workspace_id`` — it answers a platform-level founder
+    question ("are new workspaces reaching first value?"), not a tenant
+    question. The endpoint still requires authentication via
+    ``get_request_context_hybrid`` to gate access to the aggregate.
+
+    Computed from ``OrchestrationRun`` only — NO new table, NO
+    ``WorkflowExecution`` reads (Wave 0 scope; the ``WorkflowExecution``
+    drop is owned by Wave 3 per PLAYBOOK-ENGINE-DESIGN.md §4.2).
+
+    Returns ``{activated, total_workspaces, rate, generated_at}``;
+    ``rate = activated / total_workspaces``, 0 when ``total_workspaces``
+    is 0 (no divide-by-zero, no fake fallback value).
+    """
+    activated = (
+        db.query(func.count(func.distinct(OrchestrationRun.workspace_id)))
+        .filter(OrchestrationRun.state == RunState.COMPLETED.value)
+        .scalar()
+    ) or 0
+
+    total_workspaces = db.query(func.count(Workspace.id)).scalar() or 0
+
+    rate = (activated / total_workspaces) if total_workspaces > 0 else 0
+
+    return {
+        "activated": int(activated),
+        "total_workspaces": int(total_workspaces),
+        "rate": rate,
+        "generated_at": datetime.utcnow().isoformat(),
+    }
+
 
 @router.get("/dashboard/task-completion-time")
 async def get_avg_task_completion_time(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> Dict[str, Any]:
