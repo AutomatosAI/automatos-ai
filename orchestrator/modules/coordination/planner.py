@@ -25,6 +25,7 @@ from uuid import UUID, uuid4
 from config import COMPLEXITY_TOKEN_BUDGET, Config
 from core.llm import create_llm_manager
 from core.models.core import Agent
+from core.utils.exception_telemetry import record_error
 from core.models.orchestration_enums import ComplexityTier, TaskType
 from modules.coordination.templates import match_template, render_template
 from services.orchestration_deps import (
@@ -424,7 +425,15 @@ class MissionPlanner:
                 max_concurrent=max_concurrent,
             )
 
-        raise PlanValidationError(last_errors)
+        err = PlanValidationError(last_errors)
+        record_error(
+            subsystem="planner",
+            operation="replan",
+            error=err,
+            workspace_id=workspace_id,
+            extra={"goal": goal[:200], "failed_task_title": failed_task_title},
+        )
+        raise err
 
     @staticmethod
     async def decompose(
@@ -641,8 +650,17 @@ class MissionPlanner:
                 max_concurrent=max_concurrent,
             )
 
-        # All retries exhausted
-        raise PlanValidationError(last_errors)
+        # All retries exhausted — record the terminal planning failure so the
+        # ERRORS-by-subsystem tile reflects it, then surface to the caller.
+        err = PlanValidationError(last_errors)
+        record_error(
+            subsystem="planner",
+            operation="decompose",
+            error=err,
+            workspace_id=workspace_id,
+            extra={"goal": goal[:200]},
+        )
+        raise err
 
 
 # ---------------------------------------------------------------------------
