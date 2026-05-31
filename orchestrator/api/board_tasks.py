@@ -21,6 +21,7 @@ from core.auth.dependencies import RequestContext
 from core.database.database import get_db
 from core.models.core import BoardTask
 from core.models import Agent
+from core.utils.exception_telemetry import record_error
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/tasks", tags=["board-tasks"])
@@ -766,6 +767,14 @@ def _launch_task_execution(
         except Exception as e:
             logger.error(
                 "[BoardTasks] Task %d execution failed: %s", task_id, e, exc_info=True,
+            )
+            record_error(
+                subsystem="board",
+                operation="execute_task",
+                error=e,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                extra={"task_id": task_id},
             )
             try:
                 task = db.query(BoardTask).get(task_id)
