@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session
 
 from core.database.database import SessionLocal
 from core.models.sites import Site
+from core.utils.exception_telemetry import record_error
 from modules.widgets.telemetry import log_widget_event
 
 from services.destinations.base import CALLBACK_PLATFORMS, CallbackPayload, DispatchResult
@@ -216,9 +217,34 @@ async def dispatch_one_destination(
 
         # Permanent failure — bail without burning more attempts
         if not result.retryable:
+            record_error(
+                subsystem="widget",
+                operation="deliver_callback",
+                error=RuntimeError(result.error or "callback delivery failed"),
+                workspace_id=workspace_id,
+                extra={
+                    "destination_type": destination_type,
+                    "site_id": str(site_id),
+                    "attempt": attempt,
+                    "retryable": False,
+                },
+            )
             return result
 
-    # Exhausted attempts
+    # Exhausted attempts — every retry failed; record the terminal failure so
+    # the ERRORS-by-subsystem tile reflects undelivered callbacks.
+    record_error(
+        subsystem="widget",
+        operation="deliver_callback",
+        error=RuntimeError((last.error if last else None) or "callback delivery exhausted retries"),
+        workspace_id=workspace_id,
+        extra={
+            "destination_type": destination_type,
+            "site_id": str(site_id),
+            "attempts": MAX_ATTEMPTS,
+            "retryable": True,
+        },
+    )
     return last  # type: ignore[return-value]
 
 

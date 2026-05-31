@@ -38,6 +38,7 @@ from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db, get_db_session
 from core.models.business_profiles import BusinessProfile
 from core.models.core import Agent
+from core.utils.exception_telemetry import record_error
 
 from modules.intake.archetypes import (
     ARCHETYPES,
@@ -777,6 +778,13 @@ async def _run_scrape_pipeline(
 
     except Exception as exc:  # noqa: BLE001
         logger.exception("wizard pipeline failed profile=%s: %s", profile_id, exc)
+        record_error(
+            subsystem="wizard",
+            operation="scrape_pipeline",
+            error=exc,
+            workspace_id=workspace_id,
+            extra={"profile_id": profile_id, "domain": domain},
+        )
         # Mark the profile row failed so the UI can reflect it on reload
         try:
             with get_db_session() as db:

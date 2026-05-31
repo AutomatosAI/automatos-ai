@@ -24,6 +24,7 @@ from uuid import UUID
 
 from config import Config
 from core.llm import create_llm_manager
+from core.utils.exception_telemetry import record_error
 from modules.coordination.deterministic_checks import DeterministicChecker, DeterministicResult
 
 logger = logging.getLogger(__name__)
@@ -467,6 +468,7 @@ class VerificationService:
         ]
 
         last_error: Optional[str] = None
+        last_exc: Optional[Exception] = None
 
         for attempt in range(1, max_retries + 1):
             try:
@@ -560,7 +562,8 @@ class VerificationService:
                     tokens_used=tokens_used,
                 )
 
-            except Exception:
+            except Exception as exc:
+                last_exc = exc
                 last_error = f"LLM judge call failed on attempt {attempt}"
                 logger.error(
                     "Verification LLM judge error (attempt %d/%d) for task '%s'",
@@ -568,10 +571,18 @@ class VerificationService:
                     exc_info=True,
                 )
 
-        # All retries exhausted — return partial (escalate to human)
+        # All retries exhausted — return partial (escalate to human). Record the
+        # terminal failure so the ERRORS-by-subsystem tile reflects it; the
+        # advisory degrade-to-PARTIAL behaviour is unchanged.
         logger.warning(
             "Verification LLM judge exhausted %d retries for task '%s': %s",
             max_retries, task_title, last_error,
+        )
+        record_error(
+            subsystem="verification",
+            operation="verify_task",
+            error=last_exc or RuntimeError(last_error or "LLM judge failed"),
+            extra={"task_title": task_title[:200], "max_retries": max_retries},
         )
         return VerificationResult(
             verdict=VERDICT_PARTIAL,
@@ -650,6 +661,7 @@ class VerificationService:
         ]
 
         last_error: Optional[str] = None
+        last_exc: Optional[Exception] = None
 
         for attempt in range(1, max_retries + 1):
             try:
@@ -718,7 +730,8 @@ class VerificationService:
                     tokens_used=tokens_used,
                 )
 
-            except Exception:
+            except Exception as exc:
+                last_exc = exc
                 last_error = f"Consistency LLM call failed on attempt {attempt}"
                 logger.error(
                     "Consistency check error (attempt %d/%d) for run %s",
@@ -726,10 +739,18 @@ class VerificationService:
                     exc_info=True,
                 )
 
-        # All retries exhausted — assume passed (don't block human review)
+        # All retries exhausted — assume passed (don't block human review).
+        # Record the terminal failure so the ERRORS-by-subsystem tile reflects
+        # it; the fail-open behaviour is unchanged.
         logger.warning(
             "Consistency check exhausted %d retries for run %s: %s",
             max_retries, run_id, last_error,
+        )
+        record_error(
+            subsystem="verification",
+            operation="cross_task_consistency",
+            error=last_exc or RuntimeError(last_error or "consistency check failed"),
+            extra={"run_id": str(run_id), "max_retries": max_retries},
         )
         return ConsistencyResult(
             passed=True,
