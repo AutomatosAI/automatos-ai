@@ -21,14 +21,17 @@ Wave 0 answered *"can we measure it?"* — yes. The very first live read (prod, 
 the platform is **bleeding**, and Wave 1 stops exactly that, nothing else.
 
 **Pre-launch caveat (binding):** the ~20 workspaces are mostly test + a few pilots; we are **not
-live**. Adoption/activation/volume numbers are **noise**. The only Wave-0 readings that are real
-*signal* are **instrumentation-correctness gaps** and **code-path failures**. Wave 1 is scoped to
-those — not to "move the activation number."
+live**. Adoption/activation/volume numbers **and execution-outcome rates (e.g. mission success %)
+are noise** — they are dominated by test/build churn in pilot mode and must **not** be read as
+product or reliability signal. The only Wave-0 readings that are real *signal* are
+**instrumentation-correctness gaps** (a sink nothing writes to) and **specific code-path defects**
+(an `except` that loses work). Wave 1 fixes those architectural weaknesses **on their own merits** —
+not to "move a pilot-era number."
 
 | Live Wave-0 reading | What it really means | Root cause (verified on `main`) | Wave 1 action |
 |---|---|---|---|
 | **ERRORS tile = empty** (0 rows ever) | The sink works; **nothing reports into it** | `record_error` persists to `error_events` (`exception_telemetry.py:123`) but has only **2 call sites** (`smart_tool_router.py:216`, `signal_recorder.py:368`) — both tool-routing. Mission/verification/planner/board/wizard/workflow failure paths `logger.error()` and never call it. | **WS-A** — adopt `record_error` at the real failure hot-paths |
-| **Mission success 17%** (5/30) vs workflows 90% | Almost certainly **orphaned-on-restart**, not merit failures | Missions launch via fire-and-forget `asyncio.create_task` (`board_tasks.py:788`, `wizard.py:339`, `workflows.py:1019/1137`). A redeploy mid-run loses the task; no record distinguishes "crashed" from "never started". | **WS-C** — durable execution + boot reaper |
+| **Missions vanish on redeploy** (architectural — *not* inferred from the noisy pilot success rate) | In-flight work is lost with no durable record | Missions launch via fire-and-forget `asyncio.create_task` (`board_tasks.py:788`, `wizard.py:339`, `workflows.py:1019/1137`); a redeploy mid-run loses the task, and no record distinguishes "crashed" from "never started". Independently flagged **Mission Zero P1**. | **WS-C** — durable execution + boot reaper |
 | **Widget `callback_failed` ×3 / 7d** | A real code-path failure on the widget callback | Uninstrumented except path; failure is invisible beyond a log line | **WS-A** — instrument the widget callback path |
 | (background) **DDL/migrations stall** | Idle-in-transaction holds | `get_db()` (`database.py:105`) `finally` only `close()`s — no rollback; long-lived background `SessionLocal` ticks hold a tx open (9 hr idle SELECT on `agents` observed) | **WS-D** — idle-tx lifecycle fix |
 | **Mem0 stalls under load** | THE production crash source | `Mem0Client` uses sync `requests` + `time.sleep` in `run_in_executor` (35 sites) → thread-pool starvation stalls *all* async work | **WS-B** — Mem0 async (= PRD-141 Phase 1) |
@@ -160,7 +163,7 @@ wrappers in `UnifiedMemoryService`; proactive health probe; tighten timeouts/coo
   `time.sleep` in memory retry.
 
 ### WS-C — Durable mission / wizard / workflow execution
-*The gap PRD-141 misses, and the likely cause of the 17% mission success.*
+*The gap PRD-141 misses. Justified by the architecture + Mission Zero P1 — **not** by the noisy pilot-era success rate.*
 
 **W1-S4 — Persist a durable launch record + status transition *before* dispatch.**
 - For missions, board tasks (`board_tasks.py:788`), and the wizard scrape pipeline (`wizard.py:339`):
@@ -264,8 +267,8 @@ workspace, rollback path documented.
 |---|---|---|---|
 | `error_events` rows after induced subsystem failures | 0 | ≥1 per instrumented subsystem | WS-A tests + ERRORS endpoint |
 | Bare `except:` blocks | 24 | 0 | CI gate (W1-S2) |
-| Orphaned `running` runs after a deploy | unknown (≈ the 17% gap) | 0 older than reaper threshold | W1-S6 reaper + DB check |
-| Mission success rate **truthfulness** | misleading (orphans counted as failures) | reflects merit (orphans resumed or labelled) | success-rate tile post-WS-C |
+| Orphaned `running` runs after a deploy | unknown | 0 older than reaper threshold | W1-S6 reaper + DB check |
+| Missions survive a mid-run redeploy | no — lost | yes — resumed or cleanly failed | WS-C canary: redeploy mid-mission |
 | Mem0 thread-starvation under 50 concurrent | crashes | 0 | PRD-141 US-008 load test |
 | Idle-in-transaction > 60 s | present (9 hr observed) | 0 | `pg_stat_activity` |
 | Silent agent bails | unknown | measurable (`limit_reached` count) | W1-S10 event |
