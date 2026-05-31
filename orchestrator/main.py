@@ -352,6 +352,21 @@ async def _boot_phase_1_core():
 
         logger.info("Boot seeds completed (leader worker)")
 
+        # ── Orphaned-run reaper (PRD-142 Wave 1 · WS-C · W1-S6) ──
+        # Runs under the leader lock so exactly one worker reaps per deploy.
+        # In-flight rows whose background executor died with the previous
+        # process (board 'in_progress', wizard 'scraping', workflow 'running')
+        # are marked terminal here. Guarded: a reaper failure must never abort
+        # boot — it surfaces on the ERRORS-by-subsystem tile instead.
+        try:
+            from core.boot.reaper import reap_orphaned_runs
+            with get_db_session() as db:
+                reap_orphaned_runs(db)
+        except Exception as reap_err:
+            logger.warning("Boot reaper failed (non-fatal): %s", reap_err, exc_info=True)
+            from core.utils.exception_telemetry import record_error
+            record_error(subsystem="startup", operation="boot_reaper", error=reap_err)
+
 
 async def _seed_semantic_embeddings():
     """Phase 1 continued: launch the non-blocking boot seeds.
