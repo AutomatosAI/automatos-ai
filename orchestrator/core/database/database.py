@@ -108,6 +108,11 @@ def get_db() -> Session:
     try:
         yield db
     finally:
+        # Roll back any transaction the handler left open before returning the
+        # connection to the pool, so it is never 'idle in transaction' (holds
+        # row locks, blocks DDL). After a handler that committed, this is a
+        # no-op. Aligns with the get_db_session() pattern below.
+        db.rollback()
         db.close()
 
 @contextmanager
