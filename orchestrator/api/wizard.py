@@ -19,7 +19,6 @@ background so Railway's edge proxy cannot kill long-running intake jobs
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 import tempfile
@@ -39,6 +38,7 @@ from core.database.database import get_db, get_db_session
 from core.models.business_profiles import BusinessProfile
 from core.models.core import Agent
 from core.utils.exception_telemetry import record_error
+from core.utils.background_tasks import launch_guarded
 
 from modules.intake.archetypes import (
     ARCHETYPES,
@@ -336,8 +336,10 @@ async def scrape_selected(
         meta={"total": len(selected)},
     )
 
-    # Fire-and-forget; the task handles all its own errors and progress emits
-    asyncio.create_task(
+    # Fire-and-forget; the pipeline handles its own errors and progress emits.
+    # Guarded so a GC'd loop can't silently cancel it and an uncaught crash is
+    # recorded; the boot reaper (W1-S6) fails any profile stranded by a restart.
+    launch_guarded(
         _run_scrape_pipeline(
             profile_id=profile_id,
             workspace_id=workspace_id,
@@ -345,7 +347,11 @@ async def scrape_selected(
             archetype_slug=archetype,
             selected_urls=selected,
             user_goals=user_goals,
-        )
+        ),
+        subsystem="wizard",
+        operation="scrape_pipeline",
+        workspace_id=workspace_id,
+        extra={"profile_id": profile_id, "domain": domain},
     )
 
     logger.info(

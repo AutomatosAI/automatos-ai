@@ -12,12 +12,12 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, joinedload, attributes
 from sqlalchemy import and_, or_, func, desc, String
 from datetime import datetime, timedelta
-import asyncio
 import logging
 import json
 
 from config import config
 from core.database.database import get_db
+from core.utils.background_tasks import launch_guarded
 from core.models import (
     Workflow, WorkflowExecution, Agent, workflow_agents,
     WorkflowCreate, WorkflowUpdate, WorkflowResponse,
@@ -1015,12 +1015,17 @@ async def execute_workflow_advanced(
             handle = await runner.submit_task(task)
             logger.info(f"Workflow {workflow_id} execution {execution.id} queued (task={handle.task_id[:8]})")
         else:
-            # Phase 1 / Local: Run in-process (existing behavior)
-            asyncio.create_task(
+            # Phase 1 / Local: Run in-process (existing behavior), guarded so a
+            # GC'd loop can't silently cancel it and an uncaught crash is recorded.
+            launch_guarded(
                 execute_workflow_with_progress(
                     execution.id,
                     execution_data.get('options', {})
-                )
+                ),
+                subsystem="workflow",
+                operation="execute",
+                workspace_id=ctx.workspace_id,
+                extra={"execution_id": execution.id, "workflow_id": workflow_id},
             )
 
         return {
@@ -1122,19 +1127,18 @@ async def execute_workflow(
             handle = await runner.submit_task(task)
             logger.info(f"Workflow {workflow_id} execution {execution.id} queued (task={handle.task_id[:8]})")
         else:
-            # Phase 1 / Local: Run in-process (existing behavior)
-            import asyncio
-
-            async def _run_with_error_handling():
-                try:
-                    await execute_workflow_with_progress(
-                        execution.id,
-                        execution_data.get('options', {})
-                    )
-                except Exception as e:
-                    logger.error(f"❌ FATAL: Workflow execution task crashed: {e}", exc_info=True)
-
-            asyncio.create_task(_run_with_error_handling())
+            # Phase 1 / Local: Run in-process (existing behavior), guarded so a
+            # GC'd loop can't silently cancel it and an uncaught crash is recorded.
+            launch_guarded(
+                execute_workflow_with_progress(
+                    execution.id,
+                    execution_data.get('options', {})
+                ),
+                subsystem="workflow",
+                operation="execute",
+                workspace_id=ctx.workspace_id,
+                extra={"execution_id": execution.id, "workflow_id": workflow_id},
+            )
 
         logger.info(f"Workflow {workflow_id} execution {execution.id} started")
         
