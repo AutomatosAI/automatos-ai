@@ -20,10 +20,23 @@ from config import config
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db
+from core.models.workspaces import Workspace
 from core.services.blog_service import BlogService
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/blog", tags=["Blog"])
+
+
+def _resolve_author_name(db: Session, workspace_id) -> str:
+    """Public byline for a post: the workspace/brand name.
+
+    ``author_name`` is exposed on public widget endpoints, so it must never be
+    user PII. We use the workspace name (e.g. "InBuildUK") and fall back to a
+    neutral label when it is missing or blank.
+    """
+    name = db.query(Workspace.name).filter(Workspace.id == workspace_id).scalar()
+    name = (name or "").strip()
+    return name or "Workspace Author"
 
 
 # ---------------------------------------------------------------------------
@@ -66,7 +79,7 @@ async def create_post(
 ):
     """Create a new blog post (draft by default)."""
     svc = BlogService(db, ctx.workspace_id)
-    author_name = ctx.user.display_name if ctx.user and ctx.user.display_name else "Workspace Author"
+    author_name = _resolve_author_name(db, ctx.workspace_id)
     post = await svc.create_post(
         title=body.title,
         content=body.content,
