@@ -13,6 +13,7 @@ Features:
 """
 
 import asyncio
+import json
 import logging
 import re
 import time
@@ -438,25 +439,56 @@ class SmartMemoryManager:
             logger.info("[SmartMemory] Memory classified as: %s", tier)
 
             max_chars = self._get_store_max_chars()
-            messages = [
-                {"role": "user", "content": user_message[:max_chars]},
-                {"role": "assistant", "content": assistant_response[:max_chars]}
-            ]
+
+            # L3 input curation: distil durable facts from this exchange BEFORE
+            # feeding Mem0. Sending the raw transcript made Mem0's server-side
+            # extraction emit thin, episodic facts ("User requested…"). Curating
+            # here yields durable knowledge instead. The verbatim transcript is
+            # still dual-written to L2 below, so nothing is lost.
+            facts = await self._distill_durable_facts(
+                user_message,
+                assistant_response,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+            )
+
+            if facts is None:
+                # Distillation failed (LLM/parse error) — fall back to the raw
+                # exchange so a transient outage never drops the memory.
+                l3_messages = [
+                    {"role": "user", "content": user_message[:max_chars]},
+                    {"role": "assistant", "content": assistant_response[:max_chars]},
+                ]
+                distilled = False
+            elif facts:
+                # Durable facts found → store those, not the raw turns.
+                l3_messages = [
+                    {"role": "user", "content": fact[:max_chars]} for fact in facts
+                ]
+                distilled = True
+            else:
+                # facts == [] → nothing durable in this exchange. Skip L3 so we
+                # don't store episodic noise; L2 still keeps the transcript.
+                l3_messages = None
+                distilled = True
 
             base_metadata = {
                 "chat_id": chat_id,
                 "timestamp": datetime.utcnow().isoformat(),
                 "workspace_id": workspace_id,
                 "agent_id": agent_id,
+                "distilled": distilled,
             }
 
-            results = await self.unified_service.store_two_tier(
-                workspace_id=workspace_id,
-                messages=messages,
-                agent_id=agent_id,
-                tier=tier,
-                metadata=base_metadata,
-            )
+            results = []
+            if l3_messages is not None:
+                results = await self.unified_service.store_two_tier(
+                    workspace_id=workspace_id,
+                    messages=l3_messages,
+                    agent_id=agent_id,
+                    tier=tier,
+                    metadata=base_metadata,
+                )
 
             # PRD-131d Phase 3: also preserve the raw transcript in L2 so the
             # Memory Explorer can surface full convos, not just Mem0's distilled
@@ -478,23 +510,124 @@ class SmartMemoryManager:
                     "[SmartMemory] Transcript storage skipped", exc_info=True,
                 )
 
-            # Check if any storage succeeded
-            success = any(r[1] and not r[1].get("error") for r in results)
+            # L3 stored OK, or was deliberately skipped (nothing durable) — both
+            # count as success; the L2 transcript above preserves the raw
+            # exchange regardless.
+            l3_ok = any(r[1] and not r[1].get("error") for r in results)
+            success = l3_ok or l3_messages is None
 
             if success:
-                tiers_stored = [r[0] for r in results if r[1] and not r[1].get("error")]
-                logger.info("[SmartMemory] Stored in tiers: %s", tiers_stored)
+                if l3_ok:
+                    tiers_stored = [r[0] for r in results if r[1] and not r[1].get("error")]
+                    logger.info("[SmartMemory] Stored distilled facts in tiers: %s", tiers_stored)
+                else:
+                    logger.info("[SmartMemory] No durable facts — L3 skipped; transcript kept in L2")
                 # Invalidate cache
                 self._invalidate_cache(workspace_id, agent_id)
                 return True
             else:
                 errors = [f"{r[0]}: {r[1].get('error') if r[1] else 'None'}" for r in results]
-                logger.warning("[SmartMemory] Storage failed: %s", errors)
+                logger.warning("[SmartMemory] L3 storage failed: %s", errors)
                 return False
 
         except Exception as e:
             logger.error("[SmartMemory] Storage failed: %s", e, exc_info=True)
             return False
+
+    # ---------------------------------------------------------------
+    # L3 input curation — distil durable facts before feeding Mem0
+    # ---------------------------------------------------------------
+
+    async def _distill_durable_facts(
+        self,
+        user_message: str,
+        assistant_response: str,
+        *,
+        workspace_id: str,
+        agent_id: Optional[int],
+    ) -> Optional[List[str]]:
+        """Distil 0..N durable facts from a chat exchange for the L3 (Mem0) feed.
+
+        Returns:
+            - ``list[str]`` of durable facts (possibly empty → nothing worth
+              keeping; caller should skip L3),
+            - ``None`` on LLM/parse failure so the caller can fall back to the
+              raw exchange rather than silently dropping the memory.
+        """
+        prompt = self._build_distill_prompt(user_message, assistant_response)
+        try:
+            # Imported here (not at module top) so tests can monkeypatch
+            # ``core.llm.create_llm_manager`` and have it take effect per call.
+            from core.llm import create_llm_manager
+
+            llm = create_llm_manager(
+                service_name="memory_integration",
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                request_type="memory_distill",
+            )
+            response = await llm.generate_response(
+                messages=[{"role": "user", "content": prompt}]
+            )
+            content = response.content if hasattr(response, "content") else str(response)
+        except Exception:
+            logger.warning(
+                "[SmartMemory] Fact distillation LLM call failed", exc_info=True
+            )
+            return None
+
+        return self._parse_distilled_facts(content)
+
+    @staticmethod
+    def _build_distill_prompt(user_message: str, assistant_response: str) -> str:
+        """Prompt that asks the LLM for durable knowledge, not interaction logs."""
+        return (
+            "You are curating long-term memory for an AI assistant. From the "
+            "single chat exchange below, extract only DURABLE facts worth "
+            "remembering for future conversations — stable knowledge about the "
+            "user, their business, their domain, their preferences, or decisions "
+            "and constraints that will still matter weeks from now.\n\n"
+            "Do NOT record transient interaction events (e.g. 'user asked to run "
+            "a mission', 'assistant said it would do X', 'user was informed "
+            "that…'). Those are conversation logs, not knowledge.\n\n"
+            "Write each fact as a standalone, third-person statement that makes "
+            "sense without the surrounding conversation. Preserve specifics "
+            "(names, standards, numbers, spellings).\n\n"
+            "Return ONLY a JSON array of strings. If nothing durable is worth "
+            "keeping, return an empty array [].\n\n"
+            f"User: {user_message}\n"
+            f"Assistant: {assistant_response}\n\n"
+            "Durable facts (JSON array):"
+        )
+
+    @staticmethod
+    def _parse_distilled_facts(content: str) -> Optional[List[str]]:
+        """Parse the LLM output into a list of facts.
+
+        Tolerates prose and ```json code fences around the array. Returns the
+        parsed list (possibly empty), or ``None`` if no JSON array can be found.
+        """
+        if not content:
+            return None
+        text = content.strip()
+        # Strip a ```json … ``` (or bare ```) code fence if present.
+        fence = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
+        if fence:
+            text = fence.group(1).strip()
+        # Prefer a clean parse; otherwise grab the first […] array in the text.
+        candidate = text
+        if not (candidate.startswith("[") and candidate.endswith("]")):
+            match = re.search(r"\[.*\]", text, re.DOTALL)
+            if not match:
+                return None
+            candidate = match.group(0)
+        try:
+            parsed = json.loads(candidate)
+        except (ValueError, TypeError):
+            return None
+        if not isinstance(parsed, list):
+            return None
+        return [str(f).strip() for f in parsed if str(f).strip()]
 
     # ---------------------------------------------------------------
     # Daily Log Summary (US-011 / US-012)
