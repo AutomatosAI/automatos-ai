@@ -6,7 +6,6 @@ CRUD + planning endpoints for the lightweight task board (PRD-72).
 Tasks follow a Kanban lifecycle: inbox -> assigned -> in_progress -> review -> blocked -> done.
 """
 
-import asyncio
 import json
 import logging
 from datetime import datetime, timedelta, timezone
@@ -22,6 +21,7 @@ from core.database.database import get_db
 from core.models.core import BoardTask
 from core.models import Agent
 from core.utils.exception_telemetry import record_error
+from core.utils.background_tasks import launch_guarded
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/tasks", tags=["board-tasks"])
@@ -794,7 +794,17 @@ def _launch_task_execution(
         finally:
             db.close()
 
-    asyncio.create_task(_run())
+    # Guarded launch: a strong ref prevents GC-cancellation mid-run and an
+    # uncaught crash is recorded. _run() already records its own caught
+    # failures; the boot reaper (W1-S6) recovers any row stranded by a restart.
+    launch_guarded(
+        _run(),
+        subsystem="board",
+        operation="execute_task",
+        workspace_id=workspace_id,
+        agent_id=agent_id,
+        extra={"task_id": task_id},
+    )
 
 
 # ── Planning mode ────────────────────────────────────────────────────

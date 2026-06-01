@@ -352,68 +352,39 @@ async def _boot_phase_1_core():
 
         logger.info("Boot seeds completed (leader worker)")
 
+        # ── Orphaned-run reaper (PRD-142 Wave 1 · WS-C · W1-S6) ──
+        # Runs under the leader lock so exactly one worker reaps per deploy.
+        # In-flight rows whose background executor died with the previous
+        # process (board 'in_progress', wizard 'scraping', workflow 'running')
+        # are marked terminal here. Guarded: a reaper failure must never abort
+        # boot — it surfaces on the ERRORS-by-subsystem tile instead.
+        try:
+            from core.boot.reaper import reap_orphaned_runs
+            with get_db_session() as db:
+                reap_orphaned_runs(db)
+        except Exception as reap_err:
+            logger.warning("Boot reaper failed (non-fatal): %s", reap_err, exc_info=True)
+            from core.utils.exception_telemetry import record_error
+            record_error(subsystem="startup", operation="boot_reaper", error=reap_err)
+
 
 async def _seed_semantic_embeddings():
-    """Phase 1 continued: Background embedding seed (non-blocking)."""
+    """Phase 1 continued: launch the non-blocking boot seeds.
+
+    The seed bodies live in ``core.boot.startup_tasks`` — importable, tested,
+    and observable: on failure they report into ``error_events`` via
+    ``record_error(subsystem="startup")`` (WS-A sink) instead of dying with
+    only a log line. Both are self-guarding (never raise), so a bare
+    ``create_task`` cannot leak an unretrieved exception.
+    """
     import asyncio as _asyncio
-    from core.routing.semantic_indexer import embed_workspace_agents as _embed_ws
-    from core.models.workspaces import Workspace as _Workspace
+    from core.boot.startup_tasks import (
+        embed_all_agents_on_startup,
+        ensure_field_memory_collection,
+    )
 
-    async def _embed_all_agents_on_startup():
-        """Background task: embed agents in all workspaces."""
-        try:
-            from core.database.database import SessionLocal as _SL
-            from core.llm.embedding_manager import get_embedding_manager
-            from core.models.core import Agent as _Agent
-
-            _db = _SL()
-            try:
-                emgr = get_embedding_manager()
-                emgr._ensure_provider()
-                logger.info(f"PRD-64: Embedding provider: {emgr.get_provider_info()}")
-
-                ws_ids = [w.id for w in _db.query(_Workspace.id).all()]
-                total = 0
-                for ws_id in ws_ids:
-                    try:
-                        total += await _embed_ws(ws_id, _db)
-                    except Exception:
-                        logger.warning("PRD-64: Failed to embed workspace %s", ws_id, exc_info=True)
-
-                all_agents = _db.query(_Agent).filter(_Agent.status == "active").count()
-                with_embeddings = _db.query(_Agent).filter(
-                    _Agent.status == "active",
-                    _Agent.semantic_embedding.isnot(None),
-                ).count()
-                logger.info(
-                    f"PRD-64: Semantic embeddings seeded — "
-                    f"{total} new, {with_embeddings}/{all_agents} agents have embeddings"
-                )
-            finally:
-                _db.close()
-        except Exception as e:
-            logger.warning(f"PRD-64: Startup embedding seed failed (non-fatal): {e}", exc_info=True)
-
-    _asyncio.create_task(_embed_all_agents_on_startup())
-
-    # PRD-108 single-collection refactor: ensure the shared field_memory
-    # collection + payload indexes exist before the coordinator boots.
-    async def _ensure_field_memory_collection() -> None:
-        try:
-            from modules.context.factory import get_shared_context
-            from modules.context.adapters.vector_field import VectorFieldSharedContext
-            ctx = get_shared_context()
-            inner = getattr(ctx, "_inner", ctx)
-            if isinstance(inner, VectorFieldSharedContext):
-                await inner.ensure_shared_collection()
-                logger.info("PRD-108: shared field_memory collection ready")
-        except Exception:
-            logger.warning(
-                "PRD-108: shared field_memory bootstrap failed (non-fatal)",
-                exc_info=True,
-            )
-
-    _asyncio.create_task(_ensure_field_memory_collection())
+    _asyncio.create_task(embed_all_agents_on_startup())
+    _asyncio.create_task(ensure_field_memory_collection())
 
 
 class TrustGateError(RuntimeError):

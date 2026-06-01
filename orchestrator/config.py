@@ -128,6 +128,19 @@ class Config:
     MEMORY_ARCHIVAL_BATCH_SIZE: int = int(os.getenv("MEMORY_ARCHIVAL_BATCH_SIZE", "500"))
 
     # =============================================================================
+    # BOOT REAPER — orphaned in-flight runs (PRD-142 Wave 1 · WS-C · W1-S6)
+    # =============================================================================
+    # On restart, in-flight rows whose background executor died with the old
+    # process are stranded forever (a board task stuck 'in_progress', a wizard
+    # profile stuck 'scraping', a workflow execution stuck 'running'). The reaper
+    # sweeps them once per deploy under the boot leader lock.
+    BOOT_REAPER_ENABLED: bool = os.getenv("BOOT_REAPER_ENABLED", "true").lower() in ("true", "1", "yes")
+    # A row counts as orphaned only after it has been in-flight this long. Must
+    # exceed the slowest legitimate job (the wizard scrape runs ~10–20 min) so a
+    # live run is never reaped out from under itself.
+    BOOT_REAPER_STALE_MINUTES: int = int(os.getenv("BOOT_REAPER_STALE_MINUTES", "30"))
+
+    # =============================================================================
     # API SECURITY
     # =============================================================================
     ORCHESTRATOR_API_KEY: str = os.getenv("ORCHESTRATOR_API_KEY") or os.getenv("AUTOMATOS_API_KEY") or os.getenv("API_KEY")
