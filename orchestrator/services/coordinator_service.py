@@ -28,6 +28,7 @@ from sqlalchemy import and_, text
 from sqlalchemy.orm import Session
 
 from config import COMPLEXITY_TOKEN_BUDGET, Config, config
+from core.database.database import end_open_transaction
 from core.models.core import Agent
 from core.models.system_settings import SystemSetting
 from core.models.orchestration import (
@@ -1054,8 +1055,13 @@ class CoordinatorService:
                         exc_info=True,
                     )
 
-            # Flush all DB changes before entering the parallel phase
-            db.flush()
+            # Commit Phase-1 prep before the parallel phase so the connection
+            # is not idle-in-transaction for the whole asyncio.gather of agent
+            # LLM calls (PRD-135 / W1-S9). RUNNING transitions and agent
+            # activations become durable here — if the process dies mid-gather,
+            # the durable-execution reaper (WS-C) recovers them rather than a
+            # silent end-of-tick rollback.
+            end_open_transaction(db)
 
             # --- Phase 2: Agent I/O (parallel via asyncio.gather) ---
             if prepared:

@@ -129,6 +129,23 @@ def get_db_session():
     finally:
         db.close()
 
+def end_open_transaction(db: Session) -> None:
+    """Commit to end the session's open transaction before a long ``await``.
+
+    SQLAlchemy opens a transaction on the first query and holds it until the
+    next commit/rollback. A long-lived session that issues a SELECT and then
+    awaits an LLM call (or an ``asyncio.gather`` of agent coroutines) leaves its
+    backing connection 'idle in transaction' for the whole await — holding row
+    locks and blocking DDL (PRD-135: a 9-hour idle SELECT on ``agents`` once
+    wedged a migration).
+
+    Call this immediately before such an await so the connection sits idle, not
+    idle-in-transaction. Any pending writes are flushed and committed at that
+    point, so the write boundary becomes incremental rather than one commit at
+    the end of the tick — a deliberate atomicity trade for connection safety.
+    """
+    db.commit()
+
 def init_database():
     """Initialize database with default data"""
     try:

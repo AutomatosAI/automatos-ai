@@ -508,7 +508,7 @@ class HeartbeatService:
         from core.llm.manager import LLMManager
         from modules.context import ContextService, ContextMode
         from modules.tools.discovery.platform_executor import PlatformActionExecutor
-        from core.database.database import SessionLocal
+        from core.database.database import SessionLocal, end_open_transaction
         from types import SimpleNamespace
 
         # 1. Load personality settings for heartbeat-specific instructions
@@ -591,6 +591,11 @@ class HeartbeatService:
             executor = PlatformActionExecutor(db, workspace_id)
 
             for iteration in range(max_iterations):
+                # End the open transaction before each LLM call so the heartbeat
+                # connection is not idle-in-transaction across the await (PRD-135
+                # / W1-S9). First pass commits build_context()'s reads; later
+                # passes commit the prior tool's writes.
+                end_open_transaction(db)
                 response = await llm.generate_response(messages, tools=platform_tools if platform_tools else None)
 
                 # Track tokens
