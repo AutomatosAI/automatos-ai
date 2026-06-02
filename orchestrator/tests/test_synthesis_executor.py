@@ -6,7 +6,7 @@ Proves:
 1. _collect_upstream_outputs fetches dependency task outputs
 2. _build_synthesis_prompt includes all upstream outputs
 3. _auto_synthesis_verification_criteria generates required_sections + min_length
-4. _execute_task detects TaskType.SYNTHESIS and uses synthesis prompt
+4. _prepare_task detects TaskType.SYNTHESIS and uses synthesis prompt
 """
 import sys
 from pathlib import Path
@@ -219,23 +219,17 @@ class TestAutoSynthesisVerificationCriteria:
 
 
 # ---------------------------------------------------------------------------
-# Test: _execute_task uses synthesis prompt for SYNTHESIS tasks
+# Test: _prepare_task uses synthesis prompt for SYNTHESIS tasks
 # ---------------------------------------------------------------------------
 
-class TestExecuteTaskSynthesisWiring:
+class TestPrepareTaskSynthesisWiring:
     @pytest.mark.asyncio
     async def test_synthesis_task_uses_synthesis_prompt(self):
-        """Verify that _execute_task builds synthesis prompt for SYNTHESIS tasks."""
-        # Mock AgentFactory before it gets imported inside _execute_task
+        """Verify that _prepare_task builds synthesis prompt for SYNTHESIS tasks."""
+        # Mock AgentFactory before it gets imported inside _prepare_task
         mock_agent_factory_cls = MagicMock()
         mock_factory_instance = MagicMock()
         mock_factory_instance.active_agents = {}
-
-        captured_prompt = {}
-
-        async def mock_execute(*, agent, prompt, max_retries, max_tool_iterations):
-            captured_prompt["value"] = prompt
-            return {"status": "success", "execution": {"tokens_used": 500}}
 
         async def mock_activate(agent_id, workspace_dir):
             runtime = MagicMock()
@@ -243,7 +237,6 @@ class TestExecuteTaskSynthesisWiring:
             return runtime
 
         mock_factory_instance.activate_agent = mock_activate
-        mock_factory_instance.execute_with_prompt = mock_execute
         mock_agent_factory_cls.return_value = mock_factory_instance
 
         # Create a mock module for the lazy import
@@ -287,23 +280,25 @@ class TestExecuteTaskSynthesisWiring:
             mock_dispatcher.record_task_running.return_value = None
             mock_dispatcher.record_task_completion.return_value = None
 
-            await service._execute_task(db, run, synthesis_task, agent_id=1)
+            prep = await service._prepare_task(db, run, synthesis_task, agent_id=1)
 
-        # Verify synthesis prompt was used (not standard build_task_prompt)
-        assert "value" in captured_prompt
-        prompt = captured_prompt["value"]
+        # Verify synthesis prompt was built (not standard build_task_prompt)
+        prompt = prep["prompt"]
         assert "Synthesis Task: Merge Research" in prompt
         assert "AI findings" in prompt
         assert "ML findings" in prompt
 
-        # Verify verification criteria were auto-set
+        # Verify verification criteria were auto-set. Synthesis deliberately
+        # emits only a min_length floor — no required_sections, because the
+        # planner can't predict the agent's headings (see
+        # _auto_synthesis_verification_criteria).
         assert synthesis_task.verification_criteria is not None
-        section_check = next(
+        length_check = next(
             c for c in synthesis_task.verification_criteria
-            if c["type"] == "required_sections"
+            if c["type"] == "min_length"
         )
-        assert "Research AI" in section_check["value"]
-        assert "Research ML" in section_check["value"]
+        # Two upstream outputs of 11 chars each -> 22; floored at 200.
+        assert length_check["value"] == 200
 
     @pytest.mark.asyncio
     async def test_non_synthesis_task_uses_standard_prompt(self):
@@ -360,7 +355,7 @@ class TestExecuteTaskSynthesisWiring:
             mock_dispatcher.record_task_completion.return_value = None
             mock_dispatcher.build_task_prompt.return_value = "Standard prompt"
 
-            await service._execute_task(db, run, task, agent_id=1)
+            await service._prepare_task(db, run, task, agent_id=1)
 
         # Verify standard build_task_prompt was called
         mock_dispatcher.build_task_prompt.assert_called_once_with(task)

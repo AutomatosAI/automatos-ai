@@ -4,7 +4,7 @@ Wiring tests for US-003: Parallel dispatch wired into coordinator tick.
 
 Proves:
 1. _process_run() calls dispatch_ready() (not dispatch_next())
-2. When 2 tasks are dispatched, both _execute_task calls happen concurrently
+2. When 2 tasks are dispatched, both agent-I/O calls happen concurrently
 3. Sequential missions (max_concurrent=1) still work unchanged
 4. An exception in one task does not crash the tick or prevent reconciliation
 """
@@ -69,7 +69,25 @@ def _make_dispatch_result(*, task_id, agent_id=1, dispatched=True):
 def coordinator():
     """Create a CoordinatorService instance with heavy deps mocked out."""
     svc = CoordinatorService.__new__(CoordinatorService)
-    svc._execute_task = AsyncMock()
+
+    # The tick splits each task into three phases: _prepare_task (serial DB
+    # prep) -> _run_agent_io (concurrent, no DB) -> _record_task_result
+    # (serial). Mock all three. _prepare_task returns a prep dict embedding the
+    # real task so the gather/record phases thread it through unchanged.
+    async def _prep(db, run, task, agent_id):
+        return {
+            "task": task,
+            "agent_id": agent_id,
+            "agent_runtime": None,
+            "prompt": f"prompt-{task.id}",
+            "factory": MagicMock(),
+            "attachment_ids": [],
+            "mode_caps": {},
+        }
+
+    svc._prepare_task = AsyncMock(side_effect=_prep)
+    svc._run_agent_io = AsyncMock(return_value={"status": "success"})
+    svc._record_task_result = AsyncMock()
     svc._create_mission_field = AsyncMock(return_value="field-1")
     svc._get_field = MagicMock(return_value=None)
     return svc
@@ -99,7 +117,7 @@ class TestProcessRunParallelDispatch:
     @pytest.mark.asyncio
     async def test_two_tasks_both_execute(self, coordinator, mock_db):
         """
-        US-003 AC: dispatch 2 tasks, verify both _execute_task calls happen.
+        US-003 AC: dispatch 2 tasks, verify both agent-I/O calls happen.
         """
         run = _make_run(max_concurrent=2)
         task_1 = _make_task(seq=1)
@@ -140,11 +158,12 @@ class TestProcessRunParallelDispatch:
             await coordinator._process_run(mock_db, run)
 
             # Both tasks should have been executed
-            assert coordinator._execute_task.call_count == 2
+            assert coordinator._run_agent_io.call_count == 2
 
-            # Verify correct task/agent pairs
-            calls = coordinator._execute_task.call_args_list
-            call_task_ids = {c.args[2].id for c in calls}
+            # Verify correct task/agent pairs (task is positional arg 3 of
+            # _run_agent_io: factory, agent_id, prompt, task, attachment_ids)
+            calls = coordinator._run_agent_io.call_args_list
+            call_task_ids = {c.args[3].id for c in calls}
             assert task_1.id in call_task_ids
             assert task_2.id in call_task_ids
 
@@ -185,7 +204,7 @@ class TestProcessRunParallelDispatch:
 
             await coordinator._process_run(mock_db, run)
 
-            assert coordinator._execute_task.call_count == 1
+            assert coordinator._run_agent_io.call_count == 1
 
     @pytest.mark.asyncio
     async def test_no_dispatch_still_reconciles(self, coordinator, mock_db):
@@ -216,7 +235,7 @@ class TestProcessRunParallelDispatch:
 
             await coordinator._process_run(mock_db, run)
 
-            assert coordinator._execute_task.call_count == 0
+            assert coordinator._run_agent_io.call_count == 0
             mock_reconcile.assert_called_once()
 
     @pytest.mark.asyncio
@@ -234,12 +253,16 @@ class TestProcessRunParallelDispatch:
 
         call_counter = {"n": 0}
 
-        async def _execute_side_effect(db, run, task, agent_id):
+        async def _io_side_effect(factory, agent_id, prompt, task,
+                                  attachment_ids, *, mode_caps=None,
+                                  agent_runtime=None):
             call_counter["n"] += 1
             if task.id == task_1.id:
                 raise RuntimeError("LLM timeout")
 
-        coordinator._execute_task = AsyncMock(side_effect=_execute_side_effect)
+        # asyncio.gather(return_exceptions=True) captures the raise; Phase 3
+        # converts it to an error dict and still records + reconciles.
+        coordinator._run_agent_io = AsyncMock(side_effect=_io_side_effect)
 
         _task_list = [task_1, task_2]
 

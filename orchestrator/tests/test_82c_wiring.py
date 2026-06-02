@@ -637,7 +637,20 @@ class TestWiringCoordinatorTick:
     async def test_process_run_calls_dispatch_ready(self):
         """E2E: coordinator tick calls dispatch_ready, executes both tasks."""
         svc = CoordinatorService.__new__(CoordinatorService)
-        svc._execute_task = AsyncMock()
+
+        # Tick phases: _prepare_task (serial DB) -> _run_agent_io (concurrent)
+        # -> _record_task_result (serial). _prepare_task threads the real task
+        # through in its prep dict.
+        async def _prep(db, run, task, agent_id):
+            return {
+                "task": task, "agent_id": agent_id, "agent_runtime": None,
+                "prompt": f"prompt-{task.id}", "factory": MagicMock(),
+                "attachment_ids": [], "mode_caps": {},
+            }
+
+        svc._prepare_task = AsyncMock(side_effect=_prep)
+        svc._run_agent_io = AsyncMock(return_value={"status": "success"})
+        svc._record_task_result = AsyncMock()
         svc._create_mission_field = AsyncMock(return_value="field-1")
         svc._get_field = MagicMock(return_value=None)
 
@@ -676,7 +689,7 @@ class TestWiringCoordinatorTick:
             await svc._process_run(db, run)
 
             mock_ready.assert_called_once()
-            assert svc._execute_task.call_count == 2
+            assert svc._run_agent_io.call_count == 2
             mock_reconcile.assert_called_once()
 
     @pytest.mark.asyncio
@@ -690,12 +703,25 @@ class TestWiringCoordinatorTick:
         task_1 = _mock_task(seq=1)
         task_2 = _mock_task(seq=2)
 
-        async def _exec_side_effect(db, run, task, agent_id):
+        async def _prep(db, run, task, agent_id):
+            return {
+                "task": task, "agent_id": agent_id, "agent_runtime": None,
+                "prompt": f"prompt-{task.id}", "factory": MagicMock(),
+                "attachment_ids": [], "mode_caps": {},
+            }
+
+        async def _io_side_effect(factory, agent_id, prompt, task,
+                                  attachment_ids, *, mode_caps=None,
+                                  agent_runtime=None):
             call_count["n"] += 1
             if task.id == task_1.id:
                 raise RuntimeError("LLM timeout")
 
-        svc._execute_task = AsyncMock(side_effect=_exec_side_effect)
+        # gather(return_exceptions=True) captures the raise; the tick records
+        # an error result and still reconciles.
+        svc._prepare_task = AsyncMock(side_effect=_prep)
+        svc._run_agent_io = AsyncMock(side_effect=_io_side_effect)
+        svc._record_task_result = AsyncMock()
 
         run = _mock_run(max_concurrent=2)
         run.state = "running"
