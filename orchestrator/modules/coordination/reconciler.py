@@ -26,6 +26,7 @@ from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
 from config import Config
+from core.database.database import end_open_transaction
 from core.models.core import Agent
 from core.models.orchestration import OrchestrationRun, OrchestrationTask
 from core.models.orchestration_enums import (
@@ -372,16 +373,34 @@ class MissionReconciler:
                 if not criteria:
                     criteria = None
 
+            # Capture every scalar verify_task needs BEFORE committing. After
+            # end_open_transaction() the session is expired (expire_on_commit
+            # default), so touching task.title/description/output/id would
+            # re-SELECT and re-open a transaction — exactly what we must avoid
+            # across the long LLM await below.
+            t_title = task.title
+            t_desc = task.description or ""
+            t_output = task.output or ""
+            t_id = task.id
+
+            # End the read transaction so the connection sits idle (not
+            # idle-in-transaction) for the whole verify LLM call. PRD-135 /
+            # W1-S9: the agents SELECT in _get_executor_model held across this
+            # await was the documented 9-hour idle-in-transaction leak. The
+            # pending VERIFYING transition is committed here, so verification
+            # becomes durable per task rather than at end-of-tick.
+            end_open_transaction(db)
+
             # Run verification
             try:
                 result: VerificationResult = await verification_service.verify_task(
-                    task_title=task.title,
-                    task_description=task.description or "",
-                    output=task.output or "",
+                    task_title=t_title,
+                    task_description=t_desc,
+                    output=t_output,
                     verification_criteria=criteria,
                     executor_model=executor_model,
                     run_id=run_id,
-                    task_id=task.id,
+                    task_id=t_id,
                 )
             except Exception:
                 logger.error(

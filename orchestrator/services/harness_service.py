@@ -259,7 +259,7 @@ class HarnessService:
         t0 = time.monotonic()
         logger.info("[HARNESS] Tick started for workspace %s", ws_key)
 
-        from core.database.database import SessionLocal
+        from core.database.database import SessionLocal, end_open_transaction
 
         db = SessionLocal()
         try:
@@ -291,10 +291,21 @@ class HarnessService:
             allow_auto = self._workspace_allows_auto_apply(ws_settings)
 
             # ----- 5-phase pipeline -----
+            # Commit before each phase so the connection is not idle-in-
+            # transaction across the phase's long awaits (metric collection, LLM
+            # diagnose/prescribe, apply) — PRD-135 / W1-S9. The dormancy/config
+            # reads above and each phase's reads are ended here; phases that
+            # mutate state persist through PlatformActionExecutor's own commits,
+            # so these add no new write semantics, only release the connection.
+            end_open_transaction(db)
             metrics = await self._phase_collect(workspace_id, db)
+            end_open_transaction(db)
             diagnosis = await self._phase_diagnose(workspace_id, metrics, db)
+            end_open_transaction(db)
             prescriptions = await self._phase_prescribe(workspace_id, diagnosis, metrics, db)
+            end_open_transaction(db)
             changelog = await self._phase_apply(workspace_id, prescriptions, db, allow_auto_apply=allow_auto)
+            end_open_transaction(db)
             baseline, artifacts = await self._phase_baseline(
                 workspace_id, metrics, diagnosis, prescriptions, changelog, db,
             )
