@@ -1,0 +1,101 @@
+name: test
+
+# PRD-142 Wave 2 (W2-S3) — the Test Net's enforcement gate.
+#
+# Runs the orchestrator pytest suite on every PR against a real Postgres
+# service so DB-touching tests connect instead of hanging. (W2-S2 traced a
+# pre-existing hang in test_82c_wiring to psycopg2.connect blocking forever
+# when no Postgres is present — see that test's decompose path.) A per-test
+# timeout is the safety net: any future hang fails fast instead of burning
+# the whole job.
+#
+# Introduced NON-REQUIRED on purpose. The net is expected to surface
+# pre-existing gaps that Wave 2 (WS-G golden journeys, WS-H untested
+# primitives, WS-I regressions) will close. Flipping this to a required
+# check in branch protection is a deliberate follow-up, made once the suite
+# is green — that flip is the repo admin's call, not this workflow's.
+
+on:
+  push:
+    branches:
+      - main
+      - "ralph/**"
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  orchestrator-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test_db
+        ports:
+          - 5432:5432
+        # Hold the job until Postgres can actually accept connections.
+        options: >-
+          --health-cmd "pg_isready -U test -d test_db"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Wire config.get_database_url() at the ephemeral service above. These
+      # are throwaway CI credentials for a container that lives only for the
+      # job — not secrets, and never reused.
+      DATABASE_URL: postgresql://test:test@127.0.0.1:5432/test_db
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: test_db
+      ENVIRONMENT: development
+
+    defaults:
+      run:
+        working-directory: orchestrator
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: orchestrator/requirements.txt
+
+      # weasyprint (libpango/libcairo) and python-magic (libmagic) crash on
+      # *import*, not at install, when their C libraries are missing — which
+      # would break pytest collection before a single test runs. Install the
+      # shared libs the dependency set needs at import time.
+      - name: Install system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 \
+            libcairo2 libffi-dev libmagic1 ghostscript
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Initialise test database schema
+        run: python scripts/init_test_db.py
+
+      - name: Run test net
+        run: |
+          pytest \
+            --timeout=60 \
+            --timeout-method=thread \
+            -o faulthandler_timeout=90 \
+            -p no:cacheprovider \
+            -v
