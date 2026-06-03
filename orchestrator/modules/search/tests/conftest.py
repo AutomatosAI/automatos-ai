@@ -10,8 +10,6 @@ import pytest
 import numpy as np
 from datetime import datetime
 from typing import List
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, Session
 
 TEST_EMBEDDING_DIM = int(os.getenv("VECTOR_STORE_DIMENSIONS", "2048"))
 
@@ -21,40 +19,15 @@ from modules.search import (
     EnhancedVectorStore, VectorDocument, SearchMode, RankingStrategy
 )
 
-
-# Test database URL
-TEST_DB_URL = "postgresql://postgres:secure_password_123@127.0.0.1:5432/orchestrator_db"
-
-
-@pytest.fixture(scope="session")
-def test_engine():
-    """Create test database engine"""
-    engine = create_engine(TEST_DB_URL)
-    yield engine
-    engine.dispose()
-
-
-@pytest.fixture(scope="function")
-def db_session(test_engine):
-    """Provide a transactional database session for each test"""
-    connection = test_engine.connect()
-    transaction = connection.begin()
-    
-    SessionLocal = sessionmaker(bind=connection)
-    session = SessionLocal()
-    
-    yield session
-    
-    session.close()
-    transaction.rollback()
-    connection.close()
+# ``test_db_url``, ``test_engine`` and the transactional ``db_session`` fixture
+# come from the root orchestrator/conftest.py (PRD-142 W2-S4).
 
 
 @pytest.fixture
-async def vector_store():
+async def vector_store(test_db_url):
     """Provide EnhancedVectorStore instance"""
     store = EnhancedVectorStore(
-        database_url=TEST_DB_URL,
+        database_url=test_db_url,
         embedding_dimension=TEST_EMBEDDING_DIM,
         similarity_function="cosine",
         table_name="test_vector_documents"
@@ -71,10 +44,10 @@ def context_optimizer():
 
 
 @pytest.fixture
-def search_config():
+def search_config(test_db_url):
     """Provide SearchConfig for testing"""
     return SearchConfig(
-        database_url=TEST_DB_URL,
+        database_url=test_db_url,
         embedding_dimension=TEST_EMBEDDING_DIM,
         default_max_results=10,
         mmr_lambda=0.7
