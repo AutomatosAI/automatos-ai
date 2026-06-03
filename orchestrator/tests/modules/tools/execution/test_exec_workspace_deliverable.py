@@ -28,31 +28,60 @@ def _make_stub_module(name: str, **attrs) -> types.ModuleType:
     mod = types.ModuleType(name)
     for k, v in attrs.items():
         setattr(mod, k, v)
-    sys.modules[name] = mod
     return mod
 
 
-# core.workspace_client
-_make_stub_module("core", __path__=[])
-_make_stub_module("core.workspace_client", WorkspaceClient=_STUB_WORKSPACE_CLIENT)
-_make_stub_module("core.database", __path__=[])
-_make_stub_module("core.database.database", SessionLocal=_STUB_SESSION_LOCAL)
-_make_stub_module("core.models", __path__=[])
-_make_stub_module("core.models.core", Agent=MagicMock(name="AgentStub"))
-_make_stub_module("services", __path__=[])
-_make_stub_module(
-    "services.deliverable_service",
-    DeliverableService=_STUB_DELIVERABLE_SERVICE,
-    AGENT_REGISTERABLE_ARTIFACT_TYPES=frozenset({
-        "report", "image", "document", "slide", "spreadsheet", "code",
-    }),
-    _infer_artifact_type=lambda fp: (
-        "report" if fp.endswith(".md")
-        else "archive" if fp.endswith(".zip")
-        else "document"
+# Build the stub modules now, but DON'T install them into sys.modules at import
+# time — that would leak a pathless ``core`` / ``core.models`` / ``services``
+# into the collection of every sibling test module, breaking their real
+# ``core.*`` / ``services.*`` imports. exec_workspace imports these LAZILY inside
+# _auto_register_deliverable, so installing in setup_module and restoring in
+# teardown_module keeps the fakes live for THIS file's tests only and out of
+# collection. (PRD-142 W2-S2b.)
+_STUB_MODULES = {
+    "core": _make_stub_module("core", __path__=[]),
+    "core.workspace_client": _make_stub_module(
+        "core.workspace_client", WorkspaceClient=_STUB_WORKSPACE_CLIENT
     ),
-    _humanize_basename=lambda fp: fp.split("/")[-1],
-)
+    "core.database": _make_stub_module("core.database", __path__=[]),
+    "core.database.database": _make_stub_module(
+        "core.database.database", SessionLocal=_STUB_SESSION_LOCAL
+    ),
+    "core.models": _make_stub_module("core.models", __path__=[]),
+    "core.models.core": _make_stub_module(
+        "core.models.core", Agent=MagicMock(name="AgentStub")
+    ),
+    "services": _make_stub_module("services", __path__=[]),
+    "services.deliverable_service": _make_stub_module(
+        "services.deliverable_service",
+        DeliverableService=_STUB_DELIVERABLE_SERVICE,
+        AGENT_REGISTERABLE_ARTIFACT_TYPES=frozenset({
+            "report", "image", "document", "slide", "spreadsheet", "code",
+        }),
+        _infer_artifact_type=lambda fp: (
+            "report" if fp.endswith(".md")
+            else "archive" if fp.endswith(".zip")
+            else "document"
+        ),
+        _humanize_basename=lambda fp: fp.split("/")[-1],
+    ),
+}
+
+_saved_stub_modules = {}
+
+
+def setup_module(module):
+    for _name, _mod in _STUB_MODULES.items():
+        _saved_stub_modules[_name] = sys.modules.get(_name)
+        sys.modules[_name] = _mod
+
+
+def teardown_module(module):
+    for _name, _prior in _saved_stub_modules.items():
+        if _prior is None:
+            sys.modules.pop(_name, None)
+        else:
+            sys.modules[_name] = _prior
 
 # Load exec_workspace directly to avoid pulling the entire modules.tools package.
 _THIS = Path(__file__).resolve()

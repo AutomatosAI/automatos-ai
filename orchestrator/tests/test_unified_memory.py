@@ -52,10 +52,22 @@ _mock_config_obj.MEMORY_PROMOTION_BATCH_SIZE = 50
 
 _config_mod = types.ModuleType("config")
 _config_mod.config = _mock_config_obj
-sys.modules.setdefault("config", _config_mod)
+
+# Install the mock ``config`` for the importlib loads below, then restore so the
+# collection of sibling test modules never sees this fake (PRD-142 W2-S2b): a
+# pathless ``config`` stub left in sys.modules shadows the real config package
+# for every file collected afterwards. The loaded services import config lazily
+# inside their methods, so the autouse fixture re-installs it for each test.
+_config_snapshot = sys.modules.get("config")
+sys.modules["config"] = _config_mod
 
 _ums_mod = _load("unified_memory_service", "modules/memory/unified_memory_service.py")
 _cr_mod = _load("context_router", "modules/memory/context_router.py")
+
+if _config_snapshot is None:
+    sys.modules.pop("config", None)
+else:
+    sys.modules["config"] = _config_snapshot
 
 MemoryNamespace = _ums_mod.MemoryNamespace
 SessionMemory = _ums_mod.SessionMemory
@@ -79,10 +91,18 @@ CONV_ID = "conv-test-001"
 
 @pytest.fixture(autouse=True)
 def _reset_singleton():
-    """Reset singleton between tests."""
+    """Reset singleton + install the mock ``config`` for the duration of the test."""
+    _prev_config = sys.modules.get("config")
+    sys.modules["config"] = _config_mod
     UnifiedMemoryService._instance = None
-    yield
-    UnifiedMemoryService._instance = None
+    try:
+        yield
+    finally:
+        UnifiedMemoryService._instance = None
+        if _prev_config is None:
+            sys.modules.pop("config", None)
+        else:
+            sys.modules["config"] = _prev_config
 
 
 @pytest.fixture

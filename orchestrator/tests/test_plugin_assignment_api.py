@@ -39,6 +39,13 @@ from api.agent_plugins import (  # noqa: E402
     UpdateAgentPluginsBody,
 )
 
+# Collection-safe (PRD-142 W2-S2b): drop the auth/jwt stubs we installed so a
+# pathless ``core.auth.*`` stub doesn't shadow the real submodule when sibling
+# test modules are collected afterwards. api.agent_plugins has already bound the
+# symbols it needs at its own import time, so removing the stubs is safe.
+for _k in _stubs:
+    sys.modules.pop(_k, None)
+
 
 # ---------------------------------------------------------------------------
 # Helpers
