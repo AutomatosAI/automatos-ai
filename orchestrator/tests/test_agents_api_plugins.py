@@ -15,8 +15,9 @@ from uuid import uuid4
 import pytest
 
 # ---------------------------------------------------------------------------
-# Stub out transitive imports that need jwt/clerk
+# Stub out transitive imports that need jwt/clerk, then import the API module.
 # ---------------------------------------------------------------------------
+_stubs = {}
 for mod_name in [
     "jwt", "jwt.algorithms", "jwt.exceptions",
     "core.auth.clerk", "core.auth.hybrid",
@@ -29,8 +30,16 @@ for mod_name in [
         stub.DecodeError = Exception
         stub.ExpiredSignatureError = Exception
         sys.modules[mod_name] = stub
+        _stubs[mod_name] = stub
 
 from api.agents import _build_agent_response
+
+# Collection-safe (PRD-142 W2-S2b): drop the auth/jwt stubs we installed so a
+# pathless ``core.auth.*`` stub doesn't shadow the real submodule when sibling
+# test modules are collected afterwards. api.agents has already bound the
+# symbols it needs at its own import time, so removing the stubs is safe.
+for _k in _stubs:
+    sys.modules.pop(_k, None)
 
 
 # ---------------------------------------------------------------------------

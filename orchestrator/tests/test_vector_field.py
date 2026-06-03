@@ -31,59 +31,81 @@ if _orchestrator_root not in sys.path:
     sys.path.insert(0, _orchestrator_root)
 
 # ---------------------------------------------------------------------------
-# Stub qdrant_client before any project module imports it.
-# This prevents ModuleNotFoundError when qdrant_client is not installed.
-# ---------------------------------------------------------------------------
-_qdrant_stub = MagicMock()
-_qdrant_stub.AsyncQdrantClient = MagicMock
-# Expose every qdrant_client.models symbol the adapter uses
-_models_stub = MagicMock()
-for _sym in ("Distance", "FieldCondition", "Filter", "MatchValue",
-             "PayloadSchemaType", "PointStruct", "VectorParams"):
-    setattr(_models_stub, _sym, MagicMock())
-_qdrant_stub.models = _models_stub
-sys.modules.setdefault("qdrant_client", _qdrant_stub)
-sys.modules.setdefault("qdrant_client.models", _models_stub)
-
-# ---------------------------------------------------------------------------
-# Import the module under test ONCE after stubs are in place.
+# Import VectorFieldSharedContext under stubbed heavy deps, then restore.
 # Monkey-patching the instance (not the constructor) avoids re-import races.
 # ---------------------------------------------------------------------------
-_fake_config_for_import = MagicMock()
-_fake_config_for_import.QDRANT_URL = "http://localhost:6333"
-_fake_config_for_import.QDRANT_API_KEY = ""
-_fake_config_for_import.FIELD_DECAY_RATE = 0.1
-_fake_config_for_import.FIELD_REINFORCE_BONUS = 0.05
-_fake_config_for_import.FIELD_REINFORCE_CAP = 2.0
-_fake_config_for_import.FIELD_ARCHIVAL_THRESHOLD = 0.05
-_fake_config_for_import.FIELD_BOUNDARY_PERMEABILITY = 1.0
-_fake_config_for_import.FIELD_EMBEDDING_DIM = 2048
+def _import_vector_field_isolated():
+    """Load VectorFieldSharedContext with qdrant_client / core.llm / core.ports
+    stubbed, then restore sys.modules.
 
-# Import the real SharedContextPort ABC BEFORE stubbing core.*
-# (vector_field.py subclasses it — MagicMock would break object.__new__)
-from core.ports.context import SharedContextPort  # noqa: E402
+    The adapter captures the real SharedContextPort base at class-definition
+    time, so the stubs can be torn down once the import completes. Restoring
+    sys.modules stops the MagicMock ``core.ports.context`` (and the qdrant /
+    core.llm stubs) from leaking into sibling modules' collection. (PRD-142
+    W2-S2b.)
+    """
+    _keys = (
+        "qdrant_client", "qdrant_client.models", "config",
+        "core.llm", "core.llm.embedding_manager", "core.ports.context",
+    )
+    _saved = {k: sys.modules.get(k) for k in _keys}
+    try:
+        _qdrant_stub = MagicMock()
+        _qdrant_stub.AsyncQdrantClient = MagicMock
+        # Expose every qdrant_client.models symbol the adapter uses
+        _models_stub = MagicMock()
+        for _sym in ("Distance", "FieldCondition", "Filter", "MatchValue",
+                     "PayloadSchemaType", "PointStruct", "VectorParams"):
+            setattr(_models_stub, _sym, MagicMock())
+        _qdrant_stub.models = _models_stub
+        sys.modules.setdefault("qdrant_client", _qdrant_stub)
+        sys.modules.setdefault("qdrant_client.models", _models_stub)
 
-# Stub heavy transitive imports so we don't need the full dep tree
-_config_mod = MagicMock()
-_config_mod.config = _fake_config_for_import
-sys.modules.setdefault("config", _config_mod)
+        _fake_config_for_import = MagicMock()
+        _fake_config_for_import.QDRANT_URL = "http://localhost:6333"
+        _fake_config_for_import.QDRANT_API_KEY = ""
+        _fake_config_for_import.FIELD_DECAY_RATE = 0.1
+        _fake_config_for_import.FIELD_REINFORCE_BONUS = 0.05
+        _fake_config_for_import.FIELD_REINFORCE_CAP = 2.0
+        _fake_config_for_import.FIELD_ARCHIVAL_THRESHOLD = 0.05
+        _fake_config_for_import.FIELD_BOUNDARY_PERMEABILITY = 1.0
+        _fake_config_for_import.FIELD_EMBEDDING_DIM = 2048
 
-# Stub core.llm chain so EmbeddingManager import doesn't pull the world
-_core_stub = MagicMock()
-sys.modules.setdefault("core.llm", _core_stub)
-sys.modules.setdefault("core.llm.embedding_manager", _core_stub)
+        # Import the real SharedContextPort ABC BEFORE stubbing core.*
+        # (vector_field.py subclasses it — MagicMock would break object.__new__)
+        from core.ports.context import SharedContextPort
 
-# Re-register the real ports module so the subclass import resolves
-_ports_ctx_mod = MagicMock()
-_ports_ctx_mod.SharedContextPort = SharedContextPort
-sys.modules["core.ports.context"] = _ports_ctx_mod
+        # Stub heavy transitive imports so we don't need the full dep tree
+        _config_mod = MagicMock()
+        _config_mod.config = _fake_config_for_import
+        sys.modules.setdefault("config", _config_mod)
 
-with (
-    patch("modules.context.adapters.vector_field.AsyncQdrantClient", return_value=MagicMock()),
-    patch("modules.context.adapters.vector_field.EmbeddingManager", return_value=MagicMock()),
-    patch("modules.context.adapters.vector_field.config", _fake_config_for_import),
-):
-    from modules.context.adapters.vector_field import VectorFieldSharedContext
+        # Stub core.llm chain so EmbeddingManager import doesn't pull the world
+        _core_stub = MagicMock()
+        sys.modules.setdefault("core.llm", _core_stub)
+        sys.modules.setdefault("core.llm.embedding_manager", _core_stub)
+
+        # Re-register a ports module exposing the real ABC so the subclass resolves
+        _ports_ctx_mod = MagicMock()
+        _ports_ctx_mod.SharedContextPort = SharedContextPort
+        sys.modules["core.ports.context"] = _ports_ctx_mod
+
+        with (
+            patch("modules.context.adapters.vector_field.AsyncQdrantClient", return_value=MagicMock()),
+            patch("modules.context.adapters.vector_field.EmbeddingManager", return_value=MagicMock()),
+            patch("modules.context.adapters.vector_field.config", _fake_config_for_import),
+        ):
+            from modules.context.adapters.vector_field import VectorFieldSharedContext
+        return VectorFieldSharedContext
+    finally:
+        for _k, _v in _saved.items():
+            if _v is None:
+                sys.modules.pop(_k, None)
+            else:
+                sys.modules[_k] = _v
+
+
+VectorFieldSharedContext = _import_vector_field_isolated()
 
 # ---------------------------------------------------------------------------
 # Fixtures & helpers

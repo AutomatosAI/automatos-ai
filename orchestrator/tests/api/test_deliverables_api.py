@@ -26,60 +26,89 @@ import pytest
 # Stub out transitive imports that need jwt/clerk before importing the router
 # (mirrors orchestrator/tests/test_agents_api_plugins.py).
 # ---------------------------------------------------------------------------
-for mod_name in [
-    "jwt", "jwt.algorithms", "jwt.exceptions",
-    "core.auth.clerk",
-]:
-    if mod_name not in sys.modules:
-        stub = ModuleType(mod_name)
-        stub.get_clerk_auth = MagicMock()
-        stub.decode = MagicMock()
-        stub.DecodeError = Exception
-        stub.ExpiredSignatureError = Exception
-        sys.modules[mod_name] = stub
-
 def _fake_dep():  # pragma: no cover — replaced via dependency_overrides
     raise RuntimeError("dependency not overridden")
 
 
-# core.auth.hybrid must be a real (stub) module exposing the dependency name
-if "core.auth.hybrid" not in sys.modules or not hasattr(
-    sys.modules["core.auth.hybrid"], "get_request_context_hybrid"
-):
-    hybrid_stub = ModuleType("core.auth.hybrid")
-    hybrid_stub.get_request_context_hybrid = _fake_dep
-    sys.modules["core.auth.hybrid"] = hybrid_stub
-
-# core.auth.dependencies exposes RequestContext — stub as MagicMock class alias.
-if "core.auth.dependencies" not in sys.modules:
-    deps_stub = ModuleType("core.auth.dependencies")
-    deps_stub.RequestContext = MagicMock
-    sys.modules["core.auth.dependencies"] = deps_stub
-
-# core.database.database imports fail without cryptography / DB env. Stub it.
-if "core.database" not in sys.modules:
-    sys.modules["core.database"] = ModuleType("core.database")
-if "core.database.database" not in sys.modules or not hasattr(
-    sys.modules["core.database.database"], "get_db"
-):
-    db_stub = ModuleType("core.database.database")
-    db_stub.get_db = _fake_dep
-    sys.modules["core.database.database"] = db_stub
-
-# services.deliverable_service imports core.workspace_client which pulls config.
-# Patch DeliverableService as a MagicMock so the router import succeeds.
-if "services" not in sys.modules:
-    sys.modules["services"] = ModuleType("services")
-svc_stub = ModuleType("services.deliverable_service")
-svc_stub.DeliverableService = MagicMock()
-sys.modules["services.deliverable_service"] = svc_stub
-
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from api.deliverables import router as deliverables_router
-from core.auth.hybrid import get_request_context_hybrid
-from core.database.database import get_db
+
+def _import_router_isolated():
+    """Import the deliverables router under stubbed transitive deps, then
+    restore sys.modules.
+
+    The router binds its dependencies (``get_db``, ``get_request_context_hybrid``,
+    ``DeliverableService``) at its own import time; the tests then swap them via
+    FastAPI ``dependency_overrides`` / ``patch``. So the stubs only need to exist
+    during this import — restoring sys.modules afterwards stops them leaking into
+    sibling modules' collection. (PRD-142 W2-S2b.)
+    """
+    _keys = (
+        "jwt", "jwt.algorithms", "jwt.exceptions", "core.auth.clerk",
+        "core.auth.hybrid", "core.auth.dependencies",
+        "core.database", "core.database.database",
+        "services", "services.deliverable_service",
+    )
+    _saved = {k: sys.modules.get(k) for k in _keys}
+    try:
+        for mod_name in [
+            "jwt", "jwt.algorithms", "jwt.exceptions",
+            "core.auth.clerk",
+        ]:
+            if mod_name not in sys.modules:
+                stub = ModuleType(mod_name)
+                stub.get_clerk_auth = MagicMock()
+                stub.decode = MagicMock()
+                stub.DecodeError = Exception
+                stub.ExpiredSignatureError = Exception
+                sys.modules[mod_name] = stub
+
+        # core.auth.hybrid must be a real (stub) module exposing the dependency name
+        if "core.auth.hybrid" not in sys.modules or not hasattr(
+            sys.modules["core.auth.hybrid"], "get_request_context_hybrid"
+        ):
+            hybrid_stub = ModuleType("core.auth.hybrid")
+            hybrid_stub.get_request_context_hybrid = _fake_dep
+            sys.modules["core.auth.hybrid"] = hybrid_stub
+
+        # core.auth.dependencies exposes RequestContext — stub as MagicMock class alias.
+        if "core.auth.dependencies" not in sys.modules:
+            deps_stub = ModuleType("core.auth.dependencies")
+            deps_stub.RequestContext = MagicMock
+            sys.modules["core.auth.dependencies"] = deps_stub
+
+        # core.database.database imports fail without cryptography / DB env. Stub it.
+        if "core.database" not in sys.modules:
+            sys.modules["core.database"] = ModuleType("core.database")
+        if "core.database.database" not in sys.modules or not hasattr(
+            sys.modules["core.database.database"], "get_db"
+        ):
+            db_stub = ModuleType("core.database.database")
+            db_stub.get_db = _fake_dep
+            sys.modules["core.database.database"] = db_stub
+
+        # services.deliverable_service imports core.workspace_client which pulls config.
+        # Patch DeliverableService as a MagicMock so the router import succeeds.
+        if "services" not in sys.modules:
+            sys.modules["services"] = ModuleType("services")
+        svc_stub = ModuleType("services.deliverable_service")
+        svc_stub.DeliverableService = MagicMock()
+        sys.modules["services.deliverable_service"] = svc_stub
+
+        from api.deliverables import router as deliverables_router
+        from core.auth.hybrid import get_request_context_hybrid
+        from core.database.database import get_db
+        return deliverables_router, get_request_context_hybrid, get_db
+    finally:
+        for _k, _v in _saved.items():
+            if _v is None:
+                sys.modules.pop(_k, None)
+            else:
+                sys.modules[_k] = _v
+
+
+deliverables_router, get_request_context_hybrid, get_db = _import_router_isolated()
 
 
 WORKSPACE_ID = uuid4()
