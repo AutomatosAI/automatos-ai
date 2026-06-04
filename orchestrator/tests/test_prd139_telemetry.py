@@ -36,15 +36,32 @@ class MockToolExecutionLog:
             setattr(self, k, v)
 
 
-# Pre-patch the model import before loading the module
+# telemetry.py imports ToolExecutionLog lazily *inside* write_telemetry(), so
+# the fake model only needs to be live while this file's tests run — not at
+# import. Installing it in setup_module (and restoring in teardown_module)
+# keeps the fake out of sibling modules' collection/runtime. (PRD-142 W2-S2b.)
 _mock_composio_cache = MagicMock()
 _mock_composio_cache.ToolExecutionLog = MockToolExecutionLog
-sys.modules["core.models.composio_cache"] = _mock_composio_cache
 
 _spec.loader.exec_module(telemetry_mod)
 
 write_telemetry = telemetry_mod.write_telemetry
 fire_telemetry = telemetry_mod.fire_telemetry
+
+_saved_composio_cache = None
+
+
+def setup_module(module):
+    global _saved_composio_cache
+    _saved_composio_cache = sys.modules.get("core.models.composio_cache")
+    sys.modules["core.models.composio_cache"] = _mock_composio_cache
+
+
+def teardown_module(module):
+    if _saved_composio_cache is None:
+        sys.modules.pop("core.models.composio_cache", None)
+    else:
+        sys.modules["core.models.composio_cache"] = _saved_composio_cache
 
 
 @pytest.fixture

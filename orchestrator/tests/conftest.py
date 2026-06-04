@@ -131,45 +131,45 @@ def mock_agent():
     return agent
 
 
-# ---- Recipe mocks ----
+# ---- Playbook mocks ----
 
 @pytest.fixture
-def mock_recipe():
-    """A WorkflowRecipe-like mock with cron schedule_config."""
-    recipe = MagicMock()
-    recipe.id = 42
-    recipe.template_id = "test-cron-recipe"
-    recipe.name = "Test Cron Recipe"
-    recipe.workspace_id = uuid4()
-    recipe.steps = [
+def mock_playbook():
+    """A WorkflowTemplate (Playbook)-like mock with cron schedule_config."""
+    playbook = MagicMock()
+    playbook.id = 42
+    playbook.template_id = "test-cron-playbook"
+    playbook.name = "Test Cron Playbook"
+    playbook.workspace_id = uuid4()
+    playbook.steps = [
         {"step_id": "s1", "order": 1, "agent_id": 101, "prompt_template": "Do the thing"},
     ]
-    recipe.schedule_config = {
+    playbook.schedule_config = {
         "type": "cron",
         "cron_expression": "0 9 * * *",
     }
-    recipe.owner_type = "workspace"
-    recipe.is_system = False
-    return recipe
+    playbook.owner_type = "workspace"
+    playbook.is_system = False
+    return playbook
 
 
 @pytest.fixture
-def mock_recipe_manual():
-    """A WorkflowRecipe-like mock with manual schedule (no cron)."""
-    recipe = MagicMock()
-    recipe.id = 99
-    recipe.template_id = "test-manual-recipe"
-    recipe.name = "Test Manual Recipe"
-    recipe.workspace_id = uuid4()
-    recipe.steps = [
+def mock_playbook_manual():
+    """A WorkflowTemplate (Playbook)-like mock with manual schedule (no cron)."""
+    playbook = MagicMock()
+    playbook.id = 99
+    playbook.template_id = "test-manual-playbook"
+    playbook.name = "Test Manual Playbook"
+    playbook.workspace_id = uuid4()
+    playbook.steps = [
         {"step_id": "s1", "order": 1, "agent_id": 101, "prompt_template": "Manual task"},
     ]
-    recipe.schedule_config = {
+    playbook.schedule_config = {
         "type": "manual",
     }
-    recipe.owner_type = "workspace"
-    recipe.is_system = False
-    return recipe
+    playbook.owner_type = "workspace"
+    playbook.is_system = False
+    return playbook
 
 
 # ---- Request context mock ----

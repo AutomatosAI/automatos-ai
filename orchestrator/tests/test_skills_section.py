@@ -22,33 +22,61 @@ class _FakeEstimator:
 
 
 _estimator_stub.TokenEstimator = _FakeEstimator
-sys.modules.setdefault("modules", types.ModuleType("modules"))
-sys.modules["modules"].__path__ = []
-sys.modules.setdefault("modules.context", types.ModuleType("modules.context"))
-sys.modules["modules.context"].__path__ = []
-sys.modules["modules.context.estimator"] = _estimator_stub
-sys.modules.setdefault("modules.context.sections", types.ModuleType("modules.context.sections"))
-sys.modules["modules.context.sections"].__path__ = []
 
-_base_mod = importlib.util.module_from_spec(
-    importlib.util.spec_from_file_location(
+
+def _load_sections_isolated():
+    """Load base.py + skills.py under a fake module graph, then restore.
+
+    The fakes only need to exist while the target files execute — the loaded
+    classes capture their dependencies at exec time. Restoring sys.modules
+    afterwards stops the fake ``modules`` package (with an emptied ``__path__``)
+    from leaking into the collection of sibling test modules. (PRD-142 W2-S2b.)
+    """
+    _keys = (
+        "modules",
+        "modules.context",
+        "modules.context.estimator",
+        "modules.context.sections",
         "modules.context.sections.base",
-        _ROOT / "modules" / "context" / "sections" / "base.py",
     )
-)
-sys.modules["modules.context.sections.base"] = _base_mod
-_base_mod.__spec__.loader.exec_module(_base_mod)
+    _saved = {k: sys.modules.get(k) for k in _keys}
+    try:
+        # Assign fresh fake packages — never mutate a real cached package's
+        # __path__ in place (setdefault + __path__=[] would corrupt the real
+        # ``modules`` package if it was already imported).
+        for _name in ("modules", "modules.context", "modules.context.sections"):
+            _pkg = types.ModuleType(_name)
+            _pkg.__path__ = []
+            sys.modules[_name] = _pkg
+        sys.modules["modules.context.estimator"] = _estimator_stub
 
-_skills_mod = importlib.util.module_from_spec(
-    importlib.util.spec_from_file_location(
-        "modules.context.sections.skills",
-        _ROOT / "modules" / "context" / "sections" / "skills.py",
-    )
-)
-_skills_mod.__spec__.loader.exec_module(_skills_mod)
+        _base_mod = importlib.util.module_from_spec(
+            importlib.util.spec_from_file_location(
+                "modules.context.sections.base",
+                _ROOT / "modules" / "context" / "sections" / "base.py",
+            )
+        )
+        sys.modules["modules.context.sections.base"] = _base_mod
+        _base_mod.__spec__.loader.exec_module(_base_mod)
 
-SkillsSection = _skills_mod.SkillsSection
-SectionContext = _base_mod.SectionContext
+        _skills_mod = importlib.util.module_from_spec(
+            importlib.util.spec_from_file_location(
+                "modules.context.sections.skills",
+                _ROOT / "modules" / "context" / "sections" / "skills.py",
+            )
+        )
+        _skills_mod.__spec__.loader.exec_module(_skills_mod)
+
+        return _skills_mod.SkillsSection, _base_mod.SectionContext
+    finally:
+        for _k, _v in _saved.items():
+            if _v is None:
+                sys.modules.pop(_k, None)
+            else:
+                sys.modules[_k] = _v
+
+
+SkillsSection, SectionContext = _load_sections_isolated()
 
 
 # ---------------------------------------------------------------------------
@@ -77,7 +105,10 @@ def _make_ctx(agent):
 
 
 def _render(section, ctx):
-    return asyncio.get_event_loop().run_until_complete(section.render(ctx))
+    # asyncio.run() creates a fresh loop per call, so this is robust when a
+    # prior test in the same process already ran asyncio.run() (which leaves
+    # no current event loop on 3.10). get_event_loop() would raise there.
+    return asyncio.run(section.render(ctx))
 
 
 # ── Primary skill not truncated ─────────────────────────────────────

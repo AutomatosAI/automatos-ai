@@ -58,6 +58,31 @@ _SNAPSHOT: Dict[str, Optional[types.ModuleType]] = {
     k: sys.modules.get(k) for k in _DISCOVERY_KEYS
 }
 
+# The low-level stubs below SHADOW real importable packages (core,
+# core.database.database, modules.tools.*, config). Left in sys.modules after
+# this module imports, they poison the collection of every sibling test that
+# imports the real ``core.*`` / ``modules.tools.*`` tree. We snapshot them
+# before install and restore at module level right after tool_router is loaded
+# (its top-level imports are already bound by then). ``config`` is read lazily
+# at runtime, so the autouse fixture re-installs it per-test. (PRD-142 W2-S2b.)
+_LOW_LEVEL_KEYS = (
+    "core",
+    "core.database",
+    "core.database.database",
+    "modules",
+    "modules.tools",
+    # _install_discovery_stubs() creates this package object via _ensure_pkg;
+    # snapshot+restore it here too so a pathless stub never leaks to siblings.
+    "modules.tools.discovery",
+    "modules.tools.registry",
+    "modules.tools.execution",
+    "modules.tools.formatting",
+    "modules.tools.formatting.result_formatter",
+    "config",
+)
+_LOW_LEVEL_SNAPSHOT: Dict[str, Optional[types.ModuleType]] = {}
+_FAKE_CONFIG_MOD: Optional[types.ModuleType] = None
+
 
 # ---------------------------------------------------------------------------
 # Fakes wired into sys.modules BEFORE we import tool_router.
@@ -78,6 +103,11 @@ def _ensure_pkg(name: str) -> types.ModuleType:
 
 
 def _install_low_level_stubs():
+    # Snapshot every key we are about to shadow BEFORE touching it, so the
+    # module-level restore can return sys.modules to its real state.
+    for _k in _LOW_LEVEL_KEYS:
+        _LOW_LEVEL_SNAPSHOT.setdefault(_k, sys.modules.get(_k))
+
     # core.database.database.SessionLocal — sync no-op factory
     _ensure_pkg("core")
     _ensure_pkg("core.database")
@@ -126,8 +156,20 @@ def _install_low_level_stubs():
 
         config_mod.config = _FakeConfig()
         sys.modules["config"] = config_mod
+    global _FAKE_CONFIG_MOD
+    _FAKE_CONFIG_MOD = sys.modules["config"]
     fake_config_cls = type(sys.modules["config"].config)
     return fake_config_cls
+
+
+def _restore_low_level_snapshot():
+    """Undo _install_low_level_stubs at module level so the leaked stubs never
+    reach the collection of sibling test modules."""
+    for _k, _prior in _LOW_LEVEL_SNAPSHOT.items():
+        if _prior is None:
+            sys.modules.pop(_k, None)
+        else:
+            sys.modules[_k] = _prior
 
 
 _FAKE_CONFIG_CLS = _install_low_level_stubs()
@@ -210,6 +252,14 @@ def _install_discovery_stubs():
     attribute that ``tool_router`` reads via
     ``from modules.tools.discovery import get_action_registry``."""
     pkg = _ensure_pkg("modules.tools.discovery")
+    # tool_router.py top-level-imports modules.tools.discovery.signal_recorder
+    # (NOT stubbed; it's leaf-loadable — stdlib-only top imports). Point the
+    # (possibly pathless) discovery package at the real dir so that real
+    # submodule resolves, while our action_registry / action_semantic_index
+    # stubs below still shadow via their explicit sys.modules entries.
+    _real_discovery_dir = str(_ORCH / "modules" / "tools" / "discovery")
+    if _real_discovery_dir not in getattr(pkg, "__path__", []):
+        pkg.__path__ = [_real_discovery_dir]
     global _PKG_ATTR_SNAPSHOT
     _PKG_ATTR_SNAPSHOT = (
         getattr(pkg, _DISCOVERY_PKG_ATTR)
@@ -257,6 +307,7 @@ def _load_tool_router():
 
 tool_router = _load_tool_router()
 _restore_discovery_snapshot()
+_restore_low_level_snapshot()
 
 
 # ---------------------------------------------------------------------------
@@ -270,6 +321,9 @@ _restore_discovery_snapshot()
 @pytest.fixture(autouse=True)
 def _swap_in_router_stubs():
     """Swap our discovery stubs in for the duration of one test."""
+    prior_config = sys.modules.get("config")
+    if _FAKE_CONFIG_MOD is not None:
+        sys.modules["config"] = _FAKE_CONFIG_MOD
     prior_ar = sys.modules.get("modules.tools.discovery.action_registry")
     prior_asi = sys.modules.get("modules.tools.discovery.action_semantic_index")
     pkg = _ensure_pkg("modules.tools.discovery")
@@ -300,6 +354,10 @@ def _swap_in_router_stubs():
                 delattr(pkg, _DISCOVERY_PKG_ATTR)
         else:
             setattr(pkg, _DISCOVERY_PKG_ATTR, prior_pkg_attr)
+        if prior_config is None:
+            sys.modules.pop("config", None)
+        else:
+            sys.modules["config"] = prior_config
         _FAKE_CONFIG_CLS.SEMANTIC_TOOL_ROUTING = False
         _FAKE_CONFIG_CLS.SEMANTIC_TOOL_ROUTING_TOP_K = 15
 

@@ -100,10 +100,32 @@ _fake_em = _FakeEmbeddingManager()
 _fake_cache = _FakeCache()
 _fake_em_module.create_embedding_manager = lambda: _fake_em  # type: ignore[attr-defined]
 _fake_cache_module.get_cache_service = lambda: _fake_cache  # type: ignore[attr-defined]
-sys.modules.setdefault("core", type(sys)("core"))
-sys.modules["core.llm"] = _fake_em_module
-sys.modules["core.cache"] = type(sys)("core.cache")
-sys.modules["core.cache.service"] = _fake_cache_module
+
+# ActionSemanticIndex.__init__ imports core.cache.service / core.llm LAZILY, so
+# the fakes must be live while THIS module's tests run. Installing them at import
+# time, however, leaks a *pathless* fake ``core`` into the collection of sibling
+# test modules — breaking every ``core.*`` import they make. Install in
+# setup_module and restore in teardown_module so the fakes stay scoped to this
+# file's test phase and never touch collection. (PRD-142 W2-S2b.)
+_CORE_FAKE_KEYS = ("core", "core.llm", "core.cache", "core.cache.service")
+_saved_core_modules: Dict[str, object] = {}
+
+
+def setup_module(module):
+    for _k in _CORE_FAKE_KEYS:
+        _saved_core_modules[_k] = sys.modules.get(_k)
+    sys.modules.setdefault("core", type(sys)("core"))
+    sys.modules["core.llm"] = _fake_em_module
+    sys.modules["core.cache"] = type(sys)("core.cache")
+    sys.modules["core.cache.service"] = _fake_cache_module
+
+
+def teardown_module(module):
+    for _k, _v in _saved_core_modules.items():
+        if _v is None:
+            sys.modules.pop(_k, None)
+        else:
+            sys.modules[_k] = _v
 
 # Patch the import the index uses for ActionDefinition + get_action_registry
 # so we control the registry per-test. We rebuild a fresh registry per test.
