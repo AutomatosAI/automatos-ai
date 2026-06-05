@@ -21,6 +21,7 @@ _orchestrator_root = str(Path(__file__).resolve().parent.parent)
 if _orchestrator_root not in sys.path:
     sys.path.insert(0, _orchestrator_root)
 
+from config import COMPLEXITY_TOKEN_BUDGET
 from modules.coordination.planner import (
     DecompositionResult,
     MissionPlanner,
@@ -235,9 +236,13 @@ class TestTokenEstimate:
         ]
         estimate = _estimate_token_budget(tasks)
         flat_estimate = 2000 * len(tasks)
-        # simple(5000) + complex(35000) + moderate(15000) = 55000
+        # Sum of per-tier config budgets: simple + complex + moderate
         assert estimate != flat_estimate
-        assert estimate == 5000 + 35000 + 15000
+        assert estimate == (
+            COMPLEXITY_TOKEN_BUDGET["simple"]
+            + COMPLEXITY_TOKEN_BUDGET["complex"]
+            + COMPLEXITY_TOKEN_BUDGET["moderate"]
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -419,7 +424,8 @@ class TestTemplateParallelGroups:
         """All rendered templates pass _parse_plan and _validate_plan."""
         agents = [_make_agent("researcher"), _make_agent("writer"),
                   _make_agent("analyst"), _make_agent("search"),
-                  _make_agent("reviewer")]
+                  _make_agent("reviewer"), _make_agent("designer"),
+                  _make_agent("coder"), _make_agent("admin")]
         for template in TEMPLATE_REGISTRY:
             tasks = render_template(template, "Test goal for validation")
             errors: list = []

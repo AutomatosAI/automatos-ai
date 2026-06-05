@@ -114,7 +114,7 @@ class TestSectionRegistry:
         "identity", "skills", "composio", "plugins",
         "platform_actions", "memory", "tools",
         "task_context", "playbook_context", "datetime_context",
-        "conversation", "custom",
+        "business_graph", "conversation", "custom",
         "onboarding", "mission_context", "agent_roster",
     }
 

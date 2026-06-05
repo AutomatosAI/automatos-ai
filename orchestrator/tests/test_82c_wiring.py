@@ -33,6 +33,7 @@ _orchestrator_root = str(Path(__file__).resolve().parent.parent)
 if _orchestrator_root not in sys.path:
     sys.path.insert(0, _orchestrator_root)
 
+from config import COMPLEXITY_TOKEN_BUDGET
 from core.models.orchestration_enums import (
     BudgetStatus,
     ComplexityTier,
@@ -514,7 +515,12 @@ class TestWiringSynthesisPrompt:
         assert result[1]["title"] == "Research ML"
 
     def test_auto_verification_criteria_generated(self):
-        """E2E: synthesis tasks get auto-generated verification criteria."""
+        """E2E: synthesis tasks get auto-generated verification criteria.
+
+        Synthesis deliberately emits only a min_length floor — no
+        required_sections, because the planner can't predict the agent's
+        headings (see _auto_synthesis_verification_criteria).
+        """
         task = _mock_task(task_type=TaskType.SYNTHESIS.value)
         upstream = [
             {"title": "Research AI", "output": "x" * 2000},
@@ -523,9 +529,8 @@ class TestWiringSynthesisPrompt:
 
         criteria = CoordinatorService._auto_synthesis_verification_criteria(task, upstream)
 
-        section_check = next(c for c in criteria if c["type"] == "required_sections")
-        assert "Research AI" in section_check["value"]
-        assert "Research ML" in section_check["value"]
+        # No required_sections — exact-heading checks were removed.
+        assert not any(c["type"] == "required_sections" for c in criteria)
 
         length_check = next(c for c in criteria if c["type"] == "min_length")
         assert length_check["value"] == 2000  # 50% of 4000
@@ -582,6 +587,9 @@ class TestWiringTemplateParallelGroups:
             _mock_agent(agent_id=3, name="analyst"),
             _mock_agent(agent_id=4, name="search"),
             _mock_agent(agent_id=5, name="reviewer"),
+            _mock_agent(agent_id=6, name="designer"),
+            _mock_agent(agent_id=7, name="coder"),
+            _mock_agent(agent_id=8, name="admin"),
         ]
         for template in TEMPLATE_REGISTRY:
             tasks = render_template(template, "Test validation goal")
@@ -602,7 +610,7 @@ class TestWiringTokenEstimate:
     """Prove token estimation uses COMPLEXITY_TOKEN_BUDGET, not flat rate."""
 
     def test_estimate_varies_by_complexity(self):
-        """E2E: simple + complex + moderate != 2000 * 3."""
+        """E2E: simple + complex + moderate != 2000 * 3 — sums per-tier config."""
         tasks = [
             _planned_task("t1", complexity="simple", seq=1),
             _planned_task("t2", complexity="complex", seq=2, deps=["t1"]),
@@ -612,8 +620,12 @@ class TestWiringTokenEstimate:
         estimate = _estimate_token_budget(tasks)
         flat = 2000 * 3
         assert estimate != flat
-        # simple(5000) + complex(35000) + moderate(15000) = 55000
-        assert estimate == 55000
+        expected = (
+            COMPLEXITY_TOKEN_BUDGET["simple"]
+            + COMPLEXITY_TOKEN_BUDGET["complex"]
+            + COMPLEXITY_TOKEN_BUDGET["moderate"]
+        )
+        assert estimate == expected
 
     def test_synthesis_complexity_uses_config(self):
         """E2E: 'synthesis' complexity tier maps to its own budget."""
@@ -622,7 +634,7 @@ class TestWiringTokenEstimate:
                           task_type="synthesis"),
         ]
         estimate = _estimate_token_budget(tasks)
-        assert estimate == 20000  # COMPLEXITY_TOKEN_BUDGET["synthesis"]
+        assert estimate == COMPLEXITY_TOKEN_BUDGET["synthesis"]
 
 
 # ===========================================================================
@@ -807,6 +819,6 @@ class TestWiringSynthesisAutoInsertion:
             PlannedDependency("t_synth", "t4"),
         ]
 
-        new_tasks, _ = _ensure_synthesis_tasks(tasks, deps)
+        new_tasks, new_deps = _ensure_synthesis_tasks(tasks, deps)
         assert len(new_tasks) == 4
         assert len(new_deps) == 3

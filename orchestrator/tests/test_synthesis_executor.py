@@ -172,7 +172,10 @@ class TestBuildSynthesisPrompt:
 # ---------------------------------------------------------------------------
 
 class TestAutoSynthesisVerificationCriteria:
-    def test_generates_required_sections_from_titles(self):
+    def test_omits_required_sections(self):
+        """Synthesis deliberately skips required_sections — the planner can't
+        predict the agent's headings, so only a min_length floor is emitted
+        (see _auto_synthesis_verification_criteria)."""
         task = _make_task(task_type=TaskType.SYNTHESIS.value)
         upstream = [
             {"title": "Research AI", "output": "x" * 1000},
@@ -183,11 +186,9 @@ class TestAutoSynthesisVerificationCriteria:
             task, upstream,
         )
 
-        section_check = next(
-            c for c in criteria if c["type"] == "required_sections"
-        )
-        assert "Research AI" in section_check["value"]
-        assert "Research ML" in section_check["value"]
+        assert not any(c["type"] == "required_sections" for c in criteria)
+        # Only the min_length criterion is produced.
+        assert {c["type"] for c in criteria} == {"min_length"}
 
     def test_min_length_is_half_combined(self):
         task = _make_task(task_type=TaskType.SYNTHESIS.value)

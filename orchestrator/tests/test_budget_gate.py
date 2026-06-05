@@ -63,14 +63,21 @@ def _make_task(
     return task
 
 
-def _make_run(*, run_id=None, max_concurrent=2, token_budget_estimate=None, tokens_used=0):
-    """Create a mock OrchestrationRun."""
+def _make_run(*, run_id=None, max_concurrent=2, token_budget_estimate=None, tokens_used=0, config=None):
+    """Create a mock OrchestrationRun.
+
+    `config` mirrors the real OrchestrationRun.config JSONB column (DB default
+    '{}'). Defaulting to an empty dict is required: the budget gate reads
+    ``run.config.get("budget_pause_disabled")`` and a bare MagicMock would make
+    that truthy, short-circuiting the gate to "allow".
+    """
     run = MagicMock()
     run.id = run_id or uuid4()
     run.max_concurrent = max_concurrent
     run.token_budget_estimate = token_budget_estimate
     run.tokens_used = tokens_used
     run.state = RunState.RUNNING.value
+    run.config = {} if config is None else config
     return run
 
 

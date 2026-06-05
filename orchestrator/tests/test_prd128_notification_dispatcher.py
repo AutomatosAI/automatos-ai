@@ -64,7 +64,11 @@ def _make_db(pref_rows: list[tuple]) -> MagicMock:
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    # asyncio.run() spins up a fresh loop per call, so this is immune to the
+    # thread's loop being left at None by an earlier test that used
+    # asyncio.run() itself. get_event_loop() would raise "no current event
+    # loop" once that happens (full-suite ordering pollution).
+    return asyncio.run(coro)
 
 
 def _first_insert_params(db: MagicMock) -> dict:
