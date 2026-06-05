@@ -549,15 +549,39 @@ class PlatformActionExecutor:
                 except (TypeError, ValueError):
                     target_id = target_id_raw  # leave string IDs alone (UUIDs etc.)
 
-                decision = can_actor_modify(
-                    self.db,
-                    actor_agent_id=actor_id,
-                    target_type=target_type,
-                    workspace_id=self.workspace_id,
-                    target_id=target_id,
-                    change_type="update" if action_def.permission_level == "write" else "delete",
-                    source="platform_tool",
-                )
+                try:
+                    decision = can_actor_modify(
+                        self.db,
+                        actor_agent_id=actor_id,
+                        target_type=target_type,
+                        workspace_id=self.workspace_id,
+                        target_id=target_id,
+                        change_type="update" if action_def.permission_level == "write" else "delete",
+                        source="platform_tool",
+                    )
+                except Exception as e:
+                    # Fail closed: a permission check that errors must DENY, never
+                    # fall through to execution. can_actor_modify's DB probes
+                    # (_agent_row / _reports_to_id) aren't all savepoint-guarded,
+                    # so a transient DB error would otherwise raise out of the gate
+                    # and leave the write's fate to upstream handling. Deny locally
+                    # and escalate to Auto — mirrors the registry-lookup fail-closed
+                    # above.
+                    logger.warning(
+                        "[PlatformExecutor] hierarchy_check_failed action=%s actor=%s "
+                        "target=%s/%s err=%s — denying (fail-closed)",
+                        action_name, actor_id, target_type, target_id, e,
+                    )
+                    return {
+                        "success": False,
+                        "permission_denied": True,
+                        "reason": "permission_check_failed",
+                        "escalation_target": "auto",
+                        "error": (
+                            f"Action '{action_name}' denied — permission check could not be "
+                            "completed. Route this through the auto for arbitration."
+                        ),
+                    }
                 if not decision.allowed:
                     logger.warning(
                         "[PlatformExecutor] hierarchy_denied action=%s actor=%s target=%s/%s reason=%s",

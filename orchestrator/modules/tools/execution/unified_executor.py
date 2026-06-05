@@ -16,7 +16,7 @@ modules/tools/execution/exec_*.py for maintainability.
 
 import logging
 import time as _time
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional
 from uuid import UUID
 from sqlalchemy.orm import Session
 
@@ -39,18 +39,6 @@ from modules.tools.execution.telemetry import fire_telemetry
 # PRD-36: Composio Integration (lazy import to avoid startup overhead)
 _composio_executor = None
 
-# PRD-37: Capability-based validation (lazy import)
-_capability_filter = None
-
-
-def _get_capability_filter(db):
-    """Lazy import of capability filter for execution-time validation."""
-    global _capability_filter
-    try:
-        from modules.tools.services.action_capability_filter import ActionCapabilityFilter
-        return ActionCapabilityFilter(db)
-    except ImportError:
-        return None
 
 def _get_composio_executor(db):
     """Lazy import of Composio executor."""
@@ -185,13 +173,6 @@ class UnifiedToolExecutor:
         return self._composio_executor
 
     @property
-    def capability_filter(self):
-        """Lazy-load capability filter (PRD-37) for execution-time validation."""
-        if not hasattr(self, '_capability_filter') or self._capability_filter is None:
-            self._capability_filter = _get_capability_filter(self.db)
-        return self._capability_filter
-
-    @property
     def platform_tools(self):
         """Lazy-load platform tools (RAG, CodeGraph) only when needed."""
         if self._platform_tools is None:
@@ -214,99 +195,6 @@ class UnifiedToolExecutor:
             from modules.tools.registry import get_tool_registry
             self._tool_registry = get_tool_registry(self.db)
         return self._tool_registry
-
-    # ------------------------------------------------------------------
-    # Validation
-    # ------------------------------------------------------------------
-
-    def validate_composio_action(
-        self,
-        action_id: str,
-        original_intent: Optional[str] = None,
-        allow_destructive: bool = False
-    ) -> Tuple[bool, str]:
-        """
-        PRD-37: Validate that a Composio action is eligible for execution.
-
-        This is the EXECUTION-TIME validation gate (per GPT-5.2 recommendation).
-        Called before executing any Composio action to ensure the action
-        matches the original intent's capabilities.
-
-        Args:
-            action_id: The Composio action ID to validate
-            original_intent: The original user intent (optional)
-            allow_destructive: Whether destructive actions are allowed
-
-        Returns:
-            (eligible, reason) tuple
-        """
-        if not self.capability_filter:
-            # Fail open if capability filter not available
-            logger.debug("Capability filter not available, skipping validation")
-            return True, "Capability filter not available (fail open)"
-
-        if not original_intent:
-            # If no intent provided, can't validate - allow by default
-            return True, "No intent provided for validation"
-
-        try:
-            eligible, reason = self.capability_filter.check_action_eligibility(
-                action_id=action_id,
-                intent=original_intent,
-                allow_destructive=allow_destructive
-            )
-
-            if not eligible:
-                logger.warning(
-                    f"Action validation failed: action={action_id} "
-                    f"intent='{original_intent[:30]}...' reason={reason}"
-                )
-
-            return eligible, reason
-
-        except Exception as e:
-            logger.error(f"Action validation error: {e}")
-            # Fail open on errors to avoid blocking legitimate actions
-            return True, f"Validation error (fail open): {e}"
-
-    def _check_agent_permission(self, agent_id: int, tool_name: str) -> bool:
-        """
-        PRD-17: Check if agent has permission to use this tool.
-
-        Args:
-            agent_id: Agent ID
-            tool_name: Tool name
-
-        Returns:
-            True if allowed, False otherwise
-        """
-        # For now, research tools are always allowed
-        # File ops and shell require explicit permission via AgentToolPermission table
-        research_tools = ['search_knowledge', 'semantic_search', 'search_codebase']
-        if tool_name in research_tools:
-            return True
-
-        # Check AgentToolPermission table for other tools
-        from core.models.tools import AgentToolPermission, Tool
-
-        try:
-            # Find tool in tools table
-            tool = self.db.query(Tool).filter_by(name=tool_name).first()
-            if not tool:
-                logger.warning(f"Tool '{tool_name}' not found in tools table")
-                return False  # Unknown tools not allowed
-
-            # Check if agent has permission
-            permission = self.db.query(AgentToolPermission).filter_by(
-                agent_id=agent_id,
-                tool_id=tool.id,
-                is_active=True
-            ).first()
-
-            return permission is not None
-        except Exception as e:
-            logger.warning(f"Error checking permissions for tool '{tool_name}': {e}")
-            return True  # Default to allow (fail open for now)
 
     # ------------------------------------------------------------------
     # Main dispatch
