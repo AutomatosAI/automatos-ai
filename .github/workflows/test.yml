@@ -2,12 +2,17 @@ name: test
 
 # PRD-142 Wave 2 (W2-S3) — the Test Net's enforcement gate.
 #
-# Runs the orchestrator pytest suite on every PR against a real Postgres
-# service so DB-touching tests connect instead of hanging. (W2-S2 traced a
-# pre-existing hang in test_82c_wiring to psycopg2.connect blocking forever
-# when no Postgres is present — see that test's decompose path.) A per-test
-# timeout is the safety net: any future hang fails fast instead of burning
-# the whole job.
+# Runs the orchestrator pytest suite against a real Postgres service so
+# DB-touching tests connect instead of hanging. (W2-S2 traced a pre-existing
+# hang in test_82c_wiring to psycopg2.connect blocking forever when no
+# Postgres is present — see that test's decompose path.) A per-test timeout
+# is the safety net: any future hang fails fast instead of burning the whole
+# job.
+#
+# Triggers on push to ANY branch so a red suite surfaces on the feature
+# branch — before a PR is opened — not only at PR time. The pull_request
+# trigger is kept so the gate also evaluates the merged result. Concurrency
+# cancels superseded runs on the same ref so rapid pushes don't queue.
 #
 # Introduced NON-REQUIRED on purpose. The net is expected to surface
 # pre-existing gaps that Wave 2 (WS-G golden journeys, WS-H untested
@@ -18,11 +23,14 @@ name: test
 on:
   push:
     branches:
-      - main
-      - "ralph/**"
+      - "**"
   pull_request:
     branches:
       - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   orchestrator-tests:
