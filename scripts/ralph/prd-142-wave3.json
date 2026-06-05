@@ -1,0 +1,245 @@
+{
+  "project": "Automatos AI Platform",
+  "branchName": "ralph/prd-142-wave3-primitive-hardening",
+  "description": "PRD-142 Wave 3 — Primitive Hardening. Source PRD: docs/PRDS/PRD-142-WAVE3-PRIMITIVE-HARDENING.md. Companions: docs/architecture/GUARDRAILS.md §H (the 7-point Definition of Done this wave asserts), BRAIN-BLUEPRINT.md §3 (per-primitive contracts), PLAYBOOK-ENGINE-DESIGN.md (3R), KNOWLEDGE-GRAPH-CANONICAL.md (moat boundary). HARDENING UNDER GREEN — consolidate / refactor / harden the 8 existing primitives (chat, memory, RAG, NL2SQL, graph, missions, playbooks, channels) to the §H DoD, under the Wave 2 test net (merged PR #421: J1-J10 golden backbone + the blocking orchestrator-tests/ioc-scan CI gate). ZERO REWRITES (locked). NO new features / primitives / endpoints-for-their-own-sake / LLM providers. REUSE-FIRST (CLAUDE.md §2/§5): read §5 of the PRD before writing a line — the safety harness (Wave 2 conftest fixtures), the Mission durability model (CoordinatorService) ported to Playbooks, the heartbeat writer + analytics_real.py for the tile, config.py for G7 — all already exist. The cross-cutting structural fixes the DoD FORCES: G6 (converge the two tool loops onto one executor), G7 (sweep os.getenv outside config.py), god-file splits (chat/memory/RAG/tools), the moat boundary (workspace_graphs canonical, no dual-write to knowledge_nodes/edges). DELETE WHAT YOU REPLACE in the same wave (the losing tool loop, the dead modules/workflows/ twin, Recipe naming) — but NEVER delete a live path before its restart/parity tests are green AND (for the playbook front door) the frontend is repointed. Canonical nouns: Playbook (never Recipe), Mission (never Workflow). Every new/changed endpoint is workspace-scoped via get_request_context_hybrid and has a tenant-isolation test. HUMAN-GATED (NOT for the autonomous run): W3-S3 (frontend tile), the delete + FE-repoint portion of W3-S12 (3R), and W3-S14 (prod migration). Verified against branch docs/prd-142-wave3, code reads 2026-06-06.",
+  "userStories": [
+    {
+      "id": "W3-S1",
+      "title": "Heartbeat writer emits primitive-mapped findings (WS-M — do FIRST)",
+      "description": "As an operator, I need each hardened primitive to emit a heartbeat finding mapped to a product primitive, so the dashboard tile can show real per-primitive status instead of only operational checks.",
+      "acceptanceCriteria": [
+        "Add an emit_primitive_finding(primitive, status, detail) helper to services/heartbeat_service.py that writes a primitive-mapped finding to the existing heartbeat_results table: finding_type='primitive_check', a primitive field (one of exactly: chat, memory, rag, nl2sql, graph, missions, playbooks, channels), status in {green, degraded, down}. Today the writer emits only operational findings (agent_health, checklist, error, exec_error, llm_analysis, llm_error) — none map to a product primitive (verified 2026-06-06).",
+        "NO schema change to heartbeat_results — reuse the existing result/JSONB columns; the primitive + status live in the finding payload the table already stores.",
+        "The helper is best-effort: a failure writing a primitive finding NEVER breaks the heartbeat cycle (try/except, no raise) — mirror the existing finding-write path in the same file.",
+        "A primitive that has not been hardened yet emits NO finding (so GET /api/analytics/primitive-health reads 'unknown' for it — never a fake green). Do NOT seed all 8 with placeholder data.",
+        "Wire the pathfinder primitive (Memory, W3-S7) as the FIRST real caller of the helper, so at least one primitive emits a true finding in this story.",
+        "NO os.getenv / hardcoded values; canonical lowercase primitive keys only.",
+        "TDD (write tests first, RED, then implement): orchestrator/tests/test_heartbeat_primitive_findings.py with test_primitive_finding_written_with_status, test_unhardened_primitive_emits_nothing, test_finding_write_failure_is_swallowed, test_primitive_name_must_be_canonical.",
+        "python3 -m py_compile services/heartbeat_service.py; cd orchestrator && python -c 'from main import app; print(\"import OK\")'.",
+        "pytest orchestrator/tests/test_heartbeat_primitive_findings.py green; existing heartbeat tests green (no regression)."
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Reuse-checked 2026-06-06: heartbeat_results table + services/heartbeat_service.py (71KB writer) + api/heartbeat.py + api/analytics_real.py all exist; NO primitive-mapped finding exists today (confirmed by grep). This story builds the MECHANISM; each WS-J primitive story (S6-S13) wires its own emit_primitive_finding call as it hardens. Honest gaps over fake greens. Endpoint contract for the consumer was TDD-specced in memory prd142-wave0-us006-deferred."
+    },
+    {
+      "id": "W3-S2",
+      "title": "GET /api/analytics/primitive-health read endpoint (WS-M)",
+      "description": "As an operator, I need one endpoint returning each of the 8 primitives' current status, so the Command Centre tile can render 'is this primitive working right now?'.",
+      "acceptanceCriteria": [
+        "Add GET /api/analytics/primitive-health to the EXISTING api/analytics_real.py router (do NOT create a new router file).",
+        "Workspace-scoped: ctx = Depends(get_request_context_hybrid); ws_id = str(ctx.workspace_id); single query over heartbeat_results filtered to primitive_check findings, latest-mapped-finding-per-primitive wins (ORDER BY created_at DESC).",
+        "Returns {primitives: [{name, status, last_checked}], generated_at}; ALL 8 primitives ALWAYS present; status in {green, degraded, down, unknown}; a primitive with no finding -> {status: 'unknown', last_checked: null}.",
+        "Query is index-eligible on the created_at / finding_type filter — no full-table scan.",
+        "Build AFTER W3-S1 emits findings (an all-unknown tile in prod is hollow), but the endpoint must still always return all 8 (unknown for the un-emitted ones).",
+        "TDD: orchestrator/tests/test_primitive_health_endpoint.py with test_returns_all_eight_primitives, test_latest_finding_wins, test_missing_primitive_is_unknown, test_workspace_isolation.",
+        "Type checks pass; pytest orchestrator/tests/test_primitive_health_endpoint.py green."
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "BLOCKED by W3-S1 (needs primitive findings in heartbeat_results). Reuse api/analytics_real.py prefix /api/analytics. grep confirms no primitive-health route exists today (2026-06-06). This is US-006 deferred from Wave 0 to here precisely because there was no honest data source until S1."
+    },
+    {
+      "id": "W3-S3",
+      "title": "Command Centre per-primitive health tile (WS-M) — [HUMAN-SUPERVISED FRONTEND]",
+      "description": "As a user, I need the 8-primitive health tile on the existing 'Is it working?' dashboard — the 5th metric Wave 0 deferred — not a new page.",
+      "acceptanceCriteria": [
+        "Add the 8-primitive health tile to the EXISTING Wave 0 'Is it working?' dashboard section (frontend/components/dashboard/...). NO new page, NO new route (git status shows zero new frontend/app/**/page.tsx).",
+        "Add a hook call to GET /api/analytics/primitive-health (frontend/hooks/use-unified-analytics.ts or the Wave 0 analytics hook), reusing the ApiResponse<T> envelope + existing Card / MetricCards patterns.",
+        "'unknown' renders as 'not yet instrumented' (muted), NOT as broken/red; green/degraded/down use the existing status colors.",
+        "Loading + empty states handled (no crash on zero data); NO console.log; NO hardcoded statuses.",
+        "tsc passes for the frontend; the tile renders without runtime error against the LIVE Railway API (push -> Railway -> verify live URL; never localhost).",
+        "passes flips to true ONLY after the live tile is confirmed by Gerard."
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": "[HUMAN-SUPERVISED] Frontend story — per memory feedback-ralph-supervision, Ralph does NOT touch frontend/ unsupervised (past Ralph runs invented UI nobody asked for). A human builds/reviews this against the live UI. Extend the existing dashboard; do NOT rewrite working UI (feedback-ui-changes). Mirrors Wave 0 US-007. Out of scope for the autonomous loop."
+    },
+    {
+      "id": "W3-S4",
+      "title": "Converge the two tool loops onto one executor (WS-K / G6)",
+      "description": "As a maintainer, I need ONE tool executor so chat and agents share dedup/retry/truncation behaviour instead of two drifted copies.",
+      "acceptanceCriteria": [
+        "Characterize BOTH loops FIRST: consumers/chatbot/service.py::_run_tool_loop (service.py:1158) and modules/agents/factory/agent_factory.py::execute_with_prompt (agent_factory.py:839). Pin the UNION of today's dedup/retry/truncation behaviour in orchestrator/tests/test_tool_loop_characterization.py BEFORE changing anything (the two have drifted).",
+        "Pick the canonical executor; migrate the other caller onto it; DELETE the loser — no dual path, no _legacy shim (CLAUDE.md §4).",
+        "grep -rn '_run_tool_loop\\|execute_with_prompt' orchestrator/ shows ONE surviving loop after convergence (the retired name returns zero non-test hits).",
+        "Split the modules/tools/registry/tool_registry.py god-file (1,528 lines, verified) into focused modules (B4) as the loops converge onto one registry — original shell shrinks; NO behaviour change.",
+        "Chat suite + agent suite green; the characterization tests pass against the SURVIVING loop.",
+        "Type checks pass; no os.getenv outside config.py introduced.",
+        "TDD: the characterization file above (RED first) + orchestrator/tests/test_tool_loop_converged.py (one executor handles both chat + agent tool calls)."
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "[RISKY — add a one-workspace canary soak before the loser is deleted.] G6 from the Core Review. Verified 2026-06-06: _run_tool_loop@service.py:1158, execute_with_prompt@agent_factory.py:839, tool_registry.py=1528 lines. Do this convergence BEFORE the chat god-file split (W3-S6) so the split lands on one executor. Characterize before converging — never delete the loser until the surviving loop is green on the union of behaviours."
+    },
+    {
+      "id": "W3-S5",
+      "title": "Sweep os.getenv/os.environ outside config.py (WS-L / G7)",
+      "description": "As a maintainer, I need config.py to be the only env reader so configuration is centralized and the Wave 2 CI grep gate stays green.",
+      "acceptanceCriteria": [
+        "Route every os.getenv / os.environ read in RUNTIME files through orchestrator/config.py. Verified hotspots 2026-06-06: core/monitoring/automatos_logging.py (~7), core/credentials/resolver.py (~4), rate_limiter (~2), automatos_metrics (~2), automatos_logs_api (~2), plus database.py import-time load_dotenv(). ~20 reads across ~8 runtime files.",
+        "For each moved read: add a typed accessor/attribute to config.py (same default, no behaviour change), then replace the literal at the call site.",
+        "grep -rn 'os.getenv\\|os.environ' orchestrator/ excluding config.py and scripts/ -> 0 in the swept runtime files. scripts/ stay OUT of scope (one-shot tooling, as in PRD-141).",
+        "The Wave 2 os.getenv-outside-config CI grep gate stays green.",
+        "NO new env var; NO default value changed (pure widening); NO hardcoded values.",
+        "TDD: orchestrator/tests/test_config_env_centralization.py asserting the new config accessors return the env value and the swept modules read their setting from config (not os.getenv).",
+        "Type checks pass; cd orchestrator && python -c 'from main import app' OK."
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Opportunistic, pure widening (PRD-141 precedent), not big-bang. Do NOT sweep all 52 repo-wide hits — only the runtime files behind the import graph; scripts/ are out. The grep gate already guards regressions. Land this early to clear config debt out of the primitives before they are refactored."
+    },
+    {
+      "id": "W3-S6",
+      "title": "Harden Chat to the §H DoD (WS-J)",
+      "description": "As a user, I need every chat turn assessed -> routed -> streamed (no dropped tool events) -> persisted, with errors that surface visibly.",
+      "acceptanceCriteria": [
+        "Meet the BRAIN §3.x chat contract + the GUARDRAILS §H 7-point DoD under the Wave 2 net.",
+        "Failure-path test: a tool error / provider error surfaces to the user (visible), never silently swallowed — orchestrator/tests/test_chat_failure_path.py.",
+        "Restart-safe + cross-workspace tenant tests EXTEND the Wave 2 conftest fixtures (do not stand up a parallel harness).",
+        "Split the consumers/chatbot/service.py god-file (2,300 lines, verified) below the B4 ceiling OR justify in the commit body; the chat tool path uses the SINGLE converged loop from W3-S4 (no second loop remains).",
+        "Emit the chat primitive heartbeat finding via the W3-S1 helper (the chat tile can go green).",
+        "code-reviewer clean on the diff (CRITICAL/HIGH addressed before commit).",
+        "Type checks pass; chat suite green."
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "BLOCKED by W3-S4 (tool loop) + W3-S1 (tile helper). Do AFTER G6 — chat sits on the tool loop; the split must land on one executor. Verified service.py=2300 @ 2026-06-06. Reuse the Wave 2 golden chat journeys as the harness."
+    },
+    {
+      "id": "W3-S7",
+      "title": "Harden Memory to the §H DoD (WS-J) — [PATHFINDER]",
+      "description": "As the platform, I need exactly one write path per memory layer, budget-bounded reads, and graceful degradation when Mem0 is down.",
+      "acceptanceCriteria": [
+        "PATHFINDER primitive: prove the §H template + tile end-to-end HERE first, then replicate to the other primitives.",
+        "Re-prove write-once-per-layer (G12): an audit/grep shows ONE write path per layer (L1/L2/L3); the dual L3 write path is collapsed to one — orchestrator/tests/test_memory_single_write_path.py.",
+        "Failure-path: Mem0-down degrades (the circuit breaker already exists) WITHOUT losing the turn — test_memory_degrades_when_mem0_down.",
+        "Restart-safe + cross-workspace isolation tests extend the Wave 2 fixtures.",
+        "Split modules/memory/unified_memory_service.py (2,202) and/or storage/knowledge_system.py (1,431) below the B4 ceiling OR justify.",
+        "Wire memory as the FIRST caller of the W3-S1 emit_primitive_finding helper — the memory tile goes green.",
+        "code-reviewer clean; type checks pass; memory suite green."
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "Recommended pathfinder (cleaner boundary, partial Wave 2 coverage) over Chat (entangled with G6). BLOCKED by W3-S1. Verified unified_memory_service.py=2202, knowledge_system.py=1431 @ 2026-06-06. The G12 dual L3 write path is the key one-source-of-truth target — see memory l3-mem0-input-curation. Do NOT rewrite — collapse to one write path under the net."
+    },
+    {
+      "id": "W3-S8",
+      "title": "Harden RAG to the §H DoD (WS-J)",
+      "description": "As a user, I need ingest -> chunk -> embed -> index atomic per document, rerank + parent-expand, and delete that removes the vector.",
+      "acceptanceCriteria": [
+        "Atomicity failure-path test: a failed embed/index does NOT leave a half-indexed document — orchestrator/tests/test_rag_ingest_atomicity.py.",
+        "Keep the Wave 2 W2-S10 delete-removes-vector test GREEN (do not regress it).",
+        "Cross-workspace isolation test: workspace A cannot retrieve workspace B's chunks.",
+        "Split the ENGINE god-files FIRST: modules/rag/ingestion/manager.py (1,560) + modules/rag/service.py (1,243). The api/documents.py ROUTER god-file (1,924) split is LOWER-priority — note it; do it only if it falls out cleanly (see PRD §4 RAG row).",
+        "Emit the rag primitive heartbeat finding (W3-S1) — the rag tile goes green.",
+        "code-reviewer clean; type checks pass; rag suite green."
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "BLOCKED by W3-S1. Verified manager.py=1560, service.py=1243, documents.py=1924 @ 2026-06-06. documents.py is the API router (split last); manager.py/service.py are the engine (split first). Could swap with Memory as the pathfinder."
+    },
+    {
+      "id": "W3-S9",
+      "title": "Harden NL2SQL to the §H DoD (WS-J)",
+      "description": "As a user, I need generated SQL always validated/rewritten before execution (read-only), no unvalidated query, and credentials never logged.",
+      "acceptanceCriteria": [
+        "End-to-end shape test: a generated query is validated/rewritten read-only before execution; an attempt to run UNvalidated SQL is blocked — orchestrator/tests/test_nl2sql_validation_path.py.",
+        "Failure-path: an invalid/unsafe query degrades visibly (error surfaced), never silently executed.",
+        "grep proves credentials are never logged in the NL2SQL path.",
+        "Cross-workspace isolation test.",
+        "Emit the nl2sql primitive heartbeat finding (W3-S1) — the nl2sql tile goes green.",
+        "code-reviewer clean; type checks pass; suite green."
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "BLOCKED by W3-S1. Validator/router already exist (PRD §4) — this hardens + tests the end-to-end shape (was a Wave 2 §4.4 stretch, rolled here). NO new validator; reuse the existing one."
+    },
+    {
+      "id": "W3-S10",
+      "title": "Harden Graph (moat) to the §H DoD (WS-J)",
+      "description": "As the platform, I need the knowledge graph rebuildable idempotently from sources, queryable, and persisted (survives restart) — with ONE canonical store.",
+      "acceptanceCriteria": [
+        "Moat boundary: the canonical store is workspace_graphs ONLY; NO dual-write to knowledge_nodes/edges. Audit + remove any dual-write — orchestrator/tests/test_graph_single_store.py. Audit referencers (verified 2026-06-06): init_database.py, core/services/analytics_engine.py, api/system.py, api/execution_history.py, modules/memory/storage/knowledge_system.py.",
+        "Idempotent-rebuild test: rebuilding from the same sources yields the same graph.",
+        "Restart-safe test: the graph persists (not in-memory only).",
+        "Cross-workspace isolation test.",
+        "KEEP the knowledge_nodes/edges schema (Wave 4 HARNESS uses it) — do NOT wire the learning loop here; just stop dual-writing.",
+        "Storage-format evolution (JSON-blob -> edge-tables, parent §7) is named-but-deferred — NOT in scope here.",
+        "Emit the graph primitive heartbeat finding (W3-S1).",
+        "code-reviewer clean; type checks pass; graph suite green."
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": "BLOCKED by W3-S1. See KNOWLEDGE-GRAPH-CANONICAL.md + memory §7 moat boundary. Keep the schema, kill the dual-write — that is the whole moat-hardening job here. Do NOT touch the storage format."
+    },
+    {
+      "id": "W3-S11",
+      "title": "Harden Missions + Mission Zero P3 retry-feeds-critique (WS-J / E4)",
+      "description": "As a user, I need mission retries to feed the verifier's critique back into the next attempt — today they don't, so the model repeats the same mistake.",
+      "acceptanceCriteria": [
+        "E4: the verifier's critique is fed into the retry prompt — a failed-then-retried mission's retry prompt CONTAINS the prior critique — orchestrator/tests/test_mission_retry_feeds_critique.py.",
+        "Missions are already DB-authoritative + restart-durable (§8.2) — add a REGRESSION test that proves it stays true (do NOT rebuild the coordinator).",
+        "Stalled-task re-dispatch failure-path test.",
+        "Cross-workspace isolation test.",
+        "Emit the missions primitive heartbeat finding (W3-S1).",
+        "code-reviewer clean; type checks pass; mission suite green."
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "BLOCKED by W3-S1. Mission Zero P3 = E4 (the parent review §5 calls it G5). Reuse services/coordinator_service.py (3,026 lines, grade A-) durability — do NOT rebuild it; this is the learning-feedback increment only. See memory mission-zero-flaws."
+    },
+    {
+      "id": "W3-S12",
+      "title": "Consolidate + harden the Playbook engine (WS-3R) — BUILD/MIGRATE/TEST is agent; DELETE + FE-repoint is [HUMAN GATE]",
+      "description": "As the platform, I need ONE durable Playbook engine that recovers from DB on restart, with all launch paths going through it — the riskiest story in the wave.",
+      "acceptanceCriteria": [
+        "[AGENT] Build the consolidated Playbook engine behind a STABLE interface; PORT the Mission durability model (DB tick, restart recovery, Postgres state) from CoordinatorService — do NOT invent a third durability scheme.",
+        "[AGENT] Restart-durability test FIRST: an in-flight Playbook recovers from DB on restart (no longer fire-and-forget) — orchestrator/tests/test_playbook_restart_durability.py. This MUST pass before any later delete.",
+        "[AGENT] Migrate the 7 BACKEND launch sites strangler-fig to call the new interface (verified 2026-06-06): (1) api/workflow_recipes.py POST /{recipe_id}/execute door near :816 (execute_recipe), (2) api/workflow_recipes.py second webhook door near :1860 (re-grep before editing), (3) api/composio.py:886 execute_recipe_direct, (4) api/webhooks.py:683 execute_recipe_direct, (5) modules/tools/discovery/handlers_playbooks.py launch, (6) services/playbook_scheduler.py:207 launch_recipe_task, (7) services/task_reconciler.py:271 launch_recipe_task. The shared entry points are execute_recipe_direct + launch_recipe_task in api/recipe_executor.py — wrap THOSE behind the new interface.",
+        "[AGENT] Parity test: each migrated site produces the same execution outcome as before — orchestrator/tests/test_playbook_launch_parity.py.",
+        "[AGENT] Keep api/workflow_recipes.py endpoints as THIN delegators to the new engine (no behaviour change for the FE) — do NOT delete the router in the autonomous run.",
+        "[AGENT] Complete the Recipe -> Playbook rename inside the consolidated engine internals (canonical noun).",
+        "[AGENT] code-reviewer clean; type checks pass; playbook + recipe suites green.",
+        "[HUMAN GATE — do NOT perform in the autonomous run] Canonical front-door decision (PRD §12.6): promote api/api_playbooks.py /api/playbooks vs keep the /api/workflow-recipes path. Human decides.",
+        "[HUMAN GATE] Repoint the FRONTEND off /api/workflow-recipes — there are ~10 call sites in frontend/lib/api-client.ts (lines 1419-1462, incl /use at 1447) PLUS frontend/hooks/use-unified-analytics.ts:206 (/stats/dashboard), NOT just 2. ALL must move before the router is deleted.",
+        "[HUMAN GATE] DELETE api/workflow_recipes.py (legacy front door) LAST — only after the 7 sites migrate AND the FE is repointed AND a green FE playbook-launch journey.",
+        "[HUMAN GATE] DELETE the dead modules/workflows/ twin (has a recipes/ subdir + empty __init__.py, verified present) once parity is proven.",
+        "Emit the playbooks primitive heartbeat finding (W3-S1)."
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": "[RISKIEST in the wave — canary soak before ANY delete.] Strangler-fig. PRD §6 W3-S12 + §8 + §12.6. Verified 2026-06-06: workflow_recipes.py=70565b, recipe_executor.py=88808b, api_playbooks.py=49 lines (read-only stub), modules/workflows/ twin present. The FE repoint is BROADER than the PRD's 2 lines — ~10 api-client.ts call sites. Frontend + deletes are HUMAN-gated (memory feedback-ralph-supervision). The agent's passes flips to true when: durable engine built + 7 backend sites migrated + restart/parity tests green + router kept as a thin delegator. The deletes + FE-repoint are a separate human follow-through."
+    },
+    {
+      "id": "W3-S13",
+      "title": "Harden Channels to the §H DoD (WS-J)",
+      "description": "As a maintainer, I need every channel adapter to implement the same contract, so a new channel = a new adapter file with zero core change.",
+      "acceptanceCriteria": [
+        "Parametrized contract test across ALL 11 BaseChannelAdapter implementations (the shared in/out method surface) — orchestrator/tests/test_channel_adapter_contract.py.",
+        "in/out message counts are tracked (observable) per adapter.",
+        "Cross-workspace isolation test: one workspace's channel cannot read another's.",
+        "Emit the channels primitive heartbeat finding (W3-S1).",
+        "code-reviewer clean; type checks pass; channel suite green."
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": "BLOCKED by W3-S1. 11 adapters on BaseChannelAdapter; the parametrized contract test was a Wave 2 §4.8 stretch, rolled here. NO new adapter — this proves the contract holds across the existing 11."
+    },
+    {
+      "id": "W3-S14",
+      "title": "Apply the wave3_escalation_level migration to prod (WS-N) — [HUMAN / PROD-GATED]",
+      "description": "As Gerard, I need /api/kpi/decisions-needed to return real data — the escalation_level column must exist in prod.",
+      "acceptanceCriteria": [
+        "VERIFY the alembic head chain FIRST: cd orchestrator && python -m alembic heads. If there are MULTIPLE heads, author a merge migration before applying (prod may have multiple unmigrated heads).",
+        "The migration alembic/versions/wave3_escalation_level.py (down_revision = wave1d_mission_lifecycle; additive, nullable, idempotent — verified present 2026-06-06) is applied to PROD.",
+        "SURFACE THE EXACT COMMAND for Gerard's approval — run NOTHING against prod unprompted (memory feedback-no-local-builds + the WS-N prod-gate).",
+        "After apply: /api/kpi/decisions-needed returns real data (not the empty/200-swallowed tile); the column exists; alembic heads shows a single clean head.",
+        "passes flips to true ONLY after Gerard confirms the live prod result."
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": "[HUMAN — PROD-GATED operational story, mirrors Wave 0 US-008.] Do NOT auto-apply. The migration is already written; the risk is the prod head chain. See memory escalation-level-migration-drift. Surface `alembic heads` + the upgrade command; Gerard runs/approves. Out of scope for the autonomous loop."
+    }
+  ]
+}
