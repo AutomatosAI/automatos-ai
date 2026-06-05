@@ -67,6 +67,17 @@ def _make_full_agent(assigned_plugins=None):
     agent.skills = []
     agent.assigned_plugins = assigned_plugins if assigned_plugins is not None else []
     agent.workspace_id = uuid4()
+    # Optional AgentResponse fields read via getattr() — set explicitly so the
+    # MagicMock does not auto-create truthy attributes that fail Pydantic v2
+    # strict validation (these are Optional[...] = None on AgentResponse).
+    agent.public_id = None
+    agent.job_title = None
+    agent.model_usage_stats = None
+    agent.is_system_agent = False
+    agent.slug = None
+    agent.required_role = None
+    agent.marketplace_category = None
+    agent.voice_profile_id = None
     return agent
 
 

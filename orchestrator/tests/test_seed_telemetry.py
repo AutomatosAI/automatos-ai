@@ -108,12 +108,23 @@ class TestRowGeneration:
 # ---------------------------------------------------------------------------
 
 
+def _synthetic_agent(row: Dict[str, Any]) -> int:
+    """Return the *synthetic* agent id (9001/9002/9003) for a generated row.
+
+    ``_build_row`` resolves the synthetic id to a real production agent id for
+    the ``agent_id`` column (see ``_resolve_agent_id``), but preserves the
+    original synthetic id under ``router_decision['synthetic_agent_id']``. Bias
+    assertions are written against the synthetic ids, so read it from there.
+    """
+    return row["router_decision"]["synthetic_agent_id"]
+
+
 class TestAgentBias:
     """Test agent selection bias per category."""
 
     def test_three_synthetic_agents_used(self, synthetic_rows: List[Dict[str, Any]]):
         """All 3 synthetic agents appear in the data."""
-        agents_seen = {r["agent_id"] for r in synthetic_rows}
+        agents_seen = {_synthetic_agent(r) for r in synthetic_rows}
         assert agents_seen == set(SYNTHETIC_AGENTS)
 
     def test_sentinel_dominates_reports(self, synthetic_rows: List[Dict[str, Any]]):
@@ -122,7 +133,7 @@ class TestAgentBias:
         report_rows = [r for r in synthetic_rows if r["action_name"] in report_actions]
         if not report_rows:
             pytest.skip("No report action rows generated")
-        agent_counts = Counter(r["agent_id"] for r in report_rows)
+        agent_counts = Counter(_synthetic_agent(r) for r in report_rows)
         # Sentinel should have the highest count for reports
         assert agent_counts[AGENT_SENTINEL] > agent_counts.get(AGENT_SCOUT, 0), (
             f"Sentinel ({agent_counts[AGENT_SENTINEL]}) should dominate reports, "
@@ -134,7 +145,7 @@ class TestAgentBias:
         ws_rows = [r for r in synthetic_rows if r["app_name"] == "WORKSPACE"]
         if not ws_rows:
             pytest.skip("No workspace action rows generated")
-        agent_counts = Counter(r["agent_id"] for r in ws_rows)
+        agent_counts = Counter(_synthetic_agent(r) for r in ws_rows)
         assert agent_counts[AGENT_SCOUT] > agent_counts.get(AGENT_SENTINEL, 0), (
             f"Scout ({agent_counts[AGENT_SCOUT]}) should dominate workspace, "
             f"but Sentinel has {agent_counts.get(AGENT_SENTINEL, 0)}"
@@ -149,7 +160,7 @@ class TestAgentBias:
         target_rows = [r for r in synthetic_rows if r["action_name"] in ops_actions]
         if not target_rows:
             pytest.skip("No agents/missions rows generated")
-        agent_counts = Counter(r["agent_id"] for r in target_rows)
+        agent_counts = Counter(_synthetic_agent(r) for r in target_rows)
         # Ops should have significant presence (not necessarily highest for every action)
         total = len(target_rows)
         ops_share = agent_counts.get(AGENT_OPS, 0) / total

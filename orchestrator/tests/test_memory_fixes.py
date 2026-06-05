@@ -1,10 +1,8 @@
 import importlib.util
 import pathlib
-import sys
-import types
-import uuid
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
+import httpx
 import pytest
 
 
@@ -19,20 +17,24 @@ def _load_module(module_name: str, relative_path: str):
     return module
 
 
+# Loaded by path (mirroring test_mem0_async_client.py) so monkeypatch targets the
+# exact module objects the client uses.
 mem0_client_module = _load_module(
     "memory_test_mem0_client",
     "modules/memory/integrations/mem0_client.py",
 )
-platform_executor_module = _load_module(
-    "memory_test_platform_executor",
-    "modules/tools/discovery/platform_executor.py",
+workspace_handlers_module = _load_module(
+    "memory_test_workspace_handlers",
+    "modules/tools/discovery/handlers_workspace.py",
 )
 
 Mem0Client = mem0_client_module.Mem0Client
-PlatformActionExecutor = platform_executor_module.PlatformActionExecutor
+get_memory_stats = workspace_handlers_module.get_memory_stats
 
 
 class _FakeResponse:
+    """Stand-in for httpx.Response — only the attributes the client reads."""
+
     def __init__(self, status_code=200, payload=None, text=""):
         self.status_code = status_code
         self._payload = payload
@@ -42,10 +44,14 @@ class _FakeResponse:
         return self._payload
 
 
-def test_mem0_search_sends_search_query_and_prefers_score(monkeypatch):
+@pytest.mark.asyncio
+async def test_mem0_search_sends_search_query_and_prefers_score(monkeypatch):
+    """Mem0Client.search (async httpx) GETs with a ``search_query`` param and
+    re-ranks results by score so the strongest match leads regardless of recency.
+    """
     captured = {}
 
-    def fake_request(method, url, **kwargs):
+    async def fake_request(self, method, url, **kwargs):
         captured["method"] = method
         captured["url"] = url
         captured["kwargs"] = kwargs
@@ -68,46 +74,46 @@ def test_mem0_search_sends_search_query_and_prefers_score(monkeypatch):
             }
         )
 
-    monkeypatch.setattr(
-        mem0_client_module.requests,
-        "request",
-        fake_request,
-    )
+    monkeypatch.setattr(httpx.AsyncClient, "request", fake_request)
 
     client = Mem0Client(api_url="http://mem0.test", api_key="test-key")
-    results = client.search(query="pricing", user_id="ws_123", limit=2)
+    results = await client.search(query="pricing", user_id="ws_123", limit=2)
 
     assert captured["method"] == "GET"
     assert captured["kwargs"]["params"]["user_id"] == "ws_123"
     assert captured["kwargs"]["params"]["search_query"] == "pricing"
     assert results[0]["id"] == "older-strong"
     assert results[1]["id"] == "recent-low"
+    await client.aclose()
+
+
 @pytest.mark.asyncio
 async def test_platform_memory_stats_marks_partial_results(monkeypatch):
-    fake_client = MagicMock()
-    fake_client.api_url = "http://mem0.test"
+    """get_memory_stats scans at most 10 agents and flags partial results.
 
-    def fake_get_all(user_id, limit=200):
-        if user_id == "ws_workspace":
+    The handler resolves the shared UnifiedMemoryService, fetches global + the
+    first 10 agents' memories, and reports scanned_agents / total_agents so a
+    workspace with >10 agents is marked ``partial``.
+    """
+    service = MagicMock()
+    # is_mem0_configured is a property on the real service → plain bool here.
+    service.is_mem0_configured = True
+
+    async def fake_get_all_memories(workspace_id, agent_id=None, limit=200):
+        if agent_id is None:
             return [{"memory": "global memory"}]
-        return [{"memory": f"memory for {user_id}"}]
+        return [{"memory": f"memory for agent {agent_id}"}]
 
-    fake_client.get_all.side_effect = fake_get_all
+    service.get_all_memories = AsyncMock(side_effect=fake_get_all_memories)
 
-    modules_pkg = types.ModuleType("modules")
-    modules_pkg.__path__ = []
-    memory_pkg = types.ModuleType("modules.memory")
-    memory_pkg.__path__ = []
-    integrations_pkg = types.ModuleType("modules.memory.integrations")
-    integrations_pkg.__path__ = []
-    mem0_stub = types.ModuleType("modules.memory.integrations.mem0_client")
-    mem0_stub.Mem0Client = lambda: fake_client
+    # The handler imports get_unified_memory_service() *inside* the function from
+    # the canonical module, so patch the seam there (not on the by-path-loaded
+    # handler module). Otherwise the real singleton runs and the result depends
+    # on whether MEM0_API_URL is configured — non-deterministic across envs.
+    import modules.memory.unified_memory_service as ums
+    monkeypatch.setattr(ums, "get_unified_memory_service", lambda: service)
 
-    monkeypatch.setitem(sys.modules, "modules", modules_pkg)
-    monkeypatch.setitem(sys.modules, "modules.memory", memory_pkg)
-    monkeypatch.setitem(sys.modules, "modules.memory.integrations", integrations_pkg)
-    monkeypatch.setitem(sys.modules, "modules.memory.integrations.mem0_client", mem0_stub)
-
+    # 12 workspace agents → scan caps at 10, partial=True.
     db = MagicMock()
     query_result = MagicMock()
     query_result.filter.return_value.all.return_value = [
@@ -115,8 +121,7 @@ async def test_platform_memory_stats_marks_partial_results(monkeypatch):
     ]
     db.query.return_value = query_result
 
-    executor = PlatformActionExecutor(db=db, workspace_id="workspace")
-    result = await executor._get_memory_stats({})
+    result = await get_memory_stats(db, "workspace", {})
 
     assert result["success"] is True
     assert result["partial"] is True

@@ -181,7 +181,12 @@ class TestUpdateAgentPlugins:
         wep_q.filter.return_value.all.return_value = [wep_row]
         delete_q = MagicMock()
         delete_q.filter.return_value.delete.return_value = 2
-        db.query.side_effect = [agent_q, wep_q, delete_q]
+        # PRD-71: endpoint also queries MarketplacePlugin to auto-assign
+        # materialized skills. No plugin rows => no candidate skills, so the
+        # subsequent Skill queries are skipped.
+        plugins_q = MagicMock()
+        plugins_q.filter.return_value.all.return_value = []
+        db.query.side_effect = [agent_q, wep_q, delete_q, plugins_q]
 
         result = await update_agent_plugins(agent_id=42, body=body, ctx=ctx, db=db)
         assert result["success"] is True
@@ -209,7 +214,10 @@ class TestUpdateAgentPlugins:
         wep_q.filter.return_value.all.return_value = [wep_a, wep_b]
         delete_q = MagicMock()
         delete_q.filter.return_value.delete.return_value = 0
-        db.query.side_effect = [agent_q, wep_q, delete_q]
+        # PRD-71: MarketplacePlugin lookup for materialized-skill auto-assign.
+        plugins_q = MagicMock()
+        plugins_q.filter.return_value.all.return_value = []
+        db.query.side_effect = [agent_q, wep_q, delete_q, plugins_q]
 
         result = await update_agent_plugins(agent_id=42, body=body, ctx=ctx, db=db)
         assert len(result["plugin_ids"]) == 2
@@ -253,7 +261,10 @@ class TestUpdateAgentPlugins:
         wep_q.filter.return_value.all.return_value = weps
         delete_q = MagicMock()
         delete_q.filter.return_value.delete.return_value = 0
-        db.query.side_effect = [agent_q, wep_q, delete_q]
+        # PRD-71: MarketplacePlugin lookup for materialized-skill auto-assign.
+        plugins_q = MagicMock()
+        plugins_q.filter.return_value.all.return_value = []
+        db.query.side_effect = [agent_q, wep_q, delete_q, plugins_q]
 
         await update_agent_plugins(agent_id=42, body=body, ctx=ctx, db=db)
 

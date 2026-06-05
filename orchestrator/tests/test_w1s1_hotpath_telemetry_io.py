@@ -52,16 +52,20 @@ for _k, _v in {
 def test_board_task_failure_emits_board_error(monkeypatch):
     from api import board_tasks as bt_mod
     import core.database.database as db_mod
+    import core.utils.background_tasks as bg_mod
     import modules.agents.factory.agent_factory as factory_mod
 
     rec = MagicMock()
     monkeypatch.setattr(bt_mod, "record_error", rec, raising=False)
 
-    # _launch_task_execution schedules its work via create_task; capture the
-    # coroutine instead of letting it loose on a loop, then drive it ourselves.
+    # _launch_task_execution schedules its work via launch_guarded (W1-S5), which
+    # calls asyncio.create_task in the background_tasks module. Capture the
+    # coroutine there instead of letting it loose on a loop, then drive it
+    # ourselves. (launch_guarded also calls .add_done_callback on the result, so
+    # a MagicMock stands in for the Task fine.)
     captured: dict = {}
     monkeypatch.setattr(
-        bt_mod.asyncio,
+        bg_mod.asyncio,
         "create_task",
         lambda coro: captured.__setitem__("coro", coro) or MagicMock(),
     )
@@ -100,14 +104,16 @@ def test_board_task_success_does_not_emit(monkeypatch):
     """Guardrail: a clean agent execution must NOT record an error."""
     from api import board_tasks as bt_mod
     import core.database.database as db_mod
+    import core.utils.background_tasks as bg_mod
     import modules.agents.factory.agent_factory as factory_mod
 
     rec = MagicMock()
     monkeypatch.setattr(bt_mod, "record_error", rec, raising=False)
 
+    # See failure test: launch_guarded (W1-S5) owns the create_task call now.
     captured: dict = {}
     monkeypatch.setattr(
-        bt_mod.asyncio,
+        bg_mod.asyncio,
         "create_task",
         lambda coro: captured.__setitem__("coro", coro) or MagicMock(),
     )
