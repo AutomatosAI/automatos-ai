@@ -36,8 +36,22 @@ import pytest
 # wholly unrelated to the authz gate under test. Those are declared deps installed in
 # CI (requirements.txt: camelot-py, opencv-python-headless); when absent from a lean
 # local venv they break collection. Stub the package only when the heavy stack is
-# missing (camelot is the proxy) — a no-op in CI where the real stack is present.
-if _ilu.find_spec("camelot") is None:  # pragma: no cover - env-dependent
+# genuinely unlocatable — a no-op in CI where the real stack is present.
+#
+# Probe defensively. A sibling module (tests/test_l3_distill_input.py) seeds a bare
+# ``types.ModuleType("camelot")`` into ``sys.modules`` to dodge the same heavy import.
+# That stub's ``__spec__`` is ``None``, and ``find_spec`` *raises*
+# ``ValueError: camelot.__spec__ is None`` on a spec-less cached module rather than
+# returning it. Treat both "raised" and "found" as "import chain already satisfied"
+# (real dep or sibling stub) and skip our shim; only stub when camelot is truly absent.
+def _rag_chain_unlocatable() -> bool:  # pragma: no cover - env-dependent
+    try:
+        return _ilu.find_spec("camelot") is None
+    except ValueError:
+        return False  # spec-less camelot stub already present → chain satisfied
+
+
+if _rag_chain_unlocatable():  # pragma: no cover - env-dependent
     _sys.modules.setdefault("modules.rag", MagicMock())
 
 from core.security.hierarchy_permissions import PermissionDecision
