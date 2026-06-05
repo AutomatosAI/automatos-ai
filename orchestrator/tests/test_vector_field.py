@@ -159,6 +159,7 @@ def mock_qdrant():
     """Patch AsyncQdrantClient for every test that uses it."""
     client = MagicMock()
     # Every method the adapter awaits must be an AsyncMock
+    client.collection_exists = AsyncMock(return_value=False)
     client.create_collection = AsyncMock()
     client.create_payload_index = AsyncMock()
     client.upsert = AsyncMock()
@@ -168,7 +169,9 @@ def mock_qdrant():
     client.scroll = AsyncMock(return_value=([], None))
     client.retrieve = AsyncMock(return_value=[])
     client.set_payload = AsyncMock()
-    client.delete_collection = AsyncMock()
+    # PRD-108: destroy is delete-by-filter on the shared collection, not
+    # delete_collection (collections are no longer per-field).
+    client.delete = AsyncMock()
     return client
 
 
@@ -197,6 +200,11 @@ def adapter(mock_qdrant, mock_embedder):
     inst._archival_threshold = 0.05
     inst._boundary_permeability = 1.0
     inst._dimension = 2048
+    # PRD-108: the single shared collection is bootstrapped once via
+    # ensure_shared_collection(). Behavioural tests pin it done so the
+    # method-under-test runs without the bootstrap side-trip; the dedicated
+    # bootstrap tests flip it back to False to exercise that path.
+    inst._bootstrap_done = True
     return inst
 
 
@@ -279,17 +287,30 @@ class TestCreateContext:
         assert len(field_id) == 36  # UUID4 canonical form
 
     @pytest.mark.asyncio
-    async def test_creates_qdrant_collection(self, adapter, mock_qdrant):
-        field_id = await adapter.create_context([1])
+    async def test_bootstraps_single_shared_collection(self, adapter, mock_qdrant):
+        # PRD-108: ONE shared collection (field_memory), not one per field.
+        adapter._bootstrap_done = False
+        mock_qdrant.collection_exists.return_value = False
+        await adapter.create_context([1])
         mock_qdrant.create_collection.assert_awaited_once()
         call_kwargs = mock_qdrant.create_collection.call_args
-        assert call_kwargs.kwargs["collection_name"] == f"field_{field_id}"
+        assert call_kwargs.kwargs["collection_name"] == "field_memory"
 
     @pytest.mark.asyncio
     async def test_creates_payload_indexes(self, adapter, mock_qdrant):
+        adapter._bootstrap_done = False
+        mock_qdrant.collection_exists.return_value = False
         await adapter.create_context([1])
-        # Three indexes: content_hash, agent_id, created_at
-        assert mock_qdrant.create_payload_index.await_count == 3
+        # Four indexes: field_id, content_hash, agent_id, created_at
+        assert mock_qdrant.create_payload_index.await_count == 4
+
+    @pytest.mark.asyncio
+    async def test_bootstrap_skipped_when_collection_present(self, adapter, mock_qdrant):
+        # Idempotent: an existing collection is not re-created.
+        adapter._bootstrap_done = False
+        mock_qdrant.collection_exists.return_value = True
+        await adapter.create_context([1])
+        mock_qdrant.create_collection.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_no_initial_data_no_inject(self, adapter, mock_qdrant):
@@ -597,7 +618,7 @@ class TestHebbianReinforcement:
         pt = _make_point("pt-1", strength=0.8, access_count=2)
         mock_qdrant.retrieve.return_value = [pt]
 
-        await adapter._reinforce_batch("ctx-1", ["pt-1"])
+        await adapter._reinforce_batch(["pt-1"])
 
         payload = mock_qdrant.set_payload.call_args.kwargs["payload"]
         assert math.isclose(payload["strength"], 0.8, rel_tol=1e-9)
@@ -610,7 +631,7 @@ class TestHebbianReinforcement:
         pt_b = _make_point("pt-b", strength=1.0, access_count=0)
         mock_qdrant.retrieve.return_value = [pt_a, pt_b]
 
-        await adapter._reinforce_batch("ctx-1", ["pt-a", "pt-b"])
+        await adapter._reinforce_batch(["pt-a", "pt-b"])
 
         all_payloads = [call.kwargs["payload"] for call in mock_qdrant.set_payload.call_args_list]
         strengths = [p["strength"] for p in all_payloads]
@@ -624,7 +645,7 @@ class TestHebbianReinforcement:
         pts = [_make_point(f"pt-{i}", strength=1.0, access_count=0) for i in range(100)]
         mock_qdrant.retrieve.return_value = pts
 
-        await adapter._reinforce_batch("ctx-1", [f"pt-{i}" for i in range(100)])
+        await adapter._reinforce_batch([f"pt-{i}" for i in range(100)])
 
         all_payloads = [call.kwargs["payload"] for call in mock_qdrant.set_payload.call_args_list]
         for payload in all_payloads:
@@ -636,7 +657,7 @@ class TestHebbianReinforcement:
         pt_b = _make_point("pt-b", access_count=10)
         mock_qdrant.retrieve.return_value = [pt_a, pt_b]
 
-        await adapter._reinforce_batch("ctx-1", ["pt-a", "pt-b"])
+        await adapter._reinforce_batch(["pt-a", "pt-b"])
 
         payloads = {
             call.kwargs["points"][0]: call.kwargs["payload"]["access_count"]
@@ -650,14 +671,14 @@ class TestHebbianReinforcement:
         """Empty ids list → retrieve not called, set_payload not called."""
         # simulate empty result
         mock_qdrant.retrieve.return_value = []
-        await adapter._reinforce_batch("ctx-1", [])
+        await adapter._reinforce_batch([])
         mock_qdrant.set_payload.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_set_payload_called_once_per_pattern(self, adapter, mock_qdrant):
         pts = [_make_point(f"pt-{i}", strength=1.0) for i in range(3)]
         mock_qdrant.retrieve.return_value = pts
-        await adapter._reinforce_batch("ctx-1", [f"pt-{i}" for i in range(3)])
+        await adapter._reinforce_batch([f"pt-{i}" for i in range(3)])
         assert mock_qdrant.set_payload.await_count == 3
 
 
@@ -668,20 +689,23 @@ class TestHebbianReinforcement:
 
 class TestDestroyContext:
     @pytest.mark.asyncio
-    async def test_deletes_correct_collection(self, adapter, mock_qdrant):
+    async def test_deletes_by_filter_on_shared_collection(self, adapter, mock_qdrant):
+        # PRD-108: destroy = delete-by-field_id-filter on the shared
+        # collection, NOT a per-field delete_collection.
         await adapter.destroy_context("abc-123")
-        mock_qdrant.delete_collection.assert_awaited_once_with("field_abc-123")
+        mock_qdrant.delete.assert_awaited_once()
+        assert mock_qdrant.delete.call_args.kwargs["collection_name"] == "field_memory"
 
     @pytest.mark.asyncio
     async def test_does_not_raise_on_qdrant_error(self, adapter, mock_qdrant):
-        mock_qdrant.delete_collection.side_effect = Exception("network error")
+        mock_qdrant.delete.side_effect = Exception("network error")
         # Must swallow the exception gracefully
         await adapter.destroy_context("abc-123")  # no raise
 
     @pytest.mark.asyncio
-    async def test_delete_collection_called_once(self, adapter, mock_qdrant):
+    async def test_delete_called_once(self, adapter, mock_qdrant):
         await adapter.destroy_context("some-id")
-        assert mock_qdrant.delete_collection.await_count == 1
+        assert mock_qdrant.delete.await_count == 1
 
 
 # ===========================================================================
@@ -803,7 +827,8 @@ class TestFindByHash:
         mock_qdrant.scroll.return_value = ([], None)
         await adapter._find_by_hash("my-ctx", "hash123")
         scroll_call = mock_qdrant.scroll.call_args
-        assert scroll_call.kwargs.get("collection_name") == "field_my-ctx"
+        # PRD-108: lookups hit the shared collection; field isolation is via filter.
+        assert scroll_call.kwargs.get("collection_name") == "field_memory"
 
     @pytest.mark.asyncio
     async def test_scroll_limits_to_1(self, adapter, mock_qdrant):
