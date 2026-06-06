@@ -32,7 +32,7 @@ from typing import Callable, Optional
 
 from config import config
 from core.models.business_profiles import BusinessProfile
-from core.models.core import BoardTask, WorkflowExecution
+from core.models.core import BoardTask, RecipeExecution, WorkflowExecution
 from core.utils.exception_telemetry import record_error
 
 logger = logging.getLogger(__name__)
@@ -140,6 +140,52 @@ def _reap_workflow_executions(db, cutoff: datetime, now: datetime) -> int:
     return len(stale)
 
 
+def _reap_recipe_executions(db, cutoff: datetime, now: datetime) -> int:
+    """Sweep stuck ``RecipeExecution`` rows (the Playbook execution log) —
+    PRD-142 Wave 3 W3-S12.
+
+    Mirrors the workflow surface: ``pending``/``running`` past the staleness
+    window is an orphan (process crashed mid-execution), and the row would
+    otherwise stay ``running`` forever. ``RecipeExecution.started_at`` is
+    tz-NAIVE (column default ``func.now()``) and ``completed_at`` is also
+    tz-NAIVE — same naive_now handling as the workflow surface keeps the
+    timestamp comparable to existing rows.
+
+    The subsystem tag ``"playbook"`` (not ``"recipe"``) matches the
+    canonical noun (CLAUDE.md §10 / GUARDRAILS C1) so the WS-A
+    ERRORS-by-subsystem tile groups under the right name.
+    """
+    rows = (
+        db.query(RecipeExecution)
+        .filter(RecipeExecution.status.in_(["pending", "running"]))
+        .all()
+    )
+    # Defensive Python-side status guard — belt-and-braces on top of the SQL
+    # filter so a future refactor that drops the IN clause can NOT silently
+    # re-mark an already-terminal row (§H DoD #6 — no double-writes to a
+    # row whose status is the final word).
+    in_flight = [r for r in rows if r.status in ("pending", "running")]
+    stale = [r for r in in_flight if _is_stale(r.started_at, cutoff)]
+    naive_now = now.replace(tzinfo=None) if now.tzinfo is not None else now
+    for r in stale:
+        r.status = "failed"
+        r.error_message = f"{_ORPHAN_REASON}: playbook executor lost on restart"
+        r.completed_at = naive_now
+    if stale:
+        record_error(
+            subsystem="playbook",
+            operation="boot_reap",
+            error=OrphanedRunError(
+                f"reaped {len(stale)} orphaned playbook execution(s)"
+            ),
+            extra={
+                "reaped_execution_ids": [r.execution_id for r in stale],
+                "reason": _ORPHAN_REASON,
+            },
+        )
+    return len(stale)
+
+
 def _run_surface(
     db,
     cutoff: datetime,
@@ -177,6 +223,11 @@ def reap_orphaned_runs(db, *, now: Optional[datetime] = None) -> int:
     reaped += _run_surface(db, cutoff, now, "board", _reap_board_tasks)
     reaped += _run_surface(db, cutoff, now, "wizard", _reap_business_profiles)
     reaped += _run_surface(db, cutoff, now, "workflow", _reap_workflow_executions)
+    # PRD-142 Wave 3 · W3-S12: Playbook restart-durability — port the Mission
+    # durability primitive (boot-time terminal-transition sweep) onto the
+    # RecipeExecution log so an in-flight playbook cannot silently die when
+    # the process restarts (§H DoD #3 + §A E1).
+    reaped += _run_surface(db, cutoff, now, "playbook", _reap_recipe_executions)
 
     if reaped:
         try:

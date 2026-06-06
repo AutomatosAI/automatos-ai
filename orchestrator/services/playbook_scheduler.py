@@ -204,8 +204,9 @@ class PlaybookSchedulerService:
 
             logger.info("[PlaybookScheduler] Firing playbook %d (%s), execution=%s", playbook.id, playbook.name, execution_id)
 
-            from api.recipe_executor import launch_recipe_task
-            launch_recipe_task(
+            # PRD-142 W3-S12: cron-fired playbooks launch via the engine seam.
+            from services.playbook_engine import get_playbook_engine
+            get_playbook_engine().launch(
                 recipe_execution_id=execution_id,
                 recipe_id=playbook.id,
                 workspace_id=UUID(str(playbook.workspace_id)),

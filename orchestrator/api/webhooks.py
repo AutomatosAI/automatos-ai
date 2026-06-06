@@ -651,7 +651,8 @@ async def _dispatch_workflow_async(
     """Dispatch a workflow/recipe execution asynchronously, return execution_id."""
     from core.models.core import RecipeExecution
     from core.models import WorkflowTemplate as WorkflowRecipe
-    from api.recipe_executor import execute_recipe_direct
+    # PRD-142 W3-S12: workspace webhook dispatch goes via the engine seam.
+    from services.playbook_engine import get_playbook_engine
     from datetime import datetime, timezone
 
     recipe = db.query(WorkflowRecipe).filter(
@@ -680,7 +681,7 @@ async def _dispatch_workflow_async(
     db.commit()
 
     task = asyncio.create_task(
-        execute_recipe_direct(
+        get_playbook_engine().execute_direct(
             recipe_execution_id=execution_id,
             recipe_id=recipe.id,
             workspace_id=envelope.workspace_id,
