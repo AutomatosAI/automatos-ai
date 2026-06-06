@@ -19,6 +19,13 @@ MAX_ITERATIONS=0
 ITERATION=0
 CONSECUTIVE_FAILURES=0
 
+# Per-iteration wall-clock cap. A single story (TDD + validate + commit) should
+# finish well inside this; anything longer is a hung child, not real work.
+# timeout SIGTERMs at this mark, then SIGKILLs 30s later if it ignores TERM.
+# (Added after a child hung idle for 12h with no per-iteration bound.)
+ITER_TIMEOUT="45m"
+TIMEOUT_BIN=$(command -v timeout || command -v gtimeout)
+
 # Colors
 RED='\033[0;31m'
 YELLOW='\033[1;33m'
@@ -171,7 +178,7 @@ while true; do
   TEMP_OUTPUT=$(mktemp)
   set +e
 
-  claude --print \
+  "$TIMEOUT_BIN" --kill-after=30s "$ITER_TIMEOUT" claude --print \
     --verbose \
     --output-format stream-json \
     --dangerously-skip-permissions \
@@ -206,6 +213,22 @@ while true; do
 
   if is_usage_limit_error "$OUTPUT" "$EXIT_CODE"; then
     handle_usage_limit "$OUTPUT"
+    ITERATION=$((ITERATION - 1))
+    continue
+  fi
+
+  # Timeout: GNU timeout exits 124 (TERM at the mark) or 137 (SIGKILL after
+  # --kill-after). A story that blew the cap left a half-edited tree — discard
+  # it so the next iteration starts from the last clean commit, then retry.
+  if [[ $EXIT_CODE -eq 124 || $EXIT_CODE -eq 137 || $EXIT_CODE -eq 143 ]]; then
+    CONSECUTIVE_FAILURES=$((CONSECUTIVE_FAILURES + 1))
+    echo ""
+    echo -e "${RED}=== Iteration timed out after ${ITER_TIMEOUT} (exit $EXIT_CODE) — killed hung child ===${NC}"
+    echo -e "${YELLOW}Discarding partial work so the next iteration starts clean...${NC}"
+    git checkout -- . 2>/dev/null || true
+    git clean -fdq 2>/dev/null || true
+    echo -e "${YELLOW}Retrying in 15s... (consecutive failures: $CONSECUTIVE_FAILURES)${NC}"
+    countdown 15 "Waiting..."
     ITERATION=$((ITERATION - 1))
     continue
   fi
