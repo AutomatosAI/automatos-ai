@@ -40,6 +40,7 @@ from config import config
 
 # Import from consumer's own modules
 from consumers.chatbot.prompt_analyzer import get_prompt_analyzer
+from consumers.chatbot.primitive_heartbeat import _emit_chat_primitive
 from consumers.chatbot.streaming import get_streaming_handler
 from consumers.chatbot.tool_router import get_tool_router
 
@@ -2056,9 +2057,18 @@ class StreamingChatService:
             ):
                 yield chunk
 
+            # PRD-142 W3-S6: chat primitive heartbeat — green on clean turn.
+            _emit_chat_primitive(
+                self.workspace_id, success=True, detail="chat turn completed",
+            )
+
         except Exception as e:
             logger.error(f"Error streaming response with agent: {e}", exc_info=True)
             yield self.streaming_handler.format_aisdk_error(str(e))
+            # PRD-142 W3-S6: chat primitive heartbeat — down on caught error.
+            _emit_chat_primitive(
+                self.workspace_id, success=False, detail=str(e),
+            )
 
     async def stream_response(
         self,
@@ -2151,9 +2161,18 @@ class StreamingChatService:
 
             yield self.streaming_handler.format_sse_done()
 
+            # PRD-142 W3-S6: chat primitive heartbeat — green on clean turn.
+            _emit_chat_primitive(
+                self.workspace_id, success=True, detail="chat turn completed",
+            )
+
         except Exception as e:
             logger.error(f"Error streaming response: {e}", exc_info=True)
             yield self.streaming_handler.format_sse_error(str(e))
+            # PRD-142 W3-S6: chat primitive heartbeat — down on caught error.
+            _emit_chat_primitive(
+                self.workspace_id, success=False, detail=str(e),
+            )
 
     async def _execute_pretriggered_tools(
         self,
