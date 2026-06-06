@@ -448,38 +448,12 @@ class TestConsolidation:
 
 
 # ===========================================================================
-# 6. store_exchange
+# 6. store_exchange — RETIRED in PRD-142 W3-S7 (G12 dual L2 write collapsed).
+#    The canonical L2 write per chat turn is now ``store_transcript`` (PRD-131d
+#    Phase 3), called from SmartMemoryManager.store_conversation. No
+#    production caller of UnifiedMemoryService.store_exchange remains; the
+#    method was deleted in the same commit as this test block.
 # ===========================================================================
-
-
-class TestStoreExchange:
-
-    @pytest.mark.asyncio
-    async def test_stores_to_l2(self, service):
-        with patch.object(service, "store_short_term", new_callable=AsyncMock) as mock_st:
-            mock_st.return_value = str(uuid.uuid4())
-            result = await service.store_exchange(
-                workspace_id=WS_ID, agent_id=AGENT_ID,
-                user_msg="What is MRR?", assistant_msg="$45k",
-                conversation_id=CONV_ID,
-            )
-
-        assert result is not None
-        kw = mock_st.call_args[1]
-        assert kw["content_type"] == "exchange"
-        assert "What is MRR?" in kw["content"]
-        assert kw["metadata"]["conversation_id"] == CONV_ID
-
-    @pytest.mark.asyncio
-    async def test_skips_trivial(self, service):
-        with patch.object(service, "store_short_term", new_callable=AsyncMock) as mock_st:
-            result = await service.store_exchange(
-                workspace_id=WS_ID, agent_id=AGENT_ID,
-                user_msg="hi", assistant_msg="Hello!",
-                conversation_id=CONV_ID,
-            )
-        assert result is None
-        mock_st.assert_not_called()
 
 
 # ===========================================================================

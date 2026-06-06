@@ -133,11 +133,12 @@ class SmartChatOrchestrator:
         # Components
         self.classifier = get_intent_classifier()
 
-        # Legacy: keep memory_manager reference for store_exchange()
+        # SmartMemoryManager owns the L3/L2 write fan-out for a chat turn
+        # (distilled facts + verbatim transcript). UnifiedMemoryService is the
+        # shared singleton; we hold a reference for L1 session updates.
         from .smart_memory import get_smart_memory_manager
         self.memory_manager = get_smart_memory_manager()
 
-        # Unified memory service for store_exchange L2 + session updates
         from modules.memory.unified_memory_service import get_unified_memory_service
         self._unified_memory = get_unified_memory_service()
 
@@ -388,7 +389,12 @@ class SmartChatOrchestrator:
         # after the user has seen the full response. None of these writes feed
         # back into the current turn, so schedule them and return immediately.
 
-        # Mem0 distilled facts (two-tier global/agent memory)
+        # L3 distilled facts (two-tier global/agent Mem0) + L2 verbatim
+        # transcript — both fan out from store_conversation. Per W3-S7 / G12
+        # (write-once-per-layer) the L2 transcript IS the L2 write for a chat
+        # turn; the older direct ``_unified_memory.store_exchange`` spawn was
+        # a duplicate L2 row (content_type='exchange') that this collapse
+        # retires.
         _spawn_background(
             self.memory_manager.store_conversation(
                 workspace_id=self.workspace_id,
@@ -410,18 +416,6 @@ class SmartChatOrchestrator:
                 agent_id=self.agent_id,
             ),
             label="store_daily_summary",
-        )
-
-        # L2: raw exchange in Postgres
-        _spawn_background(
-            self._unified_memory.store_exchange(
-                workspace_id=self.workspace_id,
-                agent_id=self.agent_id,
-                user_msg=user_message,
-                assistant_msg=assistant_response,
-                conversation_id=chat_id,
-            ),
-            label="l2_store_exchange",
         )
 
         # L1: session in Redis
