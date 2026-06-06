@@ -74,6 +74,11 @@ _ROLE_SYNONYMS: Dict[str, List[str]] = {
     "admin": ["admin", "operations", "ops", "configure", "setup", "workspace"],
 }
 
+# Canonical capability vocabulary the mission planner assigns from. Tasks bind
+# to one of these CAPABILITIES (not a specific agent name); the matcher then
+# scores every active agent for the capability and dispatches the best fit.
+CANONICAL_ROLES: frozenset = frozenset(_ROLE_SYNONYMS)
+
 
 # ---------------------------------------------------------------------------
 # Result dataclass
