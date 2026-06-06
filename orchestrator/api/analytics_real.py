@@ -9,7 +9,7 @@ ADDITIVE: Building on existing statistics.py endpoints.
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_, desc, asc
+from sqlalchemy import func, and_, desc, asc, text
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 from core.database.database import get_db
@@ -185,6 +185,82 @@ async def get_errors_by_subsystem(
         "window": window,
         "total": total,
         "by_subsystem": by_subsystem,
+        "generated_at": datetime.utcnow().isoformat(),
+    }
+
+
+@router.get("/primitive-health")
+async def get_primitive_health(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Per-primitive health (PRD-142 Wave 3 · WS-M · W3-S2).
+
+    Backs the Command Centre "Is it working?" 8-primitive health tile (the
+    Wave 0 US-006 metric deferred until W3-S1 emitted real data). Reads the
+    LATEST ``primitive_check`` finding per primitive from ``heartbeat_results``;
+    the writer is W3-S1's ``emit_primitive_finding`` helper in
+    ``services/heartbeat_service.py``, and each primitive's hardening story
+    (S6 chat … S13 channels) wires its own caller as it comes online.
+
+    Honest gaps over fake greens: a primitive with NO finding renders
+    ``{status: "unknown", last_checked: null}``. The 8 canonical primitives
+    are ALWAYS returned — the closed set comes from
+    ``heartbeat_service.PRIMITIVE_NAMES`` (single source of truth).
+
+    Index path: ``ix_heartbeat_results_workspace_id`` +
+    ``ix_heartbeat_results_created_at`` cover the workspace filter +
+    ``ORDER BY created_at DESC`` — no full-table scan. The ``findings->0``
+    JSONB extraction runs only on the workspace-narrowed slice.
+
+    Returns ``{primitives: [{name, status, last_checked}], generated_at}``;
+    ``status`` is one of ``{green, degraded, down, unknown}``.
+    """
+    from services.heartbeat_service import PRIMITIVE_NAMES
+
+    rows = db.execute(
+        text(
+            """
+            SELECT
+                findings->0->>'primitive' AS primitive,
+                findings->0->>'status'    AS status,
+                findings->0->>'detail'    AS detail,
+                created_at
+            FROM heartbeat_results
+            WHERE workspace_id = :ws_id
+              AND findings->0->>'finding_type' = 'primitive_check'
+            ORDER BY created_at DESC
+            """
+        ),
+        {"ws_id": str(ctx.workspace_id)},
+    ).fetchall()
+
+    # Latest-wins: rows arrive DESC, so the FIRST row per primitive is the
+    # latest finding. Ignore primitive names outside the canonical closed set
+    # (the writer rejects them, but a defence-in-depth filter keeps drift out
+    # of the tile if a row ever leaks in via direct SQL).
+    latest: Dict[str, Dict[str, Any]] = {}
+    for r in rows:
+        primitive = r.primitive
+        if primitive not in PRIMITIVE_NAMES or primitive in latest:
+            continue
+        latest[primitive] = {"status": r.status, "last_checked": r.created_at}
+
+    primitives = [
+        {
+            "name": name,
+            "status": latest[name]["status"] if name in latest else "unknown",
+            "last_checked": (
+                latest[name]["last_checked"].isoformat()
+                if name in latest and latest[name]["last_checked"] is not None
+                else None
+            ),
+        }
+        for name in sorted(PRIMITIVE_NAMES)
+    ]
+
+    return {
+        "primitives": primitives,
         "generated_at": datetime.utcnow().isoformat(),
     }
 

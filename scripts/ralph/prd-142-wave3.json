@@ -36,8 +36,8 @@
         "Type checks pass; pytest orchestrator/tests/test_primitive_health_endpoint.py green."
       ],
       "priority": 2,
-      "passes": false,
-      "notes": "BLOCKED by W3-S1 (needs primitive findings in heartbeat_results). Reuse api/analytics_real.py prefix /api/analytics. grep confirms no primitive-health route exists today (2026-06-06). This is US-006 deferred from Wave 0 to here precisely because there was no honest data source until S1."
+      "passes": true,
+      "notes": "BLOCKED by W3-S1 (needs primitive findings in heartbeat_results). Reuse api/analytics_real.py prefix /api/analytics. grep confirms no primitive-health route exists today (2026-06-06). This is US-006 deferred from Wave 0 to here precisely because there was no honest data source until S1. LANDED 2026-06-06: GET /api/analytics/primitive-health added to api/analytics_real.py (same router, no new file). Imports PRIMITIVE_NAMES from services/heartbeat_service.py as the single source of truth for the 8 canonical names. SQL is one read: SELECT findings->0->>'primitive', status, detail, created_at FROM heartbeat_results WHERE workspace_id=:ws_id AND findings->0->>'finding_type'='primitive_check' ORDER BY created_at DESC — index path = ix_heartbeat_results_workspace_id + ix_heartbeat_results_created_at. Latest-wins dedupe in Python (rows already DESC). Returns {primitives:[{name,status,last_checked}], generated_at}; un-emitted primitive => {status:'unknown', last_checked:null} (never a fake green). TDD: 4/4 green in tests/test_primitive_health_endpoint.py (all_eight, latest_wins, missing_is_unknown, workspace_isolation). W3-S1 helper + US-002 endpoint patterns: 8/8 no regression."
     },
     {
       "id": "W3-S3",
