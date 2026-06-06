@@ -323,6 +323,28 @@ class _FakeSource:
         self.name = name
 
 
+def _clause_columns(expr) -> "list[str]":
+    """Column names referenced in a SQLAlchemy filter clause, extracted
+    structurally from ``.left``/``.clauses`` rather than from ``str``/``repr``.
+
+    A ``BinaryExpression`` only stringifies to SQL text containing the column
+    name once its mapper is compiled; earlier tests in the full suite can
+    leave it uncompiled, so ``repr(expr)`` falls back to the bare object id
+    and a substring check flakes. Reading ``column.name``/``.key`` is set at
+    class-definition time and is therefore order-independent."""
+    names: list[str] = []
+    for sub in getattr(expr, "clauses", None) or []:
+        names.extend(_clause_columns(sub))
+    left = getattr(expr, "left", None)
+    if left is not None:
+        name = getattr(left, "name", None) or getattr(left, "key", None)
+        if name:
+            names.append(str(name))
+        else:
+            names.extend(_clause_columns(left))
+    return names
+
+
 class _RecordingFilter:
     """Records filter expressions so we can assert the workspace clause
     was applied — without standing up a real SQLAlchemy engine."""
@@ -333,7 +355,8 @@ class _RecordingFilter:
 
     def filter(self, *exprs):
         for expr in exprs:
-            self._store.append(repr(expr))
+            cols = _clause_columns(expr)
+            self._store.append(":".join(cols) if cols else repr(expr))
         return self
 
     def first(self):
