@@ -596,8 +596,8 @@ async def _run_scrape_pipeline(
     # TEMP: WIZARD_SKIP_GRAPHIFY=1 bypasses the slow knowledge-graph build
     # so we can iterate on Step 6 / Mission Zero without waiting for the
     # graph on every test run. The existing graph from a previous run is
-    # reused. Remove before E2E testing.
-    skip_graphify = os.getenv("WIZARD_SKIP_GRAPHIFY", "").lower() in ("1", "true", "yes")
+    # reused. Remove before E2E testing. (PRD-142 W3-S5 — env via config.)
+    skip_graphify = config.WIZARD_SKIP_GRAPHIFY
 
     try:
         client = _firecrawl_client()

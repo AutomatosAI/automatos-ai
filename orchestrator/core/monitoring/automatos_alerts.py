@@ -12,16 +12,18 @@ Usage:
 import hashlib
 import json
 import logging
-import os
 from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel
 
+from config import config
+
 logger = logging.getLogger(__name__)
 
-ALERT_INGEST_TOKEN = os.environ.get("ALERT_INGEST_TOKEN", "")
+# PRD-142 W3-S5 / G7 — env read routed through config.
+ALERT_INGEST_TOKEN = config.ALERT_INGEST_TOKEN
 
 
 # ─────────────────────────────────────────────

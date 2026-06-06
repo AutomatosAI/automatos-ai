@@ -1,12 +1,12 @@
-from dotenv import load_dotenv
-load_dotenv()
-
-
 """
 Database Configuration and Session Management
 ============================================
 
 Database setup, connection management, and session handling for Automotas AI.
+
+(PRD-142 W3-S5 / G7) The redundant ``load_dotenv()`` that used to live at the
+top of this module is gone — importing ``config`` loads ``.env`` exactly once,
+so the duplicate call only fought back over already-set values.
 """
 
 from sqlalchemy import create_engine

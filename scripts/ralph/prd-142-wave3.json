@@ -86,8 +86,8 @@
         "Type checks pass; cd orchestrator && python -c 'from main import app' OK."
       ],
       "priority": 3,
-      "passes": false,
-      "notes": "Opportunistic, pure widening (PRD-141 precedent), not big-bang. Do NOT sweep all 52 repo-wide hits — only the runtime files behind the import graph; scripts/ are out. The grep gate already guards regressions. Land this early to clear config debt out of the primitives before they are refactored."
+      "passes": true,
+      "notes": "Opportunistic, pure widening (PRD-141 precedent), not big-bang. Do NOT sweep all 52 repo-wide hits — only the runtime files behind the import graph; scripts/ are out. The grep gate already guards regressions. Land this early to clear config debt out of the primitives before they are refactored. LANDED 2026-06-06: swept 8 runtime files (core/monitoring/automatos_logging.py, core/security/rate_limiter.py, core/monitoring/automatos_metrics.py, core/monitoring/automatos_logs_api.py, core/monitoring/automatos_alerts.py, core/database/database.py, api/wizard.py, api/channels.py). Added typed accessors to config.py: LOG_RELAY_URL, LOG_RELAY_ENABLED, LOG_RELAY_BATCH_SIZE, LOG_RELAY_FLUSH_INTERVAL, LOG_RELAY_SERVICE_NAME ('unknown'), METRICS_SERVICE_NAME ('automatos-backend'), LOG_RELAY_ENVIRONMENT (+RAILWAY_ENVIRONMENT fallback), METRICS_ENVIRONMENT ('unknown'), LOKI_QUERY_URL, ALERT_INGEST_TOKEN, PUBLIC_API_HOST, WIZARD_SKIP_GRAPHIFY, plus rate_limit_for(name,max,window) static helper (replaces rate_limiter._env_limit). PRESERVED both historical defaults for SERVICE_NAME + ENVIRONMENT — two accessors each, pure widening. database.py: redundant load_dotenv() removed (config.py loads .env once). resolver.py: only docstring matches existed (no real env reads — noted, no edit). TDD: 54/54 green in tests/test_config_env_centralization.py (per-module AST grep + per-accessor default + override). Per-file grep gate (os.getenv|os.environ): 0 across all 8 swept files. No regression: tests/test_config.py + test_heartbeat_primitive_findings.py + test_primitive_health_endpoint.py 10/10 green."
     },
     {
       "id": "W3-S6",
