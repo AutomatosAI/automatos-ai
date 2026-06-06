@@ -21,6 +21,103 @@ from apscheduler.triggers.cron import CronTrigger
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Primitive-mapped heartbeat findings (PRD-142 Wave 3 · WS-M · W3-S1)
+#
+# The Command Centre's per-primitive health tile reads ``heartbeat_results``
+# rows whose JSONB ``findings`` carry the ``primitive_check`` shape. Each
+# primitive's hardening story (S6 chat … S13 channels) wires its own caller
+# of ``emit_primitive_finding`` once it has a real signal; until then the
+# primitive emits NOTHING (the tile reads ``unknown`` — never a fake green).
+# Canonical lowercase keys only (CLAUDE.md §10 — no legacy nouns).
+# ---------------------------------------------------------------------------
+
+PRIMITIVE_NAMES = frozenset({
+    "chat",
+    "memory",
+    "rag",
+    "nl2sql",
+    "graph",
+    "missions",
+    "playbooks",
+    "channels",
+})
+PRIMITIVE_STATUSES = frozenset({"green", "degraded", "down"})
+
+
+def emit_primitive_finding(
+    workspace_id: str,
+    primitive: str,
+    status: str,
+    detail: str = "",
+) -> bool:
+    """Best-effort write of a primitive-mapped heartbeat finding.
+
+    Mirrors the ``_store_heartbeat_result`` INSERT path — same table, same
+    columns. The ``primitive`` / ``status`` / ``finding_type`` keys live
+    inside the existing JSONB ``findings`` column, so NO schema change is
+    required. Each call writes exactly one row whose ``findings`` payload is
+    a single ``primitive_check`` dict; the W3-S2 analytics endpoint picks the
+    latest-per-primitive when it reads.
+
+    Returns True on a written row, False on validation reject or write
+    failure. NEVER raises — a failure here cannot break the heartbeat cycle
+    or the primitive's own code path.
+    """
+    try:
+        if primitive not in PRIMITIVE_NAMES:
+            logger.warning(
+                "[Heartbeat] emit_primitive_finding rejected unknown primitive=%r",
+                primitive,
+            )
+            return False
+        if status not in PRIMITIVE_STATUSES:
+            logger.warning(
+                "[Heartbeat] emit_primitive_finding rejected invalid status=%r",
+                status,
+            )
+            return False
+
+        from core.database.database import SessionLocal
+        from sqlalchemy import text
+
+        db = SessionLocal()
+        try:
+            finding = {
+                "finding_type": "primitive_check",
+                "primitive": primitive,
+                "status": status,
+                "detail": (str(detail) if detail else "")[:500],
+            }
+            db.execute(
+                text(
+                    """
+                    INSERT INTO heartbeat_results
+                        (source_type, source_id, workspace_id, status,
+                         findings, actions_taken, tokens_used, created_at)
+                    VALUES
+                        ('orchestrator', :source_id, :workspace_id, 'success',
+                         :findings, '[]', 0, NOW())
+                    """
+                ),
+                {
+                    "source_id": str(workspace_id),
+                    "workspace_id": str(workspace_id),
+                    "findings": json.dumps([finding]),
+                },
+            )
+            db.commit()
+            return True
+        finally:
+            db.close()
+    except Exception:
+        logger.error(
+            "[Heartbeat] emit_primitive_finding failed ws=%s primitive=%s",
+            workspace_id, primitive, exc_info=True,
+        )
+        return False
+
+
 class HeartbeatService:
     """
     Manages periodic heartbeat ticks for orchestrator and agents.
@@ -117,21 +214,43 @@ class HeartbeatService:
         logger.info("[Heartbeat] Service stopped")
 
     async def _mem0_health_probe_tick(self) -> None:
-        """Probe Mem0 reachability and steer all circuit breakers (PRD-141 US-006).
+        """Probe Mem0 + emit memory primitive heartbeat finding (PRD-141 US-006 + W3-S1).
 
         Resolves the shared Mem0Client (the one real traffic uses, so probe and
         traffic agree on breaker state) and delegates the trip/reset decision to
         ``run_health_probe``. Skips silently when Mem0 is unconfigured.
+
+        W3-S1 (pathfinder wiring): after the probe lands, emit a ``memory``
+        primitive_check finding per workspace that has an active orchestrator
+        heartbeat, so the per-workspace memory tile reflects the latest probe
+        result. Richer multi-layer (L1/L2/L3) signal lands with W3-S7.
         """
         try:
             from modules.memory.unified_memory_service import get_unified_memory_service
 
             client = get_unified_memory_service()._mem0
             if not getattr(client, "api_url", ""):
-                return  # Mem0 disabled — nothing to probe
-            await client.run_health_probe()
+                return  # Mem0 disabled — skip both probe and primitive emit
+            healthy = await client.run_health_probe()
         except Exception:
             logger.error("[Heartbeat] Mem0 health probe tick errored", exc_info=True)
+            return
+
+        if self._scheduler is None:
+            return
+        primitive_status = "green" if healthy else "down"
+        detail = "mem0 probe ok" if healthy else "mem0 probe failed; breakers tripped"
+        try:
+            for job in self._scheduler.get_jobs():
+                jid = getattr(job, "id", "") or ""
+                if not jid.startswith("orch_hb_"):
+                    continue
+                ws_id = jid[len("orch_hb_"):]
+                emit_primitive_finding(ws_id, "memory", primitive_status, detail)
+        except Exception:
+            logger.error(
+                "[Heartbeat] memory primitive emit loop errored", exc_info=True
+            )
 
     # ------------------------------------------------------------------
     # Config loading

@@ -19,8 +19,8 @@
         "pytest orchestrator/tests/test_heartbeat_primitive_findings.py green; existing heartbeat tests green (no regression)."
       ],
       "priority": 1,
-      "passes": false,
-      "notes": "Reuse-checked 2026-06-06: heartbeat_results table + services/heartbeat_service.py (71KB writer) + api/heartbeat.py + api/analytics_real.py all exist; NO primitive-mapped finding exists today (confirmed by grep). This story builds the MECHANISM; each WS-J primitive story (S6-S13) wires its own emit_primitive_finding call as it hardens. Honest gaps over fake greens. Endpoint contract for the consumer was TDD-specced in memory prd142-wave0-us006-deferred."
+      "passes": true,
+      "notes": "Reuse-checked 2026-06-06: heartbeat_results table + services/heartbeat_service.py (71KB writer) + api/heartbeat.py + api/analytics_real.py all exist; NO primitive-mapped finding exists today (confirmed by grep). This story builds the MECHANISM; each WS-J primitive story (S6-S13) wires its own emit_primitive_finding call as it hardens. Honest gaps over fake greens. Endpoint contract for the consumer was TDD-specced in memory prd142-wave0-us006-deferred. LANDED 2026-06-06: emit_primitive_finding(workspace_id, primitive, status, detail) + PRIMITIVE_NAMES/PRIMITIVE_STATUSES sets added to services/heartbeat_service.py; reuses _store_heartbeat_result INSERT shape (no schema change). Helper validates canonical lowercase names, swallows DB failures (try/except, returns bool). Memory wired as FIRST caller inside existing _mem0_health_probe_tick: after run_health_probe() lands, the loop iterates scheduled orch_hb_* jobs and emits one 'memory' primitive_check finding per active workspace ('green' on probe ok, 'down' on fail). Mem0 unconfigured = no emit (honest 'unknown'). TDD: 4/4 green in tests/test_heartbeat_primitive_findings.py (shape pin, un-hardened-stays-silent, failure-swallowed, canonical-only). test_unified_scheduler.py: 10/10 no regression."
     },
     {
       "id": "W3-S2",
