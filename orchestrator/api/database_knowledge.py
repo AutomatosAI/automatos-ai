@@ -178,15 +178,18 @@ async def query_database(
     Returns results with visualization hints.
     """
     service, cache, _ = get_services()
-    
+
     try:
         result = await service.smart_query(
             source_id=str(source_id),
             text=request.query,
             user_id="1",  # TODO: Get from auth
-            agent_id=None
+            agent_id=None,
+            # W3-S9: scope the source lookup to the authenticated workspace
+            # so a workspace A token can't use workspace B's source_id.
+            workspace_id=str(ctx.workspace_id),
         )
-        
+
         return result
     
     except Exception as e:
