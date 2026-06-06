@@ -54,6 +54,7 @@ from modules.coordination.planner import (
     MissionPlanner,
     PlanValidationError,
 )
+from modules.coordination.primitive_heartbeat import _emit_missions_primitive
 from modules.coordination.reconciler import MissionReconciler
 from modules.coordination.verification import ConsistencyResult, VerificationService
 from services.orchestration_board_bridge import (
@@ -1098,6 +1099,23 @@ class CoordinatorService:
 
         if RunState(run.state) == RunState.VERIFYING:
             await self._build_and_advance_to_awaiting_human(db, run)
+            db.refresh(run)
+
+        # PRD-142 W3-S11: missions primitive heartbeat at terminal boundary.
+        # tick() only picks RunState.RUNNING runs, so a terminal state here is
+        # always a fresh transition this tick — emit exactly once. COMPLETED →
+        # green; FAILED / CANCELLED → down (the tile reflects the user-visible
+        # outcome). Best-effort: the helper swallows any emit error so a
+        # broken heartbeat writer cannot fail mission completion.
+        if RunState(run.state) in TERMINAL_RUN_STATES:
+            _emit_missions_primitive(
+                run.workspace_id,
+                success=RunState(run.state) == RunState.COMPLETED,
+                detail=(
+                    f"run={run.id} state={run.state} "
+                    f"stop_reason={run.stop_reason or 'unspecified'}"
+                ),
+            )
 
     # ------------------------------------------------------------------
     # Synthesis support (PRD-82C US-007)
