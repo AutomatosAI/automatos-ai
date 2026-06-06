@@ -73,16 +73,19 @@ from services.orchestration_state import (
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Mission Power Modes — per-mode caps for model, tokens, and tool iterations.
+# Mission Power Modes — per-mode caps for the LLM tier and tool iterations.
+# Token budget is deliberately NOT a power-mode concern: it is resolved from
+# the agent's own Max Output Tokens setting (see AgentFactory, falling back to
+# the model's registry ceiling, then DEFAULT_MAX_OUTPUT_TOKENS).
 # "standard" is the default when power_mode is absent from mission config.
 # These are the hardcoded FALLBACK only. Operators retune live values via
 # system_settings (category 'power_modes', key '<mode>'); see
 # _get_power_mode_caps(). Stored settings win; absent keys fall back here.
 # ---------------------------------------------------------------------------
 _POWER_MODE_DEFAULTS: Dict[str, Dict[str, Any]] = {
-    "light":    {"max_tokens": 2_000,  "max_tool_iterations": 5,  "force_llm_tier": "system_llm"},
-    "standard": {"max_tokens": 4_000,  "max_tool_iterations": 10, "force_llm_tier": None},
-    "max":      {"max_tokens": 16_000, "max_tool_iterations": 50, "force_llm_tier": "orchestrator_llm"},
+    "light":    {"max_tool_iterations": 5,  "force_llm_tier": "system_llm"},
+    "standard": {"max_tool_iterations": 10, "force_llm_tier": None},
+    "max":      {"max_tool_iterations": 50, "force_llm_tier": "orchestrator_llm"},
 }
 
 
@@ -1390,11 +1393,12 @@ class CoordinatorService:
             if not agent_runtime:
                 agent_runtime = await factory.activate_agent(agent_id, workspace_dir="/tmp/automatos_workspace")
 
-        if agent_runtime and hasattr(agent_runtime, "llm_manager"):
-            agent_runtime.llm_manager.config.max_tokens = max(
-                agent_runtime.llm_manager.config.max_tokens,
-                mode_caps["max_tokens"],
-            )
+        # The agent's max_tokens budget is resolved by AgentFactory from the
+        # agent's own Max Output Tokens setting (then the model's registry
+        # ceiling, then DEFAULT_MAX_OUTPUT_TOKENS). Power mode governs only the
+        # LLM tier and tool-iteration count — never the token budget. Do not
+        # re-introduce a power-mode token floor here: it silently capped large
+        # mission writes regardless of what the agent was configured to produce.
 
         # Model selection is driven by power_mode + the agent's own configured
         # model. There is intentionally NO synthesis-specific override:
