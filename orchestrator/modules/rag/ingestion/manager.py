@@ -790,6 +790,11 @@ class DocumentManager:
             filename: Real document filename (not the temp path basename)
         """
         self._ensure_database_initialized()
+        # W3-S8: track S3 vector_ids the persist helper stored so the outer
+        # except can clean up if a later step (status update, commit) fails
+        # after the dual-write already succeeded.
+        vector_ids: List[str] = []
+        conn = None
         try:
             logger.info(f"Starting document processing for document {document_id}, type: {file_type} (S3: {s3_key})")
 
@@ -1075,11 +1080,6 @@ class DocumentManager:
                     }
                 ))
 
-            # Generate embeddings and save chunks
-            valid_chunks = []
-            embeddings_for_s3 = []
-            documents_for_s3 = []
-
             # Phase 1: Filter and enrich chunks (no I/O)
             filtered_chunks = []
             for chunk in chunks:
@@ -1137,80 +1137,44 @@ class DocumentManager:
                 for chunk, embedding in zip(filtered_chunks, all_embeddings):
                     chunk.embedding = embedding
 
-            # Phase 3: Store chunks in database
-            for chunk in filtered_chunks:
-                embedding = chunk.embedding
+            # Phase 3+4: dual-write chunks (postgres) + vectors (S3, if enabled).
+            # §H "atomic per document": if S3 add_documents raises, the helper
+            # rolls back the in-flight chunk INSERTs and re-raises — no
+            # half-indexed doc survives the failure path.
+            vector_ids = await self._persist_chunks_and_vectors(
+                conn=conn,
+                cursor=cursor,
+                document_id=document_id,
+                workspace_id=workspace_id,
+                filename=filename,
+                file_path=file_path,
+                file_type=file_type,
+                filtered_chunks=filtered_chunks,
+            )
+            valid_chunks = list(filtered_chunks)
 
-                if self.use_s3_vectors and self._s3_backend:
-                    # Store metadata in postgres WITHOUT embedding (S3 vectors mode)
-                    cursor.execute("""
-                        INSERT INTO document_chunks (document_id, chunk_index, content, metadata, parent_content, headers, workspace_id)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s)
-                    """, (
-                        chunk.document_id, chunk.chunk_index, chunk.content,
-                        json.dumps(chunk.metadata),
-                        chunk.parent_content,
-                        json.dumps(chunk.headers) if chunk.headers else '{}',
-                        workspace_id
-                    ))
-
-                    # Collect for S3 batch insert
-                    embeddings_for_s3.append(embedding)
-                    real_name = filename or os.path.basename(file_path)
-                    documents_for_s3.append({
-                        "external_file_id": str(document_id),  # = PostgreSQL documents.id
-                        "document_id": str(document_id),
-                        "chunk_index": chunk.chunk_index,
-                        "chunk_text": chunk.content[:500],
-                        "file_name": real_name,
-                        "source_file": real_name,
-                        "file_path": file_path,
-                        "file_type": file_type.value if hasattr(file_type, 'value') else str(file_type),
-                        "app_name": "document_sync",
-                        "workspace_id": workspace_id
-                    })
-                else:
-                    # Store everything in postgres (legacy pgvector mode)
-                    cursor.execute("""
-                        INSERT INTO document_chunks (document_id, chunk_index, content, embedding, metadata, parent_content, headers, workspace_id)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                    """, (
-                        chunk.document_id, chunk.chunk_index, chunk.content,
-                        embedding, json.dumps(chunk.metadata),
-                        chunk.parent_content,
-                        json.dumps(chunk.headers) if chunk.headers else '{}',
-                        workspace_id
-                    ))
-
-                valid_chunks.append(chunk)
-
-            # Batch insert vectors to S3 if enabled
-            if self.use_s3_vectors and self._s3_backend and embeddings_for_s3:
-                try:
-                    await self._s3_backend.initialize()
-                    vector_ids = self._s3_backend.add_documents(
-                        documents=documents_for_s3,
-                        embeddings=embeddings_for_s3
-                    )
-                    logger.info(f"✅ Stored {len(vector_ids)} vectors in S3 for document {document_id}")
-                except Exception as e:
-                    logger.error(f"Failed to store vectors in S3: {e}")
-                    raise
-            
             # Update document status
             cursor.execute("""
-                UPDATE documents 
+                UPDATE documents
                 SET status = %s, processed_date = %s, chunk_count = %s
                 WHERE id = %s
             """, (
                 DocumentStatus.COMPLETED.value, datetime.now(), len(valid_chunks), document_id
             ))
-            
+
             conn.commit()
             cursor.close()
             conn.close()
 
             logger.info(f"Document {document_id} processed successfully with {len(chunks)} chunks")
+
+            # W3-S1 wiring: RAG primitive emits 'green' on a successful turn —
+            # this is the only honest source of the RAG tile.
+            self._emit_ingest_heartbeat(
+                document_id=document_id,
+                status="green",
+                detail=f"doc {document_id} ingest ok ({len(valid_chunks)} chunks)",
+            )
 
             # PRD-126: Trigger knowledge graph update on document ingest
             try:
@@ -1225,7 +1189,35 @@ class DocumentManager:
 
         except Exception as e:
             logger.error(f"Error processing document {document_id}: {e}")
-            
+
+            # Explicit rollback of the in-flight conn — don't rely on GC for
+            # atomicity (CPython detail, not a contract). The persist helper
+            # already rolled back on its own S3 failure; this catches the
+            # earlier-multimodal / status-update paths.
+            try:
+                if 'conn' in locals() and conn is not None:
+                    conn.rollback()
+            except Exception:
+                logger.error(
+                    f"Rollback failed for doc {document_id}", exc_info=True
+                )
+
+            # If the dual-write got past S3 but a *later* step (status update,
+            # commit) failed, clean up the orphan vectors so the failed doc
+            # doesn't leave retrievable chunks in the vector index.
+            if vector_ids and self.use_s3_vectors and self._s3_backend:
+                try:
+                    self._s3_backend.delete_documents(str(document_id))
+                    logger.info(
+                        f"Cleaned up {len(vector_ids)} orphan S3 vectors after "
+                        f"doc {document_id} ingest failure"
+                    )
+                except Exception:
+                    logger.error(
+                        f"S3 vector cleanup failed for doc {document_id} "
+                        f"after ingest failure", exc_info=True
+                    )
+
             # Update status to failed
             try:
                 conn = psycopg2.connect(**self.db_config)
@@ -1238,8 +1230,151 @@ class DocumentManager:
                 conn.close()
             except Exception:
                 pass
-            
+
+            # W3-S1 wiring: RAG primitive emits 'down' on a failed ingest.
+            self._emit_ingest_heartbeat(
+                document_id=document_id,
+                status="down",
+                detail=f"doc {document_id} ingest failed: {type(e).__name__}",
+            )
+
             raise
+
+    async def _persist_chunks_and_vectors(
+        self,
+        conn,
+        cursor,
+        document_id: int,
+        workspace_id: Optional[str],
+        filename: Optional[str],
+        file_path: str,
+        file_type,
+        filtered_chunks: List["DocumentChunk"],
+    ) -> List[str]:
+        """Persist chunks to Postgres and (in S3 Vectors mode) embeddings to S3.
+
+        W3-S8 §H "atomic per document": the chunk INSERTs and the S3 batch
+        ``add_documents`` call are a single logical unit. If the S3 step
+        raises, the helper EXPLICITLY ``conn.rollback()``s before re-raising
+        so the chunk INSERTs don't survive without their vector partners.
+        Previously the code relied on garbage-collection rollback, which is a
+        CPython implementation detail, not an atomicity contract.
+
+        Returns the list of S3 vector_ids the backend stored, so the caller
+        can clean them up if a *later* step (status update, commit, graph
+        hook) fails after this helper returned successfully. Returns ``[]``
+        in legacy pgvector mode (vectors live next to the chunks in
+        Postgres, so the commit/rollback is symmetric automatically).
+        """
+        embeddings_for_s3: List[List[float]] = []
+        documents_for_s3: List[Dict[str, Any]] = []
+
+        for chunk in filtered_chunks:
+            embedding = chunk.embedding
+            chunk_headers = chunk.headers if getattr(chunk, "headers", None) else None
+
+            if self.use_s3_vectors and self._s3_backend:
+                # Store metadata in postgres WITHOUT embedding (S3 vectors mode)
+                cursor.execute(
+                    """
+                    INSERT INTO document_chunks (document_id, chunk_index, content, metadata, parent_content, headers, workspace_id)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        chunk.document_id,
+                        chunk.chunk_index,
+                        chunk.content,
+                        json.dumps(chunk.metadata),
+                        chunk.parent_content,
+                        json.dumps(chunk_headers) if chunk_headers else '{}',
+                        workspace_id,
+                    ),
+                )
+
+                embeddings_for_s3.append(embedding)
+                real_name = filename or os.path.basename(file_path)
+                documents_for_s3.append({
+                    "external_file_id": str(document_id),
+                    "document_id": str(document_id),
+                    "chunk_index": chunk.chunk_index,
+                    "chunk_text": chunk.content[:500],
+                    "file_name": real_name,
+                    "source_file": real_name,
+                    "file_path": file_path,
+                    "file_type": file_type.value if hasattr(file_type, 'value') else str(file_type),
+                    "app_name": "document_sync",
+                    "workspace_id": workspace_id,
+                })
+            else:
+                # Legacy pgvector mode: chunk INSERT carries the embedding inline.
+                cursor.execute(
+                    """
+                    INSERT INTO document_chunks (document_id, chunk_index, content, embedding, metadata, parent_content, headers, workspace_id)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        chunk.document_id,
+                        chunk.chunk_index,
+                        chunk.content,
+                        embedding,
+                        json.dumps(chunk.metadata),
+                        chunk.parent_content,
+                        json.dumps(chunk_headers) if chunk_headers else '{}',
+                        workspace_id,
+                    ),
+                )
+
+        if not (self.use_s3_vectors and self._s3_backend and embeddings_for_s3):
+            return []
+
+        try:
+            await self._s3_backend.initialize()
+            vector_ids = self._s3_backend.add_documents(
+                documents=documents_for_s3,
+                embeddings=embeddings_for_s3,
+            )
+            logger.info(
+                f"✅ Stored {len(vector_ids)} vectors in S3 for document {document_id}"
+            )
+            return list(vector_ids or [])
+        except Exception as e:
+            logger.error(
+                f"Failed to store vectors in S3 for doc {document_id}; "
+                f"rolling back chunks: {e}"
+            )
+            try:
+                conn.rollback()
+            except Exception:
+                logger.error(
+                    f"Rollback after S3 failure for doc {document_id} also failed",
+                    exc_info=True,
+                )
+            raise
+
+    def _emit_ingest_heartbeat(
+        self, document_id: int, status: str, detail: str = ""
+    ) -> None:
+        """W3-S1 wiring: best-effort RAG primitive_check emit.
+
+        Never raises — a heartbeat write failure must not surface as an
+        ingest failure (the §H 'observable' line is best-effort by design;
+        mirrors the same swallow guarantee in ``emit_primitive_finding``).
+        Silently skips when no ``workspace_id`` is in play — no per-workspace
+        tile to update, and A4 forbids fabricating a default.
+        """
+        try:
+            if not self.workspace_id:
+                return
+            from services.heartbeat_service import emit_primitive_finding
+
+            emit_primitive_finding(
+                str(self.workspace_id), "rag", status, detail
+            )
+        except Exception:
+            logger.error(
+                f"RAG heartbeat emit failed for doc {document_id}",
+                exc_info=True,
+            )
     
     def _get_target_dimension(self) -> int:
         """Get the configured embedding dimension for validation."""
@@ -1424,26 +1559,54 @@ class DocumentManager:
             raise
     
     def delete_document(self, document_id: int) -> bool:
-        """Delete document and all its chunks"""
+        """Delete document, all its chunks, and any S3-stored vectors.
+
+        §H 'delete removes the vector': in S3 Vectors mode the manager must
+        also drop the chunk-vectors for the doc — Postgres-only delete left
+        orphan vectors in the per-workspace index, breaking the contract.
+        S3 cleanup is best-effort after the Postgres commit: a flaky S3
+        outage MUST NOT block a delete the foreground row was already gone
+        for. Logged loudly so the orphan is reconcilable; the next vector
+        search filters by workspace + the doc_id is gone from Postgres so
+        the orphan never surfaces.
+        """
         self._ensure_database_initialized()
         try:
             conn = psycopg2.connect(**self.db_config)
             cursor = conn.cursor()
-            
+
             # Delete chunks first (due to foreign key constraint)
             cursor.execute("DELETE FROM document_chunks WHERE document_id = %s", (document_id,))
-            
+
             # Delete document
             cursor.execute("DELETE FROM documents WHERE id = %s", (document_id,))
-            
+
             deleted = cursor.rowcount > 0
             conn.commit()
             cursor.close()
             conn.close()
-            
+
+            # S3 vector cleanup — only meaningful in S3 Vectors mode (legacy
+            # pgvector path stores the vectors next to the chunks, already gone).
+            if self.use_s3_vectors and self._s3_backend:
+                try:
+                    vectors_deleted = self._s3_backend.delete_documents(
+                        str(document_id)
+                    )
+                    logger.info(
+                        f"Deleted {vectors_deleted} S3 vectors for document "
+                        f"{document_id}"
+                    )
+                except Exception:
+                    logger.error(
+                        f"S3 vector delete failed for doc {document_id} "
+                        f"(postgres delete already committed)",
+                        exc_info=True,
+                    )
+
             logger.info(f"Document {document_id} deleted: {deleted}")
             return deleted
-            
+
         except Exception as e:
             logger.error(f"Error deleting document {document_id}: {e}")
             raise
