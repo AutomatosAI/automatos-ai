@@ -12,6 +12,7 @@ Components:
 - StreamingChatService: SSE streaming orchestrator
 """
 
+import asyncio
 import json
 import logging
 import uuid
@@ -25,6 +26,13 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, desc, or_
 from difflib import SequenceMatcher
+
+# Converged tool-loop spine — chat + agent share this (PRD-142 W3-S4 / G6)
+from modules.tools.execution.tool_loop import (
+    RoundState,
+    ToolLoopExecutor,
+    ToolPostResult,
+)
 
 from core.models import Chat, Message, Vote, Workspace
 from core.services.image_store import get_image_store
@@ -1152,10 +1160,11 @@ class StreamingChatService:
                 pass
 
     # ─────────────────────────────────────────────────────────────────────
-    # Unified tool loop
+    # Streaming tool loop — delegates to the converged ToolLoopExecutor
+    # (PRD-142 W3-S4 / G6: one tool loop, shared with agent_factory).
     # ─────────────────────────────────────────────────────────────────────
 
-    async def _run_tool_loop(
+    async def _stream_tool_loop(
         self,
         response,
         llm_messages: List[Dict[str, Any]],
@@ -1164,347 +1173,263 @@ class StreamingChatService:
         use_tools: Optional[List[Dict[str, Any]]],
         composio_result: Any = None,
     ) -> AsyncGenerator[Any, None]:
-        """
-        Unified tool execution loop with dedup, retry limits, and Composio recovery.
+        """Drive :class:`ToolLoopExecutor` from the chat surface.
 
-        Yields SSE chunks and a final {'_final_response': response} dict.
-        Consolidates _handle_tool_calls_aisdk and _handle_tool_calls.
-        """
-        import asyncio
+        Yields SSE chunks as the executor runs and ends with
+        ``{'_final_response': response}`` — the exact contract the chat
+        caller consumes (see ``stream_response_with_agent`` below).
 
+        Chat-specific behaviour (Composio per-action shortcut, Composio
+        error recovery, fatal_error short-circuit, force-synth on dedup,
+        ContextGuard compaction recovery, frontend-data + workflow-update
+        SSE emissions) is layered on top of the converged spine via the
+        executor's callback hooks. The spine itself — dedup, per-tool
+        attempt caps, finish_reason=length recovery, iteration cap — is
+        shared with the agent ``execute_with_prompt`` inner loop.
+        """
         max_iterations = config.CHATBOT_MAX_TOOL_ITERATIONS
-        iteration = 0
-        current_response = response
-        tracker = ToolExecutionTracker()
+        action_budget = config.CHATBOT_ACTION_RETRY_BUDGET
+        param_budget = config.CHATBOT_PARAM_RETRY_BUDGET
 
-        # Recovery budgets
-        action_not_mapped_retry_budget = config.CHATBOT_ACTION_RETRY_BUDGET
-        invalid_parameters_retry_budget = config.CHATBOT_PARAM_RETRY_BUDGET
-
-        # Search spiral detection
+        # State shared by callbacks within this turn.
         last_tool_name: Optional[str] = None
-        empty_same_tool_streak = 0
+        empty_streak = 0
+        cumulative_attempts: Dict[str, int] = {}
+        followup_messages: List[Dict[str, Any]] = []
 
-        # Per-tool attempt tracking for loop prevention
-        tool_attempts: Dict[str, int] = {}
-
-        # Multi-step tools that get a higher retry cap
         _MULTI_STEP_TOOLS = {
-            "composio_execute",
-            "generate_document",
+            "composio_execute", "generate_document",
             "workspace_read_file", "workspace_grep", "workspace_list_dir",
             "workspace_write_file", "workspace_exec", "workspace_git",
         }
+        _WORKFLOW_PREFIXES = (
+            "platform_list_recipes",
+            "platform_create_recipe",
+            "platform_execute_recipe",
+        )
 
-        while current_response.tool_calls and iteration < max_iterations:
-            iteration += 1
-            logger.info(f"Tool iteration {iteration}: {len(current_response.tool_calls)} tool calls")
+        # SSE bridge: executor on_event puts AI SDK chunks here, this generator drains.
+        sse_queue: "asyncio.Queue[Any]" = asyncio.Queue()
+        DONE = object()
 
-            start_times: Dict[str, float] = {}
-            tool_calls_prepared: List[Tuple[str, str, Dict]] = []
-            fatal_errors: List[Dict[str, Any]] = []
-            followup_system_messages: List[Dict[str, Any]] = []
-            executed_call_key_repeat = False
+        async def _on_event(event: Dict[str, Any]) -> None:
+            et = event.get("type")
+            if et == "tool-start":
+                await sse_queue.put(self.streaming_handler.format_aisdk_tool_start(
+                    event["tool_call_id"], event["tool_name"],
+                    tool_input=event.get("tool_input", {}),
+                ))
+            elif et == "tool-end":
+                # tool-result frame mirrors what the legacy loop emitted.
+                if not event.get("skipped"):
+                    await sse_queue.put(self.streaming_handler.format_aisdk_tool_end(
+                        tool_call_id=event["tool_call_id"],
+                        tool_name=event["tool_name"],
+                        success=bool(event.get("success")),
+                        duration_ms=int(event.get("duration_ms", 0)),
+                    ))
 
-            # Phase 1: Emit tool-start events
-            for tool_call in current_response.tool_calls:
-                tool_name = tool_call.get('function', {}).get('name', 'unknown')
-                tool_id = tool_call.get('id', f'call_{int(time.time() * 1000)}')
+        async def _tool_callback(name: str, args: Dict[str, Any], call_id: str, ws_id) -> Dict[str, Any]:
+            nonlocal last_tool_name, empty_streak
 
-                try:
-                    args_str = tool_call.get('function', {}).get('arguments', '{}')
-                    tool_input = json.loads(args_str) if isinstance(args_str, str) else (args_str or {})
-                except Exception:
-                    tool_input = {}
-
-                yield self.streaming_handler.format_aisdk_tool_start(tool_id, tool_name, tool_input=tool_input)
-                await asyncio.sleep(0)
-
-                start_times[tool_id] = time.time()
-                tool_calls_prepared.append((tool_id, tool_name, tool_call))
-
-            # Phase 2: Execute each tool
-            # Concurrency classification: log batch composition for future
-            # parallel execution optimization (free-code pattern).
-            try:
-                from modules.tools.execution.concurrency import partition_tool_batch
-                _read_safe, _mutating = partition_tool_batch(tool_calls_prepared)
-                if len(_read_safe) > 1 and len(_mutating) == 0:
-                    logger.info(
-                        f"[tool-batch] All {len(_read_safe)} tools are read-safe — "
-                        f"eligible for parallel execution"
-                    )
-            except Exception:
-                pass  # Classification is non-critical
-
-            # ── finish_reason: length → truncated tool call JSON ──
-            # When the LLM runs out of output tokens mid-tool-call, the JSON
-            # arguments are truncated. Detect this and ask the LLM to retry
-            # with shorter content instead of failing repeatedly.
-            _finish_reason = getattr(current_response, 'finish_reason', None)
-            if _finish_reason == 'length' and tool_calls_prepared:
-                logger.warning(
-                    f"LLM output truncated (finish_reason=length) with "
-                    f"{len(tool_calls_prepared)} tool calls — arguments likely malformed"
+            # Direct Composio per-action shortcut (preserved from legacy loop).
+            is_composio_action = (
+                composio_result and composio_result.entity_id and (
+                    name in composio_result.action_set
+                    or any(name.startswith(f"{app}_") for app in composio_result.app_names)
                 )
-                # Check if any tool call has unparseable JSON
-                _has_bad_json = False
-                for _tid, _tname, _tc in tool_calls_prepared:
-                    _astr = _tc.get('function', {}).get('arguments', '{}')
-                    if isinstance(_astr, str):
-                        try:
-                            json.loads(_astr)
-                        except json.JSONDecodeError:
-                            _has_bad_json = True
-                            break
-                if _has_bad_json:
-                    # Inject a system message telling the LLM to use shorter content
-                    llm_messages.append({
-                        "role": "system",
-                        "content": (
-                            "Your previous response was truncated (output token limit reached) "
-                            "while writing tool call arguments. The JSON was incomplete and could "
-                            "not be parsed. Please retry with SHORTER content — use concise text, "
-                            "fewer sections, or summarise instead of writing full prose in the "
-                            "tool arguments."
-                        ),
-                    })
-                    # Re-call LLM without tools to get a text response, or with tools
-                    # but the system message should guide it to be more concise
-                    current_response = await agent_runtime.llm_manager.generate_response(
-                        messages=llm_messages, tools=use_tools,
-                    )
-                    # If the retry also has tool calls, continue the loop normally
-                    # Otherwise yield the text response
-                    if not current_response.tool_calls:
-                        yield {"_final_response": current_response}
-                        return
-                    # Rebuild tool_calls_prepared from retry
-                    tool_calls_prepared = []
-                    for tool_call in current_response.tool_calls:
-                        t_name = tool_call.get('function', {}).get('name', 'unknown')
-                        t_id = tool_call.get('id', f'call_{int(time.time() * 1000)}')
-                        tool_calls_prepared.append((t_id, t_name, tool_call))
+            )
+            if is_composio_action:
+                llm_context = await self._execute_composio_action(name, args, composio_result)
+                # Emit tool-result frame parity (text excerpt as the legacy loop did).
+                await sse_queue.put(self.streaming_handler.format_aisdk_data(
+                    "tool-result",
+                    {"toolCallId": call_id, "toolName": name, "result": llm_context},
+                ))
+                return {"success": True, "llm_context": llm_context, "raw_result": {}}
 
-            tool_results: List[Dict[str, Any]] = []
-            for tool_id, tool_name, tool_call in tool_calls_prepared:
-                try:
-                    args_str = tool_call.get('function', {}).get('arguments', '{}')
-                    tool_args = json.loads(args_str or '{}') if isinstance(args_str, str) else (args_str or {})
+            user_text = self._extract_user_text(llm_messages)
+            result = await self.tool_router.execute_and_format(
+                tool_name=name,
+                tool_args=args,
+                agent_id=agent_runtime.agent_id if hasattr(agent_runtime, "agent_id") else 1,
+                workspace_id=ws_id,
+                original_intent=user_text,
+            )
 
-                    # ── Dedup check via ToolExecutionTracker ──
-                    should_skip, skip_reason = tracker.should_skip_execution(tool_name, tool_args)
-                    if should_skip:
-                        executed_call_key_repeat = True
-                        llm_context = f"Skipped: {skip_reason}"
-                        tool_results.append({
-                            "tool_call_id": tool_id,
-                            "role": "tool",
-                            "name": tool_name,
-                            "content": llm_context,
-                        })
-                        yield self.streaming_handler.format_aisdk_data(
-                            "tool-result",
-                            {"toolCallId": tool_id, "toolName": tool_name, "result": llm_context},
-                        )
-                        await asyncio.sleep(0)
-                        continue
+            # Search-spiral detection (chat-only signal).
+            empty_streak = self._track_search_spiral(
+                result, name, last_tool_name, empty_streak,
+            )
+            last_tool_name = name
 
-                    # Record execution
-                    tracker.record_execution(tool_name, tool_args)
+            cumulative_attempts[name] = cumulative_attempts.get(name, 0) + 1
 
-                    # ── Execute via tool_router.execute_and_format ──
-                    user_text = self._extract_user_text(llm_messages)
+            llm_context = result.get("llm_context", str(result.get("raw_result", "")))
+            if len(llm_context) > 6000:
+                llm_context = llm_context[:6000] + f"\n... (truncated {len(llm_context) - 6000} chars)"
 
-                    # Direct Composio action execution for per-action tools
-                    _is_composio_action = (
-                        composio_result and composio_result.entity_id and (
-                            tool_name in composio_result.action_set
-                            or any(tool_name.startswith(f"{app}_") for app in composio_result.app_names)
-                        )
-                    )
-                    if _is_composio_action:
-                        llm_context = await self._execute_composio_action(
-                            tool_name, tool_args, composio_result
-                        )
-                    else:
-                        result = await self.tool_router.execute_and_format(
-                            tool_name=tool_name,
-                            tool_args=tool_args,
-                            agent_id=agent_runtime.agent_id if hasattr(agent_runtime, 'agent_id') else 1,
-                            workspace_id=self.workspace_id,
-                            original_intent=user_text,
-                        )
+            # Frontend data emission (widget tool-data).
+            frontend_data = result.get("frontend_data", {})
+            if result.get("success") and frontend_data:
+                tool_data.update(frontend_data)
+                await sse_queue.put(self.streaming_handler.format_aisdk_tool_data(frontend_data))
 
-                        # Track empty search results for spiral detection
-                        empty_same_tool_streak = self._track_search_spiral(
-                            result, tool_name, last_tool_name, empty_same_tool_streak
-                        )
-                        last_tool_name = tool_name
+            # Recipe / workflow tool-update emission.
+            if name.startswith(_WORKFLOW_PREFIXES) or "workflow" in name.lower():
+                _raw = result.get("raw_result") or {}
+                _wf_id = str(_raw.get("id") or _raw.get("workflow_id") or _raw.get("recipe_id") or call_id)
+                _wf_status = "completed" if result.get("success") else "failed"
+                await sse_queue.put(self.streaming_handler.format_aisdk_workflow_update(
+                    workflow_id=_wf_id, status=_wf_status, current_step=name,
+                ))
 
-                        # Track per-tool attempts
-                        tool_attempts[tool_name] = tool_attempts.get(tool_name, 0) + 1
+            # tool-result excerpt frame (legacy parity).
+            await sse_queue.put(self.streaming_handler.format_aisdk_data(
+                "tool-result",
+                {"toolCallId": call_id, "toolName": name, "result": llm_context[:500]},
+            ))
 
-                        llm_context = result.get('llm_context', str(result.get('raw_result', '')))
-                        if len(llm_context) > 6000:
-                            llm_context = llm_context[:6000] + f"\n... (truncated {len(llm_context) - 6000} chars)"
+            # Loop-prevention proceed instructions (mutates llm_messages).
+            self._inject_loop_prevention(
+                llm_messages, name, cumulative_attempts,
+                empty_streak, result, agent_runtime, _MULTI_STEP_TOOLS,
+            )
 
-                        # Emit frontend data (tool-data for widgets)
-                        frontend_data = result.get("frontend_data", {})
-                        if result.get("success") and frontend_data:
-                            tool_data.update(frontend_data)
-                            yield self.streaming_handler.format_aisdk_tool_data(frontend_data)
-                            await asyncio.sleep(0)
+            # Hand back to executor with the truncated llm_context already prepared
+            # so it does not re-truncate.
+            return {
+                "success": result.get("success", True),
+                "llm_context": llm_context,
+                "raw_result": result.get("raw_result", {}),
+                "frontend_data": frontend_data,
+                "error_type": result.get("error_type"),
+                "fatal_error": result.get("fatal_error", False),
+            }
 
-                        # Emit workflow-update for recipe/workflow tools
-                        _WORKFLOW_TOOL_PREFIXES = ("platform_list_recipes", "platform_create_recipe", "platform_execute_recipe")
-                        if tool_name.startswith(_WORKFLOW_TOOL_PREFIXES) or "workflow" in tool_name.lower():
-                            _raw = result.get("raw_result") or {}
-                            _wf_id = str(_raw.get("id") or _raw.get("workflow_id") or _raw.get("recipe_id") or tool_id)
-                            _wf_status = "completed" if result.get("success") else "failed"
-                            yield self.streaming_handler.format_aisdk_workflow_update(
-                                workflow_id=_wf_id, status=_wf_status, current_step=tool_name,
-                            )
-                            await asyncio.sleep(0)
+        async def _on_tool_result(
+            name: str, args: Dict[str, Any], result: Any,
+        ) -> Optional[ToolPostResult]:
+            nonlocal action_budget, param_budget
+            if not isinstance(result, dict):
+                return None
+            recovery = self._handle_composio_error_recovery(
+                result, name, llm_messages, agent_runtime,
+                action_budget, param_budget, followup_messages,
+            )
+            if recovery is None:
+                return None
+            if recovery.get("_early_return"):
+                return ToolPostResult(
+                    force_final=True,
+                    final_content=recovery.get("message"),
+                )
+            action_budget = recovery.get(
+                "action_not_mapped_retry_budget", action_budget,
+            )
+            param_budget = recovery.get(
+                "invalid_parameters_retry_budget", param_budget,
+            )
+            return None
 
-                        # ── Composio error recovery ──
-                        recovery_result = self._handle_composio_error_recovery(
-                            result, tool_name, llm_messages, agent_runtime,
-                            action_not_mapped_retry_budget, invalid_parameters_retry_budget,
-                            followup_system_messages,
-                        )
-                        if recovery_result is not None:
-                            if recovery_result.get("_early_return"):
-                                yield {"_final_response": SimpleNamespace(
-                                    content=recovery_result["message"],
-                                    tool_calls=None, usage=None,
-                                )}
-                                return
-                            action_not_mapped_retry_budget = recovery_result.get(
-                                "action_not_mapped_retry_budget", action_not_mapped_retry_budget
-                            )
-                            invalid_parameters_retry_budget = recovery_result.get(
-                                "invalid_parameters_retry_budget", invalid_parameters_retry_budget
-                            )
+        async def _on_round_end(state: RoundState) -> Optional[ToolPostResult]:
+            # Flush any Composio follow-up system messages into llm_messages
+            # BEFORE the next LLM call (legacy ordering).
+            nonlocal followup_messages
+            if followup_messages:
+                llm_messages.extend(followup_messages)
+                followup_messages = []
 
-                        if result.get('fatal_error'):
-                            fatal_errors.append(result)
-
-                    # Store tool result
-                    tool_results.append({
-                        'tool_call_id': tool_id,
-                        'role': 'tool',
-                        'name': tool_name,
-                        'content': llm_context,
-                    })
-
-                    # Emit tool-end + tool-result events
-                    duration_ms = int((time.time() - start_times.get(tool_id, time.time())) * 1000)
-                    yield self.streaming_handler.format_aisdk_tool_end(
-                        tool_call_id=tool_id, tool_name=tool_name, success=True, duration_ms=duration_ms,
-                    )
-                    yield self.streaming_handler.format_aisdk_data('tool-result', {
-                        'toolCallId': tool_id,
-                        'toolName': tool_name,
-                        'result': llm_context[:500],
-                    })
-                    await asyncio.sleep(0)
-
-                    # ── Loop prevention: inject proceed instructions ──
-                    self._inject_loop_prevention(
-                        llm_messages, tool_name, tool_attempts,
-                        empty_same_tool_streak, result if not _is_composio_action else {"success": True},
-                        agent_runtime, _MULTI_STEP_TOOLS,
-                    )
-                except Exception as e:
-                    logger.error(f"Tool {tool_name} failed: {e}")
-                    error_msg = f"Error executing {tool_name}: {str(e)}"
-                    tool_results.append({
-                        'tool_call_id': tool_id,
-                        'role': 'tool',
-                        'name': tool_name,
-                        'content': error_msg,
-                    })
-                    yield self.streaming_handler.format_aisdk_data('tool-result', {
-                        'toolCallId': tool_id,
-                        'toolName': tool_name,
-                        'result': error_msg,
-                    })
-                    await asyncio.sleep(0)
-
-            # Phase 3: Append tool exchange to message history
-            llm_messages.append(self._build_assistant_tool_message(tool_calls_prepared))
-            llm_messages.extend(tool_results)
-
-            if followup_system_messages:
-                llm_messages.extend(followup_system_messages)
-
-            # Phase 4: Force synthesis if duplicate or exhausted
-            _any_tool_exhausted = any(v >= 8 for v in tool_attempts.values())
-            if executed_call_key_repeat or _any_tool_exhausted:
-                if _any_tool_exhausted:
-                    logger.warning(f"[tool-loop] Tool hard cap reached — forcing synthesis (attempts: {dict(tool_attempts)})")
-                llm_messages.append({
-                    "role": "system",
-                    "content": (
-                        "You now have the tool results needed. "
-                        "Do NOT call any more tools. "
-                        "Write the final answer for the user using the tool output above."
-                    ),
-                })
-                final = await agent_runtime.llm_manager.generate_response(messages=llm_messages, tools=None)
-                yield {"_final_response": SimpleNamespace(
-                    content=final.content or "", tool_calls=None,
-                    usage=getattr(final, "usage", None),
-                )}
-                return
-
-            if fatal_errors:
-                yield {"_final_response": SimpleNamespace(
-                    content=(
+            # Fatal error short-circuit (chat-only behaviour).
+            if state.had_fatal_errors:
+                return ToolPostResult(
+                    force_final=True,
+                    final_content=(
                         "I ran into a server configuration issue while executing that tool. "
                         "Please restart the backend and try again."
                     ),
-                    tool_calls=None, usage=None,
-                )}
-                return
+                )
 
-            # Phase 5: Next LLM call — withhold errors during recovery
+            # Force synthesis on dedup skip OR per-tool exhaustion (>=8 attempts).
+            any_exhausted = any(v >= 8 for v in cumulative_attempts.values())
+            if state.had_skips or any_exhausted:
+                if any_exhausted:
+                    logger.warning(
+                        f"[tool-loop] Tool hard cap reached — forcing synthesis "
+                        f"(attempts: {dict(cumulative_attempts)})"
+                    )
+                return ToolPostResult(force_final=True)
+            return None
+
+        async def _llm_callback(messages, tools):
             try:
-                current_response = await agent_runtime.llm_manager.generate_response(
-                    messages=llm_messages, tools=use_tools,
+                return await agent_runtime.llm_manager.generate_response(
+                    messages=messages, tools=tools,
                 )
             except Exception as llm_err:
-                # Withhold error: attempt compaction + retry before surfacing
                 logger.warning(
-                    f"LLM call failed (iteration {iteration}), attempting recovery: {llm_err}"
+                    f"LLM call failed in tool loop, attempting recovery: {llm_err}"
                 )
                 try:
                     from core.context_guard import ContextGuard
                     guard = ContextGuard()
-                    llm_messages, compacted, use_tools = await guard.check_and_compact(
-                        llm_messages, use_tools, agent_runtime.llm_manager,
+                    messages_new, compacted, tools_new = await guard.check_and_compact(
+                        messages, tools, agent_runtime.llm_manager,
                         workspace_id=self.workspace_id,
                     )
                     if compacted:
                         logger.info("Recovery compaction succeeded, retrying LLM call")
-                        current_response = await agent_runtime.llm_manager.generate_response(
-                            messages=llm_messages, tools=use_tools,
+                        return await agent_runtime.llm_manager.generate_response(
+                            messages=messages_new, tools=tools_new,
                         )
-                    else:
-                        raise  # No compaction possible, surface original error
+                    raise
                 except Exception:
-                    logger.error(f"Recovery failed, surfacing error: {llm_err}", exc_info=True)
+                    logger.error(
+                        f"Recovery failed, surfacing error: {llm_err}", exc_info=True
+                    )
                     raise llm_err
-            logger.info(f"Iteration {iteration} complete. More tool calls: {bool(current_response.tool_calls)}, Has content: {bool(current_response.content)}")
 
-            if not current_response.tool_calls:
-                yield {'_final_response': current_response}
-                return
+        executor = ToolLoopExecutor(
+            llm_callback=_llm_callback,
+            tool_callback=_tool_callback,
+            max_iterations=max_iterations,
+            content_truncate_chars=6000,
+        )
 
-        # Max iterations reached
-        if iteration >= max_iterations:
-            logger.warning(f"Max tool iterations ({max_iterations}) reached. Forcing final response.")
+        async def _runner():
+            try:
+                return await executor.run(
+                    initial_response=response,
+                    messages=llm_messages,
+                    tools=use_tools,
+                    workspace_id=self.workspace_id,
+                    on_event=_on_event,
+                    on_tool_result=_on_tool_result,
+                    on_round_end=_on_round_end,
+                )
+            finally:
+                await sse_queue.put(DONE)
+
+        runner_task = asyncio.create_task(_runner())
+
+        while True:
+            item = await sse_queue.get()
+            if item is DONE:
+                break
+            yield item
+            await asyncio.sleep(0)
+
+        try:
+            result = await runner_task
+        except Exception as loop_err:
+            logger.error(f"Tool loop failed: {loop_err}", exc_info=True)
+            yield {"_final_response": SimpleNamespace(
+                content=f"Error: {loop_err}", tool_calls=None, usage=None,
+            )}
+            return
+
+        # Max-iterations reached → emit limit_reached SSE + synthesize.
+        if result.max_iterations_reached:
             yield self.streaming_handler.format_aisdk_limit_reached(
                 limit="max_tool_iterations",
                 value=max_iterations,
@@ -1518,28 +1443,10 @@ class StreamingChatService:
             final = await agent_runtime.llm_manager.generate_response(
                 messages=llm_messages, tools=None,
             )
-            yield {'_final_response': final}
+            yield {"_final_response": final}
+            return
 
-    def _build_assistant_tool_message(
-        self,
-        tool_calls_prepared: List[Tuple[str, str, Dict]],
-    ) -> Dict[str, Any]:
-        """Build the assistant message with tool_calls (required by OpenAI API)."""
-        return {
-            'role': 'assistant',
-            'content': None,
-            'tool_calls': [
-                {
-                    'id': tc[0],
-                    'type': 'function',
-                    'function': {
-                        'name': tc[1],
-                        'arguments': tc[2].get('function', {}).get('arguments', '{}'),
-                    },
-                }
-                for tc in tool_calls_prepared
-            ],
-        }
+        yield {"_final_response": result.response}
 
     async def _execute_composio_action(
         self,
@@ -2090,7 +1997,7 @@ class StreamingChatService:
             if response.tool_calls:
                 logger.info(f"Agent requested {len(response.tool_calls)} tool calls")
                 final_response = None
-                async for chunk in self._run_tool_loop(
+                async for chunk in self._stream_tool_loop(
                     response, llm_messages, agent_runtime, tool_data, use_tools,
                     composio_result=_composio_result,
                 ):

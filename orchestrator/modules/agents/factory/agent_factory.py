@@ -1013,35 +1013,66 @@ class AgentFactory:
                     response = await agent_runtime.llm_manager.generate_response(messages, tools=tool_schemas)
                     execution_time = time.time() - start_time
 
-                    # --- Tool loop: iterate until no more tool calls or max iterations ---
-                    tool_iteration = 0
-                    tool_results = []
-                    while response and response.tool_calls and tool_iteration < max_tool_iterations:
-                        tool_iteration += 1
-                        self.logger.info(
-                            f"Tool iteration {tool_iteration}/{max_tool_iterations}: "
-                            f"{len(response.tool_calls)} tool call(s)"
-                        )
+                    # --- Converged tool loop (PRD-142 W3-S4 / G6): same executor as chat ---
+                    from modules.tools.execution.tool_loop import ToolLoopExecutor
 
-                        tool_results = await self._execute_tool_calls(
-                            response.tool_calls,
-                            agent_runtime,
-                            workspace_id,
-                        )
+                    async def _agent_llm_cb(msgs, tls):
+                        return await agent_runtime.llm_manager.generate_response(msgs, tools=tls)
 
-                        # Append assistant message + tool results to conversation
-                        messages.append({
-                            "role": "assistant",
-                            "content": response.content or "",
-                            "tool_calls": response.tool_calls,
-                        })
-                        messages.extend(tool_results)
+                    async def _agent_tool_cb(name, args, call_id, ws_id):
+                        # SLACK empty-params guard.
+                        if not args and "SLACK" in name:
+                            return {
+                                "success": False,
+                                "llm_context": json.dumps(
+                                    {"error": "Empty parameters for tool requiring input"}
+                                ),
+                            }
+                        try:
+                            raw = await agent_runtime.tool_executor.execute_tool(
+                                tool_name=name,
+                                parameters=args,
+                                agent_id=agent_runtime.agent_id,
+                                workspace_id=ws_id,
+                            )
+                            return {
+                                "success": True,
+                                "llm_context": json.dumps(raw),
+                                "raw_result": raw,
+                            }
+                        except Exception as tool_err:
+                            self.logger.error(f"    [TRACE] {name} failed: {tool_err}")
+                            return {
+                                "success": False,
+                                "llm_context": json.dumps({"error": str(tool_err)}),
+                            }
 
-                        # Call LLM again with tool results
-                        response = await agent_runtime.llm_manager.generate_response(messages, tools=tool_schemas)
-                        execution_time = time.time() - start_time
+                    loop_executor = ToolLoopExecutor(
+                        llm_callback=_agent_llm_cb,
+                        tool_callback=_agent_tool_cb,
+                        max_iterations=max_tool_iterations,
+                        content_truncate_chars=0,  # agent path historically did not truncate
+                    )
+                    loop_result = await loop_executor.run(
+                        initial_response=response,
+                        messages=messages,
+                        tools=tool_schemas,
+                        workspace_id=workspace_id,
+                    )
+                    response = loop_result.response
+                    tool_iteration = loop_result.iterations
+                    execution_time = time.time() - start_time
 
-                    if tool_iteration >= max_tool_iterations:
+                    # Recover the last round's tool messages for empty-response synthesis.
+                    tool_results: List[Dict[str, Any]] = []
+                    for msg in reversed(messages):
+                        if msg.get("role") == "tool":
+                            tool_results.append(msg)
+                        elif tool_results:
+                            break
+                    tool_results.reverse()
+
+                    if loop_result.max_iterations_reached:
                         self.logger.warning(f"Hit max tool iterations ({max_tool_iterations}) for agent {agent_id}")
 
                     # Synthesize empty response from tool results
@@ -1174,89 +1205,6 @@ class AgentFactory:
             agent_runtime.lifecycle_state = AgentLifecycle.ACTIVE
             self.logger.error(f"Task execution error: {e}")
             return {"status": "error", "error": str(e)}
-
-    # ==================================================================
-    # Tool Execution (extracted from execute_with_prompt)
-    # ==================================================================
-
-    async def _execute_tool_calls(
-        self,
-        tool_calls: List[Dict],
-        agent_runtime: AgentRuntime,
-        workspace_id: Optional[Any],
-    ) -> List[Dict]:
-        """Execute tool calls from LLM response, deduplicating within a turn."""
-        tool_results = []
-        executed_hashes: set = set()
-        tool_executor = agent_runtime.tool_executor
-
-        for tool_call in tool_calls:
-            func_name = tool_call["function"]["name"]
-            func_args_str = tool_call["function"]["arguments"]
-
-            try:
-                func_args = json.loads(func_args_str)
-                canonical_args = json.dumps(func_args, sort_keys=True)
-            except json.JSONDecodeError as jde:
-                self.logger.warning(
-                    "[tool_call] JSON decode failed for %s args (len=%d, first 200=%r): %s",
-                    func_name,
-                    len(func_args_str) if isinstance(func_args_str, str) else 0,
-                    func_args_str[:200] if isinstance(func_args_str, str) else func_args_str,
-                    jde,
-                )
-                canonical_args = func_args_str.strip() if isinstance(func_args_str, str) else ""
-                func_args = {}
-
-            call_hash = f"{func_name}:{canonical_args}"
-
-            if call_hash in executed_hashes:
-                self.logger.warning(f"[DEDUPE] Skipping duplicate tool call: {func_name}")
-                tool_results.append({
-                    "tool_call_id": tool_call["id"],
-                    "role": "tool",
-                    "name": func_name,
-                    "content": json.dumps({"error": "Duplicate tool call skipped"}),
-                })
-                continue
-
-            # Filter empty params for critical tools
-            if not func_args and "SLACK" in func_name:
-                tool_results.append({
-                    "tool_call_id": tool_call["id"],
-                    "role": "tool",
-                    "name": func_name,
-                    "content": json.dumps({"error": "Empty parameters for tool requiring input"}),
-                })
-                continue
-
-            executed_hashes.add(call_hash)
-            self.logger.info(f"  [TRACE] Calling {func_name}({func_args})")
-
-            try:
-                result = await tool_executor.execute_tool(
-                    tool_name=func_name,
-                    parameters=func_args,
-                    agent_id=agent_runtime.agent_id,
-                    workspace_id=workspace_id,
-                )
-                tool_results.append({
-                    "tool_call_id": tool_call["id"],
-                    "role": "tool",
-                    "name": func_name,
-                    "content": json.dumps(result),
-                })
-                self.logger.info(f"    [TRACE] {func_name} completed")
-            except Exception as e:
-                self.logger.error(f"    [TRACE] {func_name} failed: {e}")
-                tool_results.append({
-                    "tool_call_id": tool_call["id"],
-                    "role": "tool",
-                    "name": func_name,
-                    "content": json.dumps({"error": str(e)}),
-                })
-
-        return tool_results
 
     # ==================================================================
     # Composio Hint Injection
