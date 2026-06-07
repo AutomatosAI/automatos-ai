@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.scopes import TASKS_READ
 from core.database.database import get_db
 from core.services.api_key_service import ApiKeyService
 
@@ -34,6 +35,9 @@ VALID_PERMISSIONS = [
     "agents:execute",
     "workflows:read",
     "workflows:execute",
+    # Board task scopes (PRD-09). Named constant = single source of truth shared
+    # with the board auth gate in core/auth/hybrid.py.
+    TASKS_READ,
 ]
 
 

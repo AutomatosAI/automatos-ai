@@ -15,8 +15,9 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
-from core.auth.hybrid import get_request_context_hybrid
+from core.auth.hybrid import get_request_context_hybrid, require_task_context
 from core.auth.dependencies import RequestContext
+from core.auth.scopes import TASKS_READ
 from core.database.database import get_db
 from core.models.core import BoardTask
 from core.models import Agent
@@ -204,13 +205,24 @@ async def _dispatch_task_complete(db: Session, workspace_id, task: BoardTask) ->
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
-def _enrich_with_agents(tasks: list, db: Session) -> list:
-    """Join agent info onto task dicts."""
+def _enrich_with_agents(tasks: list, db: Session, workspace_id) -> list:
+    """Join agent info onto task dicts.
+
+    Agents are resolved within ``workspace_id`` only: a task whose
+    ``assigned_agent_id`` points at another workspace's agent yields no ``agent``
+    block rather than leaking that agent's name/icon (defense-in-depth tenant
+    isolation — board reads are now reachable by per-workspace SDK keys).
+    """
     agent_ids = {t.assigned_agent_id for t in tasks if t.assigned_agent_id}
     if not agent_ids:
         return [t.to_dict() for t in tasks]
 
-    agents = {a.id: a for a in db.query(Agent).filter(Agent.id.in_(agent_ids)).all()}
+    agents = {
+        a.id: a
+        for a in db.query(Agent)
+        .filter(Agent.id.in_(agent_ids), Agent.workspace_id == workspace_id)
+        .all()
+    }
 
     result = []
     for t in tasks:
@@ -298,7 +310,7 @@ async def create_task(
 
 @router.get("")
 async def list_tasks(
-    ctx: RequestContext = Depends(get_request_context_hybrid),
+    ctx: RequestContext = Depends(require_task_context(TASKS_READ)),
     db: Session = Depends(get_db),
     status: Optional[str] = Query(None, description="Comma-separated statuses"),
     agent_id: Optional[int] = Query(None),
@@ -342,7 +354,7 @@ async def list_tasks(
     )
 
     return {
-        "tasks": _enrich_with_agents(tasks, db),
+        "tasks": _enrich_with_agents(tasks, db, ctx.workspace_id),
         "total": total,
     }
 
@@ -350,7 +362,7 @@ async def list_tasks(
 @router.get("/{task_id}")
 async def get_task(
     task_id: int,
-    ctx: RequestContext = Depends(get_request_context_hybrid),
+    ctx: RequestContext = Depends(require_task_context(TASKS_READ)),
     db: Session = Depends(get_db),
 ):
     """Get a single board task."""
@@ -361,7 +373,7 @@ async def get_task(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    enriched = _enrich_with_agents([task], db)
+    enriched = _enrich_with_agents([task], db, ctx.workspace_id)
     return enriched[0]
 
 

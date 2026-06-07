@@ -18,13 +18,13 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional
-from urllib.parse import urlparse
 from uuid import UUID
 
 import jwt
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
+from core.auth.hybrid import _extract_origin
 from core.database.database import get_db
 from core.services.api_key_service import ApiKeyService
 from config import config
@@ -68,18 +68,6 @@ def _extract_bearer_token(request: Request) -> Optional[str]:
     if len(parts) != 2 or parts[0].lower() != "bearer":
         return None
     return parts[1]
-
-
-def _extract_origin(request: Request) -> Optional[str]:
-    """Return the origin hostname from the Origin or Referer header."""
-    origin = request.headers.get("Origin") or request.headers.get("Referer")
-    if not origin:
-        return None
-    try:
-        parsed = urlparse(origin)
-        return parsed.hostname or origin
-    except Exception:
-        return origin
 
 
 def _try_jwt(token: str) -> Optional[dict]:

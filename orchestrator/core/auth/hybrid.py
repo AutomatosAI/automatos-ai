@@ -3,7 +3,8 @@ from __future__ import annotations
 import hmac as _hmac
 import logging
 import secrets
-from typing import Optional
+from typing import Callable, Optional
+from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException, Request, status
@@ -14,6 +15,7 @@ from config import config
 from core.auth.clerk import get_clerk_auth
 from core.auth.dependencies import RequestContext, UserContext
 from core.database.database import SessionLocal
+from core.services.api_key_service import ApiKeyService
 
 logger = logging.getLogger(__name__)
 
@@ -490,6 +492,162 @@ def _get_bearer_token(request: Request) -> Optional[str]:
     if not auth.lower().startswith("bearer "):
         return None
     return auth.split(" ", 1)[1].strip()
+
+
+def _extract_origin(request: Request) -> Optional[str]:
+    """Return the request origin hostname from the Origin (or Referer) header.
+
+    Shared by the board SDK path and the widget plane (``api/widgets/auth.py``
+    imports this) so origin matching is identical across planes. Returns None
+    when neither header is present.
+    """
+    origin = request.headers.get("Origin") or request.headers.get("Referer")
+    if not origin:
+        return None
+    try:
+        parsed = urlparse(origin)
+        return parsed.hostname or origin
+    except Exception:
+        return origin
+
+
+# ---------------------------------------------------------------------------
+# SDK-key auth for the board plane (PRD-09 Slice 2, Step 0)
+# ---------------------------------------------------------------------------
+#
+# A narrow, scope-gated path that lets a per-workspace SDK key (ak_pub_* /
+# ak_srv_*) authenticate to the board task endpoints — WITHOUT modifying the
+# shared `get_request_context_hybrid`, which backs ~96 routers / 657 call sites.
+# Modifying that shared dependency would make every endpoint accept SDK keys,
+# and since almost none of them check scopes, one key would grant full-platform
+# access. So the SDK path is wired only into `api/board_tasks.py` reads via the
+# `require_task_context` factory below.
+
+
+def _sdk_key_has_scope(permissions: Optional[list], required_scope: str) -> bool:
+    """Return True only when *permissions* EXPLICITLY grants *required_scope*.
+
+    SECURITY — this deliberately DIVERGES from ``ApiKeyService.check_permissions``
+    and the widget plane's ``require_permission``, which treat an empty/None list
+    as "unrestricted — all permissions granted". On the board plane an empty or
+    null permission list grants NOTHING: the large population of already-issued
+    publishable keys (chat/widget keys with null or unrelated permissions) must
+    not be able to reach the task board. Least privilege — no scope, no access.
+    """
+    if not permissions:
+        return False
+    return required_scope in permissions
+
+
+def _resolve_sdk_key_context(
+    request: Request, db, *, required_scope: str
+) -> RequestContext:
+    """Resolve an SDK key into a :class:`RequestContext` for the board plane.
+
+    Mirrors the widget plane's key validation (``api/widgets/auth.py``) but adds
+    the explicit scope gate and binds the workspace to the KEY only — never to
+    env defaults, query params, or ``request.state`` (cross-tenant guard).
+    """
+    token = _get_bearer_token(request)
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing bearer token"
+        )
+
+    record = ApiKeyService.validate_api_key(db, token)
+    if record is None:
+        logger.warning(
+            "Board SDK auth: key rejected (prefix=%s…) — not found, revoked, or expired",
+            token[:11],
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired API key",
+        )
+
+    # Least-privilege scope gate (see _sdk_key_has_scope).
+    if not _sdk_key_has_scope(record.permissions, required_scope):
+        logger.warning(
+            "Board SDK auth: key %s lacks required scope %s",
+            record.key_prefix, required_scope,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"API key lacks required scope: {required_scope}",
+        )
+
+    # Defense-in-depth origin check — only when a browser Origin is present.
+    # (Desktop / ak_srv_ callers omit Origin; allowed_domains is a browser-CORS
+    # control and gives server keys no protection — scope + workspace binding
+    # are the real controls there.)
+    origin = _extract_origin(request)
+    if origin and not ApiKeyService.check_domain(record, origin):
+        logger.warning(
+            "Board SDK auth: origin %s not allowed for key %s",
+            origin, record.key_prefix,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Origin not allowed for this API key",
+        )
+
+    # Cross-tenant guard: bind to the key's workspace. An X-Workspace-ID header
+    # may only MATCH it, never override it. We never consult env defaults /
+    # query params / request.state for an SDK key.
+    workspace_id = record.workspace_id
+    raw_ws_header = (request.headers.get("x-workspace-id") or "").strip()
+    if raw_ws_header and _parse_uuid(raw_ws_header) != workspace_id:
+        logger.warning(
+            "Board SDK auth: workspace header mismatch for key %s", record.key_prefix
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Workspace mismatch between API key and header",
+        )
+
+    if not _workspace_exists(db, workspace_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid workspace_id"
+        )
+    _assert_workspace_usable(db, workspace_id, is_admin=False)
+
+    result = RequestContext(
+        workspace_id=workspace_id,
+        user=UserContext(id=f"sdk:{record.id}", role="service", system_role="service"),
+        auth_type="sdk_key",
+        api_key_id=str(record.id),
+    )
+    _enrich_log_context(result)
+    return result
+
+
+def require_task_context(required_scope: str) -> Callable:
+    """FastAPI dependency factory for the board plane.
+
+    The returned dependency authenticates EITHER:
+    - a per-workspace SDK key (``ak_pub_*`` / ``ak_srv_*``) bearing
+      *required_scope* (via :func:`_resolve_sdk_key_context`), OR
+    - anything ``get_request_context_hybrid`` already accepts (Clerk JWT, env
+      admin key, anonymous, CORS preflight) — delegated UNCHANGED.
+
+    Purely additive: existing Clerk/env callers behave exactly as before. Wired
+    only into ``api/board_tasks.py``; the shared dependency is not modified, so
+    SDK-key acceptance does not leak to the other routers.
+    """
+
+    async def _dep(request: Request) -> RequestContext:
+        token = _get_bearer_token(request)
+        if token and token.startswith(("ak_pub_", "ak_srv_")):
+            db = SessionLocal()
+            try:
+                return _resolve_sdk_key_context(
+                    request, db, required_scope=required_scope
+                )
+            finally:
+                db.close()
+        return await get_request_context_hybrid(request)
+
+    return _dep
 
 
 async def get_request_context_hybrid(request: Request) -> RequestContext:
