@@ -39,7 +39,8 @@ for _pkg in ("consumers", "consumers.chatbot"):
         _stub.__path__ = [str(_ORCH / _pkg.replace(".", "/"))]
         sys.modules[_pkg] = _stub
 
-if "consumers.chatbot.intent_classifier" not in sys.modules:
+_ic_stub_installed = "consumers.chatbot.intent_classifier" not in sys.modules
+if _ic_stub_installed:
     _ic_stub = types.ModuleType("consumers.chatbot.intent_classifier")
     _ic_stub.Intent = MagicMock()
     _ic_stub.IntentResult = MagicMock()
@@ -49,6 +50,13 @@ if "consumers.chatbot.intent_classifier" not in sys.modules:
 sys.modules.setdefault("camelot", types.ModuleType("camelot"))
 
 from consumers.chatbot.smart_orchestrator import SmartChatOrchestrator  # noqa: E402
+
+# De-pollute: drop our partial intent_classifier stub (no SmartIntentClassifier)
+# once smart_orchestrator is imported, so a later-collected sibling can import
+# the REAL module instead of inheriting this stub. See the matching note in
+# test_memory_single_write_path — leaving it cached broke full-suite collection.
+if _ic_stub_installed:
+    sys.modules.pop("consumers.chatbot.intent_classifier", None)
 
 # Unbound coroutine function — invoked with an explicit fake ``self`` below.
 store_exchange = SmartChatOrchestrator.store_exchange

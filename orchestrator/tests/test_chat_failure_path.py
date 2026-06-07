@@ -53,11 +53,16 @@ if str(_ORCH) not in sys.path:
 
 # Stub parent packages so importing ``modules.tools.execution.tool_loop``
 # does NOT drag in the rest of modules.tools (heavy registry side effects).
+# Record what we create so ``teardown_module`` can drop these path-only stubs
+# again — a leaked bare ``modules`` stub has no ``tools`` attribute and breaks
+# later siblings' ``monkeypatch.setattr("modules.tools.…")`` getattr walks.
+_LEAKED_PARENT_STUBS = {}
 for _pkg in ("modules", "modules.tools", "modules.tools.execution"):
     if _pkg not in sys.modules:
         _stub = _types.ModuleType(_pkg)
         _stub.__path__ = [str(_ORCH / _pkg.replace(".", "/"))]
         sys.modules[_pkg] = _stub
+        _LEAKED_PARENT_STUBS[_pkg] = _stub
 
 # Same trick for ``consumers.chatbot.primitive_heartbeat``: stub the parent
 # packages so importing the leaf does NOT trigger consumers/chatbot/__init__
@@ -68,6 +73,7 @@ for _pkg in ("consumers", "consumers.chatbot"):
         _stub = _types.ModuleType(_pkg)
         _stub.__path__ = [str(_ORCH / _pkg.replace(".", "/"))]
         sys.modules[_pkg] = _stub
+        _LEAKED_PARENT_STUBS[_pkg] = _stub
 
 from modules.tools.execution.tool_loop import (  # noqa: E402
     RoundState,
@@ -84,6 +90,18 @@ if "services" not in sys.modules:
     _services_stub = _types.ModuleType("services")
     _services_stub.__path__ = [str(_ORCH / "services")]
     sys.modules["services"] = _services_stub
+    _LEAKED_PARENT_STUBS["services"] = _services_stub
+
+
+def teardown_module(module):
+    """Drop the path-only parent stubs this module installed (modules.*,
+    consumers.*, services) so they don't poison sibling tests' attribute
+    walks. Identity-checked so we never evict a real import or another test's
+    replacement; runs after this file's tests, which DO need the stubs for the
+    run-time ``_load_primitive_heartbeat`` loads."""
+    for _name, _stub in _LEAKED_PARENT_STUBS.items():
+        if sys.modules.get(_name) is _stub:
+            del sys.modules[_name]
 
 
 def _load_primitive_heartbeat():

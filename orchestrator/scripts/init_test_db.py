@@ -14,6 +14,11 @@ from core.database.database import Base, engine
 from core.models import *  # Import all models
 from core.models.cloud_sync import CloudDocument, CloudSyncConfig, CloudSyncJob
 from core.models.composio import ComposioConnection, ComposioEntity
+# PRD-79 memory tables (L2 memory_short_term etc.) are defined under
+# modules.memory, not core.models, so `from core.models import *` never
+# registers them on Base. Import the module so create_all builds memory_short_term
+# — the L2 transcript store the memory restart/isolation tests depend on.
+import modules.memory.models  # noqa: F401,E402  (registers MemoryShortTerm on Base)
 
 def init_db():
     """Create all tables from models."""

@@ -6,9 +6,10 @@
  * platform working?" from the real Wave 0 analytics endpoints.
  *
  * Mirrors StatsStrip's idiom exactly: label + mono value + tone + delta.
- * Honest zero/pending states — the PRIMITIVES cell shows "—" / "metric
- * pending" (like StatsStrip's CACHE-HIT) rather than fabricate a health
- * signal; per-primitive health (US-006) lands in Wave 3.
+ * Honest zero/pending states — a cell shows "—" rather than fabricate a
+ * signal. PRIMITIVES reads the W3-S2 /primitive-health endpoint (8 canonical
+ * primitives); a primitive with no heartbeat finding renders as "awaiting
+ * checks" rather than a fake green.
  */
 
 import type { SparklineTone } from './sparkline'
@@ -17,6 +18,7 @@ import {
   useMissionSuccessRate,
   useErrorsBySubsystem,
   useWidgetEngagement,
+  usePrimitiveHealth,
 } from '@/hooks/use-analytics-api'
 
 interface Cell {
@@ -45,6 +47,14 @@ export function IsItWorkingStrip() {
 
   const sessions = widget?.sessions ?? 0
   const widgetEvents = widget?.by_event_type?.reduce((sum, ev) => sum + ev.count, 0) ?? 0
+
+  const { data: health } = usePrimitiveHealth()
+  const prim = health?.primitives ?? []
+  const primTotal = prim.length
+  const primKnown = prim.filter((p) => p.status !== 'unknown').length
+  const primGreen = prim.filter((p) => p.status === 'green').length
+  const primDegraded = prim.filter((p) => p.status === 'degraded').length
+  const primDown = prim.filter((p) => p.status === 'down').length
 
   const cells: Cell[] = [
     {
@@ -75,9 +85,16 @@ export function IsItWorkingStrip() {
     },
     {
       label: 'PRIMITIVES',
-      value: '—',
-      tone: 'muted',
-      delta: 'metric pending',
+      value: primKnown > 0 ? `${primGreen}/${primTotal}` : '—',
+      tone: primDown > 0 ? 'err' : primDegraded > 0 ? 'warn' : primKnown > 0 ? 'ok' : 'muted',
+      delta:
+        primKnown === 0
+          ? 'awaiting checks'
+          : primDown > 0
+            ? `${primDown} down`
+            : primDegraded > 0
+              ? `${primDegraded} degraded`
+              : 'all green',
     },
   ]
 

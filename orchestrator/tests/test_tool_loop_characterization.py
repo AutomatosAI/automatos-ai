@@ -37,11 +37,26 @@ _ORCH = Path(__file__).resolve().parents[1]
 if str(_ORCH) not in sys.path:
     sys.path.insert(0, str(_ORCH))
 
+# Record the path-only parent stubs we create so ``teardown_module`` can drop
+# them again. Left in ``sys.modules`` a bare ``modules`` stub has no ``tools``
+# attribute, so a later sibling's ``monkeypatch.setattr("modules.tools.…")``
+# fails walking ``getattr(modules, "tools")``.
+_LEAKED_PARENT_STUBS = {}
 for _pkg in ("modules", "modules.tools", "modules.tools.execution"):
     if _pkg not in sys.modules:
         _stub = _types.ModuleType(_pkg)
         _stub.__path__ = [str(_ORCH / _pkg.replace(".", "/"))]
         sys.modules[_pkg] = _stub
+        _LEAKED_PARENT_STUBS[_pkg] = _stub
+
+
+def teardown_module(module):
+    """Drop the path-only parent stubs this module installed (identity-checked
+    so we never evict a real import or another test's replacement)."""
+    for _name, _stub in _LEAKED_PARENT_STUBS.items():
+        if sys.modules.get(_name) is _stub:
+            del sys.modules[_name]
+
 
 from modules.tools.execution.tool_loop import ToolLoopExecutor  # noqa: E402
 

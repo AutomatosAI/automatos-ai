@@ -51,7 +51,8 @@ for _pkg in ("consumers", "consumers.chatbot"):
 
 # ``intent_classifier`` is the only sibling smart_orchestrator imports at
 # module level; stub it so we don't trigger its dependency chain either.
-if "consumers.chatbot.intent_classifier" not in sys.modules:
+_ic_stub_installed = "consumers.chatbot.intent_classifier" not in sys.modules
+if _ic_stub_installed:
     _ic_stub = types.ModuleType("consumers.chatbot.intent_classifier")
     _ic_stub.Intent = MagicMock()
     _ic_stub.IntentResult = MagicMock()
@@ -66,6 +67,15 @@ if "consumers.chatbot.intent_classifier" not in sys.modules:
 sys.modules.setdefault("camelot", types.ModuleType("camelot"))
 
 from consumers.chatbot.smart_orchestrator import SmartChatOrchestrator  # noqa: E402
+
+# De-pollute: our intent_classifier stub is intentionally partial (no
+# SmartIntentClassifier). Once smart_orchestrator is imported we no longer need
+# it, so drop it to let a later-collected sibling (e.g.
+# test_w2s9_reasoning_entry) import the REAL module — its __path__ resolves via
+# the consumers.chatbot package stub above. Leaving the stub cached caused the
+# "(unknown location)" collection error in the full-suite CI run.
+if _ic_stub_installed:
+    sys.modules.pop("consumers.chatbot.intent_classifier", None)
 
 # Unbound — invoked with an explicit fake ``self``.
 _orchestrator_store_exchange = SmartChatOrchestrator.store_exchange
