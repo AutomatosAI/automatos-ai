@@ -67,6 +67,15 @@ export interface WidgetEngagementMetric {
   generated_at: string
 }
 
+export interface PrimitiveHealthMetric {
+  primitives: Array<{
+    name: string
+    status: 'green' | 'degraded' | 'down' | 'unknown'
+    last_checked: string | null
+  }>
+  generated_at: string
+}
+
 // Mock configuration interface
 interface MockConfig {
   enabled: boolean
@@ -2244,6 +2253,10 @@ class ApiClient {
 
   async getWidgetEngagement(window: string = '7d'): Promise<WidgetEngagementMetric> {
     return this.request<WidgetEngagementMetric>(`/api/analytics/widget-engagement?window=${encodeURIComponent(window)}`)
+  }
+
+  async getPrimitiveHealth(): Promise<PrimitiveHealthMetric> {
+    return this.request<PrimitiveHealthMetric>('/api/analytics/primitive-health')
   }
 
   async getAgentAnalytics(timeRange: string) {

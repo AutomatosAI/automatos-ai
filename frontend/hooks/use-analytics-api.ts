@@ -5,6 +5,7 @@ import type {
   MissionSuccessRateMetric,
   ErrorsBySubsystemMetric,
   WidgetEngagementMetric,
+  PrimitiveHealthMetric,
 } from '@/lib/api-client'
 
 export const analyticsQueryKeys = {
@@ -85,6 +86,13 @@ export function useWidgetEngagement(window: string = '7d') {
   return useQuery<WidgetEngagementMetric>({
     queryKey: ['analytics', 'widget-engagement', window],
     queryFn: () => apiClient.getWidgetEngagement(window)
+  })
+}
+
+export function usePrimitiveHealth() {
+  return useQuery<PrimitiveHealthMetric>({
+    queryKey: ['analytics', 'primitive-health'],
+    queryFn: () => apiClient.getPrimitiveHealth()
   })
 }
 
