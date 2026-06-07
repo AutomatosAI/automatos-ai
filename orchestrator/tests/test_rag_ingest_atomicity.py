@@ -127,11 +127,16 @@ if "PIL" not in sys.modules:
 # ``test_memory_single_write_path``.
 # ---------------------------------------------------------------------------
 
+# Record the path-only parent stubs we create so ``teardown_module`` can drop
+# them again — a leaked bare ``modules`` stub has no ``tools`` attribute and
+# breaks later siblings' ``monkeypatch.setattr("modules.tools.…")`` walks.
+_LEAKED_PARENT_STUBS = {}
 for _pkg in ("modules", "modules.rag", "modules.rag.ingestion"):
     if _pkg not in sys.modules:
         _stub = types.ModuleType(_pkg)
         _stub.__path__ = [str(ORCH_ROOT / _pkg.replace(".", "/"))]
         sys.modules[_pkg] = _stub
+        _LEAKED_PARENT_STUBS[_pkg] = _stub
 
 # semantic_chunker / multimodal are referenced from manager.py inside ``try``
 # blocks — they fail to import gracefully. Pre-stub so the try block fails
@@ -152,6 +157,8 @@ _mm_stub.FormulaProcessor = MagicMock
 _mm_stub.ImageProcessor = MagicMock
 _mm_stub.MultimodalDocumentProcessor = MagicMock
 sys.modules.setdefault("modules.rag.ingestion.multimodal", _mm_stub)
+_LEAKED_PARENT_STUBS["modules.rag.chunking.semantic_chunker"] = _sc_stub
+_LEAKED_PARENT_STUBS["modules.rag.ingestion.multimodal"] = _mm_stub
 
 import importlib.util  # noqa: E402
 
@@ -161,7 +168,19 @@ _spec = importlib.util.spec_from_file_location(
 )
 _manager_mod = importlib.util.module_from_spec(_spec)
 sys.modules["modules.rag.ingestion.manager"] = _manager_mod
+_LEAKED_PARENT_STUBS["modules.rag.ingestion.manager"] = _manager_mod
 _spec.loader.exec_module(_manager_mod)
+
+
+def teardown_module(module):
+    """Drop the path-only ``modules.*`` stubs this module installed so they
+    don't poison sibling tests' attribute walks (e.g. a bare ``modules`` stub
+    with no ``tools`` attr breaking ``monkeypatch.setattr("modules.tools.…")``).
+    Identity-checked so we never evict a real import or another test's stub."""
+    for _name, _stub in _LEAKED_PARENT_STUBS.items():
+        if sys.modules.get(_name) is _stub:
+            del sys.modules[_name]
+
 
 DocumentChunk = _manager_mod.DocumentChunk
 DocumentManager = _manager_mod.DocumentManager
