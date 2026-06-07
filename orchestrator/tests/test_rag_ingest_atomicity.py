@@ -444,7 +444,7 @@ async def test_s3_vector_metadata_uses_workspace_scoped_backend():
 # ===========================================================================
 
 
-def test_delete_document_removes_s3_vectors_when_s3_mode():
+def test_delete_document_removes_s3_vectors_when_s3_mode(monkeypatch):
     """``delete_document`` must drop the chunk-vectors from the S3 backend
     when ``use_s3_vectors=True`` — today the manager tears down Postgres
     rows only, leaving orphan vectors per workspace per deleted doc.
@@ -455,9 +455,14 @@ def test_delete_document_removes_s3_vectors_when_s3_mode():
     mgr = _bare_manager(s3_backend=backend)
 
     # Replace psycopg2.connect with a recording conn so the postgres delete
-    # path runs without a real DB.
+    # path runs without a real DB. Use monkeypatch (not a raw module assign):
+    # ``_manager_mod.psycopg2`` is the one shared psycopg2 module, so a raw
+    # ``psycopg2.connect = ...`` leaks the mock process-wide and the next test
+    # to open a REAL connection on the shared engine (test_w2s5) gets a fake
+    # conn fed to SQLAlchemy's on_connect ``register_uuid`` → TypeError.
+    # monkeypatch restores the real connect at teardown.
     fake_conn = _RecordingConn()
-    _manager_mod.psycopg2.connect = MagicMock(return_value=fake_conn)
+    monkeypatch.setattr(_manager_mod.psycopg2, "connect", MagicMock(return_value=fake_conn))
 
     ok = mgr.delete_document(42)
     assert ok is True
@@ -467,21 +472,22 @@ def test_delete_document_removes_s3_vectors_when_s3_mode():
     )
 
 
-def test_delete_document_skips_s3_when_legacy_pgvector_mode():
+def test_delete_document_skips_s3_when_legacy_pgvector_mode(monkeypatch):
     """In legacy pgvector mode there are no S3 vectors to drop — the
     delete path must NOT call delete_documents on a backend that does not
     own those vectors."""
     backend = MagicMock()
     mgr = _bare_manager(use_s3=False, s3_backend=backend)
 
-    _manager_mod.psycopg2.connect = MagicMock(return_value=_RecordingConn())
+    # monkeypatch so the global psycopg2.connect is restored at teardown.
+    monkeypatch.setattr(_manager_mod.psycopg2, "connect", MagicMock(return_value=_RecordingConn()))
 
     mgr.delete_document(7)
 
     backend.delete_documents.assert_not_called()
 
 
-def test_delete_document_does_not_raise_when_s3_cleanup_fails():
+def test_delete_document_does_not_raise_when_s3_cleanup_fails(monkeypatch):
     """Postgres commit has already happened by the time we ask S3 to drop
     its vectors — an S3 outage at that point is a logged warning, not a
     user-visible 500. Otherwise a flaky S3 would block deletes the
@@ -490,7 +496,8 @@ def test_delete_document_does_not_raise_when_s3_cleanup_fails():
     backend.delete_documents = MagicMock(side_effect=RuntimeError("S3 outage"))
     mgr = _bare_manager(s3_backend=backend)
 
-    _manager_mod.psycopg2.connect = MagicMock(return_value=_RecordingConn())
+    # monkeypatch so the global psycopg2.connect is restored at teardown.
+    monkeypatch.setattr(_manager_mod.psycopg2, "connect", MagicMock(return_value=_RecordingConn()))
 
     # Must NOT raise — S3 failure is best-effort after the postgres commit.
     ok = mgr.delete_document(42)

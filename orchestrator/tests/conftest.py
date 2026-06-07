@@ -13,6 +13,28 @@ if _orchestrator_root not in sys.path:
     sys.path.insert(0, _orchestrator_root)
 
 
+@pytest.fixture(autouse=True)
+def _repair_stubbed_consumers_chatbot():
+    """Rebind ``consumers.chatbot`` onto the ``consumers`` parent if a sibling
+    leaked a hand-built stub into ``sys.modules``.
+
+    Several unit tests (test_memory_single_write_path, test_tool_loop_*, etc.)
+    inject ``types.ModuleType`` stubs for ``consumers`` and ``consumers.chatbot``
+    directly into ``sys.modules`` to dodge the heavy package __init__. A real
+    ``import`` sets the child as an attribute on the parent module; a manual
+    sys.modules insert does NOT. pytest's ``monkeypatch.setattr("a.b.c", ...)``
+    walks attributes from the top package, so a later sibling that monkeypatches
+    ``consumers.chatbot.<x>`` trips on ``'module' object ... has no attribute
+    'chatbot'``. Rebinding here is idempotent and a no-op once the real package
+    is loaded.
+    """
+    parent = sys.modules.get("consumers")
+    child = sys.modules.get("consumers.chatbot")
+    if parent is not None and child is not None and getattr(parent, "chatbot", None) is not child:
+        parent.chatbot = child
+    yield
+
+
 # ---- Database mock ----
 
 @pytest.fixture
