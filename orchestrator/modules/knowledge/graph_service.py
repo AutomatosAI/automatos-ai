@@ -56,6 +56,7 @@ from graphify.serve import (
 from config import config
 from core.graph_storage import DbWorkspaceClient
 from core.llm.manager import get_system_setting
+from modules.knowledge.primitive_heartbeat import _emit_graph_primitive
 
 logger = logging.getLogger(__name__)
 
@@ -177,7 +178,7 @@ class GraphifyService:
         async with self._lock_for(workspace_id):
             build_timeout = int(get_system_setting("knowledge_graph", "build_timeout", "1800"))
             try:
-                return await asyncio.wait_for(
+                meta = await asyncio.wait_for(
                     self._build_graph_unlocked(workspace_id),
                     timeout=build_timeout,
                 )
@@ -187,9 +188,26 @@ class GraphifyService:
                     build_timeout,
                     workspace_id,
                 )
+                _emit_graph_primitive(
+                    workspace_id, success=False, detail=f"timeout:{build_timeout}s"
+                )
                 raise TimeoutError(
                     f"Graph build timed out after {build_timeout}s for workspace {workspace_id}"
                 )
+            except Exception as exc:  # noqa: BLE001 — emit then re-raise unchanged
+                _emit_graph_primitive(
+                    workspace_id, success=False, detail=str(exc)[:200]
+                )
+                raise
+            _emit_graph_primitive(
+                workspace_id,
+                success=True,
+                detail=(
+                    f"nodes={meta.get('node_count', 0)} "
+                    f"edges={meta.get('edge_count', 0)}"
+                ),
+            )
+            return meta
 
     async def _build_graph_unlocked(self, workspace_id: str) -> Dict[str, Any]:
         """Full graph build (caller must hold the workspace lock)."""
@@ -322,9 +340,24 @@ class GraphifyService:
             Meta dict with node_count, edge_count, community_count.
         """
         async with self._lock_for(workspace_id):
-            return await self._import_graph_unlocked(
-                workspace_id, graph_data, merge=merge
+            try:
+                meta = await self._import_graph_unlocked(
+                    workspace_id, graph_data, merge=merge
+                )
+            except Exception as exc:  # noqa: BLE001 — emit then re-raise unchanged
+                _emit_graph_primitive(
+                    workspace_id, success=False, detail=str(exc)[:200]
+                )
+                raise
+            _emit_graph_primitive(
+                workspace_id,
+                success=True,
+                detail=(
+                    f"import nodes={meta.get('node_count', 0)} "
+                    f"edges={meta.get('edge_count', 0)}"
+                ),
             )
+            return meta
 
     async def _import_graph_unlocked(
         self, workspace_id: str, graph_data: Dict[str, Any], *, merge: bool = False

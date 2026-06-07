@@ -442,6 +442,62 @@ class Config:
     GRAFANA_LOKI_DATASOURCE_UID: str = os.getenv("GRAFANA_LOKI_DATASOURCE_UID", "loki")
 
     # =============================================================================
+    # OBSERVABILITY — log relay, Prometheus metrics, Loki query API, alerts
+    # (PRD-142 W3-S5 / G7 — centralized so monitoring modules stop reading env directly)
+    # =============================================================================
+    # Log relay client (core/monitoring/automatos_logging.py)
+    LOG_RELAY_URL: str = os.getenv(
+        "LOG_RELAY_URL",
+        "http://log-relay.railway.internal:8080/push",
+    )
+    LOG_RELAY_ENABLED: bool = os.getenv("LOG_RELAY_ENABLED", "true").lower() == "true"
+    LOG_RELAY_BATCH_SIZE: int = int(os.getenv("LOG_RELAY_BATCH_SIZE", "50"))
+    LOG_RELAY_FLUSH_INTERVAL: float = float(os.getenv("LOG_RELAY_FLUSH_INTERVAL", "2.0"))
+    # SERVICE_NAME has two distinct historical defaults — preserve both exactly.
+    # The logging client used "unknown"; the Prometheus exporter used "automatos-backend".
+    LOG_RELAY_SERVICE_NAME: str = os.getenv("SERVICE_NAME", "unknown")
+    METRICS_SERVICE_NAME: str = os.getenv("SERVICE_NAME", "automatos-backend")
+    # ENVIRONMENT also has two distinct historical defaults — preserve both.
+    # The logging client also falls back to RAILWAY_ENVIRONMENT; metrics defaulted to "unknown".
+    LOG_RELAY_ENVIRONMENT: str = os.getenv(
+        "ENVIRONMENT",
+        os.getenv("RAILWAY_ENVIRONMENT", "development"),
+    )
+    METRICS_ENVIRONMENT: str = os.getenv("ENVIRONMENT", "unknown")
+    # Loki query proxy (core/monitoring/automatos_logs_api.py) — separate from the
+    # PRD-73 LOKI_URL above because the existing module reads LOKI_QUERY_URL.
+    LOKI_QUERY_URL: str = os.getenv("LOKI_QUERY_URL", "http://loki.railway.internal:3100")
+    # Shared by automatos_logs_api + automatos_alerts for HMAC verification.
+    ALERT_INGEST_TOKEN: str = os.getenv("ALERT_INGEST_TOKEN", "")
+
+    # =============================================================================
+    # CHANNELS — public-facing host used to build inbound webhook URLs
+    # (PRD-142 W3-S5 / G7)
+    # =============================================================================
+    # rstrip('/') preserves api/channels.py's prior call-site behaviour.
+    PUBLIC_API_HOST: str = os.getenv("PUBLIC_API_HOST", "api.automatos.app").rstrip("/")
+
+    # =============================================================================
+    # RATE LIMITING — per-operation override helper
+    # (PRD-142 W3-S5 / G7; replaces core/security/rate_limiter.py::_env_limit)
+    # =============================================================================
+    @staticmethod
+    def rate_limit_for(name: str, default_max: int, default_window: int) -> tuple[int, int]:
+        """Read RATE_LIMIT_<NAME>_MAX and RATE_LIMIT_<NAME>_WINDOW_SECONDS env vars.
+
+        Returns ``(max_requests, window_seconds)``, both clamped to ``>= 1`` so
+        a malformed override cannot disable the bucket. Invalid integers (or any
+        TypeError/ValueError) fall back to the supplied defaults — same shape as
+        the previous in-module helper. No behaviour change.
+        """
+        try:
+            max_req = int(os.getenv(f"RATE_LIMIT_{name.upper()}_MAX", str(default_max)))
+            window = int(os.getenv(f"RATE_LIMIT_{name.upper()}_WINDOW_SECONDS", str(default_window)))
+            return max(1, max_req), max(1, window)
+        except (TypeError, ValueError):
+            return default_max, default_window
+
+    # =============================================================================
     # FEATURE FLAGS
     # =============================================================================
     HEARTBEAT_ENABLED: bool = os.getenv("HEARTBEAT_ENABLED", "true").lower() == "true"
@@ -462,6 +518,9 @@ class Config:
 
     WIZARD_ENABLED: bool = os.getenv("WIZARD_ENABLED", "true").lower() == "true"
     WIZARD_REQUIRE_DOMAIN_VERIFY: bool = os.getenv("WIZARD_REQUIRE_DOMAIN_VERIFY", "false").lower() == "true"
+    # Bypass slow knowledge-graph build during local iteration on Step 6 / Mission Zero.
+    # (PRD-142 W3-S5 — was an in-line os.getenv() inside api/wizard.py)
+    WIZARD_SKIP_GRAPHIFY: bool = os.getenv("WIZARD_SKIP_GRAPHIFY", "").lower() in ("1", "true", "yes")
 
     # =============================================================================
     # COORDINATOR — PRD-82A Sequential Mission Coordinator

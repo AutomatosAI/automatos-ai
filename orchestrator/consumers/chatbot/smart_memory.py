@@ -480,20 +480,34 @@ class SmartMemoryManager:
                 "distilled": distilled,
             }
 
-            results = []
+            # PRD-142 W3-S7 (§H "failure path tested — never silently
+            # swallowed"): wrap the L3 write in try/except so a Mem0 outage
+            # cannot prevent the L2 transcript write below. Without this
+            # guard an exception from store_two_tier would skip past the
+            # transcript persistence and lose the turn entirely.
+            results: List[tuple] = []
+            l3_raised = False
             if l3_messages is not None:
-                results = await self.unified_service.store_two_tier(
-                    workspace_id=workspace_id,
-                    messages=l3_messages,
-                    agent_id=agent_id,
-                    tier=tier,
-                    metadata=base_metadata,
-                )
+                try:
+                    results = await self.unified_service.store_two_tier(
+                        workspace_id=workspace_id,
+                        messages=l3_messages,
+                        agent_id=agent_id,
+                        tier=tier,
+                        metadata=base_metadata,
+                    )
+                except Exception:
+                    l3_raised = True
+                    logger.warning(
+                        "[SmartMemory] L3 store_two_tier raised — L2 "
+                        "transcript will still persist", exc_info=True,
+                    )
 
-            # PRD-131d Phase 3: also preserve the raw transcript in L2 so the
-            # Memory Explorer can surface full convos, not just Mem0's distilled
-            # facts. Dual-write is intentional — Mem0 keeps facts for retrieval,
-            # L2 keeps the literal text for audit/review.
+            # PRD-131d Phase 3 / W3-S7 G12: L2 transcript is the SINGLE L2
+            # write for a chat turn. Mem0 keeps the distilled facts for
+            # retrieval; L2 keeps the verbatim text for audit/review. The
+            # older direct ``UnifiedMemoryService.store_exchange`` spawn from
+            # smart_orchestrator was a duplicate L2 row this collapse retired.
             try:
                 await self.unified_service.store_transcript(
                     workspace_id=workspace_id,
@@ -512,9 +526,11 @@ class SmartMemoryManager:
 
             # L3 stored OK, or was deliberately skipped (nothing durable) — both
             # count as success; the L2 transcript above preserves the raw
-            # exchange regardless.
+            # exchange regardless. A raised L3 (l3_raised) is reported as a
+            # visible failure via False return (§H: never silent), even though
+            # L2 still got the verbatim turn.
             l3_ok = any(r[1] and not r[1].get("error") for r in results)
-            success = l3_ok or l3_messages is None
+            success = (l3_ok or l3_messages is None) and not l3_raised
 
             if success:
                 if l3_ok:
@@ -526,8 +542,13 @@ class SmartMemoryManager:
                 self._invalidate_cache(workspace_id, agent_id)
                 return True
             else:
-                errors = [f"{r[0]}: {r[1].get('error') if r[1] else 'None'}" for r in results]
-                logger.warning("[SmartMemory] L3 storage failed: %s", errors)
+                if l3_raised:
+                    logger.warning(
+                        "[SmartMemory] L3 raised; turn preserved in L2 only",
+                    )
+                else:
+                    errors = [f"{r[0]}: {r[1].get('error') if r[1] else 'None'}" for r in results]
+                    logger.warning("[SmartMemory] L3 storage failed: %s", errors)
                 return False
 
         except Exception as e:

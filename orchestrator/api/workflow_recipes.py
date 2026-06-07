@@ -900,9 +900,12 @@ async def execute_recipe(
 
         logger.info(f"[execute_recipe] Created execution {recipe_execution_id}, launching direct executor")
 
-        # Launch direct executor as async task (crash-safe)
-        from api.recipe_executor import launch_recipe_task
-        launch_recipe_task(
+        # PRD-142 W3-S12: launches go via the consolidated PlaybookEngine
+        # seam (services/playbook_engine.py). Crash-safety still lives in
+        # launch_recipe_task; the engine is the strangler-fig — see
+        # services/playbook_engine.py docstring + tests/test_playbook_launch_parity.py.
+        from services.playbook_engine import get_playbook_engine
+        get_playbook_engine().launch(
             recipe_execution_id=recipe_execution_id,
             recipe_id=recipe.id,
             workspace_id=ctx.workspace_id,
@@ -1856,8 +1859,9 @@ async def recipe_webhook(
     logger.info("[webhook] Recipe %d (%s) triggered via webhook %s, execution=%s",
                 recipe.id, recipe.name, webhook_id, execution_id)
 
-    from api.recipe_executor import launch_recipe_task
-    launch_recipe_task(
+    # PRD-142 W3-S12: webhook door launches via the consolidated engine seam.
+    from services.playbook_engine import get_playbook_engine
+    get_playbook_engine().launch(
         recipe_execution_id=execution_id,
         recipe_id=recipe.id,
         workspace_id=recipe.workspace_id,

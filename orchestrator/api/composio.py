@@ -858,7 +858,8 @@ async def _dispatch_workflow(
             ).first()
             if recipe_row:
                 from uuid import uuid4 as _uuid4
-                from api.recipe_executor import execute_recipe_direct
+                # PRD-142 W3-S12: composio trigger dispatch goes via the engine seam.
+                from services.playbook_engine import get_playbook_engine
 
                 execution_id = f"trigger-{_uuid4().hex[:12]}"
                 execution = RecipeExecution(
@@ -883,7 +884,7 @@ async def _dispatch_workflow(
                     "[webhook] Dispatching to UI recipe %d (%s), execution=%s",
                     recipe_row.id, recipe_row.name, execution_id,
                 )
-                await execute_recipe_direct(
+                await get_playbook_engine().execute_direct(
                     recipe_execution_id=execution_id,
                     recipe_id=recipe_row.id,
                     workspace_id=envelope.workspace_id,

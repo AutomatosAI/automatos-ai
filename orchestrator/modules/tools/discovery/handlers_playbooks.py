@@ -481,10 +481,12 @@ async def execute_playbook(db: Session, workspace_id: UUID, params: Dict[str, An
     db.add(execution)
     db.commit()  # Must commit before async task (it opens its own session)
 
-    # Launch async execution fire-and-forget
+    # Launch async execution via the consolidated PlaybookEngine seam.
+    # PRD-142 W3-S12: every backend launch site goes through the engine —
+    # the strangler-fig that lets durability/observability land in one place.
     try:
-        from api.recipe_executor import launch_recipe_task
-        launch_recipe_task(
+        from services.playbook_engine import get_playbook_engine
+        get_playbook_engine().launch(
             recipe_execution_id=execution_id,
             recipe_id=playbook.id,
             workspace_id=workspace_id,

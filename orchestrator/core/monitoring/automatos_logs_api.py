@@ -12,17 +12,19 @@ Usage:
 
 import json
 import logging
-import os
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Header, HTTPException, Query
 
+from config import config
+
 logger = logging.getLogger(__name__)
 
-LOKI_URL = os.environ.get("LOKI_QUERY_URL", "http://loki.railway.internal:3100")
-ALERT_INGEST_TOKEN = os.environ.get("ALERT_INGEST_TOKEN", "")
+# PRD-142 W3-S5 / G7 — env reads routed through config.
+LOKI_URL = config.LOKI_QUERY_URL
+ALERT_INGEST_TOKEN = config.ALERT_INGEST_TOKEN
 
 
 def _build_logql(

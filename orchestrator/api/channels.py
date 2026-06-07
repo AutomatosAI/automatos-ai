@@ -12,7 +12,6 @@ webhook, and start/stop polling.
 
 import json as _json
 import logging
-import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from uuid import UUID, uuid4
@@ -21,6 +20,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from config import config
 from core.database.database import get_db
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
@@ -39,8 +39,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/channels", tags=["channels"])
 
 # Public-API host used to build inbound webhook URLs. Override via env
-# (e.g. ``api.staging.automatos.app``) — default matches production.
-_PUBLIC_API_HOST = os.getenv("PUBLIC_API_HOST", "api.automatos.app").rstrip("/")
+# PUBLIC_API_HOST (e.g. ``api.staging.automatos.app``) — default matches
+# production. (PRD-142 W3-S5 / G7 — env via config.)
+_PUBLIC_API_HOST = config.PUBLIC_API_HOST
 
 # Kept so callers passing a platform not in the driver registry still
 # get a clear "unsupported" error rather than a 500. The driver

@@ -1623,6 +1623,20 @@ async def _execute_recipe_inner(
             "steps_completed": len(step_results),
         }
 
+        # PRD-142 W3-S12: playbooks primitive heartbeat at the COMPLETED
+        # boundary. tick is a one-shot terminal transition; the wrapper
+        # swallows any emit failure so a broken heartbeat writer cannot
+        # fail playbook completion.
+        from services.playbook_engine_heartbeat import _emit_playbooks_primitive
+        _emit_playbooks_primitive(
+            execution.workspace_id,
+            success=True,
+            detail=(
+                f"exec={recipe_execution_id} steps={len(step_results)} "
+                f"duration_ms={total_duration} tokens={total_tokens}"
+            ),
+        )
+
         # PRD-128: dispatch playbook_complete before final commit so the
         # notification row persists in the same transaction as the status
         # update.
@@ -1886,6 +1900,17 @@ async def _fail_execution(
             if step_results is not None:
                 execution.step_results = step_results
             db.commit()
+
+            # PRD-142 W3-S12: playbooks primitive heartbeat at the FAILED
+            # boundary. Paired with the user-visible error_message + the
+            # auto-report below so the tile flips down at the same instant
+            # the failure is recorded (§H DoD #2 Failure path visible).
+            from services.playbook_engine_heartbeat import _emit_playbooks_primitive
+            _emit_playbooks_primitive(
+                execution.workspace_id,
+                success=False,
+                detail=f"exec={execution_id} error={error_message}",
+            )
 
             # Fail the board task
             try:

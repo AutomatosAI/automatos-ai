@@ -36,6 +36,7 @@ from core.services.audit_service import AuditService
 # Module-internal imports
 from .query.nl2sql_service import NaturalLanguageToSQLService
 from .query.validator import SQLValidator
+from .primitive_heartbeat import _emit_nl2sql_primitive
 from modules.tools.services.pandas_ai_service import get_pandasai_service
 
 
@@ -95,15 +96,32 @@ class DatabaseKnowledgeService:
         self.query_cache = {}
         self.analytics_engine = get_pandasai_service()
     
-    async def _get_source(self, source_id: str) -> 'DatabaseKnowledgeSource':
-        """Fetch database source by ID"""
+    async def _get_source(
+        self,
+        source_id: str,
+        workspace_id: Optional[str] = None,
+    ) -> 'DatabaseKnowledgeSource':
+        """Fetch database source by ID.
+
+        When ``workspace_id`` is provided, the lookup is workspace-scoped:
+        a source from another workspace will NOT come back (raises). The
+        kwarg is opt-in so in-process callers that already enforce
+        isolation upstream keep their narrower interface; the API route
+        is the call site that MUST pass it (W3-S9 cross-tenant guard).
+        """
         from core.database.database import SessionLocal
         from core.models.database_knowledge import DatabaseKnowledgeSource as DBKSource
-        
+
         db_session = SessionLocal()
         try:
-            source = db_session.query(DBKSource).filter(DBKSource.id == int(source_id)).first()
+            query = db_session.query(DBKSource).filter(DBKSource.id == int(source_id))
+            if workspace_id is not None:
+                query = query.filter(DBKSource.workspace_id == str(workspace_id))
+            source = query.first()
             if not source:
+                # A None here on the workspace-scoped path is either a
+                # genuinely missing source OR a cross-tenant attempt; either
+                # way the caller cannot reach this source.
                 raise ValueError(f"Database source {source_id} not found")
             return source
         finally:
@@ -222,7 +240,8 @@ class DatabaseKnowledgeService:
         agent_id: Optional[str] = None,
         auto_correct: bool = True,
         max_retries: int = 2,
-        auto_train: bool = True
+        auto_train: bool = True,
+        workspace_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Execute a natural language query against a database source.
@@ -242,8 +261,16 @@ class DatabaseKnowledgeService:
 
         start_time = datetime.utcnow()
 
-        # Step 1: Get source
-        source = await self._get_source(source_id)
+        # Step 1: Get source (workspace-scoped when the caller — typically
+        # the API route — passed the authenticated workspace_id).
+        source = await self._get_source(source_id, workspace_id=workspace_id)
+
+        # W3-S9: capture the source's workspace_id once — the local
+        # ``workspace_id`` name is reused later in this function for
+        # few-shot / prompt purposes, so we keep a stable handle for
+        # the heartbeat emit at every return point. Falsy => helper
+        # silently skips (honest 'unknown' on the tile).
+        _emit_ws_id = str(getattr(source, 'workspace_id', '') or '') or None
 
         # Step 2: Get and decrypt credentials
         db_session = SessionLocal()
@@ -261,6 +288,11 @@ class DatabaseKnowledgeService:
         # Step 3: Get schema metadata
         schema_metadata = source.schema_metadata or {}
         if not schema_metadata or not schema_metadata.get('tables'):
+            _emit_nl2sql_primitive(
+                _emit_ws_id,
+                success=False,
+                detail="No schema metadata — introspect required",
+            )
             return {
                 "success": False,
                 "error": "No schema metadata available. Please run introspection first.",
@@ -339,6 +371,11 @@ class DatabaseKnowledgeService:
                 if attempt < retries:
                     logger.info(f"SQL validation failed (attempt {attempt + 1}), retrying: {ve}")
                     continue
+                _emit_nl2sql_primitive(
+                    _emit_ws_id,
+                    success=False,
+                    detail=last_error,
+                )
                 return {
                     "success": False,
                     "error": last_error,
@@ -392,6 +429,11 @@ class DatabaseKnowledgeService:
                     few_shot_examples, validated_sql, warnings
                 )
 
+                _emit_nl2sql_primitive(
+                    _emit_ws_id,
+                    success=True,
+                    detail=f"{len(rows)} rows in {round(execution_time)}ms",
+                )
                 return {
                     "success": True,
                     "sql": validated_sql,
@@ -412,6 +454,11 @@ class DatabaseKnowledgeService:
                     logger.info(f"SQL execution failed (attempt {attempt + 1}), retrying: {e}")
                     continue
 
+        _emit_nl2sql_primitive(
+            _emit_ws_id,
+            success=False,
+            detail=last_error or "execution failed after retries",
+        )
         return {
             "success": False,
             "error": last_error,
@@ -691,7 +738,8 @@ Rules:
         self,
         source_id: str,
         natural_language_query: str,
-        user_id: str
+        user_id: str,
+        workspace_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Perform advanced analytics/visualization on database data.
@@ -701,14 +749,17 @@ Rules:
         # 1. Fetch Data (using existing SQL pipeline)
         # We append "Return all relevant columns for analysis" to prompt implicitly
         # by asking for a broad SQL query first.
-        
+
         # For analysis, we often need more data than a simple answer.
         # We'll ask the SQL generator to get the raw data first.
-        
+
         # Heuristic: Ask LLM to generate a SQL query that fetches the DATA needed for the analysis
         fetch_query_prompt = f"Generate a SQL query to fetch the raw data needed to answer this analysis question: '{natural_language_query}'. Do not aggregate yet if the analysis requires raw data points (like scatter plots)."
-        
-        sql_result = await self.query_database(source_id, fetch_query_prompt, user_id)
+
+        sql_result = await self.query_database(
+            source_id, fetch_query_prompt, user_id,
+            workspace_id=workspace_id,
+        )
         
         if not sql_result['success']:
             return sql_result
@@ -754,7 +805,8 @@ Rules:
         source_id: str,
         text: str,
         user_id: str,
-        agent_id: Optional[str] = None
+        agent_id: Optional[str] = None,
+        workspace_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Intelligently route between SQL Query and Data Analysis.
@@ -762,8 +814,13 @@ Rules:
         # Simple heuristic router (could be LLM-based)
         analysis_keywords = ['plot', 'chart', 'graph', 'trend', 'correlation', 'visualize', 'compare', 'forecast']
         is_analysis = any(keyword in text.lower() for keyword in analysis_keywords)
-        
+
         if is_analysis:
-            return await self.analyze_database(source_id, text, user_id)
+            return await self.analyze_database(
+                source_id, text, user_id, workspace_id=workspace_id
+            )
         else:
-            return await self.query_database(source_id, text, user_id, agent_id)
+            return await self.query_database(
+                source_id, text, user_id, agent_id,
+                workspace_id=workspace_id,
+            )
