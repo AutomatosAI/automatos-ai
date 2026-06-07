@@ -8,8 +8,8 @@ maps the classified intent to ActionRegistry *category names* via
 ``_INTENT_TO_REGISTRY_CATEGORIES`` and pulls the matching action names from the
 registry at call time — so an action registered under an already-mapped
 category is auto-discoverable with no edit to the router. The kept set is
-unioned with the classifier's suggested tools plus the always-on CORE_TOOLS /
-ALWAYS_INCLUDE sets.
+unioned with the classifier's suggested tools plus the always-on CORE_TOOLS and
+the always-include pins (signal + core-platform + registry-``promoted``).
 
 Leaf-load pattern as in US-013/US-014: ``consumers.chatbot.__init__`` pulls the
 DB-backed chat service, so we load ``intent_classifier`` + ``smart_tool_router``
@@ -79,12 +79,15 @@ def _tool(name):
 
 @pytest.fixture
 def registry_env(monkeypatch):
-    """Inject a fake ActionRegistry whose get_by_category is test-controlled."""
-    state = {"by_category": {}}
+    """Inject a fake ActionRegistry whose get_by_category / get_promoted are test-controlled."""
+    state = {"by_category": {}, "promoted": []}
 
     class _FakeRegistry:
         def get_by_category(self, category):
             return state["by_category"].get(category, [])
+
+        def get_promoted(self):
+            return state["promoted"]
 
     fake_mod = types.ModuleType("modules.tools.discovery.action_registry")
     fake_mod.get_action_registry = lambda: _FakeRegistry()
@@ -158,12 +161,12 @@ def test_new_action_auto_discoverable(registry_env):
 
 
 def test_filter_always_keeps_core_and_always_include(registry_env):
-    """CORE_TOOLS, ALWAYS_INCLUDE, and suggested tools survive filtering."""
+    """CORE_TOOLS, the always-include pins, and suggested tools survive filtering."""
     registry_env["by_category"]["analytics"] = [SimpleNamespace(name="metrics_read")]
     r = SmartToolRouter()
     intent = _intent_result(primary=Intent.DATA_QUERY, suggested=["search_codebase"])
     core = sorted(SmartToolRouter.CORE_TOOLS)
-    always = sorted(SmartToolRouter.ALWAYS_INCLUDE)
+    always = sorted(r._always_include_names())
     tools = [_tool("metrics_read")] + [_tool(n) for n in core] + [_tool(n) for n in always]
 
     filtered = r._filter_tools_by_intent(tools, intent)
@@ -172,6 +175,29 @@ def test_filter_always_keeps_core_and_always_include(registry_env):
     for n in core + always:
         assert n in names
     assert "metrics_read" in names  # from registry
+
+
+def test_promoted_tool_surfaces_via_always_include(registry_env):
+    """A promoted action whose category is unmapped still survives filtering.
+
+    Headline: the full-autonomy dial (``platform_set_autonomy_level``,
+    category ``settings`` — absent from _INTENT_TO_REGISTRY_CATEGORIES) reaches
+    the LLM purely because it is ``promoted=True``. The category fallback maps
+    DATA_QUERY to analytics/etc. — never ``settings`` — so without promoted
+    surfacing the dial would be invisible in chat.
+    """
+    registry_env["by_category"]["analytics"] = [SimpleNamespace(name="metrics_read")]
+    registry_env["promoted"] = [SimpleNamespace(name="platform_set_autonomy_level")]
+    r = SmartToolRouter()
+    intent = _intent_result(primary=Intent.DATA_QUERY, suggested=[])
+    tools = [_tool("metrics_read"), _tool("platform_set_autonomy_level"), _tool("unrelated")]
+
+    filtered = r._filter_tools_by_intent(tools, intent)
+
+    names = {t["function"]["name"] for t in filtered}
+    assert "platform_set_autonomy_level" in names  # promoted → surfaced
+    assert "metrics_read" in names                 # category match
+    assert "unrelated" not in names
 
 
 def test_no_categories_no_suggested_returns_all(registry_env):
@@ -197,7 +223,7 @@ def test_widget_callback_tool_survives_multi_step_filter(registry_env):
     the registry's mapped categories did not surface widget_open_callback_form,
     and it was dropped from the LLM's toolset. The LLM then improvised
     composio_execute(action="widget_open_callback_form"), which fails with
-    "'WIDGET' is not assigned to agent N". Pinning the tool in ALWAYS_INCLUDE
+    "'WIDGET' is not assigned to agent N". Pinning the tool in _SIGNAL_TOOL_PINS
     guarantees it survives whenever it is present in available_tools (it is only
     present when the Site has callback.enabled — gated upstream).
     """

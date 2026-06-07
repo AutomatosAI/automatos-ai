@@ -19,7 +19,7 @@ See PRD-81 Task 5.3 and system audit R1 finding.
 """
 
 import logging
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Set
 from dataclasses import dataclass
 
 from .intent_classifier import Intent, IntentResult, get_intent_classifier
@@ -90,31 +90,61 @@ class SmartToolRouter:
         "generate_document",
     })
 
-    # Promoted platform tools that bypass intent filtering —
-    # always included regardless of detected intent (PRD-122 US-010).
+    # Native *signal* tools that MUST survive intent filtering but are NOT
+    # registry-promoted (they're gated upstream by validate_tool_access, so they
+    # only appear in available_tools when the affordance is enabled).
     #
-    # widget_open_callback_form is a native *signal* tool: when present in
-    # available_tools (only when the Site has callback.enabled — gated upstream
-    # by validate_tool_access), it MUST survive intent filtering. Without it the
-    # LLM, instructed by its skill to open the form, improvises a
+    # widget_open_callback_form: when present (only when the Site has
+    # callback.enabled), it must survive filtering. Without it the LLM,
+    # instructed by its skill to open the form, improvises a
     # composio_execute(action="widget_open_callback_form") call that fails with
-    # "'WIDGET' is not assigned to agent N". Pinning it here keeps the affordance
+    # "'WIDGET' is not assigned to agent N". Pinning it keeps the affordance
     # available on every widget turn regardless of the classified intent.
     # Literal (not imported) to keep this hot-path module free of the heavy
     # modules.tools.* import chain; canonical name lives in
     # modules/tools/widget_callback.py::WIDGET_OPEN_CALLBACK_FORM_NAME.
-    ALWAYS_INCLUDE = frozenset({
+    _SIGNAL_TOOL_PINS = frozenset({
+        "widget_open_callback_form",
+    })
+
+    # Platform tools that are always useful and must survive intent filtering.
+    # Kept static so the hot path knows them without a registry read. These are
+    # unioned with every registry-promoted action in _always_include_names().
+    _CORE_PLATFORM_PINS = frozenset({
         "platform_list_agents",
         "platform_get_agent",
         "platform_search_memory",
         "platform_store_memory",
         "platform_field_query",
         "platform_field_inject",
-        "widget_open_callback_form",
     })
 
     def __init__(self):
         self.classifier = get_intent_classifier()
+
+    def _always_include_names(self) -> Set[str]:
+        """Tool names that bypass intent filtering.
+
+        Signal pins + core platform pins + every registry-``promoted`` action.
+        Reading ``promoted`` here is what makes a tool marked ``promoted=True``
+        surface in chat with no edit to this router (PRD-122 US-010) — e.g. the
+        full-autonomy dial (``platform_set/get_autonomy_level``), whose
+        ``settings`` category is intentionally unmapped.
+
+        Fail-safe: a registry import/lookup error degrades to the static pins,
+        never crashes routing.
+        """
+        names: Set[str] = set(self._SIGNAL_TOOL_PINS) | set(self._CORE_PLATFORM_PINS)
+        try:
+            from modules.tools.discovery.action_registry import get_action_registry
+
+            names |= {a.name for a in get_action_registry().get_promoted()}
+        except Exception:
+            logger.warning(
+                "[ToolRouter] promoted-tool lookup failed — using static pins only",
+                exc_info=True,
+            )
+        return names
 
     async def route(
         self,
@@ -149,8 +179,8 @@ class SmartToolRouter:
                         hint_matched.append(tool)
                         break
             if hint_matched:
-                # Always include core + ALWAYS_INCLUDE tools alongside hint-matched tools
-                must_have = self.CORE_TOOLS | self.ALWAYS_INCLUDE
+                # Always include core + promoted/pinned tools alongside hint-matched tools
+                must_have = self.CORE_TOOLS | self._always_include_names()
                 core = [t for t in available_tools if t.get("function", {}).get("name") in must_have]
                 combined = hint_matched + [c for c in core if c not in hint_matched]
                 logger.info(f"[ToolRouter] PRD-68 hint match: {len(hint_matched)} tools for hints={tool_hints}")
@@ -185,8 +215,8 @@ class SmartToolRouter:
         # tool-selection pipeline. It wraps ActionSemanticIndex + the tool-routing
         # graph and internally falls back to embedding-only ranking when the graph
         # is empty. An empty result or any failure drops through to category
-        # filtering below. CORE_TOOLS / ALWAYS_INCLUDE / classifier-suggested tools
-        # are always kept so the graph path never strips a tool the agent needs.
+        # filtering below. CORE_TOOLS / always-include pins / classifier-suggested
+        # tools are always kept so the graph path never strips a tool the agent needs.
         from config import config
         if config.SEMANTIC_TOOL_ROUTING:
             try:
@@ -197,7 +227,7 @@ class SmartToolRouter:
                 )
                 if chains:
                     keep = {name for _, _, chain in chains for name in chain}
-                    keep |= self.CORE_TOOLS | self.ALWAYS_INCLUDE
+                    keep |= self.CORE_TOOLS | self._always_include_names()
                     keep |= set(intent_result.suggested_tools or [])
                     filtered = [
                         t for t in available_tools
@@ -244,9 +274,10 @@ class SmartToolRouter:
         PRD-141 US-015: maps the classified intent to ActionRegistry *category
         names* via ``_INTENT_TO_REGISTRY_CATEGORIES`` and pulls the matching
         action names from the registry at call time. The kept set is unioned
-        with the classifier's suggested tools plus the always-on CORE_TOOLS /
-        ALWAYS_INCLUDE sets, so an action registered under an already-mapped
-        category is auto-discoverable with no edit to this router.
+        with the classifier's suggested tools plus the always-on CORE_TOOLS and
+        the signal/core/promoted pins from ``_always_include_names()``, so an
+        action registered under an already-mapped category — or marked
+        ``promoted=True`` — is auto-discoverable with no edit to this router.
         """
         categories = _INTENT_TO_REGISTRY_CATEGORIES.get(intent_result.primary_intent, [])
         suggested = set(intent_result.suggested_tools or [])
@@ -256,13 +287,13 @@ class SmartToolRouter:
         if not categories and not suggested:
             return all_tools
 
-        relevant_names = suggested | set(self.CORE_TOOLS) | set(self.ALWAYS_INCLUDE)
+        relevant_names = suggested | set(self.CORE_TOOLS) | self._always_include_names()
 
         if categories:
             # Lazy import — the registry pulls in heavy modules.tools.* deps.
             # This is already the fallback-of-last-resort (the graph path failed
             # or is off), so a registry hiccup must not crash routing: degrade
-            # to suggested ∪ CORE_TOOLS ∪ ALWAYS_INCLUDE.
+            # to suggested ∪ CORE_TOOLS ∪ always-include pins.
             try:
                 from modules.tools.discovery.action_registry import get_action_registry
                 registry = get_action_registry()
@@ -282,17 +313,20 @@ class SmartToolRouter:
             and t.get("function", {}).get("name", "") in relevant_names
         ]
 
-        # Limit to a reasonable number, keeping suggested + core first.
+        # Limit to a reasonable number, keeping suggested + core + always-include
+        # (signal/core/promoted) tools first so the cap never drops a pinned or
+        # promoted affordance (e.g. the full-autonomy dial).
         if len(filtered) > 30:
+            always = self._always_include_names()
             priority_tools = []
             other_tools = []
             for tool in filtered:
                 name = tool.get("function", {}).get("name", "")
-                if name in suggested or name in self.CORE_TOOLS:
+                if name in suggested or name in self.CORE_TOOLS or name in always:
                     priority_tools.append(tool)
                 else:
                     other_tools.append(tool)
-            filtered = priority_tools + other_tools[:30 - len(priority_tools)]
+            filtered = priority_tools + other_tools[:max(0, 30 - len(priority_tools))]
 
         logger.debug(f"[ToolRouter] Filtered {len(all_tools)} tools to {len(filtered)}")
         return filtered
