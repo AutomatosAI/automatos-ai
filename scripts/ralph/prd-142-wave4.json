@@ -1,0 +1,158 @@
+{
+  "project": "Automatos AI Platform — PRD-142 Wave 4 (Self-Learning / HARNESS)",
+  "branchName": "ralph/prd-142-wave4-self-learning-harness",
+  "description": "Activate + extend the already-built HARNESS self-management, behind flags, under green. Widen the prescription vocabulary (power_mode, routing_rule), wire the tool-routing learning loop into HARNESS, and give HARNESS a structured DB store. ZERO rewrites — HARNESS, the tool-routing graph, and the autonomy dial already exist; this wave wires/extends/observes them. Nothing takes effect in prod unless HARNESS_SELF_MANAGEMENT_ENABLED (default false). Agent scope = backend-safe stories only; canary-enable, prod migration apply, JSON-drop cutover, dead-code deletion, the autonomy cross-branch merge, the three-tier governance gate, and the frontend tile are HUMAN-GATED and excluded (see PROMPT_build_prd142-wave4.md).",
+  "userStories": [
+    {
+      "id": "W4-S1",
+      "title": "Authenticated HARNESS approve/reject API (Command Center surface)",
+      "description": "As a workspace admin, I approve/reject queued HARNESS prescriptions on an authenticated surface, because the inbound webhook has no sender authz.",
+      "acceptanceCriteria": [
+        "DONE — api/harness.py POST /api/harness/prescriptions/{rx_id}/approve|reject, mounted in main.py, resolves the Clerk principal to the integer users.id and delegates to handle_harness_command (fail-closed admin gate). Escalation message repointed to the Command Center. tests/test_harness_api.py.",
+        "Typecheck passes"
+      ],
+      "priority": 0,
+      "passes": true,
+      "notes": "DONE 2026-06-07 (commit 1cb81ee9d). Reviewed clean (fail-closed authz verified). Human-admin-only by design; flag-gated."
+    },
+    {
+      "id": "W4-S5",
+      "title": "Widen vocabulary: power_mode prescription + apply (system_settings scope)",
+      "description": "As HARNESS, I can prescribe and (flag-gated) apply a power-mode change, so the optimization loop can tune power mode behind the human gate.",
+      "acceptanceCriteria": [
+        "DECIDED (PRD §12.1): power mode is prescribed at the system_settings / run_config level where it already lives — do NOT add an Agent.power_mode column. First grep the codebase for where power mode is read/written today (the refusal comment at services/harness_service.py:1420-1425 states 'power mode is mission-run scoped via run_config + system_settings, never read off an agent') and reuse that canonical location.",
+        "If no platform action to set power mode at the system_settings/run_config level exists, add one via the 3-file pattern: actions_*.py (ActionDefinition platform_set_power_mode), handlers_*.py (handler writing the canonical location), and register in modules/tools/discovery/platform_actions.py. If an equivalent action already exists, REUSE it (CLAUDE.md §2) — do not duplicate.",
+        "Add a power_mode_upgrade / power_mode_downgrade branch to HARNESS _auto_apply_prescription (services/harness_service.py:1354) that maps to that action. Snapshot current_value_before for rollback. The apply path stays gated by HARNESS_SELF_MANAGEMENT_ENABLED.",
+        "No os.getenv outside config.py; no hardcoded power-mode strings (use the existing power-mode constants/enum if one exists).",
+        "TDD (RED first): orchestrator/tests/test_harness_power_mode.py — test_power_mode_prescription_maps_to_action, test_power_mode_apply_snapshots_before, test_power_mode_not_applied_when_flag_off.",
+        "python3 -m py_compile services/harness_service.py and the new action/handler files; cd orchestrator && python -c 'from main import app; print(\"import OK\")'",
+        "cd orchestrator && python -m pytest tests/test_harness_power_mode.py -v",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "WS-Q. Net-new platform action (the one place this wave builds near-new). Reuse the 3-file registration pattern (see modules/tools/discovery/actions_harness.py + handlers_harness.py + platform_actions.py:33,60). Do NOT remove the refusal branch yet — that is W4-S7 (after both S5 and S6)."
+    },
+    {
+      "id": "W4-S6",
+      "title": "Widen vocabulary: platform_create_routing_rule action + routing_rule_add prescription",
+      "description": "As HARNESS, I can prescribe and (flag-gated) apply a routing rule, writing the existing routing_rules table.",
+      "acceptanceCriteria": [
+        "The routing_rules table ALREADY EXISTS (core/models/routing.py:108, class RoutingRule). Do NOT create a new table. Add only the missing platform action that writes it.",
+        "Add platform_create_routing_rule via the 3-file pattern (actions_*.py ActionDefinition + handlers_*.py handler + register in platform_actions.py). The handler inserts a RoutingRule scoped to ctx/workspace_id (source_pattern|source_channel, intent_keywords, target_agent_id|target_workflow_id, priority). Tenant-scoped; never cross-workspace.",
+        "Add a routing_rule_add branch to HARNESS _auto_apply_prescription mapping to the new action. Snapshot current_value_before. Flag-gated.",
+        "SQLAlchemy via the ORM model (no f-string SQL). No hardcoded values.",
+        "TDD (RED first): orchestrator/tests/test_harness_routing_rule.py — test_create_routing_rule_writes_row_workspace_scoped, test_routing_rule_prescription_maps_to_action, test_not_applied_when_flag_off.",
+        "python3 -m py_compile the changed files; cd orchestrator && python -c 'from main import app; print(\"import OK\")'",
+        "cd orchestrator && python -m pytest tests/test_harness_routing_rule.py -v",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "WS-Q. RoutingRule model fields verified at core/models/routing.py:108-122 (workspace_id, source_pattern, source_channel, intent_keywords JSONB, target_agent_id, target_workflow_id, priority, is_active). Reuse, do not redefine."
+    },
+    {
+      "id": "W4-S7",
+      "title": "Remove the prescription-vocabulary refusal branch",
+      "description": "As a maintainer, I delete the dead 'intentionally NOT handled' refusal once power_mode and routing_rule apply.",
+      "acceptanceCriteria": [
+        "BLOCKED until W4-S5 and W4-S6 are both passes:true. Delete the refusal branch at services/harness_service.py:1420-1425 (the 'Unknown auto-apply change_type' return for power_mode_*/routing_rule_add and its comment).",
+        "After deletion, grep services/harness_service.py shows the two formerly-refused change_types now route to their apply branches; no 'intentionally NOT handled' comment remains; no _legacy shim.",
+        "An unknown/garbage change_type still returns a safe failure (the generic unknown-change_type guard must remain for genuinely-unknown types — only the power_mode/routing_rule-specific refusal is removed).",
+        "TDD (RED first): extend the S5/S6 tests (or orchestrator/tests/test_harness_vocabulary.py) — test_power_mode_no_longer_refused, test_routing_rule_no_longer_refused, test_genuinely_unknown_change_type_still_safe.",
+        "python3 -m py_compile services/harness_service.py; cd orchestrator && python -c 'from main import app; print(\"import OK\")'",
+        "cd orchestrator && python -m pytest tests/test_harness_vocabulary.py -v",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "WS-Q. Small cleanup. Keep the generic unknown-change_type safety net; only remove the power_mode/routing_rule-specific refusal."
+    },
+    {
+      "id": "W4-S8",
+      "title": "Document the tool-routing graph as the canonical tool-selection learning loop",
+      "description": "As an architect, I ratify the PRD-138/139 tool-routing graph as canonical learning (Role 1) and its boundary vs the HARNESS store (Role 2).",
+      "acceptanceCriteria": [
+        "Docs-only story (no production code change). Update docs/architecture/KNOWLEDGE-GRAPH-CANONICAL.md (or add a short section there): the tool-routing graph (signal_recorder.py -> tool_routing_edges/affinities -> edge_builder.py -> graph_router.py) is the canonical TOOL-SELECTION learning loop; knowledge_nodes/edges + learning_outcomes are reshaped into the HARNESS structured store (Role 2, W4-S11/S12); neither holds business entities (the §4 moat boundary still holds).",
+        "Cite the verified file:line anchors: core/models/tool_routing.py (ToolRoutingEdge:39, ToolRoutingAffinity:123), modules/tools/discovery/signal_recorder.py, core/services/edge_builder.py, modules/tools/discovery/graph_router.py, modules/tools/tool_router.py:614,659.",
+        "Add one sentence to the doc making explicit that HARNESS reads fails_for_intent (W4-S10) but never writes business entities to the learning store.",
+        "No code, no tests required beyond the doc; canonical terms only (Knowledge Graph, Playbook, Mission, Auto).",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "WS-R. Low-risk docs story; do it early to lock the boundary the later store work depends on. No frontend, no os.getenv."
+    },
+    {
+      "id": "W4-S9",
+      "title": "Harden the tool-routing learning loop to the §H DoD (tenant-isolation + restart-safe + observable)",
+      "description": "As an operator, I want the live tool-routing learning loop proven tenant-isolated, restart-safe, and observable.",
+      "acceptanceCriteria": [
+        "Add a cross-workspace isolation test proving tool-routing signals/edges/affinities are workspace-keyed and never bleed across workspaces (GUARDRAILS §H tenant-isolation, A4). Reuse the Wave 2 real-DB fixture in orchestrator/tests/conftest.py; do not stand up a parallel harness.",
+        "Add a restart-safety test for the batched ToolSignalRecorder (modules/tools/discovery/signal_recorder.py): the in-flight queue drains or persists on shutdown so a process restart loses no recorded signal (GUARDRAILS §H restart-safe, E1). If a drain-on-shutdown hook is missing, add the minimal one; do not rewrite the recorder.",
+        "Emit a signal-count / routing-hit-rate metric the self-learning tile (W4-S16, human) will read — reuse the existing telemetry/heartbeat mechanism, do not invent a new metrics system. Best-effort: a metrics failure never breaks tool routing.",
+        "No business-entity reads/writes to the tool-routing tables; no os.getenv outside config.py.",
+        "TDD (RED first): orchestrator/tests/test_tool_routing_hardening.py — test_signals_are_workspace_isolated, test_recorder_drains_on_shutdown, test_signal_metric_emitted.",
+        "python3 -m py_compile the changed files; cd orchestrator && python -c 'from main import app; print(\"import OK\")'",
+        "cd orchestrator && python -m pytest tests/test_tool_routing_hardening.py -v",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "WS-R. The loop is already wired end-to-end (signal->edge->routing). This story HARDENS it to DoD — additive tests + minimal restart hook + one metric. Zero rewrites."
+    },
+    {
+      "id": "W4-S10",
+      "title": "Feed fails_for_intent into HARNESS diagnosis (the learning cross-link)",
+      "description": "As HARNESS, I learn from tool failures: a sustained fails_for_intent affinity surfaces an inefficiency diagnosis.",
+      "acceptanceCriteria": [
+        "In the HARNESS DIAGNOSE phase (services/harness_service.py), read the tool-routing fails_for_intent affinities (core/models/tool_routing.py ToolRoutingAffinity, affinity_type 'fails_for_intent') for the workspace and surface a sustained failure as an inefficiency signal — which PRESCRIBE can turn into an existing-vocabulary tool_assignment_remove. Reuse the existing diagnose/prescribe structures; add no new prescription type.",
+        "Strictly learning-only: read ONLY the tool-routing learning tables — never products/orders/FBT or any business entity (KNOWLEDGE-GRAPH-CANONICAL §4 boundary).",
+        "Workspace-scoped: only this workspace's affinities are read.",
+        "TDD (RED first): orchestrator/tests/test_harness_tool_failure_signal.py — test_sustained_tool_failure_surfaces_diagnosis, test_no_business_entity_read, test_workspace_scoped.",
+        "python3 -m py_compile services/harness_service.py; cd orchestrator && python -c 'from main import app; print(\"import OK\")'",
+        "cd orchestrator && python -m pytest tests/test_harness_tool_failure_signal.py -v",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "WS-R. The cross-link that makes HARNESS learn from the live tool-routing loop. Uses the EXISTING tool_assignment_remove vocabulary — no new change_type."
+    },
+    {
+      "id": "W4-S11",
+      "title": "Author the HARNESS structured-store migration + models (extend learning_outcomes + harness_prescriptions)",
+      "description": "As HARNESS, I get a queryable, tenant-isolated, auditable DB store for diagnoses/prescriptions/outcomes.",
+      "acceptanceCriteria": [
+        "DECIDED (PRD §12.2): extend the already-HARNESS-shaped learning_outcomes (modules/memory/storage/knowledge_system.py:109) with workspace_id (UUID, indexed), run_id/baseline_id, change_type, risk_score, status (applied|rejected|rolled_back), applied_at, rolled_back_at, current_value_before (JSON); AND add a new harness_prescriptions table for the prescription/diagnosis records. Do NOT force prescriptions into the concept-shaped knowledge_nodes/edges.",
+        "These tables are currently created via Base.metadata.create_all only and are absent from Alembic. Author the FIRST Alembic migration that (a) brings learning_outcomes under version control + adds the new columns, and (b) creates harness_prescriptions. Additive, nullable, idempotent; include a working downgrade(). Register the models in core.models so they are part of the canonical metadata.",
+        "Every new row is workspace-scoped (GUARDRAILS §H tenant-isolation, A4).",
+        "DO NOT apply the migration against any live/prod DB — authoring + offline/CI verification ONLY (prod apply is HUMAN-GATED, W4-S2 sibling).",
+        "TDD (RED first): orchestrator/tests/test_harness_store_models.py — test_learning_outcome_has_workspace_and_status, test_harness_prescriptions_table_shape, test_models_registered_in_core_models. Verify alembic upgrade/downgrade head chain is single + clean offline (alembic history) — do NOT run against prod.",
+        "python3 -m py_compile the model + migration files; cd orchestrator && python -c 'from main import app; print(\"import OK\")'",
+        "cd orchestrator && python -m pytest tests/test_harness_store_models.py -v",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "WS-S (riskiest). Authoring + models + migration FILE only. The prod APPLY is human-gated. learning_outcomes already has success_rate_before/after + execution_time_before/after + application_count (HARNESS-shaped) — extend it, add harness_prescriptions, leave knowledge_nodes/edges fate to the human."
+    },
+    {
+      "id": "W4-S12",
+      "title": "Strangler-move HARNESS storage from baseline JSON to the DB store (dual-write + read)",
+      "description": "As HARNESS, I read/write my diagnoses/prescriptions/outcomes from the DB store, with parity proven before the JSON is dropped.",
+      "acceptanceCriteria": [
+        "BLOCKED until W4-S11 is passes:true. Risky-story protocol: FIRST write characterization tests pinning today's baseline-JSON read/write behaviour (services/harness_service.py _read_baseline:1064, _write_workspace_file:1149, the applied-tasks ledger) and watch them pass against current code.",
+        "Then DUAL-WRITE: HARNESS writes diagnoses/prescriptions/outcomes to BOTH the DB store (W4-S11 tables) and the existing JSON, and READS from the DB store. Add a parity test proving DB and JSON agree for a full tick.",
+        "Do NOT drop the JSON paths — the JSON-drop cutover is HUMAN-GATED (it removes a live storage path after canary parity). Keep both during this story; no dual path is the eventual end-state, not this story's.",
+        "Workspace-scoped DB access throughout; restart-safe (a tick's writes survive a process restart because they are in Postgres).",
+        "TDD (RED first): orchestrator/tests/test_harness_db_store.py — test_baseline_characterization, test_dual_write_db_and_json_agree, test_read_from_db, test_db_store_workspace_scoped.",
+        "python3 -m py_compile services/harness_service.py; cd orchestrator && python -c 'from main import app; print(\"import OK\")'",
+        "cd orchestrator && python -m pytest tests/test_harness_db_store.py -v",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "WS-S. Strangler-fig (dual-write -> read-DB -> [human: parity on canary -> drop JSON]). The agent does dual-write + read + parity test; the human drops JSON after canary. NEVER delete the JSON path in this story."
+    }
+  ]
+}
