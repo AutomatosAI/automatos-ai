@@ -14,24 +14,42 @@ if _orchestrator_root not in sys.path:
 
 
 @pytest.fixture(autouse=True)
-def _repair_stubbed_consumers_chatbot():
-    """Rebind ``consumers.chatbot`` onto the ``consumers`` parent if a sibling
-    leaked a hand-built stub into ``sys.modules``.
+def _repair_stubbed_package_bindings():
+    """Repair parent->child module attribute bindings that sibling tests broke.
 
-    Several unit tests (test_memory_single_write_path, test_tool_loop_*, etc.)
-    inject ``types.ModuleType`` stubs for ``consumers`` and ``consumers.chatbot``
-    directly into ``sys.modules`` to dodge the heavy package __init__. A real
-    ``import`` sets the child as an attribute on the parent module; a manual
-    sys.modules insert does NOT. pytest's ``monkeypatch.setattr("a.b.c", ...)``
-    walks attributes from the top package, so a later sibling that monkeypatches
-    ``consumers.chatbot.<x>`` trips on ``'module' object ... has no attribute
-    'chatbot'``. Rebinding here is idempotent and a no-op once the real package
-    is loaded.
+    Many unit tests inject ``types.ModuleType`` stubs straight into
+    ``sys.modules`` (for ``consumers``, ``consumers.chatbot``, ``modules``,
+    ``modules.tools`` ...) to dodge a heavy package __init__ that pulls optional
+    deps (asyncpg / pdfplumber / tiktoken / camelot). A real ``import a.b`` binds
+    ``b`` as an attribute on package ``a``; a manual ``sys.modules['a.b'] = stub``
+    does NOT. Worse, replacing ``sys.modules['a']`` with a bare stub drops every
+    real child attribute it used to carry.
+
+    pytest's ``monkeypatch.setattr("a.b.c.attr", ...)`` resolves its target by
+    walking attributes from the top package (``getattr(a, 'b')`` ...). When a
+    sibling has left ``a`` as a stub missing ``b``, that walk raises
+    ``"'module' object at a.b has no attribute 'b'"`` in whatever test is
+    collected after the leak — e.g. test_w1s9 patching
+    ``modules.tools.discovery.platform_executor.PlatformActionExecutor`` trips on
+    ``modules.tools``; an earlier sibling tripped on ``consumers.chatbot``.
+
+    This autouse fixture re-binds every dotted ``sys.modules`` entry onto its
+    parent package when the parent is missing that attribute. It is
+    *fill-missing only* — it never overwrites an existing binding, so it cannot
+    change a target a healthy test already resolves — and is idempotent / a
+    no-op once the real packages are loaded. A failed repair must never break
+    collection, so setattr errors are swallowed.
     """
-    parent = sys.modules.get("consumers")
-    child = sys.modules.get("consumers.chatbot")
-    if parent is not None and child is not None and getattr(parent, "chatbot", None) is not child:
-        parent.chatbot = child
+    for name, mod in list(sys.modules.items()):
+        if mod is None or "." not in name:
+            continue
+        parent_name, _, child_attr = name.rpartition(".")
+        parent = sys.modules.get(parent_name)
+        if parent is not None and not hasattr(parent, child_attr):
+            try:
+                setattr(parent, child_attr, mod)
+            except Exception:
+                pass
     yield
 
 
