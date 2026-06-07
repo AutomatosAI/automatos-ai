@@ -133,10 +133,15 @@ def _install_low_level_stubs():
         reg_mod.get_tool_registry = lambda db_session=None: fake_registry
         sys.modules["modules.tools.registry"] = reg_mod
 
-    if "modules.tools.execution" not in sys.modules:
-        exec_mod = types.ModuleType("modules.tools.execution")
-        exec_mod.UnifiedToolExecutor = MagicMock()
-        sys.modules["modules.tools.execution"] = exec_mod
+    # Always shadow with our complete stub — the snapshot above preserves any
+    # prior entry for restore. A `not in sys.modules` guard here would inherit
+    # a half-initialised modules.tools.execution left by an earlier-collected
+    # test (its real __init__ pulls a long exec_* chain and can land in
+    # sys.modules without UnifiedToolExecutor bound), which is the
+    # "(unknown location)" collection error this suite hit in CI.
+    exec_mod = types.ModuleType("modules.tools.execution")
+    exec_mod.UnifiedToolExecutor = MagicMock()
+    sys.modules["modules.tools.execution"] = exec_mod
 
     if "modules.tools.formatting.result_formatter" not in sys.modules:
         _ensure_pkg("modules.tools.formatting")
