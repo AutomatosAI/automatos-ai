@@ -877,14 +877,21 @@ class HarnessService:
         })
 
     def _build_escalation_message(self, rx: Dict[str, Any], risk: int) -> str:
-        """Plain-text approval request with the /approve|/reject instructions."""
+        """Plain-text approval request pointing to the Command Center.
+
+        Approval happens on the authenticated Command Center surface
+        (``api/harness.py``), never via a channel reply: the inbound webhook has
+        no sender authorization, so a channel command can't be trusted to mutate
+        state (PRD-142 Wave 4, W4-S1). The notice carries the prescription id so
+        the admin can find it in the queued-prescriptions list.
+        """
         rx_id = rx.get("prescription_id", "unknown")
         return (
             f"HARNESS needs approval (risk {risk}/5)\n"
             f"{rx.get('change_type', 'unknown')} for {rx.get('target_name', 'unknown')}\n"
             f"Current: {json.dumps(rx.get('current_value', {}))}\n"
             f"Proposed: {json.dumps(rx.get('proposed_value', {}))}\n"
-            f"Reply /approve {rx_id} or /reject {rx_id}"
+            f"Review and approve or reject in the Command Center (prescription {rx_id})."
         )
 
     def _workspace_has_channel(self, db: "Session", workspace_id: UUID) -> bool:
