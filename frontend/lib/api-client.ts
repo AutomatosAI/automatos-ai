@@ -1329,10 +1329,6 @@ class ApiClient {
     return this.request(`/api/workflows/executions/${executionId}`)
   }
 
-  async getWorkflowExecutionResults(executionId: string) {
-    return this.request(`/api/workflows/executions/${executionId}/results`)
-  }
-
   async cancelWorkflowExecution(executionId: string) {
     return this.request(`/api/workflows/executions/${executionId}/cancel`, {
       method: 'POST'
