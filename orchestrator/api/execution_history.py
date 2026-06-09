@@ -16,11 +16,18 @@ from sqlalchemy import desc, and_
 from core.database.database import get_db
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
+from core.auth.super_admin import require_super_admin
 from core.models import WorkflowExecution, Workflow, Agent
 
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/execution-history", tags=["execution-history"])
+
+# PRD-143 S7: observability tier — router-wide super-admin lock (fail-closed).
+router = APIRouter(
+    prefix="/api/execution-history",
+    tags=["execution-history"],
+    dependencies=[Depends(require_super_admin)],
+)
 
 
 @router.get("/workflow/{workflow_id}/latest")

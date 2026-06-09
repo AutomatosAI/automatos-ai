@@ -17,6 +17,7 @@ from sqlalchemy import func, desc, and_
 
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.super_admin import require_super_admin
 from core.database.database import get_db
 from core.models.core import LLMUsage, LLMModel, UserApiKey, Agent, RecipeExecution
 from core.models import WorkflowTemplate as WorkflowRecipe
@@ -25,8 +26,19 @@ from core.credentials.encryption import get_encryption_service
 from config import config
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/analytics/llm", tags=["LLM Analytics"])
-admin_router = APIRouter(prefix="/api/admin/analytics", tags=["Admin Analytics"])
+
+# PRD-143 S7: observability tier — router-wide super-admin lock (fail-closed)
+# on BOTH routers in this module.
+router = APIRouter(
+    prefix="/api/analytics/llm",
+    tags=["LLM Analytics"],
+    dependencies=[Depends(require_super_admin)],
+)
+admin_router = APIRouter(
+    prefix="/api/admin/analytics",
+    tags=["Admin Analytics"],
+    dependencies=[Depends(require_super_admin)],
+)
 
 
 # ── Pydantic schemas ─────────────────────────────────────────────────
@@ -738,33 +750,6 @@ async def get_openrouter_key_info(
     return OpenRouterKeyInfoResponse(**data)
 
 
-# ── Admin helpers ────────────────────────────────────────────────────
-
-
-def _is_admin(ctx: RequestContext) -> bool:
-    if not ctx.user:
-        return False
-    return getattr(ctx.user, "system_role", "user") == "admin"
-
-
-def _assert_admin(ctx: RequestContext, db: Session = None) -> None:
-    """Check admin access.  In single-tenant / bootstrap mode (≤2 active
-    workspaces) any authenticated user with a workspace is promoted so the
-    first user can access admin analytics before Clerk metadata is configured."""
-    if _is_admin(ctx):
-        return
-    # Bootstrap bypass — single-tenant or pilot mode
-    if db and ctx.workspace_id:
-        ws_count = (
-            db.query(func.count(Workspace.id))
-            .filter(Workspace.is_active.is_(True))
-            .scalar() or 0
-        )
-        if ws_count <= 2:
-            return
-    raise HTTPException(status_code=403, detail="Admin access required")
-
-
 # ── Admin Analytics schemas ──────────────────────────────────────────
 
 
@@ -804,9 +789,7 @@ async def get_admin_cost_analytics(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
-    """Platform-wide cost analytics across all workspaces (admin only)."""
-    _assert_admin(ctx, db)
-
+    """Platform-wide cost analytics across all workspaces (super-admin via the router-wide lock)."""
     delta = PERIOD_MAP.get(period, timedelta(days=30))
     since = datetime.utcnow() - delta
 
@@ -971,8 +954,6 @@ async def get_admin_dashboard(
     platform-wide model usage, daily cost by provider, top models,
     and BYOK cost split.  All in a single call.
     """
-    _assert_admin(ctx, db)
-
     delta = PERIOD_MAP.get(period, timedelta(days=30))
     since = datetime.utcnow() - delta
 

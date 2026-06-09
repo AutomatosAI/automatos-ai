@@ -21,9 +21,16 @@ import psutil
 import time
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
+from core.auth.super_admin import require_super_admin
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/system", tags=["statistics"])
+
+# PRD-143 S7: observability tier — router-wide super-admin lock (fail-closed).
+router = APIRouter(
+    prefix="/api/system",
+    tags=["statistics"],
+    dependencies=[Depends(require_super_admin)],
+)
 
 # Store system start time for uptime calculation
 SYSTEM_START_TIME = time.time()

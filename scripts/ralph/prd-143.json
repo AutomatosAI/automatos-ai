@@ -126,8 +126,8 @@
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": false,
-      "notes": "Candidate list errs broad by design — Gerard prunes at manifest sign-off (Open Q1). 13 routers total across S6+S7."
+      "passes": true,
+      "notes": "Candidate list errs broad by design — Gerard prunes at manifest sign-off (Open Q1). 13 routers total across S6+S7. DONE 2026-06-10: dependencies=[Depends(require_super_admin)] on llm_analytics (BOTH router+admin_router), memory_stats, statistics, composio_analytics, database_analytics, execution_history, kpi_api, reports. llm_analytics _is_admin/_assert_admin + bootstrap bypass DELETED (superseded — they tested system_role=='admin' and would have 403'd the super admin himself). Grep gate clean: zero internal HTTP consumers (main.py matches are an endpoint-index dict). Prefix collisions documented in the manifest: /api/v1/memory shared with api/memory.py (memory_stats mounted first — its shadowing routes incl. DELETE /{memory_id} now su-locked); /api/system shared with api/system.py (system.py mounted FIRST and unlocked — /api/system/metrics keeps serving users). Manifest router table appended (13 routers; parity regex only matches platform_* rows, verified). 36/36 story tests green (9 router objects parametrized, RED-first), 86 green across all 7 PRD-143 suites. Full-app import unrunnable in this venv (email-validator missing, pre-existing — same as S2-S6); relied on py_compile + story suite (mounts every locked router in a live FastAPI app)."
     },
     {
       "id": "S8",

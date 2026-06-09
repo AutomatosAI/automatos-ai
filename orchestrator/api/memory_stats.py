@@ -19,10 +19,16 @@ from core.database.database import get_db
 from modules.memory.storage.knowledge_system import MemoryItem
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
+from core.auth.super_admin import require_super_admin
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1/memory", tags=["Real Memory Stats"])
+# PRD-143 S7: observability tier — router-wide super-admin lock (fail-closed).
+router = APIRouter(
+    prefix="/api/v1/memory",
+    tags=["Real Memory Stats"],
+    dependencies=[Depends(require_super_admin)],
+)
 
 
 # ---------------------------------------------------------------------------

@@ -29,4 +29,49 @@ its own dial, never set it.
 
 ---
 
-*Locked obs/analytics HTTP routers (13) are appended by S6/S7.*
+## Locked obs/analytics HTTP routers (13)
+
+Router-wide `require_super_admin` (`orchestrator/core/auth/super_admin.py`) —
+every endpoint on these routers returns **403 "Super admin only"** for any
+principal that is not literally `system_role == 'super_admin'`, including
+workspace admins/owners and API keys (`system_role='admin'`). The dashboards
+backed by these routers 403 for non-super-admins — the ACCEPTED Rev 2
+consequence (PRD-143 Open Q4).
+
+### Batch 1 (S6)
+
+| Router | Prefix |
+|---|---|
+| `orchestrator/api/heartbeat.py` | `/api/heartbeat` |
+| `orchestrator/api/analytics.py` | `/analytics` |
+| `orchestrator/api/analytics_api.py` | `/api/analytics` |
+| `orchestrator/api/analytics_real.py` | `/api/analytics` |
+| `orchestrator/api/analytics_charts.py` | `/api/analytics/charts` |
+
+### Batch 2 (S7)
+
+| Router | Prefix |
+|---|---|
+| `orchestrator/api/llm_analytics.py` (`router` + `admin_router`) | `/api/analytics/llm`, `/api/admin/analytics` |
+| `orchestrator/api/memory_stats.py` | `/api/v1/memory` |
+| `orchestrator/api/statistics.py` | `/api/system` |
+| `orchestrator/api/composio_analytics.py` | `/api/analytics/composio` |
+| `orchestrator/api/database_analytics.py` | `/api/database/analytics` |
+| `orchestrator/api/execution_history.py` | `/api/execution-history` |
+| `orchestrator/api/kpi_api.py` | `/api/kpi` |
+| `orchestrator/api/reports.py` | `/api/reports` |
+
+Prefix-collision notes for sign-off (Open Q1):
+
+- `/api/v1/memory` is shared with `api/memory.py` (NOT locked). `memory_stats`
+  is mounted first (`main.py:975`), so its routes — including `GET /health`,
+  `POST /consolidate`, `DELETE /{memory_id}`, which shadow identical
+  `api/memory.py` routes — are now su-locked. The shadowing itself predates
+  this PRD; the lock changes who can reach the winning handler.
+- `/api/system` is shared with `api/system.py` (NOT locked, mounted first at
+  `main.py:974`). `api/system.py`'s routes (incl. `GET /metrics`) keep serving
+  all authenticated users; only `statistics.py`'s route set is locked.
+- `llm_analytics.py`'s scattered per-route admin checks (`_is_admin` /
+  `_assert_admin` + bootstrap bypass) were deleted — superseded by the
+  router-wide lock (they would otherwise 403 the super admin himself, since
+  they tested `system_role == 'admin'`).
