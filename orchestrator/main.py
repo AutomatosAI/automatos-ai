@@ -50,7 +50,6 @@ except ImportError:
 from api.documents import router as documents_router
 from api.cache import router as cache_router
 from api.system import router as system_router
-from api.context_engineering import router as context_engineering_router
 from api.memory import router as memory_router
 from api.widget_memory import router as widget_memory_router  # US-013: Widget memory panel
 from api.analytics import router as analytics_router
@@ -973,7 +972,6 @@ app.include_router(documents_router)
 app.include_router(blog_router)  # Authenticated blog management (Deliverables → Blogs)
 app.include_router(cache_router)  # Cache management and monitoring
 app.include_router(system_router)
-app.include_router(context_engineering_router)
 app.include_router(memory_stats_router)  # PRD-77: Must be BEFORE memory_router (has /browse, /health, /stats/real specific routes that would otherwise be caught by memory_router's /{memory_id} catch-all)
 app.include_router(memory_router)
 app.include_router(widget_memory_router)  # US-013: Widget memory panel (/api/memory)
@@ -1426,11 +1424,6 @@ async def root():
                 "base_url": "/api/documents",
                 "description": "Document processing and analysis",
                 "features": ["RAG integration", "Document analysis", "Knowledge extraction", "Multi-format support"]
-            },
-            "🧠 context_engineering": {
-                "base_url": "/api/context-engineering",
-                "description": "Mathematical foundations for intelligent processing",
-                "features": ["Information theory", "Vector operations", "Statistical analysis", "Optimization algorithms"]
             },
             "📊 evaluation": {
                 "base_url": "/api/evaluation",
