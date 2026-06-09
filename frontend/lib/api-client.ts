@@ -2138,52 +2138,6 @@ class ApiClient {
     return this.request('/api/openrouter/sync', { method: 'POST' })
   }
 
-  // ===== CHATBOT ENDPOINTS =====
-  async sendChatbotQuery(params: {
-    query: string
-    context?: any
-    sessionId?: string
-    provider?: string
-    model?: string
-  }) {
-    const payload: Record<string, any> = {
-      query: params.query,
-      context: params.context,
-      session_id: params.sessionId,
-      provider: params.provider,
-      model: params.model
-    }
-
-    Object.keys(payload).forEach((key) => {
-      if (payload[key] === undefined || payload[key] === null) {
-        delete payload[key]
-      }
-    })
-
-    return this.request('/api/chatbot/query', {
-      method: 'POST',
-      body: JSON.stringify(payload)
-    })
-  }
-
-  async executeChatbotAction(data: any) {
-    return this.request('/api/chatbot/execute', {
-      method: 'POST',
-      body: JSON.stringify(data)
-    })
-  }
-
-  async getChatbotHistory(sessionId: string) {
-    return this.request(`/api/chatbot/history/${sessionId}`)
-  }
-
-  async sendChatbotFeedback(data: any) {
-    return this.request('/api/chatbot/feedback', {
-      method: 'POST',
-      body: JSON.stringify(data)
-    })
-  }
-
   // ===== LEGACY METHODS (for backward compatibility) =====
   // These methods now properly throw errors so mock fallback system handles them
   async getSystemActivities(limit = 10) {

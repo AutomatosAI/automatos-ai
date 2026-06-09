@@ -164,7 +164,6 @@ from api.recommendations import router as recommendations_router
 from api.solutions import router as solutions_router
 from api.synthesis import router as synthesis_router
 # WebSocket removed - using AI SDK SSE streaming instead
-from api.chatbot_llm import router as chatbot_router
 from api.chat import router as chat_router  # PRD-27: New streaming chat with history
 # document_processing removed - use api/documents.py instead
 from api.agent_endpoints import router as agent_endpoints_router
@@ -1022,7 +1021,6 @@ app.include_router(recommendations_router)
 app.include_router(solutions_router)
 app.include_router(synthesis_router)
 # WebSocket routers removed - using AI SDK SSE streaming
-app.include_router(chatbot_router)  # Legacy chatbot endpoint (kept for backward compatibility)
 app.include_router(chat_router)  # PRD-27: New streaming chat with SSE, history, and artifacts
 # document_processing_router removed - api/documents.py handles all document processing
 app.include_router(agent_endpoints_router)
