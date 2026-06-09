@@ -115,8 +115,8 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
-      "notes": "WS-R. The cross-link that makes HARNESS learn from the live tool-routing loop. Uses the EXISTING tool_assignment_remove vocabulary — no new change_type."
+      "passes": true,
+      "notes": "DONE 2026-06-09 (guarded) — DIAGNOSE reads tool-routing fails_for_intent (_diagnose_tool_failures, sustained = sample_count>=5) and surfaces a tool_failure issue (learning-only, workspace-scoped, best-effort/never-raises). PRESCRIBE (_prescribe_tool_removals) turns it into a QUEUED (risk 3, human-reviewed) tool_assignment_remove — but ONLY when the action cleanly maps to a Composio app (_derive_app_name); the hot path often records the composio_execute meta-tool, so a fuzzy signal never auto-yanks a tool. Existing vocab, no new change_type. tests/test_harness_tool_failure_signal.py."
     },
     {
       "id": "W4-S11",

@@ -44,6 +44,9 @@ _HIGH_PRIORITY_RISK = 4
 # description). The apply layer MUST refuse it: writing it literally would set an
 # agent's model/description to the string "review_needed".
 _PLACEHOLDER_PROPOSED_VALUE = "review_needed"
+# W4-S10: a fails_for_intent affinity must reach this many samples before HARNESS
+# treats it as a *sustained* tool failure worth surfacing (not a one-off).
+_TOOL_FAILURE_MIN_SAMPLES = 5
 
 # Convergence thresholds
 _CONVERGED_DELTA = 2.0
@@ -567,6 +570,10 @@ class HarnessService:
                 self._detect_auto_applied_regressions(baseline, health_cards)
             )
 
+        # W4-S10: surface sustained tool failures from the tool-routing learning
+        # graph (fails_for_intent) as inefficiency issues HARNESS can act on.
+        issues.extend(self._diagnose_tool_failures(workspace_id, db, agents_data))
+
         # Org-level diagnosis
         org_diagnosis = self._compute_org_diagnosis(metrics, baseline)
 
@@ -583,6 +590,100 @@ class HarnessService:
             len(health_cards), len(issues), total_delta_magnitude, is_first_run,
         )
         return diagnosis
+
+    @staticmethod
+    def _derive_app_name(action_name: str) -> Optional[str]:
+        """Best-effort map a recorded action_name to a removable Composio app.
+
+        Composio app actions are uppercase APP_ACTION (e.g. 'GMAIL_SEND_EMAIL' ->
+        'GMAIL'). Returns None for meta-tools / platform_* / workspace_* tools,
+        whose failures are surfaced as a diagnosis but never auto-proposed for
+        removal — the assignment they map to is ambiguous (the tool hot path often
+        records the 'composio_execute' meta-tool, not the specific app action).
+        """
+        if not action_name or "_" not in action_name or not action_name.isupper():
+            return None
+        return action_name.split("_", 1)[0]
+
+    def _diagnose_tool_failures(
+        self, workspace_id: UUID, db: "Session", agents_data: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Surface SUSTAINED tool failures from the tool-routing learning graph
+        (PRD-138/139 fails_for_intent) as inefficiency issues HARNESS can act on
+        (W4-S10 — the learning cross-link). Learning-only: reads ONLY
+        tool_routing_affinities, never a business entity. Workspace-scoped.
+        Best-effort — never raises (telemetry must not break the weekly tick)."""
+        issues: List[Dict[str, Any]] = []
+        try:
+            from core.models.tool_routing import ToolRoutingAffinity
+
+            name_by_id = {str(a.get("id")): a.get("name", "unknown") for a in agents_data}
+            rows = (
+                db.query(ToolRoutingAffinity)
+                .filter(
+                    ToolRoutingAffinity.affinity_type == "fails_for_intent",
+                    ToolRoutingAffinity.workspace_id == workspace_id,
+                    ToolRoutingAffinity.agent_id.isnot(None),
+                    ToolRoutingAffinity.sample_count >= _TOOL_FAILURE_MIN_SAMPLES,
+                )
+                .all()
+            )
+            for row in rows:
+                issues.append({
+                    "agent_id": str(row.agent_id),
+                    "agent_name": name_by_id.get(str(row.agent_id), "unknown"),
+                    "root_cause": "tool_failure",
+                    "severity": "medium",
+                    "detail": (
+                        f"tool '{row.action_name}' failed {row.sample_count}x for this agent "
+                        f"(tool-routing fails_for_intent)"
+                    ),
+                    "tool_failure_spec": {
+                        "agent_id": row.agent_id,
+                        "action_name": row.action_name,
+                        "app_name": self._derive_app_name(row.action_name),
+                        "sample_count": row.sample_count,
+                    },
+                })
+        except Exception as exc:
+            logger.warning("[HARNESS] tool-failure diagnosis skipped: %s", exc)
+        return issues
+
+    def _prescribe_tool_removals(
+        self, issues, rejected_signatures, today, start_seq
+    ):
+        """Turn tool_failure issues (W4-S10) into QUEUED (risk 3, human-reviewed)
+        tool_assignment_remove prescriptions — only when the failing action cleanly
+        maps to a removable Composio app. Removing a tool is consequential, so it is
+        never auto-applied (risk 3 = queued, not <= _AUTO_APPLY_MAX_RISK); when the
+        action has no clean app mapping the issue is surfaced in the diagnosis but
+        no removal is proposed. Returns (prescriptions, next_seq)."""
+        out: List[Dict[str, Any]] = []
+        seq = start_seq
+        for issue in issues:
+            if issue.get("root_cause") != "tool_failure":
+                continue
+            spec = issue.get("tool_failure_spec") or {}
+            app_name = spec.get("app_name")
+            if not app_name or spec.get("agent_id") is None:
+                continue  # surfaced as a diagnosis, but not a clean removable assignment
+            sig = f"tool_remove:{issue.get('agent_name')}:{app_name}"
+            if sig in rejected_signatures:
+                continue
+            seq += 1
+            out.append({
+                "prescription_id": f"rx-{today}-{seq:03d}",
+                "target_type": "agent",
+                "target_id": spec.get("agent_id"),
+                "target_name": issue.get("agent_name", "unknown"),
+                "change_type": "tool_assignment_remove",
+                "current_value": {"app_name": app_name},
+                "proposed_value": {"app_name": app_name},
+                "risk_score": 3,
+                "expected_improvement": f"Stop assigning '{app_name}' — it keeps failing for this agent",
+                "rationale": issue.get("detail", "Sustained tool failure from the tool-routing graph."),
+            })
+        return out, seq
 
     # ------------------------------------------------------------------
     # Phase 3: PRESCRIBE
@@ -728,6 +829,14 @@ class HarnessService:
                     "detail", "Auto-applied change regressed; reverting to prior value."
                 ),
             })
+
+        # W4-S10: sustained tool failures (from the tool-routing graph) become
+        # QUEUED tool_assignment_remove prescriptions — human-reviewed (risk 3),
+        # never auto-applied, and only when the action cleanly maps to an app.
+        tool_rxs, seq = self._prescribe_tool_removals(
+            diagnosis.get("issues", []), rejected_signatures, today, seq
+        )
+        prescriptions.extend(tool_rxs)
 
         # Sort: risk ascending, then by prescription_id
         prescriptions.sort(key=lambda p: (p["risk_score"], p["prescription_id"]))
