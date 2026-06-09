@@ -282,7 +282,6 @@ async def stream_chat(
     # (system_settings.orchestrator_llm.*) instead of the agent's model_config.
     use_orchestrator_llm = False
     complexity_assessment = None
-    _use_workflow_bridge = False  # PRD-68: DEPRECATED — kept for safety net only
     _suggest_mission = False     # PRD-125: True when ORGAN/ORGANISM → suggest mission
 
     # Every workspace has its own Auto agent — the model, persona, and tools

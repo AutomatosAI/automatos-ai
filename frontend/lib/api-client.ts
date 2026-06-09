@@ -2226,11 +2226,6 @@ class ApiClient {
     return this.updateSystemConfig(data)
   }
 
-
-  async sendChatMessage(message: string, context?: any) {
-    return this.sendChatbotQuery({ query: message, context })
-  }
-
   async testChat() {
     return this.testSystemRoute()
   }

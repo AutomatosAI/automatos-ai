@@ -2,7 +2,7 @@
 Agents Module
 =============
 
-Agent lifecycle, execution, registry, and communication.
+Agent lifecycle, factory, registry, and communication.
 
 Usage:
     from modules.agents import AgentService, AgentFactory, AgentRegistry
