@@ -125,6 +125,10 @@ from modules.tools.discovery.handlers_auto_reporting import (
     send_notification,
 )
 from modules.tools.discovery.handlers_notifications import notify_owner
+from modules.tools.discovery.handlers_autonomy import (
+    get_autonomy_level as handle_get_autonomy_level,
+    set_autonomy_level as handle_set_autonomy_level,
+)
 from modules.tools.discovery.handlers_assignments import (
     assign_tool_to_agent,
     assign_skill_to_agent,
@@ -330,6 +334,9 @@ class PlatformActionExecutor:
             "platform_unassign_tool_from_agent": unassign_tool_from_agent,
             # Owner escalation channel
             "platform_notify_owner": notify_owner,
+            # Full-autonomy dial (per-workspace setting)
+            "platform_get_autonomy_level": handle_get_autonomy_level,
+            "platform_set_autonomy_level": handle_set_autonomy_level,
             # PRD-76: Agent Reports
             "platform_submit_report": submit_report,
             "platform_get_latest_report": get_latest_report,
@@ -441,6 +448,26 @@ class PlatformActionExecutor:
             )
             return False
 
+    def _full_autonomy(self) -> bool:
+        """True when this workspace is dialled to full autonomy.
+
+        Reads ``workspace.settings.autonomy`` via the canonical service.
+        Fail-safe: any error returns False (supervised), never True — the
+        dial fails to the gated behaviour, never past it.
+        """
+        try:
+            from core.services.auto_autonomy import is_full_autonomy
+
+            return is_full_autonomy(self.db, self.workspace_id)
+        except Exception:
+            logger.warning(
+                "[PlatformExecutor] autonomy-level lookup failed for %s — "
+                "defaulting to standard (supervised)",
+                self.workspace_id,
+                exc_info=True,
+            )
+            return False
+
     async def execute(
         self,
         action_name: str,
@@ -471,10 +498,17 @@ class PlatformActionExecutor:
             from modules.tools.discovery import get_action_registry
             action_def = get_action_registry().get(action_name)
 
+            # Full-autonomy dial (per-workspace setting). When on: Auto is
+            # treated as admin and the confirmation gate is skipped. Everything
+            # else (hierarchy check, rate limits, destructive backstop) stands.
+            full_autonomy = self._full_autonomy()
+
             # US-003: Admin gate — deny admin_only actions for non-admin callers
             if action_def and action_def.admin_only:
-                is_admin = False
-                if caller_context is not None:
+                if full_autonomy:
+                    # Workspace dialled to full autonomy — Auto runs as admin.
+                    is_admin = True
+                elif caller_context is not None:
                     # Explicit caller identity — check roles directly.
                     # A dict with no role keys means "known non-admin user".
                     is_admin = (
@@ -502,7 +536,7 @@ class PlatformActionExecutor:
                         ),
                     }
 
-            if action_def and action_def.requires_confirmation:
+            if action_def and action_def.requires_confirmation and not full_autonomy:
                 return {
                     "success": False,
                     "requires_confirmation": True,

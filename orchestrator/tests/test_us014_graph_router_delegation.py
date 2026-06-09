@@ -5,9 +5,10 @@ PRD-141 US-014: SmartToolRouter delegates ranking to GraphRouter.
 The chatbot tool router no longer carries its own embedding path. When
 ``SEMANTIC_TOOL_ROUTING`` is on, ``route()`` delegates ranking to
 ``GraphRouter.rank_chains`` (the single tool-selection pipeline) and filters
-``available_tools`` to the ranked names, always preserving CORE_TOOLS /
-ALWAYS_INCLUDE / the classifier's suggested tools. On GraphRouter failure it
-records a structured ``routing`` error and falls back to category filtering.
+``available_tools`` to the ranked names, always preserving CORE_TOOLS / the
+always-include pins (signal + core-platform + registry-``promoted``) / the
+classifier's suggested tools. On GraphRouter failure it records a structured
+``routing`` error and falls back to category filtering.
 
 ``consumers.chatbot.__init__`` eagerly imports the DB-backed chat service, so
 we leaf-load ``intent_classifier`` + ``smart_tool_router`` under a synthetic
@@ -163,7 +164,7 @@ async def test_smart_router_delegates_to_graph_router(graph_env):
         _tool("platform_get_system_health"),         # ranked
         _tool("platform_browse_marketplace_agents"),  # ranked
         _tool("search_knowledge"),                    # CORE_TOOLS — preserved
-        _tool("platform_list_agents"),                # ALWAYS_INCLUDE — preserved
+        _tool("platform_list_agents"),                # core platform pin — preserved
         _tool("totally_unrelated_tool"),              # dropped
     ]
 
@@ -181,16 +182,31 @@ async def test_smart_router_delegates_to_graph_router(graph_env):
 
 
 @pytest.mark.asyncio
-async def test_always_include_tools_present(graph_env):
-    """Every ALWAYS_INCLUDE tool survives graph filtering even when unranked."""
+async def test_always_include_tools_present(graph_env, monkeypatch):
+    """Static pins + every registry-promoted action survive graph filtering.
+
+    A tool marked ``promoted=True`` (e.g. the full-autonomy dial
+    ``platform_set_autonomy_level``, whose ``settings`` category is unmapped)
+    must reach the LLM even though GraphRouter never ranks it.
+    """
     async def ok_rank(query, agent_id=None, top_k=15, **kw):
         return [("platform_get_system_health", 0.9, ["platform_get_system_health"])]
 
     graph_env["install_rank_chains"](ok_rank)
 
+    # Fake registry: one promoted action (the autonomy dial) must surface via
+    # _always_include_names() with no router edit.
+    fake_reg = SimpleNamespace(
+        get_promoted=lambda: [SimpleNamespace(name="platform_set_autonomy_level")]
+    )
+    fake_reg_mod = types.ModuleType("modules.tools.discovery.action_registry")
+    fake_reg_mod.get_action_registry = lambda: fake_reg
+    monkeypatch.setitem(sys.modules, "modules.tools.discovery.action_registry", fake_reg_mod)
+
     r = SmartToolRouter()
     r.classifier = _FakeClassifier(_intent_result(suggested=[]))
-    always = sorted(SmartToolRouter.ALWAYS_INCLUDE)
+    always = sorted(r._always_include_names())
+    assert "platform_set_autonomy_level" in always  # promoted action surfaced
     tools = [_tool("platform_get_system_health"), _tool("totally_unrelated_tool")]
     tools += [_tool(n) for n in always]
 
@@ -198,8 +214,9 @@ async def test_always_include_tools_present(graph_env):
 
     names = {t["function"]["name"] for t in result.filtered_tools}
     for n in always:
-        assert n in names, f"ALWAYS_INCLUDE tool {n} dropped"
+        assert n in names, f"always-include tool {n} dropped"
     assert "platform_get_system_health" in names
+    assert "totally_unrelated_tool" not in names
 
 
 @pytest.mark.asyncio
