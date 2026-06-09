@@ -35,9 +35,9 @@ _CRON_EXPRESSION = {"day_of_week": "sun", "hour": 2, "minute": 0}  # Sunday 2AM 
 _MIN_AGENTS = 3
 _MIN_DATA_DAYS = 7
 
-# Risk thresholds
-_AUTO_APPLY_MAX_RISK = 2
-_HIGH_PRIORITY_RISK = 4
+# Risk thresholds live in config (Railway-overridable env vars), read at use:
+#   HARNESS_AUTO_APPLY_MAX_RISK_STANDARD / _FULL — auto-apply ceilings (§12.3)
+#   HARNESS_HIGH_PRIORITY_RISK — escalation / high-priority threshold
 
 # Sentinel proposed_value meaning "a human must supply the real value" — emitted
 # by _phase_prescribe for changes it can detect but not safely decide (model,
@@ -292,6 +292,8 @@ class HarnessService:
             ws = db.query(WsModel).get(workspace_id)
             ws_settings = ws.settings if ws else None
             allow_auto = self._workspace_allows_auto_apply(ws_settings)
+            # §12.3: full-autonomy workspaces get the higher auto-apply risk ceiling.
+            max_risk = self._auto_apply_max_risk(db, workspace_id)
 
             # ----- 5-phase pipeline -----
             # Commit before each phase so the connection is not idle-in-
@@ -307,7 +309,10 @@ class HarnessService:
             end_open_transaction(db)
             prescriptions = await self._phase_prescribe(workspace_id, diagnosis, metrics, db)
             end_open_transaction(db)
-            changelog = await self._phase_apply(workspace_id, prescriptions, db, allow_auto_apply=allow_auto)
+            changelog = await self._phase_apply(
+                workspace_id, prescriptions, db,
+                allow_auto_apply=allow_auto, max_risk=max_risk,
+            )
             end_open_transaction(db)
             baseline, artifacts = await self._phase_baseline(
                 workspace_id, metrics, diagnosis, prescriptions, changelog, db,
@@ -381,6 +386,32 @@ class HarnessService:
             return True
         harness = workspace_settings.get("orchestrator", {}).get("harness", {})
         return harness.get("mode", "full_auto") == "full_auto"
+
+    @staticmethod
+    def _auto_apply_max_risk(db: "Session", workspace_id: UUID) -> int:
+        """§12.3: the auto-apply risk ceiling for this workspace.
+
+        Workspaces running at autonomy=full get the higher ``_FULL`` ceiling;
+        everyone else gets ``_STANDARD``. Both are Railway-overridable config
+        (HARNESS_AUTO_APPLY_MAX_RISK_*). The level is read via auto_autonomy, which
+        fails safe to standard on a missing/corrupt setting — and a failed read
+        (DB error mid-tick) fails safe here too, so a lookup problem can only
+        NARROW the ceiling, never widen it, and never aborts the tick.
+        """
+        from config import config
+        from core.services.auto_autonomy import is_full_autonomy
+
+        try:
+            full = is_full_autonomy(db, workspace_id)
+        except Exception:
+            logger.warning(
+                "[HARNESS] autonomy lookup failed for %s — using standard ceiling",
+                workspace_id, exc_info=True,
+            )
+            full = False
+        if full:
+            return config.HARNESS_AUTO_APPLY_MAX_RISK_FULL
+        return config.HARNESS_AUTO_APPLY_MAX_RISK_STANDARD
 
     # ------------------------------------------------------------------
     # Dormancy check
@@ -659,12 +690,13 @@ class HarnessService:
     def _prescribe_tool_removals(
         self, issues, rejected_signatures, today, start_seq
     ):
-        """Turn tool_failure issues (W4-S10) into QUEUED (risk 3, human-reviewed)
-        tool_assignment_remove prescriptions — only when the failing action cleanly
-        maps to a removable Composio app. Removing a tool is consequential, so it is
-        never auto-applied (risk 3 = queued, not <= _AUTO_APPLY_MAX_RISK); when the
-        action has no clean app mapping the issue is surfaced in the diagnosis but
-        no removal is proposed. Returns (prescriptions, next_seq)."""
+        """Turn tool_failure issues (W4-S10) into risk-3 tool_assignment_remove
+        prescriptions — only when the failing action cleanly maps to a removable
+        Composio app. Removing a tool is consequential: at standard autonomy it is
+        queued for human review (risk 3 > the standard auto-apply ceiling); at full
+        autonomy the ceiling rises to 3 (§12.3) so it auto-applies. When the action
+        has no clean app mapping the issue is surfaced in the diagnosis but no
+        removal is proposed. Returns (prescriptions, next_seq)."""
         out: List[Dict[str, Any]] = []
         seq = start_seq
         for issue in issues:
@@ -861,12 +893,19 @@ class HarnessService:
         prescriptions: List[Dict[str, Any]],
         db: "Session",
         allow_auto_apply: bool = True,
+        max_risk: Optional[int] = None,
     ) -> Dict[str, Any]:
-        """Execute safe changes (risk ≤ 2), queue risky ones as board tasks.
+        """Execute safe changes (risk <= the workspace ceiling), queue risky ones.
 
-        When allow_auto_apply is False (manual mode), ALL prescriptions are
-        queued as board tasks regardless of risk score.
+        ``max_risk`` is this workspace's auto-apply ceiling (§12.3 — higher at
+        autonomy=full); it defaults to the standard ceiling when a direct caller
+        omits it. When allow_auto_apply is False (manual mode), ALL prescriptions
+        are queued as board tasks regardless of risk score.
         """
+        from config import config
+        if max_risk is None:
+            max_risk = config.HARNESS_AUTO_APPLY_MAX_RISK_STANDARD
+        high_priority_risk = config.HARNESS_HIGH_PRIORITY_RISK
         logger.info(
             "[HARNESS] Phase 4 APPLY — workspace %s (auto_apply=%s)",
             workspace_id, allow_auto_apply,
@@ -893,7 +932,7 @@ class HarnessService:
             target_name = rx.get("target_name", "unknown")
             change_type = rx.get("change_type", "unknown")
 
-            if allow_auto_apply and risk <= _AUTO_APPLY_MAX_RISK:
+            if allow_auto_apply and risk <= max_risk:
                 # Auto-apply
                 result = await self._auto_apply_prescription(executor, rx)
                 if result.get("success"):
@@ -916,7 +955,7 @@ class HarnessService:
                     })
             else:
                 # Queue as board task
-                priority = "high" if risk >= _HIGH_PRIORITY_RISK else "medium"
+                priority = "high" if risk >= high_priority_risk else "medium"
                 try:
                     task_result = await executor.execute("platform_create_task", {
                         "title": f"[HARNESS] {change_type} for {target_name}",
@@ -968,14 +1007,16 @@ class HarnessService:
     ) -> None:
         """Notify a human to approve/reject a high-risk queued prescription.
 
-        Only fires for risk >= _HIGH_PRIORITY_RISK, and only when the workspace
-        has a connected channel — otherwise there is nobody to notify and the
+        Only fires for risk >= the escalation threshold (config
+        HARNESS_HIGH_PRIORITY_RISK), and only when the workspace has a connected
+        channel — otherwise there is nobody to notify and the
         board task already stands for in-app review (so we skip silently rather
         than record a phantom escalation). Records an 'escalated' changelog
         entry with whether delivery actually succeeded. Never raises.
         """
+        from config import config
         risk = rx.get("risk_score", 5)
-        if risk < _HIGH_PRIORITY_RISK:
+        if risk < config.HARNESS_HIGH_PRIORITY_RISK:
             return
         if not self._workspace_has_channel(db, workspace_id):
             return
