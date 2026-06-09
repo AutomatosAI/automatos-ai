@@ -294,26 +294,5 @@ class IntentClassificationCache(Base):
         }
 
 
-class ToolExecutionCache(Base):
-    """Cache tool execution results to avoid repeated calls.
-
-    Mirrors the `tool_execution_cache` table created in redesign schema v2.
-    """
-
-    __tablename__ = "tool_execution_cache"
-    __table_args__ = {"extend_existing": True}
-
-    id = Column(Integer, primary_key=True)
-    agent_id = Column(Integer, nullable=False, index=True)
-    app_name = Column(String(100), nullable=False)
-    action_name = Column(String(255), nullable=False)
-    query_text = Column(Text, nullable=False)
-
-    input_parameters = Column(JSONB)
-    cached_result = Column(JSONB, nullable=False)
-    cache_key = Column(String(255), index=True)
-
-    cached_at = Column(DateTime, default=datetime.utcnow)
-    expires_at = Column(DateTime)
-    hit_count = Column(Integer, default=0)
-    last_hit_at = Column(DateTime)
+# PRD-142 Wave 5 (WS-AA): ToolExecutionCache was verified dead and removed;
+# its table is dropped by alembic/versions/prd142_wave5_drop_dead_tables.py.

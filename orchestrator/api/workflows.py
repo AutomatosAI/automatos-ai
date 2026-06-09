@@ -1482,21 +1482,6 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
     return
 
 
-@router.get("/executions/{execution_id}/results")
-async def get_execution_results_files(execution_id: int, db: Session = Depends(get_db)):
-    """Legacy endpoint — filesystem workspaces removed (PRD-125)."""
-    raise HTTPException(status_code=410, detail="Workflow filesystem results removed. Use mission outputs instead.")
-
-@router.get("/executions/{execution_id}/results/{file_path:path}")
-async def download_execution_result_file(execution_id: int, file_path: str, db: Session = Depends(get_db)):
-    """Legacy endpoint — filesystem workspaces removed (PRD-125)."""
-    raise HTTPException(status_code=410, detail="Workflow filesystem results removed. Use mission outputs instead.")
-
-# PRD-125: Kept endpoint stubs returning 410 Gone so existing frontend
-# links don't 404 silently. Safe to fully remove once Phase 3c (frontend
-# cleanup) drops the execution result UI components.
-_LEGACY_RESULT_ENDPOINTS_REMOVED = True  # grep marker for Phase 3c
-
 @router.get("/templates/recommended")
 async def get_recommended_workflow_templates(db: Session = Depends(get_db)):
     """Get recommended workflow templates based on system usage"""

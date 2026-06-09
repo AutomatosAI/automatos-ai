@@ -50,7 +50,6 @@ except ImportError:
 from api.documents import router as documents_router
 from api.cache import router as cache_router
 from api.system import router as system_router
-from api.context_engineering import router as context_engineering_router
 from api.memory import router as memory_router
 from api.widget_memory import router as widget_memory_router  # US-013: Widget memory panel
 from api.analytics import router as analytics_router
@@ -153,16 +152,12 @@ from api.analytics_api import router as analytics_api_router
 from api.analytics_real import router as analytics_real_router
 from api.harness import router as harness_router  # PRD-142 Wave 4: HARNESS approve/reject (W4-S1)
 from api.kpi_api import router as kpi_router  # KPI Command Centre Widgets
-from api.insights import router as insights_router
 from api.knowledge import router as knowledge_router
 from api.knowledge_multimodal import router as knowledge_multimodal_router
 from api.knowledge_graph import router as knowledge_graph_router
 from api.learning import router as learning_router
-from api.problems import router as problems_router
 from api.query import router as query_router
 from api.recommendations import router as recommendations_router
-from api.solutions import router as solutions_router
-from api.synthesis import router as synthesis_router
 # WebSocket removed - using AI SDK SSE streaming instead
 from api.chat import router as chat_router  # PRD-27: New streaming chat with history
 # document_processing removed - use api/documents.py instead
@@ -977,7 +972,6 @@ app.include_router(documents_router)
 app.include_router(blog_router)  # Authenticated blog management (Deliverables → Blogs)
 app.include_router(cache_router)  # Cache management and monitoring
 app.include_router(system_router)
-app.include_router(context_engineering_router)
 app.include_router(memory_stats_router)  # PRD-77: Must be BEFORE memory_router (has /browse, /health, /stats/real specific routes that would otherwise be caught by memory_router's /{memory_id} catch-all)
 app.include_router(memory_router)
 app.include_router(widget_memory_router)  # US-013: Widget memory panel (/api/memory)
@@ -1010,16 +1004,12 @@ app.include_router(analytics_api_router)
 app.include_router(analytics_real_router)
 app.include_router(harness_router)  # PRD-142 Wave 4: HARNESS approve/reject (W4-S1)
 app.include_router(kpi_router)  # KPI Command Centre Widgets
-app.include_router(insights_router)
 app.include_router(knowledge_router)
 app.include_router(knowledge_multimodal_router)
 app.include_router(knowledge_graph_router)
 app.include_router(learning_router)
-app.include_router(problems_router)
 app.include_router(query_router)
 app.include_router(recommendations_router)
-app.include_router(solutions_router)
-app.include_router(synthesis_router)
 # WebSocket routers removed - using AI SDK SSE streaming
 app.include_router(chat_router)  # PRD-27: New streaming chat with SSE, history, and artifacts
 # document_processing_router removed - api/documents.py handles all document processing
@@ -1434,11 +1424,6 @@ async def root():
                 "base_url": "/api/documents",
                 "description": "Document processing and analysis",
                 "features": ["RAG integration", "Document analysis", "Knowledge extraction", "Multi-format support"]
-            },
-            "🧠 context_engineering": {
-                "base_url": "/api/context-engineering",
-                "description": "Mathematical foundations for intelligent processing",
-                "features": ["Information theory", "Vector operations", "Statistical analysis", "Optimization algorithms"]
             },
             "📊 evaluation": {
                 "base_url": "/api/evaluation",
