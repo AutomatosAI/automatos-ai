@@ -5,7 +5,7 @@ import {
   Settings2, RotateCcw, GripVertical, Eye, EyeOff,
   Play, PieChart as PieChartIcon, Calendar, BarChart3,
   Activity, Layers, FileText, Users,
-  DollarSign, TrendingUp, BookOpen, ShieldCheck, AlertTriangle,
+  DollarSign, TrendingUp, BookOpen, ShieldCheck, AlertTriangle, Brain,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -22,6 +22,7 @@ import { AgentPerformanceWidget } from './agent-performance-widget'
 import { PlaybookMetricsWidget } from './playbook-metrics-widget'
 import { ApprovalGatesWidget } from './approval-gates-widget'
 import { DecisionsNeededWidget } from './decisions-needed-widget'
+import { SelfLearningHealthWidget } from './self-learning-health-widget'
 import { cn } from '@/lib/utils'
 
 // ── Widget Registry ─────────────────────────────────────────
@@ -66,6 +67,8 @@ const WIDGET_REGISTRY: WidgetDef[] = [
   { id: 'playbook-metrics',    label: 'Playbook Metrics',    icon: <BookOpen className="w-3.5 h-3.5" />,      defaultVisible: true,  size: 'half',  height: 'min-h-[280px]' },
   // Pending approval rows often have long mission titles — full row.
   { id: 'approval-gates',      label: 'Approval Gates',      icon: <ShieldCheck className="w-3.5 h-3.5" />,   defaultVisible: true,  size: 'full',  height: 'min-h-[280px]' },
+  // PRD-142 Wave 4 (W4-S16): "is self-learning working right now?" — HARNESS loop, tool-routing signals, prescriptions.
+  { id: 'self-learning',       label: 'Self-Learning',       icon: <Brain className="w-3.5 h-3.5" />,         defaultVisible: true,  size: 'half',  height: 'min-h-[320px]' },
 ]
 
 const ALL_IDS = WIDGET_REGISTRY.map((w) => w.id)
@@ -262,6 +265,8 @@ export function CommandCentreDashboard({ period, onViewAllActivity, onViewCalend
         return <ApprovalGatesWidget period={period} />
       case 'decisions-needed':
         return <DecisionsNeededWidget />
+      case 'self-learning':
+        return <SelfLearningHealthWidget />
       default:
         return null
     }

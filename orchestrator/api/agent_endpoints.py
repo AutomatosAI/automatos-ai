@@ -803,7 +803,7 @@ async def switch_agent_model(
             "provider": new_model.provider,
             "model_id": new_model_id,
             "temperature": request.get("temperature", new_model.default_temperature),
-            "max_tokens": request.get("max_tokens", min(2000, new_model.max_output_tokens)),
+            "max_tokens": request.get("max_tokens", new_model.max_output_tokens),
             "top_p": current_config.get("top_p", 1.0),
             "frequency_penalty": current_config.get("frequency_penalty", 0.0),
             "presence_penalty": current_config.get("presence_penalty", 0.0),

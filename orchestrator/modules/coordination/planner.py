@@ -27,6 +27,7 @@ from core.llm import create_llm_manager
 from core.models.core import Agent
 from core.utils.exception_telemetry import record_error
 from core.models.orchestration_enums import ComplexityTier, TaskType
+from modules.coordination.agent_matcher import CANONICAL_ROLES, _compute_skill_match
 from modules.coordination.templates import match_template, render_template
 from services.orchestration_deps import (
     CyclicDependencyError,
@@ -684,7 +685,9 @@ name (e.g. "research", "analysis"). Tasks in the same parallel_group MUST NOT \
 depend on each other.
 - After parallel groups converge, include a "synthesis" task (task_type="synthesis") \
 that merges and integrates the outputs of the parallel tasks.
-- Every task must specify an agent_role matching one of the available agents.
+- Every task must specify an agent_role naming the CAPABILITY it needs (e.g. \
+researcher, writer, analyst, summarizer) — NOT a specific agent's name. The \
+platform routes each capability to the best-fit agent.
 - The plan MUST contain between 3 and 20 tasks inclusive.
 - Return ONLY a single JSON object (no markdown, no explanation).
 """
@@ -853,7 +856,9 @@ Rules:
 Tasks in the same parallel_group MUST NOT depend on each other.
 - After parallel groups converge, include a "synthesis" task (task_type="synthesis") \
 that merges the parallel outputs.
-- Every task must specify an agent_role matching one of the available agents.
+- Every task must specify an agent_role naming the CAPABILITY it needs (e.g. \
+researcher, writer, analyst, summarizer) — NOT a specific agent's name. The \
+platform routes each capability to the best-fit agent.
 - The plan MUST contain between 3 and 20 tasks inclusive.
 - Return ONLY a single JSON object (no markdown, no explanation).
 """
@@ -904,8 +909,36 @@ def _build_replan_prompt(
     return "\n".join(parts)
 
 
+# A capability role is "fillable" when at least one active agent has a
+# non-trivial skill/description/tag match for it. Below this floor the matcher
+# would return NO_AGENT_AVAILABLE at dispatch, so the plan is rejected up front
+# rather than failing a task at runtime.
+_ROLE_FILLABILITY_FLOOR = 0.3
+
+
+def _best_role_fit(role: str, agents: Sequence[Agent]) -> float:
+    """Highest capability fit any *active* agent has for ``role`` (0.0 = none)."""
+    role_lower = (role or "").lower()
+    return max(
+        (
+            _compute_skill_match(a, role_lower)
+            for a in agents
+            if getattr(a, "status", None) == "active"
+        ),
+        default=0.0,
+    )
+
+
 def _render_agent_roster(agents: Sequence[Agent]) -> str:
-    """Render available agents as a concise description for the planner prompt."""
+    """Render available agents by CAPABILITY for the planner prompt.
+
+    Agents are listed by what they can do (skills, focus, tags) so the planner
+    understands the roster's coverage — but never as a ``role: <name>`` mapping.
+    Binding a task to a specific agent NAME is what mis-routed research work to a
+    non-research agent (the matcher scores an exact name match at 1.0). Instead
+    the planner must choose ``agent_role`` from the canonical capability
+    vocabulary, and the matcher resolves each capability to the best-fit agent.
+    """
     if not agents:
         return "(No agents available)\n"
 
@@ -933,13 +966,23 @@ def _render_agent_roster(agents: Sequence[Agent]) -> str:
 
         desc = (agent.description or "")[:120]
         lines.append(
-            f"- **{agent.name}** (role: {agent.name.lower()})"
-            f" — {desc}"
+            f"- {agent.name}: {desc}"
             f"{skills_text}{tags_text}"
             f"{f' | Model: {model_id}' if model_id else ''}"
         )
 
-    return "\n".join(lines) if lines else "(No active agents)\n"
+    if not lines:
+        return "(No active agents)\n"
+
+    vocab = ", ".join(sorted(CANONICAL_ROLES))
+    return (
+        "\n".join(lines)
+        + "\n\n"
+        + "Set each task's `agent_role` to the CAPABILITY the task needs, chosen "
+        + f"from: {vocab}.\n"
+        + "Do NOT use an agent's name as the role — the platform routes each "
+        + "capability to the best-fit agent listed above.\n"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1341,35 +1384,16 @@ def _validate_plan(
     except InvalidDependencyError as exc:
         errors.append(str(exc))
 
-    # 4. Agent role matching
-    active_agent_names = set()
-    for agent in agents:
-        if agent.status == "active":
-            active_agent_names.add(agent.name.lower())
-            # Also match by skill names
-            try:
-                if agent.skills:
-                    for s in agent.skills:
-                        if s.name:
-                            active_agent_names.add(s.name.lower())
-            except Exception:
-                pass
-            # Also match by tags
-            if agent.tags and isinstance(agent.tags, list):
-                for t in agent.tags:
-                    active_agent_names.add(str(t).lower())
-
+    # 4. Agent role capability coverage.
+    #    A role is a CAPABILITY (researcher, writer, ...), valid when some active
+    #    agent can actually fill it — scored the same way the matcher dispatches.
+    #    This catches unfillable roles at plan time instead of failing the task
+    #    with NO_AGENT_AVAILABLE at dispatch.
     for task in tasks:
-        role_lower = task.agent_role.lower()
-        # Fuzzy: check if role matches any agent name, skill, or tag
-        matched = any(
-            role_lower == name or role_lower in name or name in role_lower
-            for name in active_agent_names
-        )
-        if not matched:
+        if _best_role_fit(task.agent_role, agents) < _ROLE_FILLABILITY_FLOOR:
             errors.append(
                 f"Task '{task.title}' references agent_role '{task.agent_role}' "
-                f"which does not match any active agent"
+                f"which no active agent can fill"
             )
 
     # 5. Parallel group cross-dependency check (PRD-82C)

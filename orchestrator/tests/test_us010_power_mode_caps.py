@@ -36,13 +36,12 @@ def _setting_with(value_dict):
 
 def test_power_mode_reads_system_settings():
     """Stored JSON overrides win over the hardcoded defaults."""
-    db = _db_returning(_setting_with({"max_tool_iterations": 99, "max_tokens": 12345}))
+    db = _db_returning(_setting_with({"max_tool_iterations": 99, "force_llm_tier": "orchestrator_llm"}))
 
     caps = _get_power_mode_caps("standard", db)
 
-    assert caps["max_tool_iterations"] == 99  # overridden
-    assert caps["max_tokens"] == 12345        # overridden
-    assert caps["force_llm_tier"] is None     # untouched 'standard' default
+    assert caps["max_tool_iterations"] == 99             # overridden
+    assert caps["force_llm_tier"] == "orchestrator_llm"  # overridden
 
 
 def test_power_mode_partial_override_keeps_other_defaults():
@@ -52,7 +51,6 @@ def test_power_mode_partial_override_keeps_other_defaults():
     caps = _get_power_mode_caps("light", db)
 
     assert caps["max_tool_iterations"] == 25  # overridden
-    assert caps["max_tokens"] == _POWER_MODE_DEFAULTS["light"]["max_tokens"]
     assert caps["force_llm_tier"] == "system_llm"  # default kept
 
 
@@ -86,7 +84,7 @@ def test_power_mode_db_error_falls_back_to_defaults():
 
 def test_get_power_mode_caps_does_not_mutate_defaults():
     """Resolution copies the default dict; it never mutates the module const."""
-    db = _db_returning(_setting_with({"max_tokens": 999999}))
+    db = _db_returning(_setting_with({"max_tool_iterations": 999999}))
     before = dict(_POWER_MODE_DEFAULTS["standard"])
 
     _get_power_mode_caps("standard", db)

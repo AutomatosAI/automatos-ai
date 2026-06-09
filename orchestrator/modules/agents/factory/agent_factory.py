@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from config import config
 from core.llm import LLMConfig, LLMManager, LLMProvider, LLMResponse, create_llm_manager
+from core.llm.defaults import DEFAULT_MAX_OUTPUT_TOKENS
 from core.models import Agent, Base, PriorityLevel, Skill
 from core.models.composio_cache import AgentAppAssignment, ComposioAppCache
 
@@ -63,7 +64,7 @@ class ModelConfiguration:
     provider: str
     model_id: str
     temperature: float = 0.7
-    max_tokens: int = 2000
+    max_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
     top_p: float = 1.0
     frequency_penalty: float = 0.0
     presence_penalty: float = 0.0
@@ -88,7 +89,7 @@ class ModelConfiguration:
             provider=data.get("provider") or DEFAULT_LLM_PROVIDER,
             model_id=data.get("model_id", DEFAULT_LLM_MODEL),
             temperature=data.get("temperature", 0.7),
-            max_tokens=data.get("max_tokens", 2000),
+            max_tokens=data.get("max_tokens", DEFAULT_MAX_OUTPUT_TOKENS),
             top_p=data.get("top_p", 1.0),
             frequency_penalty=data.get("frequency_penalty", 0.0),
             presence_penalty=data.get("presence_penalty", 0.0),
@@ -131,7 +132,7 @@ class AgentMetadata:
                 provider=provider,
                 model_id=self.preferred_model,
                 temperature=self.temperature or 0.7,
-                max_tokens=self.max_tokens or 2000,
+                max_tokens=self.max_tokens or DEFAULT_MAX_OUTPUT_TOKENS,
             )
         return ModelConfiguration.get_default()
 
@@ -245,13 +246,13 @@ class AgentFactory:
                     "provider": DEFAULT_LLM_PROVIDER,
                     "model": DEFAULT_LLM_MODEL,
                     "temperature": 0.7,
-                    "max_tokens": 2000,
+                    "max_tokens": DEFAULT_MAX_OUTPUT_TOKENS,
                     "context_window": 8192,
                 }
 
             # Lookup context window from LLM models registry
             context_window = 8192
-            max_tokens = 2000
+            max_tokens = DEFAULT_MAX_OUTPUT_TOKENS
             try:
                 from core.models import LLMModel
                 llm_model = self.db_session.query(LLMModel).filter_by(model_id=model).first()
@@ -276,7 +277,7 @@ class AgentFactory:
                 "provider": DEFAULT_LLM_PROVIDER,
                 "model": DEFAULT_LLM_MODEL,
                 "temperature": 0.7,
-                "max_tokens": 2000,
+                "max_tokens": DEFAULT_MAX_OUTPUT_TOKENS,
                 "context_window": 8192,
             }
 
@@ -295,7 +296,7 @@ class AgentFactory:
                 model = DEFAULT_LLM_MODEL
 
             context_window = 8192
-            max_tokens = 2000
+            max_tokens = DEFAULT_MAX_OUTPUT_TOKENS
             try:
                 from core.models import LLMModel
                 llm_model = self.db_session.query(LLMModel).filter_by(model_id=model).first()
@@ -320,9 +321,24 @@ class AgentFactory:
                 "provider": DEFAULT_LLM_PROVIDER,
                 "model": DEFAULT_LLM_MODEL,
                 "temperature": 0.7,
-                "max_tokens": 2000,
+                "max_tokens": DEFAULT_MAX_OUTPUT_TOKENS,
                 "context_window": 8192,
             }
+
+    def _model_max_output_tokens(self, model_id: Optional[str]) -> int:
+        """The selected model's own output ceiling from the LLM registry, or the
+        canonical default if the model isn't found. Lets an agent that hasn't set
+        an explicit Max Output Tokens default to what its model actually supports
+        — never a hardcoded literal."""
+        if model_id and self.db_session is not None:
+            try:
+                from core.models import LLMModel
+                m = self.db_session.query(LLMModel).filter_by(model_id=model_id).first()
+                if m and m.max_output_tokens:
+                    return m.max_output_tokens
+            except Exception as e:
+                self.logger.warning(f"max_output_tokens lookup failed for {model_id}: {e}")
+        return DEFAULT_MAX_OUTPUT_TOKENS
 
     def _resolve_provider_for_model(self, provider_str: str, model_id: str) -> tuple[str, str]:
         """Auto-detect and correct provider-model mismatches.
@@ -705,7 +721,7 @@ class AgentFactory:
                     "provider": tier_config.get("provider"),
                     "model": tier_config.get("model"),
                     "temperature": agent_llm_config.get("temperature", tier_config.get("temperature", 0.7)),
-                    "max_tokens": tier_config.get("max_tokens", 2000),
+                    "max_tokens": tier_config.get("max_tokens", DEFAULT_MAX_OUTPUT_TOKENS),
                 }
                 self.logger.info(f"Agent {agent_id} using LLM: {llm_config_dict.get('provider')}/{llm_config_dict.get('model')} (force_llm_tier=system_llm)")
             elif force_llm_tier == "orchestrator_llm" or use_orchestrator_llm:
@@ -715,7 +731,7 @@ class AgentFactory:
                     "provider": orchestrator_llm_config.get("provider"),
                     "model": orchestrator_llm_config.get("model"),
                     "temperature": agent_llm_config.get("temperature", orchestrator_llm_config.get("temperature", 0.7)),
-                    "max_tokens": agent_llm_config.get("max_tokens", orchestrator_llm_config.get("max_tokens", 2000)),
+                    "max_tokens": agent_llm_config.get("max_tokens", orchestrator_llm_config.get("max_tokens", DEFAULT_MAX_OUTPUT_TOKENS)),
                 }
                 self.logger.info(f"Agent {agent_id} using LLM: {llm_config_dict.get('provider')}/{llm_config_dict.get('model')} ({reason})")
             elif agent_has_model:
@@ -723,7 +739,7 @@ class AgentFactory:
                     "provider": agent_model_config["provider"],
                     "model": agent_model_config["model_id"],
                     "temperature": agent_model_config.get("temperature", 0.7),
-                    "max_tokens": agent_model_config.get("max_tokens", 2000),
+                    "max_tokens": agent_model_config.get("max_tokens") or self._model_max_output_tokens(agent_model_config.get("model_id")),
                 }
                 self.logger.info(f"Agent {agent_id} using LLM: {llm_config_dict['provider']}/{llm_config_dict['model']} (agent model_config)")
             else:
@@ -732,7 +748,7 @@ class AgentFactory:
                     "provider": orchestrator_llm_config.get("provider"),
                     "model": orchestrator_llm_config.get("model"),
                     "temperature": agent_llm_config.get("temperature", orchestrator_llm_config.get("temperature", 0.7)),
-                    "max_tokens": agent_llm_config.get("max_tokens", orchestrator_llm_config.get("max_tokens", 2000)),
+                    "max_tokens": agent_llm_config.get("max_tokens", orchestrator_llm_config.get("max_tokens", DEFAULT_MAX_OUTPUT_TOKENS)),
                 }
                 self.logger.info(f"Agent {agent_id} using LLM: {llm_config_dict.get('provider')}/{llm_config_dict.get('model')} (no agent model_config)")
 
@@ -773,7 +789,7 @@ class AgentFactory:
                 provider=provider,
                 model=model_id_str,
                 temperature=llm_config_dict.get("temperature", 0.7),
-                max_tokens=llm_config_dict.get("max_tokens", 2000),
+                max_tokens=llm_config_dict.get("max_tokens", DEFAULT_MAX_OUTPUT_TOKENS),
                 api_key=resolved.api_key if resolved else None,
                 top_p=llm_config_dict.get("top_p"),
                 frequency_penalty=llm_config_dict.get("frequency_penalty"),

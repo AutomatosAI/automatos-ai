@@ -36,7 +36,7 @@ class RequestContext:
 
     workspace_id: UUID
     user: UserContext
-    auth_type: str = "anonymous"  # "clerk" | "api_key" | "anonymous"
+    auth_type: str = "anonymous"  # "clerk" | "api_key" | "sdk_key" | "anonymous"
     api_key_id: Optional[str] = None
     admin_all_workspaces: bool = False  # When True, endpoints should skip workspace filtering
 

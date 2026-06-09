@@ -1,7 +1,6 @@
 """Memory Storage"""
 from .manager import AdvancedMemoryManager
 from .knowledge_system import (
-    HierarchicalMemorySystem,
     MemoryItem as KnowledgeMemoryItem,
     MemoryLevel as KnowledgeMemoryLevel,
     MemoryType as KnowledgeMemoryType,
@@ -9,7 +8,6 @@ from .knowledge_system import (
 
 __all__ = [
     "AdvancedMemoryManager",
-    "HierarchicalMemorySystem",
     "KnowledgeMemoryItem",
     "KnowledgeMemoryLevel",
     "KnowledgeMemoryType",
