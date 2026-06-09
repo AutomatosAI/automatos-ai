@@ -133,8 +133,8 @@
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": false,
-      "notes": "WS-S (riskiest). Authoring + models + migration FILE only. The prod APPLY is human-gated. learning_outcomes already has success_rate_before/after + execution_time_before/after + application_count (HARNESS-shaped) — extend it, add harness_prescriptions, leave knowledge_nodes/edges fate to the human."
+      "passes": true,
+      "notes": "DONE 2026-06-09 — extended LearningOutcome (HARNESS OUTCOME store: +workspace_id/run_id/change_type/risk_score/status/applied_at/rolled_back_at/current_value_before) + new HarnessPrescription model (PRESCRIPTION store), both on the isolated knowledge_system Base (NOT the main create_all Base, so zero test-net risk). Standalone additive migration prd142_wave4_harness_store.py (down_revision=None, per the ~55-head convention; online-safe nullable add_column + create_table). model-shape tests (test_harness_store_models.py, no DB). PROD APPLY human-gated: 55 alembic heads need a merge; learning_outcomes assumed to exist (init_complete_schema.sql)."
     },
     {
       "id": "W4-S12",
