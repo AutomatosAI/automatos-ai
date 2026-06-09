@@ -480,8 +480,9 @@ class PlatformActionExecutor:
             action_name: Registered platform action name.
             params: Action parameters.
             caller_context: Optional dict with keys user_id, system_role,
-                workspace_role.  Used by admin_only gate (US-003).
-                If None, admin_only actions are denied (fail-closed).
+                workspace_role.  Used by the super_admin_only gate (PRD-143)
+                and the admin_only gate (US-003).  If None, super_admin_only
+                and admin_only actions are denied (fail-closed).
         """
         # LLMs sometimes send params as a JSON string instead of a dict
         if isinstance(params, str):
@@ -497,6 +498,30 @@ class PlatformActionExecutor:
         try:
             from modules.tools.discovery import get_action_registry
             action_def = get_action_registry().get(action_name)
+
+            # PRD-143: Super-admin gate — fail-closed, BEFORE and independent
+            # of the admin gate below. The ONLY principal that passes is a
+            # literal system_role == 'super_admin' in caller_context. The
+            # full-autonomy dial, workspace roles, the workspace-owner
+            # fallback and API keys (system_role='admin') NEVER satisfy it;
+            # caller_context=None refuses (no identity resolution).
+            if action_def and action_def.super_admin_only:
+                if (caller_context or {}).get("system_role") != "super_admin":
+                    logger.warning(
+                        "[PlatformExecutor] Super-admin-only action '%s' denied — "
+                        "workspace_id=%s, caller_context=%s",
+                        action_name,
+                        self.workspace_id,
+                        {k: v for k, v in (caller_context or {}).items() if k != "user_id"},
+                    )
+                    return {
+                        "success": False,
+                        "permission_denied": True,
+                        "error": (
+                            f"Action '{action_name}' is restricted to the platform "
+                            "super admin (observability tier)."
+                        ),
+                    }
 
             # Full-autonomy dial (per-workspace setting). When on: Auto is
             # treated as admin and the confirmation gate is skipped. Everything

@@ -35,8 +35,8 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": "THE safety rail of Rev 2. The boundary is the principal, not the channel — Auto MAY run obs tools when the driving principal is the super admin himself (PRD-143 US-001)."
+      "passes": true,
+      "notes": "THE safety rail of Rev 2. The boundary is the principal, not the channel — Auto MAY run obs tools when the driving principal is the super admin himself (PRD-143 US-001). DONE 2026-06-09: su gate in platform_executor.py execute() (after action_def lookup, BEFORE the full-autonomy read) — (caller_context or {}).get('system_role') != 'super_admin' refuses pre-execution with permission_denied; full_autonomy bypass, workspace-owner fallback, API-key admin and caller_context=None all proven refused; 7/7 tests green (fake-registry idiom so tests stay stable across S4 reclassification). Local-venv note: test points dummy POSTGRES_* at closed port 59432 — modules.tools import chain does a fail-soft DB connect at import, and the wedged local docker 5432 proxy hangs the handshake forever (CI exports real vars, setdefault no-ops). Post-commit checks: W3 full-autonomy + W2S7 fail-closed suites 8/8 green; full-app `from main import app` unrunnable in this venv (missing email-validator dep, pre-existing) — relied on py_compile + 3 importing suites per run rules."
     },
     {
       "id": "S3",
