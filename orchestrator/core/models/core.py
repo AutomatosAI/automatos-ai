@@ -986,23 +986,6 @@ class User(Base):
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
-class ExternalKnowledge(Base):
-    """External knowledge for memory augmentation"""
-    __tablename__ = 'external_knowledge'
-    
-    id = Column(Integer, primary_key=True)
-    content = Column(JSON, nullable=False)
-    source = Column(String(255), nullable=False, default='external')
-    knowledge_metadata = Column(JSON, nullable=True)  # Renamed to avoid SQLAlchemy conflict
-    access_count = Column(Integer, default=0)
-    
-    created_at = Column(DateTime, default=func.now())
-    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
-    
-    # Ownership & Visibility (New)
-    created_by_user_id = Column(Integer, ForeignKey('users.id'), nullable=True)
-    is_shared = Column(Boolean, default=True)
-
 # Enhanced Pydantic Models for new functionality
 
 class TaskCreate(BaseModel):
@@ -1066,68 +1049,9 @@ class WebSocketMessage(BaseModel):
     data: Dict[str, Any]
     timestamp: datetime = Field(default_factory=datetime.now)
 
-# Evaluation-specific tables for enhanced assessment methodologies
-class EvaluationResult(Base):
-    __tablename__ = 'evaluation_results'
-    
-    id = Column(Integer, primary_key=True)
-    evaluation_id = Column(String(255), nullable=False, unique=True)
-    evaluation_type = Column(String(100), nullable=False)  # 'system_quality', 'component_assessment', etc.
-    scope = Column(String(100), nullable=False)  # 'single_task', 'component', 'system', 'enterprise'
-    target_id = Column(String(255), nullable=False)  # ID of evaluated entity
-    overall_score = Column(Float, nullable=False)
-    detailed_results = Column(JSON)  # Detailed evaluation data
-    success = Column(Boolean, default=True)
-    error_message = Column(Text, nullable=True)
-    execution_time_seconds = Column(Float, nullable=True)
-    user_id = Column(Integer, nullable=True)
-    created_at = Column(DateTime, default=func.now())
-
-class BenchmarkAssessment(Base):
-    __tablename__ = 'benchmark_assessments'
-    
-    id = Column(Integer, primary_key=True)
-    benchmark_id = Column(String(255), nullable=False)
-    benchmark_name = Column(String(255), nullable=False)
-    benchmark_type = Column(String(100), nullable=False)  # 'performance', 'quality', 'efficiency'
-    validity_score = Column(Float, nullable=True)
-    reliability_score = Column(Float, nullable=True)
-    discriminatory_power = Column(Float, nullable=True)
-    overall_quality = Column(Float, nullable=True)
-    quality_classification = Column(String(50), nullable=True)
-    assessment_data = Column(JSON)  # Detailed assessment results
-    recommendations = Column(JSON)  # List of improvement recommendations
-    created_at = Column(DateTime, default=func.now())
-
-class ComponentMetricsDB(Base):
-    __tablename__ = 'component_metrics'
-    
-    id = Column(Integer, primary_key=True)
-    component_id = Column(String(255), nullable=False)
-    component_type = Column(String(100), nullable=False)  # 'orchestrator', 'agent', 'workflow'
-    performance_score = Column(Float, nullable=True)
-    reliability_score = Column(Float, nullable=True)
-    readiness_score = Column(Float, nullable=True)
-    capability_rating = Column(Float, nullable=True)
-    complexity_index = Column(Float, nullable=True)
-    environment_factor = Column(Float, nullable=True)
-    assessment_details = Column(JSON)  # Detailed metrics
-    assessment_timestamp = Column(DateTime, default=func.now())
-
-class IntegrationAnalysisDB(Base):
-    __tablename__ = 'integration_analyses'
-    
-    id = Column(Integer, primary_key=True)
-    system_id = Column(String(255), nullable=False)
-    coherence_score = Column(Float, nullable=True)
-    efficiency_score = Column(Float, nullable=True)
-    emergence_score = Column(Float, nullable=True)
-    integration_score = Column(Float, nullable=True)
-    integration_classification = Column(String(50), nullable=True)
-    analysis_data = Column(JSON)  # Detailed analysis results
-    recommendations = Column(JSON)  # Integration improvement recommendations
-    confidence_level = Column(Float, nullable=True)
-    created_at = Column(DateTime, default=func.now())
+# PRD-142 Wave 5 (WS-AA): the evaluation/benchmark/component-metrics/
+# integration-analysis models were verified dead and removed; their tables
+# are dropped by alembic/versions/prd142_wave5_drop_dead_tables.py.
 
 
 # ===================================================================

@@ -81,31 +81,7 @@ class DatabaseKnowledgeSource(Base):
     
     # Relationships
     queries = relationship("DatabaseQueryAudit", back_populates="source")
-    relationships = relationship("DatabaseRelationship", back_populates="source")
     templates = relationship("DatabaseQueryTemplate", back_populates="source")
-
-
-class DatabaseRelationship(Base):
-    """
-    Table relationships for JOIN optimization and schema understanding
-    """
-    __tablename__ = 'database_relationships'
-    __table_args__ = {'extend_existing': True}
-    
-    id = Column(Integer, primary_key=True)
-    source_id = Column(Integer, ForeignKey('database_knowledge_sources.id'), nullable=False)
-    source = relationship("DatabaseKnowledgeSource", back_populates="relationships")
-    
-    from_table = Column(String(255), nullable=False)
-    from_column = Column(String(255), nullable=False)
-    to_table = Column(String(255), nullable=False)
-    to_column = Column(String(255), nullable=False)
-    
-    relationship_type = Column(String(50))  # one-to-one, one-to-many, many-to-many
-    is_inferred = Column(Boolean, default=False)
-    confidence = Column(Float, default=1.0)
-    
-    created_at = Column(DateTime, default=func.now())
 
 
 class DatabaseQueryAudit(Base):

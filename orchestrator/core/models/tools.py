@@ -69,38 +69,9 @@ class Tool(Base):
     last_updated = Column(DateTime, default=func.now(), onupdate=func.now())
     
     # Relationships
-    credentials = relationship("ToolCredentials", back_populates="tool", cascade="all, delete-orphan")
     configurations = relationship("ToolConfiguration", back_populates="tool", cascade="all, delete-orphan")
     permissions_assignments = relationship("AgentToolPermission", back_populates="tool", cascade="all, delete-orphan")
     # Note: Usage tracking is implemented separately (not tied to legacy tool tables).
-
-class ToolCredentials(Base):
-    """
-    Encrypted storage for tool credentials per environment.
-    Supports multiple credential types and automatic rotation.
-    """
-    __tablename__ = 'tool_credentials'
-    __table_args__ = {'extend_existing': True}  # PRD-17: Prevent duplicate table definition errors
-    
-    id = Column(Integer, primary_key=True)
-    tool_id = Column(Integer, ForeignKey('tools.id'), nullable=False, index=True)
-    
-    # Credential identification
-    credential_key = Column(String(100), nullable=False)  # api_token, secret_key, etc.
-    credential_value = Column(Text, nullable=False)  # Encrypted value
-    environment = Column(String(50), nullable=False, index=True)  # development, staging, production
-    
-    # Metadata
-    description = Column(Text)
-    expires_at = Column(DateTime)  # For credential rotation
-    is_active = Column(Boolean, default=True, index=True)
-    
-    # Timestamps
-    created_at = Column(DateTime, default=func.now())
-    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
-    
-    # Relationships
-    tool = relationship("Tool", back_populates="credentials")
 
 class ToolConfiguration(Base):
     """
@@ -216,70 +187,8 @@ class ToolCategory(Base):
     parent = relationship("ToolCategory", remote_side=[id])
     children = relationship("ToolCategory", back_populates="parent")
 
-class ToolReview(Base):
-    """
-    User reviews and ratings for tools.
-    Supports marketplace-style feedback system.
-    """
-    __tablename__ = 'tool_reviews'
-    __table_args__ = {'extend_existing': True}  # PRD-17: Prevent duplicate table definition errors
-    
-    id = Column(Integer, primary_key=True)
-    tool_id = Column(Integer, ForeignKey('tools.id'), nullable=False, index=True)
-    
-    # Review content
-    rating = Column(Integer, nullable=False)  # 1-5 stars
-    title = Column(String(255))
-    review_text = Column(Text)
-    
-    # Reviewer information
-    reviewer_id = Column(String(255), index=True)  # User/agent identifier
-    reviewer_type = Column(String(50))  # user, agent, system
-    
-    # Review metadata
-    is_verified = Column(Boolean, default=False)  # Verified purchase/usage
-    is_featured = Column(Boolean, default=False)  # Featured review
-    helpful_votes = Column(Integer, default=0)
-    
-    # Timestamps
-    created_at = Column(DateTime, default=func.now())
-    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
-    
-    # Relationships
-    tool = relationship("Tool")
-
-class ToolInstallationRequest(Base):
-    """
-    Tracks tool installation requests and their status.
-    Manages the installation workflow and approval process.
-    """
-    __tablename__ = 'tool_installation_requests'
-    __table_args__ = {'extend_existing': True}  # PRD-17: Prevent duplicate table definition errors
-    
-    id = Column(Integer, primary_key=True)
-    tool_id = Column(Integer, ForeignKey('tools.id'), nullable=False, index=True)
-    
-    # Request details
-    requested_by = Column(String(255), nullable=False, index=True)  # User/agent identifier
-    environment = Column(String(50), nullable=False)
-    justification = Column(Text)  # Why the tool is needed
-    
-    # Approval workflow
-    status = Column(String(50), default='pending', index=True)  # pending, approved, rejected, installed
-    approved_by = Column(String(255), index=True)
-    approval_notes = Column(Text)
-    
-    # Installation details
-    installation_config = Column(JSON, default=dict)
-    auto_configure = Column(Boolean, default=False)
-    
-    # Timestamps
-    created_at = Column(DateTime, default=func.now())
-    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
-    approved_at = Column(DateTime)
-    installed_at = Column(DateTime)
-    
-    # Relationships
-    tool = relationship("Tool")
+# PRD-142 Wave 5 (WS-AA): ToolCredentials, ToolReview and
+# ToolInstallationRequest were verified dead and removed; their tables are
+# dropped by alembic/versions/prd142_wave5_drop_dead_tables.py.
 
 
