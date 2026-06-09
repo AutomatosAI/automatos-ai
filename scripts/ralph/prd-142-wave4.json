@@ -98,8 +98,8 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": "WS-R. The loop is already wired end-to-end (signal->edge->routing). This story HARDENS it to DoD — additive tests + minimal restart hook + one metric. Zero rewrites."
+      "passes": true,
+      "notes": "DONE 2026-06-09 — added ToolSignalRecorder.stats() observability counters (recorded/dropped/flushes/flush_errors/queue_depth) the tile (W4-S16) reads; tests/test_tool_routing_hardening.py proves tenant+agent isolation at the aggregation layer, the fails_for_intent/used_after paths, and record() never raises (disabled/no-loop/full). Restart-safety assessed as ALREADY met: the nightly edge_builder recomputes authoritative rows from durable tool_execution_logs, so a drain-on-shutdown hook is unnecessary (queued signals are intra-day freshness only). Metric->tile wiring is the FE story W4-S16."
     },
     {
       "id": "W4-S10",
