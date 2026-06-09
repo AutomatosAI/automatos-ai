@@ -80,8 +80,8 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": "WS-R. Low-risk docs story; do it early to lock the boundary the later store work depends on. No frontend, no os.getenv."
+      "passes": true,
+      "notes": "DONE 2026-06-09 — docs/architecture/KNOWLEDGE-GRAPH-CANONICAL.md: added the tool-routing graph as canonical Role-1 tool-selection learning (§2A + table row 6), documented the two learning roles (Role 1 tool-routing vs Role 2 HARNESS store), the read-only fails_for_intent cross-link (W4-S10), and extended the boundary gate to tool_routing_*."
     },
     {
       "id": "W4-S9",
