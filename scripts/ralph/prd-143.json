@@ -72,8 +72,8 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": "This story IS the Rev 2 inversion: after it, zero actions are exclusion-gated from Auto except the obs/oversight 7. The manifest⇆registry parity test keeps the tier honest forever."
+      "passes": true,
+      "notes": "This story IS the Rev 2 inversion: after it, zero actions are exclusion-gated from Auto except the obs/oversight 7. The manifest⇆registry parity test keeps the tier honest forever. DONE 2026-06-10: 7 flags flipped admin_only→super_admin_only (actions_monitoring.py:55/99/140/188/211, actions_workspace.py:204, actions_autonomy.py:71); get_autonomy_level stays operator; stale workspace-owner wording in actions_autonomy.py docstring/description corrected to super-admin. Manifest authored at docs/PRDS/PRD-143-OBS-TIER-MANIFEST.md (7-row table, sign-off banner, router section placeholder for S6/S7). 4/4 parity tests green vs the REAL register_all_actions() catalogue. Grep-gate note: the AC's literal grep matches the SUBSTRING inside super_admin_only=True — verified with word-boundary grep '\\badmin_only=True' → zero matches; test_no_admin_only_actions_remain pins the real field on every registered action. Harness evolution: tests/security/test_w3_full_autonomy_gate.py used live platform_get_system_health as its admin_only probe — now su-tier, so the S2 su gate (correctly) refused it under full autonomy; switched the two admin-gate tests to a synthetic admin_only probe via the S2 fake-registry idiom (mechanism contract unchanged, no assertion weakened). 111 green across 14 affected suites. Full-app import still unrunnable in this venv (email-validator missing, pre-existing — same as S2/S3); relied on py_compile + the story suite + neighbouring suites."
     },
     {
       "id": "S5",
