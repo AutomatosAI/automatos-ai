@@ -107,8 +107,8 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
-      "notes": "Router-level dependency, not per-route decoration — one line per router, impossible to miss a new endpoint added later."
+      "passes": true,
+      "notes": "Router-level dependency, not per-route decoration — one line per router, impossible to miss a new endpoint added later. DONE 2026-06-10: dependencies=[Depends(require_super_admin)] on the APIRouter of heartbeat.py/analytics.py/analytics_api.py/analytics_real.py/analytics_charts.py. Grep gate clean: zero internal HTTP consumers of /api/heartbeat, /api/analytics, /analytics (main.py only include_routers). 20/20 story tests green (member/ws-admin+owner/api-key-admin 403 'Super admin only', su not-403; 5 routers parametrized, RED-first on heartbeat). Harness evolution: 4 PRD-142 analytics_real endpoint suites (activation, errors-by-subsystem, primitive-health, widget-engagement) principals upgraded to system_role='super_admin' — handler assertions unchanged, the obs tier is the new precondition. 50 green across all 6 PRD-143 suites. Full-app import unrunnable in this venv (email-validator missing, pre-existing — same as S2-S5); relied on py_compile + story suite (which mounts each router in a live FastAPI app) + neighbouring suites."
     },
     {
       "id": "S7",

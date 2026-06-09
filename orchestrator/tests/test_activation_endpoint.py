@@ -118,7 +118,8 @@ def _make_client(
     def _override_ctx():
         return RequestContext(
             workspace_id=workspace_id,
-            user=UserContext(id="test-user", email="test@example.com", role="owner"),
+            # PRD-143 S6: analytics_real is obs-tier — su principal required to reach the handler.
+            user=UserContext(id="test-user", email="test@example.com", role="owner", system_role="super_admin"),
             auth_type="clerk",
         )
 

@@ -13,10 +13,16 @@ from core.services.analytics_engine import AnalyticsEngine
 from core.database.database import get_db
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
+from core.auth.super_admin import require_super_admin
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/analytics", tags=["analytics"])
+# PRD-143 S6: observability tier — router-wide super-admin lock (fail-closed).
+router = APIRouter(
+    prefix="/api/analytics",
+    tags=["analytics"],
+    dependencies=[Depends(require_super_admin)],
+)
 
 # Global analytics engine instance
 analytics_engine = None
