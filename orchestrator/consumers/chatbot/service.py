@@ -665,6 +665,7 @@ class StreamingChatService:
         agent_id: int,
         skill_tools: Optional[List[Dict[str, Any]]] = None,
         query: Optional[str] = None,
+        is_super_admin: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Get all tools for an agent from the SINGLE source: modules.tools.tool_router.
@@ -676,12 +677,16 @@ class StreamingChatService:
             query: Latest user turn — when set and SEMANTIC_TOOL_ROUTING is on,
                 the platform_execute dispatcher's action.enum is narrowed to
                 top-K relevant actions (PRD-138 US-009).
+            is_super_admin: PRD-143 — True ONLY when the driving chat principal
+                is system_role == 'super_admin'. Fail-closed default excludes
+                the su tool tier from the surface.
         """
         all_tools = get_tools_for_agent(
             agent_id=agent_id,
             db_session=self.db,
             workspace_id=self.workspace_id,
             query=query,
+            is_super_admin=is_super_admin,
         )
         if skill_tools:
             all_tools = (all_tools or []) + skill_tools
@@ -1763,6 +1768,7 @@ class StreamingChatService:
         team: Optional[str] = None,
         suggest_mission: bool = False,
         force_text_only: bool = False,
+        is_super_admin: bool = False,
     ) -> AsyncGenerator[str, None]:
         """
         Stream a chat response produced by the specified agent.
@@ -1771,6 +1777,10 @@ class StreamingChatService:
         PRD-137 Fix #2: parameter renamed from ``use_system_llm`` —
         when True, the orchestrator-tier defaults are used; when
         False, the agent's own model_config drives the LLM.
+
+        PRD-143: ``is_super_admin`` is derived by the caller from the driving
+        principal's system_role == 'super_admin' ONLY — it widens the tool
+        surface to the su tier and is never inferred from workspace roles.
         """
         import asyncio
 
@@ -1866,6 +1876,7 @@ class StreamingChatService:
                     agent_id,
                     agent_ctx.get("skill_tools"),
                     query=latest_text,
+                    is_super_admin=is_super_admin,
                 )
             else:
                 # ATOM path skips full tool loading, but always include
@@ -1884,10 +1895,12 @@ class StreamingChatService:
                             top_k=_semantic_routing_top_k(),
                             exclude_admin=True,
                             exclude_promoted=True,
+                            include_super_admin=is_super_admin,
                         )
                     _dispatcher = get_action_registry().to_dispatcher_schema(
                         exclude_admin=True,
                         allowed_names=_allowed,
+                        include_super_admin=is_super_admin,
                     )
                     # PRD-007 v0.5: proactive openers get zero tools — directive
                     # is self-contained (page context + graph related products).

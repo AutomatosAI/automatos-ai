@@ -141,12 +141,14 @@ class _FakeSemanticIndex:
         top_k: int = 15,
         exclude_admin: bool = True,
         exclude_promoted: bool = True,
+        include_super_admin: bool = False,
     ) -> List[Tuple[str, float]]:
         self.calls.append({
             "query": query,
             "top_k": top_k,
             "exclude_admin": exclude_admin,
             "exclude_promoted": exclude_promoted,
+            "include_super_admin": include_super_admin,
         })
         if self.exception is not None:
             raise self.exception

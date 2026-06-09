@@ -116,8 +116,8 @@ class _FakeSemanticIndex:
         self.next_result: List[Tuple[str, float]] = []
         self.exception: Optional[Exception] = None
 
-    async def rank_actions(self, query, top_k=15, exclude_admin=True, exclude_promoted=True):
-        self.calls.append({"query": query, "top_k": top_k, "exclude_admin": exclude_admin, "exclude_promoted": exclude_promoted})
+    async def rank_actions(self, query, top_k=15, exclude_admin=True, exclude_promoted=True, include_super_admin=False):
+        self.calls.append({"query": query, "top_k": top_k, "exclude_admin": exclude_admin, "exclude_promoted": exclude_promoted, "include_super_admin": include_super_admin})
         if self.exception:
             raise self.exception
         return list(self.next_result)

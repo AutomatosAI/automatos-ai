@@ -289,6 +289,9 @@ async def stream_chat(
     # No hardcoded agent IDs. Admins get elevated tool access on the Auto agent.
     _user_role = getattr(ctx.user, "system_role", "user") if ctx.user else "user"
     _is_admin = _user_role in ("admin", "super_admin")
+    # PRD-143: the su surface is derived from system_role ONLY — never from
+    # workspace role, is_admin, or autonomy level (fail-closed boundary).
+    _is_super_admin = _user_role == "super_admin"
     logger.info(f"[PRD-67] user_role={_user_role!r}, is_admin={_is_admin}, user_id={getattr(ctx.user, 'id', '?')}")
 
     _fallback_agent_id = get_default_agent_id(db, ctx.workspace_id)
@@ -440,6 +443,7 @@ async def stream_chat(
                 mission_mode=bool(request.missionMode),
                 plan_mode=bool(request.planMode),
                 suggest_mission=_suggest_mission,
+                is_super_admin=_is_super_admin,
             ):
                 yield chunk
 

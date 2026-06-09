@@ -54,8 +54,8 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": "Selection exclusion matters as much as the executor gate: an su tool in the LLM's schema list is an invitation to call it. Exclude at the source."
+      "passes": true,
+      "notes": "Selection exclusion matters as much as the executor gate: an su tool in the LLM's schema list is an invitation to call it. Exclude at the source. DONE 2026-06-10: include_super_admin=False (fail-closed) threaded through ActionSemanticIndex (_eligible_actions/ensure_indexed/rank_actions), GraphRouter.rank_chains (entry rank + NEW _drop_super_admin_chains edge-expansion filter — edges learned from su usage can point AT su actions — + su-aware cache key), tool_router (_rank_actions_for_dispatcher + get_tools_for_agent(is_super_admin) → dispatcher/first-class/rank); PRD-122 owner fallback proven to flip is_admin only. PlatformActionsSection call sites pinned include_super_admin=False x4. Chat wired: chat.py:294 derives _is_super_admin from system_role=='super_admin' ONLY → stream_response_with_agent → _get_tools + ATOM dispatcher path; agent-factory/heartbeat/sections/tools.py paths stay default-False fail-closed. 7/7 tests green (4 RED first: rank/graph/section-pin/su-principal; 3 covered pre-S3 by S1's registry defaults), 104 green combined with 9 neighbouring suites. Harness evolution: rank_actions fakes gained the kwarg (3 files); test_graph_router pre-inits an empty registry singleton so the su filter fallback never triggers the live registrar. Full-app import unrunnable in this venv (email-validator missing, pre-existing — same as S2); relied on py_compile + importing suites."
     },
     {
       "id": "S4",

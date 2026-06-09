@@ -60,8 +60,18 @@ class GraphRouter:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _cache_key(query: str, agent_id: Optional[int], top_k: int) -> str:
-        raw = json.dumps({"q": query, "a": agent_id, "k": top_k}, sort_keys=True)
+    def _cache_key(
+        query: str,
+        agent_id: Optional[int],
+        top_k: int,
+        include_super_admin: bool = False,
+    ) -> str:
+        # PRD-143: the su flag is part of the key — a super-admin result
+        # cached under an operator key (or vice versa) would cross the tier.
+        raw = json.dumps(
+            {"q": query, "a": agent_id, "k": top_k, "su": include_super_admin},
+            sort_keys=True,
+        )
         h = hashlib.sha256(raw.encode()).hexdigest()[:16]
         return f"cache:graph_router:{h}"
 
@@ -110,13 +120,18 @@ class GraphRouter:
         top_k: int = 15,
         exclude_admin: bool = True,
         exclude_promoted: bool = True,
+        include_super_admin: bool = False,
     ) -> List[Tuple[str, float, List[str]]]:
         """Rank tool chains by combining embedding similarity with graph edges.
+
+        PRD-143: fail-closed — super_admin_only actions are excluded from
+        entry nodes AND from edge-expansion targets unless
+        include_super_admin=True is passed explicitly.
 
         Returns:
             List of (primary_action, score, chain_actions) sorted descending by score.
         """
-        cache_key = self._cache_key(query, agent_id, top_k)
+        cache_key = self._cache_key(query, agent_id, top_k, include_super_admin)
         cached = self._read_cache(cache_key)
         if cached is not None:
             return cached
@@ -127,6 +142,7 @@ class GraphRouter:
             top_k=_ENTRY_TOP_K,
             exclude_admin=exclude_admin,
             exclude_promoted=exclude_promoted,
+            include_super_admin=include_super_admin,
         )
         if not entry_nodes:
             return []
@@ -137,6 +153,12 @@ class GraphRouter:
         except Exception as e:
             logger.warning("GraphRouter: graph expansion failed, falling back to embedding-only: %s", e)
             chains = self._to_single_chains(entry_nodes)
+
+        # Step 2.5 (PRD-143): edges learned from super-admin usage can point
+        # AT su actions even when every entry node is operator-eligible —
+        # drop any chain touching the su tier before it reaches a consumer.
+        if not include_super_admin:
+            chains = self._drop_super_admin_chains(chains)
 
         # Step 3: deduplicate by action set, keep highest
         chains = self._deduplicate(chains)
@@ -350,6 +372,25 @@ class GraphRouter:
     ) -> List[Tuple[str, float, List[str]]]:
         """Convert embedding-only results to single-action chains."""
         return [(name, score, [name]) for name, score in entry_nodes]
+
+    def _drop_super_admin_chains(
+        self,
+        chains: List[Tuple[str, float, List[str]]],
+    ) -> List[Tuple[str, float, List[str]]]:
+        """Drop every chain that touches a super_admin_only action (PRD-143).
+
+        The registry is resolved via the semantic index's reference (always
+        present in production; keeps unit fakes lightweight) with the
+        canonical singleton as fallback.
+        """
+        registry = getattr(self._semantic_index, "_registry", None)
+        if registry is None:
+            from .action_registry import get_action_registry
+            registry = get_action_registry()
+        su_names = {a.name for a in registry.get_all() if a.super_admin_only}
+        if not su_names:
+            return chains
+        return [c for c in chains if not su_names.intersection(c[2])]
 
     @staticmethod
     def _deduplicate(
