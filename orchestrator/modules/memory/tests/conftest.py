@@ -33,13 +33,3 @@ def init_redis_for_tests():
     except Exception as e:
         print(f"⚠️  Redis initialization failed: {e}")
         # Tests will handle Redis not being available
-
-
-@pytest.fixture
-def memory_system():
-    """
-    Create memory system with real services.
-    Uses centralized credential system for Redis/PostgreSQL.
-    """
-    from modules.memory.storage.knowledge_system import HierarchicalMemorySystem
-    return HierarchicalMemorySystem()

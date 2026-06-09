@@ -141,8 +141,8 @@ class PromptAnalyzer:
             'agents': ['AgentFactory', 'agent_factory', 'agent_execution'],
             'workflow': ['workflow_execution', 'WorkflowExecution'],
             'workflows': ['workflow_execution', 'WorkflowExecution'],
-            'memory': ['memory_system', 'HierarchicalMemorySystem'],
-            'memories': ['memory_system', 'HierarchicalMemorySystem'],
+            'memory': ['memory_system'],
+            'memories': ['memory_system'],
             'tool': ['ToolRegistry', 'tool_executor'],
             'tools': ['ToolRegistry', 'tool_executor'],
         }

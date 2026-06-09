@@ -23,13 +23,13 @@ The audit at PRD-142 §4 named the referencer set to verify
 * ``api/system.py`` and ``api/execution_history.py`` consume those
   read-only metrics — no direct SQL on ``knowledge_nodes``/``_edges``.
 * ``modules/memory/storage/knowledge_system.py`` *defines* the
-  ``KnowledgeNode`` / ``KnowledgeEdge`` SQLAlchemy models and the
+  ``KnowledgeNode`` / ``KnowledgeEdge`` SQLAlchemy models (kept — read-only,
+  for the learning-tile COUNT metric above). The dead
   ``HierarchicalMemorySystem`` / ``KnowledgeGraph`` / ``LearningEngine``
-  classes that *would* write to them — but those classes are **never
-  instantiated** in production (verified by grep — only test fixtures +
-  the `__init__.py` re-export hit them). The learning loop is dead
-  today; Wave 4 HARNESS wires it inside the §4 boundary, and W3-S10
-  keeps the boundary so the moat is never contaminated.
+  classes that *would* have written to them were never instantiated in
+  production and were **deleted** in Wave 4 (W4-S13); HARNESS's structured
+  store (``HarnessPrescription`` + ``LearningOutcome``) is the live learning
+  substrate, inside the §4 boundary so the moat is never contaminated.
 
 These tests pin the W3-S10 hardening contract under the Wave 2 net:
 
