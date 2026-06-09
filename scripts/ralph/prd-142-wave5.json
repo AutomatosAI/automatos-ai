@@ -1,0 +1,77 @@
+{
+  "project": "Automatos AI Platform — PRD-142 Wave 5 (Cut List: WS-Z dead routes + WS-AA DROP prep)",
+  "branchName": "ralph/prd-142-wave5-cut-list",
+  "description": "Delete-only wave, under green. Phase 0 verdicts + method caveats live in docs/PRDS/PRD-142-WAVE5-PHASE0-VERDICTS.md (read it first, every iteration). WS-W/WS-X already executed on feat/prd142-wave5-cuts (neural_field+AEM, workflow bridge, mcp_executor, seed v2, chatbot_llm shim — all cut, greps zero). This loop covers WS-Z (route clusters: per-route verify-then-cut) and WS-AA prep (reversible DROP migrations, NEVER applied by the loop). Contract per cut: segment-level grep proves zero inbound on live code + flag-gate check + external-caller check + scheduler check; then unmount + delete + orphan cleanup; orchestrator-tests green; cut-grep zero. ZERO live functionality removed; survivors are not refactored.",
+  "userStories": [
+    {
+      "id": "W5-S1",
+      "title": "Cut the analytics_real.py dead cluster",
+      "description": "18 routes with zero refs (re-mine 2026-06-09). Verify each per the contract (segment greps incl. template-literal forms, flag gates, dashboards), then cut the dead routes and any service code orphaned by them.",
+      "acceptanceCriteria": [
+        "Per-route verdict table (kill/keep + evidence) recorded in the commit message or plan file",
+        "Verified-dead routes unmounted + deleted; orphaned imports/services removed",
+        "orchestrator-tests green; cut-greps zero for removed symbols"
+      ]
+    },
+    {
+      "id": "W5-S2",
+      "title": "Cut the heartbeat.py dead cluster — scheduler-aware",
+      "description": "12 routes with zero HTTP refs, BUT heartbeat may be driven by internal schedulers/cron (PRD-141 era), not HTTP consumers. Check scheduler registrations and config-driven invocation before declaring any route dead. If the subsystem is live-but-internal, record KEEP and exit the story.",
+      "acceptanceCriteria": [
+        "Scheduler/cron/config invocation check recorded per route",
+        "Only routes with zero HTTP AND zero scheduler callers are cut",
+        "orchestrator-tests green; cut-greps zero"
+      ]
+    },
+    {
+      "id": "W5-S3",
+      "title": "Cut the problems/solutions/synthesis/insights subsystem (if dead end-to-end)",
+      "description": "problems.py, solutions.py, synthesis.py, insights.py — an older problem→solution subsystem with zero route refs. Verify the whole chain (routes → services → tables) and cut as one unit if dead; tables found dead here feed W5-S7.",
+      "acceptanceCriteria": [
+        "Chain-level evidence (routes, services, models) recorded",
+        "Dead unit removed incl. main.py mounts and orphan imports; any table candidates appended to the W5-S7 list",
+        "orchestrator-tests green; cut-greps zero"
+      ]
+    },
+    {
+      "id": "W5-S4",
+      "title": "Cut context_engineering.py utility endpoints",
+      "description": "Info-theory utility routes (/entropy, /mutual-information, /chunk-text, /graph/centrality, /normalize-vectors, /optimize/gradient-descent, …) with zero refs. Verify per contract, cut the dead ones; keep any route used by live internal services.",
+      "acceptanceCriteria": [
+        "Per-route verdicts recorded",
+        "Dead routes + orphaned helpers removed",
+        "orchestrator-tests green; cut-greps zero"
+      ]
+    },
+    {
+      "id": "W5-S5",
+      "title": "Cut legacy workflows.py execution-streaming routes (cascade-aware)",
+      "description": "Candidates: /executions/{id}/cancel, /results, /stream, /stream/aisdk, /duplicate, /execute-advanced. CAUTION: parametric-path false-dead risk is highest here — Mission UI may call these via template literals; grep by segments ('/executions/', 'stream/aisdk', etc.) across frontend hooks. After any cut, re-check consumers/workflows/streaming for orphanhood (api/workflows.py was its last importer at Phase 0).",
+      "acceptanceCriteria": [
+        "Segment-level greps recorded per route (template-literal forms included)",
+        "Dead routes removed; consumers/workflows/streaming cut ONLY if zero importers remain after",
+        "orchestrator-tests green; cut-greps zero"
+      ]
+    },
+    {
+      "id": "W5-S6",
+      "title": "Sweep the remaining candidates, batched by router file",
+      "description": "Work the rest of the 290-candidate list router-by-router (batches ≤10 routes). Skip KEEP-external (widgets/*, voice audio, webhooks, OAuth callbacks). A route referenced only by tests: cut route + test together. Anything ambiguous after the checks: flag RALPH_BLOCKED-style in the plan for Gerard rather than guessing.",
+      "acceptanceCriteria": [
+        "Every remaining candidate has a recorded verdict (kill/keep-external/keep-flag-gated/ambiguous)",
+        "All verified-dead routes cut with orphan cleanup; ambiguous ones listed for Gerard",
+        "orchestrator-tests green after every batch; cut-greps zero"
+      ]
+    },
+    {
+      "id": "W5-S7",
+      "title": "WS-AA prep: reversible DROP migrations (NO APPLY — human-gated)",
+      "description": "After route cuts settle: re-verify on the live schema the 10 Phase-0 dead tables + the flagged intent_classification_cache (FK from live ToolExecutionLog — needs Gerard's call) + any tables orphaned by W5-S3..S6 + residual model-less mcp-era tables. Author reversible Alembic DROP migrations against the live head chain and delete the orphaned model classes. NEVER run the migrations.",
+      "acceptanceCriteria": [
+        "Reversible migration(s) authored + verified against the live alembic head chain",
+        "Orphaned model classes removed; zero read/write refs remain for each dropped table",
+        "Migrations NOT applied — handoff note for Gerard with the apply order"
+      ]
+    }
+  ]
+}
