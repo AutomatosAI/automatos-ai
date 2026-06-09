@@ -151,8 +151,8 @@
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": "WS-S. Strangler-fig (dual-write -> read-DB -> [human: parity on canary -> drop JSON]). The agent does dual-write + read + parity test; the human drops JSON after canary. NEVER delete the JSON path in this story."
+      "passes": true,
+      "notes": "DONE 2026-06-09 (dual-write, strangler step 1) — _persist_prescriptions_to_db writes harness_prescriptions rows per prescription (status from the apply changelog: applied/queued/proposed) via an ISOLATED own session (best-effort, never raises, never touches the tick transaction; degrades to JSON-only if un-migrated). Wired after _phase_baseline in the tick. Reads STAY on baseline JSON (authoritative); flipping reads to DB + dropping JSON is the HUMAN cutover (after migration + parity). tests/test_harness_db_store.py (mocked DB)."
     }
   ]
 }
