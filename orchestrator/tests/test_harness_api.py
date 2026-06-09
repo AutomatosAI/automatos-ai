@@ -218,3 +218,64 @@ def test_real_gate_refuses_non_admin(monkeypatch):
         assert False, "expected HTTPException"
     except HTTPException as exc:
         assert exc.status_code == 403
+
+
+# --- W4-S16: self-learning health endpoint (backend half) ------------------
+
+class _RxQuery:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def filter(self, *a, **k):
+        return self
+
+    def group_by(self, *a, **k):
+        return self
+
+    def all(self):
+        return self._rows
+
+
+class _RxDB:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def query(self, *a, **k):
+        return _RxQuery(self._rows)
+
+
+def test_self_learning_health_combines_sections(monkeypatch):
+    import types
+    import services.harness_service as hsvc
+    import modules.tools.discovery.signal_recorder as sr
+    monkeypatch.setattr(hsvc, "get_harness_service",
+                        lambda: types.SimpleNamespace(get_status=lambda ws, db=None: {"status": "completed", "iteration": 3}))
+    monkeypatch.setattr(sr, "get_tool_signal_recorder",
+                        lambda: types.SimpleNamespace(stats=lambda: {"recorded": 5, "dropped": 0}))
+    out = _run(h.self_learning_health(ctx=_ctx(clerk="admin"), db=_RxDB([("applied", 2), ("queued", 1)])))
+    assert out["workspace_id"] == str(_WS_ID)
+    assert out["harness"]["status"] == "completed"
+    assert out["tool_routing"]["recorded"] == 5
+    assert out["prescriptions"] == {"applied": 2, "queued": 1}
+
+
+def test_self_learning_health_degrades_gracefully(monkeypatch):
+    import services.harness_service as hsvc
+    import modules.tools.discovery.signal_recorder as sr
+
+    def _boom(*a, **k):
+        raise RuntimeError("section down")
+
+    monkeypatch.setattr(hsvc, "get_harness_service", _boom)
+    monkeypatch.setattr(sr, "get_tool_signal_recorder", _boom)
+
+    class _BoomDB:
+        def query(self, *a, **k):
+            raise RuntimeError("no harness_prescriptions table")
+
+    # Each section degrades to an error marker; the endpoint never 500s.
+    out = _run(h.self_learning_health(ctx=_ctx(clerk="admin"), db=_BoomDB()))
+    assert out["workspace_id"] == str(_WS_ID)
+    assert "error" in out["harness"]
+    assert "error" in out["tool_routing"]
+    assert "error" in out["prescriptions"]

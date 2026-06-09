@@ -130,6 +130,26 @@ def _get_power_mode_caps(power_mode: str, db: Session) -> Dict[str, Any]:
     return caps
 
 
+def _workspace_power_mode_default(workspace_id, db: Session) -> Optional[str]:
+    """The workspace's default power mode (``workspace.settings['power_mode']``),
+    set via ``platform_set_power_mode`` or a HARNESS ``power_mode_*`` prescription
+    (PRD-142 Wave 4, W4-S5). Returns the stored mode when it's a known tier, else
+    None so the caller falls back to ``'standard'``.
+
+    Best-effort by design: this runs on the per-task dispatch path, so a lookup
+    failure (or an unknown stored value) degrades silently to the default rather
+    than failing the task. One indexed workspace read; fine at pilot scale.
+    """
+    try:
+        from core.models.workspaces import Workspace
+
+        ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
+        mode = (ws.settings or {}).get("power_mode") if ws else None
+        return mode if mode in _POWER_MODE_DEFAULTS else None
+    except Exception:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Synthesis model override (Fix 1)
 # ---------------------------------------------------------------------------
@@ -1392,7 +1412,14 @@ class CoordinatorService:
         # Activate agent with power-mode overrides
         factory = AgentFactory(db_session=db)
         run_config = run.config or {}
-        power_mode = run_config.get("power_mode", "standard")
+        # An explicit run_config mode wins; otherwise inherit the workspace default
+        # (workspace.settings['power_mode'], set via platform_set_power_mode / a
+        # HARNESS power_mode_* prescription); falling back to 'standard'. (W4-S5.)
+        power_mode = (
+            run_config.get("power_mode")
+            or _workspace_power_mode_default(run.workspace_id, db)
+            or "standard"
+        )
         mode_caps = _get_power_mode_caps(power_mode, db)
 
         force_tier = mode_caps.get("force_llm_tier")
