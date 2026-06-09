@@ -253,7 +253,7 @@ def test_self_learning_health_combines_sections(monkeypatch):
     monkeypatch.setattr(sr, "get_tool_signal_recorder",
                         lambda: types.SimpleNamespace(stats=lambda: {"recorded": 5, "dropped": 0}))
     out = _run(h.self_learning_health(ctx=_ctx(clerk="admin"), db=_RxDB([("applied", 2), ("queued", 1)])))
-    assert out["workspace_id"] == str(_WS)
+    assert out["workspace_id"] == str(_WS_ID)
     assert out["harness"]["status"] == "completed"
     assert out["tool_routing"]["recorded"] == 5
     assert out["prescriptions"] == {"applied": 2, "queued": 1}
@@ -275,7 +275,7 @@ def test_self_learning_health_degrades_gracefully(monkeypatch):
 
     # Each section degrades to an error marker; the endpoint never 500s.
     out = _run(h.self_learning_health(ctx=_ctx(clerk="admin"), db=_BoomDB()))
-    assert out["workspace_id"] == str(_WS)
+    assert out["workspace_id"] == str(_WS_ID)
     assert "error" in out["harness"]
     assert "error" in out["tool_routing"]
     assert "error" in out["prescriptions"]
