@@ -31,13 +31,49 @@ are not duplicates of each other; conflating them is what produced the G11/G13 c
 | # | Concern | Store | Module / writer | Verdict |
 |---|---|---|---|---|
 | 1 | **Business Knowledge Graph — THE MOAT** (products, orders, FBT, business memory) | `workspace_graphs` table | `modules/knowledge/graph_service.py` (`GraphifyService`) via `core/graph_storage.py` (`DbWorkspaceClient`) | **CANONICAL** |
-| 2 | **Agent learning / inference** (experience, feedback, learned relations) | `knowledge_nodes` / `knowledge_edges` | `modules/memory/storage/knowledge_system.py` (`KnowledgeGraph.add_knowledge`, `LearningEngine.learn_from_feedback`) | **KEEP, hard boundary** — learning-only, never business entities |
+| 2 | **Agent / config learning** (HARNESS diagnoses, prescriptions, outcomes) | `knowledge_nodes` / `knowledge_edges` / `learning_outcomes` | `modules/memory/storage/knowledge_system.py` | **KEEP, hard boundary** — learning-only; **reshaped into the HARNESS store (Role 2) in Wave 4** (§2A); the dead triple-store API is removed (W4-S13) |
 | 3 | **Mission coordination field** (mission-scoped working memory) | Qdrant `field_memory` | `vector_field.py` | **KEEP** (orthogonal) |
 | 4 | **Dead twin of #3** | `core/neural_field/` (6 files, 112 nodes) | only importer = dead workflow-era `AgentExecutionManager` | **CUT** as one unit with `execution_manager` (§5) |
 | 5 | **Code intelligence** (symbol graph of this codebase) | `codegraph_symbols` | `codegraph_service.py` | **KEEP** (orthogonal — about code, not the business) |
+| 6 | **Tool-selection learning** (which tool for which intent, from usage) | `tool_routing_edges` / `tool_routing_affinities` | `signal_recorder.py` → `edge_builder.py` → `graph_router.py` (PRD-138/139) | **KEEP, canonical (Role 1)** — learning-only, never business entities (§2A) |
 
 #1 and #2 are the only two that *look* like the same thing. They are not: #1 is the merchant's
-business; #2 is the agent's learning. §4 makes the line concrete.
+business; #2 is the agent's learning. §4 makes the line concrete. #6 is a third, separate kind of
+learning — about *tools*, not the business and not agent config — added in §2A.
+
+---
+
+## 2A. The tool-routing learning graph (PRD-138/139) — canonical tool-selection learning
+
+A **sixth** graph: the platform's live **tool-selection** learning loop. It is distinct from #1 (the
+moat) and from #2 (agent/config learning), and — like every learning store — it must never hold a
+business entity.
+
+**What it is, and that it is already wired end-to-end.**
+`modules/tools/discovery/signal_recorder.py` (a batched recorder, invoked after **every** tool
+execution at `modules/tools/tool_router.py:614,659`) → the `tool_routing_edges` /
+`tool_routing_affinities` tables (`core/models/tool_routing.py:39, 123`) → `core/services/edge_builder.py`
+(nightly recompute from `tool_execution_logs`, Wilson-bounded confidence) →
+`modules/tools/discovery/graph_router.py` (ranks tool chains at selection time; `fails_for_intent`
+affinities **penalise** bad paths). It is `SEMANTIC_TOOL_ROUTING`-gated (default on) and bounds the
+LLM's tool set so the model never sees the whole catalogue.
+
+**The two learning roles (PRD-142 Wave 4 §7).** The platform's learning splits cleanly into two
+canonical stores — do not conflate or merge them:
+
+| Role | Learns | Canonical store |
+|---|---|---|
+| **Role 1 — tool-selection** | which tool for which intent, from real usage | the tool-routing graph (this section) |
+| **Role 2 — config / diagnosis** | which config change improves the org | the **HARNESS structured store** — reshaped `learning_outcomes` + the new `harness_prescriptions` table (W4-S11/S12), replacing the dead `KnowledgeGraph`/`LearningEngine` API on `knowledge_nodes/edges` (#2; removed W4-S13) |
+
+**The cross-link (read-only).** HARNESS's DIAGNOSE phase **reads** the tool-routing `fails_for_intent`
+affinities as an inefficiency signal (W4-S10) — a sustained tool failure for an intent can surface a
+`tool_assignment_remove` prescription. This is a one-way read from Role 1 into Role 2: HARNESS never
+**writes** the tool-routing tables, and neither store ever holds a business entity.
+
+**Boundary.** The §4 boundary contract applies to `tool_routing_*` verbatim: they store tool/intent
+affinities and edges only — never products, orders, customers, or FBT. A business-entity write to a
+tool-routing table is as forbidden as one to `knowledge_nodes/edges`.
 
 ---
 
@@ -85,9 +121,10 @@ Why the two must never merge:
   The module boundary already reflects the concern boundary — keep it.
 
 **How to enforce (proposed):**
-1. A CI grep gate: no writes to `knowledge_nodes`/`knowledge_edges` from `modules/knowledge/`,
-   `api/shopify.py`, or any vertical integration; no business-entity writes (`product`, `order`,
-   `frequently_bought_with`) into the learning store.
+1. A CI grep gate: no writes to `knowledge_nodes`/`knowledge_edges` (or the tool-routing learning
+   tables `tool_routing_*`, §2A) from `modules/knowledge/`, `api/shopify.py`, or any vertical
+   integration; no business-entity writes (`product`, `order`, `frequently_bought_with`) into any
+   learning store.
 2. A one-line docstring on both stores pointing at this contract.
 3. The `knowledge_nodes/edges` store folds into HARNESS (its natural home — agent self-learning,
    PRD-142 §8). **Decided 2026-05-29 (Gerard): fix, not cut.** It is the self-learning capability the

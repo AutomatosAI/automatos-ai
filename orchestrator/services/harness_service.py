@@ -44,6 +44,9 @@ _HIGH_PRIORITY_RISK = 4
 # description). The apply layer MUST refuse it: writing it literally would set an
 # agent's model/description to the string "review_needed".
 _PLACEHOLDER_PROPOSED_VALUE = "review_needed"
+# W4-S10: a fails_for_intent affinity must reach this many samples before HARNESS
+# treats it as a *sustained* tool failure worth surfacing (not a one-off).
+_TOOL_FAILURE_MIN_SAMPLES = 5
 
 # Convergence thresholds
 _CONVERGED_DELTA = 2.0
@@ -310,6 +313,13 @@ class HarnessService:
                 workspace_id, metrics, diagnosis, prescriptions, changelog, db,
             )
 
+            # W4-S12: dual-write this run's prescriptions to the structured DB store
+            # (best-effort, isolated session). The baseline JSON above stays the
+            # authoritative read path until the human cutover after the migration.
+            self._persist_prescriptions_to_db(
+                workspace_id, baseline.get("iteration"), prescriptions, changelog,
+            )
+
             elapsed = time.monotonic() - t0
             logger.info(
                 "[HARNESS] Tick completed for %s in %.1fs — %d prescriptions, %d applied, %d queued",
@@ -567,6 +577,10 @@ class HarnessService:
                 self._detect_auto_applied_regressions(baseline, health_cards)
             )
 
+        # W4-S10: surface sustained tool failures from the tool-routing learning
+        # graph (fails_for_intent) as inefficiency issues HARNESS can act on.
+        issues.extend(self._diagnose_tool_failures(workspace_id, db, agents_data))
+
         # Org-level diagnosis
         org_diagnosis = self._compute_org_diagnosis(metrics, baseline)
 
@@ -583,6 +597,100 @@ class HarnessService:
             len(health_cards), len(issues), total_delta_magnitude, is_first_run,
         )
         return diagnosis
+
+    @staticmethod
+    def _derive_app_name(action_name: str) -> Optional[str]:
+        """Best-effort map a recorded action_name to a removable Composio app.
+
+        Composio app actions are uppercase APP_ACTION (e.g. 'GMAIL_SEND_EMAIL' ->
+        'GMAIL'). Returns None for meta-tools / platform_* / workspace_* tools,
+        whose failures are surfaced as a diagnosis but never auto-proposed for
+        removal — the assignment they map to is ambiguous (the tool hot path often
+        records the 'composio_execute' meta-tool, not the specific app action).
+        """
+        if not action_name or "_" not in action_name or not action_name.isupper():
+            return None
+        return action_name.split("_", 1)[0]
+
+    def _diagnose_tool_failures(
+        self, workspace_id: UUID, db: "Session", agents_data: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Surface SUSTAINED tool failures from the tool-routing learning graph
+        (PRD-138/139 fails_for_intent) as inefficiency issues HARNESS can act on
+        (W4-S10 — the learning cross-link). Learning-only: reads ONLY
+        tool_routing_affinities, never a business entity. Workspace-scoped.
+        Best-effort — never raises (telemetry must not break the weekly tick)."""
+        issues: List[Dict[str, Any]] = []
+        try:
+            from core.models.tool_routing import ToolRoutingAffinity
+
+            name_by_id = {str(a.get("id")): a.get("name", "unknown") for a in agents_data}
+            rows = (
+                db.query(ToolRoutingAffinity)
+                .filter(
+                    ToolRoutingAffinity.affinity_type == "fails_for_intent",
+                    ToolRoutingAffinity.workspace_id == workspace_id,
+                    ToolRoutingAffinity.agent_id.isnot(None),
+                    ToolRoutingAffinity.sample_count >= _TOOL_FAILURE_MIN_SAMPLES,
+                )
+                .all()
+            )
+            for row in rows:
+                issues.append({
+                    "agent_id": str(row.agent_id),
+                    "agent_name": name_by_id.get(str(row.agent_id), "unknown"),
+                    "root_cause": "tool_failure",
+                    "severity": "medium",
+                    "detail": (
+                        f"tool '{row.action_name}' failed {row.sample_count}x for this agent "
+                        f"(tool-routing fails_for_intent)"
+                    ),
+                    "tool_failure_spec": {
+                        "agent_id": row.agent_id,
+                        "action_name": row.action_name,
+                        "app_name": self._derive_app_name(row.action_name),
+                        "sample_count": row.sample_count,
+                    },
+                })
+        except Exception as exc:
+            logger.warning("[HARNESS] tool-failure diagnosis skipped: %s", exc)
+        return issues
+
+    def _prescribe_tool_removals(
+        self, issues, rejected_signatures, today, start_seq
+    ):
+        """Turn tool_failure issues (W4-S10) into QUEUED (risk 3, human-reviewed)
+        tool_assignment_remove prescriptions — only when the failing action cleanly
+        maps to a removable Composio app. Removing a tool is consequential, so it is
+        never auto-applied (risk 3 = queued, not <= _AUTO_APPLY_MAX_RISK); when the
+        action has no clean app mapping the issue is surfaced in the diagnosis but
+        no removal is proposed. Returns (prescriptions, next_seq)."""
+        out: List[Dict[str, Any]] = []
+        seq = start_seq
+        for issue in issues:
+            if issue.get("root_cause") != "tool_failure":
+                continue
+            spec = issue.get("tool_failure_spec") or {}
+            app_name = spec.get("app_name")
+            if not app_name or spec.get("agent_id") is None:
+                continue  # surfaced as a diagnosis, but not a clean removable assignment
+            sig = f"tool_remove:{issue.get('agent_name')}:{app_name}"
+            if sig in rejected_signatures:
+                continue
+            seq += 1
+            out.append({
+                "prescription_id": f"rx-{today}-{seq:03d}",
+                "target_type": "agent",
+                "target_id": spec.get("agent_id"),
+                "target_name": issue.get("agent_name", "unknown"),
+                "change_type": "tool_assignment_remove",
+                "current_value": {"app_name": app_name},
+                "proposed_value": {"app_name": app_name},
+                "risk_score": 3,
+                "expected_improvement": f"Stop assigning '{app_name}' — it keeps failing for this agent",
+                "rationale": issue.get("detail", "Sustained tool failure from the tool-routing graph."),
+            })
+        return out, seq
 
     # ------------------------------------------------------------------
     # Phase 3: PRESCRIBE
@@ -728,6 +836,14 @@ class HarnessService:
                     "detail", "Auto-applied change regressed; reverting to prior value."
                 ),
             })
+
+        # W4-S10: sustained tool failures (from the tool-routing graph) become
+        # QUEUED tool_assignment_remove prescriptions — human-reviewed (risk 3),
+        # never auto-applied, and only when the action cleanly maps to an app.
+        tool_rxs, seq = self._prescribe_tool_removals(
+            diagnosis.get("issues", []), rejected_signatures, today, seq
+        )
+        prescriptions.extend(tool_rxs)
 
         # Sort: risk ascending, then by prescription_id
         prescriptions.sort(key=lambda p: (p["risk_score"], p["prescription_id"]))
@@ -877,15 +993,70 @@ class HarnessService:
         })
 
     def _build_escalation_message(self, rx: Dict[str, Any], risk: int) -> str:
-        """Plain-text approval request with the /approve|/reject instructions."""
+        """Plain-text approval request pointing to the Command Center.
+
+        Approval happens on the authenticated Command Center surface
+        (``api/harness.py``), never via a channel reply: the inbound webhook has
+        no sender authorization, so a channel command can't be trusted to mutate
+        state (PRD-142 Wave 4, W4-S1). The notice carries the prescription id so
+        the admin can find it in the queued-prescriptions list.
+        """
         rx_id = rx.get("prescription_id", "unknown")
         return (
             f"HARNESS needs approval (risk {risk}/5)\n"
             f"{rx.get('change_type', 'unknown')} for {rx.get('target_name', 'unknown')}\n"
             f"Current: {json.dumps(rx.get('current_value', {}))}\n"
             f"Proposed: {json.dumps(rx.get('proposed_value', {}))}\n"
-            f"Reply /approve {rx_id} or /reject {rx_id}"
+            f"Review and approve or reject in the Command Center (prescription {rx_id})."
         )
+
+    def _persist_prescriptions_to_db(self, workspace_id, iteration, prescriptions, changelog):
+        """W4-S12: dual-write this tick's prescriptions to the structured DB store
+        (harness_prescriptions), with status derived from the apply changelog.
+
+        Best-effort with its OWN session — never touches the tick's transaction and
+        never raises: if the migration hasn't been applied (table absent) or any
+        error occurs, it degrades to JSON-only and the weekly loop is unaffected.
+        The baseline JSON remains the authoritative READ path; flipping reads to the
+        DB and dropping the JSON is the human cutover (after migration + parity).
+        """
+        if not prescriptions:
+            return
+        try:
+            from core.database.database import get_db_session
+            from modules.memory.storage.knowledge_system import HarnessPrescription
+
+            cl = changelog or {}
+            applied_ids = {e.get("prescription_id") for e in cl.get("applied", []) if isinstance(e, dict)}
+            queued_ids = {e.get("prescription_id") for e in cl.get("queued", []) if isinstance(e, dict)}
+            run_id = str(iteration) if iteration is not None else None
+
+            with get_db_session() as db:
+                for rx in prescriptions:
+                    rx_id = rx.get("prescription_id")
+                    if rx_id in applied_ids:
+                        status = "applied"
+                    elif rx_id in queued_ids:
+                        status = "queued"
+                    else:
+                        status = "proposed"
+                    db.add(HarnessPrescription(
+                        workspace_id=workspace_id,
+                        run_id=run_id,
+                        prescription_id=rx_id,
+                        target_type=rx.get("target_type"),
+                        target_id=rx.get("target_id"),
+                        target_name=rx.get("target_name"),
+                        change_type=rx.get("change_type"),
+                        risk_score=rx.get("risk_score"),
+                        status=status,
+                        proposed_value=rx.get("proposed_value"),
+                        current_value_before=rx.get("current_value"),
+                        rationale=rx.get("rationale"),
+                    ))
+                db.flush()
+        except Exception as exc:
+            logger.warning("[HARNESS] DB store dual-write skipped (best-effort): %s", exc)
 
     def _workspace_has_channel(self, db: "Session", workspace_id: UUID) -> bool:
         """True if the workspace has any channel_connections row.
@@ -1416,12 +1587,25 @@ class HarnessService:
                     "agent_id": target_id,
                     "app_name": proposed.get("app_name"),
                 })
+            elif change_type == "routing_rule_add":
+                # routing_rules is read by the UniversalRouter at Tier 2a
+                # (core/routing/engine.py); the rule is workspace-scoped by the
+                # executor context. The target is a routing rule, not an agent, so
+                # target_id is unused here. (PRD-142 Wave 4, W4-S6.)
+                result = await executor.execute("platform_create_routing_rule", {
+                    "source_pattern": proposed.get("source_pattern"),
+                    "source_channel": proposed.get("source_channel"),
+                    "intent_keywords": proposed.get("intent_keywords", []),
+                    "target_agent_id": proposed.get("target_agent_id"),
+                    "target_workflow_id": proposed.get("target_workflow_id"),
+                    "priority": proposed.get("priority", 0),
+                })
             else:
-                # power_mode_upgrade/downgrade and routing_rule_add are intentionally
-                # NOT handled: agents have no power_mode attribute (power mode is
-                # mission-run scoped via run_config + system_settings, never read off
-                # an agent), and no platform_create_routing_rule action exists. Both
-                # would need net-new platform work outside this PRD.
+                # power_mode_upgrade/downgrade is intentionally NOT handled: power
+                # mode is mission-run scoped (run_config) with GLOBAL system_settings
+                # caps and has no per-workspace/agent knob to set — wiring one is
+                # net-new platform work, deferred (PRD-142 Wave 4, W4-S5).
+                # routing_rule_add is handled above (W4-S6).
                 return {"success": False, "error": f"Unknown auto-apply change_type: {change_type}"}
             return result if isinstance(result, dict) else {"success": True}
         except Exception as exc:

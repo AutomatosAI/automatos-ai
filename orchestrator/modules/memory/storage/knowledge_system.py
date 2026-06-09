@@ -121,6 +121,45 @@ class LearningOutcome(Base):
     confidence = Column(Float, default=0.5)
     application_count = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.now)
+    # --- PRD-142 Wave 4 (W4-S11): HARNESS outcome fields (all nullable/additive) ---
+    # Doubles learning_outcomes as HARNESS's structured OUTCOME store — the result
+    # of an applied prescription, workspace-scoped and auditable (Role 2, §12.2).
+    workspace_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+    run_id = Column(String(64), nullable=True, index=True)
+    change_type = Column(String(64), nullable=True)
+    risk_score = Column(Integer, nullable=True)
+    status = Column(String(32), nullable=True)  # applied | rejected | rolled_back
+    applied_at = Column(DateTime, nullable=True)
+    rolled_back_at = Column(DateTime, nullable=True)
+    current_value_before = Column(JSON, nullable=True)
+
+
+class HarnessPrescription(Base):
+    """PRD-142 Wave 4 (W4-S11): HARNESS's structured PRESCRIPTION store — one row
+    per proposed config change per tick (Role 2, §12.2). Workspace-scoped,
+    queryable, auditable; the DB counterpart of the flat baseline-JSON prescription
+    records (S12 dual-writes here).
+
+    No FKs (workspace_id / target_id are plain columns, mirroring routing_rules) so
+    table-creation ordering is never a concern. Learning/operational only — never
+    holds a business entity (KNOWLEDGE-GRAPH-CANONICAL §4 boundary).
+    """
+    __tablename__ = 'harness_prescriptions'
+
+    id = Column(Integer, primary_key=True)
+    workspace_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    run_id = Column(String(64), nullable=True, index=True)
+    prescription_id = Column(String(64), nullable=False, index=True)
+    target_type = Column(String(32), nullable=True)
+    target_id = Column(Integer, nullable=True)
+    target_name = Column(String(255), nullable=True)
+    change_type = Column(String(64), nullable=False)
+    risk_score = Column(Integer, nullable=True)
+    status = Column(String(32), nullable=False, default="proposed")  # proposed|queued|applied|rejected|rolled_back
+    proposed_value = Column(JSON, nullable=True)
+    current_value_before = Column(JSON, nullable=True)
+    rationale = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
 
 
 class HierarchicalMemorySystem:

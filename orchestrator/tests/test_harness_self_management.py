@@ -483,21 +483,26 @@ def test_power_mode_change_type_is_not_implemented():
     assert "platform_update_agent" not in ex.actions()
 
 
-def test_routing_rule_add_is_not_implemented():
-    """routing_rule_add is excluded — no platform_create_routing_rule exists."""
+def test_routing_rule_add_maps_to_create_action():
+    """routing_rule_add is now implemented (PRD-142 W4-S6) — it maps to
+    platform_create_routing_rule (the routing_rules table is router-wired at
+    Tier 2a), no longer the 'Unknown auto-apply change_type' refusal."""
     svc = HarnessService()
     ex = _FakeExecutor(tasks=[], agents=[])
     rx = {
         "prescription_id": "rx-route",
         "change_type": "routing_rule_add",
         "target_id": 42,
-        "proposed_value": {"rule": "x->y"},
+        "proposed_value": {
+            "source_channel": "telegram", "target_agent_id": 7, "priority": 1,
+        },
     }
-    result = asyncio.run(svc._auto_apply_prescription(ex, rx))
+    asyncio.run(svc._auto_apply_prescription(ex, rx))
 
-    assert result["success"] is False
-    assert "Unknown auto-apply change_type" in result["error"]
-    assert ex.calls == []
+    name, params = ex.calls[0]
+    assert name == "platform_create_routing_rule"
+    assert params["source_channel"] == "telegram"
+    assert params["target_agent_id"] == 7
 
 
 def test_temperature_adjust_uses_top_level_param():
@@ -569,7 +574,9 @@ def test_escalation_sends_telegram(monkeypatch):
 
     assert len(sent) == 1
     _, message, _ = sent[0]
-    assert "/approve rx-esc" in message and "/reject rx-esc" in message
+    # Approval moved to the authenticated Command Center (W4-S1); the channel
+    # notice points there and carries the prescription id, not a /approve command.
+    assert "Command Center" in message and "rx-esc" in message
     assert len(changelog["escalated"]) == 1
     assert changelog["escalated"][0]["notified"] is True
     assert changelog["escalated"][0]["prescription_id"] == "rx-esc"
@@ -615,11 +622,14 @@ def test_low_risk_is_not_escalated(monkeypatch):
     assert changelog["escalated"] == []
 
 
-def test_escalation_message_has_approve_reject():
-    """The message carries the /approve|/reject instructions US-025 parses."""
+def test_escalation_message_points_to_command_center():
+    """Approval moved to the authenticated Command Center (PRD-142 W4-S1) — the
+    escalation message points there and no longer carries a channel /approve
+    command, while still carrying the prescription id, risk, and change_type."""
     svc = HarnessService()
     msg = svc._build_escalation_message(_high_risk_rx(rx_id="rx-99", risk=5), 5)
-    assert "/approve rx-99" in msg
-    assert "/reject rx-99" in msg
+    assert "Command Center" in msg
+    assert "rx-99" in msg
     assert "risk 5/5" in msg
     assert "model_change_same_tier" in msg
+    assert "/approve" not in msg  # approval is no longer a channel command

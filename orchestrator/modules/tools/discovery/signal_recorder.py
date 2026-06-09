@@ -82,6 +82,22 @@ class ToolSignalRecorder:
     def __init__(self) -> None:
         self._queue: Optional[asyncio.Queue] = None
         self._drain_task: Optional[asyncio.Task] = None
+        # Process-lifetime observability counters for the self-learning tile.
+        # Restart note: these and the queue are in-memory, so a restart loses any
+        # *queued* signals — safe by design: the nightly edge_builder RECOMPUTES
+        # authoritative edges/affinities from the durable tool_execution_logs, so
+        # no authoritative learning is lost on restart (the recorder only provides
+        # intra-day freshness).
+        self._stats: Dict[str, int] = {
+            "recorded": 0, "dropped": 0, "flushes": 0, "flush_errors": 0,
+        }
+
+    def stats(self) -> Dict[str, int]:
+        """Observability snapshot: signals recorded vs dropped, flush successes
+        vs failures, and live queue depth — the numbers the self-learning tile
+        (W4-S16) reads to answer 'is tool-routing learning healthy?'."""
+        depth = self._queue.qsize() if self._queue is not None else 0
+        return {**self._stats, "queue_depth": depth}
 
     # ------------------------------------------------------------------
     # Config accessors (lazy — keep this module leaf-loadable)
@@ -139,11 +155,14 @@ class ToolSignalRecorder:
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
+            self._stats["dropped"] += 1
             return  # not on an event loop -> skip
         self._ensure_started(loop)
         try:
             self._queue.put_nowait(signal)
+            self._stats["recorded"] += 1
         except asyncio.QueueFull:
+            self._stats["dropped"] += 1
             logger.debug(
                 "ToolSignalRecorder: queue full, dropping signal for %s",
                 signal.action_name,
@@ -252,7 +271,9 @@ class ToolSignalRecorder:
                 for (action_name, affinity_type, agent_id, ws), inc in aff_counts.items():
                     self._upsert_affinity(db, action_name, affinity_type, ws, agent_id, inc, now)
                 db.flush()
+            self._stats["flushes"] += 1
         except Exception as e:
+            self._stats["flush_errors"] += 1
             self._record_flush_error(e)
 
     # ------------------------------------------------------------------
