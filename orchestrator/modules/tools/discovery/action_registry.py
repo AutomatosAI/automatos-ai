@@ -36,6 +36,10 @@ class ActionDefinition:
     requires_confirmation: bool = False
     workspace_scoped: bool = True
     admin_only: bool = False
+    # PRD-143: observability/oversight tier. Fail-closed — every listing/
+    # selection path excludes these unless include_super_admin=True is
+    # passed explicitly (opt-in include, unlike admin_only's opt-in exclude).
+    super_admin_only: bool = False
     promoted: bool = False
     tags: List[str] = field(default_factory=list)
     examples: List[str] = field(default_factory=list)
@@ -104,15 +108,24 @@ class ActionRegistry:
         self._ensure_initialized()
         return [a for a in self._actions.values() if a.permission_level == level]
 
-    def to_openai_tools(self, permission_filter: Optional[str] = None) -> List[Dict[str, Any]]:
+    def to_openai_tools(
+        self,
+        permission_filter: Optional[str] = None,
+        include_super_admin: bool = False,
+    ) -> List[Dict[str, Any]]:
         """
         Convert all actions to OpenAI function calling format.
 
         Args:
             permission_filter: Optional - only include actions with this permission level
+            include_super_admin: Fail-closed — super_admin_only actions are
+                excluded unless this is explicitly True.
         """
         self._ensure_initialized()
-        actions = self._actions.values()
+        actions = [
+            a for a in self._actions.values()
+            if include_super_admin or not a.super_admin_only
+        ]
         if permission_filter:
             actions = [a for a in actions if a.permission_level == permission_filter]
         return [a.to_openai_schema() for a in actions]
@@ -122,7 +135,11 @@ class ActionRegistry:
         self._ensure_initialized()
         return [a for a in self._actions.values() if a.promoted]
 
-    def to_first_class_schemas(self, exclude_admin: bool = False) -> List[Dict[str, Any]]:
+    def to_first_class_schemas(
+        self,
+        exclude_admin: bool = False,
+        include_super_admin: bool = False,
+    ) -> List[Dict[str, Any]]:
         """
         Return OpenAI function schemas for promoted actions.
 
@@ -132,9 +149,13 @@ class ActionRegistry:
         Args:
             exclude_admin: If True, admin_only promoted actions are excluded
                 (non-admin callers won't get schemas for admin tools).
+            include_super_admin: Fail-closed — super_admin_only actions are
+                excluded unless this is explicitly True.
         """
         self._ensure_initialized()
         promoted = [a for a in self._actions.values() if a.promoted]
+        if not include_super_admin:
+            promoted = [a for a in promoted if not a.super_admin_only]
         if exclude_admin:
             promoted = [a for a in promoted if not a.admin_only]
         return [a.to_openai_schema() for a in promoted]
@@ -144,6 +165,7 @@ class ActionRegistry:
         exclude_admin: bool = False,
         exclude_promoted: bool = True,
         allowed_names: Optional[List[str]] = None,
+        include_super_admin: bool = False,
     ) -> Dict[str, Any]:
         """
         Return a SINGLE OpenAI tool schema (platform_execute) that wraps
@@ -162,14 +184,20 @@ class ActionRegistry:
                 enum and logs a WARNING — empty list is treated as "ranker
                 returned nothing", not "block everything", so the LLM is
                 never left with zero callable actions.
+            include_super_admin: Fail-closed — super_admin_only actions are
+                excluded from the enum (and from every fallback path)
+                unless this is explicitly True.
         """
         self._ensure_initialized()
 
-        # Build enum of valid action names AFTER admin/promoted filters.
+        # Build enum of valid action names AFTER admin/su/promoted filters.
+        # The su filter applies here, BEFORE the allow-list, so the
+        # empty-intersection fallback below can never re-admit su actions.
         valid_actions = sorted(
             a.name for a in self._actions.values()
             if (not exclude_promoted or not a.promoted)
             and (not exclude_admin or not a.admin_only)
+            and (include_super_admin or not a.super_admin_only)
         )
 
         # PRD-138 US-008: optional allow-list narrows the enum so the LLM only
@@ -233,7 +261,12 @@ class ActionRegistry:
             },
         }
 
-    def build_prompt_summary(self, exclude_admin: bool = False, exclude_promoted: bool = False) -> str:
+    def build_prompt_summary(
+        self,
+        exclude_admin: bool = False,
+        exclude_promoted: bool = False,
+        include_super_admin: bool = False,
+    ) -> str:
         """
         Build a markdown summary of all platform actions for injection
         into the agent's system prompt.  Grouped by category.
@@ -244,12 +277,15 @@ class ActionRegistry:
             exclude_promoted: If True, promoted actions are skipped from the
                 prompt text. Default False — promoted actions appear in a
                 "Direct Tools" section with call-directly instructions.
+            include_super_admin: Fail-closed — super_admin_only actions are
+                excluded unless this is explicitly True.
         """
         self._ensure_initialized()
         return self._format_actions_summary(
             list(self._actions.values()),
             exclude_admin=exclude_admin,
             exclude_promoted=exclude_promoted,
+            include_super_admin=include_super_admin,
         )
 
     def build_filtered_prompt_summary(
@@ -257,6 +293,7 @@ class ActionRegistry:
         action_names: List[str],
         exclude_admin: bool = False,
         exclude_promoted: bool = False,
+        include_super_admin: bool = False,
     ) -> str:
         """
         Build a markdown summary of only the named subset of platform actions,
@@ -274,6 +311,8 @@ class ActionRegistry:
             exclude_promoted: If True, promoted actions are skipped from
                 the prompt text. Default False — promoted actions appear
                 in a "Direct Tools" section.
+            include_super_admin: Fail-closed — super_admin_only actions are
+                excluded even when explicitly named, unless this is True.
         """
         self._ensure_initialized()
         # Preserve registry-membership filtering; unknown names silently skipped.
@@ -285,6 +324,7 @@ class ActionRegistry:
             filtered,
             exclude_admin=exclude_admin,
             exclude_promoted=exclude_promoted,
+            include_super_admin=include_super_admin,
         )
 
     @staticmethod
@@ -303,11 +343,15 @@ class ActionRegistry:
         actions: List[ActionDefinition],
         exclude_admin: bool,
         exclude_promoted: bool,
+        include_super_admin: bool = False,
     ) -> str:
         """
         Render a list of ActionDefinitions as the canonical markdown summary
         used in agent system prompts.  Shared between build_prompt_summary
         and build_filtered_prompt_summary so output format stays identical.
+
+        Fail-closed: super_admin_only actions are skipped unless
+        include_super_admin=True is passed explicitly.
 
         Promoted actions are rendered in a separate section with instructions
         to call them directly by name (they have first-class tool schemas).
@@ -318,6 +362,8 @@ class ActionRegistry:
         dispatcher_by_cat: Dict[str, List[ActionDefinition]] = {}
 
         for action in actions:
+            if action.super_admin_only and not include_super_admin:
+                continue
             if exclude_admin and action.admin_only:
                 continue
             if exclude_promoted and action.promoted:

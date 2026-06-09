@@ -17,8 +17,8 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": "Foundation story — everything else layers on this flag. Smallest safe extension of the existing admin_only mechanism (PRD-143 §9); do NOT invent a new permission system."
+      "passes": true,
+      "notes": "Foundation story — everything else layers on this flag. Smallest safe extension of the existing admin_only mechanism (PRD-143 §9); do NOT invent a new permission system. DONE 2026-06-09: super_admin_only field at action_registry.py:43; include_super_admin=False threaded through to_openai_tools/to_first_class_schemas/to_dispatcher_schema (su filter runs BEFORE allow-list so fallback stays su-clean)/build_prompt_summary/build_filtered_prompt_summary/_format_actions_summary. 5/5 tests green, 52 neighbouring registry tests green. NOTE: full-app import check exceeded the 300s cap (heavy torch/transformers chain in this venv) — per run rules, relied on py_compile + the story pytest file + 6 registry-consumer suites instead."
     },
     {
       "id": "S2",
