@@ -12,6 +12,15 @@ Your working directory is **`/Users/gkavanagh/Development/Automatos-AI-Platform/
 - NEVER run a migration, seed script, or test against a **live/prod** database. The S12 seed is AUTHORED only; a human applies it.
 - If you accidentally drift, abort with `RALPH_ABORT: drifted out of checkout`.
 
+## One-shot execution discipline (a hung child = your work DISCARDED)
+
+You run as a single `claude --print` invocation inside a 45-minute `timeout`. When your final message is emitted, every process you started must already be finished — a dangling child holds the output pipe open, the loop kills the iteration at 45m, and `git checkout -- .` **discards your uncommitted work** (this exact failure already cost one full S1 implementation).
+
+- NEVER run a Bash command in the background (`run_in_background`, trailing `&`, `nohup`). FOREGROUND ONLY.
+- NEVER `sleep`-poll while waiting on anything.
+- Wrap slow validations: `timeout 300 python -c "from main import app; print('import OK')"` — the first import in this venv can take minutes; if it exceeds the cap, record that in the story notes and rely on py_compile + the story's pytest file instead.
+- **Commit IMMEDIATELY once the story's named test file + py_compile pass.** Do not defer the commit behind extra re-validation. Commit first, then run any optional extra checks; amend only if they fail.
+
 ## The PRD
 
 - `scripts/ralph/prd-143.json` — the user stories. **The `passes` field is the single source of truth for progress.**
