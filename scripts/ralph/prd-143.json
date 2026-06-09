@@ -89,8 +89,8 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": "ONE canonical dependency (PRD-143 FR-4). No require_super_admin existed before — every obs router in S6/S7 imports this exact symbol."
+      "passes": true,
+      "notes": "ONE canonical dependency (PRD-143 FR-4). No require_super_admin existed before — every obs router in S6/S7 imports this exact symbol. DONE 2026-06-10: NEW core/auth/super_admin.py — require_super_admin composes get_request_context_hybrid via Depends (hybrid.py untouched, verified); fail-closed getattr check refuses missing user, missing/None system_role, attribute-less principal, workspace admin/owner, API-key admin (hybrid.py:783), service principal (hybrid.py:616); returns ctx only for literal system_role=='super_admin'. No os.getenv/config/DB. 7/7 tests green incl. a wiring pin that the Depends target IS get_request_context_hybrid; 30 green across all 5 PRD-143 suites. Full-app import unrunnable in this venv (email-validator missing, pre-existing — same as S2-S4); relied on py_compile + the story suite + neighbouring suites."
     },
     {
       "id": "S6",
