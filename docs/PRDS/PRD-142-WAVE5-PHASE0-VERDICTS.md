@@ -62,3 +62,23 @@ Process: WS-Z route cuts land first → re-verify each table on the live schema 
 1. **`automatos-mobile`** references `/api/chatbot/history` and `/api/chatbot/stream` in its api-client — endpoints that no longer exist (most never existed post-consolidation). Sibling-repo cleanup, not this PR.
 2. **`seed_recipes_marketplace.py` (v1)** has the same evidence profile as the deleted v2 (zero invocations; writes the same superseded `marketplace_items` `type='recipe'` path). Not on §11, so left in place — say the word and it folds into the wave.
 3. `marketplace_items` rows with `type='recipe'` in prod look vestigial (live browse reads `WorkflowRecipe`) — candidate for the WS-AA data-cleanup review.
+
+---
+
+# Addendum — WS-Z / WS-AA execution (2026-06-09, post-merge of #431/#432)
+
+Per-story outcomes on `ralph/prd-142-wave5-cut-list` (fresh main):
+
+| Story | Outcome | Evidence |
+|---|---|---|
+| **W5-S1** `analytics_real.py` | **KEEP — all 18 routes live.** The "18/0" stale flag was hook-indirection blindness: `use-analytics-api.ts` hooks → IsItWorkingStrip / Command Center; composite routes delegate to sub-handlers as functions. | No cuts |
+| **W5-S2** `heartbeat.py` | **KEEP — all 12 routes live.** Routes are the HTTP control surface of the live `HeartbeatService` (APScheduler, `HEARTBEAT_ENABLED`, started in main.py lifespan); FE callers in agent-configuration-modal, use-heartbeats-api, Routines tab, analytics-overview. | No cuts |
+| **W5-S3** problems/solutions/synthesis/insights | **KILLED end-to-end.** 7 stub routes (hardcoded JSON), zero callers, zero tables; 3 orphaned FE hook files whose api-client methods didn't even exist (broken at runtime). | 4 routers + 3 hooks + mounts deleted |
+| **W5-S4** `context_engineering.py` | **KILLED — whole router** (12 routes, 0 callers, 2 handlers were commented-out husks) + route-only orphans `QueryProcessor`/`MultiModalProcessor`. Engines KEPT (core.math, SemanticChunker, ContextOptimizer — live in RAG). Live `ContentModality` users import the separate `modules.rag` copy. | Router + 2 classes deleted |
+| **W5-S5** workflows.py legacy streaming | **KEEP — all streaming/execution routes are live Mission-UI paths** (execution-kitchen.tsx → `/stream/aisdk` is the canonical protocol; template-literal callers). Only cut: the PRD-125 410-Gone `/results` stub pair + orphaned hook/query-key/client method. `consumers/workflows/streaming` survives. | Micro-cut only |
+| **W5-S6** remainder sweep | **VERDICTS REJECTED — no cuts.** The remainder agent labelled 375/534 routes KILL via literal path-grep, skipping the api-client method indirection. Sample-disproof: `agents.py` CRUD live via `use-agent-api.ts`; `attachments.py` live at `api-client.ts:1725`; `api_playbooks.py /mine` contradicts the Phase-0 parity-test KEEP. The remainder sweep returns to the Ralph loop with the corrected method (trace api-client wrapper → hook → component before any verdict). | No cuts on unsafe evidence |
+| **W5-S7** WS-AA | **DONE (prep).** All 10 tables re-verified zero-ref on post-merge main; reversible standalone migration `prd142_wave5_drop_dead_tables` authored (DROP IF EXISTS ×10; downgrade recreates from DDL snapshots); 10 model classes + 2 live back-refs removed. `intent_classification_cache` EXCLUDED (FK from live `ToolExecutionLog`). **Apply = Gerard only.** | Migration + models committed |
+
+**Gates:** every cut grep-zero; `py_compile` green; full net **1807 passed** with only the 2 pre-existing L2-transcript flakes (identical to the pristine-main baseline).
+
+**Method lesson (now in the loop PROMPT):** a route's liveness verdict REQUIRES tracing the frontend indirection chain — api-client wrapper method → hook → component callers. Literal path-grep alone produced 375 false-KILLs in one pass.

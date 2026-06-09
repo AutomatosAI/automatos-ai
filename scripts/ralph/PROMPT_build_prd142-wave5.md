@@ -13,7 +13,7 @@ You are executing **PRD-142 Wave 5**, the deletion wave, one story per iteration
 
 A cut is done only when ALL hold:
 
-1. **Zero inbound on live code, proven by grep** — instantiation sites, call sites, attribute reads, route mounts, model reads. For routes: grep by **path segments** AND template-literal forms (`` `${...}` ``) across `frontend/`, not just the literal `{param}` string.
+1. **Zero inbound on live code, proven by grep** — instantiation sites, call sites, attribute reads, route mounts, model reads. For routes: grep by **path segments** AND template-literal forms (`` `${...}` ``) across `frontend/`, not just the literal `{param}` string. **MANDATORY indirection trace:** find the `frontend/lib/api-client.ts` method wrapping the path, then grep THAT method's callers (hooks → components). A path-string grep alone is NOT evidence — the 2026-06-09 remainder pass produced 375 false-KILLs this way (agents.py CRUD, attachments.py, missions.py were all "dead" by path-grep and live by method-trace). Also honor test contracts (e.g. `test_playbook_launch_parity` enforces api_playbooks as a KEEP).
 2. **External callers checked** — widgets JS, voice audio, Composio/Shopify/Clerk/Stripe webhooks + OAuth callbacks, SDK repos. Zero internal refs is NOT enough for these: flag `KEEP-external`.
 3. **Flag-gate + scheduler check** — a route behind `HARNESS_*`/feature flags or driven by cron/schedulers is live even with zero HTTP refs.
 4. **The delete is clean** — file/route/mount goes, plus orphaned imports, exports, seeds, and tests that exist only for the deleted surface.

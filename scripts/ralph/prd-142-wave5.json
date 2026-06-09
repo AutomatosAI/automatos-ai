@@ -1,76 +1,65 @@
 {
   "project": "Automatos AI Platform — PRD-142 Wave 5 (Cut List: WS-Z dead routes + WS-AA DROP prep)",
   "branchName": "ralph/prd-142-wave5-cut-list",
-  "description": "Delete-only wave, under green. Phase 0 verdicts + method caveats live in docs/PRDS/PRD-142-WAVE5-PHASE0-VERDICTS.md (read it first, every iteration). WS-W/WS-X already executed on feat/prd142-wave5-cuts (neural_field+AEM, workflow bridge, mcp_executor, seed v2, chatbot_llm shim — all cut, greps zero). This loop covers WS-Z (route clusters: per-route verify-then-cut) and WS-AA prep (reversible DROP migrations, NEVER applied by the loop). Contract per cut: segment-level grep proves zero inbound on live code + flag-gate check + external-caller check + scheduler check; then unmount + delete + orphan cleanup; orchestrator-tests green; cut-grep zero. ZERO live functionality removed; survivors are not refactored.",
+  "description": "Delete-only wave, under green. Phase 0 verdicts + the WS-Z/WS-AA execution addendum live in docs/PRDS/PRD-142-WAVE5-PHASE0-VERDICTS.md (read it first, every iteration). Status 2026-06-09: W5-S1..S5 and S7 EXECUTED interactively (see addendum + commits be56cfd..4c9046d); ONLY W5-S6 (the remainder sweep) remains for the loop, with a corrected method: a route verdict REQUIRES tracing api-client wrapper → hook → component callers — literal path-grep produced 375 false-KILLs and its labels were rejected. Contract per cut: indirection-traced zero inbound + flag-gate + scheduler + external-caller checks; unmount + delete + orphan cleanup; orchestrator-tests green; cut-grep zero. The W5-S7 DROP migration is authored but NEVER applied by the loop (Gerard applies).",
   "userStories": [
     {
       "id": "W5-S1",
-      "title": "Cut the analytics_real.py dead cluster",
-      "description": "18 routes with zero refs (re-mine 2026-06-09). Verify each per the contract (segment greps incl. template-literal forms, flag gates, dashboards), then cut the dead routes and any service code orphaned by them.",
+      "title": "analytics_real.py cluster",
+      "description": "DONE 2026-06-09 — KEEP-all: 18/18 routes live (use-analytics-api hooks → IsItWorkingStrip / Command Center; composites delegate to sub-handlers as functions). Stale '18/0' flag was hook-indirection blindness. No cuts.",
       "acceptanceCriteria": [
-        "Per-route verdict table (kill/keep + evidence) recorded in the commit message or plan file",
-        "Verified-dead routes unmounted + deleted; orphaned imports/services removed",
-        "orchestrator-tests green; cut-greps zero for removed symbols"
+        "DONE — verdict table in PHASE0-VERDICTS addendum; story closed KEEP"
       ]
     },
     {
       "id": "W5-S2",
-      "title": "Cut the heartbeat.py dead cluster — scheduler-aware",
-      "description": "12 routes with zero HTTP refs, BUT heartbeat may be driven by internal schedulers/cron (PRD-141 era), not HTTP consumers. Check scheduler registrations and config-driven invocation before declaring any route dead. If the subsystem is live-but-internal, record KEEP and exit the story.",
+      "title": "heartbeat.py cluster",
+      "description": "DONE 2026-06-09 — KEEP-all: routes are the HTTP control surface of the live HeartbeatService (APScheduler, HEARTBEAT_ENABLED, main.py lifespan); FE callers in agent-configuration-modal / use-heartbeats-api / Routines tab. No cuts.",
       "acceptanceCriteria": [
-        "Scheduler/cron/config invocation check recorded per route",
-        "Only routes with zero HTTP AND zero scheduler callers are cut",
-        "orchestrator-tests green; cut-greps zero"
+        "DONE — scheduler + FE evidence in PHASE0-VERDICTS addendum; story closed KEEP"
       ]
     },
     {
       "id": "W5-S3",
-      "title": "Cut the problems/solutions/synthesis/insights subsystem (if dead end-to-end)",
-      "description": "problems.py, solutions.py, synthesis.py, insights.py — an older problem→solution subsystem with zero route refs. Verify the whole chain (routes → services → tables) and cut as one unit if dead; tables found dead here feed W5-S7.",
+      "title": "problems/solutions/synthesis/insights subsystem",
+      "description": "DONE 2026-06-09 — KILLED end-to-end (commit be56cfd): 7 hardcoded-JSON stub routes, zero callers, zero tables; 3 orphaned FE hook files whose api-client methods did not exist. Cut-greps zero.",
       "acceptanceCriteria": [
-        "Chain-level evidence (routes, services, models) recorded",
-        "Dead unit removed incl. main.py mounts and orphan imports; any table candidates appended to the W5-S7 list",
-        "orchestrator-tests green; cut-greps zero"
+        "DONE — 4 routers + 3 hooks + mounts deleted; net green"
       ]
     },
     {
       "id": "W5-S4",
-      "title": "Cut context_engineering.py utility endpoints",
-      "description": "Info-theory utility routes (/entropy, /mutual-information, /chunk-text, /graph/centrality, /normalize-vectors, /optimize/gradient-descent, …) with zero refs. Verify per contract, cut the dead ones; keep any route used by live internal services.",
+      "title": "context_engineering.py router",
+      "description": "DONE 2026-06-09 — KILLED whole router (commit 88a6300): 12 routes, 0 callers, 2 commented-out handlers; route-only orphans QueryProcessor/MultiModalProcessor deleted; core.math/SemanticChunker/ContextOptimizer engines KEPT (live in RAG).",
       "acceptanceCriteria": [
-        "Per-route verdicts recorded",
-        "Dead routes + orphaned helpers removed",
-        "orchestrator-tests green; cut-greps zero"
+        "DONE — router + 2 orphan classes deleted; retrieval/__init__ trimmed; net green"
       ]
     },
     {
       "id": "W5-S5",
-      "title": "Cut legacy workflows.py execution-streaming routes (cascade-aware)",
-      "description": "Candidates: /executions/{id}/cancel, /results, /stream, /stream/aisdk, /duplicate, /execute-advanced. CAUTION: parametric-path false-dead risk is highest here — Mission UI may call these via template literals; grep by segments ('/executions/', 'stream/aisdk', etc.) across frontend hooks. After any cut, re-check consumers/workflows/streaming for orphanhood (api/workflows.py was its last importer at Phase 0).",
+      "title": "workflows.py legacy execution-streaming routes",
+      "description": "DONE 2026-06-09 — KEEP all streaming/execution routes (live Mission-UI template-literal callers; /stream/aisdk is the canonical protocol). Micro-cut only (commit f001127): the PRD-125 410-Gone /results stub pair + orphaned hook/query-key/client method. consumers/workflows/streaming survives.",
       "acceptanceCriteria": [
-        "Segment-level greps recorded per route (template-literal forms included)",
-        "Dead routes removed; consumers/workflows/streaming cut ONLY if zero importers remain after",
-        "orchestrator-tests green; cut-greps zero"
+        "DONE — micro-cut executed; streaming cascade map in PHASE0-VERDICTS addendum"
       ]
     },
     {
       "id": "W5-S6",
-      "title": "Sweep the remaining candidates, batched by router file",
-      "description": "Work the rest of the 290-candidate list router-by-router (batches ≤10 routes). Skip KEEP-external (widgets/*, voice audio, webhooks, OAuth callbacks). A route referenced only by tests: cut route + test together. Anything ambiguous after the checks: flag RALPH_BLOCKED-style in the plan for Gerard rather than guessing.",
+      "title": "Remainder sweep, batched by router file — THE loop's remaining work",
+      "description": "REOPENED with corrected method. The 2026-06-09 remainder pass labelled 375/534 routes KILL via literal path-grep and was REJECTED (sample disproof: agents.py CRUD live via use-agent-api.ts; attachments.py live at api-client.ts:1725; api_playbooks.py /mine is parity-test-protected KEEP). Work the ~70 uncovered routers in batches ≤10 routes. Per route, MANDATORY: trace frontend/lib/api-client.ts wrapper method → hook → component callers (plus segment/template-literal greps, flag-gate, scheduler, external-caller checks, test contracts). KILL only on a complete trace; any doubt → AMBIGUOUS for Gerard.",
       "acceptanceCriteria": [
-        "Every remaining candidate has a recorded verdict (kill/keep-external/keep-flag-gated/ambiguous)",
-        "All verified-dead routes cut with orphan cleanup; ambiguous ones listed for Gerard",
+        "Every uncovered router has per-route verdicts with indirection-trace evidence",
+        "Verified-dead routes cut with orphan cleanup; AMBIGUOUS list handed to Gerard",
         "orchestrator-tests green after every batch; cut-greps zero"
       ]
     },
     {
       "id": "W5-S7",
-      "title": "WS-AA prep: reversible DROP migrations (NO APPLY — human-gated)",
-      "description": "After route cuts settle: re-verify on the live schema the 10 Phase-0 dead tables + the flagged intent_classification_cache (FK from live ToolExecutionLog — needs Gerard's call) + any tables orphaned by W5-S3..S6 + residual model-less mcp-era tables. Author reversible Alembic DROP migrations against the live head chain and delete the orphaned model classes. NEVER run the migrations.",
+      "title": "WS-AA: reversible DROP migrations (NO APPLY — human-gated)",
+      "description": "DONE (prep) 2026-06-09 (commit 4c9046d): alembic prd142_wave5_drop_dead_tables drops the 10 re-verified tables (IF EXISTS, no CASCADE; downgrade recreates from DDL snapshots); 10 model classes + 2 live back-refs removed. intent_classification_cache EXCLUDED (FK from live ToolExecutionLog) — needs Gerard's decision. REMAINING (human): Gerard applies the migration on prod; loop never runs it. Tables newly orphaned by future S6 cuts get a follow-up migration under the same pattern.",
       "acceptanceCriteria": [
-        "Reversible migration(s) authored + verified against the live alembic head chain",
-        "Orphaned model classes removed; zero read/write refs remain for each dropped table",
-        "Migrations NOT applied — handoff note for Gerard with the apply order"
+        "DONE — migration authored + verified; models removed; net green (1807 passed)",
+        "HUMAN — Gerard applies on prod; intent_classification_cache decision recorded"
       ]
     }
   ]
