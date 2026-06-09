@@ -1600,12 +1600,17 @@ class HarnessService:
                     "target_workflow_id": proposed.get("target_workflow_id"),
                     "priority": proposed.get("priority", 0),
                 })
+            elif change_type in ("power_mode_upgrade", "power_mode_downgrade"):
+                # Sets the workspace default power mode (workspace.settings['power_mode']),
+                # which a Mission run inherits when its run_config doesn't pin one
+                # (coordinator_service._workspace_power_mode_default). Workspace-scoped
+                # by the executor context; target_id is unused (this is a workspace
+                # knob, not an agent attribute). (PRD-142 Wave 4, W4-S5.)
+                result = await executor.execute("platform_set_power_mode", {
+                    "power_mode": proposed.get("power_mode"),
+                })
             else:
-                # power_mode_upgrade/downgrade is intentionally NOT handled: power
-                # mode is mission-run scoped (run_config) with GLOBAL system_settings
-                # caps and has no per-workspace/agent knob to set — wiring one is
-                # net-new platform work, deferred (PRD-142 Wave 4, W4-S5).
-                # routing_rule_add is handled above (W4-S6).
+                # routing_rule_add (W4-S6) and power_mode_* (W4-S5) are handled above.
                 return {"success": False, "error": f"Unknown auto-apply change_type: {change_type}"}
             return result if isinstance(result, dict) else {"success": True}
         except Exception as exc:

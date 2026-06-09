@@ -148,12 +148,12 @@ def test_routing_rule_add_maps_to_action():
     assert params["priority"] == 2
 
 
-def test_power_mode_still_refused_while_deferred():
-    # power_mode remains net-new work (W4-S5 deferred); the apply path must still
-    # refuse it safely rather than silently no-op.
+def test_power_mode_upgrade_maps_to_action():
+    # W4-S5: power_mode_upgrade/downgrade now map onto the platform_set_power_mode
+    # action (sets workspace.settings['power_mode']) — no longer refused.
     svc = get_harness_service()
     ex = _FakeExecutor()
-    rx = {"change_type": "power_mode_upgrade", "proposed_value": {"power_mode": "performance"}}
+    rx = {"change_type": "power_mode_upgrade", "proposed_value": {"power_mode": "max"}}
     res = _run(svc._auto_apply_prescription(ex, rx))
-    assert res.get("success") is False
-    assert ex.calls == []  # nothing executed for an unhandled change_type
+    assert res.get("success") is True
+    assert ex.calls == [("platform_set_power_mode", {"power_mode": "max"})]

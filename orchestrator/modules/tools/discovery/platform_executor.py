@@ -118,6 +118,7 @@ from modules.tools.discovery.handlers_harness import (
     harness_history,
 )
 from modules.tools.discovery.handlers_routing import create_routing_rule  # PRD-142 Wave 4 (W4-S6)
+from modules.tools.discovery.handlers_power import set_power_mode  # PRD-142 Wave 4 (W4-S5)
 from modules.tools.discovery.handlers_auto_reporting import (
     get_auto_reporting_prefs,
     update_auto_reporting_prefs,
@@ -392,6 +393,8 @@ class PlatformActionExecutor:
             "platform_harness_history": harness_history,
             # PRD-142 Wave 4 (W4-S6): routing-rule creation
             "platform_create_routing_rule": create_routing_rule,
+            # PRD-142 Wave 4 (W4-S5): workspace power-mode knob
+            "platform_set_power_mode": set_power_mode,
             # Wave 2: Auto reporting preferences + send-notification wrapper
             "platform_get_auto_reporting_prefs": get_auto_reporting_prefs,
             "platform_update_auto_reporting_prefs": update_auto_reporting_prefs,
