@@ -94,3 +94,48 @@ async def reject_prescription(
 ) -> Dict[str, Any]:
     """Reject a queued HARNESS prescription — suppresses future re-proposal."""
     return await _run_command(db, ctx, "/reject", rx_id)
+
+
+@router.get("/self-learning")
+async def self_learning_health(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Self-learning health for the Command Center tile (PRD-142 Wave 4, W4-S16 backend).
+
+    Workspace-scoped read combining the three self-learning signals: HARNESS loop
+    status, the tool-routing recorder's stats, and a prescription summary from the
+    structured store. Each section is best-effort — a failure in one (e.g. the
+    harness_prescriptions table not yet migrated in this env) degrades to an
+    ``error`` marker rather than 500-ing the tile. The frontend component that
+    renders this is human-built (W4-S16 FE half).
+    """
+    ws = ctx.workspace_id
+    out: Dict[str, Any] = {"workspace_id": str(ws)}
+
+    try:
+        from services.harness_service import get_harness_service
+        out["harness"] = get_harness_service().get_status(ws, db=db)
+    except Exception as exc:  # noqa: BLE001 — best-effort tile section
+        out["harness"] = {"error": str(exc)}
+
+    try:
+        from modules.tools.discovery.signal_recorder import get_tool_signal_recorder
+        out["tool_routing"] = get_tool_signal_recorder().stats()
+    except Exception as exc:  # noqa: BLE001
+        out["tool_routing"] = {"error": str(exc)}
+
+    try:
+        from sqlalchemy import func
+        from modules.memory.storage.knowledge_system import HarnessPrescription
+        rows = (
+            db.query(HarnessPrescription.status, func.count())
+            .filter(HarnessPrescription.workspace_id == ws)
+            .group_by(HarnessPrescription.status)
+            .all()
+        )
+        out["prescriptions"] = {status: count for status, count in rows}
+    except Exception as exc:  # noqa: BLE001 — table may be absent in un-migrated envs
+        out["prescriptions"] = {"error": str(exc)}
+
+    return out
