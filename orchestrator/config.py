@@ -508,6 +508,16 @@ class Config:
     # config changes back onto the platform). HIGH RISK — default OFF. Nothing
     # in Phase 5 may take effect unless this is true.
     HARNESS_SELF_MANAGEMENT_ENABLED: bool = os.getenv("HARNESS_SELF_MANAGEMENT_ENABLED", "false").lower() == "true"
+    # PRD-142 Wave 4 (§12.3): HARNESS risk thresholds — Railway-overridable env vars
+    # (change in Railway + restart, no file edit). Auto-apply ceilings: a prescription
+    # auto-applies only when its risk_score <= the workspace's ceiling; higher risk is
+    # queued for human approval. Workspaces at autonomy=full get the higher ceiling,
+    # standard workspaces the lower one.
+    HARNESS_AUTO_APPLY_MAX_RISK_STANDARD: int = int(os.getenv("HARNESS_AUTO_APPLY_MAX_RISK_STANDARD", "2"))
+    HARNESS_AUTO_APPLY_MAX_RISK_FULL: int = int(os.getenv("HARNESS_AUTO_APPLY_MAX_RISK_FULL", "3"))
+    # Escalation threshold: prescriptions at or above this risk are flagged high
+    # priority and escalated for human approval (when self-management is on).
+    HARNESS_HIGH_PRIORITY_RISK: int = int(os.getenv("HARNESS_HIGH_PRIORITY_RISK", "4"))
 
     # =============================================================================
     # PRD-130 — Business Intake Wizard (PoC)

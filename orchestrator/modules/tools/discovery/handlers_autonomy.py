@@ -48,19 +48,44 @@ async def get_autonomy_level(
 async def set_autonomy_level(
     db: Session, workspace_id: UUID, params: Dict[str, Any]
 ) -> Dict[str, Any]:
-    """Persist a new autonomy ``level`` to ``workspace.settings.autonomy``."""
-    from core.services.auto_autonomy import set_autonomy_level as _set
+    """Persist a new autonomy ``level`` to ``workspace.settings.autonomy``.
+
+    Writes an audit line (PRD-142 Wave 4, HIGH-2) on every change — actor, prior
+    level, new level — because this dial can disable the confirmation gate, so
+    "who turned full autonomy on, and when" must be reconstructable.
+    """
+    from core.services.auto_autonomy import (
+        get_autonomy_level as _get,
+        set_autonomy_level as _set,
+    )
 
     level = params.get("level")
     if not level:
         return {"success": False, "error": "level is required (standard | full)"}
 
+    # Actor + prior level, captured before the write for the audit trail. The
+    # executor re-mints _agent_id server-side, so it can't be spoofed by the LLM.
+    actor = params.get("_agent_id")
+    try:
+        previous = _get(db, workspace_id)
+    except Exception:
+        previous = "unknown"
+
     try:
         result = _set(db, workspace_id, level)
         db.commit()
+        # Audit record — greppable in Loki; the durable "who flipped the gate" trail.
+        logger.info(
+            "[autonomy][audit] workspace=%s actor_agent=%s level %s -> %s",
+            workspace_id, actor, previous, result["level"],
+        )
         return {
             "success": True,
-            "data": {**result, "meaning": _LEVEL_MEANING.get(result["level"], "")},
+            "data": {
+                **result,
+                "previous_level": previous,
+                "meaning": _LEVEL_MEANING.get(result["level"], ""),
+            },
         }
     except ValueError as exc:
         return {"success": False, "error": str(exc)}
