@@ -12,7 +12,6 @@ The following files were used as context for generating this wiki page:
 - [orchestrator/core/seeds/platform-management-skill.md](orchestrator/core/seeds/platform-management-skill.md)
 - [orchestrator/scripts/seed_agent_personas_v2.py](orchestrator/scripts/seed_agent_personas_v2.py)
 - [orchestrator/scripts/seed_marketplace_agents_v2.py](orchestrator/scripts/seed_marketplace_agents_v2.py)
-- [orchestrator/scripts/seed_recipes_marketplace_v2.py](orchestrator/scripts/seed_recipes_marketplace_v2.py)
 
 </details>
 

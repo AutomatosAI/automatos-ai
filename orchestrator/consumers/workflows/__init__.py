@@ -5,7 +5,7 @@ Workflows Consumer
 Business logic for workflow streaming.
 
 PRD-125 Phase 3: Removed WorkflowAnalyticsService and ModelUsageTracker (dead code).
-Streaming is still used by chat.py and execution_manager.py.
+Streaming is still used by api/workflows.py.
 """
 
 from consumers.workflows.streaming import (
