@@ -394,13 +394,22 @@ class HarnessService:
         Workspaces running at autonomy=full get the higher ``_FULL`` ceiling;
         everyone else gets ``_STANDARD``. Both are Railway-overridable config
         (HARNESS_AUTO_APPLY_MAX_RISK_*). The level is read via auto_autonomy, which
-        fails safe to standard on a missing/corrupt setting — so the ceiling can
-        only widen on a deliberate, valid full-autonomy opt-in.
+        fails safe to standard on a missing/corrupt setting — and a failed read
+        (DB error mid-tick) fails safe here too, so a lookup problem can only
+        NARROW the ceiling, never widen it, and never aborts the tick.
         """
         from config import config
         from core.services.auto_autonomy import is_full_autonomy
 
-        if is_full_autonomy(db, workspace_id):
+        try:
+            full = is_full_autonomy(db, workspace_id)
+        except Exception:
+            logger.warning(
+                "[HARNESS] autonomy lookup failed for %s — using standard ceiling",
+                workspace_id, exc_info=True,
+            )
+            full = False
+        if full:
             return config.HARNESS_AUTO_APPLY_MAX_RISK_FULL
         return config.HARNESS_AUTO_APPLY_MAX_RISK_STANDARD
 

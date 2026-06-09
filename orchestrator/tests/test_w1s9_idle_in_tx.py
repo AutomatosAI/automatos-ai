@@ -471,6 +471,14 @@ class _GetQuery:
     def get(self, *a, **k):
         return self._obj
 
+    # §12.3: the tick now reads the autonomy level via
+    # db.query(Workspace).filter(...).first() — serve the same workspace.
+    def filter(self, *a, **k):
+        return self
+
+    def first(self):
+        return self._obj
+
 
 class _HarnessDB:
     def __init__(self, ws, events):
@@ -532,7 +540,7 @@ async def test_harness_commits_before_each_phase(monkeypatch):
         events.append("prescribe")
         return []
 
-    async def _apply(_ws, _rx, _db, allow_auto_apply=True):
+    async def _apply(_ws, _rx, _db, allow_auto_apply=True, max_risk=None):
         events.append("apply")
         return {"applied": [], "queued": []}
 
