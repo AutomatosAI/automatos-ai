@@ -29,9 +29,9 @@
         "cd orchestrator && python -m pytest tests/test_harness_power_mode.py -v",
         "Typecheck passes"
       ],
-      "priority": 1,
+      "priority": 90,
       "passes": false,
-      "notes": "WS-Q. Net-new platform action (the one place this wave builds near-new). Reuse the 3-file registration pattern (see modules/tools/discovery/actions_harness.py + handlers_harness.py + platform_actions.py:33,60). Do NOT remove the refusal branch yet — that is W4-S7 (after both S5 and S6)."
+      "notes": "DEFERRED 2026-06-09 — power mode has NO persistent per-workspace/agent knob: run_config default 'standard' (coordinator_service.py:1392), caps are GLOBAL system_settings (no workspace_id). Making it HARNESS-tunable means building workspace.settings.power_mode + wiring the mission-creation hot path — net-new feature work the original author flagged out-of-scope. Parked pending a product decision on per-workspace power mode. NOT for the autonomous loop until decided."
     },
     {
       "id": "W4-S6",
@@ -48,8 +48,8 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": "WS-Q. RoutingRule model fields verified at core/models/routing.py:108-122 (workspace_id, source_pattern, source_channel, intent_keywords JSONB, target_agent_id, target_workflow_id, priority, is_active). Reuse, do not redefine."
+      "passes": true,
+      "notes": "DONE 2026-06-09 (hand-built): actions_routing.py + handlers_routing.py (workspace-scoped insert), registered in platform_actions.py + platform_executor.py dispatch map; routing_rule_add branch in _auto_apply_prescription; tests/test_harness_routing_rule.py. RoutingRule (core/models/routing.py:108) is read by UniversalRouter Tier 2a, so created rules take effect."
     },
     {
       "id": "W4-S7",
@@ -64,9 +64,9 @@
         "cd orchestrator && python -m pytest tests/test_harness_vocabulary.py -v",
         "Typecheck passes"
       ],
-      "priority": 3,
+      "priority": 91,
       "passes": false,
-      "notes": "WS-Q. Small cleanup. Keep the generic unknown-change_type safety net; only remove the power_mode/routing_rule-specific refusal."
+      "notes": "FOLDED/BLOCKED 2026-06-09 — the routing_rule_add part of the refusal was removed in W4-S6; the power_mode refusal correctly REMAINS while W4-S5 is deferred. Full removal of the else-branch only when power_mode lands. NOT for the autonomous loop until then."
     },
     {
       "id": "W4-S8",

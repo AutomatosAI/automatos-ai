@@ -1423,12 +1423,25 @@ class HarnessService:
                     "agent_id": target_id,
                     "app_name": proposed.get("app_name"),
                 })
+            elif change_type == "routing_rule_add":
+                # routing_rules is read by the UniversalRouter at Tier 2a
+                # (core/routing/engine.py); the rule is workspace-scoped by the
+                # executor context. The target is a routing rule, not an agent, so
+                # target_id is unused here. (PRD-142 Wave 4, W4-S6.)
+                result = await executor.execute("platform_create_routing_rule", {
+                    "source_pattern": proposed.get("source_pattern"),
+                    "source_channel": proposed.get("source_channel"),
+                    "intent_keywords": proposed.get("intent_keywords", []),
+                    "target_agent_id": proposed.get("target_agent_id"),
+                    "target_workflow_id": proposed.get("target_workflow_id"),
+                    "priority": proposed.get("priority", 0),
+                })
             else:
-                # power_mode_upgrade/downgrade and routing_rule_add are intentionally
-                # NOT handled: agents have no power_mode attribute (power mode is
-                # mission-run scoped via run_config + system_settings, never read off
-                # an agent), and no platform_create_routing_rule action exists. Both
-                # would need net-new platform work outside this PRD.
+                # power_mode_upgrade/downgrade is intentionally NOT handled: power
+                # mode is mission-run scoped (run_config) with GLOBAL system_settings
+                # caps and has no per-workspace/agent knob to set — wiring one is
+                # net-new platform work, deferred (PRD-142 Wave 4, W4-S5).
+                # routing_rule_add is handled above (W4-S6).
                 return {"success": False, "error": f"Unknown auto-apply change_type: {change_type}"}
             return result if isinstance(result, dict) else {"success": True}
         except Exception as exc:
