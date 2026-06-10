@@ -273,7 +273,11 @@ class GraphRouter:
 
         filters = [
             ToolRoutingEdge.from_action.in_(from_actions),
-            ToolRoutingEdge.edge_type == "used_after",
+            # used_after = learned co-occurrence (telemetry); meta_sibling =
+            # metadata cold-start (PRD-143 metadata_graph_seed) so zero-telemetry
+            # tools are still graph-reachable. Both are confidence-filtered, so
+            # real usage (higher Wilson confidence) outranks metadata edges.
+            ToolRoutingEdge.edge_type.in_(("used_after", "meta_sibling")),
             ToolRoutingEdge.confidence >= min_confidence,
         ]
 

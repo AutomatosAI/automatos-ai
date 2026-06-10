@@ -467,3 +467,132 @@ def test_unseeded_intent_falls_back_to_semantic(fake_env, monkeypatch):
     chains = asyncio.run(router.rank_chains(QUERY_UNSEEDED, agent_id=None, top_k=10))
 
     assert chains == [("workspace_zip_files", 0.7, ["workspace_zip_files"])]
+
+
+# ===========================================================================
+# Metadata graph cold-start (PRD-143 discoverability gap close)
+# ---------------------------------------------------------------------------
+# metadata_graph_seed seeds GLOBAL meta_sibling edges from registry metadata so
+# a brand-new tool (zero tool_execution_logs) is still reachable via GraphRouter
+# the moment a same-category sibling is relevant. Reuses the _FakeStore upsert
+# idiom above, so idempotency is real row convergence and routing is asserted
+# through the actual GraphRouter expansion path.
+# ===========================================================================
+
+import modules.tools.discovery.metadata_graph_seed as meta_seed  # noqa: E402
+
+
+def _act(name, category, tags=(), su=False):
+    return SimpleNamespace(
+        name=name, category=category, tags=list(tags), super_admin_only=su,
+    )
+
+
+def _fake_registry(actions):
+    return SimpleNamespace(get_all=lambda: list(actions))
+
+
+def test_meta_pairs_same_category_only_and_exclude_su():
+    reg = _fake_registry([
+        _act("platform_list_members", "team", ["team", "members"]),
+        _act("platform_invite_member", "team", ["team", "invite"]),
+        _act("platform_create_agent", "agents", ["agents"]),       # other category
+        _act("platform_query_loki_logs", "monitoring", ["obs"], su=True),  # su tier
+    ])
+    pairs = meta_seed.compute_meta_sibling_pairs(reg)
+    names = {(s, d) for s, d, _w, _c in pairs}
+
+    # same-category 'team' pair, both directions
+    assert ("platform_list_members", "platform_invite_member") in names
+    assert ("platform_invite_member", "platform_list_members") in names
+    # agents has only one operator member -> no pair; cross-category never pairs
+    assert not any("platform_create_agent" in p for p in names)
+    # the super_admin_only (obs) tool is NEVER seeded into the graph
+    assert not any("platform_query_loki_logs" in p for p in names)
+
+
+def test_meta_confidence_at_floor_with_tag_bonus():
+    reg = _fake_registry([
+        _act("a", "c", ["x", "y", "z"]),
+        _act("b", "c", ["x", "y", "z"]),   # 3 shared tags
+        _act("d", "c", []),                # 0 shared with a
+    ])
+    by_pair = {(s, t): (w, c) for s, t, w, c in meta_seed.compute_meta_sibling_pairs(reg)}
+    # base floor 0.6, +0.01 per shared tag (capped) — always <= a strong real edge
+    assert round(by_pair[("a", "b")][1], 4) == 0.63
+    assert round(by_pair[("a", "d")][1], 4) == 0.60
+    assert all(0.60 <= c <= 0.64 for (_w, c) in by_pair.values())
+
+
+def test_meta_seed_upserts_and_is_idempotent(fake_env):
+    store, _ = fake_env
+    reg = _fake_registry([
+        _act("platform_list_members", "team", ["team"]),
+        _act("platform_invite_member", "team", ["team"]),
+    ])
+    n1 = meta_seed.seed_meta_sibling_edges(store, reg)
+    n2 = meta_seed.seed_meta_sibling_edges(store, reg)  # re-run converges
+    assert n1 == n2 == 2
+    meta_rows = [v for v in store.edges.values() if v["edge_type"] == "meta_sibling"]
+    assert len(meta_rows) == 2  # upsert, not duplicate
+    for row in meta_rows:
+        assert row["workspace_id"] is None and row["agent_id"] is None  # global
+        assert row["confidence"] >= 0.6                                  # passes floor
+        assert row["sample_count"] == 0                                  # metadata, not usage
+
+
+def test_meta_dry_run_writes_nothing(fake_env):
+    store, _ = fake_env
+    reg = _fake_registry([_act("a", "c", []), _act("b", "c", [])])
+    n = meta_seed.seed_meta_sibling_edges(store, reg, dry_run=True)
+    assert n == 2
+    assert store.statements == []  # no execute() calls
+
+
+def test_meta_edge_routes_zero_telemetry_sibling(fake_env, monkeypatch):
+    """A new tool with NO telemetry is graph-reachable via a same-category
+    sibling's meta_sibling edge."""
+    store, _ = fake_env
+    reg = _fake_registry([
+        _act("platform_list_members", "team", ["team"]),   # the relevant one
+        _act("platform_invite_member", "team", ["team"]),  # brand-new, zero logs
+    ])
+    meta_seed.seed_meta_sibling_edges(store, reg)
+
+    query = "add a teammate to my workspace"
+    router = _router_over_store(
+        monkeypatch, store, {query: [("platform_list_members", 0.8)]}
+    )
+    chains = asyncio.run(router.rank_chains(query, agent_id=None, top_k=10))
+    chain_actions = [c[2] for c in chains]
+
+    # the zero-telemetry sibling is now reachable through the metadata edge
+    assert ["platform_list_members", "platform_invite_member"] in chain_actions
+
+
+def test_real_used_after_outranks_meta(fake_env, monkeypatch):
+    """When real telemetry exists, used_after (higher Wilson confidence) ranks
+    above a metadata edge from the same entry node — metadata is the floor."""
+    store, _ = fake_env
+    reg = _fake_registry([
+        _act("platform_list_members", "team", ["team"]),
+        _act("platform_invite_member", "team", ["team"]),   # meta target
+    ])
+    meta_seed.seed_meta_sibling_edges(store, reg)
+    # a strong learned edge from the same entry node to a different target
+    edge_builder._upsert_edge_row(
+        store, "platform_list_members", "platform_set_member_role",
+        "used_after", None, None, 40.0, 0.9, 40, datetime.utcnow(),
+    )
+
+    query = "manage my team"
+    router = _router_over_store(
+        monkeypatch, store, {query: [("platform_list_members", 0.8)]}
+    )
+    chains = asyncio.run(router.rank_chains(query, agent_id=None, top_k=10))
+    actions = [c[2] for c in chains]
+
+    real_chain = ["platform_list_members", "platform_set_member_role"]
+    meta_chain = ["platform_list_members", "platform_invite_member"]
+    assert real_chain in actions and meta_chain in actions
+    assert actions.index(real_chain) < actions.index(meta_chain)
