@@ -1,0 +1,154 @@
+{
+  "project": "Automatos AI Platform — PRD-154 Wave-0 Quick Wins (Remediation Chain Night 1, first)",
+  "branchName": "ralph/prd-154-wave0-quick-wins",
+  "description": "Twelve independent stories fixing verified one-to-three-file breakages from the platform deep review (reports/PLATFORM_DEEP_REVIEW_2026-06.md §2; full spec docs/PRDS/PRD-154-WAVE0-QUICK-WINS.md with BINDING amendments). Branch from main. Rules: no shims, delete what you replace, no new tables/tools, no os.getenv outside config.py, no hardcoded values. Update tests that assert the old broken behavior — never skip/delete them. Chain testing policy: docs/PRDS/PRD-CHAIN-2026-06-REMEDIATION.md.",
+  "userStories": [
+    {
+      "id": "P154-S1",
+      "title": "RAG: batched full-chunk hydration consumed by the formatter",
+      "description": "modules/rag/service.py:855-909 already hydrates full chunk text into candidate['expanded_content'] via one asyncpg query PER candidate, and NOTHING reads it — service.py:544 and :754 read only c['content'] (the 500-char S3 metadata preview written by ingestion/manager.py:1300). Replace the N+1 with ONE batched IN-query over parent chunk ids, and make the retrieval/format path consume the hydrated text so result_formatter.py's 4000-char per-doc budget (:354-356) actually fills. Do not change chunking or S3 writes.",
+      "acceptanceCriteria": [
+        "Retrieval returns full chunk text (beyond 500 chars) for chunks whose parents exist in PG",
+        "Exactly one hydration SQL round-trip per retrieval (query-counter assertion in test)",
+        "New tests/test_rag_hydration.py covers preview-vs-hydrated; existing formatter tests asserting truncated output updated",
+        "cd orchestrator && pytest -q green"
+      ],
+      "files": ["orchestrator/modules/rag/service.py", "orchestrator/modules/rag/result_formatter.py", "orchestrator/tests/test_rag_hydration.py"]
+    },
+    {
+      "id": "P154-S2",
+      "title": "RAG: team filter fails closed; fix team-access PATCH SQL",
+      "description": "service.py:391-393 except-branch returns ALL candidates unfiltered on DB error (fail-open security hole). Fail closed: on filter error return only candidates with empty team_access (public) and log error-level. Separately, api/documents.py:1871-1924 PATCH/bulk team-access SQL references documents.title and documents.updated_at which DO NOT EXIST in the model (core/models/core.py:548-580) — fix the SQL to the real columns (BINDING Q1: fail-closed).",
+      "acceptanceCriteria": [
+        "Test with forced DB error in _filter_by_team: only public docs returned, never team-restricted",
+        "PATCH /api/documents/{id}/team-access and bulk endpoint succeed against real schema (new API test)",
+        "cd orchestrator && pytest -q green"
+      ],
+      "files": ["orchestrator/modules/rag/service.py", "orchestrator/api/documents.py"]
+    },
+    {
+      "id": "P154-S3",
+      "title": "Memory: infer:false for curated writes, real bulk delete, week-scale decay, touch-on-recall",
+      "description": "Four root causes of memory junk/loss (report §2.2): (1) curated writers (distilled facts, mission/playbook/widget/tool stores via mem0_client.py:312-376) omit infer so mem0 re-extracts them with its personal-info prompt — send infer:false on every already-curated write. (2) mem0_client.py:498-506 calls DELETE /api/v1/memories/{id}/ which doesn't exist on the server (only bulk DELETE per mem0_openapi.json) — every delete 405s and trips the circuit breaker; switch to the bulk endpoint. (3) MEMORY_DECAY_RATE=0.1/hr + threshold 0.3 (config.py:104,106) archives importance-0.8 memories in ~15h — retune to week-scale via config. (4) touch_short_term has ZERO callers so L2→L3 promotion (unified_memory_service.py:1990-1996) can never fire — call it on recall.",
+      "acceptanceCriteria": [
+        "Grep-able assertion test: all curated write paths pass infer:false",
+        "Delete uses bulk endpoint; circuit-breaker no longer trips on 3 consecutive deletes (test)",
+        "Decay unit test: importance-0.8 L2 row survives >= 7 days",
+        "Recall increments access_count (promotion-eligibility test)",
+        "Existing decay/memory tests updated to new constants; cd orchestrator && pytest -q green"
+      ],
+      "files": ["orchestrator/modules/memory/storage/mem0_client.py", "orchestrator/config.py", "orchestrator/modules/memory/unified_memory_service.py"]
+    },
+    {
+      "id": "P154-S4",
+      "title": "Board: assignment dispatches execution; fix priority CASE",
+      "description": "Assigning a task starts nothing today — _launch_task_execution exists (api/board_tasks.py:724) but is never called on assignment; pickup waits for an opt-in heartbeat most agents lack. Call it from create-with-assignee and the assign endpoint; guard double-fire for already-running tasks and skip recipe-mirror tasks. Also fix the broken priority CASE expression in services/heartbeat_service.py:919. PRD-09 constraint: do NOT touch shared hybrid auth or test_board_sdk_auth.py behavior.",
+      "acceptanceCriteria": [
+        "Integration test (mock executor): assign → execution starts same tick",
+        "Re-assign of running task does not double-fire (test)",
+        "Priority ordering unit test over the fixed CASE",
+        "tests/test_board_task_handlers.py updated for dispatch-on-assign; test_board_sdk_auth.py untouched and green",
+        "cd orchestrator && pytest -q green"
+      ],
+      "files": ["orchestrator/api/board_tasks.py", "orchestrator/services/heartbeat_service.py", "orchestrator/tests/test_board_task_handlers.py"]
+    },
+    {
+      "id": "P154-S5",
+      "title": "Missions: fix platform_get_mission, context_messages, duplicate route, honest create reply",
+      "description": "handlers_missions.py: platform_get_mission crashes every call — int() cast on a UUID PK (:96), reads t.output which doesn't exist, and a wrong schema string; fix all three. Auto-created missions lose chat context: only the UI suggestion-card sets context_messages (mission-suggestion-card.tsx:48) — the executor path (handlers_missions.py:12-30) must attach recent conversation too, and chat.tsx:870 must read message parts (current extraction broken). Delete the byte-duplicate /resume route. Document auto_approve in the mission-create tool schema and make the create reply state the awaiting_approval status and how to approve (no false 'mission started').",
+      "acceptanceCriteria": [
+        "platform_get_mission returns a seeded mission by UUID (test)",
+        "Auto-created mission carries recent chat as context_messages (test)",
+        "Duplicate /resume route removed (route-collision test)",
+        "Create-tool reply includes approval state (snapshot test)",
+        "Protected recipe suite untouched; cd orchestrator && pytest -q green"
+      ],
+      "files": ["orchestrator/modules/tools/discovery/handlers_missions.py", "frontend/components/chat/chat.tsx"]
+    },
+    {
+      "id": "P154-S6",
+      "title": "Knowledge Graph: export community+confidence, idOf guards, deterministic palette, communities tool rewire",
+      "description": "_export_graph drops node.community and confidence — the UI's default community coloring is broken until exported (backfill confidence where null). Add the idOf() null-guard at the 4 frontend crash sites. Type→color becomes a deterministic hash palette defined as data (BINDING Q26; no hardcoded hex per design rules). Point platform_graph_communities at DbWorkspaceClient (currently wired to a backend that returns nothing for DB-backed workspaces).",
+      "acceptanceCriteria": [
+        "Export test asserts community + confidence on nodes",
+        "vitest: idOf guard + same-type-same-color determinism",
+        "platform_graph_communities returns data for a DB-backed workspace (test)",
+        "Typecheck passes; cd orchestrator && pytest -q green"
+      ],
+      "files": ["orchestrator/modules/", "frontend/components/knowledge/"]
+    },
+    {
+      "id": "P154-S7",
+      "title": "Field memory: render the graph (react-force-graph), archive-don't-destroy, agent_id fix",
+      "description": "The 3D field graph has NEVER rendered: @react-three/fiber v9 peer-requires React 19, app is React 18.2 — <Canvas> crashes at mount (mission-field-viz.tsx:532) with no ErrorBoundary. Replace the R3F stack with react-force-graph-3d wrapped in an ErrorBoundary falling back to react-force-graph-2d; REMOVE @react-three/fiber and drei from package.json (delete the losing stack). Stop destroying fields at mission end: _cleanup_terminal_fields (coordinator_service.py:711-737) marks archived/expired_at instead of deleting Qdrant data and popping field_id (BINDING D7 stepping stone). handlers_field.py must read params['_agent_id'] so field tools work for agents.",
+      "acceptanceCriteria": [
+        "Field tab renders nodes+edges for a live AND a completed mission — verify in browser using dev-browser skill",
+        "vitest: ErrorBoundary falls back to 2D",
+        "Archived field queryable post-completion (pytest)",
+        "Field tool call with _agent_id no longer 400s (test)",
+        "@react-three/fiber and drei absent from package.json; typecheck passes"
+      ],
+      "files": ["frontend/components/missions/mission-field-viz.tsx", "frontend/package.json", "orchestrator/modules/coordination/coordinator_service.py", "orchestrator/modules/tools/discovery/handlers_field.py"]
+    },
+    {
+      "id": "P154-S8",
+      "title": "CodeGraph: semantic search routes to the working path; results carry path:line",
+      "description": "search_type='semantic' currently routes to a broken path while a working pgvector path exists — route to it, forward the dropped params, remove the <50-char content filter hiding most hits, reconcile the query-log schema mismatch and make logging non-fatal (a log failure must never fail the search). Results emit path:line and symbol signature so agents can act on them.",
+      "acceptanceCriteria": [
+        "Semantic search returns results on a seeded index; params forwarded (test)",
+        "Result snapshot contains path:line + signature",
+        "Induced query-log failure does not fail search (test)",
+        "cd orchestrator && pytest -q green"
+      ],
+      "files": ["orchestrator/modules/codegraph/codegraph_service.py", "orchestrator/api/codegraph.py"]
+    },
+    {
+      "id": "P154-S9",
+      "title": "One toast system: mount sonner, codemod the rest away",
+      "description": "providers.tsx:91 mounts only react-hot-toast's Toaster while 49 files call sonner and 21 use shadcn use-toast — those toasts NEVER render (mission approve/reject feedback, template save errors, field-op results all silently dropped). BINDING Q73: sonner wins. Mount sonner's <Toaster/>, codemod react-hot-toast (17 files) and use-toast (21 files + duplicated store) call sites to sonner, remove both losing systems from package.json and the tree.",
+      "acceptanceCriteria": [
+        "Mission approve/reject and template-save-error toasts visibly render — verify in browser using dev-browser skill",
+        "Zero call sites of react-hot-toast or use-toast remain (grep); both removed from package.json",
+        "Typecheck and lint pass"
+      ],
+      "files": ["frontend/app/providers.tsx", "frontend/components/", "frontend/package.json"]
+    },
+    {
+      "id": "P154-S10",
+      "title": "Honest pilot surfaces: ticker, fake stats, global search, skills API, fetch ban",
+      "description": "BINDING D10 (pilots see Studio). (1) StudioTicker fabricates live ops metrics with a LIVE dot (studio-ticker.tsx:39-47, mounted main-layout.tsx:104) — wire to the real analytics endpoints already serving command-center, or remove the component. (2) Remove hardcoded 85.5% agent performance (api/agents.py:331-336), fake Studio tab counts (studio-menu.ts:88-96), fake green validation checkmarks. (3) Global search calls wrong paths and swallows errors (use-global-search.ts:43,59) — fix to real routes, surface errors. (4) Agent skill create/remove targets a dead pre-v1 API (api-client.ts:1895-1941) — migrate to /api/v1/skills like the page's workspace-skills-tab already does. (5) Add an ESLint rule banning raw fetch('/api') so components must use apiClient.",
+      "acceptanceCriteria": [
+        "No string-literal metrics/counts in studio chrome (grep gate listed literals)",
+        "Global search returns live results for a seeded agent — verify in browser using dev-browser skill",
+        "Skill add/remove round-trips against /api/v1/skills (test)",
+        "ESLint fails on raw fetch('/api' (rule fixture test)",
+        "Typecheck passes; cd orchestrator && pytest -q green"
+      ],
+      "files": ["frontend/components/studio/studio-ticker.tsx", "frontend/config/studio-menu.ts", "frontend/hooks/use-global-search.ts", "frontend/lib/api-client.ts", "orchestrator/api/agents.py"]
+    },
+    {
+      "id": "P154-S11",
+      "title": "Calendar stopgap: retry on inactive scheduler + request timeout",
+      "description": "Root cause (1-of-4-workers APScheduler state) is fixed properly in PRD-162. Stopgap so the calendar stops caching empty results: a get_schedule response with scheduler_active=false becomes a thrown error so React Query retries instead of rendering an empty calendar from a 200; add AbortSignal.timeout(15000) and a visible error state with retry button in CalendarTab.",
+      "acceptanceCriteria": [
+        "vitest: inactive-scheduler response triggers retry, not empty render",
+        "Timeout shows error state with retry — verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "files": ["frontend/components/command-center/calendar-tab.tsx"]
+    },
+    {
+      "id": "P154-S12",
+      "title": "NL2SQL tab revival + safety trims + entity-KG gate + token strip",
+      "description": "(1) Three Databases tabs use raw fetch with no auth/baseUrl and 404 in split-origin deploys — migrate DatabaseQueryAnalytics.tsx:25-27, SemanticLayerBuilder.tsx:125,161, QueryTemplatesGrid.tsx:90,136 to apiClient (revives the Training tab instantly). (2) Honor the dialect field in generation. (3) On failure return a structured error — never an executable error-string SELECT. (4) Auth-gate the legacy entity-KG endpoints (api/knowledge_graph.py:84-559, currently unauthenticated cross-tenant) pending their PRD-165 deletion. (5) Strip the GitHub token from clone error messages (codegraph_service.py:489).",
+      "acceptanceCriteria": [
+        "All six Databases sub-tabs load data in split-origin dev — verify in browser using dev-browser skill",
+        "Failure path returns no executable sql field (test)",
+        "Entity-KG endpoints 401 without auth (test)",
+        "Clone error with bad token contains no token substring (test)",
+        "Typecheck passes; cd orchestrator && pytest -q green"
+      ],
+      "files": ["frontend/components/knowledge/DatabaseQueryAnalytics.tsx", "frontend/components/knowledge/SemanticLayerBuilder.tsx", "frontend/components/knowledge/QueryTemplatesGrid.tsx", "orchestrator/api/knowledge_graph.py", "orchestrator/modules/codegraph/codegraph_service.py"]
+    }
+  ]
+}
