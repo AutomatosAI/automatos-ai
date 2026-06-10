@@ -759,7 +759,20 @@ class PlatformActionExecutor:
                 logger.warning("[PRD-108] Failed to resolve field_id: %s", e)
 
         try:
-            return await handler(self.db, self.workspace_id, params)
+            result = await handler(self.db, self.workspace_id, params)
+            # PRD-143 S8: an invocation that ran only because the full-autonomy
+            # dial skipped the confirmation gate is marked here, and the
+            # universal telemetry hook persists it to tool_execution_logs
+            # (router_decision->>'autonomous') — the Wave 4 audit trail
+            # records autonomous actions distinctly and queryably.
+            if (
+                full_autonomy
+                and action_def is not None
+                and action_def.requires_confirmation
+                and isinstance(result, dict)
+            ):
+                result = {**result, "autonomous": True}
+            return result
         except Exception as e:
             logger.error(f"[PlatformExecutor] {action_name} failed: {e}", exc_info=True)
             try:

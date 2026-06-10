@@ -117,7 +117,9 @@ async def test_confirmation_gate_skipped_under_full():
     ):
         result = await ex.execute(_CONFIRM_WRITE, {"enabled": True})
 
-    assert result == sentinel
+    # PRD-143 S8: a confirmation skipped by the full dial is marked
+    # `autonomous` so the audit trail records it distinctly.
+    assert result == {**sentinel, "autonomous": True}
     ex._handlers[_CONFIRM_WRITE].assert_awaited_once()
 
 
@@ -134,7 +136,8 @@ async def test_destructive_delete_runs_under_full():
     ):
         result = await ex.execute(_DESTRUCTIVE_DELETE, {"memory_id": "m1"})
 
-    assert result == sentinel
+    # PRD-143 S8: the autonomous-invocation audit marker rides on the result.
+    assert result == {**sentinel, "autonomous": True}
     ex._handlers[_DESTRUCTIVE_DELETE].assert_awaited_once()
 
 

@@ -141,8 +141,8 @@
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": "PRD-143 US-008 positive half. Open ≠ unguarded: this story proves gates-and-logs hold while exclusion is gone."
+      "passes": true,
+      "notes": "PRD-143 US-008 positive half. Open ≠ unguarded: this story proves gates-and-logs hold while exclusion is gone. DONE 2026-06-10: 4/4 story tests green. platform_delete_agent (real catalogue: destructive, requires_confirmation=True, operator-tier) executes WITHOUT confirmation at autonomy=full for a plain-member principal while the PRD-140 hierarchy gate is consulted (can_actor_modify kwargs pinned: actor 9, TARGET_AGENT 42, change_type=delete, source=platform_tool) and the destructive backstop stays satisfied; same action returns requires_confirmation at standard; kill-switch halts MID-FLOW both ways (dial re-read via core.services.auto_autonomy.is_full_autonomy on every execute — flip → next call confirms; HARNESS_SELF_MANAGEMENT_ENABLED off → _apply_approved_board_tasks refuses, zero calls). Audit test exposed a REAL GAP (RED): no distinct autonomous marker — fixed forward per AC: platform_executor.py:761-775 marks confirmation-skipped invocations {**result, autonomous: True}; telemetry.py persists router_decision->>'autonomous' on tool_execution_logs (queryable; non-autonomous rows unmarked — distinctness proven both ways). Harness evolution: W3's two skipped-gate equality assertions now pin the marker (stronger, not weakened). 131 green across 12 suites (8 prd143 + W3 + W2S7 + prd139 telemetry + harness). Full-app import unrunnable in this venv (email-validator missing, pre-existing — same as S2-S7); relied on py_compile + suites."
     },
     {
       "id": "S9",
