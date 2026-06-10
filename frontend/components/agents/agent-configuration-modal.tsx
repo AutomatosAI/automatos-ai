@@ -60,7 +60,7 @@ import { useAgentModelConfig, useUpdateAgentModelConfig } from '@/hooks/use-mode
 import { useTools } from '@/hooks/use-tools-api'
 import { useSystemIcons } from '@/hooks/use-system-config-api'
 import { apiClient } from '@/lib/api-client'
-import { toast } from 'react-hot-toast'
+import { toast } from 'sonner'
 
 interface AgentConfigurationModalProps {
   agentId: number | null

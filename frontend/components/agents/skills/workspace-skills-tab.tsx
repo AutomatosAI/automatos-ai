@@ -34,7 +34,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { useToast } from '@/hooks/use-toast'
+import { toast } from 'sonner'
 import { useWorkspace } from '@/components/workspace-provider'
 import { useSkillsApi } from '@/hooks/use-skills-api'
 import { useSystemIcons } from '@/hooks/use-system-config-api'
@@ -64,7 +64,6 @@ interface Props {
 
 export function WorkspaceSkillsTab({ viewMode = 'grid' }: Props) {
   const { workspace } = useWorkspace()
-  const { toast } = useToast()
   const { listWorkspaceSkills, deleteWorkspaceSkill, disableWorkspaceSkill } = useSkillsApi()
   const { data: iconMappings = {} } = useSystemIcons()
 
@@ -96,7 +95,7 @@ export function WorkspaceSkillsTab({ viewMode = 'grid' }: Props) {
       setSkills(result.items as WorkspaceSkillRow[])
       setMarketplaceTotal(result.marketplace_total ?? 0)
     } catch (err: any) {
-      toast({ title: 'Failed to load skills', description: err.message, variant: 'destructive' })
+      toast.error('Failed to load skills', { description: err.message })
     } finally {
       setLoading(false)
     }

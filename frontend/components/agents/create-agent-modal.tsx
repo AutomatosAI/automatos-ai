@@ -17,7 +17,7 @@ import {
   Coins,
   Shield,
 } from 'lucide-react'
-import { toast } from 'react-hot-toast'
+import { toast } from 'sonner'
 import { InlineHelp } from '@/components/ui/help-tooltip'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'

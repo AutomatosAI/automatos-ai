@@ -7,7 +7,7 @@
  */
 
 import { useState, useCallback } from 'react';
-import { useToast } from '@/hooks/use-toast';
+import { toast } from 'sonner'
 import {
   Skill,
   SkillSource,
@@ -100,7 +100,6 @@ async function fetchWithAuth(url: string, init?: RequestInit): Promise<Response>
 }
 
 export function useSkillsApi() {
-  const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -134,22 +133,14 @@ export function useSkillsApi() {
 
       const result = await response.json();
       
-      toast({
-        title: 'Success',
-        description: `Imported ${result.skills_discovered} skills from ${result.source_name}`,
-        variant: 'default'
-      });
+      toast('Success', { description: `Imported ${result.skills_discovered} skills from ${result.source_name}` });
 
       return result;
     } catch (err: any) {
       const errorMsg = err.message || 'Unknown error';
       setError(errorMsg);
       
-      toast({
-        title: 'Error',
-        description: errorMsg,
-        variant: 'destructive'
-      });
+      toast.error('Error', { description: errorMsg });
       
       return null;
     } finally {
@@ -179,11 +170,7 @@ export function useSkillsApi() {
       return sources;
     } catch (err: any) {
       setError(err.message);
-      toast({
-        title: 'Error',
-        description: err.message,
-        variant: 'destructive'
-      });
+      toast.error('Error', { description: err.message });
       return [];
     } finally {
       setLoading(false);
@@ -227,20 +214,12 @@ export function useSkillsApi() {
 
       const result = await response.json();
       
-      toast({
-        title: 'Repository Updated',
-        description: result.message,
-        variant: 'default'
-      });
+      toast('Repository Updated', { description: result.message });
 
       return true;
     } catch (err: any) {
       setError(err.message);
-      toast({
-        title: 'Update Failed',
-        description: err.message,
-        variant: 'destructive'
-      });
+      toast.error('Update Failed', { description: err.message });
       return false;
     } finally {
       setLoading(false);
@@ -265,20 +244,12 @@ export function useSkillsApi() {
         throw new Error(errorData.detail || 'Failed to rollback repository');
       }
 
-      toast({
-        title: 'Repository Rolled Back',
-        description: `Rolled back to commit ${commitSha}`,
-        variant: 'default'
-      });
+      toast('Repository Rolled Back', { description: `Rolled back to commit ${commitSha}` });
 
       return true;
     } catch (err: any) {
       setError(err.message);
-      toast({
-        title: 'Rollback Failed',
-        description: err.message,
-        variant: 'destructive'
-      });
+      toast.error('Rollback Failed', { description: err.message });
       return false;
     } finally {
       setLoading(false);
@@ -302,20 +273,12 @@ export function useSkillsApi() {
         throw new Error('Failed to deactivate skill source');
       }
 
-      toast({
-        title: 'Source Deactivated',
-        description: 'Skill source has been deactivated',
-        variant: 'default'
-      });
+      toast('Source Deactivated', { description: 'Skill source has been deactivated' });
 
       return true;
     } catch (err: any) {
       setError(err.message);
-      toast({
-        title: 'Error',
-        description: err.message,
-        variant: 'destructive'
-      });
+      toast.error('Error', { description: err.message });
       return false;
     } finally {
       setLoading(false);
@@ -356,11 +319,7 @@ export function useSkillsApi() {
       return skills;
     } catch (err: any) {
       setError(err.message);
-      toast({
-        title: 'Error',
-        description: err.message,
-        variant: 'destructive'
-      });
+      toast.error('Error', { description: err.message });
       return [];
     } finally {
       setLoading(false);
@@ -429,20 +388,12 @@ export function useSkillsApi() {
         throw new Error('Failed to deactivate skill');
       }
 
-      toast({
-        title: 'Skill Deactivated',
-        description: 'Skill has been deactivated',
-        variant: 'default'
-      });
+      toast('Skill Deactivated', { description: 'Skill has been deactivated' });
 
       return true;
     } catch (err: any) {
       setError(err.message);
-      toast({
-        title: 'Error',
-        description: err.message,
-        variant: 'destructive'
-      });
+      toast.error('Error', { description: err.message });
       return false;
     } finally {
       setLoading(false);
@@ -496,20 +447,12 @@ export function useSkillsApi() {
         throw new Error(errorData.detail || 'Failed to assign skills');
       }
 
-      toast({
-        title: 'Skills Assigned',
-        description: `Successfully assigned ${skillIds.length} skills to agent`,
-        variant: 'default'
-      });
+      toast('Skills Assigned', { description: `Successfully assigned ${skillIds.length} skills to agent` });
 
       return true;
     } catch (err: any) {
       setError(err.message);
-      toast({
-        title: 'Assignment Failed',
-        description: err.message,
-        variant: 'destructive'
-      });
+      toast.error('Assignment Failed', { description: err.message });
       return false;
     } finally {
       setLoading(false);
@@ -534,20 +477,12 @@ export function useSkillsApi() {
         throw new Error('Failed to remove skills');
       }
 
-      toast({
-        title: 'Skills Removed',
-        description: `Removed ${skillIds.length} skills from agent`,
-        variant: 'default'
-      });
+      toast('Skills Removed', { description: `Removed ${skillIds.length} skills from agent` });
 
       return true;
     } catch (err: any) {
       setError(err.message);
-      toast({
-        title: 'Error',
-        description: err.message,
-        variant: 'destructive'
-      });
+      toast.error('Error', { description: err.message });
       return false;
     } finally {
       setLoading(false);
@@ -664,15 +599,12 @@ export function useSkillsApi() {
         body: JSON.stringify(payload),
       });
       const result = await _parseSaveResponse(response);
-      toast({
-        title: 'Skill created',
-        description: `'${payload.name}' added to your workspace.`,
-      });
+      toast('Skill created', { description: `'${payload.name}' added to your workspace.` });
       return result;
     } catch (err: any) {
       if (!(err instanceof SkillScanError)) {
         setError(err.message);
-        toast({ title: 'Save failed', description: err.message, variant: 'destructive' });
+        toast.error('Save failed', { description: err.message });
       }
       throw err;
     } finally {
@@ -693,17 +625,14 @@ export function useSkillsApi() {
         body: JSON.stringify(payload),
       });
       const result = await _parseSaveResponse(response);
-      toast({
-        title: result.forked ? 'Skill forked & saved' : 'Skill saved',
-        description: result.forked
+      toast(result.forked ? 'Skill forked & saved' : 'Skill saved', { description: result.forked
           ? `Created your workspace copy. ${result.agents_migrated ?? 0} agent assignment(s) migrated.`
-          : 'Your changes are live.',
-      });
+          : 'Your changes are live.' });
       return result;
     } catch (err: any) {
       if (!(err instanceof SkillScanError)) {
         setError(err.message);
-        toast({ title: 'Save failed', description: err.message, variant: 'destructive' });
+        toast.error('Save failed', { description: err.message });
       }
       throw err;
     } finally {
@@ -725,11 +654,11 @@ export function useSkillsApi() {
         const text = await response.text();
         throw new Error(text || 'Failed to delete skill');
       }
-      toast({ title: 'Skill deleted' });
+      toast('Skill deleted');
       return true;
     } catch (err: any) {
       setError(err.message);
-      toast({ title: 'Delete failed', description: err.message, variant: 'destructive' });
+      toast.error('Delete failed', { description: err.message });
       return false;
     } finally {
       setLoading(false);
@@ -750,11 +679,11 @@ export function useSkillsApi() {
         const text = await response.text();
         throw new Error(text || 'Failed to remove skill from workspace');
       }
-      toast({ title: 'Skill removed from workspace' });
+      toast('Skill removed from workspace');
       return true;
     } catch (err: any) {
       setError(err.message);
-      toast({ title: 'Remove failed', description: err.message, variant: 'destructive' });
+      toast.error('Remove failed', { description: err.message });
       return false;
     } finally {
       setLoading(false);

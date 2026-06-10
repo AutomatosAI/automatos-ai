@@ -39,7 +39,7 @@ import { Progress } from '@/components/ui/progress'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Skeleton } from '@/components/ui/skeleton'
-import { toast } from 'react-hot-toast'
+import { toast } from 'sonner'
 
 // API hooks
 import { 

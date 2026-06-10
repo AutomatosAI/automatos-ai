@@ -10,7 +10,7 @@
 import { useState } from 'react'
 import { ExternalLink, Loader2, Check } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { useToast } from '@/hooks/use-toast'
+import { toast } from 'sonner'
 import { useInitiateConnection } from '@/hooks/use-composio-api'
 
 interface AppConnectionButtonProps {
@@ -26,7 +26,6 @@ export function AppConnectionButton({
     isConnected,
     onConnected,
 }: AppConnectionButtonProps) {
-    const { toast } = useToast()
     const [isConnecting, setIsConnecting] = useState(false)
     const initiateConnection = useInitiateConnection()
 
@@ -79,11 +78,7 @@ export function AppConnectionButton({
 
         } catch (error) {
             setIsConnecting(false)
-            toast({
-                title: 'Connection failed',
-                description: `Failed to connect to ${displayName}. Please try again.`,
-                variant: 'destructive',
-            })
+            toast.error('Connection failed', { description: `Failed to connect to ${displayName}. Please try again.` })
         }
     }
 

@@ -8,11 +8,10 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '@clerk/nextjs'
 import { apiClient } from '@/lib/api-client'
-import { useToast } from './use-toast'
+import { toast } from 'sonner'
 
 export function useSyncOpenRouterCache() {
   const queryClient = useQueryClient()
-  const { toast } = useToast()
 
   return useMutation({
     mutationFn: () => apiClient.syncOpenRouterCache(),
@@ -20,17 +19,10 @@ export function useSyncOpenRouterCache() {
       queryClient.invalidateQueries({ queryKey: ['openrouterModels'] })
       queryClient.invalidateQueries({ queryKey: ['openrouterStats'] })
       queryClient.invalidateQueries({ queryKey: ['openrouterProviders'] })
-      toast({
-        title: 'LLM sync complete',
-        description: `Synced ${data?.models_synced ?? 0} models from OpenRouter (${data?.models_added ?? 0} new, ${data?.models_updated ?? 0} updated)`,
-      })
+      toast('LLM sync complete', { description: `Synced ${data?.models_synced ?? 0} models from OpenRouter (${data?.models_added ?? 0} new, ${data?.models_updated ?? 0} updated)` })
     },
     onError: (error: any) => {
-      toast({
-        title: 'LLM sync failed',
-        description: error.message || 'Failed to sync OpenRouter models.',
-        variant: 'destructive',
-      })
+      toast.error('LLM sync failed', { description: error.message || 'Failed to sync OpenRouter models.' })
     },
   })
 }

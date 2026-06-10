@@ -29,8 +29,7 @@ import { apiClient } from '@/lib/api-client'
 import { WorkflowStreamViewer } from './workflow-stream-viewer'
 import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
-import { toast } from '@/hooks/use-toast'
-import { ToastAction } from '@/components/ui/toast'
+import { toast } from 'sonner'
 
 // New theater sub-components
 import { TheaterStageProgress } from './theater/theater-stage-progress'
@@ -929,19 +928,14 @@ export function ExecutionKitchen({
 
             if (isLowQuality || data.suggestions.length > 0) {
               const highPriority = data.suggestions.filter((s: any) => s.priority === 'high')
-              toast({
-                title: `${executionData.name || 'Playbook'} has improvement suggestions`,
+              toast(`${executionData.name || 'Playbook'} has improvement suggestions`, {
                 description: highPriority.length > 0
                   ? `${highPriority.length} high-priority suggestion${highPriority.length !== 1 ? 's' : ''} found`
                   : `${data.suggestions.length} suggestion${data.suggestions.length !== 1 ? 's' : ''} based on execution analysis`,
-                action: React.createElement(
-                  ToastAction,
-                  {
-                    altText: 'Review suggestions',
-                    onClick: () => setShowSuggestionsPanel(true),
-                  } as any,
-                  'Review'
-                ) as any,
+                action: {
+                  label: 'Review',
+                  onClick: () => setShowSuggestionsPanel(true),
+                },
               })
             }
           }
@@ -1221,20 +1215,17 @@ export function ExecutionKitchen({
                 data={suggestionsData}
                 playbookName={executionData?.name}
                 onApplyPromptRewrite={(suggestion) => {
-                  toast({
-                    title: 'Prompt Rewrite',
+                  toast('Prompt Rewrite', {
                     description: `Edit recipe step ${suggestion.target_step !== undefined ? suggestion.target_step + 1 : ''} with suggested prompt improvement`,
                   })
                 }}
                 onApplyModelUpgrade={(suggestion) => {
-                  toast({
-                    title: 'Model Upgrade Suggested',
+                  toast('Model Upgrade Suggested', {
                     description: suggestion.description,
                   })
                 }}
                 onApplyToolAddition={(suggestion) => {
-                  toast({
-                    title: 'Tool Addition Suggested',
+                  toast('Tool Addition Suggested', {
                     description: suggestion.description,
                   })
                 }}

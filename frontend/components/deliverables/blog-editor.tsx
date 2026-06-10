@@ -32,7 +32,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
-import { toast } from 'react-hot-toast'
+import { toast } from 'sonner'
 import {
   useBlogPost,
   useCreatePost,

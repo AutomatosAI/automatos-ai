@@ -57,7 +57,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { useToast } from '@/hooks/use-toast'
+import { toast } from 'sonner'
 import { useWorkspace } from '@/components/workspace-provider'
 import { useAgents } from '@/hooks/use-agent-api'
 import {
@@ -101,7 +101,6 @@ A concrete worked example so the agent can pattern-match.
 
 export function SkillEditorModal({ open, mode: initialMode, skillId, onClose }: Props) {
   const { workspace } = useWorkspace()
-  const { toast } = useToast()
   const { data: agents = [] } = useAgents()
   const {
     getWorkspaceSkillContent,
@@ -161,7 +160,7 @@ export function SkillEditorModal({ open, mode: initialMode, skillId, onClose }: 
         setContent(data.content ?? '')
       })
       .catch((err) => {
-        toast({ title: 'Failed to load skill', description: err.message, variant: 'destructive' })
+        toast.error('Failed to load skill', { description: err.message })
         onClose(false)
       })
       .finally(() => setLoading(false))
@@ -179,19 +178,11 @@ export function SkillEditorModal({ open, mode: initialMode, skillId, onClose }: 
     const file = files?.[0]
     if (!file) return
     if (file.size > MAX_UPLOAD_BYTES) {
-      toast({
-        title: 'File too large',
-        description: `Max ${MAX_UPLOAD_BYTES / 1024} KB. Got ${(file.size / 1024).toFixed(1)} KB.`,
-        variant: 'destructive',
-      })
+      toast.error('File too large', { description: `Max ${MAX_UPLOAD_BYTES / 1024} KB. Got ${(file.size / 1024).toFixed(1)} KB.` })
       return
     }
     if (!/\.(md|markdown|txt)$/i.test(file.name)) {
-      toast({
-        title: 'Unsupported file type',
-        description: 'Only .md, .markdown, or .txt files are accepted.',
-        variant: 'destructive',
-      })
+      toast.error('Unsupported file type', { description: 'Only .md, .markdown, or .txt files are accepted.' })
       return
     }
     const reader = new FileReader()
@@ -200,7 +191,7 @@ export function SkillEditorModal({ open, mode: initialMode, skillId, onClose }: 
       setContent(text)
     }
     reader.onerror = () => {
-      toast({ title: 'Read failed', description: 'Could not read the file.', variant: 'destructive' })
+      toast.error('Read failed', { description: 'Could not read the file.' })
     }
     reader.readAsText(file)
   }, [toast])
@@ -212,7 +203,7 @@ export function SkillEditorModal({ open, mode: initialMode, skillId, onClose }: 
     try {
       if (isNew) {
         if (!name.trim()) {
-          toast({ title: 'Name required', variant: 'destructive' })
+          toast.error('Name required')
           setSaving(false)
           return
         }
@@ -244,16 +235,9 @@ export function SkillEditorModal({ open, mode: initialMode, skillId, onClose }: 
         setFindings(err.findings)
         if (err.status === 'warnings') {
           // High-severity — let the user toggle the acknowledge box and retry
-          toast({
-            title: 'Review warnings',
-            description: 'High-severity findings — confirm and save again to proceed.',
-          })
+          toast('Review warnings', { description: 'High-severity findings — confirm and save again to proceed.' })
         } else {
-          toast({
-            title: 'Skill blocked',
-            description: 'Critical security findings must be removed before saving.',
-            variant: 'destructive',
-          })
+          toast.error('Skill blocked', { description: 'Critical security findings must be removed before saving.' })
         }
       }
       // Non-scan errors already toasted by the hook

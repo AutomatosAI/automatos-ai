@@ -7,7 +7,7 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'react-hot-toast'
+import { toast } from 'sonner'
 
 // API client - you'll need to adjust the import path based on your project structure
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || ''

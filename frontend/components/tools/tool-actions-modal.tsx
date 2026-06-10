@@ -11,7 +11,7 @@ import { Separator } from '@/components/ui/separator'
 import { ToolLogo } from '@/components/ui/tool-logo'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { apiClient } from '@/lib/api-client'
-import { useToast } from '@/hooks/use-toast'
+import { toast } from 'sonner'
 
 interface ToolActionsModalProps {
     open: boolean
@@ -27,7 +27,6 @@ interface Action {
 }
 
 export function ToolActionsModal({ open, onClose, tool }: ToolActionsModalProps) {
-    const { toast } = useToast()
     const [loading, setLoading] = useState(true)
     const [saving, setSaving] = useState(false)
     const [actions, setActions] = useState<Action[]>([])
@@ -60,11 +59,7 @@ export function ToolActionsModal({ open, onClose, tool }: ToolActionsModalProps)
             setActions(mappedActions)
         } catch (error) {
             console.error('Failed to fetch actions:', error)
-            toast({
-                title: 'Error',
-                description: 'Failed to load app actions',
-                variant: 'destructive',
-            })
+            toast.error('Error', { description: 'Failed to load app actions' })
         } finally {
             setLoading(false)
         }
@@ -91,18 +86,11 @@ export function ToolActionsModal({ open, onClose, tool }: ToolActionsModalProps)
                 actions: enabledActions
             })
 
-            toast({
-                title: 'Settings Saved',
-                description: `Updated permissions for ${tool.name}. ${enabledActions.length} actions enabled.`,
-            })
+            toast('Settings Saved', { description: `Updated permissions for ${tool.name}. ${enabledActions.length} actions enabled.` })
             onClose()
         } catch (error) {
             console.error(error)
-            toast({
-                title: 'Save Failed',
-                description: 'Could not save permission changes.',
-                variant: 'destructive',
-            })
+            toast.error('Save Failed', { description: 'Could not save permission changes.' })
         } finally {
             setSaving(false)
         }

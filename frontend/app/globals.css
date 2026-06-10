@@ -921,8 +921,7 @@
   }
 
   /* Toast — Studio uses paper with semantic left-border (per kit.jsx) */
-  .studio [data-sonner-toast],
-  .studio .react-hot-toast {
+  .studio [data-sonner-toast] {
     background: hsl(var(--card));
     border: 1px solid hsl(var(--border));
     border-radius: 8px;
