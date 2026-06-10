@@ -49,6 +49,18 @@ from modules.tools.discovery.handlers_documents import (
     list_documents,
     delete_document,
     reprocess_document,
+    upload_document,
+)
+from modules.tools.discovery.handlers_channels import (  # PRD-143 S10
+    list_channels,
+    connect_channel,
+    configure_channel,
+    start_channel,
+    stop_channel,
+)
+from modules.tools.discovery.handlers_widgets import (  # PRD-143 S10
+    get_widget_config,
+    update_widget_config,
 )
 from modules.tools.discovery.handlers_workspace import (
     get_workspace_info,
@@ -118,7 +130,7 @@ from modules.tools.discovery.handlers_harness import (
     harness_history,
 )
 from modules.tools.discovery.handlers_routing import create_routing_rule  # PRD-142 Wave 4 (W4-S6)
-from modules.tools.discovery.handlers_power import set_power_mode  # PRD-142 Wave 4 (W4-S5)
+from modules.tools.discovery.handlers_power import set_power_mode, get_power_mode  # PRD-142 W4-S5 / PRD-143 S10
 from modules.tools.discovery.handlers_auto_reporting import (
     get_auto_reporting_prefs,
     update_auto_reporting_prefs,
@@ -402,6 +414,16 @@ class PlatformActionExecutor:
             "platform_create_routing_rule": create_routing_rule,
             # PRD-142 Wave 4 (W4-S5): workspace power-mode knob
             "platform_set_power_mode": set_power_mode,
+            # PRD-143 S10: setup-surface gap-fill (operator tier)
+            "platform_get_power_mode": get_power_mode,
+            "platform_list_channels": list_channels,
+            "platform_connect_channel": connect_channel,
+            "platform_configure_channel": configure_channel,
+            "platform_start_channel": start_channel,
+            "platform_stop_channel": stop_channel,
+            "platform_get_widget_config": get_widget_config,
+            "platform_update_widget_config": update_widget_config,
+            "platform_upload_document": upload_document,
             # Wave 2: Auto reporting preferences + send-notification wrapper
             "platform_get_auto_reporting_prefs": get_auto_reporting_prefs,
             "platform_update_auto_reporting_prefs": update_auto_reporting_prefs,

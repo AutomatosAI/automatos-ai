@@ -21,6 +21,10 @@ logger = logging.getLogger(__name__)
 # avoid importing that heavy module into a handler. Keep the two in sync.
 _VALID_POWER_MODES = ("light", "standard", "max")
 
+# The tier a Mission run falls back to when the workspace pins none — mirrors
+# the fallback in ``coordinator_service`` (see _workspace_power_mode_default).
+_DEFAULT_POWER_MODE = "standard"
+
 
 async def set_power_mode(
     db: Session, workspace_id: UUID, params: Dict[str, Any]
@@ -61,4 +65,37 @@ async def set_power_mode(
     except Exception as exc:
         db.rollback()
         logger.error("[power] set_power_mode failed: %s", exc, exc_info=True)
+        return {"success": False, "error": str(exc)}
+
+
+async def get_power_mode(
+    db: Session, workspace_id: UUID, params: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Read the workspace's default power mode (PRD-143 S10).
+
+    Same resolution a Mission run uses (``coordinator_service.
+    _workspace_power_mode_default``): the stored ``settings['power_mode']``
+    when it's a known tier, else the platform default.
+    """
+    try:
+        from core.models.workspaces import Workspace
+
+        ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
+        if ws is None:
+            return {"success": False, "error": "Workspace not found"}
+
+        stored = (ws.settings or {}).get("power_mode")
+        if stored in _VALID_POWER_MODES:
+            mode, source = stored, "workspace_setting"
+        else:
+            mode, source = _DEFAULT_POWER_MODE, "platform_default"
+
+        return {
+            "success": True,
+            "power_mode": mode,
+            "source": source,
+            "valid_modes": list(_VALID_POWER_MODES),
+        }
+    except Exception as exc:
+        logger.error("[power] get_power_mode failed: %s", exc, exc_info=True)
         return {"success": False, "error": str(exc)}

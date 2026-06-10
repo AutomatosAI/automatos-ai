@@ -44,3 +44,28 @@ def register_power_actions(registry: ActionRegistry) -> None:
             "dial up quality for this workspace",
         ],
     ))
+
+    # PRD-143 S10: the read side of the knob — setup-surface gap-fill.
+    registry.register(ActionDefinition(
+        name="platform_get_power_mode",
+        description=(
+            "Read the workspace's default power mode — the cost/quality tier a "
+            "Mission run inherits unless it pins its own ('light', 'standard' or "
+            "'max'). Reports whether the value is a stored workspace setting or "
+            "the platform default. Use before changing the dial or when "
+            "explaining a workspace's spend/quality behaviour."
+        ),
+        category="configuration",
+        parameters={
+            "type": "object",
+            "properties": {},
+        },
+        permission_level="read",
+        requires_confirmation=False,
+        tags=["power_mode", "configuration", "cost", "quality"],
+        examples=[
+            "what power mode is this workspace on?",
+            "check the current power mode",
+            "is the workspace running light, standard or max?",
+        ],
+    ))

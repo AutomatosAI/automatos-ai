@@ -35,6 +35,8 @@ from .actions_graph import register_graph_actions
 from .actions_auto_reporting import register_auto_reporting_actions
 from .actions_notifications import register_notifications_actions
 from .actions_routing import register_routing_actions  # PRD-142 Wave 4 (W4-S6)
+from .actions_channels import register_channels_actions  # PRD-143 S10
+from .actions_widgets import register_widgets_actions  # PRD-143 S10
 from .actions_power import register_power_actions  # PRD-142 Wave 4 (W4-S5)
 from .actions_autonomy import register_autonomy_actions
 
@@ -65,6 +67,8 @@ def register_all_actions(registry: ActionRegistry) -> None:
     register_auto_reporting_actions(registry)
     register_notifications_actions(registry)
     register_routing_actions(registry)  # PRD-142 Wave 4 (W4-S6): routing-rule tool
+    register_channels_actions(registry)  # PRD-143 S10: channel connect/configure surface
+    register_widgets_actions(registry)  # PRD-143 S10: widget-config surface
     register_power_actions(registry)  # PRD-142 Wave 4 (W4-S5): power-mode tool
     register_autonomy_actions(registry)
 

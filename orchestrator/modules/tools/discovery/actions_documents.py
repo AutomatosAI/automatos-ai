@@ -1,4 +1,4 @@
-"""Document ActionDefinitions (list, delete, reprocess)."""
+"""Document ActionDefinitions (list, upload, delete, reprocess)."""
 
 from .action_registry import ActionDefinition, ActionRegistry
 
@@ -30,6 +30,46 @@ def register_documents_actions(registry: ActionRegistry) -> None:
             "what documents have I uploaded?",
             "list my files",
             "show knowledge base documents",
+        ],
+    ))
+
+    # PRD-143 S10: knowledge upload — setup-surface gap-fill.
+    registry.register(ActionDefinition(
+        name="platform_upload_document",
+        description=(
+            "Add a text document to the workspace knowledge base from content "
+            "Auto already has — markdown (.md), plain text (.txt) or JSON "
+            "(.json). The document is stored, chunked and embedded exactly like "
+            "a dashboard upload, so agents can retrieve it via RAG. Duplicate "
+            "content is detected and not re-uploaded. Use to capture notes, "
+            "policies, FAQs or generated knowledge for the workspace."
+        ),
+        category="documents",
+        parameters={
+            "type": "object",
+            "properties": {
+                "filename": {
+                    "type": "string",
+                    "description": "Filename including extension — .md, .markdown, .txt or .json.",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "The full text content of the document.",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Optional short description of the document.",
+                },
+            },
+            "required": ["filename", "content"],
+        },
+        permission_level="write",
+        requires_confirmation=False,
+        tags=["documents", "knowledge", "upload", "rag", "setup"],
+        examples=[
+            "add this FAQ to the knowledge base",
+            "upload these notes as a document",
+            "save this policy as knowledge",
         ],
     ))
 

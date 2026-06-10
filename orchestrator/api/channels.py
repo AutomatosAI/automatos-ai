@@ -310,18 +310,44 @@ async def create_channel(
     db: Session = Depends(get_db),
 ):
     """Create a new channel connection."""
-    platform = payload.get("platform", "").lower()
-    config = payload.get("config", {})
-    default_agent_id = payload.get("default_agent_id")
+    try:
+        return await connect_channel_for_workspace(
+            db,
+            workspace_id=str(ctx.workspace_id),
+            platform=payload.get("platform", ""),
+            config=payload.get("config", {}),
+            default_agent_id=payload.get("default_agent_id"),
+            mode=payload.get("mode"),
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
 
+
+async def connect_channel_for_workspace(
+    db: Session,
+    workspace_id: str,
+    platform: str,
+    config: Dict[str, Any],
+    default_agent_id: Optional[str] = None,
+    mode: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Create, verify and activate a channel connection — the single connect flow.
+
+    Shared by ``POST /api/channels`` and the ``platform_connect_channel`` tool
+    (PRD-143 S10), so the driver-mediated verify + install_webhook/start_polling
+    behaviour cannot drift between the dashboard and Auto. Raises ``ValueError``
+    on an unsupported platform or missing required config fields — the router
+    maps that to HTTP 400.
+    """
+    platform = (platform or "").lower()
     if platform not in _SUPPORTED_PLATFORMS:
-        raise HTTPException(400, f"Platform must be one of {_SUPPORTED_PLATFORMS}")
+        raise ValueError(f"Platform must be one of {_SUPPORTED_PLATFORMS}")
 
     # Validate required config fields
     required = _REQUIRED_CONFIG.get(platform, [])
     missing = [f for f in required if not config.get(f)]
     if missing:
-        raise HTTPException(400, f"Missing required config fields for {platform}: {missing}")
+        raise ValueError(f"Missing required config fields for {platform}: {missing}")
 
     conn_id = uuid4()
     db.execute(
@@ -331,15 +357,15 @@ async def create_channel(
         """),
         {
             "id": str(conn_id),
-            "ws_id": str(ctx.workspace_id),
+            "ws_id": str(workspace_id),
             "platform": platform,
-            "config": __import__('json').dumps(config),
+            "config": _json.dumps(config),
             "agent_id": default_agent_id,
         },
     )
     db.commit()
 
-    logger.info("Created channel connection %s (%s) for workspace %s", conn_id, platform, ctx.workspace_id)
+    logger.info("Created channel connection %s (%s) for workspace %s", conn_id, platform, workspace_id)
 
     # ------------------------------------------------------------------
     # PRD-008-A.4 — driver-mediated verify + (install_webhook | start_polling)
@@ -359,12 +385,12 @@ async def create_channel(
             },
         }
 
-    requested_mode = str(payload.get("mode") or driver.default_mode().value).lower()
+    requested_mode = str(mode or driver.default_mode().value).lower()
     if not driver.supports(ConnectivityMode(requested_mode) if requested_mode in {"webhook", "polling"} else driver.default_mode()):
         # Fall back to the driver's preferred mode rather than erroring.
         requested_mode = driver.default_mode().value
 
-    verify_result = await driver.verify(workspace_id=str(ctx.workspace_id), config=config)
+    verify_result = await driver.verify(workspace_id=str(workspace_id), config=config)
 
     # Persist the mode on the row now that we know which one we'll use.
     db.execute(
@@ -389,11 +415,11 @@ async def create_channel(
     install_result: Optional[VerifyResult] = None
 
     if requested_mode == "webhook":
-        webhook_url = _webhook_url_for(db, ctx.workspace_id)
+        webhook_url = _webhook_url_for(db, workspace_id)
         if webhook_url:
             try:
                 install_result = await driver.install_webhook(
-                    workspace_id=str(ctx.workspace_id),
+                    workspace_id=str(workspace_id),
                     config=config,
                     webhook_url=webhook_url,
                 )
@@ -426,7 +452,7 @@ async def create_channel(
         try:
             started = await driver.start_polling(
                 connection_id=str(conn_id),
-                workspace_id=str(ctx.workspace_id),
+                workspace_id=str(workspace_id),
                 config=config,
             )
             if not started:
