@@ -131,11 +131,11 @@
       "title": "Calendar stopgap: retry on inactive scheduler + request timeout",
       "description": "Root cause (1-of-4-workers APScheduler state) is fixed properly in PRD-162. Stopgap so the calendar stops caching empty results: a get_schedule response with scheduler_active=false becomes a thrown error so React Query retries instead of rendering an empty calendar from a 200; add AbortSignal.timeout(15000) and a visible error state with retry button in CalendarTab.",
       "acceptanceCriteria": [
-        "vitest: inactive-scheduler response triggers retry, not empty render",
-        "Timeout shows error state with retry — verify in browser using dev-browser skill",
-        "Typecheck passes"
+        "DONE — useActivitySchedule queryFn (hooks/use-activity-api.ts) now routes the response through new exported scheduleOrThrow(): a scheduler_active=false 200 THROWS (an empty `scheduled` list from a scheduler-less worker is noise, not truth) so React Query (retry:2 already configured) retries another worker instead of caching/rendering an empty calendar. components/__tests__/calendar-schedule-retry.test.ts (5): scheduleOrThrow throws on false, returns data unchanged on true AND on absent (legacy 200); wiring guards assert the queryFn has AbortSignal.timeout(15000)+scheduleOrThrow()+retry:2 and CalendarTab has isError/refetch/Retry.",
+        "DEFERRED — morning browser check: throttle/kill /api/activity/schedule (or force scheduler_active=false), confirm CalendarTab shows the error banner + a working Retry, not a blank calendar. Deterministic proxy DONE: request now carries AbortSignal.timeout(15000); CalendarTab destructures isError+refetch and renders a role=alert banner with a Retry button (onClick=refetch()) directly under the toolbar (shows in day/week/month). Headless loop cannot run dev-browser.",
+        "DONE — npx tsc --noEmit holds at the branch's 713 pre-existing errors (set-diff vs pre-S10 baseline = ZERO new; the only two deltas are tsc's nondeterministic union-member ORDER in an untouched file's error text + main-layout's pathname error line-shifting 76->61 from the S10 ticker deletion — neither is a new error). AbortSignal.timeout typechecks (lib.dom). vitest 53 passed across 10 files (incl. 5 new S11). S11 is frontend-only; orchestrator pytest unaffected (last green at 2124)."
       ],
-      "files": ["frontend/components/command-center/calendar-tab.tsx"]
+      "files": ["frontend/components/command-center/calendar-tab.tsx", "frontend/hooks/use-activity-api.ts", "frontend/components/__tests__/calendar-schedule-retry.test.ts"]
     },
     {
       "id": "P154-S12",

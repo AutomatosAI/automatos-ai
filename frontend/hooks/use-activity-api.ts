@@ -166,13 +166,31 @@ export function useActivityStats(period: string = '1d') {
 }
 
 /**
+ * PRD-154 S11 stopgap. The real root cause (the scheduler only lives on 1 of 4
+ * workers) is fixed in PRD-162. Until then a `scheduler_active: false` 200 means
+ * THIS worker has no live scheduler — its empty `scheduled` list is noise, not
+ * truth. Treat it as a transient error so React Query retries (hitting another
+ * worker) and the calendar shows a retry affordance instead of caching empty.
+ */
+export function scheduleOrThrow(data: ScheduleResponse): ScheduleResponse {
+  if (data?.scheduler_active === false) {
+    throw new Error('Scheduler is not active on this worker yet.')
+  }
+  return data
+}
+
+/**
  * Fetch upcoming scheduled routines/recipes for the calendar widget.
  */
 export function useActivitySchedule(range: string = '7d') {
   return useQuery<ScheduleResponse>({
     queryKey: activityQueryKeys.schedule(range),
-    queryFn: () =>
-      apiClient.request<ScheduleResponse>(`/api/activity/schedule?range=${range}`),
+    queryFn: async () =>
+      scheduleOrThrow(
+        await apiClient.request<ScheduleResponse>(`/api/activity/schedule?range=${range}`, {
+          signal: AbortSignal.timeout(15000),
+        }),
+      ),
     refetchInterval: 60000,
     staleTime: 30000,
     keepPreviousData: true,
