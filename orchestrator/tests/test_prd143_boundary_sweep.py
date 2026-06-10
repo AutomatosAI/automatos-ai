@@ -112,18 +112,26 @@ from fastapi.testclient import TestClient  # noqa: E402
 # CI collection-order guard. The real fix lives in conftest.py's
 # pytest_collectstart hook (which fires before this module imports); this
 # in-file copy keeps the module robust when run standalone or reordered.
-# Earlier-collected siblings leak non-file-backed modules.*/consumers.* stubs
-# in TWO shapes — bare (__spec__ is None) AND spec'd-but-pathless ("unknown
-# location") — so a __spec__-based predicate misses half (that was the CI red
-# on #434). Gate on file-backing: purge every stub that has neither __file__
-# nor __path__, so the real packages re-import fresh from disk. Real packages
-# are preserved — a whole-family purge instead self-collides ("cannot import
-# name 'tools' from 'modules'").
+# Earlier-collected siblings leak non-real modules.*/consumers.* stubs in THREE
+# shapes — bare (__spec__ is None), spec'd-but-pathless (origin=None), and
+# path-bearing (__path__=[realdir] but no __file__, imports as "unknown
+# location"). A __spec__- or __path__-based predicate misses the last shape —
+# that was the CI red on #434. Decide realness by the FILESYSTEM: a real module
+# has a __file__ that exists, a real namespace package has spec
+# submodule_search_locations; everything else is a stub and is purged so the
+# real packages re-import fresh. Real packages are preserved — a whole-family
+# purge instead self-collides ("cannot import name 'tools' from 'modules'").
+import os as _os_guard  # noqa: E402
 import sys as _sys_guard  # noqa: E402
 for _name, _mod in [(n, m) for n, m in list(_sys_guard.modules.items())
                     if n.split(".")[0] in ("modules", "consumers")]:
-    if getattr(_mod, "__file__", None) is None and not getattr(_mod, "__path__", None):
-        _sys_guard.modules.pop(_name, None)
+    _f = getattr(_mod, "__file__", None)
+    if _f and _os_guard.path.exists(_f):
+        continue
+    _spec = getattr(_mod, "__spec__", None)
+    if _spec is not None and getattr(_spec, "submodule_search_locations", None):
+        continue
+    _sys_guard.modules.pop(_name, None)
 
 import modules.tools.discovery.platform_executor as pe  # noqa: E402,F401
 from core.auth.dependencies import RequestContext, UserContext  # noqa: E402

@@ -1,4 +1,5 @@
 """Shared fixtures for plugin system tests."""
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -6,6 +7,42 @@ from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
+
+
+def _module_is_real(mod) -> bool:
+    """True iff ``mod`` is a genuinely-loaded module/package, not a test stub.
+
+    Realness is decided by the filesystem, not by ``__spec__`` presence:
+      * a real module/regular package has ``__file__`` pointing at a file that
+        EXISTS on disk;
+      * a real namespace package has a ``__spec__`` carrying
+        ``submodule_search_locations``.
+    Everything else — bare ``ModuleType`` stubs, ``module_from_spec`` stubs with
+    ``origin=None``, and (critically) path-bearing stubs that set
+    ``__path__=[realdir]`` but no ``__file__`` (these import as
+    "(unknown location)") — is a stub. A ``__spec__``- or ``__path__``-only
+    check misses the last shape, which is the PR #434 CI failure.
+    """
+    f = getattr(mod, "__file__", None)
+    if f and os.path.exists(f):
+        return True
+    spec = getattr(mod, "__spec__", None)
+    if spec is not None and getattr(spec, "submodule_search_locations", None):
+        return True
+    return False
+
+
+def _purge_app_stubs() -> None:
+    """Drop every non-real ``modules.*`` / ``consumers.*`` entry so the real
+    packages re-import fresh from disk. Real packages are preserved untouched —
+    purging the whole family instead makes the cold re-import collide with its
+    own half-initialised packages ("cannot import name 'tools' from 'modules'").
+    """
+    for _name, _mod in list(sys.modules.items()):
+        if _name.split(".")[0] not in ("modules", "consumers"):
+            continue
+        if not _module_is_real(_mod):
+            sys.modules.pop(_name, None)
 
 # Ensure orchestrator package is importable
 _orchestrator_root = str(Path(__file__).resolve().parent.parent)
@@ -72,20 +109,15 @@ def pytest_collectstart(collector):
     Linux collection order makes the stubs live here; macOS order hides it,
     which is why this passed locally and failed only on CI (PR #434).
 
-    Right before one of these modules collects, purge every non-file-backed
-    ``modules.*`` / ``consumers.*`` entry so the real packages re-import fresh
-    from disk. Real (file-backed) packages are preserved untouched — purging
-    the whole family instead makes the re-import collide with its own
-    half-initialised packages ("cannot import name 'tools' from 'modules'").
+    Right before one of these modules collects, purge every non-real
+    ``modules.*`` / ``consumers.*`` stub (see ``_module_is_real`` — realness is
+    decided by the filesystem, so path-bearing "(unknown location)" stubs are
+    caught) so the real packages re-import fresh from disk.
     """
     name = getattr(collector, "name", "")
     if not name.startswith("test_prd143"):
         return
-    for _name, _mod in list(sys.modules.items()):
-        if _name.split(".")[0] not in ("modules", "consumers"):
-            continue
-        if getattr(_mod, "__file__", None) is None and not getattr(_mod, "__path__", None):
-            sys.modules.pop(_name, None)
+    _purge_app_stubs()
 
 
 # ---- Database mock ----
