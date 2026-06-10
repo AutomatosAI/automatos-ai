@@ -223,8 +223,8 @@
         "Typecheck passes"
       ],
       "priority": 13,
-      "passes": false,
-      "notes": "PRD-143 US-006 first half + FR-5. The fixture is the rehearsal for the real ~200 catalogue."
+      "passes": true,
+      "notes": "PRD-143 US-006 first half + FR-5. The fixture is the rehearsal for the real ~200 catalogue. DONE 2026-06-10: tests-only — tests/test_prd143_selection_at_scale.py: synthetic 200-action registry (11 operator anchors mirroring real S10/S11 names + 2 promoted + the 7 su-tier names from the S4 manifest + 180 generated fillers across realistic categories) ranked by the REAL ActionSemanticIndex over deterministic md5 hash-bag embeddings (DIM=1024, no network, run-stable). 31/31 green FIRST RUN — no gap in the S1-S3 stack at scale. AC-3 starvation evidence: every representative intent's expected tool ranks 1/15 (worst rank 1) at 200 tools → SEMANTIC_TOOL_ROUTING_TOP_K=15 kept, no tuning needed. su negatives counter-proven non-vacuous (each obs intent's paired su tool ranks once include_super_admin=True). Dispatcher enum == ranked set exactly (incl. an obs-flavoured intent), promoted stay first-class/never enum members, bound pinned to the config value via tr._semantic_routing_top_k(). 58 green with the 4 neighbouring selection suites."
     },
     {
       "id": "S14",
