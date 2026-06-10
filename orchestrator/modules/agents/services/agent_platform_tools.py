@@ -469,6 +469,13 @@ class AgentPlatformTools:
                 query = parameters.get("query", "")
                 file_type = parameters.get("file_type")
                 project_name = parameters.get("project_name")
+                search_type = (parameters.get("search_type") or "fuzzy").lower()
+                symbol_type = parameters.get("symbol_type")
+                if symbol_type == "all":
+                    symbol_type = None
+                limit = parameters.get("limit", 10)
+                # fetch headroom for PageRank re-ranking, then cap at requested limit
+                fetch_limit = max(limit, 20)
 
                 # Resolve workspace_id from agent (CodeGraph projects are workspace-scoped)
                 workspace_id = None
@@ -526,17 +533,29 @@ class AgentPlatformTools:
                         tool_name
                     )
                 
-                self.logger.info(f"  🔍 Searching codebase: '{query}' in project '{project_name}'")
+                self.logger.info(
+                    f"  🔍 Searching codebase ({search_type}): '{query}' in project '{project_name}'"
+                )
                 try:
-                    result_dict = await self.code_graph.search_symbols(
-                        project_name=project_name,
-                        query=query,
-                        limit=20,  # Fetch more, will filter down to 10
-                        workspace_id=workspace_id,
-                    )
-                    # search_symbols returns a dict with 'results' key
+                    if search_type == "semantic":
+                        # Route to the working pgvector path (was unreachable before).
+                        result_dict = await self.code_graph.semantic_search(
+                            project_name=project_name,
+                            query=query,
+                            limit=fetch_limit,
+                            workspace_id=workspace_id,
+                        )
+                    else:
+                        result_dict = await self.code_graph.search_symbols(
+                            project_name=project_name,
+                            query=query,
+                            symbol_type=symbol_type,
+                            limit=fetch_limit,
+                            workspace_id=workspace_id,
+                        )
+                    # search returns a dict with 'results' key
                     results = result_dict.get("results", []) if isinstance(result_dict, dict) else []
-                    
+
                 except Exception as e:
                     # Project might not exist or name mismatch - return helpful message
                     self.logger.warning(f"  ⚠️ CodeGraph search failed: {str(e)}")
@@ -582,24 +601,23 @@ class AgentPlatformTools:
                 except Exception as e:
                     self.logger.debug(f"  PageRank ranking skipped: {e}")
 
-                # Convert to raw format for formatter
+                # Convert to raw format for formatter. No content-length filter:
+                # the old <50-char gate hid short symbols (one-liners, signatures)
+                # that are valid hits agents need to act on.
                 raw_results = []
                 for r in results:
-                    code_snippet = r.get("code_snippet", "")
-                    if len(code_snippet.strip()) < 50:
-                        continue
                     raw_results.append({
                         "symbol_name": r.get("name", "Unknown"),
                         "file_path": r.get("file_path", "Unknown"),
                         "symbol_type": r.get("symbol_type", "symbol"),
                         "line_number": r.get("line_number", 0),
-                        "code": code_snippet,
+                        "code": r.get("code_snippet", ""),
                         "docstring": r.get("docstring", ""),
                         "signature": r.get("signature", ""),
                         "score": r.get("score", 0.8),
                         "importance_rank": r.get("importance_rank", 0.0),
                     })
-                    if len(raw_results) >= 10:
+                    if len(raw_results) >= limit:
                         break
                 
                 # Use unified formatter

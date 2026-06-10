@@ -1260,22 +1260,9 @@ class CodeGraphService:
         
         execution_time = (time.time() - start_time) * 1000
         
-        # Log query
-        self.db.execute(
-            text("""
-                INSERT INTO codegraph_query_logs
-                (project_id, query_type, query_text, results_count, execution_time_ms)
-                VALUES (:project_id, 'symbol', :query, :count, :time)
-            """),
-            {
-                "project_id": project_id,
-                "query": query,
-                "count": len(symbols),
-                "time": execution_time
-            }
-        )
-        self.db.commit()
-        
+        # Log query (best-effort; never fails the search)
+        self._log_query(project_id, "symbol", query, len(symbols), execution_time, workspace_id)
+
         return {
             "project": project_name,
             "query": query,
@@ -1359,22 +1346,9 @@ class CodeGraphService:
                 execution_time = (time.time() - start_time) * 1000
                 prompt_block = self._format_prompt_block(symbols, query)
                 
-                # Log query
-                self.db.execute(
-                    text("""
-                        INSERT INTO codegraph_query_logs
-                        (project_id, query_type, query_text, results_count, execution_time_ms)
-                        VALUES (:project_id, 'semantic', :query, :count, :time)
-                    """),
-                    {
-                        "project_id": project_id,
-                        "query": query,
-                        "count": len(symbols),
-                        "time": execution_time
-                    }
-                )
-                self.db.commit()
-                
+                # Log query (best-effort; never fails the search)
+                self._log_query(project_id, "semantic", query, len(symbols), execution_time, workspace_id)
+
                 logger.info(f"✅ Retrieved {len(symbols)} symbols using EnhancedVectorStore")
                 
                 return {
@@ -1441,22 +1415,9 @@ class CodeGraphService:
         # Format as prompt block for LLMs
         prompt_block = self._format_prompt_block(symbols, query)
         
-        # Log query
-        self.db.execute(
-            text("""
-                INSERT INTO codegraph_query_logs
-                (project_id, query_type, query_text, results_count, execution_time_ms)
-                VALUES (:project_id, 'semantic', :query, :count, :time)
-            """),
-            {
-                "project_id": project_id,
-                "query": query,
-                "count": len(symbols),
-                "time": execution_time
-            }
-        )
-        self.db.commit()
-        
+        # Log query (best-effort; never fails the search)
+        self._log_query(project_id, "semantic", query, len(symbols), execution_time, workspace_id)
+
         logger.info(f"✅ Retrieved {len(symbols)} symbols with SQL fallback")
         
         return {
@@ -1467,7 +1428,47 @@ class CodeGraphService:
             "prompt_block": prompt_block,
             "execution_time_ms": round(execution_time, 2)
         }
-    
+
+    def _log_query(
+        self,
+        project_id: Any,
+        query_type: str,
+        query_text: str,
+        results_count: int,
+        duration_ms: float,
+        workspace_id: Optional[str],
+    ) -> None:
+        """Best-effort query-log write.
+
+        The codegraph_query_logs table stores duration_ms (not execution_time_ms)
+        and a NOT NULL workspace_id; the old INSERTs targeted a phantom column and
+        omitted workspace_id, so every write failed. A telemetry write must never
+        fail the search, so any failure is rolled back and swallowed.
+        """
+        try:
+            self.db.execute(
+                text("""
+                    INSERT INTO codegraph_query_logs
+                    (project_id, query_type, query_text, results_count, duration_ms, workspace_id)
+                    VALUES (:project_id, :query_type, :query_text, :results_count, :duration_ms, :workspace_id)
+                """),
+                {
+                    "project_id": project_id,
+                    "query_type": query_type,
+                    "query_text": query_text,
+                    "results_count": results_count,
+                    "duration_ms": duration_ms,
+                    "workspace_id": workspace_id,
+                },
+            )
+            self.db.commit()
+        except Exception as e:
+            logger.warning(f"CodeGraph query-log write failed (non-fatal): {e}")
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
+
     def _format_prompt_block(self, symbols: List[Dict], query: str) -> str:
         """Format search results as prompt block for LLM"""
         parts = [f"# CodeGraph Search Results\n\nQuery: {query}\n\n"]

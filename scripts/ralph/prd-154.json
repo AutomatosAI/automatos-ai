@@ -95,12 +95,12 @@
       "title": "CodeGraph: semantic search routes to the working path; results carry path:line",
       "description": "search_type='semantic' currently routes to a broken path while a working pgvector path exists — route to it, forward the dropped params, remove the <50-char content filter hiding most hits, reconcile the query-log schema mismatch and make logging non-fatal (a log failure must never fail the search). Results emit path:line and symbol signature so agents can act on them.",
       "acceptanceCriteria": [
-        "Semantic search returns results on a seeded index; params forwarded (test)",
-        "Result snapshot contains path:line + signature",
-        "Induced query-log failure does not fail search (test)",
-        "cd orchestrator && pytest -q green"
+        "DONE — search_codebase (agent_platform_tools.py) now reads search_type and ROUTES semantic→CodeGraphService.semantic_search (the working pgvector path; the handler previously IGNORED search_type and ALWAYS called search_symbols, so semantic was unreachable from agents). Dropped params now forwarded: symbol_type ('all'→None) + the requested limit (was hardcoded 20). test_search_codebase_routes_semantic_to_semantic_search + _fuzzy_forwards_symbol_type_and_limit + _symbol_type_all_maps_to_none; semantic_search returns seeded results via the SQL pgvector fallback in test_semantic_search_returns_results_via_pgvector_fallback.",
+        "DONE — _format_prompt_block emits 'File: <path>:<line>' + 'Signature:' and result rows carry file_path/line_number/signature; the <50-char code_snippet filter (hid short one-line symbols) is REMOVED and output now caps at the requested limit not a hardcoded 10. test asserts 'api/auth.py:42'+'Signature:' in prompt_block and a 16-char snippet survives (test_search_codebase_keeps_short_snippets).",
+        "DONE — the 3 broken query-log INSERTs (search_symbols + both semantic paths) collapse to a best-effort _log_query writing the REAL columns duration_ms + NOT NULL workspace_id (phantom execution_time_ms + missing workspace_id dropped — every write previously failed) and swallow+rollback on error so logging can never fail the search. test_search_symbols_survives_query_log_failure (induced INSERT failure → search still returns, rollback==1) + source guard test_query_log_insert_uses_real_columns_not_execution_time_ms.",
+        "DONE — cd orchestrator && python3 -m pytest -q: 2121 passed, 17 skipped, 1 xfailed (2114 + 7 new S8 tests). NOTE: the search_type routing + <50 filter live in orchestrator/modules/agents/services/agent_platform_tools.py (the agent tool surface where the binding description's headline behavior uniquely sits), which the story files list omitted; api/codegraph.py needed NO change (its /search/semantic endpoint already forwards every param semantic_search accepts)."
       ],
-      "files": ["orchestrator/modules/codegraph/codegraph_service.py", "orchestrator/api/codegraph.py"]
+      "files": ["orchestrator/modules/codegraph/codegraph_service.py", "orchestrator/api/codegraph.py", "orchestrator/modules/agents/services/agent_platform_tools.py", "orchestrator/tests/test_prd154_s8_codegraph.py"]
     },
     {
       "id": "P154-S9",
