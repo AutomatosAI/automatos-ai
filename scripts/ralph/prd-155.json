@@ -8,11 +8,11 @@
       "title": "Backend route manifest generator",
       "description": "Script/pytest fixture imports the FastAPI app and dumps sorted {method, path} pairs to reports/route-manifest.json deterministically. If app import currently opens DB connections at import time, make those lazy — the manifest must generate without Postgres.",
       "acceptanceCriteria": [
-        "python -m scripts.dump_routes produces a stable sorted manifest twice in a row (diff empty)",
-        "Generation works with no DB available (test)",
-        "cd orchestrator && pytest -q green"
+        "python -m scripts.dump_routes produces a stable sorted manifest twice in a row (diff empty) — DONE: test_route_manifest.py::test_dump_routes_deterministic_two_runs asserts byte-identical; acceptance S1 check diffs two runs (742 routes)",
+        "Generation works with no DB available (test) — DONE: subprocess runs with POSTGRES_PORT=59432 (unreachable); create_engine lazy + lifespan-only init means import never dials DB; test_dump_routes_generates_without_db green",
+        "cd orchestrator && pytest -q green — DONE: 2142 passed, 17 skipped, 1 xfailed, 0 failed (no DB, integration skips cleanly)"
       ],
-      "files": ["orchestrator/scripts/dump_routes.py", "orchestrator/main.py"]
+      "files": ["orchestrator/scripts/dump_routes.py", "orchestrator/main.py", "orchestrator/tests/test_route_manifest.py", "orchestrator/reports/route-manifest.json"]
     },
     {
       "id": "P155-S2",
