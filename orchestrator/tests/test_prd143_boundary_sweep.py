@@ -109,14 +109,24 @@ from fastapi import FastAPI  # noqa: E402
 from fastapi.routing import APIRoute, APIRouter  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-# NO sys.modules purge here. The v2 "collection-order guard" that popped the
-# whole modules.*/consumers.* family was itself the CI failure: by the time
-# this file collects in a full-tree run, hundreds of loaded modules hold
-# references into that family, and the forced re-import collides with its own
-# half-initialized packages ("cannot import name 'tools' from 'modules'").
-# The sibling prd143 files import this exact chain plainly and pass CI —
-# match them. conftest's autouse repair fixture handles stub cleanup at test
-# time; collection-time imports here must go through the normal import system.
+# CI collection-order guard (v1 — the proven variant; see PR #434 CI history):
+# earlier-collected tests stub modules.*/consumers.* in sys.modules (bare
+# ModuleType, no __spec__) and leak them. On Linux collection order the stubs
+# are still live HERE, so the real imports below resolve against them and die
+# at collection ("cannot import name 'UnifiedToolExecutor' from
+# 'modules.tools.execution' (unknown location)"). Purge ONLY origin-less
+# entries so the real packages import fresh; conftest's autouse repair fixture
+# re-binds other tests' attributes at test time. Do NOT widen this to a
+# whole-family purge (the v2 experiment): popping healthy loaded packages
+# mid-collection makes the re-import collide with itself ("cannot import
+# name 'tools' from 'modules'") — that variant failed CI twice.
+import sys as _sys_guard  # noqa: E402
+for _name in [n for n, m in list(_sys_guard.modules.items())
+              if (n == "modules" or n.startswith("modules.")
+                  or n == "consumers" or n.startswith("consumers."))
+              and getattr(m, "__spec__", None) is None]:
+    _sys_guard.modules.pop(_name, None)
+
 import modules.tools.discovery.platform_executor as pe  # noqa: E402,F401
 from core.auth.dependencies import RequestContext, UserContext  # noqa: E402
 from core.auth.hybrid import get_request_context_hybrid  # noqa: E402
