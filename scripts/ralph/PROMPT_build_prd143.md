@@ -91,11 +91,15 @@ For every story: **write the test FIRST (RED), watch it fail, then implement (GR
 ### Phase 3 — Validate
 ```bash
 python3 -m py_compile $(git diff --name-only --diff-filter=AM HEAD | grep '\.py$')
-cd orchestrator && python -c "from main import app; print('import OK')"
 cd orchestrator && python -m pytest tests/<the story's test file> -v
+# Plus the neighbouring suite if you modified a live module (e.g. edge_builder → test_prd139_edge_builder.py).
 # Plus any grep gate the AC names (no admin_only=True left after S4; no os.getenv; no frontend/ diff).
 ```
-All must pass. Do NOT run anything against a live DB. If validation fails: apply an obvious honest fix, else revert (`git checkout -- .`) and exit with a commit message starting `BLOCKED:`. Never weaken a test to go green.
+All must pass. **DO NOT run `from main import app`** — the full-app import takes >5 minutes in this venv, the harness auto-backgrounds it, and three iterations have already been lost waiting on it. py_compile + the story's pytest file + the neighbouring suite ARE the green signal (stories whose AC mention the import check: record "import gate skipped per prompt — venv-slow" in the notes instead). If the harness auto-backgrounds ANY command: do not wait on it, do not `sleep`, do not end your message while it runs — kill it, re-run a faster foreground variant (tighter -k filter, fewer files), and move on.
+
+Do NOT run anything against a live DB. If validation fails: apply an obvious honest fix, else revert (`git checkout -- .`) and exit with a commit message starting `BLOCKED:`. Never weaken a test to go green.
+
+**Dirty-tree adoption rule (Phase 1 refinement):** if `git status` shows uncommitted files that belong to the CURRENT story (they match the story's named test/impl files), a previous iteration died mid-story — ADOPT them: validate per Phase 3 and commit. Only abort (`RALPH_ABORT: dirty tree`) when the dirty files belong to no story or to an already-passed one.
 
 ### Phase 4 — Flip passes + Commit + Exit
 1. In `prd-143.json`, set the finished story's `"passes": true` and append a one-line note (what landed, key file:lines). Keep the JSON valid.
