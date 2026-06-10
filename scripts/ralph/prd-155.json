@@ -31,12 +31,12 @@
       "title": "Startup mount assertions replace silent try/except",
       "description": "main.py mounts ~25 routers inside try/except that swallows ImportError — two imports ALREADY fail silently every boot (main.py:115,123). Replace with an explicit expected-router manifest; boot raises naming the failed router. Escape hatch ALLOW_DEGRADED_BOOT=true via config.py (default off). Fix or deliberately delete the two currently-failing imports and record which in the PR description.",
       "acceptanceCriteria": [
-        "Simulated router ImportError fails startup with router name in message (test)",
-        "Zero try/except ImportError around router mounts in main.py (grep gate)",
-        "The two failing imports resolved (fixed or deleted, documented)",
-        "cd orchestrator && pytest -q green"
+        "Simulated router ImportError fails startup with router name in message (test) — DONE: test_router_mount_manifest.py::test_required_router_failure_raises_naming_the_router asserts RouterMountError names the failed router + mentions ALLOW_DEGRADED_BOOT; test_allow_degraded_boot_downgrades_required_failure covers the escape hatch",
+        "Zero try/except ImportError around router mounts in main.py (grep gate) — DONE: `grep -nE \"except[[:space:]]+ImportError\" orchestrator/main.py` returns zero matches (was 28); 24 conditional routers moved to router_manifest.MANIFEST_ROUTERS, mounted via mount_manifest_routers(); widget middleware + 6 mount-time blocks converted to plain imports",
+        "The two failing imports resolved (fixed or deleted, documented) — DONE: api.auth and api.evaluation both DELETED (neither api/auth.py nor api/evaluation.py exists on disk — they failed ImportError every boot and mounted nothing); import + `if x_router` mount + manifest entry all removed",
+        "cd orchestrator && pytest -q green — DONE: 2148 passed, 17 skipped, 1 xfailed, 0 failed (+6 loader tests); route-manifest.json byte-identical (742 routes) proving the route SET is unchanged — only the mount mechanism changed; manifest still generates DB-free"
       ],
-      "files": ["orchestrator/main.py", "orchestrator/config.py"]
+      "files": ["orchestrator/main.py", "orchestrator/config.py", "orchestrator/router_manifest.py", "orchestrator/tests/test_router_mount_manifest.py"]
     },
     {
       "id": "P155-S4",
