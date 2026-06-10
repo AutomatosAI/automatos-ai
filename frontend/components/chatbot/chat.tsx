@@ -867,7 +867,7 @@ export function Chat({
                             complexity={missionSuggestion.complexity}
                             agentId={missionSuggestion.agentId}
                             chatId={id}
-                            recentMessages={messages.slice(-5).map(m => ({ role: m.role, content: m.content }))}
+                            recentMessages={messages.slice(-5).map(m => { const textPart = m.parts?.find(p => p.type === 'text'); return { role: m.role, content: textPart && 'text' in textPart ? textPart.text : '' } })}
                           />
                         </motion.div>
                       )}
@@ -1192,7 +1192,7 @@ export function Chat({
                       complexity={missionSuggestion.complexity}
                       agentId={missionSuggestion.agentId}
                       chatId={id}
-                      recentMessages={messages.slice(-5).map(m => ({ role: m.role, content: m.content }))}
+                      recentMessages={messages.slice(-5).map(m => { const textPart = m.parts?.find(p => p.type === 'text'); return { role: m.role, content: textPart && 'text' in textPart ? textPart.text : '' } })}
                     />
                   </motion.div>
                 )}
