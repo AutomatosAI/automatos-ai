@@ -11,6 +11,7 @@ pulled in by modules/memory/__init__.py.
 """
 
 import importlib.util
+import inspect
 import json
 import math
 import pathlib
@@ -43,7 +44,7 @@ _mock_config_obj = MagicMock()
 _mock_config_obj.MEMORY_SESSION_TTL_SECONDS = 86400
 _mock_config_obj.MEMORY_SESSION_CONSOLIDATION_TTL_SECONDS = 3600
 _mock_config_obj.MEMORY_CACHE_TTL_SECONDS = 300
-_mock_config_obj.MEMORY_DECAY_RATE = 0.1
+_mock_config_obj.MEMORY_DECAY_RATE = 0.004  # PRD-154 S3: week-scale (was 0.1/hr)
 _mock_config_obj.MEMORY_DECAY_ARCHIVE_THRESHOLD = 0.3
 _mock_config_obj.MEMORY_DECAY_BATCH_SIZE = 100
 _mock_config_obj.MEMORY_PROMOTION_MIN_IMPORTANCE = 0.7
@@ -352,8 +353,59 @@ class TestL3:
 
     @pytest.mark.asyncio
     async def test_delete(self, service, mock_mem0):
-        assert await service.delete_memory("mem-001") is True
-        mock_mem0.delete.assert_called_once_with(memory_id="mem-001")
+        # PRD-154 S3: delete now routes through the bulk endpoint, so the service
+        # resolves the namespace user_id and passes mem0 a memory_ids list.
+        assert await service.delete_memory("mem-001", workspace_id=WS_ID) is True
+        mock_mem0.delete.assert_called_once_with(
+            memory_ids=["mem-001"], user_id=f"mem:{WS_ID}", workspace_id=WS_ID
+        )
+
+    @pytest.mark.asyncio
+    async def test_store_long_term_infer_false(self, service, mock_mem0):
+        # Curated facts must not be re-extracted by Mem0's personal-info prompt.
+        await service.store_long_term(WS_ID, "distilled durable fact")
+        assert mock_mem0.add.call_args[1].get("infer") is False
+
+    @pytest.mark.asyncio
+    async def test_store_long_term_messages_infer_false(self, service, mock_mem0):
+        await service.store_long_term_messages(
+            f"mem:{WS_ID}:recipe:1", [{"role": "user", "content": "x"}]
+        )
+        assert mock_mem0.add.call_args[1].get("infer") is False
+
+    @pytest.mark.asyncio
+    async def test_store_daily_log_infer_false(self, service, mock_mem0):
+        await service.store_daily_log(WS_ID, "5 tasks done", metadata={"date": "2026-06-10", "type": "s"})
+        assert mock_mem0.add.call_args[1].get("infer") is False
+
+    @pytest.mark.asyncio
+    async def test_store_two_tier_infer_false(self, service, mock_mem0):
+        await service.store_two_tier(WS_ID, [{"role": "user", "content": "x"}], agent_id=1, tier="global")
+        assert mock_mem0.add.call_args[1].get("infer") is False
+
+    def test_all_curated_writers_grep_infer_false(self):
+        # Grep-able guard (PRD-154 S3 AC): every curated L3 writer passes infer=False.
+        for name in ("store_long_term", "store_long_term_messages", "store_daily_log", "store_two_tier"):
+            src = inspect.getsource(getattr(UnifiedMemoryService, name))
+            assert "infer=False" in src, f"{name} must pass infer=False to mem0.add"
+
+    @pytest.mark.asyncio
+    async def test_recall_touches_each_short_term_result(self, service):
+        # touch_short_term had ZERO callers; recall must now bump access_count so
+        # the L2->L3 promotion threshold becomes reachable.
+        rows = [{"id": "r1", "content": "a"}, {"id": "r2", "content": "b"}]
+        service._search_short_term_sync = lambda *a, **k: rows
+        touched: list = []
+
+        async def _fake_touch(memory_id):
+            touched.append(memory_id)
+            return True
+
+        service.touch_short_term = _fake_touch
+        out = await service.search_short_term(WS_ID, "anything")
+
+        assert out == rows
+        assert set(touched) == {"r1", "r2"}
 
     @pytest.mark.asyncio
     async def test_store_failure(self, service, mock_mem0):
@@ -560,7 +612,13 @@ class TestContextBundle:
 
 class TestDecayFormula:
 
-    def _retention(self, hours, importance=0.5, access_count=0, rate=0.1):
+    # Mirror config.MEMORY_DECAY_RATE — PRD-154 S3 retuned it to week-scale
+    # (0.1/hr archived importance-0.8 in ~15h). Threshold unchanged at 0.3.
+    RATE = 0.004
+    THRESHOLD = 0.3
+
+    def _retention(self, hours, importance=0.5, access_count=0, rate=None):
+        rate = self.RATE if rate is None else rate
         return math.exp(-rate * hours) * (
             1.0 + 0.5 * importance + 0.1 * min(access_count, 10)
         )
@@ -568,29 +626,31 @@ class TestDecayFormula:
     def test_fresh_high_retention(self):
         assert self._retention(1) > 0.9
 
-    def test_old_low_retention(self):
-        assert self._retention(72, importance=0.1) < 0.3
-
     def test_importance_boost(self):
-        assert self._retention(48, importance=0.9) > self._retention(48, importance=0.2)
+        # Even after a full week, higher importance retains more.
+        week = 7 * 24
+        assert self._retention(week, importance=0.9) > self._retention(week, importance=0.2)
 
     def test_access_boost(self):
-        assert self._retention(48, access_count=5) > self._retention(48, access_count=0)
+        week = 7 * 24
+        assert self._retention(week, access_count=5) > self._retention(week, access_count=0)
 
     def test_access_capped_at_10(self):
         assert self._retention(24, access_count=10) == self._retention(24, access_count=100)
 
-    def test_archive_threshold_reasonable(self):
-        # With default params, item shouldn't be archived instantly
-        assert self._retention(1) > 0.3
-        # But should eventually drop below
-        found = False
-        for h in range(1, 200):
-            if self._retention(h) < 0.3:
-                assert h >= 5
-                found = True
-                break
-        assert found
+    def test_high_importance_survives_one_week(self):
+        # PRD-154 S3 AC: an importance-0.8 row stays above the archive threshold
+        # after 7 days under the new rate — and the OLD 0.1/hr rate would not.
+        assert self._retention(7 * 24, importance=0.8) >= self.THRESHOLD
+        assert self._retention(7 * 24, importance=0.8, rate=0.1) < self.THRESHOLD
+
+    def test_eventually_archives_on_a_week_scale(self):
+        # Low-importance memory still decays — but over weeks, not hours.
+        first_below = next(
+            (d for d in range(1, 120) if self._retention(d * 24, importance=0.1) < self.THRESHOLD),
+            None,
+        )
+        assert first_below is not None and first_below >= 7
 
 
 # ===========================================================================

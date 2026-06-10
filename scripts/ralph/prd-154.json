@@ -31,13 +31,13 @@
       "title": "Memory: infer:false for curated writes, real bulk delete, week-scale decay, touch-on-recall",
       "description": "Four root causes of memory junk/loss (report §2.2): (1) curated writers (distilled facts, mission/playbook/widget/tool stores via mem0_client.py:312-376) omit infer so mem0 re-extracts them with its personal-info prompt — send infer:false on every already-curated write. (2) mem0_client.py:498-506 calls DELETE /api/v1/memories/{id}/ which doesn't exist on the server (only bulk DELETE per mem0_openapi.json) — every delete 405s and trips the circuit breaker; switch to the bulk endpoint. (3) MEMORY_DECAY_RATE=0.1/hr + threshold 0.3 (config.py:104,106) archives importance-0.8 memories in ~15h — retune to week-scale via config. (4) touch_short_term has ZERO callers so L2→L3 promotion (unified_memory_service.py:1990-1996) can never fire — call it on recall.",
       "acceptanceCriteria": [
-        "Grep-able assertion test: all curated write paths pass infer:false",
-        "Delete uses bulk endpoint; circuit-breaker no longer trips on 3 consecutive deletes (test)",
-        "Decay unit test: importance-0.8 L2 row survives >= 7 days",
-        "Recall increments access_count (promotion-eligibility test)",
-        "Existing decay/memory tests updated to new constants; cd orchestrator && pytest -q green"
+        "DONE — add() gained infer:bool=True; all 4 curated L3 writers (store_long_term, store_long_term_messages, store_daily_log, store_two_tier) pass infer=False. test_unified_memory: 4 behavior tests assert mem0.add called with infer=False + test_all_curated_writers_grep_infer_false greps the source.",
+        "DONE — delete() now hits bulk DELETE /memories/ with {memory_ids,user_id} body (no per-id /memories/{id}/ 405). test_delete_uses_bulk_endpoint asserts URL+method+body; test_delete_three_times_keeps_breaker_closed asserts breaker.failures==0 after 3 deletes.",
+        "DONE — config MEMORY_DECAY_RATE 0.1->0.004/hr (week-scale). test_prd154_s3_decay_config (real config) asserts importance-0.8 retention>=threshold at 168h AND the old 0.1 rate would archive it; TestDecayFormula rewritten to week-scale.",
+        "DONE — search_short_term now awaits touch_short_term for each recalled row (best-effort gather). test_recall_touches_each_short_term_result asserts both result ids touched.",
+        "DONE — updated test_unified_memory.py (decay formula + delete signature) and test_mem0_async_client.py; handlers_search.py passes workspace_id to delete_memory (bulk endpoint needs user_id). cd orchestrator && pytest -q: 2074 passed, 17 skipped, 1 xfailed."
       ],
-      "files": ["orchestrator/modules/memory/storage/mem0_client.py", "orchestrator/config.py", "orchestrator/modules/memory/unified_memory_service.py"]
+      "files": ["orchestrator/modules/memory/integrations/mem0_client.py", "orchestrator/config.py", "orchestrator/modules/memory/unified_memory_service.py", "orchestrator/modules/tools/discovery/handlers_search.py", "orchestrator/tests/test_unified_memory.py", "orchestrator/tests/test_mem0_async_client.py", "orchestrator/tests/test_prd154_s3_decay_config.py"]
     },
     {
       "id": "P154-S4",
