@@ -44,11 +44,11 @@
       "title": "Board: assignment dispatches execution; fix priority CASE",
       "description": "Assigning a task starts nothing today — _launch_task_execution exists (api/board_tasks.py:724) but is never called on assignment; pickup waits for an opt-in heartbeat most agents lack. Call it from create-with-assignee and the assign endpoint; guard double-fire for already-running tasks and skip recipe-mirror tasks. Also fix the broken priority CASE expression in services/heartbeat_service.py:919. PRD-09 constraint: do NOT touch shared hybrid auth or test_board_sdk_auth.py behavior.",
       "acceptanceCriteria": [
-        "Integration test (mock executor): assign → execution starts same tick",
-        "Re-assign of running task does not double-fire (test)",
-        "Priority ordering unit test over the fixed CASE",
-        "tests/test_board_task_handlers.py updated for dispatch-on-assign; test_board_sdk_auth.py untouched and green",
-        "cd orchestrator && pytest -q green"
+        "DONE — create_task + update_task(assign endpoint) now call _dispatch_on_assign, which flips the task to in_progress and fires _launch_task_execution inline. test_create_with_assignee_dispatches_execution + test_assign_endpoint_dispatches_execution (mock executor) assert exactly 1 launch same-tick with the right agent_id and status=='in_progress'.",
+        "DONE — _dispatch_on_assign self-guards via _should_dispatch_on_assign (only status=='assigned'); an in_progress task is skipped. test_reassign_running_task_does_not_double_fire patches the executor and asserts zero launches when re-assigning a running task (+ predicate test_should_dispatch_skips_already_running).",
+        "DONE — replaced alphabetical BoardTask.priority.desc() (urgent,medium,low,high) with data-driven _board_task_priority_order() CASE from _BOARD_TASK_PRIORITY_RANK {urgent:0,high:1,medium:2,low:3}, ORDER BY rank ASC. test_priority_rank_is_semantic_not_alphabetical asserts urgent>high>medium>low and != the broken alpha sort; test_assigned_task_order_uses_priority_case_not_string_desc asserts a compiled CASE over all four priorities; source guard asserts .priority.desc() is gone.",
+        "DONE — added 11 tests to test_board_task_handlers.py (4 predicate, 4 dispatch-integration incl. recipe-mirror skip, 3 priority-CASE). test_board_sdk_auth.py untouched (not in diff) and green in the full run; PRD-09 hybrid auth not modified.",
+        "DONE — cd orchestrator && python3 -m pytest -q: 2085 passed, 17 skipped, 1 xfailed (was 2074 + 11 new)."
       ],
       "files": ["orchestrator/api/board_tasks.py", "orchestrator/services/heartbeat_service.py", "orchestrator/tests/test_board_task_handlers.py"]
     },
