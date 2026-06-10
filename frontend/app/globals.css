@@ -1219,40 +1219,6 @@
     background: hsl(var(--secondary)); color: hsl(var(--muted-foreground));
   }
 
-  /* ── Studio ticker (TICK-A · editorial slim 30px) ──────────────── */
-  .studio .sh-ticker {
-    display: flex; align-items: center;
-    height: 30px; padding: 0 24px; gap: 18px;
-    background: hsl(38 45% 96%); border-bottom: 1px solid hsl(var(--border));
-    font-family: var(--font-geist-mono, monospace);
-    font-size: 10.5px; color: hsl(var(--muted-foreground));
-    letter-spacing: 0.01em; overflow-x: auto; scrollbar-width: none;
-  }
-  .studio .sh-ticker::-webkit-scrollbar { display: none; }
-  .studio .sh-ticker .sh-cell {
-    display: inline-flex; align-items: baseline; gap: 6px; white-space: nowrap;
-  }
-  .studio .sh-ticker .sh-cell .sh-l {
-    color: hsl(var(--muted-foreground)); letter-spacing: 0.10em;
-    text-transform: uppercase; font-size: 9.5px;
-  }
-  .studio .sh-ticker .sh-cell .sh-v {
-    color: hsl(var(--foreground)); font-weight: 600;
-    font-feature-settings: "tnum";
-  }
-  .studio .sh-ticker .sh-cell .sh-v.ok  { color: hsl(82 50% 22%); }
-  .studio .sh-ticker .sh-cell .sh-v.err { color: hsl(var(--accent)); }
-  .studio .sh-ticker .sh-cell .sh-v.info { color: hsl(var(--info)); }
-  .studio .sh-ticker .sh-cell .sh-delta {
-    color: hsl(var(--muted-foreground)); font-size: 9.5px;
-  }
-  .studio .sh-ticker .sh-clock {
-    margin-left: auto; color: hsl(var(--muted-foreground));
-  }
-  .studio .sh-ticker .sh-divider {
-    width: 1px; height: 12px; background: hsl(var(--border)); flex-shrink: 0;
-  }
-
   /* ── Studio shell layout container ─────────────────────────────── */
   .studio .sh-shell {
     display: flex; height: 100vh; height: 100dvh;

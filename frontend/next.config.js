@@ -11,6 +11,13 @@ const nextConfig = {
     // Security audit 2026-02-04: 798 lines of TS errors found across dozens of components
     ignoreBuildErrors: true
   },
+  eslint: {
+    // PRD-154 S10 added .eslintrc.json (no config existed before, so `next
+    // build` previously skipped linting). The new no-restricted-syntax rule
+    // banning raw fetch('/api…') fires on pre-existing call sites; lint runs in
+    // CI / `next lint`, not as a deploy gate — same posture as ignoreBuildErrors.
+    ignoreDuringBuilds: true
+  },
   typedRoutes: true,
   turbopack: {
     root: __dirname,

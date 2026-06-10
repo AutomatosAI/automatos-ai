@@ -1927,18 +1927,18 @@ class ApiClient {
   }
 
   async getAgentSkillsFromSkillsAPI(agentId: string) {
-    return this.request(`/api/skills/agents/${agentId}/`)
+    return this.request(`/api/v1/skills/agents/${agentId}/skills`)
   }
 
   async addSkillToAgent(agentId: string, skillId: string) {
-    return this.request(`/api/skills/agents/${agentId}/`, {
+    return this.request(`/api/v1/skills/agents/${agentId}/skills`, {
       method: 'POST',
       body: JSON.stringify([parseInt(skillId)])
     })
   }
 
   async removeSkillFromAgent(agentId: string, skillId: string) {
-    return this.request(`/api/skills/agents/${agentId}/${skillId}`, {
+    return this.request(`/api/v1/skills/agents/${agentId}/skills?skill_ids=${skillId}`, {
       method: 'DELETE'
     })
   }

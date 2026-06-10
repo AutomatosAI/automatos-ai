@@ -38,61 +38,53 @@ function filterPages(query: string): SearchResult[] {
   return NAVIGATION_PAGES.filter((p) => p.label.toLowerCase().includes(lower))
 }
 
+// Routes are the real backend prefixes: activity lives at /api/activity and
+// agents at /api/agents (NOT /api/v1/*, which 404s). Errors propagate to the
+// caller — the hook surfaces them rather than silently returning [].
 async function searchTasks(query: string): Promise<SearchResult[]> {
-  try {
-    const data = await apiClient.request<any>(`/api/v1/activity/feed?search=${encodeURIComponent(query)}&limit=5`)
-    const items = Array.isArray(data) ? data : data?.items ?? data?.data ?? []
-    return items.map((t: any) => ({
-      id: `task-${t.id}`,
-      label: t.name || t.title || 'Untitled Task',
-      description: [t.status, t.agent_name].filter(Boolean).join(' · '),
-      category: 'tasks' as const,
-      path: `/command-center?tab=board&task_id=${t.id}`,
-    }))
-  } catch {
-    return []
-  }
+  const data = await apiClient.request<any>(`/api/activity/feed?search=${encodeURIComponent(query)}&limit=5`)
+  const items = Array.isArray(data) ? data : data?.items ?? data?.data ?? []
+  return items.map((t: any) => ({
+    id: `task-${t.id}`,
+    label: t.name || t.title || 'Untitled Task',
+    description: [t.status, t.agent_name].filter(Boolean).join(' · '),
+    category: 'tasks' as const,
+    path: `/command-center?tab=board&task_id=${t.id}`,
+  }))
 }
 
 async function searchAgents(query: string): Promise<SearchResult[]> {
-  try {
-    const data = await apiClient.request<any>(`/api/v1/agents?search=${encodeURIComponent(query)}&limit=5`)
-    const items = Array.isArray(data) ? data : data?.agents ?? data?.data ?? []
-    return items.map((a: any) => ({
-      id: `agent-${a.id}`,
-      label: a.name || 'Unnamed Agent',
-      description: a.role || a.skill || undefined,
-      category: 'agents' as const,
-      path: `/agents?agent_id=${a.id}`,
-    }))
-  } catch {
-    return []
-  }
+  const data = await apiClient.request<any>(`/api/agents?search=${encodeURIComponent(query)}&limit=5`)
+  const items = Array.isArray(data) ? data : data?.agents ?? data?.data ?? []
+  return items.map((a: any) => ({
+    id: `agent-${a.id}`,
+    label: a.name || 'Unnamed Agent',
+    description: a.role || a.skill || undefined,
+    category: 'agents' as const,
+    path: `/agents?agent_id=${a.id}`,
+  }))
 }
 
 async function searchMemories(query: string): Promise<SearchResult[]> {
-  try {
-    const data = await apiClient.request<any>(`/api/v1/memory/browse?query=${encodeURIComponent(query)}&limit=5`)
-    const items = Array.isArray(data) ? data : data?.memories ?? data?.data ?? []
-    return items.map((m: any) => {
-      const content = m.memory || m.content || m.text || ''
-      return {
-        id: `memory-${m.id}`,
-        label: content.length > 80 ? content.slice(0, 80) + '...' : content,
-        description: m.created_at ? new Date(m.created_at).toLocaleDateString() : undefined,
-        category: 'memories' as const,
-        path: `/command-center?memory_id=${m.id}`,
-      }
-    })
-  } catch {
-    return []
-  }
+  const data = await apiClient.request<any>(`/api/v1/memory/browse?query=${encodeURIComponent(query)}&limit=5`)
+  const items = Array.isArray(data) ? data : data?.memories ?? data?.data ?? []
+  return items.map((m: any) => {
+    const content = m.memory || m.content || m.text || ''
+    return {
+      id: `memory-${m.id}`,
+      label: content.length > 80 ? content.slice(0, 80) + '...' : content,
+      description: m.created_at ? new Date(m.created_at).toLocaleDateString() : undefined,
+      category: 'memories' as const,
+      path: `/command-center?memory_id=${m.id}`,
+    }
+  })
 }
 
 export function useGlobalSearch() {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [pages, setPages] = useState<SearchResult[]>(NAVIGATION_PAGES)
   const [tasks, setTasks] = useState<SearchResult[]>([])
   const [agents, setAgents] = useState<SearchResult[]>([])
@@ -124,6 +116,7 @@ export function useGlobalSearch() {
       setTasks([])
       setAgents([])
       setMemories([])
+      setError(null)
       setPages(NAVIGATION_PAGES)
     }
   }, [])
@@ -136,6 +129,7 @@ export function useGlobalSearch() {
       setTasks([])
       setAgents([])
       setMemories([])
+      setError(null)
       setLoading(false)
       return
     }
@@ -144,20 +138,25 @@ export function useGlobalSearch() {
     const generation = ++abortRef.current
 
     const timer = setTimeout(async () => {
-      const [t, a, m] = await Promise.all([
+      // allSettled, not all: one source failing must not blank the others, and
+      // a failure is surfaced (error state) rather than silently swallowed.
+      const settled = await Promise.allSettled([
         searchTasks(query),
         searchAgents(query),
         searchMemories(query),
       ])
       if (abortRef.current !== generation) return
-      setTasks(t)
-      setAgents(a)
-      setMemories(m)
+      const [t, a, m] = settled
+      setTasks(t.status === 'fulfilled' ? t.value : [])
+      setAgents(a.status === 'fulfilled' ? a.value : [])
+      setMemories(m.status === 'fulfilled' ? m.value : [])
+      const failed = settled.filter((r) => r.status === 'rejected').length
+      setError(failed > 0 ? 'Some results could not be loaded. Try again.' : null)
       setLoading(false)
     }, 300)
 
     return () => clearTimeout(timer)
   }, [query])
 
-  return { open, query, setQuery, loading, pages, tasks, agents, memories, handleOpenChange }
+  return { open, query, setQuery, loading, error, pages, tasks, agents, memories, handleOpenChange }
 }
