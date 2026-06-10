@@ -32,6 +32,7 @@ import {
   Trash2,
   Save
 } from 'lucide-react';
+import { apiClient } from '@/lib/api-client';
 
 /**
  * Semantic Layer Builder - PROMINENT UI FEATURE
@@ -122,8 +123,7 @@ export function SemanticLayerBuilder({
   const loadSemanticLayer = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`/api/knowledge/sources/database/${sourceId}/semantic`);
-      const data = await response.json();
+      const data = await apiClient.get<any>(`/api/knowledge/sources/database/${sourceId}/semantic`);
       setMetrics(data.metrics || []);
       setDimensions(data.dimensions || []);
     } catch (error) {
@@ -158,11 +158,7 @@ export function SemanticLayerBuilder({
     } else {
       // Default save to API
       try {
-        await fetch(`/api/knowledge/sources/database/${sourceId}/semantic`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ metrics, dimensions })
-        });
+        await apiClient.post(`/api/knowledge/sources/database/${sourceId}/semantic`, { metrics, dimensions });
       } catch (error) {
         console.error('Failed to save semantic layer:', error);
       }

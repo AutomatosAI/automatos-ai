@@ -486,7 +486,12 @@ class CodeGraphService:
 
         except Exception as e:
             shutil.rmtree(temp_dir, ignore_errors=True)
-            raise ValueError(f"Failed to clone repository {safe_url}: {e}")
+            # git echoes the authed clone URL (https://<token>@github.com/…) in its
+            # error text; redact the token before it reaches logs/callers.
+            detail = str(e)
+            if auth_token:
+                detail = detail.replace(f"{auth_token}@", "***@").replace(auth_token, "***")
+            raise ValueError(f"Failed to clone repository {safe_url}: {detail}")
     
     def _discover_files(self, root_dir: str, exclude_patterns: List[str]) -> List[str]:
         """Discover all code files in directory"""

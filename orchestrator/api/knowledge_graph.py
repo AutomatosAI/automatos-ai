@@ -83,6 +83,7 @@ class EntitySearchResult(BaseModel):
 
 @router.get("/entities", response_model=List[Entity])
 async def list_entities(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
     entity_type: Optional[str] = None,
     limit: int = Query(50, le=200),
@@ -143,6 +144,7 @@ async def list_entities(
 
 @router.get("/entities/search")
 async def search_entities(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
     query: str = Query(..., min_length=2),
     limit: int = Query(20, le=100)
@@ -188,7 +190,8 @@ async def search_entities(
 async def get_entity_details(
     entity_id: int,
     include_related: bool = True,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
     """
     Get detailed information about an entity
@@ -271,7 +274,8 @@ async def get_entity_graph(
     entity_id: int,
     depth: int = Query(2, ge=1, le=3),
     max_nodes: int = Query(50, le=200),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
     """
     Get graph visualization data for an entity
@@ -366,7 +370,8 @@ async def get_entity_graph(
 async def get_entity_documents(
     entity_id: int,
     limit: int = Query(20, le=100),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
     """
     Get all knowledge items (documents, tables, formulas, etc.) mentioning this entity
@@ -410,7 +415,8 @@ async def find_connection(
     entity_a: str = Query(..., description="First entity name"),
     entity_b: str = Query(..., description="Second entity name"),
     max_hops: int = Query(3, ge=1, le=5),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
     """
     Find connection path between two entities
@@ -501,7 +507,10 @@ async def find_connection(
 
 
 @router.get("/stats/entities")
-async def get_entity_stats(db: Session = Depends(get_db)):
+async def get_entity_stats(
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
     """Get statistics about entities in the knowledge graph"""
     try:
         # Get overview stats
