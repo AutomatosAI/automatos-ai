@@ -90,11 +90,21 @@ class ToolSignalRecorder:
         # intra-day freshness).
         self._stats: Dict[str, int] = {
             "recorded": 0, "dropped": 0, "flushes": 0, "flush_errors": 0,
+            "selection_narrowed": 0, "selection_fallback": 0,
         }
+        # PRD-143 S14: last selection outcome per (workspace_id, agent_id) —
+        # written by get_tools_for_agent when it builds the dispatcher schema,
+        # peeked by the platform_execute dispatch so the universal telemetry
+        # hook can persist hit/fallback per execution row. Pure in-memory
+        # (no DB, no event loop), bounded FIFO, last-write-wins per key.
+        # Best-effort by design: a dispatch with no recorded surface (other
+        # process, restart) simply carries no selection outcome.
+        self._last_selection: Dict[tuple, Dict[str, object]] = {}
 
     def stats(self) -> Dict[str, int]:
         """Observability snapshot: signals recorded vs dropped, flush successes
-        vs failures, and live queue depth — the numbers the self-learning tile
+        vs failures, selection outcomes (narrowed vs fallback, PRD-143 S14),
+        and live queue depth — the numbers the self-learning tile
         (W4-S16) reads to answer 'is tool-routing learning healthy?'."""
         depth = self._queue.qsize() if self._queue is not None else 0
         return {**self._stats, "queue_depth": depth}
@@ -139,6 +149,15 @@ class ToolSignalRecorder:
         except Exception:
             return 10000
 
+    @staticmethod
+    def _selection_stash_maxsize() -> int:
+        try:
+            from config import config
+
+            return int(getattr(config, "TOOL_SELECTION_STASH_MAXSIZE", 512))
+        except Exception:
+            return 512
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -167,6 +186,63 @@ class ToolSignalRecorder:
                 "ToolSignalRecorder: queue full, dropping signal for %s",
                 signal.action_name,
             )
+
+    # ------------------------------------------------------------------
+    # PRD-143 S14: per-selection outcome (narrowed vs fallback)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _selection_key(workspace_id, agent_id) -> tuple:
+        """Normalize stash keys across callers (UUID vs str workspace,
+        0/None agent)."""
+        ws = str(workspace_id) if workspace_id else None
+        aid = int(agent_id) if agent_id else None
+        return (ws, aid)
+
+    def record_selection(
+        self,
+        *,
+        workspace_id=None,
+        agent_id=None,
+        narrowed: bool,
+        reason: Optional[str] = None,
+        allowed_names: Optional[List[str]] = None,
+    ) -> None:
+        """Record one dispatcher-selection outcome (PRD-143 S14).
+
+        Called by ``get_tools_for_agent`` where the tool-trace log used to be
+        the only record of narrowed-vs-not-narrowed. Bumps the process-lifetime
+        counters and stashes the outcome so the next ``platform_execute``
+        dispatch for this (workspace, agent) can attach hit/fallback telemetry.
+        Pure in-memory and never raises — selection telemetry must never break
+        the surface build.
+        """
+        try:
+            self._stats["selection_narrowed" if narrowed else "selection_fallback"] += 1
+            stash = self._last_selection
+            while len(stash) >= self._selection_stash_maxsize():
+                stash.pop(next(iter(stash)))  # FIFO eviction
+            entry: Dict[str, object] = {
+                "narrowed": bool(narrowed),
+                "reason": reason,
+                "allowed": frozenset(allowed_names or ()),
+                "enum_size": len(allowed_names) if narrowed and allowed_names else None,
+            }
+            key = self._selection_key(workspace_id, agent_id)
+            stash.pop(key, None)  # re-insert so FIFO order tracks recency
+            stash[key] = entry
+        except Exception:  # pragma: no cover - defensive, never blocks the hot path
+            logger.debug("ToolSignalRecorder: record_selection failed", exc_info=True)
+
+    def peek_selection(self, *, workspace_id=None, agent_id=None) -> Optional[Dict[str, object]]:
+        """Return the last recorded selection outcome for this
+        (workspace, agent), or None when no surface was recorded in-process.
+        Peek (not consume): one surface may serve several dispatches in a
+        single tool-loop turn."""
+        try:
+            return self._last_selection.get(self._selection_key(workspace_id, agent_id))
+        except Exception:  # pragma: no cover - defensive
+            return None
 
     def _ensure_started(self, loop: asyncio.AbstractEventLoop) -> None:
         """Create the queue and the SINGLE drain task, once.

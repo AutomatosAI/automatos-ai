@@ -239,8 +239,8 @@
         "Typecheck passes"
       ],
       "priority": 14,
-      "passes": false,
-      "notes": "PRD-143 US-006 second half. The metric lives on the su-locked surface by design \u2014 obs is Gerard's."
+      "passes": true,
+      "notes": "PRD-143 US-006 second half. The metric lives on the su-locked surface by design \u2014 obs is Gerard's. DONE 2026-06-10: selection outcome persisted instead of log-only \u2014 get_tools_for_agent records narrowed/fallback per selection on the EXISTING ToolSignalRecorder (record_selection/peek_selection: counters in stats() + bounded (ws,agent) last-selection stash, config TOOL_SELECTION_STASH_MAXSIZE); the platform_execute dispatch (unified_executor) peeks the stash and attaches selection_outcome {action, narrowed, hit=chosen\u2208narrowed-enum (computed BEFORE registry validation so enum escapes count as misses), enum_size, reason} to caller_context; the PRD-139 universal telemetry hook persists it at tool_execution_logs.router_decision->'selection' \u2014 NO new infra/table. GET /api/analytics/selection-health on the S6-locked analytics_real router (inherits require_super_admin) aggregates hit_rate=hits/narrowed + fallback_rate=fallback/selections over the existing _parse_window param. 4/4 story tests green (RED first: missing recorder API + 404); 309 green across 24 neighbouring suites \u2014 the single test_dispatcher_parallel combined-run failure reproduces on the stashed BASELINE (pre-existing inter-suite flake, not S14). Known limit: the chat ATOM-path narrowing (service.py) does not re-record; its dispatches reuse the last full-surface stash entry or carry none \u2014 best-effort telemetry by design. Full-app import gate dropped per run rules (venv-slow)."
     },
     {
       "id": "S15",

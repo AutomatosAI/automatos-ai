@@ -440,6 +440,17 @@ def get_tools_for_agent(
                     f"[tool-trace {trace_id}] dispatcher enum NOT narrowed: "
                     f"reason={narrow_reason}; full={dispatcher_count} actions"
                 )
+
+            # PRD-143 S14: persist the selection outcome instead of log-only —
+            # counter + stash on the existing ToolSignalRecorder so the
+            # platform_execute dispatch can attach hit/fallback telemetry.
+            get_tool_signal_recorder().record_selection(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                narrowed=allowed_names is not None,
+                reason=narrow_reason,
+                allowed_names=allowed_names,
+            )
         except Exception as e:
             logger.debug(f"[tool-trace {trace_id}] Platform actions unavailable: {e}")
 

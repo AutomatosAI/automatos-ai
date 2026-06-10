@@ -91,6 +91,11 @@ def _build_router_decision(
         # PRD-143: confirmation was skipped by the full-autonomy dial — the
         # distinct, queryable audit marker (router_decision->>'autonomous').
         decision["autonomous"] = True
+    sel = ctx.get("selection_outcome")
+    if isinstance(sel, dict) and sel:
+        # PRD-143 S14: per-dispatch selection outcome (narrowed/hit/fallback)
+        # — the durable rows behind the su-locked selection-health metric.
+        decision["selection"] = sel
     if ctx.get("routing_candidates"):
         decision["candidates"] = ctx["routing_candidates"]
     if ctx.get("routing_chain_hints"):

@@ -195,6 +195,68 @@ async def get_errors_by_subsystem(
     }
 
 
+@router.get("/selection-health")
+async def get_selection_health(
+    window: str = "24h",
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Tool-selection health over a rolling window (PRD-143 S14).
+
+    Aggregates the per-dispatch selection outcomes the universal telemetry
+    hook persists at ``tool_execution_logs.router_decision->'selection'``:
+
+    * ``hit_rate``     — of narrowed dispatches, the fraction whose chosen
+      action came from the narrowed enum (``hits / narrowed``);
+    * ``fallback_rate`` — dispatches whose surface was NOT narrowed
+      (narrow_reason set / rank returned empty) over all selection-recorded
+      dispatches (``fallback / selections``).
+
+    Platform-wide by design: this is the super admin's watchtower — the
+    router-wide ``require_super_admin`` (S6) gates every caller. Index path:
+    ``idx_tool_logs_executed`` covers the window filter.
+    """
+    window_start = datetime.utcnow() - _parse_window(window)
+
+    row = db.execute(
+        text(
+            """
+            SELECT
+                COUNT(*) FILTER (
+                    WHERE (router_decision->'selection'->>'narrowed')::boolean
+                ) AS narrowed,
+                COUNT(*) FILTER (
+                    WHERE NOT (router_decision->'selection'->>'narrowed')::boolean
+                ) AS fallback,
+                COUNT(*) FILTER (
+                    WHERE (router_decision->'selection'->>'narrowed')::boolean
+                      AND COALESCE((router_decision->'selection'->>'hit')::boolean, false)
+                ) AS hits
+            FROM tool_execution_logs
+            WHERE executed_at >= :window_start
+              AND router_decision->'selection' IS NOT NULL
+            """
+        ),
+        {"window_start": window_start},
+    ).fetchone()
+
+    narrowed, fallback, hits = (
+        (int(row[0] or 0), int(row[1] or 0), int(row[2] or 0)) if row else (0, 0, 0)
+    )
+    selections = narrowed + fallback
+
+    return {
+        "window": window,
+        "selections": selections,
+        "narrowed": narrowed,
+        "fallback": fallback,
+        "hits": hits,
+        "hit_rate": round(hits / narrowed, 4) if narrowed else 0.0,
+        "fallback_rate": round(fallback / selections, 4) if selections else 0.0,
+        "generated_at": datetime.utcnow().isoformat(),
+    }
+
+
 @router.get("/primitive-health")
 async def get_primitive_health(
     ctx: RequestContext = Depends(get_request_context_hybrid),
