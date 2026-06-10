@@ -70,6 +70,11 @@ _META_JSON_PATH = f"{_GRAPH_DIR}/meta.json"
 _COMMUNITIES_JSON_PATH = f"{_GRAPH_DIR}/communities.json"
 _GRAPH_HTML_PATH = f"{_GRAPH_DIR}/graph.html"
 
+# Confidence backfilled onto an exported node that arrived without one
+# (e.g. a merged graph.json edge target). Matches _node()'s default in
+# graph_extraction.py so the value space stays a single enum.
+_DEFAULT_NODE_CONFIDENCE = "EXTRACTED"
+
 _HISTORY_DIR = f"{_GRAPH_DIR}/history"
 _REPORTS_DIR = f"{_GRAPH_DIR}/reports"
 _LATEST_DIFF_PATH = f"{_GRAPH_DIR}/latest_diff.json"
@@ -803,10 +808,15 @@ class GraphifyService:
         """Export graph artefacts to workspace files."""
         loop = asyncio.get_event_loop()
 
-        # graph.json — NetworkX node_link_data (in-memory, not graphify's to_json)
+        # graph.json — NetworkX node_link_data (in-memory, not graphify's to_json).
+        # node_link_data carries only node *attributes*; community membership
+        # lives in the separate `communities` map and confidence may be absent
+        # on merged-in targets — annotate both onto each node so the UI's
+        # default community colouring (and confidence) has something to read.
         graph_data = await loop.run_in_executor(
             None, partial(nx.node_link_data, graph)
         )
+        graph_data = self._annotate_export_nodes(graph_data, communities)
         await self._write_json(ws, _GRAPH_JSON_PATH, graph_data)
 
         # communities.json
@@ -834,6 +844,36 @@ class GraphifyService:
                     "_export_graph: graph too large for HTML viz (%d nodes) — skipping, JSON still exported",
                     graph.number_of_nodes(),
                 )
+
+    @staticmethod
+    def _annotate_export_nodes(
+        graph_data: Dict[str, Any],
+        communities: Dict[int, List[str]],
+    ) -> Dict[str, Any]:
+        """Attach ``community`` + a backfilled ``confidence`` to each node.
+
+        ``nx.node_link_data`` serialises only node attributes; the community a
+        node belongs to lives in the separate ``communities`` map (community_id
+        → member node_ids) and never reaches the node. The React panel's
+        default colour mode reads ``node.community``, so without this the whole
+        graph renders the neutral fallback colour. Confidence is likewise
+        absent on any node that arrived without one (merged graph.json edge
+        targets) — backfill it so every node carries a value.
+
+        Returns a NEW dict; the caller's ``graph_data`` is never mutated.
+        """
+        node_to_community: Dict[str, int] = {
+            nid: cid for cid, members in communities.items() for nid in members
+        }
+        nodes = [
+            {
+                **node,
+                "community": node_to_community.get(node.get("id")),
+                "confidence": node.get("confidence") or _DEFAULT_NODE_CONFIDENCE,
+            }
+            for node in graph_data.get("nodes", [])
+        ]
+        return {**graph_data, "nodes": nodes}
 
     @staticmethod
     def _format_communities(
