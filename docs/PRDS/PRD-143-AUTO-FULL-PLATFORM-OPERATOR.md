@@ -1,6 +1,6 @@
 # PRD-143: Auto as Full Platform Operator (Phase 1 — The Enabler)
 
-> **Status:** Revised draft — 2026-06-09 (supersedes 2026-06-07 draft).
+> **Status:** Implemented on `ralph/prd-143-operator-obs-lock` — pending Gerard review + obs-manifest sign-off (Open Q1/Q2). 2026-06-10.
 > **Revision 2 (2026-06-09):** Security model **inverted** per the all-in autonomy pilot decision (memory `pilot-all-in-autonomy`). Auto now gets **full access to every platform API** — including platform-administrative ones. The **only** hard-excluded tier is **observability/oversight**, locked to `system_role="super_admin"` (Gerard, the sole super admin). Rationale: in a low-blast-radius pilot, exclusions teach nothing — but the **watchtower stays human**. Auto must never read, write, or game its own oversight channel, and no other principal needs platform internals.
 > **Builds on (does NOT rebuild):** PRD-142 Wave 4 (HARNESS / autonomy / structured-store foundation), PRD-138/139 (tool-routing graph + semantic selection), PRD-140 (hierarchy permissions), PRD-120 (skills). The autonomy dial, HARNESS loop, audit, rollback, and the tool-routing graph already exist — this PRD **extends** them.
 > **Type:** Net-new capability **on existing rails**. Phase 1 = the **enabler**; the full ~200-tool catalogue, the full skills library, and additional concierge journeys are **follow-on PRDs**.
@@ -86,70 +86,70 @@ Phase 1 delivers the **enabler** for all three, plus the **one hard safety bound
 
 **US-001: Add a `super_admin_only` tier to the registry.**
 *As the Super admin, I want observability tools hard-locked to me, so Auto and users can never read or game the oversight channel.*
-- [ ] Add `super_admin_only: bool = False` to `ActionDefinition` (`action_registry.py`), alongside the existing `admin_only`.
-- [ ] Registry selection/listing paths (`to_first_class_schemas`, `to_dispatcher_schema`, `build_prompt_summary`, semantic + graph selection) exclude `super_admin_only` actions unless the caller's `system_role == "super_admin"` — fail-closed (unknown/absent role → excluded).
-- [ ] `PlatformActionExecutor` refuses a `super_admin_only` action **before execution** unless `caller_context.system_role == "super_admin"`. The check runs **before and independent of** the `full_autonomy → is_admin=True` bypass (`platform_executor.py:510`) and the PRD-122 workspace-owner fallback (`tool_router.py:358-372`) — neither may satisfy it. **API-key principals (`system_role="admin"`, `hybrid.py:783`) must NOT pass.**
-- [ ] When Gerard himself is the driving principal (chat `caller_context` carries `system_role="super_admin"`), Auto MAY invoke obs tools on his behalf — the boundary is the principal, not the channel.
-- [ ] Tests: `test_super_admin_tool_excluded_from_auto_surface_at_full_autonomy`, `test_super_admin_tool_refused_for_admin_and_api_key`, `test_super_admin_principal_can_invoke`, `test_full_autonomy_bypass_does_not_cross_su_gate`. Typecheck passes.
+- [x] Add `super_admin_only: bool = False` to `ActionDefinition` (`action_registry.py`), alongside the existing `admin_only`.
+- [x] Registry selection/listing paths (`to_first_class_schemas`, `to_dispatcher_schema`, `build_prompt_summary`, semantic + graph selection) exclude `super_admin_only` actions unless the caller's `system_role == "super_admin"` — fail-closed (unknown/absent role → excluded).
+- [x] `PlatformActionExecutor` refuses a `super_admin_only` action **before execution** unless `caller_context.system_role == "super_admin"`. The check runs **before and independent of** the `full_autonomy → is_admin=True` bypass (`platform_executor.py:510`) and the PRD-122 workspace-owner fallback (`tool_router.py:358-372`) — neither may satisfy it. **API-key principals (`system_role="admin"`, `hybrid.py:783`) must NOT pass.**
+- [x] When Gerard himself is the driving principal (chat `caller_context` carries `system_role="super_admin"`), Auto MAY invoke obs tools on his behalf — the boundary is the principal, not the channel.
+- [x] Tests: `test_super_admin_tool_excluded_from_auto_surface_at_full_autonomy`, `test_super_admin_tool_refused_for_admin_and_api_key`, `test_super_admin_principal_can_invoke`, `test_full_autonomy_bypass_does_not_cross_su_gate`. Typecheck passes.
 
 **US-002: Reclassify the catalogue — obs locked, everything else open.**
 *As the Super admin, I want the obs tier explicit and everything else operator-reachable, so Auto has the full platform and I keep the watchtower.*
-- [ ] Mark `super_admin_only=True`: `platform_query_loki_logs`, `platform_query_prometheus`, `platform_get_alerts`, `platform_get_logs`, `platform_list_services`, `platform_get_system_health`, and `platform_set_autonomy_level` (the kill-switch dial stays human — see Open Q2). Drop their now-redundant `admin_only` flags.
-- [ ] **Every other action — including formerly admin-gated and all platform-administrative capabilities (workspace deletion, billing, user/role management, system settings) — defaults to the operator tier and is Auto-reachable at `autonomy=full`.** This is the deliberate inversion of the 2026-06-07 draft: gates-and-logs (PRD-140 checks, destructive backstop, audit, rollback), not exclusion.
-- [ ] Produce a one-page **obs-tier manifest** listing every `super_admin_only` action and why; Gerard signs it off (Open Q1).
-- [ ] Tests assert manifest ⇆ registry parity (no obs action silently operator-reachable; no operator action silently su-locked). Typecheck passes.
+- [x] Mark `super_admin_only=True`: `platform_query_loki_logs`, `platform_query_prometheus`, `platform_get_alerts`, `platform_get_logs`, `platform_list_services`, `platform_get_system_health`, and `platform_set_autonomy_level` (the kill-switch dial stays human — see Open Q2). Drop their now-redundant `admin_only` flags.
+- [x] **Every other action — including formerly admin-gated and all platform-administrative capabilities (workspace deletion, billing, user/role management, system settings) — defaults to the operator tier and is Auto-reachable at `autonomy=full`.** This is the deliberate inversion of the 2026-06-07 draft: gates-and-logs (PRD-140 checks, destructive backstop, audit, rollback), not exclusion.
+- [x] Produce a one-page **obs-tier manifest** listing every `super_admin_only` action and why; Gerard signs it off (Open Q1).
+- [x] Tests assert manifest ⇆ registry parity (no obs action silently operator-reachable; no operator action silently su-locked). Typecheck passes.
 
 **US-002b: Lock the observability HTTP routers (new in Rev 2).**
 *As the Super admin, I want the obs/analytics REST surface readable by me only, so platform internals never leak to workspace users or Auto-driven calls.*
-- [ ] Add one canonical `require_super_admin` dependency to `core/auth` (checks `ctx.user.system_role == "super_admin"` exactly; 403 otherwise; fail-closed on missing context). No ad-hoc copies.
-- [ ] Apply it router-wide to the obs surface: `heartbeat`, `analytics`, `analytics_api`, `analytics_real`, `analytics_charts`, `llm_analytics`, `memory_stats`, `statistics`, `composio_analytics`, `database_analytics`, `execution_history`, `kpi_api`, `reports` (candidate list — Gerard prunes/extends at sign-off, Open Q1).
-- [ ] **Known consequence:** non-super-admin users lose the analytics/Command-Center dashboards these routers back. Acceptable in the pilot (Gerard is the only real human); revisit before GA. Frontend may hide those nav entries for non-super-admins as a courtesy, not as security.
-- [ ] The `automatos-monitoring` stack (Prometheus/Grafana/Loki) is network-level infra — confirm it is not exposed through any operator-reachable proxy endpoint other than the now-locked obs tools/routers.
-- [ ] Tests: `test_obs_router_403_for_member_admin_and_api_key`, `test_obs_router_200_for_super_admin`, one per locked router (parametrized). Typecheck passes.
+- [x] Add one canonical `require_super_admin` dependency to `core/auth` (checks `ctx.user.system_role == "super_admin"` exactly; 403 otherwise; fail-closed on missing context). No ad-hoc copies.
+- [x] Apply it router-wide to the obs surface: `heartbeat`, `analytics`, `analytics_api`, `analytics_real`, `analytics_charts`, `llm_analytics`, `memory_stats`, `statistics`, `composio_analytics`, `database_analytics`, `execution_history`, `kpi_api`, `reports` (candidate list — Gerard prunes/extends at sign-off, Open Q1).
+- [x] **Known consequence:** non-super-admin users lose the analytics/Command-Center dashboards these routers back. Acceptable in the pilot (Gerard is the only real human); revisit before GA. Frontend may hide those nav entries for non-super-admins as a courtesy, not as security.
+- [x] The `automatos-monitoring` stack (Prometheus/Grafana/Loki) is network-level infra — confirm it is not exposed through any operator-reachable proxy endpoint other than the now-locked obs tools/routers.
+- [x] Tests: `test_obs_router_403_for_member_admin_and_api_key`, `test_obs_router_200_for_super_admin`, one per locked router (parametrized). Typecheck passes.
 
 ### WS-B — Tool breadth mechanism + first batch
 
 **US-003: Scaffold platform tools from existing routers/registry.**
 *As a developer, I want a repeatable way to wrap a platform API as a 3-file tool, so reaching ~200 isn't 84 hand-written files.*
-- [ ] A scaffolding script/codegen that, given a platform API/router endpoint, emits the `actions_*`/`handlers_*` skeleton (name, description, params, workspace-scoping, default tier) for human curation — it does NOT auto-register without review.
-- [ ] Output obeys conventions: workspace-scoped, no `os.getenv`, canonical naming `platform_*`, default `super_admin_only=False` — but endpoints under the obs routers (US-002b list) are flagged `super_admin_only=True` by default for review.
-- [ ] Tests for the generator on 2-3 sample endpoints. Typecheck passes.
+- [x] A scaffolding script/codegen that, given a platform API/router endpoint, emits the `actions_*`/`handlers_*` skeleton (name, description, params, workspace-scoping, default tier) for human curation — it does NOT auto-register without review.
+- [x] Output obeys conventions: workspace-scoped, no `os.getenv`, canonical naming `platform_*`, default `super_admin_only=False` — but endpoints under the obs routers (US-002b list) are flagged `super_admin_only=True` by default for review.
+- [x] Tests for the generator on 2-3 sample endpoints. Typecheck passes.
 
 **US-004: First batch of operator tools (the high-value setup + admin surface).**
 *As a user, I want Auto able to create agents, manage workspaces, configure channels/widgets, manage members, so it can actually run the platform.*
-- [ ] A prioritized batch (~15-25) of operator tools covering the **setup and administration** surface: agent CRUD, model/power config, channel connect, widget config, playbook/mission launch, knowledge upload, workspace member/role management, system settings — reusing existing platform actions where they already exist (do NOT duplicate). Administrative tools are **operator-tier** (Rev 2), with correct PRD-140 `permission_level` (`write`/`destructive`) so the hierarchy gate + audit cover them.
-- [ ] Each tool: 3-file pattern, workspace-scoped, correct tier + permission_level, a handler test. Typecheck passes.
+- [x] A prioritized batch (~15-25) of operator tools covering the **setup and administration** surface: agent CRUD, model/power config, channel connect, widget config, playbook/mission launch, knowledge upload, workspace member/role management, system settings — reusing existing platform actions where they already exist (do NOT duplicate). Administrative tools are **operator-tier** (Rev 2), with correct PRD-140 `permission_level` (`write`/`destructive`) so the hierarchy gate + audit cover them.
+- [x] Each tool: 3-file pattern, workspace-scoped, correct tier + permission_level, a handler test. Typecheck passes.
 
 ### WS-C — Graph selection at scale (the enabler)
 
 **US-005: Seed the graph from telemetry (cold-start).**
 *As Auto, I want the routing graph to recommend sensible tools before it has months of usage, by learning from existing logs.*
-- [ ] A backfill that computes `tool_routing_edges`/`affinities` from existing `tool_execution_logs` (reuse `edge_builder`'s recompute; add a one-shot seed/backfill entry point) — workspace-scoped, idempotent.
-- [ ] After seeding, `graph_router` returns non-empty graph signal for common intents; semantic index remains the floor for unseeded intents.
-- [ ] Tests: `test_seed_backfills_edges_from_logs`, `test_seeded_graph_routes_common_intent`. Typecheck passes. (NO prod run — seed is human-applied like a migration.)
+- [x] A backfill that computes `tool_routing_edges`/`affinities` from existing `tool_execution_logs` (reuse `edge_builder`'s recompute; add a one-shot seed/backfill entry point) — workspace-scoped, idempotent.
+- [x] After seeding, `graph_router` returns non-empty graph signal for common intents; semantic index remains the floor for unseeded intents.
+- [x] Tests: `test_seed_backfills_edges_from_logs`, `test_seeded_graph_routes_common_intent`. Typecheck passes. (NO prod run — seed is human-applied like a migration.)
 
 **US-006: Selection robustness + observability at ~200 tools.**
 *As the Super admin, I want confidence the LLM gets the right handful out of 200, and I can see it working.*
-- [ ] Verify/tune top-K so adding tools doesn't starve or mis-rank (a test with a 200-tool fixture asserting the relevant tool is in the selected set for representative intents). The fixture includes `super_admin_only` actions and asserts they never appear in a non-super-admin selection.
-- [ ] Emit a tool-selection-health metric (selection hit-rate, fallback rate) via the existing telemetry/heartbeat mechanism — surfaced on the **super-admin-locked** dashboard (US-002b).
-- [ ] Tests: `test_relevant_tool_selected_at_scale`, `test_su_tools_never_selected_for_operator`, `test_selection_metric_emitted`. Typecheck passes.
+- [x] Verify/tune top-K so adding tools doesn't starve or mis-rank (a test with a 200-tool fixture asserting the relevant tool is in the selected set for representative intents). The fixture includes `super_admin_only` actions and asserts they never appear in a non-super-admin selection.
+- [x] Emit a tool-selection-health metric (selection hit-rate, fallback rate) via the existing telemetry/heartbeat mechanism — surfaced on the **super-admin-locked** dashboard (US-002b).
+- [x] Tests: `test_relevant_tool_selected_at_scale`, `test_su_tools_never_selected_for_operator`, `test_selection_metric_emitted`. Typecheck passes.
 
 ### WS-D — Concierge MVP (fully autonomous)
 
 **US-007: One fully-autonomous concierge journey.**
 *As a user, I say "set up X" and Auto plans and does it end-to-end, no confirmation.*
-- [ ] Pick ONE journey (recommend "set up my workspace/agents"; Shopify as journey #2) and make Auto execute it fully autonomously under `autonomy=full`: plan → select tools (semantic+graph) → call the platform APIs → set up → recommend next channels/tools. With Rev 2 the journey may legitimately use administrative operator tools (e.g. member invites, workspace config).
-- [ ] Every step is **audited** (who/what/when via the Wave 4 audit trail); the journey respects the obs boundary (never calls a `super_admin_only` tool); HARNESS rollback + the autonomy/HARNESS flags remain the kill-switch.
-- [ ] A golden-journey test drives the flow end-to-end with mocked external calls. Typecheck passes.
+- [x] Pick ONE journey (recommend "set up my workspace/agents"; Shopify as journey #2) and make Auto execute it fully autonomously under `autonomy=full`: plan → select tools (semantic+graph) → call the platform APIs → set up → recommend next channels/tools. With Rev 2 the journey may legitimately use administrative operator tools (e.g. member invites, workspace config).
+- [x] Every step is **audited** (who/what/when via the Wave 4 audit trail); the journey respects the obs boundary (never calls a `super_admin_only` tool); HARNESS rollback + the autonomy/HARNESS flags remain the kill-switch.
+- [x] A golden-journey test drives the flow end-to-end with mocked external calls. Typecheck passes.
 
 ### WS-E — Governance & guardrails
 
 **US-008: Boundary + kill-switch tests + audit surface.**
 *As the Super admin, I want proof the (inverted) boundary holds and a single switch to stop Auto.*
-- [ ] Cross-cutting **positive** tests: at `autonomy=full`, Auto's surface includes formerly admin-gated operator tools and can execute a representative administrative action end-to-end (audited, hierarchy-checked, rolled back in test).
-- [ ] Cross-cutting **negative** tests: no operator path (surface, dispatcher enum, semantic ranking, graph ranking, direct executor call, API-key call) reaches a `super_admin_only` tool or obs router; `autonomy=full` cannot cross the obs boundary; `platform_set_autonomy_level` is not Auto-invocable (the dial is human-held).
-- [ ] The kill-switch test: flipping autonomy/HARNESS flags halts autonomous execution mid-journey.
-- [ ] The audit trail records autonomous concierge actions distinctly (queryable), including every invocation of an administrative operator tool. Typecheck passes.
+- [x] Cross-cutting **positive** tests: at `autonomy=full`, Auto's surface includes formerly admin-gated operator tools and can execute a representative administrative action end-to-end (audited, hierarchy-checked, rolled back in test).
+- [x] Cross-cutting **negative** tests: no operator path (surface, dispatcher enum, semantic ranking, graph ranking, direct executor call, API-key call) reaches a `super_admin_only` tool or obs router; `autonomy=full` cannot cross the obs boundary; `platform_set_autonomy_level` is not Auto-invocable (the dial is human-held).
+- [x] The kill-switch test: flipping autonomy/HARNESS flags halts autonomous execution mid-journey.
+- [x] The audit trail records autonomous concierge actions distinctly (queryable), including every invocation of an administrative operator tool. Typecheck passes.
 
 ---
 
