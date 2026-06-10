@@ -109,23 +109,21 @@ from fastapi import FastAPI  # noqa: E402
 from fastapi.routing import APIRoute, APIRouter  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-# CI collection-order guard (v1 — the proven variant; see PR #434 CI history):
-# earlier-collected tests stub modules.*/consumers.* in sys.modules (bare
-# ModuleType, no __spec__) and leak them. On Linux collection order the stubs
-# are still live HERE, so the real imports below resolve against them and die
-# at collection ("cannot import name 'UnifiedToolExecutor' from
-# 'modules.tools.execution' (unknown location)"). Purge ONLY origin-less
-# entries so the real packages import fresh; conftest's autouse repair fixture
-# re-binds other tests' attributes at test time. Do NOT widen this to a
-# whole-family purge (the v2 experiment): popping healthy loaded packages
-# mid-collection makes the re-import collide with itself ("cannot import
-# name 'tools' from 'modules'") — that variant failed CI twice.
+# CI collection-order guard. The real fix lives in conftest.py's
+# pytest_collectstart hook (which fires before this module imports); this
+# in-file copy keeps the module robust when run standalone or reordered.
+# Earlier-collected siblings leak non-file-backed modules.*/consumers.* stubs
+# in TWO shapes — bare (__spec__ is None) AND spec'd-but-pathless ("unknown
+# location") — so a __spec__-based predicate misses half (that was the CI red
+# on #434). Gate on file-backing: purge every stub that has neither __file__
+# nor __path__, so the real packages re-import fresh from disk. Real packages
+# are preserved — a whole-family purge instead self-collides ("cannot import
+# name 'tools' from 'modules'").
 import sys as _sys_guard  # noqa: E402
-for _name in [n for n, m in list(_sys_guard.modules.items())
-              if (n == "modules" or n.startswith("modules.")
-                  or n == "consumers" or n.startswith("consumers."))
-              and getattr(m, "__spec__", None) is None]:
-    _sys_guard.modules.pop(_name, None)
+for _name, _mod in [(n, m) for n, m in list(_sys_guard.modules.items())
+                    if n.split(".")[0] in ("modules", "consumers")]:
+    if getattr(_mod, "__file__", None) is None and not getattr(_mod, "__path__", None):
+        _sys_guard.modules.pop(_name, None)
 
 import modules.tools.discovery.platform_executor as pe  # noqa: E402,F401
 from core.auth.dependencies import RequestContext, UserContext  # noqa: E402

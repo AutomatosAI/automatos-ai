@@ -53,6 +53,41 @@ def _repair_stubbed_package_bindings():
     yield
 
 
+def pytest_collectstart(collector):
+    """Collection-time stub purge for heavy-import test modules.
+
+    The autouse ``_repair_stubbed_package_bindings`` fixture above runs at
+    TEST-SETUP time and is fill-missing only — too late and too gentle for a
+    module whose *top level* imports the real ``modules.*`` / ``consumers.*``
+    app packages at COLLECTION time (e.g. ``test_prd143_boundary_sweep``
+    imports ``modules.tools.discovery.platform_executor`` at import). By the
+    time such a module is collected, earlier siblings have injected
+    non-file-backed ``ModuleType`` stubs (e.g.
+    ``test_platform_actions_section_graph`` stubs
+    ``modules.tools.discovery.*`` at module level), so the real import resolves
+    against a stub and dies at collection — pytest then aborts the WHOLE run
+    ("Interrupted: 1 error during collection"). The stubs come in two shapes:
+    bare (``__spec__ is None``) AND spec'd-but-pathless ("unknown location"),
+    so a ``__spec__``-based guard misses half of them — gate on file-backing.
+    Linux collection order makes the stubs live here; macOS order hides it,
+    which is why this passed locally and failed only on CI (PR #434).
+
+    Right before one of these modules collects, purge every non-file-backed
+    ``modules.*`` / ``consumers.*`` entry so the real packages re-import fresh
+    from disk. Real (file-backed) packages are preserved untouched — purging
+    the whole family instead makes the re-import collide with its own
+    half-initialised packages ("cannot import name 'tools' from 'modules'").
+    """
+    name = getattr(collector, "name", "")
+    if not name.startswith("test_prd143"):
+        return
+    for _name, _mod in list(sys.modules.items()):
+        if _name.split(".")[0] not in ("modules", "consumers"):
+            continue
+        if getattr(_mod, "__file__", None) is None and not getattr(_mod, "__path__", None):
+            sys.modules.pop(_name, None)
+
+
 # ---- Database mock ----
 
 @pytest.fixture
