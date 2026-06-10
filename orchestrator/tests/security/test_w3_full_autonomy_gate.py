@@ -43,6 +43,7 @@ if _camelot_unlocatable():  # pragma: no cover - env-dependent
     _sys.modules.setdefault("camelot", _types.ModuleType("camelot"))
 
 import modules.tools.discovery.platform_executor as pe
+from modules.tools.discovery.action_registry import ActionDefinition
 from modules.tools.discovery.platform_executor import PlatformActionExecutor
 
 pytestmark = pytest.mark.asyncio
@@ -51,8 +52,36 @@ pytestmark = pytest.mark.asyncio
 # else: none are in _HIERARCHY_TARGETS, so can_actor_modify is never consulted.
 _CONFIRM_WRITE = "platform_update_auto_reporting_prefs"   # write, requires_confirmation
 _DESTRUCTIVE_DELETE = "platform_delete_memory"            # destructive, requires_confirmation
-_ADMIN_READ = "platform_get_system_health"               # read, admin_only
+# PRD-143 S4 emptied the live admin_only tier (the 7 obs actions became
+# super_admin_only, which full autonomy must NOT bypass). The admin-gate
+# mechanism is kept for future workspace-tier tools, so its bypass contract is
+# pinned with a SYNTHETIC admin_only action via a fake registry (S2 idiom).
+_ADMIN_READ = "platform_w3_admin_probe"                  # read, admin_only (synthetic)
 _NON_ADMIN_CALLER = {"workspace_role": "member"}         # known non-admin identity
+
+_ADMIN_READ_DEF = ActionDefinition(
+    name=_ADMIN_READ,
+    description="W3 admin-gate probe",
+    category="monitoring",
+    parameters={"type": "object", "properties": {}, "required": []},
+    permission_level="read",
+    admin_only=True,
+)
+
+
+class _FakeRegistry:
+    def __init__(self, *defs: ActionDefinition):
+        self._defs = {d.name: d for d in defs}
+
+    def get(self, name: str):
+        return self._defs.get(name)
+
+
+def _admin_probe_registry():
+    return patch(
+        "modules.tools.discovery.get_action_registry",
+        return_value=_FakeRegistry(_ADMIN_READ_DEF),
+    )
 
 
 def _executor() -> PlatformActionExecutor:
@@ -88,7 +117,9 @@ async def test_confirmation_gate_skipped_under_full():
     ):
         result = await ex.execute(_CONFIRM_WRITE, {"enabled": True})
 
-    assert result == sentinel
+    # PRD-143 S8: a confirmation skipped by the full dial is marked
+    # `autonomous` so the audit trail records it distinctly.
+    assert result == {**sentinel, "autonomous": True}
     ex._handlers[_CONFIRM_WRITE].assert_awaited_once()
 
 
@@ -105,7 +136,8 @@ async def test_destructive_delete_runs_under_full():
     ):
         result = await ex.execute(_DESTRUCTIVE_DELETE, {"memory_id": "m1"})
 
-    assert result == sentinel
+    # PRD-143 S8: the autonomous-invocation audit marker rides on the result.
+    assert result == {**sentinel, "autonomous": True}
     ex._handlers[_DESTRUCTIVE_DELETE].assert_awaited_once()
 
 
@@ -116,7 +148,9 @@ async def test_destructive_delete_runs_under_full():
 async def test_admin_only_denied_for_nonadmin_under_standard():
     ex = _executor()
     _stub_handler(ex, _ADMIN_READ)
-    with patch.object(PlatformActionExecutor, "_full_autonomy", return_value=False):
+    with patch.object(
+        PlatformActionExecutor, "_full_autonomy", return_value=False
+    ), _admin_probe_registry():
         result = await ex.execute(_ADMIN_READ, {}, _NON_ADMIN_CALLER)
 
     assert result["success"] is False
@@ -127,7 +161,9 @@ async def test_admin_only_denied_for_nonadmin_under_standard():
 async def test_admin_only_bypassed_under_full():
     ex = _executor()
     sentinel = _stub_handler(ex, _ADMIN_READ)
-    with patch.object(PlatformActionExecutor, "_full_autonomy", return_value=True):
+    with patch.object(
+        PlatformActionExecutor, "_full_autonomy", return_value=True
+    ), _admin_probe_registry():
         result = await ex.execute(_ADMIN_READ, {}, _NON_ADMIN_CALLER)
 
     assert result == sentinel

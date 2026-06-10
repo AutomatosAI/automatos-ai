@@ -127,9 +127,13 @@ def _rank_actions_for_dispatcher(
     top_k: int,
     exclude_admin: bool,
     exclude_promoted: bool,
+    include_super_admin: bool = False,
 ) -> Optional[List[str]]:
     """Return the top-K action names for ``query`` from ActionSemanticIndex,
     or None on any failure (caller falls back to the full enum).
+
+    PRD-143: include_super_admin defaults False (fail-closed) — su actions
+    are never ranked for an operator caller.
 
     Empty results also return None — the dispatcher's allowed_names=[] path
     falls back to the full enum, but routing through None is cleaner here:
@@ -148,6 +152,7 @@ def _rank_actions_for_dispatcher(
                 top_k=top_k,
                 exclude_admin=exclude_admin,
                 exclude_promoted=exclude_promoted,
+                include_super_admin=include_super_admin,
             )
         )
         if not ranked:
@@ -218,6 +223,7 @@ def get_tools_for_agent(
     workspace_id: Optional[Any] = None,
     is_admin: bool = False,
     query: Optional[str] = None,
+    is_super_admin: bool = False,
 ) -> List[Dict[str, Any]]:
     """
     Get tools from modules.tools.ToolRegistry in OpenAI function format.
@@ -230,6 +236,11 @@ def get_tools_for_agent(
             ActionSemanticIndex to the top-K most relevant actions —
             closes the prompt-vs-schema gap from PRD-138 Phase 1 (US-008).
             On any error or empty rank, falls back to the full enum.
+        is_super_admin: PRD-143 — True ONLY when the driving principal is
+            literally system_role == 'super_admin'. Fail-closed default:
+            super_admin_only actions are excluded from the dispatcher enum,
+            first-class schemas, and semantic ranking. Unlike ``is_admin``,
+            this is NEVER auto-resolved from workspace roles or autonomy.
     """
     session_used = db_session or SessionLocal()
     trace_id = _new_trace_id()
@@ -356,6 +367,8 @@ def get_tools_for_agent(
 
         # PRD-122 fix: Auto-resolve admin status from workspace owner role
         # when no explicit is_admin was passed (heartbeat, agent factory paths).
+        # PRD-143: this fallback may flip is_admin ONLY — is_super_admin is
+        # never derived from workspace roles (su trap #2, PRD-143 §9).
         if not is_admin and workspace_id and session_used:
             try:
                 from core.workspaces.models import WorkspaceMember
@@ -397,6 +410,7 @@ def get_tools_for_agent(
                     top_k=_semantic_routing_top_k(),
                     exclude_admin=not is_admin,
                     exclude_promoted=True,
+                    include_super_admin=is_super_admin,
                 )
                 if allowed_names is None:
                     narrow_reason = "rank_actions returned empty or raised"
@@ -405,6 +419,7 @@ def get_tools_for_agent(
                 exclude_admin=not is_admin,
                 exclude_promoted=True,  # promoted actions have first-class schemas below
                 allowed_names=allowed_names,
+                include_super_admin=is_super_admin,
             )
             openai_tools.append(dispatcher_schema)
             all_actions = action_registry.get_all()
@@ -425,6 +440,17 @@ def get_tools_for_agent(
                     f"[tool-trace {trace_id}] dispatcher enum NOT narrowed: "
                     f"reason={narrow_reason}; full={dispatcher_count} actions"
                 )
+
+            # PRD-143 S14: persist the selection outcome instead of log-only —
+            # counter + stash on the existing ToolSignalRecorder so the
+            # platform_execute dispatch can attach hit/fallback telemetry.
+            get_tool_signal_recorder().record_selection(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                narrowed=allowed_names is not None,
+                reason=narrow_reason,
+                allowed_names=allowed_names,
+            )
         except Exception as e:
             logger.debug(f"[tool-trace {trace_id}] Platform actions unavailable: {e}")
 
@@ -436,7 +462,10 @@ def get_tools_for_agent(
         try:
             if not action_registry:
                 raise RuntimeError("action_registry not initialized")
-            promoted_schemas = action_registry.to_first_class_schemas(exclude_admin=not is_admin)
+            promoted_schemas = action_registry.to_first_class_schemas(
+                exclude_admin=not is_admin,
+                include_super_admin=is_super_admin,
+            )
             openai_tools.extend(promoted_schemas)
             logger.info(f"[tool-trace {trace_id}] Added {len(promoted_schemas)} promoted action schemas")
         except Exception as e:
@@ -628,7 +657,12 @@ class ToolRouter:
                     "error_type": None,
                 }
 
-            error = result.get("error", "Unknown error")
+            # PRD-143 S15: a confirmation stop is not an opaque failure — the
+            # executor's message (action + permission level) must reach the
+            # LLM so Auto can relay the ask instead of "Unknown error".
+            error = result.get("error") or (
+                result.get("message") if result.get("requires_confirmation") else None
+            ) or "Unknown error"
             error_type = result.get("error_type")
             fatal_error = bool(result.get("fatal")) or _is_fatal_dependency_error(error)
             llm_error = (

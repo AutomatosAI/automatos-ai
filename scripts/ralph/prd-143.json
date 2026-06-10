@@ -1,0 +1,297 @@
+{
+  "project": "Automatos AI Platform \u2014 PRD-143 Rev 2 (Auto as Full Platform Operator + Observability Lock)",
+  "branchName": "ralph/prd-143-operator-obs-lock",
+  "description": "PRD-143 Rev 2 (2026-06-09): the security model is INVERTED vs the old draft. Auto gets the FULL operator surface \u2014 every platform API exposed as a tool, including platform-administrative capabilities \u2014 at autonomy=full, protected by gates-and-logs (PRD-140 hierarchy checks, destructive backstop, audit, HARNESS rollback, human kill-switch), NOT by exclusion. The ONLY hard-excluded tier is OBSERVABILITY + the oversight control plane, locked to system_role=='super_admin' (Gerard, the sole super admin), fail-closed, independent of the autonomy dial: the 6 obs tools + platform_set_autonomy_level + the obs/analytics HTTP routers. Also: tool-scaffolding mechanism toward ~200 tools, telemetry-seeded graph routing, selection robustness at scale, one fully-autonomous concierge journey. Builds ON PRD-142 Wave 4 / PRD-138/139 / PRD-140 \u2014 extends, never rebuilds. Full context: docs/PRDS/PRD-143-AUTO-FULL-PLATFORM-OPERATOR.md.",
+  "userStories": [
+    {
+      "id": "S1",
+      "title": "Registry: add super_admin_only tier + fail-closed exclusion in every listing/selection path",
+      "description": "As the Super admin, I want a super_admin_only flag on ActionDefinition that every registry listing/selection path excludes by default, so obs tools can never leak into an operator surface.",
+      "acceptanceCriteria": [
+        "Add `super_admin_only: bool = False` to ActionDefinition in orchestrator/modules/tools/discovery/action_registry.py (alongside admin_only at :38).",
+        "Thread an `include_super_admin: bool = False` parameter through EVERY registry listing/selection path: to_first_class_schemas (:125), the promoted filter (:138-139), the listing filter (:144-172), build_prompt_summary (:236), to_dispatcher_schema (:258), and the internal filter helper (:304-321). FAIL-CLOSED: the default everywhere excludes super_admin_only actions; they are included ONLY when include_super_admin=True is passed explicitly.",
+        "Do NOT remove or weaken the existing admin_only/exclude_admin mechanism \u2014 super_admin_only is a second, stricter tier layered on top.",
+        "TDD (RED first): orchestrator/tests/test_prd143_su_registry.py \u2014 test_su_action_excluded_from_first_class_schemas_by_default, test_su_action_excluded_from_dispatcher_schema_by_default, test_su_action_excluded_from_prompt_summary_by_default, test_su_action_included_only_with_explicit_include_flag, test_admin_only_filter_behaviour_unchanged.",
+        "python3 -m py_compile orchestrator/modules/tools/discovery/action_registry.py; cd orchestrator && python -c \"from main import app; print('import OK')\"",
+        "cd orchestrator && python -m pytest tests/test_prd143_su_registry.py -v",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Foundation story \u2014 everything else layers on this flag. Smallest safe extension of the existing admin_only mechanism (PRD-143 \u00a79); do NOT invent a new permission system. DONE 2026-06-09: super_admin_only field at action_registry.py:43; include_super_admin=False threaded through to_openai_tools/to_first_class_schemas/to_dispatcher_schema (su filter runs BEFORE allow-list so fallback stays su-clean)/build_prompt_summary/build_filtered_prompt_summary/_format_actions_summary. 5/5 tests green, 52 neighbouring registry tests green. NOTE: full-app import check exceeded the 300s cap (heavy torch/transformers chain in this venv) \u2014 per run rules, relied on py_compile + the story pytest file + 6 registry-consumer suites instead."
+    },
+    {
+      "id": "S2",
+      "title": "Executor: super-admin gate that the full-autonomy bypass CANNOT cross",
+      "description": "As the Super admin, I want PlatformActionExecutor to refuse super_admin_only actions pre-execution for any principal that is not literally system_role=='super_admin', so neither Auto at autonomy=full nor an admin API key can invoke obs tools.",
+      "acceptanceCriteria": [
+        "In orchestrator/modules/tools/discovery/platform_executor.py execute path (:477-523): add the super_admin_only gate BEFORE and INDEPENDENT of the existing admin_only gate. The check: action_def.super_admin_only and (caller_context or {}).get('system_role') != 'super_admin' \u2192 refuse pre-execution with a permission_denied result mirroring the admin-gate shape (:506-540).",
+        "CRITICAL \u2014 three verified traps the gate must NOT fall into: (1) the full_autonomy \u2192 is_admin=True bypass at :510 applies ONLY to admin_only, NEVER to super_admin_only; (2) the _workspace_has_admin_owner() fallback at :522 must NOT satisfy the su gate; (3) caller_context=None (heartbeat/agent-factory paths) \u2192 REFUSE su actions (fail-closed), do not resolve from workspace owner.",
+        "API-key principals carry system_role='admin' (core/auth/hybrid.py:783) and MUST be refused.",
+        "A genuine super-admin principal (caller_context={'system_role': 'super_admin'}) executes the action normally \u2014 including via Auto when Gerard is the driving chat principal.",
+        "TDD (RED first): orchestrator/tests/test_prd143_su_executor_gate.py \u2014 test_su_action_refused_for_member, test_su_action_refused_for_workspace_admin, test_su_action_refused_under_full_autonomy, test_su_action_refused_for_api_key_admin, test_su_action_refused_when_no_caller_context, test_su_action_executes_for_super_admin_principal, test_admin_only_gate_unchanged_under_full_autonomy.",
+        "python3 -m py_compile orchestrator/modules/tools/discovery/platform_executor.py; cd orchestrator && python -c \"from main import app; print('import OK')\"",
+        "cd orchestrator && python -m pytest tests/test_prd143_su_executor_gate.py -v",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "THE safety rail of Rev 2. The boundary is the principal, not the channel \u2014 Auto MAY run obs tools when the driving principal is the super admin himself (PRD-143 US-001). DONE 2026-06-09: su gate in platform_executor.py execute() (after action_def lookup, BEFORE the full-autonomy read) \u2014 (caller_context or {}).get('system_role') != 'super_admin' refuses pre-execution with permission_denied; full_autonomy bypass, workspace-owner fallback, API-key admin and caller_context=None all proven refused; 7/7 tests green (fake-registry idiom so tests stay stable across S4 reclassification). Local-venv note: test points dummy POSTGRES_* at closed port 59432 \u2014 modules.tools import chain does a fail-soft DB connect at import, and the wedged local docker 5432 proxy hangs the handshake forever (CI exports real vars, setdefault no-ops). Post-commit checks: W3 full-autonomy + W2S7 fail-closed suites 8/8 green; full-app `from main import app` unrunnable in this venv (missing email-validator dep, pre-existing) \u2014 relied on py_compile + 3 importing suites per run rules."
+    },
+    {
+      "id": "S3",
+      "title": "Tool surface + selection: su tools never offered to operators (semantic, graph, dispatcher, prompt, sections)",
+      "description": "As the Super admin, I want every surface-building and ranking path to exclude super_admin_only tools for non-su principals, so Auto never even sees an obs tool schema, at any autonomy level.",
+      "acceptanceCriteria": [
+        "orchestrator/modules/tools/tool_router.py: extend get_openai_tools (:219) with an `is_super_admin: bool = False` (or equivalent caller-system_role) parameter; pass include_super_admin=is_super_admin into the dispatcher schema (:405), first-class schemas (:439), and _rank_actions_for_dispatcher (:125, called at :395). The PRD-122 workspace-owner fallback (:358-372) may continue to flip is_admin but MUST NOT flip is_super_admin.",
+        "orchestrator/modules/tools/discovery/action_semantic_index.py: _eligible_actions (:70-73) and rank_actions (:109-116) exclude super_admin_only actions unless explicitly included (mirror the admin_only filter; default exclude).",
+        "orchestrator/modules/tools/discovery/graph_router.py: the exclude path (:111, :128) likewise excludes su actions by default.",
+        "orchestrator/modules/context/sections/platform_actions.py: the hardcoded exclude_admin=True call sites (:156, :198, :232, :246) also exclude su (these are Auto context paths \u2014 they NEVER include su).",
+        "Wire the chat path: where get_openai_tools is invoked for Auto, derive is_super_admin from the driving principal's system_role == 'super_admin' ONLY (grep the call sites; do not derive from workspace role, is_admin, or autonomy level).",
+        "TDD (RED first): orchestrator/tests/test_prd143_su_surface.py \u2014 test_su_tool_absent_from_openai_tools_by_default, test_su_tool_absent_under_full_autonomy, test_workspace_owner_fallback_does_not_include_su, test_semantic_rank_never_returns_su_for_operator, test_graph_router_never_returns_su_for_operator, test_platform_actions_section_never_includes_su, test_su_tool_present_for_super_admin_principal.",
+        "python3 -m py_compile the changed files; cd orchestrator && python -c \"from main import app; print('import OK')\"",
+        "cd orchestrator && python -m pytest tests/test_prd143_su_surface.py -v",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "Selection exclusion matters as much as the executor gate: an su tool in the LLM's schema list is an invitation to call it. Exclude at the source. DONE 2026-06-10: include_super_admin=False (fail-closed) threaded through ActionSemanticIndex (_eligible_actions/ensure_indexed/rank_actions), GraphRouter.rank_chains (entry rank + NEW _drop_super_admin_chains edge-expansion filter \u2014 edges learned from su usage can point AT su actions \u2014 + su-aware cache key), tool_router (_rank_actions_for_dispatcher + get_tools_for_agent(is_super_admin) \u2192 dispatcher/first-class/rank); PRD-122 owner fallback proven to flip is_admin only. PlatformActionsSection call sites pinned include_super_admin=False x4. Chat wired: chat.py:294 derives _is_super_admin from system_role=='super_admin' ONLY \u2192 stream_response_with_agent \u2192 _get_tools + ATOM dispatcher path; agent-factory/heartbeat/sections/tools.py paths stay default-False fail-closed. 7/7 tests green (4 RED first: rank/graph/section-pin/su-principal; 3 covered pre-S3 by S1's registry defaults), 104 green combined with 9 neighbouring suites. Harness evolution: rank_actions fakes gained the kwarg (3 files); test_graph_router pre-inits an empty registry singleton so the su filter fallback never triggers the live registrar. Full-app import unrunnable in this venv (email-validator missing, pre-existing \u2014 same as S2); relied on py_compile + importing suites."
+    },
+    {
+      "id": "S4",
+      "title": "Reclassify the catalogue: 7 actions \u2192 super_admin_only, everything else operator; write the obs-tier manifest",
+      "description": "As the Super admin, I want the obs tier explicit and signed-off-able, and every other tool operator-reachable, so Auto has the full platform and I keep the watchtower.",
+      "acceptanceCriteria": [
+        "Set super_admin_only=True AND remove admin_only=True on exactly these 7: platform_query_loki_logs (orchestrator/modules/tools/discovery/actions_monitoring.py:12), platform_query_prometheus (:69), platform_get_alerts (:113), platform_get_logs (:153), platform_list_services (:199), platform_get_system_health (actions_workspace.py, grep name=\"platform_get_system_health\"), platform_set_autonomy_level (actions_autonomy.py:47 \u2014 the kill-switch dial stays HUMAN).",
+        "platform_get_autonomy_level (actions_autonomy.py:23, read-only) stays OPERATOR \u2014 Auto may read its own dial, never set it.",
+        "Grep gate: after the change, `grep -rn 'admin_only=True' orchestrator/modules/tools/discovery/actions_*.py` returns ZERO matches (the admin_only mechanism itself is KEPT for future workspace-tier tools \u2014 do not delete the field or filters).",
+        "Write docs/PRDS/PRD-143-OBS-TIER-MANIFEST.md: a one-page table of every super_admin_only action \u2014 name, source file, one-line why (obs read / oversight control). Note it requires Gerard's sign-off (PRD-143 Open Q1/Q2).",
+        "TDD (RED first): orchestrator/tests/test_prd143_manifest_parity.py \u2014 test_manifest_matches_registry (parse the manifest table, assert exact set-equality with [a.name for a in registry if a.super_admin_only]), test_no_admin_only_actions_remain, test_get_autonomy_level_is_operator_tier, test_set_autonomy_level_is_su_tier.",
+        "python3 -m py_compile the changed files; cd orchestrator && python -c \"from main import app; print('import OK')\"",
+        "cd orchestrator && python -m pytest tests/test_prd143_manifest_parity.py -v",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "This story IS the Rev 2 inversion: after it, zero actions are exclusion-gated from Auto except the obs/oversight 7. The manifest\u21c6registry parity test keeps the tier honest forever. DONE 2026-06-10: 7 flags flipped admin_only\u2192super_admin_only (actions_monitoring.py:55/99/140/188/211, actions_workspace.py:204, actions_autonomy.py:71); get_autonomy_level stays operator; stale workspace-owner wording in actions_autonomy.py docstring/description corrected to super-admin. Manifest authored at docs/PRDS/PRD-143-OBS-TIER-MANIFEST.md (7-row table, sign-off banner, router section placeholder for S6/S7). 4/4 parity tests green vs the REAL register_all_actions() catalogue. Grep-gate note: the AC's literal grep matches the SUBSTRING inside super_admin_only=True \u2014 verified with word-boundary grep '\\badmin_only=True' \u2192 zero matches; test_no_admin_only_actions_remain pins the real field on every registered action. Harness evolution: tests/security/test_w3_full_autonomy_gate.py used live platform_get_system_health as its admin_only probe \u2014 now su-tier, so the S2 su gate (correctly) refused it under full autonomy; switched the two admin-gate tests to a synthetic admin_only probe via the S2 fake-registry idiom (mechanism contract unchanged, no assertion weakened). 111 green across 14 affected suites. Full-app import still unrunnable in this venv (email-validator missing, pre-existing \u2014 same as S2/S3); relied on py_compile + the story suite + neighbouring suites."
+    },
+    {
+      "id": "S5",
+      "title": "Auth: one canonical require_super_admin FastAPI dependency",
+      "description": "As a developer, I want a single reusable dependency that 403s everyone except system_role=='super_admin', so obs routers lock consistently with zero ad-hoc copies.",
+      "acceptanceCriteria": [
+        "NEW small module orchestrator/core/auth/super_admin.py (do NOT modify core/auth/hybrid.py \u2014 it is the 657-call-site shared auth; PRD-09 precedent says extend via narrow new deps, never touch the shared path): `async def require_super_admin(ctx: RequestContext = Depends(get_request_context_hybrid)) -> RequestContext` \u2014 raises HTTPException(403, 'Super admin only') unless ctx.user is present AND ctx.user.system_role == 'super_admin'; returns ctx otherwise. Fail-closed on missing user/system_role.",
+        "API-key contexts (system_role='admin' per hybrid.py:783) \u2192 403. SDK/service contexts (system_role='service', hybrid.py:616) \u2192 403. Workspace owner/admin without the system role \u2192 403.",
+        "No os.getenv; no config reads; pure role check.",
+        "TDD (RED first): orchestrator/tests/test_prd143_require_super_admin.py \u2014 test_403_for_member, test_403_for_workspace_admin, test_403_for_api_key_admin, test_403_for_service_principal, test_403_when_user_or_role_missing, test_returns_ctx_for_super_admin.",
+        "python3 -m py_compile orchestrator/core/auth/super_admin.py; cd orchestrator && python -c \"from main import app; print('import OK')\"",
+        "cd orchestrator && python -m pytest tests/test_prd143_require_super_admin.py -v",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "ONE canonical dependency (PRD-143 FR-4). No require_super_admin existed before \u2014 every obs router in S6/S7 imports this exact symbol. DONE 2026-06-10: NEW core/auth/super_admin.py \u2014 require_super_admin composes get_request_context_hybrid via Depends (hybrid.py untouched, verified); fail-closed getattr check refuses missing user, missing/None system_role, attribute-less principal, workspace admin/owner, API-key admin (hybrid.py:783), service principal (hybrid.py:616); returns ctx only for literal system_role=='super_admin'. No os.getenv/config/DB. 7/7 tests green incl. a wiring pin that the Depends target IS get_request_context_hybrid; 30 green across all 5 PRD-143 suites. Full-app import unrunnable in this venv (email-validator missing, pre-existing \u2014 same as S2-S4); relied on py_compile + the story suite + neighbouring suites."
+    },
+    {
+      "id": "S6",
+      "title": "Lock obs routers batch 1: heartbeat + the four analytics routers",
+      "description": "As the Super admin, I want the heartbeat/analytics REST surface readable by me only, so platform internals stop being visible to every authenticated workspace user.",
+      "acceptanceCriteria": [
+        "Apply require_super_admin ROUTER-WIDE (APIRouter(dependencies=[Depends(require_super_admin)]) or equivalent on every route) to: orchestrator/api/heartbeat.py, orchestrator/api/analytics.py, orchestrator/api/analytics_api.py, orchestrator/api/analytics_real.py, orchestrator/api/analytics_charts.py.",
+        "These routers are currently open to ANY authenticated workspace user (only get_request_context_hybrid) \u2014 verified 2026-06-09. After this story every endpoint on them returns 403 for non-super-admin principals.",
+        "Do NOT touch frontend/ \u2014 the dashboards backed by these routers will 403 for non-super-admins; that is the ACCEPTED Rev 2 consequence (PRD-143 US-002b, Open Q4). Do not 'fix' it.",
+        "Verify no INTERNAL server-side consumer calls these routers over HTTP (grep orchestrator/ for the route prefixes \u2014 internal code calls services directly; if an internal HTTP call exists, STOP and mark BLOCKED with the finding rather than breaking it).",
+        "TDD (RED first): orchestrator/tests/test_prd143_obs_routers_batch1.py \u2014 parametrized over one representative GET per router: test_403_for_member, test_403_for_workspace_admin, test_403_for_api_key_admin, test_not_403_for_super_admin (assert status not in (401,403)).",
+        "python3 -m py_compile the changed routers; cd orchestrator && python -c \"from main import app; print('import OK')\"",
+        "cd orchestrator && python -m pytest tests/test_prd143_obs_routers_batch1.py -v",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": "Router-level dependency, not per-route decoration \u2014 one line per router, impossible to miss a new endpoint added later. DONE 2026-06-10: dependencies=[Depends(require_super_admin)] on the APIRouter of heartbeat.py/analytics.py/analytics_api.py/analytics_real.py/analytics_charts.py. Grep gate clean: zero internal HTTP consumers of /api/heartbeat, /api/analytics, /analytics (main.py only include_routers). 20/20 story tests green (member/ws-admin+owner/api-key-admin 403 'Super admin only', su not-403; 5 routers parametrized, RED-first on heartbeat). Harness evolution: 4 PRD-142 analytics_real endpoint suites (activation, errors-by-subsystem, primitive-health, widget-engagement) principals upgraded to system_role='super_admin' \u2014 handler assertions unchanged, the obs tier is the new precondition. 50 green across all 6 PRD-143 suites. Full-app import unrunnable in this venv (email-validator missing, pre-existing \u2014 same as S2-S5); relied on py_compile + story suite (which mounts each router in a live FastAPI app) + neighbouring suites."
+    },
+    {
+      "id": "S7",
+      "title": "Lock obs routers batch 2: llm_analytics, memory_stats, statistics, composio/database analytics, execution_history, kpi, reports",
+      "description": "As the Super admin, I want the remaining observability routers locked the same way, completing the obs perimeter.",
+      "acceptanceCriteria": [
+        "Apply require_super_admin router-wide to: orchestrator/api/llm_analytics.py, orchestrator/api/memory_stats.py, orchestrator/api/statistics.py, orchestrator/api/composio_analytics.py, orchestrator/api/database_analytics.py, orchestrator/api/execution_history.py, orchestrator/api/kpi_api.py, orchestrator/api/reports.py.",
+        "Same internal-consumer grep gate as S6: if any server-side code calls these prefixes over HTTP, STOP and mark BLOCKED with the finding.",
+        "llm_analytics.py already has scattered admin checks (e.g. 'admin only' comments at :807, :969) \u2014 the router-wide su dependency SUPERSEDES them; remove now-redundant per-route admin checks in this file ONLY where they become dead (delete what you replace, CLAUDE.md \u00a75).",
+        "Do NOT touch frontend/.",
+        "Update docs/PRDS/PRD-143-OBS-TIER-MANIFEST.md: append the locked-router table (13 routers, batch 1 + batch 2) so the manifest covers tools AND routers.",
+        "TDD (RED first): orchestrator/tests/test_prd143_obs_routers_batch2.py \u2014 same parametrized 403/not-403 shape as batch 1, one representative endpoint per router.",
+        "python3 -m py_compile the changed routers; cd orchestrator && python -c \"from main import app; print('import OK')\"",
+        "cd orchestrator && python -m pytest tests/test_prd143_obs_routers_batch2.py -v",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": "Candidate list errs broad by design \u2014 Gerard prunes at manifest sign-off (Open Q1). 13 routers total across S6+S7. DONE 2026-06-10: dependencies=[Depends(require_super_admin)] on llm_analytics (BOTH router+admin_router), memory_stats, statistics, composio_analytics, database_analytics, execution_history, kpi_api, reports. llm_analytics _is_admin/_assert_admin + bootstrap bypass DELETED (superseded \u2014 they tested system_role=='admin' and would have 403'd the super admin himself). Grep gate clean: zero internal HTTP consumers (main.py matches are an endpoint-index dict). Prefix collisions documented in the manifest: /api/v1/memory shared with api/memory.py (memory_stats mounted first \u2014 its shadowing routes incl. DELETE /{memory_id} now su-locked); /api/system shared with api/system.py (system.py mounted FIRST and unlocked \u2014 /api/system/metrics keeps serving users). Manifest router table appended (13 routers; parity regex only matches platform_* rows, verified). 36/36 story tests green (9 router objects parametrized, RED-first), 86 green across all 7 PRD-143 suites. Full-app import unrunnable in this venv (email-validator missing, pre-existing \u2014 same as S2-S6); relied on py_compile + story suite (mounts every locked router in a live FastAPI app)."
+    },
+    {
+      "id": "S8",
+      "title": "Governance positive path: full operator surface at autonomy=full + kill-switch proof",
+      "description": "As the Super admin, I want test-proof that Auto genuinely has the full operator surface under full autonomy, that every autonomous action is audited, and that one flag stops it all.",
+      "acceptanceCriteria": [
+        "Tests-only story (no production code unless a test exposes a real gap \u2014 fix forward if so).",
+        "orchestrator/tests/test_prd143_full_surface_positive.py \u2014 test_operator_destructive_action_executes_at_full_autonomy (a representative permission_level='destructive' operator action passes the PRD-140 hierarchy gate + destructive backstop and executes without confirmation under full autonomy, with caller_context carrying a plain member role), test_same_action_requires_confirmation_when_autonomy_standard (the dial works both ways), test_kill_switch_halts (flipping the autonomy/HARNESS flag off mid-flow re-imposes confirmation / refuses auto-apply), test_audit_row_written_for_autonomous_action (the Wave 4 audit trail records the autonomous invocation distinctly and queryably).",
+        "Reuse the Wave 2/4 test idiom from orchestrator/tests/test_harness_self_management.py and conftest.py fixtures (fake apscheduler, dummy POSTGRES_*, monkeypatch config flags) \u2014 do NOT stand up a parallel harness.",
+        "cd orchestrator && python -m pytest tests/test_prd143_full_surface_positive.py -v",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": "PRD-143 US-008 positive half. Open \u2260 unguarded: this story proves gates-and-logs hold while exclusion is gone. DONE 2026-06-10: 4/4 story tests green. platform_delete_agent (real catalogue: destructive, requires_confirmation=True, operator-tier) executes WITHOUT confirmation at autonomy=full for a plain-member principal while the PRD-140 hierarchy gate is consulted (can_actor_modify kwargs pinned: actor 9, TARGET_AGENT 42, change_type=delete, source=platform_tool) and the destructive backstop stays satisfied; same action returns requires_confirmation at standard; kill-switch halts MID-FLOW both ways (dial re-read via core.services.auto_autonomy.is_full_autonomy on every execute \u2014 flip \u2192 next call confirms; HARNESS_SELF_MANAGEMENT_ENABLED off \u2192 _apply_approved_board_tasks refuses, zero calls). Audit test exposed a REAL GAP (RED): no distinct autonomous marker \u2014 fixed forward per AC: platform_executor.py:761-775 marks confirmation-skipped invocations {**result, autonomous: True}; telemetry.py persists router_decision->>'autonomous' on tool_execution_logs (queryable; non-autonomous rows unmarked \u2014 distinctness proven both ways). Harness evolution: W3's two skipped-gate equality assertions now pin the marker (stronger, not weakened). 131 green across 12 suites (8 prd143 + W3 + W2S7 + prd139 telemetry + harness). Full-app import unrunnable in this venv (email-validator missing, pre-existing \u2014 same as S2-S7); relied on py_compile + suites."
+    },
+    {
+      "id": "S9",
+      "title": "Tool scaffolder: router endpoint \u2192 3-file skeleton (scaffold-then-curate, never auto-register)",
+      "description": "As a developer, I want a codegen that turns a platform API endpoint into an actions_*/handlers_* skeleton for human curation, so reaching ~200 tools isn't 84 hand-written files.",
+      "acceptanceCriteria": [
+        "NEW orchestrator/scripts/scaffold_platform_tool.py: given a router module + endpoint (e.g. `python scripts/scaffold_platform_tool.py api/agents.py 'POST /api/agents'`), introspects the FastAPI route (params, body model, docstring) and emits an ActionDefinition skeleton + handler skeleton to a gen/ staging dir (or stdout) \u2014 it NEVER writes into modules/tools/discovery/ and NEVER registers anything in platform_actions.py.",
+        "Emitted skeletons obey conventions: canonical platform_* naming, workspace-scoped handler signature, permission_level required (read/write/destructive guessed from HTTP verb, flagged for review), no os.getenv, super_admin_only=False default \u2014 EXCEPT endpoints belonging to the 13 locked obs routers (S6/S7 list), which emit super_admin_only=True with a review flag.",
+        "Output includes a '# CURATE:' header checklist (name, description, params, tier, permission_level) so the human review step is explicit (PRD-143 FR-7: no auto-registration).",
+        "TDD (RED first): orchestrator/tests/test_prd143_scaffolder.py \u2014 test_emits_action_and_handler_skeleton_for_sample_endpoint (run on 2-3 real endpoints e.g. agents POST, workspaces GET), test_obs_router_endpoint_flagged_su, test_never_writes_into_discovery_dir, test_verb_to_permission_level_mapping.",
+        "python3 -m py_compile orchestrator/scripts/scaffold_platform_tool.py; cd orchestrator && python -m pytest tests/test_prd143_scaffolder.py -v",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": "The mechanism story (PRD-143 US-003). The long tail to ~200 is follow-on PRDs; Phase 1 proves the generator on samples. DONE 2026-06-10: scripts/scaffold_platform_tool.py \u2014 introspects the live APIRoute via fastapi.openapi.utils.get_openapi (body model, path/query params, docstring), emits ActionDefinition + workspace-scoped handler skeletons to stdout or --out-dir; _assert_safe_out_dir refuses modules/tools/discovery/ and any path under it (direct call + CLI both proven); su tier detected by require_super_admin dependency IDENTITY on the router/route (S6/S7 perimeter, no hardcoded module list) \u2192 super_admin_only=True + REVIEW flag; verb\u2192permission map fail-closed (unknown verb \u2192 destructive); workspace_id stripped from emitted schemas (executor injects scoping server-side); # CURATE checklist covers name/description/params/tier/permission_level. 9/9 tests green on REAL routes (agents POST/GET/DELETE, workspaces GET, heartbeat su-flagged, discovery-dir refusal, verb map, unknown-endpoint candidates error). Prior iteration authored both files but hit the 45m cap pre-commit; this iteration validated and committed them unchanged."
+    },
+    {
+      "id": "S10",
+      "title": "Operator tools batch 1: the setup surface gap-fill (~8-12 tools)",
+      "description": "As a user, I want Auto able to drive the core setup surface \u2014 agents, models, channels, widgets, playbooks, missions, knowledge \u2014 so the concierge journey has real hands.",
+      "acceptanceCriteria": [
+        "INVENTORY FIRST (CLAUDE.md \u00a72): list existing actions via the registry (grep name=\\\"platform_ across orchestrator/modules/tools/discovery/actions_*.py) and identify GAPS in the setup surface: agent update/delete/configure, model/power config read, channel connect/configure, widget config, playbook launch/status, mission launch/status, knowledge upload/list. SKIP anything that already exists \u2014 reuse, never duplicate.",
+        "Add ~8-12 gap-fill tools via the 3-file pattern ONLY (actions_*.py + handlers_*.py + register in modules/tools/discovery/platform_actions.py \u2014 the only sanctioned extension point). Each: workspace-scoped (handler filters by workspace_id), correct permission_level (write for mutations, destructive for deletes), operator tier (super_admin_only=False), no os.getenv, no hardcoded values.",
+        "Handlers call the same service/DB layer the corresponding REST router uses (grep the router first; reuse its service calls) \u2014 never reimplement business logic in a handler.",
+        "TDD (RED first): orchestrator/tests/test_prd143_tools_batch1.py \u2014 one handler test per new tool (happy path + workspace-scoping assertion), plus test_batch1_tools_registered_and_operator_tier.",
+        "python3 -m py_compile the new files; cd orchestrator && python -c \"from main import app; print('import OK')\"",
+        "cd orchestrator && python -m pytest tests/test_prd143_tools_batch1.py -v",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": true,
+      "notes": "PRD-143 US-004 first half. If the inventory shows the setup surface is already fully covered, add the genuinely-missing remainder and record the inventory result in this story's notes rather than padding with duplicates. DONE 2026-06-10: inventory showed agents/playbooks/missions fully covered (create_mission launches via CoordinatorService; execute_playbook/get_playbook_execution exist). 9 honest gap tools added, all operator-tier write/read: platform_get_power_mode (handlers_power.py, mirrors coordinator_service default resolution); platform_list/connect/configure/start/stop_channel (actions_channels.py+handlers_channels.py \u2014 connect delegates to api/channels.py connect_channel_for_workspace, EXTRACTED from POST /api/channels so the driver verify/install flow has one implementation); platform_get/update_widget_config (handlers_widgets.py, whitelist reused from api.widgets.config.PUBLIC_WIDGET_CONFIG_KEYS, fail-closed on other keys); platform_upload_document (handlers_documents.py, reuses get_document_manager + UPLOAD_DIR/MAX_UPLOAD_BYTES constants extracted in api/documents.py, text formats only). tests/test_prd143_tools_batch1.py 18/18 green; su suites 28/28 green; channel suites 159 green. NOTE: `from main import app` blocked by PRE-EXISTING venv gap (email-validator not installed; api/team.py:45 via main.py:85, untouched) \u2014 wiring proven via test imports of platform_executor+registry+api.channels/widgets/documents instead."
+    },
+    {
+      "id": "S11",
+      "title": "Operator tools batch 2: the administration surface (~8-12 tools, operator-tier by design)",
+      "description": "As a user with Auto at full autonomy, I want platform-administrative capabilities \u2014 members, roles, workspace settings, system settings \u2014 exposed as operator tools, because Rev 2 opens them deliberately.",
+      "acceptanceCriteria": [
+        "INVENTORY FIRST, then gap-fill ~8-12 admin-surface tools from the real routers: workspace member invite/remove/role-set (api/team.py / api/workspaces.py), workspace settings update (api/workspaces.py), system settings read/update (api/system_settings.py), API key list/create/revoke (api/api_keys.py / api/user_api_keys.py), plugin enable/disable (api/workspace_plugins.py). Every one is OPERATOR tier \u2014 this is the deliberate Rev 2 inversion; do NOT mark them super_admin_only.",
+        "Destructive/role-changing tools get permission_level='destructive' (member remove, key revoke, role change) or 'write' \u2014 so the PRD-140 hierarchy gate + audit cover them on every call. That is the safety net replacing exclusion.",
+        "3-file pattern, workspace-scoped, reuse the routers' service layer, no os.getenv, no hardcoded values.",
+        "TDD (RED first): orchestrator/tests/test_prd143_tools_batch2.py \u2014 one handler test per tool (happy path + workspace-scoping + tenant-isolation: a workspace-A principal cannot mutate workspace B), plus test_batch2_tools_operator_tier_and_permission_levels.",
+        "python3 -m py_compile the new files; cd orchestrator && python -c \"from main import app; print('import OK')\"",
+        "cd orchestrator && python -m pytest tests/test_prd143_tools_batch2.py -v",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": true,
+      "notes": "The risk posture is explicit in PRD-143 \u00a79 and accepted for the pilot: gates-and-logs (hierarchy checks, destructive backstop, audit, rollback, kill-switch), not exclusion. Cross-tenant stays forbidden \u2014 workspace-scoped always. | DONE 2026-06-10: 11 operator tools landed via the 3-file pattern \u2014 members (list/invite/set_role/remove; handlers_members.py, actions_members.py; invite delegates to core/workspaces/invitations.py::invite_member_to_workspace, extracted from POST /team/invite so router+tool share one flow; invite token never returned to the LLM), workspace+system settings (handlers_workspace.py \u2014 fail-closed OPERATOR_WORKSPACE_SETTINGS_KEYS whitelist {byok_overrides, default_notification_channel} importing api.workspaces validators; system settings masked when is_sensitive, update is write+requires_confirmation as it is platform-wide), SDK API keys (handlers_api_keys.py via ApiKeyService \u2014 BYOK provider keys deliberately excluded: raw secrets must not transit LLM context), plugin disable (handlers_marketplace.py::uninstall_plugin, cascade unassign). Destructive set {set_member_role, remove_member, revoke_api_key, uninstall_plugin} = destructive+requires_confirmation=True (executor backstop). Registry 148 actions; all 11 wired in platform_executor.py. Tests: 30/30 story tests + 85 prd143 family + 8 security gates green. NOTE: 'from main import app' is blocked LOCALLY by a pre-existing venv gap (email-validator missing; pinned in requirements.txt; EmailStr pre-dates this story at api/team.py) \u2014 discovery-stack import + registration verified directly instead."
+    },
+    {
+      "id": "S12",
+      "title": "Graph cold-start: one-shot telemetry seed backfill (authored, never prod-run)",
+      "description": "As Auto, I want the routing graph seeded from existing tool_execution_logs, so graph routing gives signal before months of organic usage.",
+      "acceptanceCriteria": [
+        "NEW orchestrator/scripts/seed_tool_routing_graph.py: a one-shot backfill entry point that REUSES core/services/edge_builder.py's recompute logic (import and drive it \u2014 do not reimplement edge math) to populate tool_routing_edges/tool_routing_affinities from historical tool_execution_logs. Workspace-scoped, idempotent (re-running converges to the same rows, no duplicates), supports --workspace-id and --dry-run.",
+        "NEVER run against a live/prod database \u2014 the seed is human-applied like a migration (PRD-143 US-005). The script refuses to run unless an explicit --yes flag is passed, and the story only AUTHORS + tests it against test fixtures.",
+        "After seeding (in tests), graph_router returns non-empty ranked tools for a common seeded intent; the semantic index remains the floor for unseeded intents (no behaviour change there).",
+        "TDD (RED first): orchestrator/tests/test_prd143_graph_seed.py \u2014 test_seed_backfills_edges_from_logs, test_seed_is_idempotent, test_seeded_graph_routes_common_intent, test_dry_run_writes_nothing, test_unseeded_intent_falls_back_to_semantic.",
+        "python3 -m py_compile orchestrator/scripts/seed_tool_routing_graph.py; cd orchestrator && python -m pytest tests/test_prd143_graph_seed.py -v",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": true,
+      "notes": "DONE 2026-06-10 (committed by supervisor): scripts/seed_tool_routing_graph.py (one-shot backfill reusing edge_builder recompute; --workspace-id/--dry-run/--yes guard) + edge_builder.py extended for seed entry (+34/-14); 6 tests green (test_prd143_graph_seed.py), 42 edge_builder regression tests green. Import-gate validation recorded as venv-slow (>300s) \u2014 py_compile + suites are the green signal. Child iterations stalled on the harness auto-backgrounding the slow import; supervisor landed the finished work."
+    },
+    {
+      "id": "S13",
+      "title": "Selection robustness at ~200 tools: synthetic fixture + top-K verification + su negative cases",
+      "description": "As the Super admin, I want proof the LLM gets the right handful out of 200 tools and never an su tool, before the real catalogue grows.",
+      "acceptanceCriteria": [
+        "Tests-only story. Build a synthetic 200-action registry fixture (generated ActionDefinitions across realistic categories \u2014 agents, channels, widgets, missions, knowledge, admin \u2014 including ~7 super_admin_only ones mirroring the real tier).",
+        "orchestrator/tests/test_prd143_selection_at_scale.py \u2014 test_relevant_tool_in_topk_for_representative_intents (\u22658 representative intents e.g. 'create an agent', 'connect slack channel', 'upload knowledge', 'invite a member' \u2014 assert the expected tool is in the selected top-K set), test_su_tools_never_in_topk_for_operator (across ALL intents incl. 'show me the logs' / 'query prometheus' \u2014 the su tools never appear for a non-su principal), test_topk_is_bounded (selected set \u2264 SEMANTIC_TOOL_ROUTING_TOP_K), test_dispatcher_enum_matches_ranked_set.",
+        "If top-K=15 demonstrably starves any representative intent at 200 tools, tune via config (the existing SEMANTIC_TOOL_ROUTING_TOP_K setting in config.py) and record the chosen value + evidence in the story notes \u2014 do NOT hardcode.",
+        "Embedding calls must be faked/deterministic in tests (mirror the idiom in orchestrator/tests/test_platform_actions_section_graph.py and test_us014_graph_router_delegation.py \u2014 fake GraphRouter/embedding fixtures already exist).",
+        "cd orchestrator && python -m pytest tests/test_prd143_selection_at_scale.py -v",
+        "Typecheck passes"
+      ],
+      "priority": 13,
+      "passes": true,
+      "notes": "PRD-143 US-006 first half + FR-5. The fixture is the rehearsal for the real ~200 catalogue. DONE 2026-06-10: tests-only — tests/test_prd143_selection_at_scale.py: synthetic 200-action registry (11 operator anchors mirroring real S10/S11 names + 2 promoted + the 7 su-tier names from the S4 manifest + 180 generated fillers across realistic categories) ranked by the REAL ActionSemanticIndex over deterministic md5 hash-bag embeddings (DIM=1024, no network, run-stable). 31/31 green FIRST RUN — no gap in the S1-S3 stack at scale. AC-3 starvation evidence: every representative intent's expected tool ranks 1/15 (worst rank 1) at 200 tools → SEMANTIC_TOOL_ROUTING_TOP_K=15 kept, no tuning needed. su negatives counter-proven non-vacuous (each obs intent's paired su tool ranks once include_super_admin=True). Dispatcher enum == ranked set exactly (incl. an obs-flavoured intent), promoted stay first-class/never enum members, bound pinned to the config value via tr._semantic_routing_top_k(). 58 green with the 4 neighbouring selection suites."
+    },
+    {
+      "id": "S14",
+      "title": "Selection-health metric: hit-rate/fallback-rate emitted via existing telemetry, surfaced su-locked",
+      "description": "As the Super admin, I want a selection-health signal (hit-rate, fallback rate) on my locked dashboard, so I can see tool selection working at scale.",
+      "acceptanceCriteria": [
+        "REUSE the existing telemetry path \u2014 signal_recorder / tool-routing telemetry (modules/tools/discovery/signal_recorder.py) or the heartbeat summary mechanism (services/heartbeat_service.py) \u2014 to record per-selection outcome: narrowed vs not-narrowed (the existing tool-trace log at tool_router.py:417-428 already distinguishes these; persist the counter instead of log-only). NO new infra, NO new table if an existing telemetry/log table fits (tool_execution_logs / heartbeat results).",
+        "Expose an aggregate endpoint on one of the ALREADY-LOCKED obs routers (e.g. analytics_real.py): selection hit-rate (relevant action chosen from the narrowed enum), fallback rate (narrow_reason set / rank returned empty), window parameterized. Inherits require_super_admin from S6 automatically.",
+        "TDD (RED first): orchestrator/tests/test_prd143_selection_metric.py \u2014 test_selection_outcome_recorded_on_narrowed_dispatch, test_fallback_recorded_when_rank_fails, test_metric_endpoint_aggregates, test_metric_endpoint_su_locked (403 for non-su).",
+        "python3 -m py_compile the changed files; cd orchestrator && python -c \"from main import app; print('import OK')\"",
+        "cd orchestrator && python -m pytest tests/test_prd143_selection_metric.py -v",
+        "Typecheck passes"
+      ],
+      "priority": 14,
+      "passes": true,
+      "notes": "PRD-143 US-006 second half. The metric lives on the su-locked surface by design \u2014 obs is Gerard's. DONE 2026-06-10: selection outcome persisted instead of log-only \u2014 get_tools_for_agent records narrowed/fallback per selection on the EXISTING ToolSignalRecorder (record_selection/peek_selection: counters in stats() + bounded (ws,agent) last-selection stash, config TOOL_SELECTION_STASH_MAXSIZE); the platform_execute dispatch (unified_executor) peeks the stash and attaches selection_outcome {action, narrowed, hit=chosen\u2208narrowed-enum (computed BEFORE registry validation so enum escapes count as misses), enum_size, reason} to caller_context; the PRD-139 universal telemetry hook persists it at tool_execution_logs.router_decision->'selection' \u2014 NO new infra/table. GET /api/analytics/selection-health on the S6-locked analytics_real router (inherits require_super_admin) aggregates hit_rate=hits/narrowed + fallback_rate=fallback/selections over the existing _parse_window param. 4/4 story tests green (RED first: missing recorder API + 404); 309 green across 24 neighbouring suites \u2014 the single test_dispatcher_parallel combined-run failure reproduces on the stashed BASELINE (pre-existing inter-suite flake, not S14). Known limit: the chat ATOM-path narrowing (service.py) does not re-record; its dispatches reuse the last full-surface stash entry or carry none \u2014 best-effort telemetry by design. Full-app import gate dropped per run rules (venv-slow)."
+    },
+    {
+      "id": "S15",
+      "title": "Concierge MVP: 'set up my workspace/agents' journey, fully autonomous, audited, su-clean",
+      "description": "As a user, I say 'set up my workspace' and Auto plans and executes it end-to-end under autonomy=full with no confirmation \u2014 every step audited, never touching an su tool.",
+      "acceptanceCriteria": [
+        "Wire the journey through the EXISTING Arc \u2014 AutoBrain / tool_router planning + execution (consumers/chatbot/service.py + modules/tools/tool_router.py) under autonomy=full. Phase 1 wires a journey; it does NOT build a new planner (PRD-143 \u00a79). The journey: create/configure 1-2 agents \u2192 set model/power config \u2192 connect a channel (mocked) \u2192 launch a starter playbook/mission \u2192 recommend next steps. Use operator tools from S10/S11 + existing actions.",
+        "If the journey needs a steering artifact (a journey prompt/skill seed), add the MINIMAL one via existing mechanisms (personas/prompts already in DB patterns \u2014 no file hacks for DB data, memory feedback-no-file-hacks-for-db-data).",
+        "GOLDEN-JOURNEY TEST (the deliverable): orchestrator/tests/test_prd143_concierge_journey.py \u2014 test_journey_end_to_end_with_mocked_externals (drives the full flow, asserts each setup step's effect), test_every_step_audited (Wave 4 audit trail has a distinct row per autonomous action, queryable), test_journey_never_invokes_su_tool (assert the executed action list \u2229 su tier == \u2205), test_journey_requires_confirmation_at_standard_autonomy.",
+        "External calls (LLM, channel connect) mocked/faked; DB via test fixtures. Reuse the chatbot/harness test idiom from conftest.py.",
+        "python3 -m py_compile the changed files; cd orchestrator && python -c \"from main import app; print('import OK')\"",
+        "cd orchestrator && python -m pytest tests/test_prd143_concierge_journey.py -v",
+        "Typecheck passes"
+      ],
+      "priority": 15,
+      "passes": true,
+      "notes": "PRD-143 US-007 / WS-D. Journey #1 is workspace/agents (pure-platform, Open Q3 recommendation); Shopify is journey #2 in a follow-on PRD. DONE 2026-06-10: golden journey drives the REAL Arc — StreamingChatService._stream_tool_loop → ToolLoopExecutor → ToolRouter.execute_and_format → execute_tool → UnifiedToolExecutor (platform_execute dispatcher + promoted first-class) → fresh PlatformActionExecutor with REAL gates (su lock, confirmation dial, PRD-140 hierarchy consulted for update_agent, S8 autonomous marker, S14 selection stash); only leaf handlers + the LLM are scripted (the mocked externals). Journey: create_agent → update_agent → set_power_mode → connect_channel → invite_member → set_member_role (destructive+requires_confirmation — the dial-governed step; the PRD-sanctioned administrative operator surface) → execute_playbook → recommendations. 4/4 tests green: e2e effects (workspace-scoped, server-minted _agent_id, create→configure id chaining, hierarchy gate consulted); every step audited via real write_telemetry replay (7 distinct queryable identities — action_name for first-class, router_decision->selection->action for dispatches; EXACTLY the role-grant carries router_decision->>'autonomous'); su-clean (surface enum + executed-set ∩ su == ∅, hallucinated su dispatch refused fail-closed with caller_context=None); standard autonomy halts the journey at the confirmation gate (steps 1-5 run, role-grant + playbook never; zero autonomous markers). REAL GAP fixed forward (RED first): execute_and_format swallowed requires_confirmation stops as 'Unknown error' — tool_router.py:660 now surfaces the executor's confirmation message (names action + permission level) to the LLM. No steering artifact needed — the journey runs on the existing surface. 192 green across the 15-file prd143 family; tool_router/chat/harness neighbours green (the combined-run chat_failure_path failures reproduce on the stashed baseline — pre-existing ordering flake; suite is 13/13 standalone and 17/17 with the journey suite). Full-app import gate skipped per prompt (venv-slow; email-validator missing pre-existing)."
+    },
+    {
+      "id": "S16",
+      "title": "Negative boundary sweep: no path crosses the obs lock \u2014 surface, ranking, executor, HTTP, API key, autonomy",
+      "description": "As the Super admin, I want one cross-cutting test file that proves NO operator path reaches the su tier, so the invariant survives future changes.",
+      "acceptanceCriteria": [
+        "Tests-only story. orchestrator/tests/test_prd143_boundary_sweep.py \u2014 parametrized over EVERY su-tier action from the manifest: test_absent_from_openai_tools_surface, test_absent_from_dispatcher_enum, test_absent_from_semantic_ranking, test_absent_from_graph_ranking, test_executor_refuses_direct_call (operator caller_context), test_executor_refuses_under_full_autonomy, test_executor_refuses_api_key_admin; plus parametrized over all 13 locked routers: test_router_403_for_operator_and_api_key; plus test_set_autonomy_level_not_in_auto_surface_at_any_autonomy (the dial is human-held) and test_audit_distinguishes_autonomous_actions (queryable filter).",
+        "The sweep imports the su set FROM THE REGISTRY (single source of truth), not a hardcoded list \u2014 a future su action is automatically swept.",
+        "If ANY sweep test finds a hole, fix the hole in the responsible module (registry/executor/surface/router) in this same story \u2014 fail-closed, never weaken the test.",
+        "cd orchestrator && python -m pytest tests/test_prd143_boundary_sweep.py -v",
+        "cd orchestrator && python -m pytest tests/ -k prd143 -q (the full PRD-143 suite passes together)",
+        "Typecheck passes"
+      ],
+      "priority": 16,
+      "passes": true,
+      "notes": "PRD-143 US-008 negative half + FR-3. This is the invariant net Gerard's review leans on \u2014 make it exhaustive and registry-driven. DONE 2026-06-10: tests-only \u2014 tests/test_prd143_boundary_sweep.py, 65 tests, ZERO holes found (the boundary held on every path; the 10 initial reds were sweep-control errors \u2014 promoted operators are first-class, never enum members, and 2 su actions are promoted so the semantic counter-proof needed exclude_promoted=False). su set read LIVE from register_all_actions() (7, floor+controls pinned non-vacuous); router set parsed from the manifest table (13 modules \u2192 14 APIRouter objects incl. llm_analytics admin_router). Per su action: absent from first-class surface + dispatcher enum across default/admin-elevated/PRD-122-owner-fallback elevations; never semantically ranked even as the STRONGEST match (own-description query, cosine 1.0, promoted filter off) with include_super_admin=True counter-proof; dropped from graph chains as edge targets (operator expansion kept, entry rank pinned include_super_admin=False); executor refuses pre-execution for member/full-autonomy/api-key-admin with handler-leak detectors. Routers: structural pin (require_super_admin IDENTITY in router.dependencies) + behavioural FULL route enumeration (every route \u00d7 every method \u00d7 member/ws-admin/owner/api-key \u2192 403 'Super admin only'). Dial: set absent from enum\u222afirst-class at every elevation, read stays reachable (asymmetry proven). Audit: mixed write_telemetry rows split exactly on router_decision->>'autonomous'. 257 green across the 16-file prd143 family run TOGETHER (glob form; the AC's `tests/ -k prd143` directory form trips 32 PRE-EXISTING collection errors in unrelated suites in this lean venv \u2014 identical under -k prd142 \u2014 so the family glob is the green signal, S15 precedent). Harness note: the sweep's fake-apscheduler shim is find_spec-guarded \u2014 it collects alphabetically first and an unconditional fake would shadow the REAL package for the concierge journey's apscheduler.triggers.cron import."
+    },
+    {
+      "id": "S17",
+      "title": "Self-review, full suite, push branch, open the PR for Gerard",
+      "description": "As Gerard, I want the finished branch reviewed against the security invariants, the full test suite green, and a PR opened ready for my review and test \u2014 I merge it myself.",
+      "acceptanceCriteria": [
+        "Pre-flight: every story S1-S16 has passes:true. If not, STOP \u2014 this story is last.",
+        "Run the full PRD-143 suite + the neighbouring suites the diff touches: cd orchestrator && python -m pytest tests/ -k 'prd143' -v AND python -m pytest tests/test_us014_graph_router_delegation.py tests/test_platform_actions_section_graph.py tests/test_harness_self_management.py -q (no regressions in the surfaces this PRD extends). All green.",
+        "Self-review `git diff main...HEAD` against the invariant checklist; fix anything found (CRITICAL/HIGH severity fixed in this story): (1) su gate fail-closed everywhere \u2014 default excludes, unknown role excludes, caller_context None refuses; (2) full_autonomy/is_admin/workspace-owner-fallback never satisfy an su check; (3) API-key and service principals 403 on su tools AND obs routers; (4) no os.getenv outside config.py; (5) no hardcoded URLs/keys/magic values; (6) every new handler workspace-scoped; (7) no _legacy shims, no dead code left where checks were superseded (S7); (8) no frontend/ changes; (9) canonical naming platform_*; (10) tests assert, never skip \u2014 no weakened assertions, no # type: ignore.",
+        "Update docs/PRDS/PRD-143-AUTO-FULL-PLATFORM-OPERATOR.md: tick the delivered user-story checkboxes, set Status to 'Implemented on ralph/prd-143-operator-obs-lock \u2014 pending Gerard review + obs-manifest sign-off'.",
+        "git push -u origin ralph/prd-143-operator-obs-lock",
+        "gh pr create --base main --title 'PRD-143 Rev 2: Auto full platform operator + observability lock (super-admin only)' --body with: summary of the inversion (full operator surface, obs locked to super_admin), the obs-tier manifest table (7 tools + 13 routers), the three su-gate traps and how each is tested, test plan (suite names + counts), the KNOWN consequence (non-su dashboards 403 \u2014 Open Q4), and the sign-off asks (manifest Q1, autonomy-dial Q2). Do NOT merge, do NOT enable auto-merge \u2014 Gerard merges himself (memory pilot-all-in-autonomy).",
+        "Record the PR URL in this story's notes.",
+        "Typecheck passes"
+      ],
+      "priority": 17,
+      "passes": true,
+      "notes": "The ONLY story allowed to push or open a PR. Merge is Gerard's \u2014 the harness rule on gate-changing PRs stands. DONE 2026-06-10: family suite 257/257 green (16-file glob form; the AC's `tests/ -k prd143` directory form trips the 32 pre-existing collection errors documented in S16). Neighbouring suites 39/39 green run per-file (us014 7/7, section_graph 8/8, harness 24/24; us014+section and section+harness pairs also green). The combined us014+harness invocation hangs LOCALLY only: harness sets POSTGRES localhost:5432 setdefaults at import, then us014's delegation test triggers the PRE-EXISTING modules.tools import-chain fail-soft DB connect (S2 note) which wedges on the broken local docker 5432 proxy \u2014 proven environmental: bare `import platform_actions` hangs at 5432 and completes at closed 59432 with zero PRD-143 code in the loop; every interacting file (smart_tool_router.py, both test files, modules/tools/__init__.py, agents/core.llm chains) is UNCHANGED vs main. Self-review 10/10 clean: frontend/ untouched; no os.getenv outside config.py; no _legacy/type-ignore/skip in code (only matches are the plan text itself); no hardcoded URLs/keys; su seams verified (action_registry fail-closed defaults, platform_executor su gate :557 refuses caller_context=None, super_admin.py fail-closed, PRD-122 owner fallback flips is_admin only). py_compile 77 branch .py files OK. PRD doc: 32/32 story checkboxes ticked, Status \u2192 'Implemented on ralph/prd-143-operator-obs-lock \u2014 pending Gerard review + obs-manifest sign-off'. Branch pushed; PR OPEN for Gerard: https://github.com/AutomatosAI/automatos-ai/pull/434 (not merged, no auto-merge \u2014 Gerard merges himself)."
+    }
+  ]
+}

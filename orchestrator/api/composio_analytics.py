@@ -17,13 +17,20 @@ from sqlalchemy import func, desc, case, cast, Float
 
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.super_admin import require_super_admin
 from core.database.database import get_db
 from core.models.core import Agent
 from core.models.composio import ComposioEntity, ComposioConnection, AgentAppFeature
 from core.models.composio_cache import ToolExecutionLog
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/analytics/composio", tags=["Composio Analytics"])
+
+# PRD-143 S7: observability tier — router-wide super-admin lock (fail-closed).
+router = APIRouter(
+    prefix="/api/analytics/composio",
+    tags=["Composio Analytics"],
+    dependencies=[Depends(require_super_admin)],
+)
 
 
 # ── Pydantic schemas ─────────────────────────────────────────────────

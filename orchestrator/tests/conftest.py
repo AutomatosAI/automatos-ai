@@ -1,4 +1,5 @@
 """Shared fixtures for plugin system tests."""
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -6,6 +7,62 @@ from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
+
+
+def _module_is_real(mod) -> bool:
+    """True iff ``mod`` is a genuinely-loaded module/package, not a test stub.
+
+    Realness is decided by the filesystem, not by ``__spec__`` presence:
+      * a real module/regular package has ``__file__`` pointing at a file that
+        EXISTS on disk;
+      * a real namespace package has a ``__spec__`` carrying
+        ``submodule_search_locations``.
+    Everything else — bare ``ModuleType`` stubs, ``module_from_spec`` stubs with
+    ``origin=None``, and (critically) path-bearing stubs that set
+    ``__path__=[realdir]`` but no ``__file__`` (these import as
+    "(unknown location)") — is a stub. A ``__spec__``- or ``__path__``-only
+    check misses the last shape, which is the PR #434 CI failure.
+    """
+    f = getattr(mod, "__file__", None)
+    if f and os.path.exists(f):
+        return True
+    spec = getattr(mod, "__spec__", None)
+    if spec is not None and getattr(spec, "submodule_search_locations", None):
+        return True
+    return False
+
+
+# The real app chain that the heavy test_prd143_* modules import at COLLECTION
+# time. Preloaded once while sys.modules is still clean (pytest_configure, below)
+# and snapshotted, so those modules resolve from a real cache instead of
+# cold-re-importing against a sys.modules already polluted by sibling stubs.
+_PRELOAD_TARGETS = (
+    "modules.tools.discovery.platform_executor",
+    "modules.tools.discovery.action_registry",
+    "modules.tools.discovery.platform_actions",
+    "modules.tools.tool_router",
+    "modules.tools.execution.telemetry",
+    "consumers.chatbot.service",
+    "core.auth.super_admin",
+)
+_REAL_APP_SNAPSHOT: dict = {}
+
+
+def _restore_real_app_modules() -> None:
+    """Put the preloaded real modules back over any stub a sibling left.
+
+    Only entries that are currently MISSING or a stub are overwritten — a real
+    module already in place (even a different instance) is left untouched, so
+    this cannot disturb a test that legitimately holds the real module. No
+    package is re-imported, so the cold-import collision the purge approach hit
+    ("cannot import name 'tools' from 'modules'") cannot occur.
+    """
+    for _name, _real in _REAL_APP_SNAPSHOT.items():
+        _cur = sys.modules.get(_name)
+        if _cur is _real:
+            continue
+        if not _module_is_real(_cur):
+            sys.modules[_name] = _real
 
 # Ensure orchestrator package is importable
 _orchestrator_root = str(Path(__file__).resolve().parent.parent)
@@ -51,6 +108,59 @@ def _repair_stubbed_package_bindings():
             except Exception:
                 pass
     yield
+
+
+def pytest_collectstart(collector):
+    """Collection-time stub purge for heavy-import test modules.
+
+    The autouse ``_repair_stubbed_package_bindings`` fixture above runs at
+    TEST-SETUP time and is fill-missing only — too late and too gentle for a
+    module whose *top level* imports the real ``modules.*`` / ``consumers.*``
+    app packages at COLLECTION time (e.g. ``test_prd143_boundary_sweep``
+    imports ``modules.tools.discovery.platform_executor`` at import). By the
+    time such a module is collected, earlier siblings have injected
+    non-file-backed ``ModuleType`` stubs (e.g.
+    ``test_platform_actions_section_graph`` stubs
+    ``modules.tools.discovery.*`` at module level), so the real import resolves
+    against a stub and dies at collection — pytest then aborts the WHOLE run
+    ("Interrupted: 1 error during collection"). The stubs come in two shapes:
+    bare (``__spec__ is None``) AND spec'd-but-pathless ("unknown location"),
+    so a ``__spec__``-based guard misses half of them — gate on file-backing.
+    Linux collection order makes the stubs live here; macOS order hides it,
+    which is why this passed locally and failed only on CI (PR #434).
+
+    Right before one of these modules collects, restore the preloaded real app
+    modules over any sibling's stub (see ``_restore_real_app_modules``), so the
+    module's collection-time imports resolve to the real, fully-initialised
+    packages instead of a stub ("(unknown location)") or a doomed cold re-import
+    ("cannot import name 'tools' from 'modules'").
+    """
+    name = getattr(collector, "name", "")
+    if not name.startswith("test_prd143"):
+        return
+    _restore_real_app_modules()
+
+
+def pytest_configure(config):
+    """Preload the real app chain while sys.modules is still clean.
+
+    Runs once, before any test module is collected (so before sibling tests
+    inject their ``modules.*`` / ``consumers.*`` stubs). Importing the chain now
+    populates sys.modules with the real, fully-initialised packages and lets us
+    snapshot them; ``pytest_collectstart`` then restores that snapshot in front
+    of the heavy ``test_prd143_*`` modules. Best-effort: a preload failure (e.g.
+    an optional dep missing in a lean dev venv) just leaves the snapshot partial
+    — never breaks the run.
+    """
+    import importlib
+    for _tgt in _PRELOAD_TARGETS:
+        try:
+            importlib.import_module(_tgt)
+        except Exception:
+            pass
+    for _name, _mod in list(sys.modules.items()):
+        if _name.split(".")[0] in ("modules", "consumers") and _module_is_real(_mod):
+            _REAL_APP_SNAPSHOT[_name] = _mod
 
 
 # ---- Database mock ----

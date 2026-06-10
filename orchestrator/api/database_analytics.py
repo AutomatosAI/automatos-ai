@@ -13,9 +13,16 @@ import logging
 from core.database.database import get_db
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
+from core.auth.super_admin import require_super_admin
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/database/analytics", tags=["Database Analytics"])
+
+# PRD-143 S7: observability tier — router-wide super-admin lock (fail-closed).
+router = APIRouter(
+    prefix="/api/database/analytics",
+    tags=["Database Analytics"],
+    dependencies=[Depends(require_super_admin)],
+)
 
 @router.get("/stats")
 async def get_database_query_stats(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):

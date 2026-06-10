@@ -234,6 +234,11 @@ _ar_spec = importlib.util.spec_from_file_location(
 )
 _ar_mod = importlib.util.module_from_spec(_ar_spec)
 _ar_spec.loader.exec_module(_ar_mod)
+# PRD-143: pre-initialize this module's registry singleton (empty) so the
+# su chain filter's fallback lookup (_drop_super_admin_chains) never triggers
+# the live platform_actions registrar — no su actions in these fixtures.
+_ar_mod._registry_instance = _ar_mod.ActionRegistry()
+_ar_mod._registry_instance._initialized = True
 
 # Create fake package for the relative import chain
 _pkg_name = "gr_test_pkg"

@@ -49,12 +49,38 @@ from modules.tools.discovery.handlers_documents import (
     list_documents,
     delete_document,
     reprocess_document,
+    upload_document,
+)
+from modules.tools.discovery.handlers_channels import (  # PRD-143 S10
+    list_channels,
+    connect_channel,
+    configure_channel,
+    start_channel,
+    stop_channel,
+)
+from modules.tools.discovery.handlers_widgets import (  # PRD-143 S10
+    get_widget_config,
+    update_widget_config,
 )
 from modules.tools.discovery.handlers_workspace import (
     get_workspace_info,
     get_memory_stats,
     list_connected_apps,
     store_memory,
+    update_workspace_settings,  # PRD-143 S11
+    list_system_settings,  # PRD-143 S11
+    update_system_setting,  # PRD-143 S11
+)
+from modules.tools.discovery.handlers_members import (  # PRD-143 S11
+    list_members,
+    invite_member,
+    set_member_role,
+    remove_member,
+)
+from modules.tools.discovery.handlers_api_keys import (  # PRD-143 S11
+    list_api_keys,
+    create_api_key,
+    revoke_api_key,
 )
 from modules.tools.discovery.handlers_monitoring import (
     get_logs,
@@ -85,6 +111,7 @@ from modules.tools.discovery.handlers_marketplace import (
     install_plugin,
     install_skill,
     install_model,
+    uninstall_plugin,  # PRD-143 S11
 )
 from modules.tools.discovery.handlers_skills import (
     get_skill_content,
@@ -118,7 +145,7 @@ from modules.tools.discovery.handlers_harness import (
     harness_history,
 )
 from modules.tools.discovery.handlers_routing import create_routing_rule  # PRD-142 Wave 4 (W4-S6)
-from modules.tools.discovery.handlers_power import set_power_mode  # PRD-142 Wave 4 (W4-S5)
+from modules.tools.discovery.handlers_power import set_power_mode, get_power_mode  # PRD-142 W4-S5 / PRD-143 S10
 from modules.tools.discovery.handlers_auto_reporting import (
     get_auto_reporting_prefs,
     update_auto_reporting_prefs,
@@ -402,6 +429,28 @@ class PlatformActionExecutor:
             "platform_create_routing_rule": create_routing_rule,
             # PRD-142 Wave 4 (W4-S5): workspace power-mode knob
             "platform_set_power_mode": set_power_mode,
+            # PRD-143 S10: setup-surface gap-fill (operator tier)
+            "platform_get_power_mode": get_power_mode,
+            "platform_list_channels": list_channels,
+            "platform_connect_channel": connect_channel,
+            "platform_configure_channel": configure_channel,
+            "platform_start_channel": start_channel,
+            "platform_stop_channel": stop_channel,
+            "platform_get_widget_config": get_widget_config,
+            "platform_update_widget_config": update_widget_config,
+            "platform_upload_document": upload_document,
+            # PRD-143 S11: administration surface (operator tier by design)
+            "platform_list_members": list_members,
+            "platform_invite_member": invite_member,
+            "platform_set_member_role": set_member_role,
+            "platform_remove_member": remove_member,
+            "platform_update_workspace_settings": update_workspace_settings,
+            "platform_list_system_settings": list_system_settings,
+            "platform_update_system_setting": update_system_setting,
+            "platform_list_api_keys": list_api_keys,
+            "platform_create_api_key": create_api_key,
+            "platform_revoke_api_key": revoke_api_key,
+            "platform_uninstall_plugin": uninstall_plugin,
             # Wave 2: Auto reporting preferences + send-notification wrapper
             "platform_get_auto_reporting_prefs": get_auto_reporting_prefs,
             "platform_update_auto_reporting_prefs": update_auto_reporting_prefs,
@@ -480,8 +529,9 @@ class PlatformActionExecutor:
             action_name: Registered platform action name.
             params: Action parameters.
             caller_context: Optional dict with keys user_id, system_role,
-                workspace_role.  Used by admin_only gate (US-003).
-                If None, admin_only actions are denied (fail-closed).
+                workspace_role.  Used by the super_admin_only gate (PRD-143)
+                and the admin_only gate (US-003).  If None, super_admin_only
+                and admin_only actions are denied (fail-closed).
         """
         # LLMs sometimes send params as a JSON string instead of a dict
         if isinstance(params, str):
@@ -497,6 +547,30 @@ class PlatformActionExecutor:
         try:
             from modules.tools.discovery import get_action_registry
             action_def = get_action_registry().get(action_name)
+
+            # PRD-143: Super-admin gate — fail-closed, BEFORE and independent
+            # of the admin gate below. The ONLY principal that passes is a
+            # literal system_role == 'super_admin' in caller_context. The
+            # full-autonomy dial, workspace roles, the workspace-owner
+            # fallback and API keys (system_role='admin') NEVER satisfy it;
+            # caller_context=None refuses (no identity resolution).
+            if action_def and action_def.super_admin_only:
+                if (caller_context or {}).get("system_role") != "super_admin":
+                    logger.warning(
+                        "[PlatformExecutor] Super-admin-only action '%s' denied — "
+                        "workspace_id=%s, caller_context=%s",
+                        action_name,
+                        self.workspace_id,
+                        {k: v for k, v in (caller_context or {}).items() if k != "user_id"},
+                    )
+                    return {
+                        "success": False,
+                        "permission_denied": True,
+                        "error": (
+                            f"Action '{action_name}' is restricted to the platform "
+                            "super admin (observability tier)."
+                        ),
+                    }
 
             # Full-autonomy dial (per-workspace setting). When on: Auto is
             # treated as admin and the confirmation gate is skipped. Everything
@@ -734,7 +808,20 @@ class PlatformActionExecutor:
                 logger.warning("[PRD-108] Failed to resolve field_id: %s", e)
 
         try:
-            return await handler(self.db, self.workspace_id, params)
+            result = await handler(self.db, self.workspace_id, params)
+            # PRD-143 S8: an invocation that ran only because the full-autonomy
+            # dial skipped the confirmation gate is marked here, and the
+            # universal telemetry hook persists it to tool_execution_logs
+            # (router_decision->>'autonomous') — the Wave 4 audit trail
+            # records autonomous actions distinctly and queryably.
+            if (
+                full_autonomy
+                and action_def is not None
+                and action_def.requires_confirmation
+                and isinstance(result, dict)
+            ):
+                result = {**result, "autonomous": True}
+            return result
         except Exception as e:
             logger.error(f"[PlatformExecutor] {action_name} failed: {e}", exc_info=True)
             try:

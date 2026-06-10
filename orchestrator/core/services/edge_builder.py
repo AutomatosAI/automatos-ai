@@ -64,11 +64,16 @@ def wilson_lower_bound(successes: int, total: int, z: float = 1.96) -> float:
     return (centre - spread) / denominator
 
 
-async def build_edges(window: timedelta = timedelta(days=30)) -> EdgeBuildSummary:
+async def build_edges(
+    window: timedelta = timedelta(days=30),
+    workspace_id: Optional[str] = None,
+) -> EdgeBuildSummary:
     """Main entry point: read telemetry, compute edges + affinities, upsert.
 
     Args:
         window: How far back to look in tool_execution_logs.
+        workspace_id: Optional workspace UUID string — restrict the recompute
+            to one workspace's logs (PRD-143 S12 seed backfill scoping).
 
     Returns:
         EdgeBuildSummary with counts of what was built.
@@ -81,7 +86,7 @@ async def build_edges(window: timedelta = timedelta(days=30)) -> EdgeBuildSummar
     with get_db_session() as db:
         # 1. Load execution logs within window
         cutoff = datetime.utcnow() - window
-        logs = _load_logs(db, cutoff)
+        logs = _load_logs(db, cutoff, workspace_id=workspace_id)
         summary.logs_processed = len(logs)
 
         if not logs:
@@ -124,14 +129,16 @@ async def build_edges(window: timedelta = timedelta(days=30)) -> EdgeBuildSummar
 # ---------------------------------------------------------------------------
 
 
-def _load_logs(db: Session, cutoff: datetime) -> List[Dict[str, Any]]:
+def _load_logs(
+    db: Session,
+    cutoff: datetime,
+    workspace_id: Optional[str] = None,
+) -> List[Dict[str, Any]]:
     """Load tool_execution_logs rows from cutoff onwards, return as dicts."""
-    rows = (
-        db.query(ToolExecutionLog)
-        .filter(ToolExecutionLog.executed_at >= cutoff)
-        .order_by(ToolExecutionLog.executed_at.asc())
-        .all()
-    )
+    query = db.query(ToolExecutionLog).filter(ToolExecutionLog.executed_at >= cutoff)
+    if workspace_id:
+        query = query.filter(ToolExecutionLog.workspace_id == workspace_id)
+    rows = query.order_by(ToolExecutionLog.executed_at.asc()).all()
     results = []
     for row in rows:
         # Extract turn_id from router_decision JSONB
@@ -430,11 +437,24 @@ async def _compute_and_upsert_clusters(
     dimension = info.get("dimension") or embedding_manager.get_dimension()
     embedding_model_key = f"{provider}:{model}:{dimension}"
 
-    # Upsert clusters - delete old ones and insert fresh (idempotent rebuild)
-    # Delete existing clusters for this model key, then insert new
-    db.query(ToolRoutingIntentCluster).filter(
-        ToolRoutingIntentCluster.embedding_model_key == embedding_model_key
-    ).delete(synchronize_session="fetch")
+    # Upsert clusters - delete old ones and insert fresh (idempotent rebuild).
+    # Affinities referencing the doomed clusters go FIRST: the FK has no
+    # cascade, so without this a re-run would either FK-error on the cluster
+    # delete or strand intent affinities under dead cluster ids (duplicating
+    # them under the regenerated ids) — re-runs must converge (PRD-143 S12).
+    existing_clusters = (
+        db.query(ToolRoutingIntentCluster)
+        .filter(ToolRoutingIntentCluster.embedding_model_key == embedding_model_key)
+        .all()
+    )
+    if existing_clusters:
+        doomed_ids = [c.id for c in existing_clusters]
+        db.query(ToolRoutingAffinity).filter(
+            ToolRoutingAffinity.intent_cluster_id.in_(doomed_ids)
+        ).delete(synchronize_session="fetch")
+        db.query(ToolRoutingIntentCluster).filter(
+            ToolRoutingIntentCluster.id.in_(doomed_ids)
+        ).delete(synchronize_session="fetch")
     db.flush()
 
     now = datetime.utcnow()

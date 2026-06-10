@@ -8,9 +8,9 @@ at execute() time by PlatformActionExecutor:
     full      — Auto runs as admin and the confirmation gate is skipped.
 
 Both tools are ``promoted`` so Auto always sees the dial and can answer
-"what can you do?" / "go full autonomy" without category routing. ``set`` is
-``admin_only`` so only the workspace owner (not a self-directing sub-agent at
-standard) can turn the dial up.
+"what can you do?" without category routing. ``set`` is ``super_admin_only``
+(PRD-143): the kill-switch dial stays HUMAN — only the platform super admin
+can turn it, at any autonomy level. Auto may read its own dial, never set it.
 """
 
 from .action_registry import ActionDefinition, ActionRegistry
@@ -50,7 +50,7 @@ def register_autonomy_actions(registry: ActionRegistry) -> None:
             "skips the confirmation gate — writes and the destructive deletes run "
             "without asking. 'standard' restores the supervised default. "
             "Workspace-scoped: rate limits and the agent-hierarchy permission check "
-            "still apply. Only the workspace owner can change this."
+            "still apply. Only the platform super admin can change this."
         ),
         category="settings",
         parameters={
@@ -68,7 +68,7 @@ def register_autonomy_actions(registry: ActionRegistry) -> None:
             "required": ["level"],
         },
         permission_level="write",
-        admin_only=True,
+        super_admin_only=True,
         promoted=True,
         tags=["settings", "autonomy", "permissions"],
         examples=[

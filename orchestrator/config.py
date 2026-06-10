@@ -621,6 +621,9 @@ class Config:
     TOOL_SIGNAL_FLUSH_BATCH_SIZE: int = int(os.getenv("TOOL_SIGNAL_FLUSH_BATCH_SIZE", "50"))
     TOOL_SIGNAL_FLUSH_INTERVAL_SECONDS: float = float(os.getenv("TOOL_SIGNAL_FLUSH_INTERVAL_SECONDS", "5.0"))
     TOOL_SIGNAL_QUEUE_MAXSIZE: int = int(os.getenv("TOOL_SIGNAL_QUEUE_MAXSIZE", "10000"))
+    # PRD-143 S14: bounded (workspace, agent) -> last-selection-outcome stash
+    # used to attach hit/fallback telemetry to platform_execute dispatches.
+    TOOL_SELECTION_STASH_MAXSIZE: int = int(os.getenv("TOOL_SELECTION_STASH_MAXSIZE", "512"))
 
     # =============================================================================
     # AWS S3 VECTORS (PRD-42: Cloud Document Sync)

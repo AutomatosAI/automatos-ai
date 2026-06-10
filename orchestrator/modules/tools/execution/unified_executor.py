@@ -254,6 +254,33 @@ class UnifiedToolExecutor:
                     result = {"success": False, "error": "Missing required field: action", "tool": tool_name}
                     return result
 
+                # PRD-143 S14: attach the recorded selection outcome for this
+                # (workspace, agent) surface so the universal telemetry hook
+                # persists it (router_decision->'selection'). hit = the chosen
+                # action came from the narrowed enum; computed BEFORE registry
+                # validation so enum-escaping hallucinations count as misses.
+                # Best-effort: never blocks or fails the dispatch.
+                try:
+                    from modules.tools.discovery.signal_recorder import (
+                        get_tool_signal_recorder,
+                    )
+                    _sel = get_tool_signal_recorder().peek_selection(
+                        workspace_id=workspace_id, agent_id=agent_id
+                    )
+                    if _sel is not None:
+                        caller_context = {
+                            **(caller_context or {}),
+                            "selection_outcome": {
+                                "action": action_name,
+                                "narrowed": _sel["narrowed"],
+                                "hit": (action_name in _sel["allowed"]) if _sel["narrowed"] else None,
+                                "enum_size": _sel.get("enum_size"),
+                                "reason": _sel.get("reason"),
+                            },
+                        }
+                except Exception as _sel_exc:
+                    logger.debug(f"[tool-trace {trace}] selection telemetry skipped: {_sel_exc}")
+
                 # Validate action exists in registry
                 from modules.tools.discovery import get_action_registry
                 registry = get_action_registry()

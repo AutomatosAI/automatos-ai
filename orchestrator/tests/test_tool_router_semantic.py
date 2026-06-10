@@ -429,7 +429,7 @@ def test_run_coroutine_blocking_inside_running_loop():
 
 
 def test_rank_actions_for_dispatcher_happy_path():
-    async def _fake_rank(query, top_k, exclude_admin, exclude_promoted):
+    async def _fake_rank(query, top_k, exclude_admin, exclude_promoted, include_super_admin=False):
         return [
             ("platform_list_agents", 0.91),
             ("platform_create_agent", 0.83),
@@ -513,7 +513,7 @@ def test_get_tools_for_agent_with_query_narrows_enum(caplog):
     """AC: query + flag on → dispatcher enum is the ranked subset."""
     _FAKE_CONFIG_CLS.SEMANTIC_TOOL_ROUTING = True
 
-    async def _rank(query, top_k, exclude_admin, exclude_promoted):
+    async def _rank(query, top_k, exclude_admin, exclude_promoted, include_super_admin=False):
         return [
             ("platform_list_agents", 0.95),
             ("platform_create_agent", 0.80),
@@ -594,7 +594,7 @@ def test_get_tools_for_agent_excludes_admin_when_not_admin():
     regardless of query / ranking output."""
     _FAKE_CONFIG_CLS.SEMANTIC_TOOL_ROUTING = True
 
-    async def _rank(query, top_k, exclude_admin, exclude_promoted):
+    async def _rank(query, top_k, exclude_admin, exclude_promoted, include_super_admin=False):
         # Even if the ranker tried to surface an admin action, the schema
         # builder should drop it.
         return [

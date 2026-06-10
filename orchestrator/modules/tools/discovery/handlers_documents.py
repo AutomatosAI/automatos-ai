@@ -183,3 +183,122 @@ async def reprocess_document(db: Session, workspace_id: UUID, params: Dict[str, 
         db.flush()
         logger.error("[PlatformExecutor] Reprocess failed for doc %d: %s", doc.id, e, exc_info=True)
         return {"success": False, "error": f"Reprocessing failed: {e}"}
+
+
+_TEXT_UPLOAD_EXTENSIONS = {
+    ".md": "markdown",
+    ".markdown": "markdown",
+    ".txt": "text",
+    ".json": "json",
+}
+
+
+async def upload_document(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a knowledge document from text content and process it into RAG (PRD-143 S10).
+
+    Mirrors POST /api/documents/upload for the text formats Auto can supply
+    (markdown/text/json): same dedupe-by-hash, same UPLOAD_DIR/MAX_UPLOAD_BYTES,
+    same DocumentManager processing. Binary formats stay dashboard-only.
+    """
+    from pathlib import Path
+
+    filename = (params.get("filename") or "").strip()
+    content = params.get("content")
+    if not filename:
+        return {"success": False, "error": "Missing required parameter: filename"}
+    if not content:
+        return {"success": False, "error": "Missing required parameter: content"}
+
+    ext = Path(filename).suffix.lower()
+    file_type = _TEXT_UPLOAD_EXTENSIONS.get(ext)
+    if file_type is None:
+        return {
+            "success": False,
+            "error": (
+                f"filename extension must be one of {sorted(_TEXT_UPLOAD_EXTENSIONS)} — "
+                "this tool uploads text content; use the dashboard for binary files"
+            ),
+        }
+
+    try:
+        import hashlib
+        import uuid as _uuid
+
+        from api.documents import MAX_UPLOAD_BYTES, UPLOAD_DIR, get_document_manager
+        from core.models import Document
+
+        data = content.encode("utf-8")
+        if len(data) > MAX_UPLOAD_BYTES:
+            return {"success": False, "error": "Content too large (max 50MB)"}
+
+        content_hash = hashlib.sha256(data).hexdigest()
+        existing = (
+            db.query(Document)
+            .filter(
+                Document.content_hash == content_hash,
+                Document.workspace_id == workspace_id,
+            )
+            .first()
+        )
+        if existing:
+            return {
+                "success": True,
+                "status": "duplicate",
+                "document_id": existing.id,
+                "filename": existing.filename,
+                "message": "Document already exists",
+            }
+
+        UPLOAD_DIR.mkdir(exist_ok=True)
+        file_path = UPLOAD_DIR / f"{_uuid.uuid4().hex}{ext}"
+        file_path.write_bytes(data)
+
+        document = Document(
+            workspace_id=workspace_id,
+            filename=filename,
+            original_filename=filename,
+            file_type=file_type,
+            file_size=len(data),
+            file_path=str(file_path),
+            content_hash=content_hash,
+            status="uploaded",
+            description=params.get("description"),
+            team_access=[],
+            created_by="auto",
+        )
+        db.add(document)
+        db.commit()
+        db.refresh(document)
+
+        try:
+            from modules.rag import DocumentType
+
+            type_enum = {
+                "markdown": DocumentType.MARKDOWN,
+                "text": DocumentType.TEXT,
+                "json": DocumentType.JSON,
+            }[file_type]
+
+            document.status = "processing"
+            db.commit()
+
+            doc_manager = get_document_manager(str(workspace_id))
+            await doc_manager._process_document(document.id, str(file_path), type_enum)
+            db.refresh(document)
+        except Exception as exc:
+            logger.error("[PlatformExecutor] upload_document processing failed for doc %s: %s",
+                         document.id, exc, exc_info=True)
+            document.status = "failed"
+            db.commit()
+
+        return {
+            "success": document.status != "failed",
+            "document_id": document.id,
+            "filename": document.filename,
+            "status": document.status,
+            "chunk_count": document.chunk_count or 0,
+        }
+    except Exception as exc:
+        db.rollback()
+        logger.error("[PlatformExecutor] upload_document failed: %s", exc, exc_info=True)
+        return {"success": False, "error": str(exc)}

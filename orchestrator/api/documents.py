@@ -103,6 +103,10 @@ ALLOWED_MIME_TYPES = {
     "application/octet-stream": [".pdf", ".docx", ".xlsx"],  # fallback for binary
 }
 
+# Shared by POST /upload and the platform_upload_document tool (PRD-143 S10).
+UPLOAD_DIR = Path("/tmp/automotas_uploads")
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50MB
+
 @router.post("/upload", response_model=DocumentUploadResponse)
 async def handle_request(
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -124,7 +128,7 @@ async def handle_request(
         content = await file.read()
         file_size = len(content)
         
-        if file_size > 50 * 1024 * 1024:  # 50MB limit
+        if file_size > MAX_UPLOAD_BYTES:
             raise HTTPException(status_code=400, detail="File too large (max 50MB)")
 
         # MIME type validation using python-magic (detect actual content type)
@@ -165,11 +169,10 @@ async def handle_request(
             )
 
         # Save file temporarily with random filename (never use original filename)
-        upload_dir = Path("/tmp/automotas_uploads")
-        upload_dir.mkdir(exist_ok=True)
+        UPLOAD_DIR.mkdir(exist_ok=True)
 
         safe_filename = f"{uuid.uuid4().hex}{file_extension}"
-        file_path = upload_dir / safe_filename
+        file_path = UPLOAD_DIR / safe_filename
         
         with open(file_path, "wb") as f:
             f.write(content)

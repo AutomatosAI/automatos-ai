@@ -64,7 +64,9 @@ async def write_telemetry(
             status=status,
             error_message=result.get("error") if status == "error" else None,
             execution_time_ms=execution_time_ms,
-            router_decision=_build_router_decision(ctx),
+            router_decision=_build_router_decision(
+                ctx, autonomous=result.get("autonomous") is True
+            ),
             intent_cluster_id=ctx.get("intent_cluster_id"),
             routing_source=ctx.get("routing_source"),
             telemetry_source=ctx.get("telemetry_source", "production"),
@@ -80,9 +82,20 @@ async def write_telemetry(
             pass
 
 
-def _build_router_decision(ctx: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def _build_router_decision(
+    ctx: Dict[str, Any], autonomous: bool = False
+) -> Optional[Dict[str, Any]]:
     """Extract routing metadata from caller_context into router_decision JSONB."""
     decision = {}
+    if autonomous:
+        # PRD-143: confirmation was skipped by the full-autonomy dial — the
+        # distinct, queryable audit marker (router_decision->>'autonomous').
+        decision["autonomous"] = True
+    sel = ctx.get("selection_outcome")
+    if isinstance(sel, dict) and sel:
+        # PRD-143 S14: per-dispatch selection outcome (narrowed/hit/fallback)
+        # — the durable rows behind the su-locked selection-health metric.
+        decision["selection"] = sel
     if ctx.get("routing_candidates"):
         decision["candidates"] = ctx["routing_candidates"]
     if ctx.get("routing_chain_hints"):

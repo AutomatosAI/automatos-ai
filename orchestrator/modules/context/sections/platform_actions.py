@@ -151,9 +151,14 @@ class PlatformActionsSection(BaseSection):
         hints = self._build_chain_hints(chains)
 
         # Build filtered summary from registry
+        # PRD-143: Auto context paths NEVER include the su tier — pinned
+        # explicitly so a future default change cannot widen this surface.
         registry = get_action_registry()
         catalog = registry.build_filtered_prompt_summary(
-            action_names, exclude_admin=True, exclude_promoted=True
+            action_names,
+            exclude_admin=True,
+            exclude_promoted=True,
+            include_super_admin=False,
         )
 
         if not catalog:
@@ -195,7 +200,12 @@ class PlatformActionsSection(BaseSection):
         from modules.tools.discovery.action_registry import get_action_registry
 
         registry = get_action_registry()
-        catalog: str = registry.build_prompt_summary(exclude_promoted=True, exclude_admin=True)
+        # PRD-143: Auto context path — su tier pinned out explicitly.
+        catalog: str = registry.build_prompt_summary(
+            exclude_promoted=True,
+            exclude_admin=True,
+            include_super_admin=False,
+        )
 
         if not catalog:
             logger.warning(
@@ -226,11 +236,13 @@ class PlatformActionsSection(BaseSection):
 
             index = get_action_semantic_index()
             top_k = self._top_k()
+            # PRD-143: Auto context path — su tier pinned out explicitly.
             ranked = await index.rank_actions(
                 query,
                 top_k=top_k,
                 exclude_admin=True,
                 exclude_promoted=True,
+                include_super_admin=False,
             )
             if not ranked:
                 logger.debug(
@@ -245,6 +257,7 @@ class PlatformActionsSection(BaseSection):
                 top_names,
                 exclude_admin=True,
                 exclude_promoted=True,
+                include_super_admin=False,
             )
             if not catalog:
                 return None

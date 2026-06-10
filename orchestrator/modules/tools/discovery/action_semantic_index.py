@@ -67,16 +67,29 @@ class ActionSemanticIndex:
         dimension = info.get("dimension") or self._embedding_manager.get_dimension()
         return f"{provider}:{model}:{dimension}"
 
-    def _eligible_actions(self, exclude_admin: bool, exclude_promoted: bool) -> List[ActionDefinition]:
+    def _eligible_actions(
+        self,
+        exclude_admin: bool,
+        exclude_promoted: bool,
+        include_super_admin: bool = False,
+    ) -> List[ActionDefinition]:
+        # PRD-143: fail-closed — super_admin_only actions are eligible ONLY
+        # when include_super_admin=True is passed explicitly.
         return [
             a for a in self._registry.get_all()
             if not (exclude_admin and a.admin_only)
             and not (exclude_promoted and a.promoted)
+            and (include_super_admin or not a.super_admin_only)
         ]
 
-    async def ensure_indexed(self, exclude_admin: bool = True, exclude_promoted: bool = True) -> None:
+    async def ensure_indexed(
+        self,
+        exclude_admin: bool = True,
+        exclude_promoted: bool = True,
+        include_super_admin: bool = False,
+    ) -> None:
         async with self._get_lock():
-            actions = self._eligible_actions(exclude_admin, exclude_promoted)
+            actions = self._eligible_actions(exclude_admin, exclude_promoted, include_super_admin)
             missing = [a for a in actions if a.name not in self._action_embeddings]
             if not missing:
                 return
@@ -112,8 +125,13 @@ class ActionSemanticIndex:
         top_k: int = 15,
         exclude_admin: bool = True,
         exclude_promoted: bool = True,
+        include_super_admin: bool = False,
     ) -> List[Tuple[str, float]]:
-        await self.ensure_indexed(exclude_admin=exclude_admin, exclude_promoted=exclude_promoted)
+        await self.ensure_indexed(
+            exclude_admin=exclude_admin,
+            exclude_promoted=exclude_promoted,
+            include_super_admin=include_super_admin,
+        )
         # Pre-filter eligibility (admin/promoted), then score every remaining
         # action and let cosine similarity decide ranking. Earlier revisions
         # truncated `candidate_names` at 50 in registration order BEFORE
@@ -122,7 +140,10 @@ class ActionSemanticIndex:
         # PRD-138 Appendix A baselines (US-005) caught this. The PRD allows
         # a wider-candidate-set heuristic only AFTER ranking; we keep things
         # simple by ranking the full eligible set (≤ ~110 actions, sub-ms).
-        eligible_names = [a.name for a in self._eligible_actions(exclude_admin, exclude_promoted)]
+        eligible_names = [
+            a.name
+            for a in self._eligible_actions(exclude_admin, exclude_promoted, include_super_admin)
+        ]
         candidate_names = [n for n in eligible_names if n in self._action_embeddings]
         if not candidate_names:
             return []

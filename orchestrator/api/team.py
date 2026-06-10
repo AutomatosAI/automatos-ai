@@ -9,13 +9,12 @@ from core.auth.dependencies import RequestContext
 from core.auth.clerk import get_clerk_auth
 from core.database.database import get_db
 from core.workspaces.permissions import require_permission, WorkspaceRole
-from core.workspaces.invitations import InvitationService, WorkspaceInvitation
+from core.workspaces.invitations import WorkspaceInvitation, invite_member_to_workspace
 from core.workspaces.audit import AuditService
 from core.workspaces.models import WorkspaceMember
 from core.models.workspaces import Workspace
 from core.models.core import User
 from sqlalchemy.orm import Session
-from config import config
 
 logger = logging.getLogger(__name__)
 
@@ -129,83 +128,25 @@ async def invite_member(
     db: Session = Depends(get_db)
 ):
     """Invite a new member to the workspace via Clerk."""
-    
-    # Check plan limits (basic check)
-    workspace = db.query(Workspace).get(workspace_id)
-    if not workspace:
-        raise HTTPException(404, "Workspace not found")
-        
-    current_members = db.query(WorkspaceMember).filter(
-        WorkspaceMember.workspace_id == workspace_id,
-        WorkspaceMember.is_active == True
-    ).count()
-    
-    # Default to 5 members if not specified
-    limits = workspace.plan_limits or {}
-    max_members = limits.get("max_members", 5)
-    
-    if max_members != -1 and current_members >= max_members:
-        raise HTTPException(400, f"Workspace has reached member limit ({max_members})")
-    
-    # Validate role
-    valid_roles = [r.value for r in WorkspaceRole]
-    if request.role not in valid_roles:
-        raise HTTPException(400, f"Invalid role: {request.role}. Must be one of {valid_roles}")
 
     inviter_internal_id = _resolve_internal_user_id(db, ctx)
     if not inviter_internal_id:
         raise HTTPException(401, "Inviter user not found in database")
 
-    invitation_service = InvitationService(db)
-    invitation = None
-    clerk_invite_data = {}
-
-    # Create local invitation first; then Clerk. If Clerk fails, revoke local invite.
     try:
-        invitation = await invitation_service.create_invitation(
+        invitation = await invite_member_to_workspace(
+            db=db,
             workspace_id=workspace_id,
             email=request.email,
             role=request.role,
-            invited_by=inviter_internal_id,
+            inviter_internal_id=inviter_internal_id,
+            inviter_email=ctx.user.email if ctx.user else None,
         )
     except ValueError as e:
         raise HTTPException(400, str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
 
-    # Send the invitation email via Clerk (user-level, no org required).
-    # Clerk hosts signup, then redirects the invitee to our accept page where
-    # the token is exchanged for a WorkspaceMember row.
-    try:
-        clerk = get_clerk_auth()
-        redirect_url = f"{config.FRONTEND_URL.rstrip('/')}/accept-invitation?token={invitation.token}"
-        clerk_invite_data = await clerk.create_user_invitation(
-            email=request.email,
-            redirect_url=redirect_url,
-            public_metadata={
-                "workspace_id": str(workspace_id),
-                "role": request.role,
-                "invitation_token": invitation.token,
-                "invited_by_email": ctx.user.email if ctx.user else None,
-            },
-            expires_in_days=7,
-        )
-        invitation.clerk_invitation_id = clerk_invite_data.get("id")
-        db.commit()
-    except Exception as e:
-        try:
-            invitation_service.revoke_invitation(invitation)
-        except Exception as revoke_err:
-            logger.error("Failed to revoke invitation after Clerk error: %s", revoke_err)
-        logger.error("Clerk user invitation failed for %s: %s", request.email, e)
-        raise HTTPException(status_code=502, detail=f"Could not send invitation email: {e}") from e
-
-    audit = AuditService(db)
-    audit.log(
-        workspace_id=workspace_id,
-        user_id=inviter_internal_id,
-        action="member:invited",
-        details={"email": request.email, "role": request.role, "clerk_id": clerk_invite_data.get("id")},
-    )
-    
     return InvitationResponse(
         id=invitation.id,
         email=invitation.email,
