@@ -20,11 +20,11 @@
       "title": "RAG: team filter fails closed; fix team-access PATCH SQL",
       "description": "service.py:391-393 except-branch returns ALL candidates unfiltered on DB error (fail-open security hole). Fail closed: on filter error return only candidates with empty team_access (public) and log error-level. Separately, api/documents.py:1871-1924 PATCH/bulk team-access SQL references documents.title and documents.updated_at which DO NOT EXIST in the model (core/models/core.py:548-580) — fix the SQL to the real columns (BINDING Q1: fail-closed).",
       "acceptanceCriteria": [
-        "Test with forced DB error in _filter_by_team: only public docs returned, never team-restricted",
-        "PATCH /api/documents/{id}/team-access and bulk endpoint succeed against real schema (new API test)",
-        "cd orchestrator && pytest -q green"
+        "DONE — _filter_by_team except-branch now returns ONLY candidates with empty metadata.team_access (public) and logs at error level. test_filter_by_team_fails_closed_on_db_error forces SessionLocal to raise and asserts the restricted doc ('b', team_access=['finance']) is never returned.",
+        "DONE — PATCH & bulk SQL fixed to real columns: dropped phantom 'updated_at = NOW()', RETURNING/response use 'filename' (Document has no title/updated_at). test_team_access_sql_targets_real_columns (deterministic, model-introspection + source guard) + @integration test_team_access_endpoints_execute_against_real_schema (runs the real endpoint SQL against CI Postgres; bogus ids -> 404/updated:0, proving every column plans against the live schema; skips with no DB).",
+        "DONE — cd orchestrator && pytest -q: 2064 passed, 17 skipped, 1 xfailed."
       ],
-      "files": ["orchestrator/modules/rag/service.py", "orchestrator/api/documents.py"]
+      "files": ["orchestrator/modules/rag/service.py", "orchestrator/api/documents.py", "orchestrator/tests/test_prd154_s2_team_access.py"]
     },
     {
       "id": "P154-S3",

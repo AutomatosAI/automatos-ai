@@ -389,8 +389,19 @@ class RAGService:
             finally:
                 db.close()
         except Exception as e:
-            logger.warning(f"Team filtering query failed, passing all candidates: {e}")
-            return candidates
+            # Fail CLOSED (BINDING Q1): a DB error must never leak team-restricted
+            # chunks. Surface only the docs we can prove are public (empty
+            # team_access, mirrored into chunk metadata at ingestion).
+            public_only = [
+                c for c in candidates
+                if not (c.get("metadata", {}) or {}).get("team_access")
+            ]
+            logger.error(
+                "Team filtering query failed — failing closed to %d public-only "
+                "candidate(s) of %d (team=%s): %s",
+                len(public_only), len(candidates), team, e, exc_info=True,
+            )
+            return public_only
 
         filtered = [
             c for c in candidates
