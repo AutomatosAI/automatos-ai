@@ -122,6 +122,12 @@ MAX_TASKS = 20
 MAX_PLAN_RETRIES = 3
 TOKENS_PER_TASK_ESTIMATE = 2000  # legacy fallback
 
+# Task titles persist to orchestration_tasks.title (VARCHAR 500). Template and
+# LLM titles embed the mission goal (e.g. "Research scope for: {goal}"), so a
+# long goal overflows the column and aborts mission creation. Titles are short
+# labels — the full goal lives in the task description (TEXT) — so cap here.
+MAX_TASK_TITLE_LEN = 200
+
 
 def _estimate_token_budget(tasks: List["PlannedTask"]) -> int:
     """Sum token budgets based on each task's complexity tier."""
@@ -1061,6 +1067,8 @@ def _parse_plan(
         if not title:
             errors.append(f"tasks[{i}] ({temp_id}): missing title")
             continue
+        if len(title) > MAX_TASK_TITLE_LEN:
+            title = title[: MAX_TASK_TITLE_LEN - 1].rstrip() + "…"
 
         description = str(rt.get("description", "")).strip()
         agent_role = str(rt.get("agent_role", "")).strip()
