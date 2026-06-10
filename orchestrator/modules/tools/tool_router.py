@@ -657,7 +657,12 @@ class ToolRouter:
                     "error_type": None,
                 }
 
-            error = result.get("error", "Unknown error")
+            # PRD-143 S15: a confirmation stop is not an opaque failure — the
+            # executor's message (action + permission level) must reach the
+            # LLM so Auto can relay the ask instead of "Unknown error".
+            error = result.get("error") or (
+                result.get("message") if result.get("requires_confirmation") else None
+            ) or "Unknown error"
             error_type = result.get("error_type")
             fatal_error = bool(result.get("fatal")) or _is_fatal_dependency_error(error)
             llm_error = (
