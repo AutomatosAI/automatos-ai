@@ -32,17 +32,37 @@ def _module_is_real(mod) -> bool:
     return False
 
 
-def _purge_app_stubs() -> None:
-    """Drop every non-real ``modules.*`` / ``consumers.*`` entry so the real
-    packages re-import fresh from disk. Real packages are preserved untouched —
-    purging the whole family instead makes the cold re-import collide with its
-    own half-initialised packages ("cannot import name 'tools' from 'modules'").
+# The real app chain that the heavy test_prd143_* modules import at COLLECTION
+# time. Preloaded once while sys.modules is still clean (pytest_configure, below)
+# and snapshotted, so those modules resolve from a real cache instead of
+# cold-re-importing against a sys.modules already polluted by sibling stubs.
+_PRELOAD_TARGETS = (
+    "modules.tools.discovery.platform_executor",
+    "modules.tools.discovery.action_registry",
+    "modules.tools.discovery.platform_actions",
+    "modules.tools.tool_router",
+    "modules.tools.execution.telemetry",
+    "consumers.chatbot.service",
+    "core.auth.super_admin",
+)
+_REAL_APP_SNAPSHOT: dict = {}
+
+
+def _restore_real_app_modules() -> None:
+    """Put the preloaded real modules back over any stub a sibling left.
+
+    Only entries that are currently MISSING or a stub are overwritten — a real
+    module already in place (even a different instance) is left untouched, so
+    this cannot disturb a test that legitimately holds the real module. No
+    package is re-imported, so the cold-import collision the purge approach hit
+    ("cannot import name 'tools' from 'modules'") cannot occur.
     """
-    for _name, _mod in list(sys.modules.items()):
-        if _name.split(".")[0] not in ("modules", "consumers"):
+    for _name, _real in _REAL_APP_SNAPSHOT.items():
+        _cur = sys.modules.get(_name)
+        if _cur is _real:
             continue
-        if not _module_is_real(_mod):
-            sys.modules.pop(_name, None)
+        if not _module_is_real(_cur):
+            sys.modules[_name] = _real
 
 # Ensure orchestrator package is importable
 _orchestrator_root = str(Path(__file__).resolve().parent.parent)
@@ -109,15 +129,38 @@ def pytest_collectstart(collector):
     Linux collection order makes the stubs live here; macOS order hides it,
     which is why this passed locally and failed only on CI (PR #434).
 
-    Right before one of these modules collects, purge every non-real
-    ``modules.*`` / ``consumers.*`` stub (see ``_module_is_real`` — realness is
-    decided by the filesystem, so path-bearing "(unknown location)" stubs are
-    caught) so the real packages re-import fresh from disk.
+    Right before one of these modules collects, restore the preloaded real app
+    modules over any sibling's stub (see ``_restore_real_app_modules``), so the
+    module's collection-time imports resolve to the real, fully-initialised
+    packages instead of a stub ("(unknown location)") or a doomed cold re-import
+    ("cannot import name 'tools' from 'modules'").
     """
     name = getattr(collector, "name", "")
     if not name.startswith("test_prd143"):
         return
-    _purge_app_stubs()
+    _restore_real_app_modules()
+
+
+def pytest_configure(config):
+    """Preload the real app chain while sys.modules is still clean.
+
+    Runs once, before any test module is collected (so before sibling tests
+    inject their ``modules.*`` / ``consumers.*`` stubs). Importing the chain now
+    populates sys.modules with the real, fully-initialised packages and lets us
+    snapshot them; ``pytest_collectstart`` then restores that snapshot in front
+    of the heavy ``test_prd143_*`` modules. Best-effort: a preload failure (e.g.
+    an optional dep missing in a lean dev venv) just leaves the snapshot partial
+    — never breaks the run.
+    """
+    import importlib
+    for _tgt in _PRELOAD_TARGETS:
+        try:
+            importlib.import_module(_tgt)
+        except Exception:
+            pass
+    for _name, _mod in list(sys.modules.items()):
+        if _name.split(".")[0] in ("modules", "consumers") and _module_is_real(_mod):
+            _REAL_APP_SNAPSHOT[_name] = _mod
 
 
 # ---- Database mock ----

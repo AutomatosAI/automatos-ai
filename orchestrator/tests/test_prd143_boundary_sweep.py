@@ -109,29 +109,18 @@ from fastapi import FastAPI  # noqa: E402
 from fastapi.routing import APIRoute, APIRouter  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-# CI collection-order guard. The real fix lives in conftest.py's
-# pytest_collectstart hook (which fires before this module imports); this
-# in-file copy keeps the module robust when run standalone or reordered.
-# Earlier-collected siblings leak non-real modules.*/consumers.* stubs in THREE
-# shapes — bare (__spec__ is None), spec'd-but-pathless (origin=None), and
-# path-bearing (__path__=[realdir] but no __file__, imports as "unknown
-# location"). A __spec__- or __path__-based predicate misses the last shape —
-# that was the CI red on #434. Decide realness by the FILESYSTEM: a real module
-# has a __file__ that exists, a real namespace package has spec
-# submodule_search_locations; everything else is a stub and is purged so the
-# real packages re-import fresh. Real packages are preserved — a whole-family
-# purge instead self-collides ("cannot import name 'tools' from 'modules'").
-import os as _os_guard  # noqa: E402
-import sys as _sys_guard  # noqa: E402
-for _name, _mod in [(n, m) for n, m in list(_sys_guard.modules.items())
-                    if n.split(".")[0] in ("modules", "consumers")]:
-    _f = getattr(_mod, "__file__", None)
-    if _f and _os_guard.path.exists(_f):
-        continue
-    _spec = getattr(_mod, "__spec__", None)
-    if _spec is not None and getattr(_spec, "submodule_search_locations", None):
-        continue
-    _sys_guard.modules.pop(_name, None)
+# CI collection-order safety net. This module imports the real modules.* app
+# chain at COLLECTION time; sibling tests collected earlier inject stub
+# modules.*/consumers.* entries into sys.modules, so on Linux collection order
+# the real imports below could bind a stub and die at collection ("(unknown
+# location)" / "cannot import name 'tools' from 'modules'" — the PR #434 CI
+# red). The real fix is conftest.py: it preloads this chain in pytest_configure
+# while sys.modules is clean, then restores those real modules in
+# pytest_collectstart right before this file is imported. The call below is a
+# belt-and-suspenders for standalone/reordered runs — a no-op once conftest has
+# run (which it always has under pytest, since conftest loads first).
+import tests.conftest as _conftest  # noqa: E402
+_conftest._restore_real_app_modules()
 
 import modules.tools.discovery.platform_executor as pe  # noqa: E402,F401
 from core.auth.dependencies import RequestContext, UserContext  # noqa: E402
