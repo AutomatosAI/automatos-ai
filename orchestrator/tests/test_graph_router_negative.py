@@ -105,18 +105,27 @@ def _aff(action_name, affinity_type, weight, confidence):
 
 
 def _extract_edge_type(filter_clause):
-    """Pull the `edge_type == X` literal out of the and_() expression that
+    """Pull the allowed edge_type literal(s) out of the and_() expression that
     GraphRouter._query_edges passes to db.query(...).filter(...).
 
-    Walks the BooleanClauseList for the binary expression whose left column is
-    `edge_type` and returns its bound value, so the fake DB can honour the same
-    filter the real query would apply.
+    Handles BOTH the scalar `edge_type == X` form and the collection
+    `edge_type.in_((X, Y))` form (PRD-143 added meta_sibling alongside
+    used_after), returning a set of allowed edge_type values so the fake DB can
+    honour the same filter the real query would apply. Returns None when no
+    edge_type clause is present.
     """
     for clause in getattr(filter_clause, "clauses", [filter_clause]):
         left = getattr(clause, "left", None)
+        if getattr(left, "key", None) != "edge_type":
+            continue
         right = getattr(clause, "right", None)
-        if getattr(left, "key", None) == "edge_type" and right is not None:
-            return getattr(right, "value", None)
+        value = getattr(right, "value", None)
+        if value is None:
+            continue
+        # `==` binds a scalar; `.in_((...))` binds a list/tuple of values.
+        if isinstance(value, (list, tuple, set)):
+            return set(value)
+        return {value}
     return None
 
 
@@ -145,7 +154,8 @@ class _FakeEdgeQuery:
     def all(self):
         if self._edge_type is None:
             return list(self._rows)
-        return [r for r in self._rows if r.edge_type == self._edge_type]
+        # _edge_type is a set of allowed edge_types (used_after, meta_sibling).
+        return [r for r in self._rows if r.edge_type in self._edge_type]
 
 
 class _FakeEdgeDB:
@@ -278,9 +288,9 @@ def test_positive_boost_still_applies(router, monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_failed_after_edge_not_expanded():
-    """_query_edges only ever requests edge_type == 'used_after', so a
-    failed_after edge sitting in the same table is filtered out at the DB layer
-    and can never become a recommended chain.
+    """_query_edges requests edge_type IN ('used_after', 'meta_sibling') only,
+    so a failed_after edge sitting in the same table is filtered out at the DB
+    layer and can never become a recommended chain.
     """
     rows = [
         _edge("good", "next", "used_after", confidence=1.0),

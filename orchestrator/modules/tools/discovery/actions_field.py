@@ -32,6 +32,13 @@ def register_field_actions(registry: ActionRegistry) -> None:
             },
             "required": ["query"],
         },
+        tags=["field", "mission", "shared-context", "coordination", "memory"],
+        examples=[
+            "what have the other agents found so far",
+            "check the field before I start researching",
+            "find prior analysis on competitor pricing from the team",
+            "see what's already known about the EU AI Act",
+        ],
     ))
 
     registry.register(ActionDefinition(
@@ -63,6 +70,13 @@ def register_field_actions(registry: ActionRegistry) -> None:
             },
             "required": ["key", "value"],
         },
+        tags=["field", "mission", "share", "findings", "coordination"],
+        examples=[
+            "share this finding with the rest of the team",
+            "record my analysis so other agents can see it",
+            "post this conclusion to the shared field",
+            "let the other agents know what I discovered",
+        ],
     ))
 
     registry.register(ActionDefinition(
@@ -78,4 +92,11 @@ def register_field_actions(registry: ActionRegistry) -> None:
             "type": "object",
             "properties": {},
         },
+        tags=["field", "mission", "convergence", "consensus", "coordination"],
+        examples=[
+            "has the team reached consensus yet",
+            "is the field converged enough to stop researching",
+            "how stable are the agents' findings",
+            "are we done gathering research",
+        ],
     ))

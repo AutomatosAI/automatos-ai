@@ -216,4 +216,16 @@ Phase 1 delivers the **enabler** for all three, plus the **one hard safety bound
 
 ---
 
-**This PRD is the Phase-1 plan: the enabler for Auto-as-operator, Rev 2. One boundary instead of many: Auto gets the whole platform; Gerard keeps the watchtower. It builds on PRD-142 Wave 4, PRD-138/139, and PRD-140 — extends, never rebuilds — and enforces the observability lock as a hard, fail-closed invariant that no autonomy level, admin role, or API key can cross. The full catalogue, skills library, and additional concierge journeys follow once the enabler is proven.**
+**This PRD is the Phase-1 plan: the enabler for Auto-as-operator, Rev 2. One boundary instead of many: Auto gets the whole platform; Gerard keeps the watchtower. It builds on PRD-142 Wave 4, PRD-138/139, and PRD-140 — extends, never rebuilds — and enforces the observability lock as a hard, fail-closed invariant that no autonomy level, admin role, or API key can cross.**
+
+---
+
+## Addendum — Discoverability completion (2026-06-10)
+
+Access ≠ discoverability: Auto reaching every API is worthless if it can't tell *what each does, when to use it,* and *find the right one.* This addendum closes that, so the selection stack genuinely serves the full operator surface — not just the happy path.
+
+**Selection metadata — every tool is now self-describing.** Audited all 140 platform tools; the semantic index embeds `name: description | Tags | Examples | Category` (`action_semantic_index._build_embedding_text`), and every operator tool now carries all four — description ("what"), tags + examples ("when to use"). The 4 weak tools found (3 in `actions_field.py` missing tags/examples, 1 thin `platform_cancel_scheduled_task` description) are filled. New tools are auto-indexed (`ensure_indexed` embeds any action not yet in the index from `registry.get_all()`) — no manual reindex needed, ever.
+
+**Graph cold-start — new tools are reachable before they have telemetry.** The S12 telemetry seed only helps tools already in `tool_execution_logs`; a brand-new tool had zero graph signal. New `modules/tools/discovery/metadata_graph_seed.py` seeds GLOBAL `meta_sibling` edges between same-category operator tools straight from the registry, so a new tool surfaces via the graph the moment a sibling is relevant. `GraphRouter._query_edges` now follows `used_after` **and** `meta_sibling`; metadata edges sit at the min-confidence floor so real usage (higher Wilson confidence) always outranks them — metadata is the floor, telemetry wins as it accrues. `super_admin_only` tools are never seeded (the obs lock holds). Wired into the human-applied seed script as an independent step. Tests: 6 new in `test_prd143_graph_seed.py` (pairing, su-exclusion, confidence band, idempotent upsert, dry-run, zero-telemetry routing, real-outranks-meta).
+
+**Net:** for every tool in the operator surface, Auto now knows what it does, when to use it, and can find it via both semantic (auto-indexed) and graph (telemetry + metadata cold-start). The one remaining axis — deep multi-step *skills/knowledge* (rich "use X then Y to achieve Z" guidance, distinct from per-tool discoverability) — is the **PRD-120 skills library**, an open decision (§11 Q6), not a silent deferral.

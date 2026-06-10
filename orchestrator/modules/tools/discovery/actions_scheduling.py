@@ -86,7 +86,12 @@ def register_scheduling_actions(registry: ActionRegistry) -> None:
 
     registry.register(ActionDefinition(
         name="platform_cancel_scheduled_task",
-        description="Cancel a scheduled task by ID.",
+        description=(
+            "Cancel a scheduled (recurring or one-off) task by its ID so it stops "
+            "running on its schedule. Use when the user wants to stop, disable, or "
+            "remove an automation/cron they previously set up. List scheduled tasks "
+            "first if you don't know the ID."
+        ),
         category="scheduling",
         parameters={
             "type": "object",
