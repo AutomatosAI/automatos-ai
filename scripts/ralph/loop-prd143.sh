@@ -110,6 +110,15 @@ is_usage_limit_error() {
   if [[ "$error_text" =~ "You've hit your limit" ]] || [[ "$error_text" =~ "You have hit your limit" ]]; then
     return 0
   fi
+  # "You've hit your session limit · resets 3:40am" — phrasing the original
+  # patterns missed (caused a crash-loop 2026-06-10). Catch any hit-your-X-limit.
+  if [[ "$error_text" =~ hit\ your.*limit ]] || [[ "$error_text" =~ session\ limit ]]; then
+    return 0
+  fi
+  # api_error_status 429 in the result JSON (text may carry no "Error: 429")
+  if echo "$output" | grep '^{' | jq -e 'select(.type == "result") | select(.api_error_status == 429 or .api_error_status == 529)' &>/dev/null; then
+    return 0
+  fi
   if [[ "$error_text" =~ Error:\ 429 ]] || [[ "$error_text" =~ Error:\ 529 ]]; then
     return 0
   fi
@@ -121,6 +130,18 @@ is_usage_limit_error() {
 
 get_sleep_duration() {
   local output="$1"
+
+  # "resets 3:40am (Europe/Lisbon)" — sleep until that wall-clock time (+5m buffer)
+  if [[ "$output" =~ resets\ ([0-9]{1,2}):([0-9]{2})(am|pm) ]]; then
+    local hh=${BASH_REMATCH[1]} mm=${BASH_REMATCH[2]} ap=${BASH_REMATCH[3]}
+    [[ "$ap" == "pm" && $hh -ne 12 ]] && hh=$((hh + 12))
+    [[ "$ap" == "am" && $hh -eq 12 ]] && hh=0
+    local now=$(date +%s)
+    local target=$(date -v${hh}H -v${mm}M -v0S +%s 2>/dev/null || date -d "today ${hh}:${mm}:00" +%s)
+    [[ $target -le $now ]] && target=$((target + 86400))
+    echo $((target - now + 300))
+    return
+  fi
 
   if [[ "$output" =~ "try again in "([0-9]+)" minute" ]]; then
     echo $(( ${BASH_REMATCH[1]} * 60 + 60 ))
