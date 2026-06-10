@@ -64,6 +64,19 @@ if _camelot_unlocatable():  # pragma: no cover - env-dependent
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
+# CI collection-order guard: earlier-collected tests stub modules.*/consumers.*
+# in sys.modules (bare ModuleType, no __spec__). On Linux collection order the
+# stubs are still live HERE, so the real imports below resolve against them and
+# die at collection ("unknown location" ImportError — see PR #434 CI). Purge
+# origin-less entries so the real packages import fresh; conftest's autouse
+# repair fixture re-binds everything else at test time.
+import sys as _sys_guard  # noqa: E402
+for _name in [n for n, m in list(_sys_guard.modules.items())
+              if (n == "modules" or n.startswith("modules.")
+                  or n == "consumers" or n.startswith("consumers."))
+              and getattr(m, "__spec__", None) is None]:
+    _sys_guard.modules.pop(_name, None)
+
 import modules.tools.discovery.signal_recorder as sr  # noqa: E402
 import modules.tools.execution.unified_executor as ue  # noqa: E402
 from core.auth.dependencies import RequestContext, UserContext  # noqa: E402

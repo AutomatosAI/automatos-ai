@@ -74,6 +74,19 @@ def _camelot_unlocatable() -> bool:  # pragma: no cover - env-dependent
 if _camelot_unlocatable():  # pragma: no cover - env-dependent
     sys.modules.setdefault("camelot", types.ModuleType("camelot"))
 
+# CI collection-order guard: earlier-collected tests stub modules.*/consumers.*
+# in sys.modules (bare ModuleType, no __spec__). On Linux collection order the
+# stubs are still live HERE, so the real imports below resolve against them and
+# die at collection ("unknown location" ImportError — see PR #434 CI). Purge
+# origin-less entries so the real packages import fresh; conftest's autouse
+# repair fixture re-binds everything else at test time.
+import sys as _sys_guard  # noqa: E402
+for _name in [n for n, m in list(_sys_guard.modules.items())
+              if (n == "modules" or n.startswith("modules.")
+                  or n == "consumers" or n.startswith("consumers."))
+              and getattr(m, "__spec__", None) is None]:
+    _sys_guard.modules.pop(_name, None)
+
 import consumers.chatbot.service as chat_mod  # noqa: E402
 import modules.tools.discovery.platform_executor as pe  # noqa: E402
 import modules.tools.execution.unified_executor as ue_mod  # noqa: E402
