@@ -291,3 +291,37 @@ def register_marketplace_actions(registry: ActionRegistry) -> None:
             "enable openai/gpt-4o",
         ],
     ))
+
+    # PRD-143 S11: the disable side of platform_install_plugin (administration
+    # surface, operator tier). Destructive because it cascades: agent
+    # assignments for this workspace are removed with the junction record.
+    registry.register(ActionDefinition(
+        name="platform_uninstall_plugin",
+        description=(
+            "Disable a marketplace plugin for this workspace. Removes the "
+            "plugin and unassigns it from every agent in the workspace — the "
+            "agents lose its skills/commands immediately. Use "
+            "platform_list_workspace_plugins first to get the plugin_id. "
+            "Re-enabling later is possible with platform_install_plugin, but "
+            "agent assignments are not restored."
+        ),
+        category="marketplace",
+        parameters={
+            "type": "object",
+            "properties": {
+                "plugin_id": {
+                    "type": "string",
+                    "description": "The plugin id (UUID) from platform_list_workspace_plugins.",
+                },
+            },
+            "required": ["plugin_id"],
+        },
+        permission_level="destructive",
+        requires_confirmation=True,
+        tags=["marketplace", "plugins", "disable", "uninstall"],
+        examples=[
+            "disable the shopify plugin",
+            "remove that plugin from the workspace",
+            "uninstall the SEO plugin",
+        ],
+    ))

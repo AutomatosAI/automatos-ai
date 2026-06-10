@@ -211,3 +211,145 @@ async def store_memory(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
     except Exception as e:
         logger.warning(f"[PlatformExecutor] Memory store failed: {e}", exc_info=True)
         return {"success": False, "error": f"Memory service error: {e}"}
+
+
+# ---------------------------------------------------------------------------
+# PRD-143 S11 — administration surface: workspace + system settings.
+# Operator tier by design (the Rev 2 inversion); safety is the fail-closed
+# key whitelist, the executor's confirmation gate and the audit trail.
+# ---------------------------------------------------------------------------
+
+# The only workspace.settings keys this tool may write. Other slices have
+# their own dedicated tools (power_mode, widget config, autonomy,
+# auto-reporting) or are deliberately excluded (integrations carries raw
+# tokens; orchestrator has its own seeded-agent PUT flow).
+OPERATOR_WORKSPACE_SETTINGS_KEYS = ("byok_overrides", "default_notification_channel")
+
+
+async def update_workspace_settings(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Set one whitelisted workspace-settings key. Fail-closed on any other key."""
+    key = params.get("key")
+    value = params.get("value")
+
+    try:
+        if key not in OPERATOR_WORKSPACE_SETTINGS_KEYS:
+            return {
+                "success": False,
+                "error": f"key must be one of {list(OPERATOR_WORKSPACE_SETTINGS_KEYS)}, got {key!r}",
+            }
+
+        from core.models.workspaces import Workspace
+
+        ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
+        if ws is None:
+            return {"success": False, "error": "Workspace not found"}
+
+        settings = dict(ws.settings or {})
+
+        if key == "byok_overrides":
+            # Same semantics as PUT /api/workspaces/current/byok-preferences:
+            # merge, provider-whitelisted, booleans only.
+            from api.workspaces import _ALLOWED_PROVIDERS
+
+            if not isinstance(value, dict):
+                return {"success": False, "error": "byok_overrides value must be an object of provider -> bool"}
+            overrides = dict(settings.get("byok_overrides", {}))
+            ignored = [p for p in value if p not in _ALLOWED_PROVIDERS]
+            for provider, enabled in value.items():
+                if provider in _ALLOWED_PROVIDERS:
+                    overrides[provider] = bool(enabled)
+            settings["byok_overrides"] = overrides
+            applied: Any = overrides
+        else:  # default_notification_channel
+            from api.workspaces import _VALID_NOTIFICATION_CHANNELS
+
+            channel = str(value or "").strip().lower()
+            if channel not in _VALID_NOTIFICATION_CHANNELS:
+                return {
+                    "success": False,
+                    "error": f"default_notification_channel must be one of {sorted(_VALID_NOTIFICATION_CHANNELS)}, got {value!r}",
+                }
+            settings["default_notification_channel"] = channel
+            applied = channel
+            ignored = []
+
+        ws.settings = settings
+        db.commit()
+
+        result = {"success": True, "key": key, "value": applied}
+        if ignored:
+            result["ignored"] = ignored
+        return result
+    except Exception as exc:
+        db.rollback()
+        logger.error("[workspace] update_workspace_settings failed: %s", exc, exc_info=True)
+        return {"success": False, "error": str(exc)}
+
+
+def _masked_setting(s) -> Dict[str, Any]:
+    return {
+        "id": s.id,
+        "category": s.category,
+        "key": s.key,
+        "value": "****" if s.is_sensitive else s.value,
+        "is_sensitive": bool(s.is_sensitive),
+        "is_required": bool(s.is_required),
+        "description": s.description,
+    }
+
+
+async def list_system_settings(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """List system settings (optionally by category). Sensitive values are
+    ALWAYS masked — secrets never reach the LLM context (the REST router
+    returns them raw to admin sessions; the tool deliberately does not)."""
+    try:
+        from core.models.system_settings import SystemSetting
+
+        query = db.query(SystemSetting)
+        category = params.get("category")
+        if category:
+            query = query.filter(SystemSetting.category == category)
+
+        rows = query.order_by(SystemSetting.category, SystemSetting.key).all()
+        settings = [_masked_setting(s) for s in rows]
+        return {"success": True, "settings": settings, "count": len(settings)}
+    except Exception as exc:
+        logger.error("[workspace] list_system_settings failed: %s", exc, exc_info=True)
+        return {"success": False, "error": str(exc)}
+
+
+async def update_system_setting(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Update one system setting by category + key (platform-wide — the
+    action carries requires_confirmation=True for exactly that reason)."""
+    category = params.get("category")
+    key = params.get("key")
+    value = params.get("value")
+    if not category or not key or value is None:
+        return {"success": False, "error": "category, key and value are required"}
+
+    try:
+        from datetime import datetime
+
+        from core.models.system_settings import SystemSetting
+
+        setting = (
+            db.query(SystemSetting)
+            .filter(SystemSetting.category == category, SystemSetting.key == key)
+            .first()
+        )
+        if not setting:
+            return {"success": False, "error": f"Setting not found: {category}.{key}"}
+
+        setting.value = str(value)
+        setting.updated_at = datetime.utcnow()
+        db.commit()
+
+        logger.info(
+            "[workspace] system setting %s.%s updated via platform tool (workspace %s)",
+            category, key, workspace_id,
+        )
+        return {"success": True, "setting": _masked_setting(setting)}
+    except Exception as exc:
+        db.rollback()
+        logger.error("[workspace] update_system_setting failed: %s", exc, exc_info=True)
+        return {"success": False, "error": str(exc)}

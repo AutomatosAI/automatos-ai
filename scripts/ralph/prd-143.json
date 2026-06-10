@@ -191,8 +191,8 @@
         "Typecheck passes"
       ],
       "priority": 11,
-      "passes": false,
-      "notes": "The risk posture is explicit in PRD-143 \u00a79 and accepted for the pilot: gates-and-logs (hierarchy checks, destructive backstop, audit, rollback, kill-switch), not exclusion. Cross-tenant stays forbidden \u2014 workspace-scoped always."
+      "passes": true,
+      "notes": "The risk posture is explicit in PRD-143 \u00a79 and accepted for the pilot: gates-and-logs (hierarchy checks, destructive backstop, audit, rollback, kill-switch), not exclusion. Cross-tenant stays forbidden \u2014 workspace-scoped always. | DONE 2026-06-10: 11 operator tools landed via the 3-file pattern \u2014 members (list/invite/set_role/remove; handlers_members.py, actions_members.py; invite delegates to core/workspaces/invitations.py::invite_member_to_workspace, extracted from POST /team/invite so router+tool share one flow; invite token never returned to the LLM), workspace+system settings (handlers_workspace.py \u2014 fail-closed OPERATOR_WORKSPACE_SETTINGS_KEYS whitelist {byok_overrides, default_notification_channel} importing api.workspaces validators; system settings masked when is_sensitive, update is write+requires_confirmation as it is platform-wide), SDK API keys (handlers_api_keys.py via ApiKeyService \u2014 BYOK provider keys deliberately excluded: raw secrets must not transit LLM context), plugin disable (handlers_marketplace.py::uninstall_plugin, cascade unassign). Destructive set {set_member_role, remove_member, revoke_api_key, uninstall_plugin} = destructive+requires_confirmation=True (executor backstop). Registry 148 actions; all 11 wired in platform_executor.py. Tests: 30/30 story tests + 85 prd143 family + 8 security gates green. NOTE: 'from main import app' is blocked LOCALLY by a pre-existing venv gap (email-validator missing; pinned in requirements.txt; EmailStr pre-dates this story at api/team.py) \u2014 discovery-stack import + registration verified directly instead."
     },
     {
       "id": "S12",

@@ -211,3 +211,110 @@ def register_workspace_actions_defs(registry: ActionRegistry) -> None:
             "platform health check",
         ],
     ))
+
+    # ── PRD-143 S11: administration surface — workspace + system settings ──
+    # Operator tier by design (Rev 2). The workspace-settings tool is
+    # fail-closed on a key whitelist (handlers_workspace.
+    # OPERATOR_WORKSPACE_SETTINGS_KEYS); system-setting updates are
+    # platform-wide, hence requires_confirmation=True.
+
+    registry.register(ActionDefinition(
+        name="platform_update_workspace_settings",
+        description=(
+            "Update a workspace setting. Supported keys: 'byok_overrides' "
+            "(per-provider bring-your-own-key toggles, e.g. {\"openai\": true}) "
+            "and 'default_notification_channel' (in_app, webhook, telegram or "
+            "slack). Other settings have dedicated tools (power mode, widget "
+            "config, autonomy) — this tool refuses keys outside its whitelist."
+        ),
+        category="settings",
+        parameters={
+            "type": "object",
+            "properties": {
+                "key": {
+                    "type": "string",
+                    "enum": ["byok_overrides", "default_notification_channel"],
+                    "description": "Which workspace setting to update.",
+                },
+                "value": {
+                    "description": (
+                        "For byok_overrides: an object of provider -> boolean. "
+                        "For default_notification_channel: the channel name."
+                    ),
+                },
+            },
+            "required": ["key", "value"],
+        },
+        permission_level="write",
+        requires_confirmation=False,
+        tags=["settings", "workspace", "byok", "notifications", "configuration"],
+        examples=[
+            "use my own OpenAI key for this workspace",
+            "turn off BYOK for anthropic",
+            "set the default notification channel to telegram",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_list_system_settings",
+        description=(
+            "List platform system settings (optionally filtered by category) — "
+            "the database-backed configuration that replaces .env. Sensitive "
+            "values are always masked. Use before updating a setting or when "
+            "the user asks how the platform is configured."
+        ),
+        category="settings",
+        parameters={
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "description": "Optional category filter (e.g. 'llm', 'email').",
+                },
+            },
+        },
+        permission_level="read",
+        requires_confirmation=False,
+        tags=["settings", "system", "configuration", "platform"],
+        examples=[
+            "list the system settings",
+            "show the llm configuration settings",
+            "what platform settings exist?",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_update_system_setting",
+        description=(
+            "Update one platform system setting by category + key. This is "
+            "PLATFORM-WIDE — it changes behaviour for every workspace, which "
+            "is why it always asks for confirmation first. Use "
+            "platform_list_system_settings to find the category and key."
+        ),
+        category="settings",
+        parameters={
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "description": "The setting's category (e.g. 'llm').",
+                },
+                "key": {
+                    "type": "string",
+                    "description": "The setting's key within the category.",
+                },
+                "value": {
+                    "type": "string",
+                    "description": "The new value (stored as a string).",
+                },
+            },
+            "required": ["category", "key", "value"],
+        },
+        permission_level="write",
+        requires_confirmation=True,
+        tags=["settings", "system", "configuration", "platform"],
+        examples=[
+            "change the default LLM model setting",
+            "update the email sender system setting",
+        ],
+    ))

@@ -67,6 +67,20 @@ from modules.tools.discovery.handlers_workspace import (
     get_memory_stats,
     list_connected_apps,
     store_memory,
+    update_workspace_settings,  # PRD-143 S11
+    list_system_settings,  # PRD-143 S11
+    update_system_setting,  # PRD-143 S11
+)
+from modules.tools.discovery.handlers_members import (  # PRD-143 S11
+    list_members,
+    invite_member,
+    set_member_role,
+    remove_member,
+)
+from modules.tools.discovery.handlers_api_keys import (  # PRD-143 S11
+    list_api_keys,
+    create_api_key,
+    revoke_api_key,
 )
 from modules.tools.discovery.handlers_monitoring import (
     get_logs,
@@ -97,6 +111,7 @@ from modules.tools.discovery.handlers_marketplace import (
     install_plugin,
     install_skill,
     install_model,
+    uninstall_plugin,  # PRD-143 S11
 )
 from modules.tools.discovery.handlers_skills import (
     get_skill_content,
@@ -424,6 +439,18 @@ class PlatformActionExecutor:
             "platform_get_widget_config": get_widget_config,
             "platform_update_widget_config": update_widget_config,
             "platform_upload_document": upload_document,
+            # PRD-143 S11: administration surface (operator tier by design)
+            "platform_list_members": list_members,
+            "platform_invite_member": invite_member,
+            "platform_set_member_role": set_member_role,
+            "platform_remove_member": remove_member,
+            "platform_update_workspace_settings": update_workspace_settings,
+            "platform_list_system_settings": list_system_settings,
+            "platform_update_system_setting": update_system_setting,
+            "platform_list_api_keys": list_api_keys,
+            "platform_create_api_key": create_api_key,
+            "platform_revoke_api_key": revoke_api_key,
+            "platform_uninstall_plugin": uninstall_plugin,
             # Wave 2: Auto reporting preferences + send-notification wrapper
             "platform_get_auto_reporting_prefs": get_auto_reporting_prefs,
             "platform_update_auto_reporting_prefs": update_auto_reporting_prefs,

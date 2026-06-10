@@ -411,6 +411,80 @@ async def install_plugin(db: Session, workspace_id: UUID, params: Dict[str, Any]
     }
 
 
+async def uninstall_plugin(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Disable a marketplace plugin for this workspace (PRD-143 S11).
+
+    Mirrors DELETE /api/workspaces/{id}/plugins/{plugin_id}: removes the
+    workspace junction record, cascades agent assignments for this
+    workspace's agents, and decrements the plugin's enable_count. The
+    cascade is why the action is destructive + requires_confirmation.
+    """
+    from core.models.marketplace_plugins import (
+        AgentAssignedPlugin, MarketplacePlugin, WorkspaceEnabledPlugin,
+    )
+
+    plugin_id = params.get("plugin_id")
+    if not plugin_id:
+        return {"success": False, "error": "plugin_id is required"}
+
+    from uuid import UUID as _UUID
+    try:
+        plugin_uuid = _UUID(str(plugin_id))
+    except (TypeError, ValueError):
+        return {"success": False, "error": f"plugin_id must be a UUID, got {plugin_id!r}"}
+
+    junction = (
+        db.query(WorkspaceEnabledPlugin)
+        .filter(
+            WorkspaceEnabledPlugin.workspace_id == workspace_id,
+            WorkspaceEnabledPlugin.plugin_id == plugin_uuid,
+        )
+        .first()
+    )
+    if not junction:
+        return {"success": False, "error": "Plugin is not enabled for this workspace"}
+
+    from core.models.core import Agent
+
+    workspace_agent_ids = [
+        a.id for a in db.query(Agent.id).filter(Agent.workspace_id == workspace_id).all()
+    ]
+
+    removed_agent_count = 0
+    if workspace_agent_ids:
+        removed_agent_count = (
+            db.query(AgentAssignedPlugin)
+            .filter(
+                AgentAssignedPlugin.agent_id.in_(workspace_agent_ids),
+                AgentAssignedPlugin.plugin_id == plugin_uuid,
+            )
+            .delete(synchronize_session="fetch")
+        )
+
+    db.delete(junction)
+
+    plugin = db.query(MarketplacePlugin).filter(MarketplacePlugin.id == plugin_uuid).first()
+    if plugin and plugin.enable_count and plugin.enable_count > 0:
+        plugin.enable_count = plugin.enable_count - 1
+
+    db.commit()
+
+    logger.info(
+        "[PlatformExecutor] Uninstalled plugin %s for workspace %s (%s agent assignments removed)",
+        plugin_uuid, workspace_id, removed_agent_count,
+    )
+
+    return {
+        "success": True,
+        "plugin_id": str(plugin_uuid),
+        "agents_unassigned": removed_agent_count,
+        "message": (
+            f"Plugin disabled for this workspace"
+            + (f" ({removed_agent_count} agent assignments removed)." if removed_agent_count else ".")
+        ),
+    }
+
+
 async def install_skill(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Enable a marketplace skill for this workspace."""
     from core.models.core import Skill
