@@ -1,0 +1,63 @@
+{
+  "project": "Automatos AI Platform — PRD-155 Route Contract & Mount Honesty (Remediation Chain Night 1, stacked on PRD-154)",
+  "branchName": "ralph/prd-155-route-contract",
+  "description": "Branch from ralph/prd-154-wave0-quick-wins tip (PRD-153 honesty rule: if the base is incomplete, acceptance FAILS — no shims). Builds the net that protects every later PRD: CI fails when the frontend calls a non-existent backend path, boot fails loudly on router mount failure, and every registered tool must resolve to a live route. Full spec docs/PRDS/PRD-155-ROUTE-CONTRACT-MOUNT-HONESTY.md; chain policy docs/PRDS/PRD-CHAIN-2026-06-REMEDIATION.md.",
+  "userStories": [
+    {
+      "id": "P155-S1",
+      "title": "Backend route manifest generator",
+      "description": "Script/pytest fixture imports the FastAPI app and dumps sorted {method, path} pairs to reports/route-manifest.json deterministically. If app import currently opens DB connections at import time, make those lazy — the manifest must generate without Postgres.",
+      "acceptanceCriteria": [
+        "python -m scripts.dump_routes produces a stable sorted manifest twice in a row (diff empty) — DONE: test_route_manifest.py::test_dump_routes_deterministic_two_runs asserts byte-identical; acceptance S1 check diffs two runs (742 routes)",
+        "Generation works with no DB available (test) — DONE: subprocess runs with POSTGRES_PORT=59432 (unreachable); create_engine lazy + lifespan-only init means import never dials DB; test_dump_routes_generates_without_db green",
+        "cd orchestrator && pytest -q green — DONE: 2142 passed, 17 skipped, 1 xfailed, 0 failed (no DB, integration skips cleanly)"
+      ],
+      "files": ["orchestrator/scripts/dump_routes.py", "orchestrator/main.py", "orchestrator/tests/test_route_manifest.py", "orchestrator/reports/route-manifest.json"]
+    },
+    {
+      "id": "P155-S2",
+      "title": "Frontend path extraction + contract test",
+      "description": "Static extractor over lib/api-client.ts, hooks/, and any remaining raw fetch: template literals like `${id}` normalize to path-param wildcards. Vitest contract suite asserts extracted paths ⊆ manifest (method-aware where extractable). NO allowlist/suppression file — anything failing on the PRD-154 tip is a real bug: fix the caller or delete it in this story.",
+      "acceptanceCriteria": [
+        "Negative fixture: fabricated path fails the suite",
+        "Suite green on the PRD-154 tip with zero suppressions",
+        "npm run test:contract wired into package.json",
+        "Typecheck passes"
+      ],
+      "files": ["frontend/tests/contract/", "frontend/lib/api-client.ts"]
+    },
+    {
+      "id": "P155-S3",
+      "title": "Startup mount assertions replace silent try/except",
+      "description": "main.py mounts ~25 routers inside try/except that swallows ImportError — two imports ALREADY fail silently every boot (main.py:115,123). Replace with an explicit expected-router manifest; boot raises naming the failed router. Escape hatch ALLOW_DEGRADED_BOOT=true via config.py (default off). Fix or deliberately delete the two currently-failing imports and record which in the PR description.",
+      "acceptanceCriteria": [
+        "Simulated router ImportError fails startup with router name in message (test) — DONE: test_router_mount_manifest.py::test_required_router_failure_raises_naming_the_router asserts RouterMountError names the failed router + mentions ALLOW_DEGRADED_BOOT; test_allow_degraded_boot_downgrades_required_failure covers the escape hatch",
+        "Zero try/except ImportError around router mounts in main.py (grep gate) — DONE: `grep -nE \"except[[:space:]]+ImportError\" orchestrator/main.py` returns zero matches (was 28); 24 conditional routers moved to router_manifest.MANIFEST_ROUTERS, mounted via mount_manifest_routers(); widget middleware + 6 mount-time blocks converted to plain imports",
+        "The two failing imports resolved (fixed or deleted, documented) — DONE: api.auth and api.evaluation both DELETED (neither api/auth.py nor api/evaluation.py exists on disk — they failed ImportError every boot and mounted nothing); import + `if x_router` mount + manifest entry all removed",
+        "cd orchestrator && pytest -q green — DONE: 2148 passed, 17 skipped, 1 xfailed, 0 failed (+6 loader tests); route-manifest.json byte-identical (742 routes) proving the route SET is unchanged — only the mount mechanism changed; manifest still generates DB-free"
+      ],
+      "files": ["orchestrator/main.py", "orchestrator/config.py", "orchestrator/router_manifest.py", "orchestrator/tests/test_router_mount_manifest.py"]
+    },
+    {
+      "id": "P155-S4",
+      "title": "Tool reachability test",
+      "description": "For every action in the platform tool registry, assert a route exists in unified_executor.tool_routes and the dispatch layer resolves a handler (no LLM, no external calls). This kills the stale-tool-name drift class (e.g. workspace_file_read vs workspace_read_file) permanently.",
+      "acceptanceCriteria": [
+        "Test enumerates the live registry; an injected stale name fails with a diff-style message — DONE: test_tool_reachability.py enumerates the LIVE ActionRegistry via _build_real_registry()→register_all_actions (148 actions: 140 platform_* + 8 workspace_*, never hardcoded); test_injected_stale_name_fails_with_diff_message feeds fabricated `workspace_file_read`+`platform_lst_agents` through find_unreachable()→difflib and asserts both flagged with canonical suggestions (`workspace_read_file`/`platform_list_agents`) + the message contains 'did you mean'",
+        "Green on the current tip — DONE: test_every_registry_action_resolves_a_handler green — all 140 platform_* resolve a key in PlatformActionExecutor._handlers (150 keys; 10 *_recipe* aliases are harmless extras) and all 8 workspace_* resolve an if/elif branch in exec_workspace.execute_workspace_action (AST-extracted, so a renamed branch surfaces as drift); 6/6 file tests pass with no DB (closed-port POSTGRES_PORT=59432 preamble + conftest real-module restore)",
+        "cd orchestrator && pytest -q green — DONE: 2154 passed, 17 skipped, 1 xfailed, 0 failed (+6 vs S3's 2148), 76s, no DB"
+      ],
+      "files": ["orchestrator/tests/test_tool_reachability.py", "orchestrator/modules/tools/execution/unified_executor.py (path corrected from consumers/chatbot/; reachability target is the ActionRegistry→PlatformActionExecutor._handlers + exec_workspace dispatch, the registry/handler drift class)"]
+    },
+    {
+      "id": "P155-S5",
+      "title": "CI wiring for contract + reachability",
+      "description": "Add both suites to .github/workflows/test.yml using the existing Postgres-service + per-test-timeout pattern. Non-required initially (PRD-142 Wave-2 test-net precedent); note the flip-to-required as a repo-admin follow-up in the workflow comment header.",
+      "acceptanceCriteria": [
+        "Jobs run on push; seeded-violation branch goes red, chain tip green",
+        "Workflow comment documents the non-required rationale + flip plan"
+      ],
+      "files": [".github/workflows/test.yml"]
+    }
+  ]
+}

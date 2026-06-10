@@ -502,6 +502,11 @@ class Config:
     # =============================================================================
     # FEATURE FLAGS
     # =============================================================================
+    # PRD-155 S3: startup mount honesty. By default a required router that fails
+    # to import aborts boot (RouterMountError names it) instead of being silently
+    # dropped. Set true to downgrade that to a logged skip and boot degraded —
+    # an operator escape hatch, not the norm. Default OFF.
+    ALLOW_DEGRADED_BOOT: bool = os.getenv("ALLOW_DEGRADED_BOOT", "false").lower() == "true"
     HEARTBEAT_ENABLED: bool = os.getenv("HEARTBEAT_ENABLED", "true").lower() == "true"
     RECIPE_SCHEDULER_ENABLED: bool = os.getenv("RECIPE_SCHEDULER_ENABLED", "true").lower() == "true"
     COORDINATOR_ENABLED: bool = os.getenv("COORDINATOR_ENABLED", "true").lower() == "true"
