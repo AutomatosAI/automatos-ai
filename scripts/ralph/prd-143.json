@@ -157,8 +157,8 @@
         "Typecheck passes"
       ],
       "priority": 9,
-      "passes": false,
-      "notes": "The mechanism story (PRD-143 US-003). The long tail to ~200 is follow-on PRDs; Phase 1 proves the generator on samples."
+      "passes": true,
+      "notes": "The mechanism story (PRD-143 US-003). The long tail to ~200 is follow-on PRDs; Phase 1 proves the generator on samples. DONE 2026-06-10: scripts/scaffold_platform_tool.py — introspects the live APIRoute via fastapi.openapi.utils.get_openapi (body model, path/query params, docstring), emits ActionDefinition + workspace-scoped handler skeletons to stdout or --out-dir; _assert_safe_out_dir refuses modules/tools/discovery/ and any path under it (direct call + CLI both proven); su tier detected by require_super_admin dependency IDENTITY on the router/route (S6/S7 perimeter, no hardcoded module list) → super_admin_only=True + REVIEW flag; verb→permission map fail-closed (unknown verb → destructive); workspace_id stripped from emitted schemas (executor injects scoping server-side); # CURATE checklist covers name/description/params/tier/permission_level. 9/9 tests green on REAL routes (agents POST/GET/DELETE, workspaces GET, heartbeat su-flagged, discovery-dir refusal, verb map, unknown-endpoint candidates error). Prior iteration authored both files but hit the 45m cap pre-commit; this iteration validated and committed them unchanged."
     },
     {
       "id": "S10",
