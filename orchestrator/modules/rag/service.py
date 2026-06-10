@@ -541,7 +541,8 @@ class RAGService:
         source_counts = {}
         
         for i, c in enumerate(candidates):
-            content = c.get("content", "")
+            # Prefer the hydrated full chunk text; fall back to the 500-char preview.
+            content = c.get("expanded_content") or c.get("content", "")
             source = c.get("source_file", c.get("filename", "unknown"))
             
             # Calculate content quality
@@ -752,7 +753,8 @@ class RAGService:
         total_tokens = 0
         
         for c in sorted_candidates:
-            content = c.get("content", "")
+            # Prefer the hydrated full chunk text; fall back to the 500-char preview.
+            content = c.get("expanded_content") or c.get("content", "")
             chunk_tokens = _count_tokens(content)  # Use tiktoken for accuracy
             if total_tokens + chunk_tokens > max_tokens:
                 break
@@ -864,43 +866,67 @@ class RAGService:
         if not candidates or not self.config.parent_child_expansion:
             return candidates
 
+        window = expand_window or self.config.expansion_window
+
+        # Plan each candidate's window once, collecting the union of
+        # (document_id, chunk_index) keys to hydrate. The full chunk text lives
+        # in document_chunks.content; candidate['content'] is only the 500-char
+        # S3 preview. One batched query replaces the old query-per-candidate N+1.
+        plans = []  # (candidate, doc_id|None, [chunk_index, ...]|None)
+        needed = set()
+        for candidate in candidates:
+            raw_doc_id = candidate.get("document_id")
+            chunk_metadata = candidate.get("metadata", {})
+            chunk_index = chunk_metadata.get("chunk_index") if isinstance(chunk_metadata, dict) else None
+
+            # Cast document_id to int (S3 Vectors stores as string)
+            try:
+                doc_id = int(raw_doc_id) if raw_doc_id else None
+            except (ValueError, TypeError):
+                doc_id = None
+
+            if doc_id is None or chunk_index is None:
+                plans.append((candidate, None, None))
+                continue
+
+            idx_window = list(range(max(0, chunk_index - window), chunk_index + window + 1))
+            for ci in idx_window:
+                needed.add((doc_id, ci))
+            plans.append((candidate, doc_id, idx_window))
+
+        if not needed:
+            for candidate, _, _ in plans:
+                candidate["expanded_content"] = candidate.get("content", "")
+            return candidates
+
         try:
             import asyncpg
             from config import config as app_config
-            db_url = app_config.DATABASE_URL
-            conn = await asyncpg.connect(db_url)
+            conn = await asyncpg.connect(app_config.DATABASE_URL)
 
             try:
-                for candidate in candidates:
-                    raw_doc_id = candidate.get("document_id")
-                    chunk_metadata = candidate.get("metadata", {})
-                    chunk_index = chunk_metadata.get("chunk_index") if isinstance(chunk_metadata, dict) else None
-
-                    # Cast document_id to int (S3 Vectors stores as string)
-                    try:
-                        doc_id = int(raw_doc_id) if raw_doc_id else None
-                    except (ValueError, TypeError):
-                        doc_id = None
-
-                    if doc_id is None or chunk_index is None:
-                        candidate["expanded_content"] = candidate.get("content", "")
-                        continue
-
-                    window = expand_window or self.config.expansion_window
-                    surrounding = await conn.fetch("""
-                        SELECT content, metadata
-                        FROM document_chunks
-                        WHERE document_id = $1
-                          AND chunk_index BETWEEN $2 AND $3
-                        ORDER BY chunk_index
-                    """, doc_id, max(0, chunk_index - window), chunk_index + window)
-
-                    if surrounding:
-                        candidate["expanded_content"] = "\n\n".join(r["content"] for r in surrounding)
-                    else:
-                        candidate["expanded_content"] = candidate.get("content", "")
+                pairs = list(needed)
+                doc_ids = [p[0] for p in pairs]
+                chunk_idxs = [p[1] for p in pairs]
+                # ONE round-trip: join the requested (doc_id, chunk_index) keys
+                # against document_chunks via unnest of two parallel arrays.
+                rows = await conn.fetch("""
+                    SELECT dc.document_id, dc.chunk_index, dc.content
+                    FROM document_chunks dc
+                    JOIN unnest($1::int[], $2::int[]) AS k(document_id, chunk_index)
+                      ON dc.document_id = k.document_id
+                     AND dc.chunk_index = k.chunk_index
+                """, doc_ids, chunk_idxs)
             finally:
                 await conn.close()
+
+            hydrated = {(r["document_id"], r["chunk_index"]): r["content"] for r in rows}
+            for candidate, doc_id, idx_window in plans:
+                if doc_id is None or idx_window is None:
+                    candidate["expanded_content"] = candidate.get("content", "")
+                    continue
+                pieces = [hydrated[(doc_id, ci)] for ci in idx_window if (doc_id, ci) in hydrated]
+                candidate["expanded_content"] = "\n\n".join(pieces) if pieces else candidate.get("content", "")
         except Exception as e:
             logger.warning(f"Parent-child expansion failed, using original content: {e}")
             for candidate in candidates:

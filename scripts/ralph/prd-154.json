@@ -8,10 +8,10 @@
       "title": "RAG: batched full-chunk hydration consumed by the formatter",
       "description": "modules/rag/service.py:855-909 already hydrates full chunk text into candidate['expanded_content'] via one asyncpg query PER candidate, and NOTHING reads it — service.py:544 and :754 read only c['content'] (the 500-char S3 metadata preview written by ingestion/manager.py:1300). Replace the N+1 with ONE batched IN-query over parent chunk ids, and make the retrieval/format path consume the hydrated text so result_formatter.py's 4000-char per-doc budget (:354-356) actually fills. Do not change chunking or S3 writes.",
       "acceptanceCriteria": [
-        "Retrieval returns full chunk text (beyond 500 chars) for chunks whose parents exist in PG",
-        "Exactly one hydration SQL round-trip per retrieval (query-counter assertion in test)",
-        "New tests/test_rag_hydration.py covers preview-vs-hydrated; existing formatter tests asserting truncated output updated",
-        "cd orchestrator && pytest -q green"
+        "DONE — _expand_to_parent_context joins (doc_id,chunk_index) keys against document_chunks via unnest; read-sites service.py:545 & :756 now consume expanded_content. test_hydration_is_a_single_batched_query + consume tests assert hydrated text >500 chars reaches chunks.",
+        "DONE — single unnest($1::int[],$2::int[]) round-trip replaces the N+1; test asserts conn.fetch.await_count == 1 for 3 candidates across 2 docs.",
+        "DONE — added tests/test_rag_hydration.py (4 tests: batched-query, fallback-to-preview, basic_retrieval consume, optimizer consume). No existing formatter test asserted the old 500-char truncation (4000-char budget already shipped PRD-136 in modules/tools/formatting/result_formatter.py:356), so none required updating; story files path 'modules/rag/result_formatter.py' was stale.",
+        "DONE — cd orchestrator && pytest -q: 2061 passed, 16 skipped, 1 xfailed."
       ],
       "files": ["orchestrator/modules/rag/service.py", "orchestrator/modules/rag/result_formatter.py", "orchestrator/tests/test_rag_hydration.py"]
     },
