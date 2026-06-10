@@ -100,8 +100,10 @@ class Config:
     CONTEXT_BUDGET_SYSTEM_PROMPT: int = int(os.getenv("CONTEXT_BUDGET_SYSTEM_PROMPT", "600"))
     # Knowledge awareness: TTL for per-workspace capability map cached in Redis
     MEMORY_AWARENESS_CACHE_TTL_SECONDS: int = int(os.getenv("MEMORY_AWARENESS_CACHE_TTL_SECONDS", "600"))
-    # L2 Decay: Ebbinghaus decay rate (higher = faster forgetting)
-    MEMORY_DECAY_RATE: float = float(os.getenv("MEMORY_DECAY_RATE", "0.1"))
+    # L2 Decay: Ebbinghaus decay rate per hour (higher = faster forgetting).
+    # Week-scale (PRD-154 S3): 0.1/hr archived importance-0.8 memories in ~15h;
+    # 0.004/hr keeps them above the 0.3 threshold for ~16 days.
+    MEMORY_DECAY_RATE: float = float(os.getenv("MEMORY_DECAY_RATE", "0.004"))
     # L2 Decay: threshold below which items are archived
     MEMORY_DECAY_ARCHIVE_THRESHOLD: float = float(os.getenv("MEMORY_DECAY_ARCHIVE_THRESHOLD", "0.3"))
     # L2 Decay: batch size per workspace (rows per transaction)

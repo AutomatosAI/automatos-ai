@@ -315,6 +315,7 @@ class Mem0Client:
         user_id: str,
         metadata: Optional[Dict] = None,
         workspace_id: Optional[str] = None,
+        infer: bool = True,
     ) -> Dict:
         """
         Add memories from messages.
@@ -325,6 +326,10 @@ class Mem0Client:
             metadata: Optional metadata to attach
             workspace_id: Scopes the circuit breaker so one workspace's Mem0
                 outage does not trip the breaker for every other workspace.
+            infer: When False, store the text verbatim and skip Mem0's
+                server-side fact extraction. Already-curated writers (distilled
+                facts, mission/playbook/widget/tool stores) pass False so Mem0
+                does not re-extract them with its personal-info prompt.
 
         Returns:
             Response dict from server
@@ -347,6 +352,9 @@ class Mem0Client:
         }
         if metadata:
             payload["metadata"] = metadata
+        if not infer:
+            # Already-curated content: store verbatim, no server-side re-extraction.
+            payload["infer"] = False
 
         logger.debug("[Mem0] Adding memory for user_id=%s (text_len=%d)", user_id, len(text))
 
@@ -495,11 +503,26 @@ class Mem0Client:
             return data[:limit]
         return data.get("memories", data.get("results", data.get("items", [])))[:limit]
 
-    async def delete(self, memory_id: str, workspace_id: Optional[str] = None) -> bool:
-        """Delete a specific memory."""
-        url = f"{self.api_url}/memories/{memory_id}/"
+    async def delete(
+        self,
+        memory_ids: List[str],
+        user_id: str,
+        workspace_id: Optional[str] = None,
+    ) -> bool:
+        """Delete memories via the bulk endpoint.
 
-        resp = await self._request("DELETE", url, workspace_id=workspace_id)
+        The OpenMemory server exposes only ``DELETE /api/v1/memories/`` taking a
+        ``{memory_ids, user_id}`` body — there is no per-id ``/memories/{id}/``
+        route, so the old single-id call 405'd on every delete and tripped the
+        circuit breaker.
+        """
+        url = f"{self.api_url}/memories/"
+
+        resp = await self._request(
+            "DELETE", url,
+            json={"memory_ids": list(memory_ids), "user_id": user_id},
+            workspace_id=workspace_id,
+        )
         if resp is None:
             return False
 

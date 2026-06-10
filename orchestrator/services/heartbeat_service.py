@@ -45,6 +45,34 @@ PRIMITIVE_NAMES = frozenset({
 PRIMITIVE_STATUSES = frozenset({"green", "degraded", "down"})
 
 
+# ---------------------------------------------------------------------------
+# Board-task pickup priority (PRD-154 · P154-S4)
+#
+# A raw ``ORDER BY priority DESC`` sorts the string column ALPHABETICALLY
+# (urgent, medium, low, high) — 'high' lands dead last, so an urgent and a
+# low-priority task outrank a high one. Rank the canonical priorities as DATA
+# instead; lower rank = higher priority, ordered ASC, so urgent > high >
+# medium > low. (Canonical set: api/board_tasks.py VALID_PRIORITIES.)
+# ---------------------------------------------------------------------------
+
+_BOARD_TASK_PRIORITY_RANK = {"urgent": 0, "high": 1, "medium": 2, "low": 3}
+
+
+def _board_task_priority_order():
+    """SQLAlchemy ORDER BY expression ranking ``BoardTask.priority`` semantically.
+
+    Unknown values sort last. Built from ``_BOARD_TASK_PRIORITY_RANK`` so the
+    ordering stays a single source of truth with no inline magic numbers.
+    """
+    from sqlalchemy import case
+    from core.models.core import BoardTask
+
+    return case(
+        *[(BoardTask.priority == _p, _r) for _p, _r in _BOARD_TASK_PRIORITY_RANK.items()],
+        else_=len(_BOARD_TASK_PRIORITY_RANK),
+    )
+
+
 def emit_primitive_finding(
     workspace_id: str,
     primitive: str,
@@ -916,7 +944,7 @@ class HeartbeatService:
                             BoardTask.status == "assigned",
                             BoardTask.workspace_id == workspace_id,
                         )
-                        .order_by(BoardTask.priority.desc(), BoardTask.created_at.asc())
+                        .order_by(_board_task_priority_order().asc(), BoardTask.created_at.asc())
                         .limit(3)
                         .all()
                     )

@@ -2,7 +2,7 @@
 
 import { useCallback, useState } from 'react'
 import { useCreatePlaybook, useUpdatePlaybook } from './use-playbook-api'
-import { toast } from './use-toast'
+import { toast } from 'sonner'
 import type { PlaybookFormValues } from '@/components/workflows/create-playbook-modal'
 
 /**
@@ -168,11 +168,7 @@ export function usePlaybookForm(): UsePlaybookFormReturn {
       // Validate form data
       const validationError = validateFormData(data)
       if (validationError) {
-        toast({
-          title: 'Validation Error',
-          description: validationError,
-          variant: 'destructive',
-        })
+        toast.error('Validation Error', { description: validationError })
         return
       }
 
@@ -189,10 +185,7 @@ export function usePlaybookForm(): UsePlaybookFormReturn {
           setLastSavedWebhookId(webhookId)
         }
 
-        toast({
-          title: 'Playbook Created',
-          description: `"${data.name}" has been created successfully.`,
-        })
+        toast('Playbook Created', { description: `"${data.name}" has been created successfully.` })
 
         onSuccess?.()
       } catch (err: unknown) {
@@ -203,11 +196,7 @@ export function usePlaybookForm(): UsePlaybookFormReturn {
               ? String((err as { detail: unknown }).detail)
               : 'Failed to create playbook. Please try again.'
 
-        toast({
-          title: 'Error Creating Playbook',
-          description: message,
-          variant: 'destructive',
-        })
+        toast.error('Error Creating Playbook', { description: message })
       } finally {
         setIsSubmitting(false)
       }
@@ -220,11 +209,7 @@ export function usePlaybookForm(): UsePlaybookFormReturn {
       // Validate form data
       const validationError = validateFormData(data)
       if (validationError) {
-        toast({
-          title: 'Validation Error',
-          description: validationError,
-          variant: 'destructive',
-        })
+        toast.error('Validation Error', { description: validationError })
         return
       }
 
@@ -241,10 +226,7 @@ export function usePlaybookForm(): UsePlaybookFormReturn {
           setLastSavedWebhookId(webhookId)
         }
 
-        toast({
-          title: 'Playbook Updated',
-          description: `"${data.name}" has been updated successfully.`,
-        })
+        toast('Playbook Updated', { description: `"${data.name}" has been updated successfully.` })
 
         onSuccess?.()
       } catch (err: unknown) {
@@ -255,11 +237,7 @@ export function usePlaybookForm(): UsePlaybookFormReturn {
               ? String((err as { detail: unknown }).detail)
               : 'Failed to update playbook. Please try again.'
 
-        toast({
-          title: 'Error Updating Playbook',
-          description: message,
-          variant: 'destructive',
-        })
+        toast.error('Error Updating Playbook', { description: message })
       } finally {
         setIsSubmitting(false)
       }

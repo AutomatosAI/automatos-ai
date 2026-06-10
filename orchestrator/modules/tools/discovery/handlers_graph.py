@@ -271,9 +271,12 @@ async def handle_graph_communities(
     agent_team = _resolve_agent_team(db, params.get("_agent_id"))
 
     try:
-        from core.workspace_client import WorkspaceClient
+        # Read from the SAME store _export_graph wrote to — Postgres
+        # workspace_graphs via DbWorkspaceClient. The file-backed
+        # WorkspaceClient returns nothing for a DB-backed workspace.
+        from core.graph_storage import DbWorkspaceClient
 
-        ws = WorkspaceClient(str(workspace_id))
+        ws = DbWorkspaceClient(str(workspace_id))
         result = await ws.read_file("graph/communities.json")
 
         if not result.get("success"):

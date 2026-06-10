@@ -18,7 +18,7 @@ import {
 import { Separator } from '@/components/ui/separator'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
-import { useToast } from '@/hooks/use-toast'
+import { toast } from 'sonner'
 import { useUser } from '@clerk/nextjs'
 import { useInstallPlaybookFromMarketplace } from '@/hooks/use-playbook-api'
 import { ViewPlaybookModal } from '@/components/workflows/view-playbook-modal'
@@ -35,7 +35,6 @@ export function MarketplacePlaybooksTab({ searchQuery }: MarketplacePlaybooksTab
   const [showViewModal, setShowViewModal] = useState(false)
   const [approvingId, setApprovingId] = useState<number | null>(null)
   const [deletingId, setDeletingId] = useState<number | null>(null)
-  const { toast } = useToast()
   const { user } = useUser()
   const queryClient = useQueryClient()
   const installMutation = useInstallPlaybookFromMarketplace()
@@ -49,14 +48,10 @@ export function MarketplacePlaybooksTab({ searchQuery }: MarketplacePlaybooksTab
     setApprovingId(recipeId)
     try {
       await apiClient.post(`/api/marketplace/items/${recipeId}/approve`)
-      toast({ title: 'Playbook approved and published to marketplace!' })
+      toast('Playbook approved and published to marketplace!')
       queryClient.invalidateQueries({ queryKey: ['marketplacePlaybooks'] })
     } catch (error: any) {
-      toast({
-        title: 'Failed to approve recipe',
-        description: error?.message || 'An error occurred',
-        variant: 'destructive',
-      })
+      toast.error('Failed to approve recipe', { description: error?.message || 'An error occurred' })
     } finally {
       setApprovingId(null)
     }
@@ -68,14 +63,10 @@ export function MarketplacePlaybooksTab({ searchQuery }: MarketplacePlaybooksTab
     setDeletingId(recipeId)
     try {
       await apiClient.delete(`/api/marketplace/items/${recipeId}`)
-      toast({ title: 'Playbook removed from marketplace' })
+      toast('Playbook removed from marketplace')
       queryClient.invalidateQueries({ queryKey: ['marketplacePlaybooks'] })
     } catch (error: any) {
-      toast({
-        title: 'Failed to delete recipe',
-        description: error?.message || 'An error occurred',
-        variant: 'destructive',
-      })
+      toast.error('Failed to delete recipe', { description: error?.message || 'An error occurred' })
     } finally {
       setDeletingId(null)
     }
@@ -104,31 +95,19 @@ export function MarketplacePlaybooksTab({ searchQuery }: MarketplacePlaybooksTab
     try {
       const data = await installMutation.mutateAsync(recipeId)
 
-      toast({
-        title: 'Playbook Added to Workspace',
-        description: data.message || 'Recipe added successfully',
-        variant: 'default'
-      })
+      toast('Playbook Added to Workspace', { description: data.message || 'Recipe added successfully' })
 
       // Show warnings for missing dependencies (e.g., agents not found in marketplace)
       if (data.warnings && data.warnings.length > 0) {
         data.warnings.forEach((warning: string) => {
-          toast({
-            title: 'Warning',
-            description: warning,
-            variant: 'default'
-          })
+          toast('Warning', { description: warning })
         })
       }
 
       // Also invalidate marketplace queries for updated install counts
       queryClient.invalidateQueries({ queryKey: ['marketplacePlaybooks'] })
     } catch (error: any) {
-      toast({
-        title: 'Installation Failed',
-        description: error?.message || 'Failed to add playbook to workspace',
-        variant: 'destructive'
-      })
+      toast.error('Installation Failed', { description: error?.message || 'Failed to add playbook to workspace' })
     } finally {
       setInstallingRecipeId(null)
     }

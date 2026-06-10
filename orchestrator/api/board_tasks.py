@@ -304,6 +304,9 @@ async def create_task(
     db.commit()
     db.refresh(task)
 
+    # Assignment dispatches execution immediately (no opt-in heartbeat wait).
+    _dispatch_on_assign(task, ctx.workspace_id, db)
+
     logger.info("[BoardTasks] Created task %d in workspace %s", task.id, ctx.workspace_id)
     return task.to_dict()
 
@@ -481,6 +484,11 @@ async def update_task(
             review_mode=task.review_mode or "auto",
             attachment_ids=task.attachment_ids,  # PRD-127
         )
+    elif "assigned_agent_id" in body:
+        # The assign endpoint dispatches execution the moment a task is
+        # assigned. _dispatch_on_assign self-guards (only 'assigned' tasks),
+        # so re-assigning a running task never double-fires.
+        _dispatch_on_assign(task, ctx.workspace_id, db)
 
     logger.info("[BoardTasks] Updated task %d", task.id)
     return task.to_dict()
@@ -817,6 +825,46 @@ def _launch_task_execution(
         agent_id=agent_id,
         extra={"task_id": task_id},
     )
+
+
+def _should_dispatch_on_assign(task: BoardTask) -> bool:
+    """A board task starts executing the instant it is assigned to an agent.
+
+    Skipped when there is no agent, when the task is not in the freshly
+    'assigned' state (a task already in_progress is running — re-assigning it
+    must NOT launch a second execution), or when it is a recipe-mirror task
+    (the recipe executor drives those). This replaces the old reliance on an
+    opt-in heartbeat pickup that most agents never enable.
+    """
+    return (
+        task.assigned_agent_id is not None
+        and task.status == "assigned"
+        and task.source_type != "recipe"
+    )
+
+
+def _dispatch_on_assign(task: BoardTask, workspace_id, db: Session) -> bool:
+    """Move an assigned task to in_progress and launch its agent immediately.
+
+    Returns True when execution was launched. in_progress is set before the
+    launch so _launch_task_execution's completion path (guarded on
+    status == "in_progress") can persist the result.
+    """
+    if not _should_dispatch_on_assign(task):
+        return False
+    task.status = "in_progress"
+    task.started_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(task)
+    _launch_task_execution(
+        task_id=task.id,
+        agent_id=task.assigned_agent_id,
+        workspace_id=str(workspace_id),
+        prompt=task.raw_prompt or task.description or task.title,
+        review_mode=task.review_mode or "auto",
+        attachment_ids=task.attachment_ids,
+    )
+    return True
 
 
 # ── Planning mode ────────────────────────────────────────────────────

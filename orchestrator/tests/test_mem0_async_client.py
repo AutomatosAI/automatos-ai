@@ -392,3 +392,72 @@ def test_mem0_config_defaults_tightened():
     # Unchanged by US-007.
     assert 'MEM0_TIMEOUT_SECONDS", "3.0"' in source
     assert 'MEM0_CIRCUIT_THRESHOLD", "3"' in source
+
+
+# ── PRD-154 S3: bulk delete + infer:false on curated writes ─────────
+
+
+@pytest.mark.asyncio
+async def test_delete_uses_bulk_endpoint(monkeypatch):
+    """delete() must hit the bulk ``DELETE /memories/`` endpoint with a
+    {memory_ids, user_id} body — NOT the per-id ``/memories/{id}/`` path that
+    405s and trips the breaker."""
+    client, _ = _fresh_client(monkeypatch)
+    captured = {}
+
+    async def fake_request(self, method, url, **kwargs):
+        captured["method"] = method
+        captured["url"] = url
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse(200, payload={"deleted": 2})
+
+    monkeypatch.setattr(httpx.AsyncClient, "request", fake_request)
+
+    ok = await client.delete(memory_ids=["m1", "m2"], user_id="mem:ws-1")
+
+    assert ok is True
+    assert captured["method"] == "DELETE"
+    assert captured["url"].endswith("/memories/")     # bulk endpoint
+    assert "/memories/m1" not in captured["url"]       # not the 405 per-id path
+    assert captured["json"] == {"memory_ids": ["m1", "m2"], "user_id": "mem:ws-1"}
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_delete_three_times_keeps_breaker_closed(monkeypatch):
+    """Three consecutive deletes (now 200s on the bulk endpoint) must NOT trip
+    the breaker — the old 405-per-delete behaviour did."""
+    client, breaker = _fresh_client(monkeypatch)
+
+    async def fake_request(self, method, url, **kwargs):
+        return _FakeResponse(200, payload={})
+
+    monkeypatch.setattr(httpx.AsyncClient, "request", fake_request)
+
+    for _ in range(3):
+        assert await client.delete(memory_ids=["m1"], user_id="u") is True
+
+    assert breaker.failures == 0
+    assert not breaker.is_open
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_add_infer_false_in_payload(monkeypatch):
+    """add(infer=False) sends ``"infer": false`` so Mem0 stores the already-
+    curated text verbatim; the default keeps the field absent (server extracts)."""
+    client, _ = _fresh_client(monkeypatch)
+    captured = {}
+
+    async def fake_request(self, method, url, **kwargs):
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse(200, payload={})
+
+    monkeypatch.setattr(httpx.AsyncClient, "request", fake_request)
+
+    await client.add(messages=[{"role": "user", "content": "x"}], user_id="u", infer=False)
+    assert captured["json"].get("infer") is False
+
+    await client.add(messages=[{"role": "user", "content": "y"}], user_id="u")
+    assert "infer" not in captured["json"]   # default unchanged: server extracts
+    await client.aclose()

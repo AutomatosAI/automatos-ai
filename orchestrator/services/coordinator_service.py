@@ -504,18 +504,6 @@ class CoordinatorService:
             )
             return None
 
-    async def _destroy_mission_field(self, run: OrchestrationRun) -> None:
-        """Destroy the shared field when a mission ends."""
-        field = self._get_field()
-        field_id = (run.config or {}).get("field_id")
-        if not field or not field_id:
-            return
-        try:
-            await field.destroy_context(field_id)
-            logger.info("[PRD-108] Destroyed field %s for mission %s", field_id, run.id)
-        except Exception as e:
-            logger.warning("[PRD-108] Failed to destroy field %s: %r", field_id, e, exc_info=True)
-
     async def _inject_task_output_into_field(
         self,
         run: OrchestrationRun,
@@ -709,30 +697,39 @@ class CoordinatorService:
             return None
 
     async def _cleanup_terminal_fields(self, db: Session) -> None:
-        """Destroy fields for missions that have ended.
+        """Archive fields for missions that have ended (BINDING D7 stepping stone).
 
-        Each field is its own Qdrant collection — Qdrant loads all collections
-        into memory on startup, so a backlog OOM-crashes Qdrant. Throttle
-        is intentionally generous to drain the backlog quickly.
+        Fields now share ONE Qdrant collection (``field_memory``) keyed by a
+        ``field_id`` payload filter — there is no longer a per-mission
+        collection to tear down. Destroying the data here made a completed
+        mission's Field tab read ``not_created`` with zero patterns forever.
+        Instead, archive in place: stamp ``field_archived`` + ``field_expired_at``
+        and KEEP both ``field_id`` and the data, so the field stays queryable
+        after the mission ends. The orphan reaper (_cleanup_orphan_field_data)
+        still removes data whose run row has been purged.
         """
         terminal_with_fields = (
             db.query(OrchestrationRun)
             .filter(
                 OrchestrationRun.state.in_([s.value for s in TERMINAL_RUN_STATES]),
                 OrchestrationRun.config["field_id"].astext.isnot(None),
+                OrchestrationRun.config["field_archived"].astext.is_(None),
             )
             .limit(50)
             .all()
         )
         for run in terminal_with_fields:
-            field_id = (run.config or {}).get("field_id")
-            if not field_id:
+            cfg = run.config or {}
+            field_id = cfg.get("field_id")
+            if not field_id or cfg.get("field_archived"):
                 continue
-            await self._destroy_mission_field(run)
-            # Remove field_id from config so we don't try again
-            updated_config = {**(run.config or {})}
-            updated_config.pop("field_id", None)
-            run.config = updated_config
+            # Archive in place — data and field_id are retained so the
+            # /field endpoint can still read this mission's field.
+            run.config = {
+                **cfg,
+                "field_archived": True,
+                "field_expired_at": datetime.now(timezone.utc).isoformat(),
+            }
             db.flush()
 
     async def _cleanup_orphan_field_data(self, db: Session) -> None:

@@ -8,7 +8,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '@clerk/nextjs'
 import { apiClient } from '@/lib/api-client'
-import { useToast } from './use-toast'
+import { toast } from 'sonner'
 
 function shouldRetry(error: any) {
   const msg = String(error?.message || '')
@@ -66,7 +66,6 @@ export function useToolCategories() {
 
 export function useSyncToolsCache() {
   const queryClient = useQueryClient()
-  const { toast } = useToast()
 
   return useMutation({
     mutationFn: (syncType: 'full' | 'incremental' = 'full') => apiClient.syncToolsCache(syncType),
@@ -74,17 +73,10 @@ export function useSyncToolsCache() {
       queryClient.invalidateQueries({ queryKey: ['tools'] })
       queryClient.invalidateQueries({ queryKey: ['tools', 'stats'] })
       queryClient.invalidateQueries({ queryKey: ['tools', 'categories'] })
-      toast({
-        title: 'Sync started/completed',
-        description: 'Marketplace cache sync finished. Refreshing tools list…',
-      })
+      toast('Sync started/completed', { description: 'Marketplace cache sync finished. Refreshing tools list…' })
     },
     onError: (error: any) => {
-      toast({
-        title: 'Sync failed',
-        description: error.message || 'Failed to sync tools cache.',
-        variant: 'destructive',
-      })
+      toast.error('Sync failed', { description: error.message || 'Failed to sync tools cache.' })
     },
   })
 }

@@ -23,7 +23,7 @@ import {
   ListTodo,
 } from 'lucide-react'
 import { format, formatDistanceToNow } from 'date-fns'
-import { toast } from 'react-hot-toast'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { StatusBadge } from '@/components/shared/status-badge'
 import type { StatusVariant } from '@/components/shared/status-badge'

@@ -1,4 +1,5 @@
 from typing import Any, Dict, List, Optional
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload, subqueryload
 from sqlalchemy import and_, or_, func, text
@@ -328,11 +329,7 @@ async def get_agent_stats(ctx: RequestContext = Depends(get_request_context_hybr
             "active_agents": active_agents,
             "inactive_agents": inactive_agents,
             "agents_by_type": agent_types,
-            "average_performance": 85.5,  # Placeholder
-            "total_executions": 0,  # Placeholder
-            "successful_executions": 0,  # Placeholder
-            "failed_executions": 0,  # Placeholder
-            "timestamp": "2025-08-01T12:57:03Z"
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
     except Exception as e:
         logger.error(f"Error getting agent stats: {e}")

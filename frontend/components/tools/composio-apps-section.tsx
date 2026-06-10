@@ -15,7 +15,7 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
-import { useToast } from '@/hooks/use-toast'
+import { toast } from 'sonner'
 import {
     useAvailableApps,
     useConnectedApps,
@@ -35,7 +35,6 @@ const APP_CATEGORIES = [
 ]
 
 export function ComposioAppsSection() {
-    const { toast } = useToast()
     const [searchQuery, setSearchQuery] = useState('')
     const [selectedCategory, setSelectedCategory] = useState('all')
     const [connectingApp, setConnectingApp] = useState<string | null>(null)
@@ -109,10 +108,7 @@ export function ComposioAppsSection() {
                     setConnectingApp(null)
                     refetchApps()
                     refetchConnections()
-                    toast({
-                        title: 'Connection initiated',
-                        description: `Check if ${app.display_name} is now connected.`,
-                    })
+                    toast('Connection initiated', { description: `Check if ${app.display_name} is now connected.` })
                 }
             }, 1000)
 
@@ -124,11 +120,7 @@ export function ComposioAppsSection() {
             }, 5 * 60 * 1000)
         } catch (error) {
             setConnectingApp(null)
-            toast({
-                title: 'Connection failed',
-                description: `Failed to connect to ${app.display_name}`,
-                variant: 'destructive',
-            })
+            toast.error('Connection failed', { description: `Failed to connect to ${app.display_name}` })
         }
     }
 
@@ -137,16 +129,9 @@ export function ComposioAppsSection() {
             await disconnectApp.mutateAsync(appName)
             refetchApps()
             refetchConnections()
-            toast({
-                title: 'Disconnected',
-                description: `${appName} has been disconnected.`,
-            })
+            toast('Disconnected', { description: `${appName} has been disconnected.` })
         } catch (error) {
-            toast({
-                title: 'Error',
-                description: 'Failed to disconnect app',
-                variant: 'destructive',
-            })
+            toast.error('Error', { description: 'Failed to disconnect app' })
         }
     }
 

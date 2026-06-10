@@ -106,8 +106,11 @@ class NaturalLanguageToSQLService:
 
         except Exception as e:
             logger.error(f"Failed to generate SQL: {str(e)}")
+            # Return NO executable SQL on failure — an error-string SELECT would
+            # validate and then execute, surfacing the error text as a fake result
+            # row. Callers branch on metadata["success"] is False.
             return (
-                f"SELECT 'Error generating SQL: {str(e)}' as error",
+                "",
                 f"Failed to generate SQL: {str(e)}",
                 {"error": str(e), "success": False}
             )

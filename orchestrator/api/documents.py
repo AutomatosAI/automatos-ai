@@ -1873,9 +1873,9 @@ async def update_document_team_access(
 
     result = db.execute(
         text(
-            "UPDATE documents SET team_access = :teams, updated_at = NOW() "
+            "UPDATE documents SET team_access = :teams "
             "WHERE id = :doc_id AND workspace_id = :ws "
-            "RETURNING id, title, team_access"
+            "RETURNING id, filename, team_access"
         ),
         {"teams": clean_teams, "doc_id": document_id, "ws": str(ctx.workspace_id)},
     ).fetchone()
@@ -1886,7 +1886,7 @@ async def update_document_team_access(
 
     return {
         "id": result.id,
-        "title": result.title,
+        "filename": result.filename,
         "team_access": result.team_access,
     }
 
@@ -1910,9 +1910,9 @@ async def bulk_update_team_access(
 
     rows = db.execute(
         text(
-            "UPDATE documents SET team_access = :teams, updated_at = NOW() "
+            "UPDATE documents SET team_access = :teams "
             "WHERE id = ANY(:ids) AND workspace_id = :ws "
-            "RETURNING id, title, team_access"
+            "RETURNING id, filename, team_access"
         ),
         {"teams": clean_teams, "ids": body.document_ids, "ws": str(ctx.workspace_id)},
     ).fetchall()
@@ -1921,7 +1921,7 @@ async def bulk_update_team_access(
     return {
         "updated": len(rows),
         "documents": [
-            {"id": r.id, "title": r.title, "team_access": r.team_access}
+            {"id": r.id, "filename": r.filename, "team_access": r.team_access}
             for r in rows
         ],
     }

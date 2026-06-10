@@ -42,7 +42,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Progress } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Checkbox } from '@/components/ui/checkbox'
-import { toast } from 'react-hot-toast'
+import { toast } from 'sonner'
 
 // API hooks
 import { useDeleteDocument, useTagDocument, useStartProcessing } from '@/hooks/use-document-api'

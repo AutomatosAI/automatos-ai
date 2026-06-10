@@ -13,6 +13,7 @@ import BusinessGraphVisualization, {
   type ColorMode,
 } from './BusinessGraphVisualization'
 import { GraphErrorBoundary } from './GraphErrorBoundary'
+import { colorForType } from './graph-viz-utils'
 import {
   Network, Loader2, Search, X, ChevronRight,
   FileText, Clock, Layers, Upload, RefreshCw, Plus,
@@ -266,13 +267,15 @@ export function BusinessGraphPanel() {
     return m
   }, [graphData])
 
-  // Pretty label for each node type — sortable for chip ordering.
-  const TYPE_DISPLAY: Record<string, { label: string; color: string; order: number }> = {
-    shopify_product:    { label: 'Products',    color: '#ff5e3a', order: 1 },
-    shopify_variant:    { label: 'Variants',    color: '#ffb347', order: 2 },
-    shopify_vendor:     { label: 'Vendors',     color: '#c084fc', order: 3 },
-    shopify_collection: { label: 'Collections', color: '#10e89e', order: 4 },
-    shopify_metafield:  { label: 'Metafields',  color: '#38bdf8', order: 5 },
+  // Pretty label + chip ordering for the known node types. Colour is derived
+  // from the shared deterministic palette (colorForType) so the legend swatch
+  // always matches the rendered node — no per-type hex literals here.
+  const TYPE_DISPLAY: Record<string, { label: string; order: number }> = {
+    shopify_product:    { label: 'Products',    order: 1 },
+    shopify_variant:    { label: 'Variants',    order: 2 },
+    shopify_vendor:     { label: 'Vendors',     order: 3 },
+    shopify_collection: { label: 'Collections', order: 4 },
+    shopify_metafield:  { label: 'Metafields',  order: 5 },
   }
 
   const typeChips = useMemo(() => {
@@ -281,7 +284,7 @@ export function BusinessGraphPanel() {
         type: t,
         count: n,
         label: TYPE_DISPLAY[t]?.label ?? t.replace(/_/g, ' '),
-        color: TYPE_DISPLAY[t]?.color ?? '#94a3b8',
+        color: colorForType(t),
         order: TYPE_DISPLAY[t]?.order ?? 99,
       }))
       .sort((a, b) => a.order - b.order || b.count - a.count)

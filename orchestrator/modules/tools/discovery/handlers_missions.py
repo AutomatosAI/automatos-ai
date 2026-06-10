@@ -8,17 +8,83 @@ from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
+# Mirrors the UI suggestion-card's recentMessages.slice(-5) (mission-suggestion-card.tsx).
+_CONTEXT_MESSAGE_LIMIT = 5
+
+
+def _recent_chat_context(db: Session, workspace_id: UUID, chat_id: Any = None,
+                         limit: int = _CONTEXT_MESSAGE_LIMIT) -> list:
+    """Recent workspace chat turns, oldest-first, as ``[{role, content}]``.
+
+    The executor (Auto-tool) path has no chat_id, so we best-effort read the
+    workspace's most recent messages; an explicit chat_id narrows to one thread.
+    Parts→text extraction mirrors handlers_search. Best-effort: any failure
+    yields no context rather than blocking mission creation.
+    """
+    from core.models.core import Message
+
+    try:
+        q = db.query(Message).filter(Message.workspace_id == workspace_id)
+        if chat_id:
+            q = q.filter(Message.chat_id == chat_id)
+        rows = q.order_by(Message.created_at.desc()).limit(limit).all()
+    except Exception as exc:
+        logger.warning("[Missions] could not load chat context: %s", exc)
+        return []
+
+    context = []
+    for m in reversed(rows):
+        parts = m.parts if isinstance(m.parts, list) else []
+        text_content = " ".join(
+            p.get("text", "") for p in parts if isinstance(p, dict) and p.get("text")
+        ).strip()
+        if text_content:
+            context.append({"role": m.role, "content": text_content})
+    return context
+
+
+def _create_reply_message(run: Any, task_count: int) -> str:
+    """Honest status line — a mission defaults to awaiting_approval, not running."""
+    from core.models.orchestration_enums import RunState
+
+    if run.state == RunState.AWAITING_APPROVAL.value:
+        return (
+            f"Mission {run.id} created with {task_count} task(s) and is awaiting your "
+            f"approval. Review the plan and approve it to begin execution."
+        )
+    if run.state == RunState.RUNNING.value:
+        return (
+            f"Mission {run.id} created with {task_count} task(s) and is now running "
+            f"(auto-approved); the coordinator will execute them automatically."
+        )
+    return f"Mission {run.id} created with {task_count} task(s) (state: {run.state})."
+
 
 async def create_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Create and launch a mission via CoordinatorService."""
+    """Create a mission via CoordinatorService.
+
+    Missions default to ``awaiting_approval``; the reply states that honestly and
+    tells the caller how to approve. Recent chat is attached as context so the
+    planner sees the conversation that motivated the mission.
+    """
     goal = params.get("goal")
     if not goal:
         return {"success": False, "error": "goal is required"}
 
-    config = params.get("config") or {}
+    config = dict(params.get("config") or {})
     created_by = str(params.get("_agent_id", "agent"))
 
+    # The UI suggestion-card sets context_messages on its API call; the executor
+    # path did not. Attach recent conversation here too — never clobber a
+    # caller-supplied context.
+    if "context_messages" not in config:
+        recent = _recent_chat_context(db, workspace_id, chat_id=config.get("chat_id"))
+        if recent:
+            config["context_messages"] = recent
+            config.setdefault("source", "chat")
+
     try:
+        from core.models.orchestration_enums import RunState
         from services.coordinator_service import CoordinatorService
 
         coordinator = CoordinatorService()
@@ -42,10 +108,11 @@ async def create_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]
             "success": True,
             "mission_id": run.id,
             "state": run.state,
+            "awaiting_approval": run.state == RunState.AWAITING_APPROVAL.value,
             "goal": run.goal[:200] if run.goal else "",
             "task_count": len(tasks),
             "tasks": task_summary,
-            "message": f"Mission {run.id} created with {len(tasks)} tasks. The coordinator will execute them automatically.",
+            "message": _create_reply_message(run, len(tasks)),
         }
 
     except Exception as e:
@@ -92,8 +159,14 @@ async def get_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]) -
     if not mission_id:
         return {"success": False, "error": "mission_id is required"}
 
+    # Run ids are UUIDs, not ints — coerce and fail cleanly on a malformed id.
+    try:
+        run_id = mission_id if isinstance(mission_id, UUID) else UUID(str(mission_id))
+    except (ValueError, TypeError):
+        return {"success": False, "error": f"Invalid mission_id: {mission_id!r}"}
+
     run = db.query(OrchestrationRun).filter(
-        OrchestrationRun.id == int(mission_id),
+        OrchestrationRun.id == run_id,
         OrchestrationRun.workspace_id == workspace_id,
     ).first()
 
@@ -113,8 +186,8 @@ async def get_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]) -
             "state": t.state,
             "agent_role": t.agent_role,
             "sequence": t.sequence_number,
-            "result_summary": str(t.result)[:500] if t.result else None,
-            "error": t.error_message if hasattr(t, "error_message") else None,
+            "result_summary": str(t.output)[:500] if t.output else None,
+            "error": t.failure_detail,
         })
 
     return {

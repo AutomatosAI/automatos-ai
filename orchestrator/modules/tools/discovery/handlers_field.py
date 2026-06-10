@@ -15,6 +15,25 @@ from sqlalchemy.orm import Session
 logger = logging.getLogger(__name__)
 
 
+def _actor_agent_id(params: Dict[str, Any], kwargs: Dict[str, Any]) -> int:
+    """Resolve the acting agent id.
+
+    The platform executor invokes field handlers as
+    ``handler(db, workspace_id, params)`` with no kwargs, and carries the
+    actor in ``params["_agent_id"]`` (its actor convention — see
+    platform_executor.py). Read it there first; fall back to a legacy
+    ``agent_id`` kwarg, then to 0 (system). Coerce defensively so a JSON
+    string id never raises downstream.
+    """
+    raw = params.get("_agent_id")
+    if raw is None:
+        raw = kwargs.get("agent_id", 0)
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return 0
+
+
 async def field_query(
     db: Session,
     workspace_id: UUID,
@@ -25,7 +44,7 @@ async def field_query(
     query_text = params.get("query", "")
     top_k = params.get("top_k", 10)
     field_id = params.get("field_id") or kwargs.get("field_id")
-    agent_id = kwargs.get("agent_id", 0)
+    agent_id = _actor_agent_id(params, kwargs)
 
     if not query_text:
         return {"success": False, "error": "query is required"}
@@ -89,7 +108,7 @@ async def field_inject(
     value = params.get("value", "")
     strength = params.get("strength", 1.0)
     field_id = params.get("field_id") or kwargs.get("field_id")
-    agent_id = kwargs.get("agent_id", 0)
+    agent_id = _actor_agent_id(params, kwargs)
 
     if not key or not value:
         return {"success": False, "error": "key and value are required"}

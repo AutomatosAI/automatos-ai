@@ -19,7 +19,7 @@ import {
     DialogTitle,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { useToast } from '@/hooks/use-toast'
+import { toast } from 'sonner'
 import { AppTabList } from './app-tab-list'
 import { FeatureGrid } from './feature-grid'
 import {
@@ -39,7 +39,6 @@ interface ManageAppsModalProps {
 }
 
 export function ManageAppsModal({ agentId, open, onClose }: ManageAppsModalProps) {
-    const { toast } = useToast()
     const [selectedApp, setSelectedApp] = useState<string | null>(null)
     const [pendingToggles, setPendingToggles] = useState<Map<string, boolean>>(new Map())
 
@@ -112,19 +111,12 @@ export function ManageAppsModal({ agentId, open, onClose }: ManageAppsModalProps
                 features: featureUpdates,
             })
 
-            toast({
-                title: 'Features updated',
-                description: `Updated ${featureUpdates.length} feature(s) for ${selectedApp}`,
-            })
+            toast('Features updated', { description: `Updated ${featureUpdates.length} feature(s) for ${selectedApp}` })
 
             setPendingToggles(new Map())
             onClose()
         } catch (error) {
-            toast({
-                title: 'Error',
-                description: 'Failed to update features',
-                variant: 'destructive',
-            })
+            toast.error('Error', { description: 'Failed to update features' })
         }
     }
 
@@ -134,16 +126,9 @@ export function ManageAppsModal({ agentId, open, onClose }: ManageAppsModalProps
         try {
             await enableAllFeatures.mutateAsync({ agentId, appName: selectedApp })
             setPendingToggles(new Map())
-            toast({
-                title: 'All features enabled',
-                description: `Enabled all features for ${selectedApp}`,
-            })
+            toast('All features enabled', { description: `Enabled all features for ${selectedApp}` })
         } catch (error) {
-            toast({
-                title: 'Error',
-                description: 'Failed to enable features',
-                variant: 'destructive',
-            })
+            toast.error('Error', { description: 'Failed to enable features' })
         }
     }
 
@@ -153,16 +138,9 @@ export function ManageAppsModal({ agentId, open, onClose }: ManageAppsModalProps
         try {
             await disableAllFeatures.mutateAsync({ agentId, appName: selectedApp })
             setPendingToggles(new Map())
-            toast({
-                title: 'All features disabled',
-                description: `Disabled all features for ${selectedApp}`,
-            })
+            toast('All features disabled', { description: `Disabled all features for ${selectedApp}` })
         } catch (error) {
-            toast({
-                title: 'Error',
-                description: 'Failed to disable features',
-                variant: 'destructive',
-            })
+            toast.error('Error', { description: 'Failed to disable features' })
         }
     }
 
@@ -172,16 +150,9 @@ export function ManageAppsModal({ agentId, open, onClose }: ManageAppsModalProps
         try {
             await disconnectApp.mutateAsync(selectedApp)
             setSelectedApp(null)
-            toast({
-                title: 'App disconnected',
-                description: `${selectedApp} has been disconnected`,
-            })
+            toast('App disconnected', { description: `${selectedApp} has been disconnected` })
         } catch (error) {
-            toast({
-                title: 'Error',
-                description: 'Failed to disconnect app',
-                variant: 'destructive',
-            })
+            toast.error('Error', { description: 'Failed to disconnect app' })
         }
     }
 

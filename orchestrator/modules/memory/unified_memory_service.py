@@ -339,7 +339,7 @@ class UnifiedMemoryService:
         messages = [{"role": "user", "content": content}]
 
         try:
-            result = await self._mem0.add(messages=messages, user_id=user_id, metadata=meta or None, workspace_id=workspace_id)
+            result = await self._mem0.add(messages=messages, user_id=user_id, metadata=meta or None, workspace_id=workspace_id, infer=False)
             logger.info(
                 "[UnifiedMemoryService] store_long_term user_id=%s len=%d",
                 user_id,
@@ -449,18 +449,32 @@ class UnifiedMemoryService:
             )
             return []
 
-    async def delete_memory(self, memory_id: str) -> bool:
+    async def delete_memory(
+        self,
+        memory_id: str,
+        workspace_id: str,
+        agent_id: Optional[int] = None,
+    ) -> bool:
         """
         Delete a specific memory by ID from L3 (Mem0).
 
+        The Mem0 server only exposes the bulk DELETE endpoint, which requires the
+        owning ``user_id`` — resolved here from the workspace/agent namespace
+        (the same namespace get_all_memories lists under for the ownership check).
+
         Args:
             memory_id: The Mem0 memory ID to delete.
+            workspace_id: Workspace scope (used to resolve the namespace user_id).
+            agent_id: Optional agent scope.
 
         Returns:
             True if deleted, False on failure.
         """
         try:
-            result = await self._mem0.delete(memory_id=memory_id)
+            user_id = self.namespace(workspace_id).resolve(agent_id)
+            result = await self._mem0.delete(
+                memory_ids=[memory_id], user_id=user_id, workspace_id=workspace_id
+            )
             logger.info("[UnifiedMemoryService] delete_memory id=%s success=%s", memory_id, result)
             return result
         except Exception:
@@ -503,7 +517,7 @@ class UnifiedMemoryService:
         try:
             result = await self._mem0.add(
                 messages=messages, user_id=user_id, metadata=metadata,
-                workspace_id=workspace_id,
+                workspace_id=workspace_id, infer=False,
             )
             logger.info(
                 "[UnifiedMemoryService] store_long_term_messages user_id=%s",
@@ -623,7 +637,7 @@ class UnifiedMemoryService:
         messages = [{"role": "system", "content": content}]
 
         try:
-            result = await self._mem0.add(messages=messages, user_id=user_id, metadata=metadata, workspace_id=workspace_id)
+            result = await self._mem0.add(messages=messages, user_id=user_id, metadata=metadata, workspace_id=workspace_id, infer=False)
             logger.info(
                 "[UnifiedMemoryService] store_daily_log user_id=%s len=%d",
                 user_id,
@@ -704,7 +718,7 @@ class UnifiedMemoryService:
         async def _store(user_id: str, tier_name: str) -> tuple:
             meta = {**base_meta, "tier": tier_name}
             try:
-                result = await self._mem0.add(messages=messages, user_id=user_id, metadata=meta, workspace_id=workspace_id)
+                result = await self._mem0.add(messages=messages, user_id=user_id, metadata=meta, workspace_id=workspace_id, infer=False)
                 return (tier_name, result)
             except Exception:
                 logger.error(
@@ -896,6 +910,14 @@ class UnifiedMemoryService:
                 days,
                 len(results),
             )
+            # PRD-154 S3: touch each recalled row so access_count climbs toward the
+            # L2->L3 promotion threshold (touch_short_term had zero callers before).
+            # Best-effort: a touch failure must never fail the recall.
+            if results:
+                await asyncio.gather(
+                    *(self.touch_short_term(r["id"]) for r in results if r.get("id")),
+                    return_exceptions=True,
+                )
             return results
         except Exception:
             logger.error(

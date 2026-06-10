@@ -41,7 +41,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
-import { toast } from 'react-hot-toast'
+import { toast } from 'sonner'
 
 // API hooks
 import { 

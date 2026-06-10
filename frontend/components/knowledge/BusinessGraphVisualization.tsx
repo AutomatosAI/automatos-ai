@@ -26,6 +26,7 @@ import React, {
   useImperativeHandle,
 } from "react";
 import dynamic from "next/dynamic";
+import { idOf, colorForType, colorForCommunity } from "./graph-viz-utils";
 
 const ForceGraph2D = dynamic(() => import("react-force-graph-2d"), {
   ssr: false,
@@ -85,32 +86,11 @@ interface VizNode extends GraphNode {
 }
 
 // ---------------------------------------------------------------------------
-// Palette — Automatos-aligned, picked to maximise contrast across the
-// node types we see in a Shopify catalog graph. Stable color per type.
+// Node colour — a deterministic hash over a shared DATA palette (see
+// graph-viz-utils). Type→colour is no longer a hardcoded per-type map: ANY
+// node type gets a stable, distinct hue, and the panel legend reads the same
+// helper so swatches always match the rendered nodes (BINDING Q26).
 // ---------------------------------------------------------------------------
-
-const TYPE_COLORS: Record<string, string> = {
-  shopify_product:    "#ff5e3a",  // vivid orange — anchor
-  shopify_variant:    "#ffb347",  // amber
-  shopify_vendor:     "#c084fc",  // purple
-  shopify_collection: "#10e89e",  // electric emerald
-  shopify_metafield:  "#38bdf8",  // bright sky
-  // Catch-alls (used if anyone seeds graphs with the un-prefixed names)
-  product:    "#ff5e3a",
-  variant:    "#ffb347",
-  vendor:     "#c084fc",
-  collection: "#10e89e",
-  metafield:  "#38bdf8",
-};
-
-// 24-colour cluster palette spread across the hue wheel — every adjacent
-// pair is visually distinct (60° hue separation across two passes).
-const COMMUNITY_COLORS = [
-  "#ff5e3a", "#10e89e", "#38bdf8", "#c084fc", "#fbbf24", "#f472b6",
-  "#22d3ee", "#fb7185", "#a3e635", "#818cf8", "#facc15", "#2dd4bf",
-  "#f97316", "#06b6d4", "#d946ef", "#84cc16", "#0ea5e9", "#ec4899",
-  "#eab308", "#14b8a6", "#a855f7", "#f59e0b", "#6366f1", "#22c55e",
-];
 
 // Edge colour per relation type — so structure reads at a glance even
 // when zoomed out and individual nodes blur together. Used when no
@@ -131,12 +111,6 @@ const DEFAULT_LINK = "#94a3b8";
 // than being constant. FBT edges carry a `weight` (raw co_count) so the
 // strongest co-purchases visually thicken; weaker ones recede.
 const WEIGHTED_RELATIONS = new Set(["frequently_bought_with"]);
-
-const colorByType = (t: string | undefined): string =>
-  TYPE_COLORS[t ?? ""] ?? "#94a3b8";
-
-const colorByCommunity = (c: number | undefined): string =>
-  c == null ? "#64748b" : COMMUNITY_COLORS[c % COMMUNITY_COLORS.length];
 
 // ---------------------------------------------------------------------------
 // Component
@@ -197,20 +171,25 @@ const BusinessGraphVisualization = forwardRef<
     const wantedRels = visibleRelations;
     const relAllowed = (l: GraphLink) =>
       !wantedRels || wantedRels.size === 0 || wantedRels.has(l.relation);
-    const links = graphData.links.filter(
-      (l) =>
+    const links = graphData.links.filter((l) => {
+      const sid = idOf(l.source);
+      const tid = idOf(l.target);
+      return (
         l.confidence_score >= minConfidence &&
         relAllowed(l) &&
-        nodeIds.has(typeof l.source === "string" ? l.source : (l.source as any).id) &&
-        nodeIds.has(typeof l.target === "string" ? l.target : (l.target as any).id),
-    );
+        sid != null &&
+        nodeIds.has(sid) &&
+        tid != null &&
+        nodeIds.has(tid)
+      );
+    });
 
     const degree = new Map<string, number>();
     for (const l of links) {
-      const s = typeof l.source === "string" ? l.source : (l.source as any).id;
-      const t = typeof l.target === "string" ? l.target : (l.target as any).id;
-      degree.set(s, (degree.get(s) ?? 0) + 1);
-      degree.set(t, (degree.get(t) ?? 0) + 1);
+      const s = idOf(l.source);
+      const t = idOf(l.target);
+      if (s != null) degree.set(s, (degree.get(s) ?? 0) + 1);
+      if (t != null) degree.set(t, (degree.get(t) ?? 0) + 1);
     }
     const vizNodes: VizNode[] = nodes.map((n) => ({
       ...n,
@@ -230,10 +209,10 @@ const BusinessGraphVisualization = forwardRef<
     if (!focusNodeId) return null;
     const neighbours = new Set<string>([focusNodeId]);
     for (const l of data.links) {
-      const s = typeof l.source === "object" ? (l.source as any).id : l.source;
-      const t = typeof l.target === "object" ? (l.target as any).id : l.target;
-      if (s === focusNodeId) neighbours.add(t);
-      if (t === focusNodeId) neighbours.add(s);
+      const s = idOf(l.source);
+      const t = idOf(l.target);
+      if (s === focusNodeId && t != null) neighbours.add(t);
+      if (t === focusNodeId && s != null) neighbours.add(s);
     }
     return neighbours;
   }, [focusNodeId, data.links]);
@@ -248,7 +227,7 @@ const BusinessGraphVisualization = forwardRef<
 
   const getColor = useCallback(
     (n: VizNode): string =>
-      colorMode === "type" ? colorByType(n.file_type) : colorByCommunity(n.community),
+      colorMode === "type" ? colorForType(n.file_type) : colorForCommunity(n.community),
     [colorMode],
   );
 
@@ -487,9 +466,9 @@ const BusinessGraphVisualization = forwardRef<
     });
     const nodeIds = new Set(nodes.map((n) => n.id));
     const links = data.links.filter((l) => {
-      const s = typeof l.source === "object" ? (l.source as any).id : l.source;
-      const t = typeof l.target === "object" ? (l.target as any).id : l.target;
-      return nodeIds.has(s) && nodeIds.has(t);
+      const s = idOf(l.source);
+      const t = idOf(l.target);
+      return s != null && t != null && nodeIds.has(s) && nodeIds.has(t);
     });
     return { nodes, links };
   }, [data, selectedCommunity, focusNeighbourhood]);

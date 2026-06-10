@@ -133,6 +133,7 @@ class DatabaseKnowledgeService:
         credential_id: str,
         workspace_id=None,
         description: Optional[str] = None,
+        dialect: str = "postgresql",
         tenant_id: str = None,  # deprecated, use workspace_id
     ) -> Dict[str, Any]:
         """
@@ -187,6 +188,7 @@ class DatabaseKnowledgeService:
                 existing.name = name_trimmed  # Normalize name (remove trailing spaces)
                 existing.description = description
                 existing.credential_id = credential_id
+                existing.dialect = dialect
                 existing.is_active = True
                 db_session.commit()
                 db_session.refresh(existing)
@@ -199,7 +201,7 @@ class DatabaseKnowledgeService:
                 name=name_trimmed,  # Use trimmed name
                 description=description,
                 credential_id=credential_id,
-                dialect='postgresql',  # TODO: detect from credentials
+                dialect=dialect,
                 schema_metadata={},  # Will be populated during introspection
                 is_active=True
             )
@@ -221,6 +223,7 @@ class DatabaseKnowledgeService:
                 existing.name = name_trimmed
                 existing.description = description
                 existing.credential_id = credential_id
+                existing.dialect = dialect
                 existing.is_active = True
                 db_session.commit()
                 db_session.refresh(existing)
@@ -357,6 +360,21 @@ class DatabaseKnowledgeService:
             )
 
             generated_sql = sql
+
+            # Generation itself failed (LLM error): return a structured error
+            # with NO executable SQL. The self-correction loop corrects
+            # *validation* errors, not LLM failures, so retrying is pointless.
+            if not generated_sql or metadata.get("success") is False:
+                gen_error = metadata.get("error") or explanation or "SQL generation failed"
+                _emit_nl2sql_primitive(_emit_ws_id, success=False, detail=gen_error)
+                return {
+                    "success": False,
+                    "error": gen_error,
+                    "sql": None,
+                    "data": [],
+                    "row_count": 0,
+                    "attempts": attempt + 1,
+                }
 
             # Step 5: Validate SQL
             validator = SQLValidator()

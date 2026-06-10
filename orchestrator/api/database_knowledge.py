@@ -137,7 +137,8 @@ async def create_database_source(
             name=source.name,
             credential_id=source.credential_id,
             workspace_id=ctx.workspace_id,
-            description=source.description
+            description=source.description,
+            dialect=source.dialect,
         )
         
         # Create tools for agents

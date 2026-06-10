@@ -160,7 +160,7 @@ export function CalendarTab() {
   const [anchor, setAnchor] = useState<Date>(() => new Date())
 
   const range = mode === 'month' ? '30d' : '7d'
-  const { data: schedule, isLoading } = useActivitySchedule(range)
+  const { data: schedule, isLoading, isError, refetch } = useActivitySchedule(range)
   const { data: heartbeats } = useHeartbeats()
 
   const week = useMemo(() => buildWeek(anchor), [anchor])
@@ -492,6 +492,19 @@ export function CalendarTab() {
           {monthLabel}
         </span>
       </div>
+
+      {isError && (
+        <div
+          className="cc-panel-empty"
+          role="alert"
+          style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}
+        >
+          <span>Couldn’t load the schedule — the scheduler may still be starting up.</span>
+          <button type="button" className="cc-btn" onClick={() => refetch()}>
+            Retry
+          </button>
+        </div>
+      )}
 
       {mode !== 'month' && alwaysOn.length > 0 && (
         <div className="cc-cal-alwayson">

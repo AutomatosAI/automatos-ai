@@ -30,6 +30,9 @@ def register_mission_actions(registry: ActionRegistry) -> None:
                     "type": "object",
                     "description": (
                         "Optional mission config overrides. Keys: "
+                        "auto_approve (bool: skip the awaiting_approval gate and "
+                        "start executing immediately — default false, the mission "
+                        "waits for human approval), "
                         "max_retries (int), category (str), "
                         "output_format (str: 'markdown'|'json'|'code'), "
                         "publish (bool: auto-publish result if applicable)."
@@ -93,8 +96,8 @@ def register_mission_actions(registry: ActionRegistry) -> None:
             "type": "object",
             "properties": {
                 "mission_id": {
-                    "type": "integer",
-                    "description": "The mission/run ID to look up",
+                    "type": "string",
+                    "description": "The mission/run UUID to look up",
                 },
             },
             "required": ["mission_id"],
@@ -102,8 +105,8 @@ def register_mission_actions(registry: ActionRegistry) -> None:
         permission_level="read",
         tags=["missions", "read", "details", "status"],
         examples=[
-            "show me mission 5",
-            "what's the status of mission 12?",
+            "show me that mission",
+            "what's the status of the pricing-research mission?",
             "get mission details",
         ],
     ))
