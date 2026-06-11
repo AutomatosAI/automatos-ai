@@ -73,6 +73,85 @@ def register_documents_actions(registry: ActionRegistry) -> None:
         ],
     ))
 
+    # PRD-157 S2: document-reading tools (Letta pattern). Both read-only and
+    # workspace/team-scoped via the centralized retrieval filters.
+    registry.register(ActionDefinition(
+        name="platform_read_document",
+        description=(
+            "Read the full text of a knowledge-base document, one page at a time. "
+            "Use this to read PAST the short snippet returned by search — pass the "
+            "document_id from a search result, then request successive pages to read "
+            "the whole document. Each page is a token-budgeted slice; the response "
+            "reports total_pages, has_more and next_page so you can keep reading."
+        ),
+        category="documents",
+        parameters={
+            "type": "object",
+            "properties": {
+                "document_id": {
+                    "type": "integer",
+                    "description": "ID of the document to read (from a search result or list_documents).",
+                },
+                "page": {
+                    "type": "integer",
+                    "description": "Zero-based page number to read. Defaults to 0 (the first page).",
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "Optional chunk-index to start from; the page containing it is returned.",
+                },
+            },
+            "required": ["document_id"],
+        },
+        permission_level="read",
+        tags=["documents", "read", "knowledge", "rag"],
+        examples=[
+            "read the rest of that document",
+            "show me page 2 of document 12",
+            "read document 7 in full",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_grep_documents",
+        description=(
+            "Search the literal text of knowledge-base documents with a regular "
+            "expression and get back the matching passages with their document id "
+            "and chunk position. Use for exact-string / pattern lookups (an error "
+            "code, a config key, a name) where semantic search is too fuzzy."
+        ),
+        category="documents",
+        parameters={
+            "type": "object",
+            "properties": {
+                "pattern": {
+                    "type": "string",
+                    "description": "A Python regular expression to match against document text (case-insensitive).",
+                },
+                "team": {
+                    "type": "string",
+                    "description": "Optional team to narrow the search within your accessible documents.",
+                },
+                "document_id": {
+                    "type": "integer",
+                    "description": "Optional: restrict the search to a single document.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of matching passages to return. Defaults to 20.",
+                },
+            },
+            "required": ["pattern"],
+        },
+        permission_level="read",
+        tags=["documents", "grep", "search", "knowledge", "rag"],
+        examples=[
+            "grep the docs for ERR_TIMEOUT",
+            "find where the docs mention 'rate limit'",
+            "search documents for the exact phrase 'service level agreement'",
+        ],
+    ))
+
     registry.register(ActionDefinition(
         name="platform_delete_document",
         description=(

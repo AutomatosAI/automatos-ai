@@ -50,6 +50,8 @@ from modules.tools.discovery.handlers_documents import (
     delete_document,
     reprocess_document,
     upload_document,
+    read_document,
+    grep_documents,
 )
 from modules.tools.discovery.handlers_channels import (  # PRD-143 S10
     list_channels,
@@ -291,6 +293,8 @@ class PlatformActionExecutor:
             "platform_get_llm_usage": get_llm_usage,
             "platform_get_cost_breakdown": get_cost_breakdown,
             "platform_list_documents": list_documents,
+            "platform_read_document": read_document,
+            "platform_grep_documents": grep_documents,
             "platform_get_workspace_info": get_workspace_info,
             "platform_get_memory_stats": get_memory_stats,
             "platform_list_connected_apps": list_connected_apps,
@@ -763,8 +767,13 @@ class PlatformActionExecutor:
                 ),
             }
 
-        # PRD-124/126: Auto-inject _agent_id for graph tools (team scoping)
-        if action_name.startswith("platform_graph") or action_name == "platform_query_graph":
+        # PRD-124/126: Auto-inject _agent_id for graph tools (team scoping).
+        # PRD-157 S2: the document-reading tools are team-scoped the same way.
+        if (
+            action_name.startswith("platform_graph")
+            or action_name == "platform_query_graph"
+            or action_name in ("platform_read_document", "platform_grep_documents")
+        ):
             if "_agent_id" not in params:
                 # Resolve agent_id from the active mission or caller context
                 try:
