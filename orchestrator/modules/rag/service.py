@@ -13,7 +13,7 @@ import logging
 import json
 import os
 from typing import List, Dict, Any, Optional, Tuple
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 # Accurate token counting
 try:
@@ -42,6 +42,8 @@ class RAGResult:
     query: str
     diversity_score: float = 0.0
     information_gain: float = 0.0
+    # PRD-157 S3: numbered-citation source map — [{citation, source_file, document_id, score}]
+    sources_map: List[Dict[str, Any]] = field(default_factory=list)
 
 
 def _get_rag_setting_int(key: str, default: int) -> int:
@@ -538,7 +540,9 @@ class RAGService:
         max_tokens: int,
         diversity: float
     ) -> RAGResult:
-        """Use REAL 0/1 knapsack DP algorithm with content quality and source diversity"""
+        """Score candidates (content quality + source diversity), then select whole
+        chunks under the token budget (PRD-157 S3 budgeter) and assemble numbered
+        citations. Replaces the former pure-Python knapsack DP."""
         
         logger.info(f"🔍 Starting optimization: {len(candidates)} candidates, max_chunks={max_chunks}, max_tokens={max_tokens}")
         
@@ -583,55 +587,49 @@ class RAGService:
                 preview = content[:100].replace('\n', ' ')
                 logger.info(f"  Candidate {i+1}: base={base_relevance:.3f}, quality={quality_score:.2f}, source_penalty={source_penalty:.2f}, final={adjusted_score:.3f}, tokens={item.token_count}, source={source}, preview='{preview}...'")
         
-        # Calculate information value for each chunk
-        values = [item.relevance_score for item in context_items]
-        weights = [item.token_count for item in context_items]
-        
-        logger.info(f"📊 Value range: {min(values):.3f} - {max(values):.3f}, Weight range: {min(weights)} - {max(weights)} tokens")
-        
-        # Apply REAL 0/1 Knapsack Dynamic Programming
-        logger.info(f"🎯 Running 0/1 Knapsack DP algorithm with quality-adjusted scores...")
-        selected_indices = self._knapsack_dp(values, weights, max_tokens, max_chunks)
-        
-        logger.info(f"✅ Knapsack selected {len(selected_indices)} items: {selected_indices}")
-        
-        # Get selected contexts
-        selected_contexts = [context_items[i] for i in selected_indices]
-        
-        # Log selected chunks
-        for i, idx in enumerate(selected_indices):
-            ctx = context_items[idx]
-            preview = ctx.content[:80].replace('\n', ' ')
-            logger.info(f"  Selected {i+1}: idx={idx}, score={ctx.relevance_score:.3f}, tokens={ctx.token_count}, source={ctx.source}, preview='{preview}...'")
-        
-        # Format results
-        chunks = []
-        total_tokens = 0
-        final_source_counts = {}
-        for ctx in selected_contexts:
-            chunks.append({
-                "content": ctx.content,
-                "source_file": ctx.source,
-                "similarity": ctx.relevance_score,
-                "tokens": ctx.token_count,
-                "document_id": ctx.metadata.get("document_id") if ctx.metadata else None,
-                "metadata": ctx.metadata.get("original_metadata", {}) if ctx.metadata else {},
-            })
-            total_tokens += ctx.token_count
-            final_source_counts[ctx.source] = final_source_counts.get(ctx.source, 0) + 1
-        
-        # Calculate diversity score
+        # PRD-157 S3/S4: token-budgeted whole-chunk selection replaces the
+        # pure-Python knapsack DP. context_items already carry the
+        # quality-adjusted relevance score and per-chunk token count computed
+        # above; the budgeter accumulates whole chunks highest-score-first under
+        # the token budget, then assembles numbered [1]..[n] citations.
+        from modules.rag.budget import select_within_budget, assemble_with_citations
+
+        scored_chunks = [
+            {
+                "content": item.content,
+                "source_file": item.source,
+                "similarity": item.relevance_score,
+                "tokens": item.token_count,
+                "document_id": item.metadata.get("document_id") if item.metadata else None,
+                "metadata": item.metadata.get("original_metadata", {}) if item.metadata else {},
+            }
+            for item in context_items
+        ]
+
+        selection = select_within_budget(
+            scored_chunks, max_tokens, max_chunks=max_chunks, score_key="similarity"
+        )
+        chunks = selection.chunks
+        total_tokens = selection.total_tokens
+
+        final_source_counts: Dict[str, int] = {}
+        for c in chunks:
+            final_source_counts[c["source_file"]] = final_source_counts.get(c["source_file"], 0) + 1
         diversity_score = len(final_source_counts) / len(chunks) if chunks else 0.0
-        
-        logger.info(f"📈 Results: {len(chunks)} chunks, {total_tokens} tokens, source_diversity={diversity_score:.2f}")
-        logger.info(f"📁 Source distribution: {final_source_counts}")
-        
-        # Format context
-        formatted_context = self._format_context(chunks, query)
-        
-        info_gain = sum(values[i] for i in selected_indices) / len(values) if values else 0.0
-        logger.info(f"💡 Information gain: {info_gain:.3f}")
-        
+
+        logger.info(
+            "Token-budgeted selection: %d/%d chunks, %d tokens (budget=%d), dropped=%d, diversity=%.2f",
+            len(chunks), len(scored_chunks), total_tokens, max_tokens, selection.dropped, diversity_score,
+        )
+
+        # Numbered, citation-grade context assembly [1]..[n] + source map.
+        formatted_context, sources_map = assemble_with_citations(chunks, query)
+
+        all_values = [item.relevance_score for item in context_items]
+        info_gain = (
+            sum(c["similarity"] for c in chunks) / len(all_values) if all_values else 0.0
+        )
+
         return RAGResult(
             chunks=chunks,
             formatted_context=formatted_context,
@@ -639,7 +637,8 @@ class RAGService:
             sources=list(set(c["source_file"] for c in chunks)),
             query=query,
             diversity_score=diversity_score,
-            information_gain=info_gain
+            information_gain=info_gain,
+            sources_map=sources_map,
         )
     
     def _calculate_content_quality(self, text: str) -> float:
@@ -675,67 +674,6 @@ class RAGService:
             return 0.85
         else:
             return 1.0
-    
-    
-    def _knapsack_dp(
-        self,
-        values: List[float],
-        weights: List[int],
-        capacity: int,
-        max_items: int
-    ) -> List[int]:
-        """
-        REAL 0/1 Knapsack with Dynamic Programming
-        
-        Finds optimal subset of items that:
-        1. Maximizes total value
-        2. Stays within weight capacity
-        3. Respects max_items constraint
-        
-        Time: O(n * capacity * max_items)
-        Space: O(n * capacity * max_items)
-        """
-        n = len(values)
-        if n == 0 or capacity <= 0 or max_items <= 0:
-            logger.warning(f"⚠️ Knapsack: invalid params n={n}, capacity={capacity}, max_items={max_items}")
-            return []
-        
-        logger.info(f"🎒 Knapsack DP: n={n} items, capacity={capacity} tokens, max_items={max_items}")
-        
-        # DP table: dp[i][w][k] = max value using first i items, weight w, k items selected
-        # For memory efficiency, use 2D table and track item count separately
-        dp = [[0.0 for _ in range(capacity + 1)] for _ in range(n + 1)]
-        item_count = [[0 for _ in range(capacity + 1)] for _ in range(n + 1)]
-        
-        # Build DP table
-        for i in range(1, n + 1):
-            for w in range(capacity + 1):
-                # Option 1: Don't include item i-1
-                dp[i][w] = dp[i-1][w]
-                item_count[i][w] = item_count[i-1][w]
-                
-                # Option 2: Include item i-1 (if it fits and we haven't hit max_items)
-                if weights[i-1] <= w and item_count[i-1][w - weights[i-1]] < max_items:
-                    value_with_item = dp[i-1][w - weights[i-1]] + values[i-1]
-                    
-                    if value_with_item > dp[i][w]:
-                        dp[i][w] = value_with_item
-                        item_count[i][w] = item_count[i-1][w - weights[i-1]] + 1
-        
-        # Backtrack to find selected items
-        selected = []
-        w = capacity
-        for i in range(n, 0, -1):
-            # Check if item i-1 was included
-            if dp[i][w] != dp[i-1][w]:
-                selected.append(i-1)
-                w -= weights[i-1]
-        
-        final_value = dp[n][capacity]
-        final_weight = sum(weights[i] for i in selected)
-        logger.info(f"✅ Knapsack result: {len(selected)} items, total_value={final_value:.3f}, total_weight={final_weight} tokens")
-        
-        return list(reversed(selected))
     
     
     def _basic_retrieval(
@@ -915,22 +853,15 @@ class RAGService:
         return candidates
 
     def _format_context(self, chunks: List[Dict], query: str) -> str:
-        """Format chunks into context string"""
-        
-        if not chunks:
-            return "No relevant context found."
-        
-        parts = [f"## Retrieved Context for: {query}\n"]
-        
-        for i, chunk in enumerate(chunks, 1):
-            source = chunk.get("source_file", "unknown")
-            similarity = chunk.get("similarity", 0)
-            content = chunk.get("content", "")
-            
-            parts.append(f"\n### Source {i}: {source} (relevance: {similarity:.0%})")
-            parts.append(content)
-        
-        return "\n".join(parts)
+        """Format chunks into a numbered-citation context string (PRD-157 S3).
+
+        Delegates to the shared budget assembler so every retrieval path renders
+        sources as ``[1]..[n]`` consistently.
+        """
+        from modules.rag.budget import assemble_with_citations
+
+        formatted_context, _ = assemble_with_citations(chunks, query)
+        return formatted_context
     
     async def enhance_prompt_with_context(
         self,
