@@ -46,55 +46,63 @@ class RAGResult:
     sources_map: List[Dict[str, Any]] = field(default_factory=list)
 
 
-def _get_rag_setting_int(key: str, default: int) -> int:
-    """Get RAG setting from system_settings"""
+# PRD-157 S4: RAGConfig used to open up to 7 SessionLocal()s per instantiation
+# (one per setting). Load them once, in a single session, and memoize — so the
+# per-request RAGService construction costs zero DB round-trips after warm-up.
+_RAG_SETTINGS_CACHE: Optional[Dict[str, str]] = None
+
+
+def _load_rag_settings(force: bool = False) -> Dict[str, str]:
+    """Load all RAG-related system_settings in ONE session (memoized).
+
+    Only a successful read is cached, so a transient DB error falls back to
+    defaults without poisoning the cache.
+    """
+    global _RAG_SETTINGS_CACHE
+    if _RAG_SETTINGS_CACHE is not None and not force:
+        return _RAG_SETTINGS_CACHE
     try:
         from core.database.database import SessionLocal
         from core.models.system_settings import SystemSetting
+
         db = SessionLocal()
         try:
-            setting = db.query(SystemSetting).filter(SystemSetting.key == key).first()
-            if setting and setting.value:
-                return int(setting.value)
+            rows = db.query(SystemSetting.key, SystemSetting.value).all()
+            settings = {k: v for k, v in rows if v is not None}
         finally:
             db.close()
+        _RAG_SETTINGS_CACHE = settings  # cache only on success
+        return settings
     except Exception:
-        logger.error("Failed to read RAG setting '%s' (int), using default=%d", key, default, exc_info=True)
-    return default
+        logger.error("Failed to load RAG settings, using defaults", exc_info=True)
+        return {}
+
+
+def reset_rag_settings_cache() -> None:
+    """Drop the memoized RAG settings (call after changing them at runtime)."""
+    global _RAG_SETTINGS_CACHE
+    _RAG_SETTINGS_CACHE = None
+
+
+def _get_rag_setting_int(key: str, default: int) -> int:
+    raw = _load_rag_settings().get(key)
+    try:
+        return int(raw) if raw not in (None, "") else default
+    except (TypeError, ValueError):
+        return default
 
 
 def _get_rag_setting_str(key: str, default: str) -> str:
-    """Get RAG setting string from system_settings"""
-    try:
-        from core.database.database import SessionLocal
-        from core.models.system_settings import SystemSetting
-        db = SessionLocal()
-        try:
-            setting = db.query(SystemSetting).filter(SystemSetting.key == key).first()
-            if setting and setting.value is not None:
-                return setting.value
-        finally:
-            db.close()
-    except Exception:
-        logger.error("Failed to read RAG setting '%s' (str), using default='%s'", key, default, exc_info=True)
-    return default
+    raw = _load_rag_settings().get(key)
+    return raw if raw is not None else default
 
 
 def _get_rag_setting_float(key: str, default: float) -> float:
-    """Get RAG setting from system_settings"""
+    raw = _load_rag_settings().get(key)
     try:
-        from core.database.database import SessionLocal
-        from core.models.system_settings import SystemSetting
-        db = SessionLocal()
-        try:
-            setting = db.query(SystemSetting).filter(SystemSetting.key == key).first()
-            if setting and setting.value:
-                return float(setting.value)
-        finally:
-            db.close()
-    except Exception:
-        logger.error("Failed to read RAG setting '%s' (float), using default=%s", key, default, exc_info=True)
-    return default
+        return float(raw) if raw not in (None, "") else default
+    except (TypeError, ValueError):
+        return default
 
 
 @dataclass
@@ -157,6 +165,9 @@ class RAGService:
     ):
         self.config = config or RAGConfig()
         self._workspace_id = workspace_id
+        # PRD-157 S4: one initialized S3 backend per workspace, reused across
+        # queries instead of rebuilt+reinitialized on every _get_candidates call.
+        self._s3_backends: Dict[str, Any] = {}
         self._context_optimizer = None
         self._semantic_chunker = None
         self._embedding_manager = None
@@ -329,11 +340,35 @@ class RAGService:
             # Fallback to basic retrieval
             result = self._basic_retrieval(query, candidates, max_chunks, max_tokens)
 
-        # Track document access for analytics (fire-and-forget)
+        # Track document access for analytics (PRD-157 S4: fire-and-forget, run
+        # off the event loop so it never blocks the retrieval response).
         if result.chunks and workspace_id:
-            self._track_document_access(result.chunks, workspace_id)
+            self._schedule_access_tracking(result.chunks, workspace_id)
 
         return result
+
+    def _schedule_access_tracking(self, chunks: List[Dict[str, Any]], workspace_id: str) -> None:
+        """Run the (blocking) access-tracking update without blocking the caller.
+
+        Inside the async retrieve path this offloads to a worker thread and does
+        not await it; with no running loop (sync caller) it runs inline.
+        """
+        import asyncio
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop is not None:
+            task = loop.create_task(
+                asyncio.to_thread(self._track_document_access, chunks, workspace_id)
+            )
+            # Keep a reference so the task isn't garbage-collected mid-flight.
+            self._pending_tracking = getattr(self, "_pending_tracking", set())
+            self._pending_tracking.add(task)
+            task.add_done_callback(lambda t: self._pending_tracking.discard(t))
+        else:
+            self._track_document_access(chunks, workspace_id)
 
     def _track_document_access(self, chunks: List[Dict[str, Any]], workspace_id: str) -> None:
         """Update last_accessed timestamp on documents retrieved via RAG."""
@@ -720,6 +755,23 @@ class RAGService:
             query=query
         )
     
+    async def _get_s3_backend(self, workspace_id: str):
+        """PRD-157 S4: reuse one initialized S3VectorsBackend per workspace.
+
+        The backend is workspace-scoped, so caching by workspace_id is safe and
+        removes the boto3 client + bucket/index checks from every query (the RRF
+        path calls _get_candidates up to 5x per retrieve()).
+        """
+        key = str(workspace_id)
+        backend = self._s3_backends.get(key)
+        if backend is None:
+            from modules.search.vector_store.backends.s3_vectors_backend import S3VectorsBackend
+
+            backend = S3VectorsBackend(workspace_id=key)
+            await backend.initialize()
+            self._s3_backends[key] = backend
+        return backend
+
     async def _get_candidates(self, query: str, limit: int = 20, min_similarity: float = 0.5, workspace_id: str = None) -> List[Dict]:
         """
         Get candidate chunks via S3 Vectors.
@@ -741,10 +793,8 @@ class RAGService:
             # Generate query embedding
             query_embedding = await self._embedding_manager.generate_embedding(query)
 
-            # Create S3VectorsBackend for this workspace
-            from modules.search.vector_store.backends.s3_vectors_backend import S3VectorsBackend
-            vector_store = S3VectorsBackend(workspace_id=effective_workspace_id)
-            await vector_store.initialize()
+            # PRD-157 S4: reuse the per-workspace S3 backend (built+initialized once).
+            vector_store = await self._get_s3_backend(effective_workspace_id)
 
             logger.info(f"🔎 S3 Vectors search: workspace={effective_workspace_id}, min_similarity={min_similarity}, limit={limit}")
 
