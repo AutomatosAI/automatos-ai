@@ -1,15 +1,15 @@
 """PRD-156 S5 — closures completed here: widget-memory delete ownership,
 GET /api/documents/content auth, and document_usage workspace attribution.
 
-Structural pins (the behavioral DB/service paths run in CI). NOTE — two S5 items
-are intentionally surfaced for a human decision rather than silently deferred:
-  * RAG-analytics READ scoping over document_usage — the write side now attributes
-    each row to a workspace (below); the analytics READ endpoints still need to
-    filter on metadata->>'workspace_id';
-  * deleting the mock /api/v1/memory router + AdvancedMemoryManager — its
-    acceptance is the PRD-155 route-contract test (not built), and removal cascades
-    into live frontend callers (memory explorer / monitoring tab), so it needs the
-    PRD-155 dependency or an explicit go to remove those features.
+Structural pins (the behavioral DB/service paths run in CI). document_usage is now
+scoped on BOTH sides — writes attribute each row to its workspace (metadata JSONB,
+no migration), reads filter on metadata->>'workspace_id'.
+
+ONE S5 item remains intentionally surfaced for a human decision rather than
+silently deferred: deleting the mock /api/v1/memory router + AdvancedMemoryManager.
+Its acceptance is the PRD-155 route-contract test (not built), and removal cascades
+into live frontend callers (memory explorer / monitoring tab) — so it needs the
+PRD-155 dependency, or an explicit go to remove those fake-data features.
 """
 from __future__ import annotations
 
@@ -40,3 +40,13 @@ def test_document_usage_writes_attributed_to_workspace():
     assert inserts >= 2 and attributed >= 2, (
         f"unattributed document_usage write (inserts={inserts}, attributed={attributed})"
     )
+
+
+def test_document_usage_reads_scoped_by_workspace():
+    """Every workspace-attributable analytics read over document_usage filters on
+    metadata->>'workspace_id' (the references-count read is document-owned, so it's
+    already scoped by the document's workspace check)."""
+    total = 0
+    for rel in ("api/documents.py", "api/context.py", "modules/rag/service.py"):
+        total += (ORCH / rel).read_text().count("metadata->>'workspace_id' = :workspace_id")
+    assert total >= 6, f"document_usage analytics reads not all workspace-scoped (found {total})"

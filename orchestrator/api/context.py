@@ -277,10 +277,11 @@ async def get_optimization_recommendations(
             SELECT AVG(execution_time_ms) as avg_time
             FROM document_usage
             WHERE event_type IN ('document_searched', 'rag_query')
+                AND metadata->>'workspace_id' = :workspace_id
                 AND timestamp >= NOW() - INTERVAL '24 hours'
         """)
-        
-        perf = db.execute(perf_query).fetchone()
+
+        perf = db.execute(perf_query, {"workspace_id": str(ctx.workspace_id)}).fetchone()
         
         if perf and perf.avg_time and perf.avg_time > 1000:
             recommendations.append({
@@ -297,10 +298,11 @@ async def get_optimization_recommendations(
             SELECT COUNT(*) as query_count
             FROM document_usage
             WHERE event_type IN ('document_searched', 'rag_query')
+                AND metadata->>'workspace_id' = :workspace_id
                 AND timestamp >= NOW() - INTERVAL '24 hours'
         """)
-        
-        usage = db.execute(usage_query).fetchone()
+
+        usage = db.execute(usage_query, {"workspace_id": str(ctx.workspace_id)}).fetchone()
         
         if usage and usage.query_count == 0:
             recommendations.append({

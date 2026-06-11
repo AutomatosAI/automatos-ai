@@ -1580,9 +1580,10 @@ async def get_usage_analytics(
                 SELECT event_type, COUNT(*) as count
                 FROM document_usage
                 WHERE timestamp >= :start_time
+                    AND metadata->>'workspace_id' = :workspace_id
                 GROUP BY event_type
             """)
-            event_counts_result = db.execute(event_counts_query, {"start_time": start_time}).fetchall()
+            event_counts_result = db.execute(event_counts_query, {"start_time": start_time, "workspace_id": str(ctx.workspace_id)}).fetchall()
             for row in event_counts_result:
                 usage_event_counts[row.event_type] = row.count
                 usage_total_events += row.count
@@ -1595,13 +1596,14 @@ async def get_usage_analytics(
                 FROM document_usage
                 WHERE event_type IN ('document_searched', 'rag_query')
                     AND timestamp >= :start_time
+                    AND metadata->>'workspace_id' = :workspace_id
                     AND metadata->>'query' IS NOT NULL
                 GROUP BY metadata->>'query'
                 ORDER BY count DESC
                 LIMIT 10
             """)
 
-            search_terms_result = db.execute(search_terms_query, {"start_time": start_time}).fetchall()
+            search_terms_result = db.execute(search_terms_query, {"start_time": start_time, "workspace_id": str(ctx.workspace_id)}).fetchall()
             popular_search_terms = [
                 {"query": row.query, "count": row.count}
                 for row in search_terms_result
