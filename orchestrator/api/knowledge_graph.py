@@ -84,6 +84,7 @@ class EntitySearchResult(BaseModel):
 @router.get("/entities", response_model=List[Entity])
 async def list_entities(
     db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     entity_type: Optional[str] = None,
     limit: int = Query(50, le=200),
     offset: int = 0,
@@ -91,7 +92,7 @@ async def list_entities(
 ):
     """
     List all entities with optional filtering
-    
+
     Args:
         entity_type: Filter by entity type (technology, concept, person, etc.)
         limit: Maximum results to return
@@ -99,26 +100,33 @@ async def list_entities(
         sort_by: Sort field (importance, mentions, name)
     """
     try:
-        # Build query
-        where_clause = "WHERE entity_type = :entity_type" if entity_type else ""
-        
+        # PRD-157 S1: workspace-scoped through the centralized fail-closed choke
+        # point (kb_entities is workspace-scoped; entities have no team granularity).
+        from modules.rag.retrieval_filters import build_retrieval_filters
+        _scope = build_retrieval_filters(workspace_id=ctx.workspace_id)
+
+        where_parts = ["workspace_id::text = :workspace_id"]
+        if entity_type:
+            where_parts.append("entity_type = :entity_type")
+        where_clause = "WHERE " + " AND ".join(where_parts)
+
         order_map = {
             "importance": "importance_score DESC",
             "mentions": "mention_count DESC",
             "name": "entity_name ASC"
         }
         order_clause = order_map.get(sort_by, "importance_score DESC")
-        
+
         query_text = f"""
-            SELECT id, entity_name, entity_type, canonical_name, description, 
+            SELECT id, entity_name, entity_type, canonical_name, description,
                    mention_count, importance_score, created_at
             FROM kb_entities
             {where_clause}
             ORDER BY {order_clause}
             LIMIT :limit OFFSET :offset
         """
-        
-        params = {"limit": limit, "offset": offset}
+
+        params = {"limit": limit, "offset": offset, "workspace_id": _scope.workspace_id}
         if entity_type:
             params["entity_type"] = entity_type
         
@@ -144,28 +152,37 @@ async def list_entities(
 @router.get("/entities/search")
 async def search_entities(
     db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     query: str = Query(..., min_length=2),
     limit: int = Query(20, le=100)
 ):
     """
     Search entities by name (full-text search)
-    
+
     Args:
         query: Search query
         limit: Maximum results
     """
     try:
+        # PRD-157 S1: fail-closed workspace scope via the centralized choke point.
+        from modules.rag.retrieval_filters import build_retrieval_filters
+        _scope = build_retrieval_filters(workspace_id=ctx.workspace_id)
+
         search_query = text("""
-            SELECT id, entity_name, entity_type, canonical_name, description, 
+            SELECT id, entity_name, entity_type, canonical_name, description,
                    mention_count, importance_score, created_at
             FROM kb_entities
-            WHERE entity_name ILIKE :search_pattern
-               OR description ILIKE :search_pattern
+            WHERE workspace_id::text = :workspace_id
+              AND (entity_name ILIKE :search_pattern
+                   OR description ILIKE :search_pattern)
             ORDER BY importance_score DESC, mention_count DESC
             LIMIT :limit
         """)
-        
-        result = db.execute(search_query, {"search_pattern": f"%{query}%", "limit": limit})
+
+        result = db.execute(
+            search_query,
+            {"search_pattern": f"%{query}%", "limit": limit, "workspace_id": _scope.workspace_id},
+        )
         rows = result.fetchall()
         
         return [Entity(

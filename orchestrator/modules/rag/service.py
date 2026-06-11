@@ -252,11 +252,26 @@ class RAGService:
             except Exception as e:
                 logger.warning(f"Query enhancement failed, using original: {e}")
         
-        # PRD-124: normalize team name and over-fetch to compensate for post-filter reduction
-        if team:
-            from core.team_access import normalize_team
-            team = normalize_team(team)
-        team_multiplier = 2 if team else 1
+        # PRD-157 S1: derive the scope through the single fail-closed choke point.
+        # A team restriction without a workspace is unscoped → fail closed.
+        from modules.rag.retrieval_filters import build_retrieval_filters, RetrievalScopeError
+        try:
+            filters = build_retrieval_filters(
+                workspace_id=workspace_id,
+                team=team,
+                require_workspace=bool(team),
+            )
+        except RetrievalScopeError:
+            logger.warning("retrieve() requested team scope without workspace_id — failing closed")
+            return RAGResult(
+                chunks=[],
+                formatted_context="No relevant context found.",
+                total_tokens=0,
+                sources=[],
+                query=query,
+            )
+        team = filters.team  # canonical (lowercased) team or None
+        team_multiplier = 2 if filters.has_team_restriction else 1
 
         # Multi-query retrieval with RRF fusion
         if len(queries_to_search) > 1 and self.config.enable_rrf_fusion:
@@ -348,65 +363,56 @@ class RAGService:
         except Exception as e:
             logger.debug(f"Document access tracking failed: {e}")
     
+    @staticmethod
+    def _candidate_doc_id(c: Dict) -> Optional[str]:
+        """Best-effort document id for a candidate chunk (S3 stores it as external_file_id)."""
+        meta = c.get("metadata", {}) or {}
+        doc_id = (
+            c.get("document_id")
+            or meta.get("document_id")
+            or meta.get("doc_id")
+            or meta.get("external_file_id")
+        )
+        return str(doc_id) if doc_id else None
+
     async def _filter_by_team(
         self,
         candidates: List[Dict],
         team: str,
         workspace_id: str,
     ) -> List[Dict]:
-        """PRD-124: Filter candidates to only include chunks from team-accessible documents.
+        """PRD-157 S1: filter candidates to team-accessible documents via the
+        centralized fail-closed scope helper.
 
-        Queries PostgreSQL for document IDs where:
-          team_access = '{}' (empty = visible to all) OR team = ANY(team_access)
+        Replaces the old fail-open inline SQL: any scope error now drops the
+        candidates (returns ``[]``) instead of passing them through, and
+        candidates whose document cannot be identified are excluded when a team
+        restriction is active (their access cannot be verified).
         """
-        # Collect unique document IDs from candidates
-        doc_ids: set = set()
-        for c in candidates:
-            meta = c.get("metadata", {})
-            doc_id = meta.get("document_id") or meta.get("doc_id") or meta.get("external_file_id")
-            if doc_id:
-                doc_ids.add(str(doc_id))
+        from modules.rag.retrieval_filters import build_retrieval_filters, allowed_document_ids
 
+        filters = build_retrieval_filters(workspace_id=workspace_id, team=team)
+        if not filters.has_team_restriction:
+            return candidates  # no team → workspace-only, nothing to post-filter
+
+        doc_ids = {d for d in (self._candidate_doc_id(c) for c in candidates) if d}
         if not doc_ids:
-            return candidates  # No doc IDs to filter — pass through
+            # Team restriction active but no identifiable documents → cannot verify → fail closed.
+            logger.info("PRD-157 team filter: no document ids on candidates, failing closed")
+            return []
 
+        from core.database.database import SessionLocal
+
+        db = SessionLocal()
         try:
-            from core.database.database import SessionLocal
-            from sqlalchemy import text as sa_text
+            allowed_ids = allowed_document_ids(db, doc_ids, filters)
+        finally:
+            db.close()
 
-            db = SessionLocal()
-            try:
-                rows = db.execute(
-                    sa_text("""
-                        SELECT id::text FROM documents
-                        WHERE id = ANY(:ids::int[])
-                          AND workspace_id = :ws::uuid
-                          AND (team_access = '{}' OR :team = ANY(team_access))
-                    """),
-                    {"ids": list(doc_ids), "ws": str(workspace_id), "team": team},
-                ).fetchall()
-                allowed_ids = {str(r[0]) for r in rows}
-            finally:
-                db.close()
-        except Exception as e:
-            logger.warning(f"Team filtering query failed, passing all candidates: {e}")
-            return candidates
-
-        filtered = [
-            c for c in candidates
-            if str(
-                c.get("metadata", {}).get("document_id")
-                or c.get("metadata", {}).get("doc_id")
-                or c.get("metadata", {}).get("external_file_id")
-                or ""
-            ) in allowed_ids
-            or not (  # Keep candidates without doc ID (shouldn't happen, but safe)
-                c.get("metadata", {}).get("document_id")
-                or c.get("metadata", {}).get("doc_id")
-                or c.get("metadata", {}).get("external_file_id")
-            )
-        ]
-        logger.info(f"PRD-124 team filter: {len(candidates)} → {len(filtered)} candidates (team={team})")
+        filtered = [c for c in candidates if self._candidate_doc_id(c) in allowed_ids]
+        logger.info(
+            f"PRD-157 team filter: {len(candidates)} → {len(filtered)} candidates (team={filters.team})"
+        )
         return filtered
 
     async def _multi_query_retrieval_with_rrf(

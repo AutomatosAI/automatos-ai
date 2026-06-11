@@ -880,6 +880,7 @@ async def semantic_search(
     limit: int = Query(10, ge=1, le=50, description="Maximum number of results"),
     min_similarity: float = Query(0.70, ge=0.0, le=1.0, description="Minimum similarity score"),
     document_ids: Optional[List[int]] = Query(None, description="Optional filter by document IDs"),
+    team: Optional[str] = Query(None, description="Optional team scope (PRD-157 S1); normalized server-side"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
@@ -971,6 +972,16 @@ async def semantic_search(
                     existing["best_similarity"] = similarity
                     existing["best_excerpt"] = chunk_text
                     existing["best_chunk_index"] = chunk_index
+
+        # PRD-157 S1: route surfaced documents through the centralized fail-closed
+        # scope choke point. Workspace is already enforced per-hit above; this adds
+        # team scoping (no-op when no team is supplied, preserving prior behaviour).
+        from modules.rag.retrieval_filters import build_retrieval_filters, allowed_document_ids
+        _scope = build_retrieval_filters(workspace_id=ctx.workspace_id, team=team)
+        if _scope.has_team_restriction and doc_order:
+            _allowed = allowed_document_ids(db, doc_order, _scope)
+            doc_order = [d for d in doc_order if str(d) in _allowed]
+            grouped_results = {d: v for d, v in grouped_results.items() if str(d) in _allowed}
 
         # Fetch limited previews + stats for surfaced docs
         # Collect doc_ids and calculate preview ranges upfront

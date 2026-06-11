@@ -675,8 +675,14 @@ async def search_knowledge(
     - Quality filtering
     """
     try:
+        # PRD-157 S1: fail-closed workspace scope via the centralized choke point.
+        # kb_formulas/kb_tables/kb_images are workspace assets (no team granularity);
+        # the builder guarantees we never search without a resolved workspace.
+        from modules.rag.retrieval_filters import build_retrieval_filters
+        build_retrieval_filters(workspace_id=ctx.workspace_id)
+
         all_results = []
-        
+
         # Search formulas
         if not search.kb_types or 'formula' in search.kb_types:
             formula_query = text("""
