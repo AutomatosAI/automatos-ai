@@ -9,14 +9,15 @@ need no embeddings, no vector DB, and no network:
 * ``_basic_chunk`` — the fallback ingest-chunking primitive (fixed-size windows,
   drops slivers).
 * ``_calculate_content_quality`` — the per-chunk quality score that down-weights
-  ASCII-art / boilerplate before the knapsack picks a context budget.
-* ``_knapsack_dp`` — the 0/1 knapsack that selects the highest-value chunks that
-  fit the token budget. **A real suboptimality is documented below** (see the
-  xfail): when ``max_items`` binds before the token budget, it can pick a
-  lower-value set. Flagged for fix — the test net surfaced it.
-* ``_format_context`` — assembles selected chunks into the prompt context block.
+  ASCII-art / boilerplate before the budgeter picks a context budget.
+* ``_format_context`` — assembles selected chunks into the numbered-citation
+  prompt context block (PRD-157 S3).
 
-All four are exercised on a bare instance (``__new__`` bypasses the DB-reading
+PRD-157 S3/S4 replaced the pure-Python knapsack DP with the whole-chunk token
+budgeter (``modules/rag/budget.py``); its selection behaviour — including the
+case the old knapsack got wrong — is covered by ``tests/test_context_budget.py``.
+
+These are exercised on a bare instance (``__new__`` bypasses the DB-reading
 ``RAGConfig`` in ``__init__``) since none of them touch instance state.
 """
 
@@ -92,52 +93,12 @@ def test_content_quality_penalises_ascii_art_heavily():
     assert _svc()._calculate_content_quality(art) == 0.2
 
 
-# ================================================================ _knapsack_dp
-# 0/1 knapsack: maximise value within token capacity and max_items.
-
-
-def test_knapsack_rejects_degenerate_params():
-    s = _svc()
-    assert s._knapsack_dp([], [], 10, 5) == []
-    assert s._knapsack_dp([1.0], [1], 0, 5) == []      # zero capacity
-    assert s._knapsack_dp([1.0], [1], 10, 0) == []     # zero max_items
-
-
-def test_knapsack_picks_optimal_set_within_capacity():
-    # items (value, weight): A(10,5) B(40,4) C(30,6) D(50,3); cap=10.
-    # Optimal = B+D (value 90, weight 7). A+B+D would weigh 12 > 10.
-    selected = _svc()._knapsack_dp([10, 40, 30, 50], [5, 4, 6, 3], 10, 10)
-    assert selected == [1, 3]
-
-
-def test_knapsack_respects_capacity_bound():
-    # Total weight of all items (18) exceeds capacity (10): result must fit.
-    weights = [5, 4, 6, 3]
-    selected = _svc()._knapsack_dp([10, 40, 30, 50], weights, 10, 10)
-    assert sum(weights[i] for i in selected) <= 10
-
-
-def test_knapsack_honours_max_items_count():
-    # With max_items=2, never return more than 2 indices.
-    selected = _svc()._knapsack_dp([10, 40, 30, 50], [5, 4, 6, 3], 10, 2)
-    assert len(selected) <= 2
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "KNOWN DEFECT (PRD-142 W2-S10): _knapsack_dp is suboptimal when "
-        "max_items binds before the token budget. For values=[10,40,30,50] "
-        "weights=[5,4,6,3] cap=10 max_items=1 it returns index 0 (value 10) "
-        "instead of index 3 (value 50). The 2D DP + greedy item_count tracking "
-        "does not solve the 3-constraint knapsack its docstring promises "
-        "(dp[i][w][k]). Flagged for fix; remove this marker once corrected."
-    ),
-)
-def test_knapsack_is_optimal_when_max_items_binds():
-    # The single most valuable item that fits cap=10 is D (index 3, value 50).
-    selected = _svc()._knapsack_dp([10, 40, 30, 50], [5, 4, 6, 3], 10, 1)
-    assert selected == [3]
+# ================================================================ token budgeter
+# PRD-157 S3/S4: the pure-Python knapsack DP was replaced by the whole-chunk
+# token budgeter (modules/rag/budget.py). Selection/boundary/ordering behaviour —
+# including the previously-xfailed "optimal when max_items binds" case, which the
+# budgeter handles by score-ordered greedy selection — is covered by
+# tests/test_context_budget.py. The knapsack primitive no longer exists.
 
 
 # ============================================================= _format_context
@@ -147,11 +108,14 @@ def test_format_context_empty_is_explicit_sentinel():
     assert _svc()._format_context([], "anything") == "No relevant context found."
 
 
-def test_format_context_renders_sources_with_relevance():
+def test_format_context_renders_numbered_citations():
+    # PRD-157 S3: numbered citations [1]..[n] + a source map replace the old
+    # "### Source i: file (relevance: NN%)" headers.
     out = _svc()._format_context(
-        [{"source_file": "guide.md", "similarity": 0.9, "content": "the answer"}],
+        [{"source_file": "guide.md", "similarity": 0.9, "content": "the answer", "document_id": 7}],
         "my query",
     )
-    assert "## Retrieved Context for: my query" in out
-    assert "### Source 1: guide.md (relevance: 90%)" in out
+    assert "## Retrieved context for: my query" in out
+    assert "[1] (source: guide.md)" in out
     assert "the answer" in out
+    assert "Sources (cite as [n]):" in out
