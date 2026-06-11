@@ -462,8 +462,8 @@ class UnifiedToolExecutor:
     async def _execute_smart_database_tool(self, tool_name, parameters, agent_id, **kw):
         return await exec_research.execute_smart_database_tool(self, tool_name, parameters, agent_id)
 
-    async def _execute_multimodal_tool(self, tool_name, parameters, agent_id, **kw):
-        return await exec_multimodal.execute_multimodal_tool(self, tool_name, parameters, agent_id)
+    async def _execute_multimodal_tool(self, tool_name, parameters, agent_id, workspace_id=None, **kw):
+        return await exec_multimodal.execute_multimodal_tool(self, tool_name, parameters, agent_id, workspace_id=workspace_id)
 
     async def _execute_file_op(self, tool_name, parameters, agent_id, workspace_id=None, trace_id=None, caller_context=None, **kw):
         return await exec_file_ops.execute_file_op(
