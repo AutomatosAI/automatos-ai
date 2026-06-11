@@ -1835,6 +1835,11 @@ class ApiClient {
     return this.request('/api/documents/')
   }
 
+  // PRD-157 S6: real processing-queue status (replaces the FALLBACK_DATA placebo).
+  async getProcessingQueue() {
+    return this.request('/api/documents/queue/status')
+  }
+
   async getDocument(id: string) {
     return this.request(`/api/documents/${id}`)
   }

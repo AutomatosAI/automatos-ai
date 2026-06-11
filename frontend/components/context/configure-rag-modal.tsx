@@ -44,8 +44,6 @@ export function ConfigureRAGModal({ isOpen, onClose, onConfigCreated }: Configur
     hybrid_keyword_weight: 0.3,
     parent_child_expansion: true,
     expansion_window: 1,
-    enable_graph_retrieval: false,
-    graph_max_hops: 2,
     configuration: '{}'
   })
   
@@ -97,8 +95,6 @@ export function ConfigureRAGModal({ isOpen, onClose, onConfigCreated }: Configur
         hybrid_keyword_weight: formData.hybrid_keyword_weight,
         parent_child_expansion: formData.parent_child_expansion,
         expansion_window: formData.expansion_window,
-        enable_graph_retrieval: formData.enable_graph_retrieval,
-        graph_max_hops: formData.graph_max_hops,
       }
 
       // Create RAG configuration
@@ -152,8 +148,6 @@ export function ConfigureRAGModal({ isOpen, onClose, onConfigCreated }: Configur
       hybrid_keyword_weight: 0.3,
       parent_child_expansion: true,
       expansion_window: 1,
-      enable_graph_retrieval: false,
-      graph_max_hops: 2,
       configuration: '{}'
     })
     setTestQuery('')
@@ -375,38 +369,6 @@ export function ConfigureRAGModal({ isOpen, onClose, onConfigCreated }: Configur
                     <div className="flex justify-between text-xs text-muted-foreground mt-1">
                       <span>1 (narrow)</span>
                       <span>5 (wide)</span>
-                    </div>
-                  </div>
-                )}
-
-                {/* Graph Retrieval */}
-                <div className="flex items-center justify-between p-3 bg-secondary/20 rounded-lg border border-border/40">
-                  <div>
-                    <Label>Knowledge Graph Retrieval</Label>
-                    <p className="text-xs text-muted-foreground">Use entity relationships for multi-hop search</p>
-                  </div>
-                  <Switch
-                    checked={formData.enable_graph_retrieval}
-                    onCheckedChange={(checked) => handleInputChange('enable_graph_retrieval', checked)}
-                    disabled={!!createdConfig}
-                  />
-                </div>
-
-                {formData.enable_graph_retrieval && (
-                  <div>
-                    <Label className="flex items-center gap-1">Max Graph Hops: {formData.graph_max_hops} <InlineHelp id="knowledge.rag.graph_hops" size="sm" /></Label>
-                    <Slider
-                      value={[formData.graph_max_hops]}
-                      onValueChange={(values) => handleSliderChange('graph_max_hops', values)}
-                      min={1}
-                      max={4}
-                      step={1}
-                      className="mt-2"
-                      disabled={!!createdConfig}
-                    />
-                    <div className="flex justify-between text-xs text-muted-foreground mt-1">
-                      <span>1 (direct)</span>
-                      <span>4 (deep)</span>
                     </div>
                   </div>
                 )}
