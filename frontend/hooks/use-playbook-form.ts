@@ -7,7 +7,7 @@ import type { PlaybookFormValues } from '@/components/workflows/create-playbook-
 
 /**
  * Transforms frontend PlaybookFormValues into the API request body
- * expected by POST /api/workflow-recipes
+ * expected by POST /api/playbooks
  */
 function transformFormToApiPayload(data: PlaybookFormValues) {
   // Generate a slug-style template_id from the playbook name

@@ -203,7 +203,7 @@ export function useWorkflowAnalytics(days: number = 30) {
         safeRequest(() => apiClient.getWorkflows(), []),
         safeRequest(() => apiClient.getWorkflowStatsDashboard(), null),
         safeRequest(() => apiClient.listWorkflowRecipes({ limit: 100 }), null),
-        safeRequest(() => apiClient.request<any>('/api/workflow-recipes/stats/dashboard'), null),
+        safeRequest(() => apiClient.request<any>('/api/playbooks/stats/dashboard'), null),
         safeRequest(() => apiClient.request<any>(`/api/missions?limit=100`), null),
         safeRequest(() => apiClient.request<any>(`/api/missions/stats?period=${period}`), null),
       ])
