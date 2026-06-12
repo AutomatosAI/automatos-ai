@@ -274,8 +274,14 @@ async def upload_document_multimodal(
     Creates knowledge items for each extracted element.
     """
     start_time = datetime.now()
-    
+
     try:
+        # PRD-156 S1 / PRD-124: persist team_access (comma-separated → normalized
+        # list) into each knowledge_item's metadata so retrieval can scope it.
+        # knowledge_items has no team_access column; empty list = visible to all.
+        from core.team_access import normalize_teams
+        team_access_list: List[str] = normalize_teams(team_access.split(",")) if team_access else []
+
         # Validate file type
         if not file.filename:
             raise HTTPException(status_code=400, detail="No file provided")
@@ -362,7 +368,7 @@ async def upload_document_multimodal(
                         "title": doc_title,
                         "content": results['text'],
                         "summary": summary,
-                        "metadata": json.dumps({"filename": file.filename, "description": description}),
+                        "metadata": json.dumps({"filename": file.filename, "description": description, "team_access": team_access_list}),
                         "source_id": file.filename,
                         "workspace_id": ctx.workspace_id
                     }
@@ -397,7 +403,8 @@ async def upload_document_multimodal(
                             "headers": table.headers,
                             "row_count": table.row_count,
                             "column_count": table.column_count,
-                            "page_number": table.page_number
+                            "page_number": table.page_number,
+                            "team_access": team_access_list
                         }),
                         "source_id": file.filename,
                         "workspace_id": ctx.workspace_id
@@ -454,7 +461,8 @@ async def upload_document_multimodal(
                             "width": image.width,
                             "height": image.height,
                             "format": image.format,
-                            "page_number": image.page_number
+                            "page_number": image.page_number,
+                            "team_access": team_access_list
                         }),
                         "source_id": file.filename,
                         "workspace_id": ctx.workspace_id
@@ -511,7 +519,8 @@ async def upload_document_multimodal(
                         "metadata": json.dumps({
                             "formula_type": formula.formula_type,
                             "domain": formula.domain,
-                            "complexity": formula.complexity
+                            "complexity": formula.complexity,
+                            "team_access": team_access_list
                         }),
                         "source_id": file.filename,
                         "workspace_id": ctx.workspace_id

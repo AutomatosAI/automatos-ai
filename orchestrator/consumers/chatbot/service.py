@@ -101,7 +101,9 @@ class ToolExecutionTracker:
     SEARCH_TOOLS = {
         'search_knowledge', 'semantic_search', 'search_codebase',
         'search_tables', 'search_images', 'search_formulas',
-        'search_multimodal', 'smart_query_database', 'query_database'
+        'search_multimodal'
+        # PRD-156 S3: smart_query_database / query_database removed — NL2SQL is
+        # off the chat surface until PRD-160 re-enables it workspace-scoped.
     }
 
     TOOL_RETRY_LIMITS = {
@@ -109,8 +111,6 @@ class ToolExecutionTracker:
         'search_knowledge': 5,
         'semantic_search': 5,
         'search_codebase': 5,
-        'smart_query_database': 5,
-        'query_database': 5,
         'list_directory': 5,
         'read_file': 8,
         'write_file': 5,

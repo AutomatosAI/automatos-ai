@@ -412,7 +412,10 @@ async def download_document(path: str = Query(..., description="Full path to doc
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/content")
-async def get_document_content_by_path(path: str = Query(..., description="Full path to document")):
+async def get_document_content_by_path(
+    path: str = Query(..., description="Full path to document"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
     """
     Get document content as text for artifact viewer.
     
@@ -1089,7 +1092,10 @@ async def semantic_search(
                     "query": query,
                     "results_count": len(aggregated_results),
                     "execution_time_ms": execution_time_ms,
-                    "metadata": json.dumps({"min_similarity": min_similarity}),
+                    # PRD-156 S5: attribute each usage row to its workspace (the
+                    # table has no workspace_id column; metadata JSONB carries it so
+                    # analytics can filter by metadata->>'workspace_id' without a migration).
+                    "metadata": json.dumps({"min_similarity": min_similarity, "workspace_id": str(ctx.workspace_id)}),
                     "timestamp": datetime.now()
                 }
             )
@@ -1372,6 +1378,7 @@ async def rag_retrieve(
                     "results_count": len(formatted_chunks),
                     "execution_time_ms": execution_time_ms,
                     "metadata": json.dumps({
+                        "workspace_id": str(ctx.workspace_id),  # PRD-156 S5: attribute usage to workspace
                         "max_chunks": max_chunks,
                         "max_tokens": max_tokens,
                         "diversity": diversity,
@@ -1573,9 +1580,10 @@ async def get_usage_analytics(
                 SELECT event_type, COUNT(*) as count
                 FROM document_usage
                 WHERE timestamp >= :start_time
+                    AND metadata->>'workspace_id' = :workspace_id
                 GROUP BY event_type
             """)
-            event_counts_result = db.execute(event_counts_query, {"start_time": start_time}).fetchall()
+            event_counts_result = db.execute(event_counts_query, {"start_time": start_time, "workspace_id": str(ctx.workspace_id)}).fetchall()
             for row in event_counts_result:
                 usage_event_counts[row.event_type] = row.count
                 usage_total_events += row.count
@@ -1588,13 +1596,14 @@ async def get_usage_analytics(
                 FROM document_usage
                 WHERE event_type IN ('document_searched', 'rag_query')
                     AND timestamp >= :start_time
+                    AND metadata->>'workspace_id' = :workspace_id
                     AND metadata->>'query' IS NOT NULL
                 GROUP BY metadata->>'query'
                 ORDER BY count DESC
                 LIMIT 10
             """)
 
-            search_terms_result = db.execute(search_terms_query, {"start_time": start_time}).fetchall()
+            search_terms_result = db.execute(search_terms_query, {"start_time": start_time, "workspace_id": str(ctx.workspace_id)}).fetchall()
             popular_search_terms = [
                 {"query": row.query, "count": row.count}
                 for row in search_terms_result

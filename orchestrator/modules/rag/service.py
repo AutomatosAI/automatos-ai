@@ -1072,7 +1072,8 @@ class RAGService:
                         MAX(timestamp) as last_query
                     FROM document_usage
                     WHERE event_type IN ('document_searched', 'rag_query')
-                """)).fetchone()
+                        AND metadata->>'workspace_id' = :workspace_id
+                """), {"workspace_id": self._workspace_id}).fetchone()
                 if usage_result:
                     avg_response_time = round(usage_result.avg_time or 0, 1)
                     last_query_time = usage_result.last_query.isoformat() if usage_result.last_query else None
@@ -1183,9 +1184,10 @@ class RAGService:
                     timestamp
                 FROM document_usage
                 WHERE event_type = 'rag_query' AND query IS NOT NULL
+                    AND metadata->>'workspace_id' = :workspace_id
                 ORDER BY timestamp DESC
                 LIMIT :limit
-            """), {"limit": limit}).fetchall()
+            """), {"limit": limit, "workspace_id": self._workspace_id}).fetchall()
             
             return [
                 {

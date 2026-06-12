@@ -29,17 +29,22 @@ async def get_database_query_stats(ctx: RequestContext = Depends(get_request_con
     """Get real-time database query statistics"""
     try:
         # Query the database_query_audit table for real stats
+        # PRD-156 S3: scope to the caller's workspace via the source join — the
+        # audit table is shared, so an unscoped read leaks every workspace's
+        # query history, generated SQL and stats.
         result = db.execute(text("""
-            SELECT 
+            SELECT
                 COUNT(*) as total_queries,
-                COUNT(CASE WHEN success = true THEN 1 END) as successful_queries,
-                AVG(execution_time_ms) as avg_execution_time,
-                MAX(execution_time_ms) as max_execution_time,
-                SUM(row_count) as total_rows_queried,
-                COUNT(DISTINCT source_id) as active_sources
-            FROM database_query_audit
-            WHERE created_at > NOW() - INTERVAL '24 hours'
-        """)).fetchone()
+                COUNT(CASE WHEN dqa.success = true THEN 1 END) as successful_queries,
+                AVG(dqa.execution_time_ms) as avg_execution_time,
+                MAX(dqa.execution_time_ms) as max_execution_time,
+                SUM(dqa.row_count) as total_rows_queried,
+                COUNT(DISTINCT dqa.source_id) as active_sources
+            FROM database_query_audit dqa
+            JOIN database_knowledge_sources dks ON dks.id = dqa.source_id
+            WHERE dqa.created_at > NOW() - INTERVAL '24 hours'
+              AND dks.workspace_id = :workspace_id::uuid
+        """), {"workspace_id": str(ctx.workspace_id)}).fetchone()
         
         if not result:
             return {
@@ -79,17 +84,20 @@ async def get_database_query_stats(ctx: RequestContext = Depends(get_request_con
 async def get_database_performance(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get database query performance over time"""
     try:
+        # PRD-156 S3: workspace-scoped via the source join (see /stats).
         result = db.execute(text("""
-            SELECT 
-                DATE_TRUNC('hour', created_at) as hour,
+            SELECT
+                DATE_TRUNC('hour', dqa.created_at) as hour,
                 COUNT(*) as queries,
-                AVG(execution_time_ms) as avg_time,
-                COUNT(CASE WHEN success = true THEN 1 END)::float / COUNT(*) * 100 as success_rate
-            FROM database_query_audit
-            WHERE created_at > NOW() - INTERVAL '24 hours'
-            GROUP BY DATE_TRUNC('hour', created_at)
+                AVG(dqa.execution_time_ms) as avg_time,
+                COUNT(CASE WHEN dqa.success = true THEN 1 END)::float / COUNT(*) * 100 as success_rate
+            FROM database_query_audit dqa
+            JOIN database_knowledge_sources dks ON dks.id = dqa.source_id
+            WHERE dqa.created_at > NOW() - INTERVAL '24 hours'
+              AND dks.workspace_id = :workspace_id::uuid
+            GROUP BY DATE_TRUNC('hour', dqa.created_at)
             ORDER BY hour
-        """)).fetchall()
+        """), {"workspace_id": str(ctx.workspace_id)}).fetchall()
         
         performance_data = [
             {
@@ -111,19 +119,22 @@ async def get_database_performance(ctx: RequestContext = Depends(get_request_con
 async def get_top_queries(limit: int = 10, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get most frequently executed queries"""
     try:
+        # PRD-156 S3: workspace-scoped via the source join (see /stats).
         result = db.execute(text("""
-            SELECT 
-                natural_language_query,
-                generated_sql,
+            SELECT
+                dqa.natural_language_query,
+                dqa.generated_sql,
                 COUNT(*) as execution_count,
-                AVG(execution_time_ms) as avg_time,
-                MAX(created_at) as last_executed
-            FROM database_query_audit
-            WHERE created_at > NOW() - INTERVAL '7 days'
-            GROUP BY natural_language_query, generated_sql
+                AVG(dqa.execution_time_ms) as avg_time,
+                MAX(dqa.created_at) as last_executed
+            FROM database_query_audit dqa
+            JOIN database_knowledge_sources dks ON dks.id = dqa.source_id
+            WHERE dqa.created_at > NOW() - INTERVAL '7 days'
+              AND dks.workspace_id = :workspace_id::uuid
+            GROUP BY dqa.natural_language_query, dqa.generated_sql
             ORDER BY execution_count DESC
             LIMIT :limit
-        """), {"limit": limit}).fetchall()
+        """), {"limit": limit, "workspace_id": str(ctx.workspace_id)}).fetchall()
         
         return [
             {

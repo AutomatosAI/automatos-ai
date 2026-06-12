@@ -276,7 +276,10 @@ async def delete_memory(
 
     if service is not None:
         try:
-            deleted = await service.delete_memory(memory_id=memory_id)
+            # PRD-156 S5: scope the delete to the caller's workspace so a memory
+            # id from another workspace can't be deleted (the service enforces
+            # ownership via workspace_id; previously omitted = cross-tenant delete).
+            deleted = await service.delete_memory(memory_id=memory_id, workspace_id=ws)
             return MemoryDeleteResponse(id=memory_id, deleted=deleted)
         except Exception as exc:
             logger.warning("[widget_memory] Memory delete failed, falling back: %s", exc, exc_info=True)
