@@ -202,6 +202,32 @@ export function Chat({
         const toolData = dataPart.data
         console.log('[WIDGET-DEBUG] tool-data keys:', Object.keys(toolData), 'has generated_document:', !!toolData.generated_document)
 
+        // PRD-163 S4: mission plan approval card (auto-created mission awaiting approval)
+        if (toolData.mission_approval && toolData.mission_approval.mission_id) {
+          const ma = toolData.mission_approval
+          addWidget({
+            type: 'mission_approval',
+            title: 'Mission plan — approval needed',
+            data: {
+              mission_id: ma.mission_id,
+              goal: ma.goal || '',
+              state: ma.state,
+              task_count: ma.task_count ?? (ma.tasks?.length || 0),
+              tasks: ma.tasks || [],
+              cost_estimate_usd: ma.cost_estimate_usd,
+              cost_ceiling_usd: ma.cost_ceiling_usd,
+              approval_deadline_at: ma.approval_deadline_at,
+            },
+            metadata: {
+              source: { type: 'tool', name: 'platform_create_mission' },
+              createdAt: new Date(),
+              conversationId: id,
+            },
+            state: 'ready',
+            createdAt: new Date().toISOString(),
+          } as any)
+        }
+
         // Create widgets for database results
         if (toolData.database_results && Array.isArray(toolData.database_results)) {
           toolData.database_results.forEach((dbResult: any) => {

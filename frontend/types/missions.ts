@@ -115,11 +115,6 @@ export interface MissionCreateRequest {
 }
 
 export interface MissionApproveRequest {
-  modifications?: {
-    task_overrides?: Record<string, Record<string, unknown>>
-    notes?: string
-    agent_overrides?: Record<string, number>
-  }
   max_concurrent_override?: number
   token_budget_override?: number
 }
@@ -128,10 +123,19 @@ export interface MissionRejectRequest {
   reason: string
 }
 
-export interface MissionReviewRequest {
-  verdict: 'accept' | 'reject'
-  task_feedback?: Record<string, string>
-  feedback?: string
+// PRD-163 S4/Q57: approval-time plan editing — edits PATCH the plan (task rows)
+// before approval so an edited agent_role persists into execution.
+export interface MissionTaskEdit {
+  task_id?: string
+  temp_id?: string
+  sequence_number?: number
+  agent_role?: string
+  title?: string
+  description?: string
+}
+
+export interface MissionPlanEditRequest {
+  task_edits: MissionTaskEdit[]
 }
 
 export interface SaveAsRoutineRequest {

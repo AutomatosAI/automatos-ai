@@ -197,6 +197,15 @@ Database Dialect: {dialect}
 
         # Add semantic layer if available
         if semantic_layer:
+            # PRD-160 S4: admin-instructions semantic layer v1 — free-text
+            # per-connection business definitions an admin writes (e.g. "active
+            # = status NOT IN ('churned','deleted'); fiscal year starts in Feb").
+            # Rendered first so the definitions steer everything below.
+            instructions = semantic_layer.get('instructions') or semantic_layer.get('business_context')
+            if instructions:
+                prompt_parts.append("\nBUSINESS DEFINITIONS (authoritative — follow exactly):")
+                prompt_parts.append(str(instructions).strip())
+
             if semantic_layer.get('metrics'):
                 prompt_parts.append("\nBUSINESS METRICS (use these when applicable):")
                 for name, metric in semantic_layer['metrics'].items():

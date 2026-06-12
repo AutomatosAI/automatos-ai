@@ -61,7 +61,10 @@ async def test_mem0_search_sends_search_query_and_prefers_score(monkeypatch):
                     {
                         "id": "recent-low",
                         "content": "recent but weak",
-                        "score": 0.2,
+                        # Above the PRD-159 S3 relevance floor (0.3) so this test
+                        # exercises score ORDERING, not floor filtering (which has
+                        # its own suite: test_recall_relevance_floor).
+                        "score": 0.45,
                         "created_at": "2026-03-10T00:00:00Z",
                     },
                     {

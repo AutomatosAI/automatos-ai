@@ -83,11 +83,84 @@ logger = logging.getLogger(__name__)
 # system_settings (category 'power_modes', key '<mode>'); see
 # _get_power_mode_caps(). Stored settings win; absent keys fall back here.
 # ---------------------------------------------------------------------------
+# PRD-163 S5: timeout scales with power mode — light work shouldn't hang for the
+# full window, and max-power deep work needs more than the 4-min default.
 _POWER_MODE_DEFAULTS: Dict[str, Dict[str, Any]] = {
-    "light":    {"max_tool_iterations": 5,  "force_llm_tier": "system_llm"},
-    "standard": {"max_tool_iterations": 10, "force_llm_tier": None},
-    "max":      {"max_tool_iterations": 50, "force_llm_tier": "orchestrator_llm"},
+    "light":    {"max_tool_iterations": 5,  "force_llm_tier": "system_llm", "timeout_seconds": 120},
+    "standard": {"max_tool_iterations": 10, "force_llm_tier": None, "timeout_seconds": 240},
+    "max":      {"max_tool_iterations": 50, "force_llm_tier": "orchestrator_llm", "timeout_seconds": 600},
 }
+
+
+# PRD-163 S4/Q57: approval-time plan editing — only these per-task fields are
+# editable from the approval card. Structural changes (add/remove tasks, rewire
+# dependencies) go through plan-import (Q54), not this field-PATCH path.
+_EDITABLE_TASK_FIELDS = ("agent_role", "title", "description")
+
+
+def apply_plan_task_edits(tasks: List[Any], plan: Optional[Dict[str, Any]],
+                          edits: List[Dict[str, Any]]) -> tuple:
+    """Apply per-task field edits to OrchestrationTask rows and mirror them into
+    the ``run.plan`` snapshot. Pure w.r.t. its arguments (no DB) so it is unit
+    testable: the caller supplies the loaded task rows + plan dict.
+
+    Each edit matches a task by (in priority order) ``task_id`` (str of the row
+    id), ``temp_id`` (resolved to a sequence via the plan snapshot), or
+    ``sequence_number``. Only ``_EDITABLE_TASK_FIELDS`` are honoured. Task rows
+    are mutated in place (the ORM idiom); a NEW plan dict is returned so the JSON
+    column's change is tracked. Returns ``(new_plan, fields_changed)``.
+    """
+    by_id = {str(getattr(t, "id", "")): t for t in tasks}
+    by_seq = {int(getattr(t, "sequence_number", -1)): t for t in tasks}
+
+    plan = plan or {}
+    plan_tasks = list(plan.get("tasks") or [])
+    # temp_id -> sequence_number, so a temp_id edit can find the row by sequence.
+    temp_to_seq = {
+        str(pt.get("temp_id")): pt.get("sequence_number")
+        for pt in plan_tasks if pt.get("temp_id") is not None
+    }
+
+    fields_changed = 0
+    edited_rows = set()
+    for edit in (edits or []):
+        if not isinstance(edit, dict):
+            continue
+        task = None
+        if edit.get("task_id") is not None:
+            task = by_id.get(str(edit["task_id"]))
+        if task is None and edit.get("temp_id") is not None:
+            seq = temp_to_seq.get(str(edit["temp_id"]))
+            if seq is not None:
+                task = by_seq.get(int(seq))
+        if task is None and edit.get("sequence_number") is not None:
+            try:
+                task = by_seq.get(int(edit["sequence_number"]))
+            except (ValueError, TypeError):
+                task = None
+        if task is None:
+            continue
+        for field in _EDITABLE_TASK_FIELDS:
+            if field in edit and edit[field] is not None:
+                new_val = edit[field]
+                if getattr(task, field, None) != new_val:
+                    setattr(task, field, new_val)
+                    fields_changed += 1
+        edited_rows.add(int(getattr(task, "sequence_number", -1)))
+
+    # Mirror the row state back into the plan snapshot (by sequence_number).
+    if edited_rows:
+        seq_to_row = {int(getattr(t, "sequence_number", -1)): t for t in tasks}
+        new_plan_tasks = []
+        for pt in plan_tasks:
+            seq = pt.get("sequence_number")
+            row = seq_to_row.get(int(seq)) if seq is not None else None
+            if row is not None and int(seq) in edited_rows:
+                pt = {**pt, **{f: getattr(row, f, pt.get(f)) for f in _EDITABLE_TASK_FIELDS}}
+            new_plan_tasks.append(pt)
+        plan = {**plan, "tasks": new_plan_tasks}
+
+    return plan, fields_changed
 
 
 def _get_power_mode_caps(power_mode: str, db: Session) -> Dict[str, Any]:
@@ -934,6 +1007,25 @@ class CoordinatorService:
                         db.rollback()
                         summary["errors"].append(str(run.id))
 
+                # --- PRD-163 S5: async planning — run deferred planners ---
+                try:
+                    planned = await self._sweep_async_planning(db)
+                    if planned:
+                        summary["async_planned"] = planned
+                except Exception:
+                    logger.warning("[Coordinator] async planning sweep failed", exc_info=True)
+                    db.rollback()
+
+                # --- PRD-163 S3: approval countdowns — auto-proceed expired plans ---
+                try:
+                    n = self.check_approval_countdowns(db)
+                    if n:
+                        db.commit()
+                        summary["countdown_auto_approved"] = n
+                except Exception:
+                    logger.warning("[Coordinator] approval countdown sweep failed", exc_info=True)
+                    db.rollback()
+
                 # --- PRD-108: Clean up fields for terminal runs ---
                 await self._cleanup_terminal_fields(db)
                 db.commit()  # Persist field_id removal to stop destroy loop
@@ -1118,7 +1210,7 @@ class CoordinatorService:
             _cleanup_ephemeral_agents(db, run)
 
         if RunState(run.state) == RunState.VERIFYING:
-            await self._build_and_advance_to_awaiting_human(db, run)
+            await self._complete_verified_run(db, run)
             db.refresh(run)
 
         # PRD-142 W3-S11: missions primitive heartbeat at terminal boundary.
@@ -1480,6 +1572,8 @@ class CoordinatorService:
         """
         caps = mode_caps or _POWER_MODE_DEFAULTS["standard"]
         max_iters = caps["max_tool_iterations"]
+        # PRD-163 S5: per-power-mode timeout (falls back to the global default).
+        task_timeout = caps.get("timeout_seconds") or Config.COORDINATOR_TASK_EXECUTION_TIMEOUT
 
         # Pass runtime directly when we have it so the factory cache can't
         # swap in a stale cached runtime under us mid-flight.
@@ -1494,18 +1588,18 @@ class CoordinatorService:
                     max_tool_iterations=max_iters,
                     attachment_ids=attachment_ids,
                 ),
-                timeout=Config.COORDINATOR_TASK_EXECUTION_TIMEOUT,
+                timeout=task_timeout,
             )
         except asyncio.TimeoutError:
             logger.error(
                 "Task %s execution timed out after %ds (agent=%d)",
                 task.id,
-                Config.COORDINATOR_TASK_EXECUTION_TIMEOUT,
+                task_timeout,
                 agent_id,
             )
             result = {
                 "status": "error",
-                "error": f"Execution timed out after {Config.COORDINATOR_TASK_EXECUTION_TIMEOUT}s",
+                "error": f"Execution timed out after {task_timeout}s",
             }
         except Exception as exc:
             logger.error(
@@ -1670,6 +1764,31 @@ class CoordinatorService:
             actor_id="coordinator",
         )
 
+        # PRD-163 S5: async planning — return immediately in PLANNING; the
+        # coordinator tick sweep runs the planner and the plan lands via a
+        # mission_plan_ready notification. The default path stays synchronous
+        # (the in-chat approval card is emitted from the create tool result,
+        # which needs the plan inline).
+        if mission_config.get("async_planning"):
+            logger.info("Mission %s → async planning (deferred to coordinator tick)", run.id)
+            return run
+
+        return await self._run_planning(db, run)
+
+    async def _run_planning(self, db: Session, run: OrchestrationRun) -> OrchestrationRun:
+        """PRD-163 S5: the planning tail — load agents, decompose, persist, and
+        evaluate approval. Shared by synchronous ``create_mission`` and the async
+        planning tick sweep (``_sweep_async_planning``). On reaching
+        awaiting_approval it dispatches a ``mission_plan_ready`` notification to
+        the creating user (S1).
+
+        Raises PlanValidationError (after transitioning the run to FAILED) if the
+        planner cannot produce a valid plan.
+        """
+        workspace_id = run.workspace_id
+        goal = run.goal
+        mission_config = run.config or {}
+
         # Load roster agents
         agents: List[Agent] = (
             db.query(Agent)
@@ -1721,92 +1840,9 @@ class CoordinatorService:
             )
             raise
 
-        # Store the plan on the run
-        run.plan = {
-            "tasks": [
-                {
-                    "temp_id": t.temp_id,
-                    "title": t.title,
-                    "description": t.description,
-                    "agent_role": t.agent_role,
-                    "sequence_number": t.sequence_number,
-                    "task_type": t.task_type,
-                    "complexity": getattr(t, "complexity", "moderate"),
-                    "parallel_group": getattr(t, "parallel_group", None),
-                }
-                for t in decomposition.tasks
-            ],
-            "dependencies": [
-                {
-                    "from": d.from_task_temp_id,
-                    "to": d.to_task_temp_id,
-                }
-                for d in decomposition.dependencies
-            ],
-        }
-        run.token_budget_estimate = decomposition.token_estimate
-        run.max_concurrent = decomposition.max_concurrent
-
-        # Persist template metadata for completion handler (e.g. app_builder → zip output)
-        if decomposition.template_used:
-            run.config = {
-                **(run.config or {}),
-                "template_used": decomposition.template_used,
-            }
-
-        # Create OrchestrationTask rows
-        temp_id_to_task: Dict[str, OrchestrationTask] = {}
-        for planned in decomposition.tasks:
-            task = OrchestrationTask(
-                run_id=run.id,
-                title=planned.title,
-                description=planned.description,
-                task_type=planned.task_type,
-                sequence_number=planned.sequence_number,
-                agent_role=planned.agent_role,
-                state=TaskState.PENDING.value,
-                state_type="initial",
-                verification_criteria=planned.verification_criteria or None,
-                input_context={
-                    "required_tools": planned.required_tools,
-                } if planned.required_tools else None,
-                max_retries=run.max_retries,
-                complexity=getattr(planned, "complexity", "moderate"),
-                parallel_group=getattr(planned, "parallel_group", None),
-                estimated_tokens=COMPLEXITY_TOKEN_BUDGET.get(
-                    getattr(planned, "complexity", "moderate"), 4000
-                ),
-            )
-            db.add(task)
-            db.flush()  # Get task.id
-            temp_id_to_task[planned.temp_id] = task
-
-            emit_event(
-                db=db,
-                run_id=run.id,
-                event_type=EventType.TASK_CREATED,
-                actor_type=ActorType.COORDINATOR,
-                actor_id="coordinator",
-                task_id=task.id,
-                payload={
-                    "title": planned.title,
-                    "sequence_number": planned.sequence_number,
-                    "agent_role": planned.agent_role,
-                },
-            )
-
-        # Create dependency edges
-        for dep in decomposition.dependencies:
-            from_task = temp_id_to_task.get(dep.from_task_temp_id)
-            to_task = temp_id_to_task.get(dep.to_task_temp_id)
-            if from_task and to_task:
-                dep_row = OrchestrationTaskDependency(
-                    task_id=to_task.id,
-                    depends_on_task_id=from_task.id,
-                )
-                db.add(dep_row)
-
-        db.flush()
+        # Store the plan + create task/dependency rows (PRD-163 S2: shared
+        # with import_plan so an imported plan persists the exact given DAG).
+        temp_id_to_task = self._persist_decomposition(db, run, decomposition)
 
         # Create board tasks for kanban visibility
         try:
@@ -1832,21 +1868,55 @@ class CoordinatorService:
             },
         )
 
-        # Auto-approve or await approval
-        auto_approve = mission_config.get("auto_approve", False)
-        if auto_approve:
+        # PRD-163 S3: decide auto-approve vs await-approval via the workspace
+        # approval policy ($ ceiling / full_auto + §12.3 gate). plan_only always
+        # awaits (S2). A per-request auto_approve from chat is an explicit override.
+        from core.services.approval_policy import evaluate_approval, ApprovalDecision
+
+        estimated_cost = self._estimate_cost_usd(decomposition.token_estimate)
+        if mission_config.get("plan_only"):
+            decision = ApprovalDecision(
+                auto_approve=False, reason="plan_only", policy="plan_only",
+                ceiling=None, estimated_cost=estimated_cost, countdown_seconds=None,
+            )
+        else:
+            decision = evaluate_approval(
+                db, workspace_id, estimated_cost,
+                override_auto_approve=bool(mission_config.get("auto_approve", False)),
+            )
+
+        if decision.auto_approve:
             transition_run(
                 db=db,
                 run=run,
                 new_state=RunState.RUNNING,
                 actor_type=ActorType.COORDINATOR,
                 actor_id="coordinator",
-                reason="Auto-approved",
+                reason=f"Auto-approved: {decision.reason}",
+            )
+            # PRD-163 S3: distinct audit event with the policy + ceiling snapshot.
+            emit_event(
+                db=db,
+                run_id=run.id,
+                event_type=EventType.RUN_AUTO_APPROVED,
+                actor_type=ActorType.COORDINATOR,
+                actor_id="coordinator",
+                payload=decision.audit_snapshot(),
             )
             self._queue_initial_tasks(db, run)
             await self._create_mission_field(db, run)
-            logger.info("Mission %s auto-approved → running", run.id)
+            logger.info("Mission %s auto-approved (%s) → running", run.id, decision.reason)
         else:
+            # PRD-163 S3: countdown — store a deadline; the tick loop auto-proceeds
+            # when it passes (cancelled by an explicit approve/reject in the meantime).
+            if decision.countdown_seconds:
+                from datetime import datetime, timezone, timedelta
+                deadline = datetime.now(timezone.utc) + timedelta(seconds=decision.countdown_seconds)
+                run.config = {
+                    **(run.config or {}),
+                    "approval_deadline_at": deadline.isoformat(),
+                    "approval_countdown_seconds": decision.countdown_seconds,
+                }
             transition_run(
                 db=db,
                 run=run,
@@ -1854,32 +1924,354 @@ class CoordinatorService:
                 actor_type=ActorType.COORDINATOR,
                 actor_id="coordinator",
             )
-            logger.info("Mission %s → awaiting_approval", run.id)
+            logger.info("Mission %s → awaiting_approval (%s)", run.id, decision.reason)
+            # PRD-163 S1/S5: tell the creating user the plan is ready for review.
+            # This is the "plan lands via notification" half of async planning and
+            # the mission_plan_ready notification S1 requires.
+            task_count = len((run.plan or {}).get("tasks", []))
+            await _dispatch_mission_event(
+                db=db,
+                run=run,
+                event_type="mission_plan_ready",
+                title=f"Mission plan ready: {(run.goal or 'Mission')[:120]}",
+                message=(
+                    f"{task_count} task(s) planned, est. ${decision.estimated_cost:.2f}. "
+                    f"Review and approve to start execution."
+                ),
+                status="action_required",
+            )
 
         return run
+
+    def _estimate_cost_usd(self, token_estimate: int) -> float:
+        """PRD-163 S3/S5: dollar cost for a token estimate — the currency the
+        approval policy and budget ceilings are denominated in."""
+        tokens = max(0, int(token_estimate or 0))
+        return (tokens / 1000.0) * Config.COORDINATOR_COST_PER_1K_TOKENS
+
+    def check_approval_countdowns(self, db: Session, workspace_id: Optional[UUID] = None) -> int:
+        """PRD-163 S3: auto-proceed any awaiting-approval mission whose countdown
+        deadline has passed. Returns the number auto-approved. ``workspace_id=None``
+        sweeps every workspace (the coordinator tick uses this). Cancelable: an
+        explicit approve/reject moves the run out of awaiting_approval, so it is
+        no longer a candidate here.
+        """
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc)
+        q = db.query(OrchestrationRun).filter(
+            OrchestrationRun.state == RunState.AWAITING_APPROVAL.value,
+        )
+        if workspace_id is not None:
+            q = q.filter(OrchestrationRun.workspace_id == workspace_id)
+        candidates = q.all()
+        proceeded = 0
+        for run in candidates:
+            cfg = run.config or {}
+            deadline_raw = cfg.get("approval_deadline_at")
+            if not deadline_raw:
+                continue
+            try:
+                deadline = datetime.fromisoformat(deadline_raw)
+                if deadline.tzinfo is None:
+                    deadline = deadline.replace(tzinfo=timezone.utc)
+            except (ValueError, TypeError):
+                continue
+            if now < deadline:
+                continue
+            transition_run(
+                db=db, run=run, new_state=RunState.RUNNING,
+                actor_type=ActorType.COORDINATOR, actor_id="coordinator",
+                reason="Auto-approved: approval countdown elapsed",
+            )
+            emit_event(
+                db=db, run_id=run.id, event_type=EventType.RUN_AUTO_APPROVED,
+                actor_type=ActorType.COORDINATOR, actor_id="coordinator",
+                payload={"auto_approved": True, "reason": "countdown_elapsed",
+                         "deadline_at": deadline_raw},
+            )
+            self._queue_initial_tasks(db, run)
+            proceeded += 1
+            logger.info("Mission %s auto-proceeded (countdown elapsed)", run.id)
+        return proceeded
+
+    async def _sweep_async_planning(self, db: Session) -> int:
+        """PRD-163 S5: run the planner for missions created with
+        ``config.async_planning`` that are parked in PLANNING with no plan yet.
+        ``create_mission`` returns those immediately; this sweep produces the
+        plan and (via ``_run_planning``) fires the mission_plan_ready
+        notification. Returns the number planned this tick.
+        """
+        candidates: List[OrchestrationRun] = (
+            db.query(OrchestrationRun)
+            .filter(OrchestrationRun.state == RunState.PLANNING.value)
+            .all()
+        )
+        planned = 0
+        for run in candidates:
+            cfg = run.config or {}
+            if not cfg.get("async_planning") or run.plan:
+                continue  # not an async-planning run, or already planned
+            try:
+                await self._run_planning(db, run)
+                db.commit()
+                planned += 1
+            except PlanValidationError:
+                # _run_planning already transitioned the run to FAILED in-session.
+                db.commit()
+                logger.warning("[Coordinator] async planning failed for run %s", run.id)
+            except Exception:
+                logger.error(
+                    "[Coordinator] async planning error for run %s", run.id, exc_info=True,
+                )
+                db.rollback()
+        return planned
 
     # ------------------------------------------------------------------
     # Lifecycle: approve_plan
     # ------------------------------------------------------------------
+
+    def _persist_decomposition(
+        self,
+        db: Session,
+        run: OrchestrationRun,
+        decomposition,
+    ) -> Dict[str, OrchestrationTask]:
+        """Write a decomposition (planner output OR an imported plan) to
+        ``run.plan`` + OrchestrationTask / dependency rows. Returns the
+        temp_id -> task map. PRD-163 S2: shared by create_mission and import_plan
+        so an imported plan persists the EXACT given DAG (no re-decomposition)."""
+        run.plan = {
+            "tasks": [
+                {
+                    "temp_id": t.temp_id,
+                    "title": t.title,
+                    "description": t.description,
+                    "agent_role": t.agent_role,
+                    "sequence_number": t.sequence_number,
+                    "task_type": t.task_type,
+                    "complexity": getattr(t, "complexity", "moderate"),
+                    "parallel_group": getattr(t, "parallel_group", None),
+                }
+                for t in decomposition.tasks
+            ],
+            "dependencies": [
+                {"from": d.from_task_temp_id, "to": d.to_task_temp_id}
+                for d in decomposition.dependencies
+            ],
+        }
+        run.token_budget_estimate = decomposition.token_estimate
+        run.max_concurrent = decomposition.max_concurrent
+        if decomposition.template_used:
+            run.config = {**(run.config or {}), "template_used": decomposition.template_used}
+
+        temp_id_to_task: Dict[str, OrchestrationTask] = {}
+        for planned in decomposition.tasks:
+            task = OrchestrationTask(
+                run_id=run.id,
+                title=planned.title,
+                description=planned.description,
+                task_type=planned.task_type,
+                sequence_number=planned.sequence_number,
+                agent_role=planned.agent_role,
+                state=TaskState.PENDING.value,
+                state_type="initial",
+                verification_criteria=planned.verification_criteria or None,
+                input_context={"required_tools": planned.required_tools} if planned.required_tools else None,
+                max_retries=run.max_retries,
+                complexity=getattr(planned, "complexity", "moderate"),
+                parallel_group=getattr(planned, "parallel_group", None),
+                estimated_tokens=COMPLEXITY_TOKEN_BUDGET.get(
+                    getattr(planned, "complexity", "moderate"), 4000
+                ),
+            )
+            db.add(task)
+            db.flush()  # Get task.id
+            temp_id_to_task[planned.temp_id] = task
+
+            emit_event(
+                db=db,
+                run_id=run.id,
+                event_type=EventType.TASK_CREATED,
+                actor_type=ActorType.COORDINATOR,
+                actor_id="coordinator",
+                task_id=task.id,
+                payload={
+                    "title": planned.title,
+                    "sequence_number": planned.sequence_number,
+                    "agent_role": planned.agent_role,
+                },
+            )
+
+        for dep in decomposition.dependencies:
+            from_task = temp_id_to_task.get(dep.from_task_temp_id)
+            to_task = temp_id_to_task.get(dep.to_task_temp_id)
+            if from_task and to_task:
+                db.add(OrchestrationTaskDependency(
+                    task_id=to_task.id,
+                    depends_on_task_id=from_task.id,
+                ))
+
+        db.flush()
+        return temp_id_to_task
+
+    def import_plan(
+        self,
+        db: Session,
+        workspace_id: UUID,
+        goal: str,
+        plan: Dict[str, Any],
+        created_by: str,
+        config: Optional[Dict[str, Any]] = None,
+    ) -> OrchestrationRun:
+        """PRD-163 S2: create a mission from a pre-built plan WITHOUT re-running the
+        planner. The given tasks/dependencies are persisted verbatim and the
+        mission lands in awaiting_approval. Used by the plan-import endpoint and by
+        Auto when a chat-approved plan should execute exactly as agreed (Q54)."""
+        from modules.coordination.planner import (
+            DecompositionResult,
+            PlannedTask,
+            PlannedDependency,
+        )
+
+        raw_tasks = plan.get("tasks") or []
+        if not raw_tasks:
+            raise ValueError("Imported plan has no tasks")
+
+        planned_tasks: List[PlannedTask] = []
+        for idx, t in enumerate(raw_tasks):
+            temp_id = str(t.get("temp_id") or t.get("id") or f"t{idx + 1}")
+            planned_tasks.append(PlannedTask(
+                temp_id=temp_id,
+                title=str(t.get("title") or f"Task {idx + 1}"),
+                description=str(t.get("description") or ""),
+                agent_role=str(t.get("agent_role") or "generalist"),
+                sequence_number=int(t.get("sequence_number", idx + 1)),
+                task_type=str(t.get("task_type") or "execution"),
+                verification_criteria=t.get("verification_criteria") or [],
+                required_tools=t.get("required_tools") or [],
+                dependencies=[str(d) for d in (t.get("dependencies") or [])],
+                complexity=str(t.get("complexity") or "moderate"),
+                parallel_group=t.get("parallel_group"),
+            ))
+
+        valid_ids = {pt.temp_id for pt in planned_tasks}
+        deps: List[PlannedDependency] = []
+        for d in (plan.get("dependencies") or []):
+            frm = str(d.get("from") or d.get("from_task_temp_id") or "")
+            to = str(d.get("to") or d.get("to_task_temp_id") or "")
+            if frm in valid_ids and to in valid_ids:
+                deps.append(PlannedDependency(from_task_temp_id=frm, to_task_temp_id=to))
+
+        token_estimate = int(plan.get("token_estimate") or sum(
+            COMPLEXITY_TOKEN_BUDGET.get(pt.complexity, 4000) for pt in planned_tasks
+        ))
+        decomposition = DecompositionResult(
+            tasks=planned_tasks,
+            dependencies=deps,
+            token_estimate=token_estimate,
+            max_concurrent=int(plan.get("max_concurrent", 1)),
+        )
+
+        mission_config = {**(config or {}), "imported_plan": True}
+        run = OrchestrationRun(
+            workspace_id=workspace_id,
+            goal=goal,
+            created_by=created_by,
+            config=mission_config,
+            state=RunState.PENDING.value,
+            state_type="initial",
+            max_retries=mission_config.get("max_retries", Config.COORDINATOR_MAX_TASK_RETRIES),
+            max_concurrent=decomposition.max_concurrent,
+        )
+        db.add(run)
+        db.flush()
+
+        emit_event(
+            db=db, run_id=run.id, event_type=EventType.RUN_CREATED,
+            actor_type=ActorType.HUMAN, actor_id=created_by,
+            payload={"goal": goal[:500], "imported": True},
+        )
+        transition_run(
+            db=db, run=run, new_state=RunState.PLANNING,
+            actor_type=ActorType.COORDINATOR, actor_id="coordinator",
+        )
+
+        self._persist_decomposition(db, run, decomposition)
+
+        emit_event(
+            db=db, run_id=run.id, event_type=EventType.RUN_PLAN_READY,
+            actor_type=ActorType.COORDINATOR, actor_id="coordinator",
+            payload={"task_count": len(planned_tasks), "imported": True},
+        )
+        transition_run(
+            db=db, run=run, new_state=RunState.AWAITING_APPROVAL,
+            actor_type=ActorType.COORDINATOR, actor_id="coordinator",
+        )
+        logger.info("Imported plan -> mission %s (%d tasks) awaiting_approval", run.id, len(planned_tasks))
+        return run
+
+    def update_mission_plan(
+        self,
+        db: Session,
+        run_id: UUID,
+        actor_id: str,
+        task_edits: List[Dict[str, Any]],
+    ) -> OrchestrationRun:
+        """PRD-163 S4/Q57: apply approval-time task/agent edits to an
+        awaiting-approval mission so they persist into execution.
+
+        ``task_edits`` is a list of ``{task_id|temp_id|sequence_number,
+        agent_role?, title?, description?}``. Edits mutate the OrchestrationTask
+        rows the dispatcher will execute (so an edited ``agent_role`` actually
+        changes who runs the task) and are mirrored into ``run.plan``. Field
+        edits only — structural changes go through plan-import (Q54). Valid only
+        while the mission is awaiting approval.
+        """
+        run = self._get_run(db, run_id)
+        if run.state != RunState.AWAITING_APPROVAL.value:
+            raise ValueError(
+                f"Mission is in '{run.state}' state, expected 'awaiting_approval'"
+            )
+
+        tasks: List[OrchestrationTask] = (
+            db.query(OrchestrationTask)
+            .filter(OrchestrationTask.run_id == run.id)
+            .all()
+        )
+        new_plan, fields_changed = apply_plan_task_edits(tasks, run.plan, task_edits)
+        if fields_changed:
+            run.plan = new_plan  # reassign so the JSON column is marked dirty
+            emit_event(
+                db=db,
+                run_id=run.id,
+                event_type=EventType.RUN_PLAN_EDITED,
+                actor_type=ActorType.HUMAN,
+                actor_id=actor_id,
+                payload={"fields_changed": fields_changed,
+                         "edit_count": len(task_edits or [])},
+            )
+            logger.info(
+                "Mission %s plan edited by %s (%d field(s))",
+                run_id, actor_id, fields_changed,
+            )
+        return run
 
     def approve_plan(
         self,
         db: Session,
         run_id: UUID,
         actor_id: str,
-        modifications: Optional[Dict[str, Any]] = None,
     ) -> OrchestrationRun:
         """
         Approve a mission plan and start execution.
 
         Transitions: awaiting_approval → running.
         Queues initial tasks (those with no dependencies) as QUEUED.
+        Approval-time edits are applied beforehand via ``update_mission_plan``
+        (PRD-163 S4/Q57), so this executes the plan exactly as shown.
         """
         run = self._get_run(db, run_id)
-
-        if modifications:
-            # Apply plan modifications (e.g., reorder, remove tasks)
-            run.plan = {**(run.plan or {}), "modifications": modifications}
 
         transition_run(
             db=db,
@@ -1895,7 +2287,6 @@ class CoordinatorService:
             event_type=EventType.RUN_APPROVED,
             actor_type=ActorType.HUMAN,
             actor_id=actor_id,
-            payload={"modifications": modifications} if modifications else None,
         )
 
         self._queue_initial_tasks(db, run)
@@ -1946,132 +2337,6 @@ class CoordinatorService:
 
         VerificationService.clear_cache(run.id)
         logger.info("Mission %s rejected by %s: %s", run_id, actor_id, reason)
-        return run
-
-    # ------------------------------------------------------------------
-    # Lifecycle: review_mission
-    # ------------------------------------------------------------------
-
-    def review_mission(
-        self,
-        db: Session,
-        run_id: UUID,
-        actor_id: str,
-        verdict: str,
-        task_feedback: Optional[Dict[str, str]] = None,
-        feedback: Optional[str] = None,
-    ) -> OrchestrationRun:
-        """
-        Submit human review after all tasks are verified.
-
-        Args:
-            verdict: 'accept' or 'reject'
-            task_feedback: Optional dict mapping task_id → feedback string.
-                          On reject, tasks with feedback get re-queued.
-            feedback: Optional general rejection feedback (no per-task flags needed).
-        """
-        run = self._get_run(db, run_id)
-
-        if verdict == "accept":
-            transition_run(
-                db=db,
-                run=run,
-                new_state=RunState.COMPLETED,
-                actor_type=ActorType.HUMAN,
-                actor_id=actor_id,
-            )
-            emit_event(
-                db=db,
-                run_id=run.id,
-                event_type=EventType.RUN_COMPLETED,
-                actor_type=ActorType.HUMAN,
-                actor_id=actor_id,
-            )
-            VerificationService.clear_cache(run.id)
-            logger.info("Mission %s accepted by %s → completed", run_id, actor_id)
-
-        elif verdict == "reject":
-            # Re-queue specific tasks with feedback
-            requeued_count = 0
-            if task_feedback:
-                for task_id_str, fb in task_feedback.items():
-                    task = (
-                        db.query(OrchestrationTask)
-                        .filter(
-                            and_(
-                                OrchestrationTask.id == task_id_str,
-                                OrchestrationTask.run_id == run_id,
-                            )
-                        )
-                        .first()
-                    )
-                    if task:
-                        self._requeue_task_with_feedback(
-                            db, task, fb, actor_id,
-                        )
-                        requeued_count += 1
-
-            # Feedback-only rejection: re-queue the last verified task with the feedback
-            if requeued_count == 0 and feedback:
-                last_task = (
-                    db.query(OrchestrationTask)
-                    .filter(
-                        and_(
-                            OrchestrationTask.run_id == run_id,
-                            OrchestrationTask.state == TaskState.VERIFIED.value,
-                        )
-                    )
-                    .order_by(OrchestrationTask.sequence_number.desc())
-                    .first()
-                )
-                if last_task:
-                    self._requeue_task_with_feedback(
-                        db, last_task, feedback, actor_id,
-                    )
-                    requeued_count += 1
-
-            # Build reason string
-            if requeued_count > 0:
-                reason = f"Human rejected — {requeued_count} tasks re-queued"
-            elif feedback:
-                reason = f"Human rejected with feedback: {feedback[:200]}"
-            else:
-                reason = "Human rejected"
-
-            # Transition run back to running for re-execution
-            transition_run(
-                db=db,
-                run=run,
-                new_state=RunState.RUNNING,
-                actor_type=ActorType.HUMAN,
-                actor_id=actor_id,
-                reason=reason,
-            )
-
-            event_payload: Dict[str, object] = {
-                "verdict": "reject",
-                "tasks_requeued": requeued_count,
-            }
-            if feedback:
-                event_payload["feedback"] = feedback
-
-            emit_event(
-                db=db,
-                run_id=run.id,
-                event_type=EventType.RUN_RESUMED,
-                actor_type=ActorType.HUMAN,
-                actor_id=actor_id,
-                payload=event_payload,
-            )
-
-            logger.info(
-                "Mission %s rejected by %s — %d tasks re-queued, general_feedback=%s",
-                run_id,
-                actor_id,
-                requeued_count,
-                bool(feedback),
-            )
-
         return run
 
     # ------------------------------------------------------------------
@@ -2876,7 +3141,7 @@ class CoordinatorService:
 
         return archived_count
 
-    async def _build_and_advance_to_awaiting_human(
+    async def _complete_verified_run(
         self,
         db: Session,
         run: OrchestrationRun,

@@ -48,6 +48,9 @@ export { WorkflowWidget, WorkflowWidgetDef } from './WorkflowWidget'
 export { MemoryWidget, MemoryWidgetDef } from './MemoryWidget'
 export { FileWidget, FileWidgetDef } from './FileWidget'
 
+// PRD-163 S4: Mission plan approval card
+export { MissionApprovalWidget, MissionApprovalWidgetDef } from './MissionApprovalWidget'
+
 // PRD-66: Coding Canvas Widget (workspace file browser + Monaco editor)
 export { CodingCanvasWidget, CodingCanvasWidgetDef } from './CodingCanvasWidget'
 

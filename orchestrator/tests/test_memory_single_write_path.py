@@ -175,11 +175,11 @@ async def test_chat_turn_writes_l2_exactly_once():
 async def test_chat_turn_writes_l3_exactly_once():
     """L3 (Mem0) is invoked exactly once per turn via ``store_conversation``.
 
-    ``store_conversation`` *internally* may fan out to a global tier + an
-    agent tier (``store_two_tier`` with tier='both'). That fan-out is
-    *namespace dispatch by design*, not a duplicate write of the same
-    logical event. What G12 forbids is two SEPARATE call sites both pushing
-    the same chat exchange to L3 — the chat path must have exactly one.
+    ``store_conversation`` routes to a SINGLE namespace per turn — "global" by
+    default, or the agent namespace only on an explicit agent-scoped instruction
+    (PRD-159 S5 removed the old 'both'-tier double-write default). What G12
+    forbids is two SEPARATE call sites both pushing the same chat exchange to L3
+    — the chat path must have exactly one.
     """
     fake = _make_fake_orchestrator()
 

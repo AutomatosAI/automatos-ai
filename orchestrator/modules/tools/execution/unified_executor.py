@@ -35,6 +35,7 @@ from modules.tools.execution import exec_multimodal
 from modules.tools.execution import exec_workspace
 from modules.tools.execution import exec_planning
 from modules.tools.execution.telemetry import fire_telemetry
+from modules.memory.tool_outcome_capture import capture_tool_outcome
 
 # PRD-36: Composio Integration (lazy import to avoid startup overhead)
 _composio_executor = None
@@ -407,6 +408,7 @@ class UnifiedToolExecutor:
                         agent_id,
                         workspace_id=workspace_id,
                         trace_id=trace,
+                        caller_context=caller_context,
                     )
                 except TypeError:
                     result = await executor_func(tool_name, parameters, agent_id)
@@ -441,6 +443,16 @@ class UnifiedToolExecutor:
                 execution_time_ms=_exec_ms,
                 caller_context=caller_context,
             )
+            # PRD-159 S2: capture notable tool outcomes (failures + notable
+            # successes) as typed tool_outcome memories — fire-and-forget,
+            # content-hash deduped, noise-gated. Never fails the tool call.
+            capture_tool_outcome(
+                tool_name=tool_name,
+                parameters=parameters if isinstance(parameters, dict) else {},
+                result=result,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+            )
 
     # ------------------------------------------------------------------
     # Delegate methods -- thin wrappers calling extracted modules
@@ -456,11 +468,17 @@ class UnifiedToolExecutor:
             agent_id=agent_id,
         )
 
-    async def _execute_database_tool(self, tool_name, parameters, agent_id, **kw):
-        return await exec_research.execute_database_tool(self, tool_name, parameters, agent_id)
+    async def _execute_database_tool(self, tool_name, parameters, agent_id, workspace_id=None, caller_context=None, **kw):
+        return await exec_research.execute_database_tool(
+            self, tool_name, parameters, agent_id,
+            workspace_id=workspace_id, caller_context=caller_context,
+        )
 
-    async def _execute_smart_database_tool(self, tool_name, parameters, agent_id, **kw):
-        return await exec_research.execute_smart_database_tool(self, tool_name, parameters, agent_id)
+    async def _execute_smart_database_tool(self, tool_name, parameters, agent_id, workspace_id=None, caller_context=None, **kw):
+        return await exec_research.execute_smart_database_tool(
+            self, tool_name, parameters, agent_id,
+            workspace_id=workspace_id, caller_context=caller_context,
+        )
 
     async def _execute_multimodal_tool(self, tool_name, parameters, agent_id, workspace_id=None, **kw):
         return await exec_multimodal.execute_multimodal_tool(self, tool_name, parameters, agent_id, workspace_id=workspace_id)

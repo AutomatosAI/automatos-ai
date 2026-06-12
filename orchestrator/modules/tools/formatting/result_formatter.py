@@ -741,6 +741,19 @@ class ToolResultFormatter:
             passthrough = result.get("frontend_data") or {}
             frontend_data.update(passthrough)
 
+        elif tool_name == "platform_create_mission":
+            # PRD-163 S4: an auto-created mission that's awaiting approval surfaces
+            # an in-chat approval card. (raw_result fallback covers wrapped results.)
+            mres = result if result.get("mission_id") else (result.get("raw_result") or {})
+            if mres.get("awaiting_approval") and mres.get("mission_id"):
+                frontend_data["mission_approval"] = {
+                    "mission_id": str(mres.get("mission_id")),
+                    "goal": mres.get("goal", ""),
+                    "state": mres.get("state"),
+                    "task_count": mres.get("task_count", 0),
+                    "tasks": mres.get("tasks", []),
+                }
+
         return frontend_data
     
     @staticmethod

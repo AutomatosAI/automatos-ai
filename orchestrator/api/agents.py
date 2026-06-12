@@ -580,6 +580,7 @@ async def get_org_chart(
     """
     try:
         from core.models.composio_cache import AgentAppAssignment
+        from core.team_access import list_teams
 
         # Fetch active workspace agents — the workspace Auto (slug=auto-{ws_id})
         # is included so the chart has a single root. Excludes the global
@@ -627,7 +628,6 @@ async def get_org_chart(
 
         nodes = []
         edges = []
-        teams_set: set = set()
 
         for a in agents:
             skill_names = [s.name for s in a.skills] if a.skills else []
@@ -656,14 +656,15 @@ async def get_org_chart(
             if parent_id is not None:
                 edges.append({"from": parent_id, "to": a.id})
 
-            if a.team:
-                teams_set.add(a.team)
+        # PRD-158 S1: teams come from the Teams table (same source as /api/teams)
+        # so the org-chart and the team API never disagree.
+        teams = [t.name for t in list_teams(db, ctx.workspace_id)]
 
         return {
             "success": True,
             "nodes": nodes,
             "edges": edges,
-            "teams": sorted(teams_set),
+            "teams": teams,
         }
 
     except Exception as e:

@@ -188,10 +188,10 @@ export function useSyncStatus(connectionId: number, enabled = true) {
 export function useSelectFolder() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (args: { connectionId: number; rootFolderPath: string }) =>
+    mutationFn: (args: { connectionId: number; rootFolderPath: string; defaultTeamAccess?: string[] }) =>
       apiClient.post(
         `/api/cloud-documents/connections/${args.connectionId}/select-folder`,
-        { root_folder_path: args.rootFolderPath },
+        { root_folder_path: args.rootFolderPath, default_team_access: args.defaultTeamAccess },
       ),
     onSuccess: () => {
       toast.success('Root folder selected')

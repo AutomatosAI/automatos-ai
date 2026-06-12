@@ -1,11 +1,15 @@
 """
-Adversarial tests for NL2SQL SQLValidator — PRD-70 FIX-04.
+Adversarial tests for NL2SQL SQLValidator — PRD-70 FIX-04,
+reconciled with the PRD-160 S2 sqlglot AST validator.
 
 Covers:
-  - Existing mutation detection (INSERT/UPDATE/DELETE in subqueries)
-  - New deny keywords (RETURNING, COPY, EXECUTE)
-  - CTE (WITH clause) blocking
-  - UNION cross-workspace blocking
+  - Mutation detection (INSERT/UPDATE/DELETE/DROP anywhere in the tree)
+  - Deny keywords (RETURNING, COPY, EXECUTE) — rejected structurally
+  - CTE / UNION scoping: the AST allowlist walks every table in the tree,
+    including inside ``WITH`` clauses and every UNION branch, so an escape to
+    an unlisted table is blocked while a safe CTE/UNION over allowlisted
+    tables is allowed (the old regex blocked them wholesale, which also
+    rejected legitimate queries).
   - String literal bypass resistance
 """
 
@@ -56,8 +60,13 @@ class TestMutationDetection:
             validator.validate_and_rewrite("DROP TABLE users")
 
     def test_rejects_insert_in_subquery(self, validator):
-        """INSERT hidden in a subquery — caught by deny keyword scan."""
-        with pytest.raises(SQLValidationError, match="forbidden keyword"):
+        """INSERT hidden in a subquery — rejected by the AST walk.
+
+        PRD-160 S2: the sqlglot validator refuses any non-SELECT node anywhere
+        in the tree (and unparseable SQL), so the regex-era "forbidden keyword"
+        message no longer applies — what matters is the write never executes.
+        """
+        with pytest.raises(SQLValidationError):
             validator.validate_and_rewrite(
                 "SELECT * FROM (INSERT INTO users (name) VALUES ('x') RETURNING *) AS t"
             )
@@ -89,7 +98,9 @@ class TestNewDenyKeywords:
     """Test RETURNING, COPY, EXECUTE are now blocked."""
 
     def test_rejects_returning_clause(self, validator):
-        with pytest.raises(SQLValidationError, match="forbidden keyword"):
+        # RETURNING is not valid on a SELECT; the AST parse fails closed and
+        # the validator raises rather than letting the statement through.
+        with pytest.raises(SQLValidationError):
             validator.validate_and_rewrite(
                 "SELECT * FROM users RETURNING *"
             )
@@ -108,8 +119,8 @@ class TestNewDenyKeywords:
             validator.validate_and_rewrite("EXECUTE my_plan")
 
     def test_rejects_execute_in_select(self, validator):
-        """EXECUTE keyword embedded in a SELECT — caught by deny keyword scan."""
-        with pytest.raises(SQLValidationError, match="forbidden keyword"):
+        """EXECUTE embedded in a SELECT — rejected (the AST fails closed)."""
+        with pytest.raises(SQLValidationError):
             validator.validate_and_rewrite(
                 "SELECT EXECUTE('SELECT 1') FROM users"
             )
@@ -123,25 +134,34 @@ class TestNewDenyKeywords:
 
 
 # ============================================================================
-# PRD-70 FIX-04: CTE blocking
+# PRD-160 S2: CTE scoping (the AST allowlist sees into WITH clauses)
 # ============================================================================
 
-class TestCTEBlocking:
-    """WITH clauses (CTEs) are blocked to prevent hidden mutations."""
+class TestCTEScoping:
+    """CTEs are no longer banned wholesale. The sqlglot validator walks every
+    table in the tree — including inside ``WITH`` clauses — so a CTE that
+    reaches a table outside the connection's allowlist is blocked, while a CTE
+    over allowlisted tables is allowed. Hidden mutations inside a CTE are still
+    caught by the non-SELECT-node walk (see TestMutationDetection)."""
 
-    def test_rejects_simple_cte(self, validator):
-        with pytest.raises(SQLValidationError, match="CTE"):
+    _SCHEMA = {"tables": [{"name": "users"}]}
+
+    def test_blocks_cte_escape_to_unlisted_table(self, validator):
+        """A CTE reaching a table outside the allowlist is rejected."""
+        with pytest.raises(SQLValidationError, match="unknown table"):
             validator.validate_and_rewrite(
-                "SELECT * FROM (WITH x AS (SELECT 1) SELECT * FROM x) AS t"
+                "WITH x AS (SELECT * FROM secrets) SELECT * FROM x",
+                schema_metadata=self._SCHEMA,
             )
 
-    def test_rejects_cte_at_start(self, validator):
-        """CTEs at statement start are caught before the SELECT check."""
-        with pytest.raises(SQLValidationError):
-            validator.validate_and_rewrite(
-                "WITH active_users AS (SELECT * FROM users WHERE active = true) "
-                "SELECT * FROM active_users"
-            )
+    def test_allows_safe_cte_over_allowlisted_tables(self, validator):
+        """A CTE that only touches allowlisted tables is allowed."""
+        sql, _ = validator.validate_and_rewrite(
+            "WITH active_users AS (SELECT * FROM users WHERE active = true) "
+            "SELECT * FROM active_users",
+            schema_metadata=self._SCHEMA,
+        )
+        assert "active_users" in sql
 
     def test_with_in_string_literal_is_safe(self, validator):
         """'WITH' inside a string literal should not be blocked."""
@@ -152,24 +172,35 @@ class TestCTEBlocking:
 
 
 # ============================================================================
-# PRD-70 FIX-04: UNION cross-workspace blocking
+# PRD-160 S2: UNION scoping (the AST allowlist sees into every UNION branch)
 # ============================================================================
 
-class TestUnionBlocking:
-    """UNION queries are blocked to prevent cross-workspace data exfiltration."""
+class TestUnionScoping:
+    """UNION queries are no longer banned wholesale. The validator allowlists
+    every table in every branch, so a UNION that reaches a table outside the
+    connection's schema (the cross-table exfiltration vector) is blocked, while
+    a UNION over allowlisted tables is allowed. Cross-*workspace* reach is
+    additionally prevented at the source layer — a query only ever runs against
+    the caller's own resolved connection (see the _get_source workspace pins in
+    test_nl2sql_validation_path.py)."""
 
-    def test_rejects_union(self, validator):
-        with pytest.raises(SQLValidationError, match="UNION"):
+    _SCHEMA = {"tables": [{"name": "users"}]}
+
+    def test_blocks_union_escape_to_unlisted_table(self, validator):
+        """A UNION branch reaching an unlisted table is rejected."""
+        with pytest.raises(SQLValidationError, match="unknown table"):
             validator.validate_and_rewrite(
-                "SELECT * FROM users WHERE workspace_id = 'mine' "
-                "UNION SELECT * FROM users WHERE workspace_id = 'theirs'"
+                "SELECT * FROM users UNION SELECT * FROM secrets",
+                schema_metadata=self._SCHEMA,
             )
 
-    def test_rejects_union_all(self, validator):
-        with pytest.raises(SQLValidationError, match="UNION"):
-            validator.validate_and_rewrite(
-                "SELECT id FROM users UNION ALL SELECT id FROM users"
-            )
+    def test_allows_safe_union_over_allowlisted_tables(self, validator):
+        """A UNION over only allowlisted tables is allowed."""
+        sql, _ = validator.validate_and_rewrite(
+            "SELECT id FROM users UNION ALL SELECT id FROM users",
+            schema_metadata=self._SCHEMA,
+        )
+        assert "users" in sql
 
     def test_union_in_string_literal_is_safe(self, validator):
         """'UNION' inside a string literal should not be blocked."""

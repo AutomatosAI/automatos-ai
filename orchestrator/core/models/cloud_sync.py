@@ -12,6 +12,7 @@ from datetime import datetime
 from sqlalchemy import (
     BigInteger, Boolean, Column, DateTime, ForeignKey, Integer, String, Text,
 )
+from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import relationship
 
@@ -35,6 +36,9 @@ class CloudSyncConfig(Base):
     sync_enabled = Column(Boolean, server_default="true")
     last_sync_at = Column(DateTime)
     sync_frequency_minutes = Column(Integer, server_default="30")
+    # PRD-158 S2/Q5: normalized teams applied to docs synced from this connection
+    # (empty = public/all teams).
+    default_team_access = Column(PG_ARRAY(String), server_default="{}", nullable=False)
 
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

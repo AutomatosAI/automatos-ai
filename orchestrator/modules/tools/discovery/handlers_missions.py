@@ -12,6 +12,12 @@ logger = logging.getLogger(__name__)
 _CONTEXT_MESSAGE_LIMIT = 5
 
 
+def _actor(params: Dict[str, Any]) -> str:
+    """PRD-163 Q56: the human behind this action — the chatting user's clerk id
+    (``_created_by``, injected by the executor) when available, else the agent."""
+    return str(params.get("_created_by") or params.get("_agent_id") or "agent")
+
+
 def _recent_chat_context(db: Session, workspace_id: UUID, chat_id: Any = None,
                          limit: int = _CONTEXT_MESSAGE_LIMIT) -> list:
     """Recent workspace chat turns, oldest-first, as ``[{role, content}]``.
@@ -72,7 +78,7 @@ async def create_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]
         return {"success": False, "error": "goal is required"}
 
     config = dict(params.get("config") or {})
-    created_by = str(params.get("_agent_id", "agent"))
+    created_by = _actor(params)
 
     # The UI suggestion-card sets context_messages on its API call; the executor
     # path did not. Attach recent conversation here too — never clobber a
@@ -204,3 +210,181 @@ async def get_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]) -
             "tasks": task_details,
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# PRD-163 S1: lifecycle tools — approve / reject / pause / resume / cancel / replan
+# Thin wrappers over the existing CoordinatorService lifecycle methods so Auto
+# can drive a mission from chat. The transaction is committed by the executor
+# (same as create_mission). Notifications resolve to the creating user inside
+# the coordinator (run.created_by), satisfying Q56.
+# ---------------------------------------------------------------------------
+
+def _resolve_run(db: Session, workspace_id: UUID, params: Dict[str, Any]):
+    """Resolve + workspace-scope a run from ``params['mission_id']``.
+
+    Returns ``(run, None)`` or ``(None, error_dict)``.
+    """
+    from core.models.orchestration import OrchestrationRun
+
+    mission_id = params.get("mission_id")
+    if not mission_id:
+        return None, {"success": False, "error": "mission_id is required"}
+    try:
+        run_id = mission_id if isinstance(mission_id, UUID) else UUID(str(mission_id))
+    except (ValueError, TypeError):
+        return None, {"success": False, "error": f"Invalid mission_id: {mission_id!r}"}
+
+    run = (
+        db.query(OrchestrationRun)
+        .filter(
+            OrchestrationRun.id == run_id,
+            OrchestrationRun.workspace_id == workspace_id,
+        )
+        .first()
+    )
+    if not run:
+        return None, {"success": False, "error": f"Mission {mission_id} not found"}
+    return run, None
+
+
+def _ok(run: Any, verb: str) -> Dict[str, Any]:
+    return {
+        "success": True,
+        "mission_id": str(run.id),
+        "state": run.state,
+        "message": f"Mission {run.id} {verb} (state: {run.state}).",
+    }
+
+
+async def approve_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Approve a mission plan and start execution (awaiting_approval → running)."""
+    run, err = _resolve_run(db, workspace_id, params)
+    if err:
+        return err
+    from services.coordinator_service import CoordinatorService
+
+    actor_id = _actor(params)
+    try:
+        updated = CoordinatorService().approve_plan(db, run.id, actor_id)
+        return _ok(updated, "approved → running")
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+    except Exception as e:  # pragma: no cover - defensive
+        logger.error("[Missions] approve failed: %s", e, exc_info=True)
+        return {"success": False, "error": f"Failed to approve mission: {str(e)[:300]}"}
+
+
+async def reject_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Reject a mission plan (awaiting_approval → failed)."""
+    run, err = _resolve_run(db, workspace_id, params)
+    if err:
+        return err
+    reason = params.get("reason") or "Rejected by user"
+    from services.coordinator_service import CoordinatorService
+
+    actor_id = _actor(params)
+    try:
+        updated = CoordinatorService().reject_plan(db, run.id, actor_id, reason=reason)
+        return _ok(updated, "rejected")
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+    except Exception as e:  # pragma: no cover - defensive
+        logger.error("[Missions] reject failed: %s", e, exc_info=True)
+        return {"success": False, "error": f"Failed to reject mission: {str(e)[:300]}"}
+
+
+async def pause_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Pause a running mission (running → paused)."""
+    run, err = _resolve_run(db, workspace_id, params)
+    if err:
+        return err
+    from services.coordinator_service import CoordinatorService
+
+    actor_id = _actor(params)
+    try:
+        updated = CoordinatorService().pause_mission(db, run.id, actor_id)
+        return _ok(updated, "paused")
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+    except Exception as e:  # pragma: no cover - defensive
+        logger.error("[Missions] pause failed: %s", e, exc_info=True)
+        return {"success": False, "error": f"Failed to pause mission: {str(e)[:300]}"}
+
+
+async def resume_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Resume a paused mission (paused → running)."""
+    run, err = _resolve_run(db, workspace_id, params)
+    if err:
+        return err
+    from services.coordinator_service import CoordinatorService
+
+    actor_id = _actor(params)
+    try:
+        updated = CoordinatorService().resume_mission(db, run.id, actor_id)
+        return _ok(updated, "resumed → running")
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+    except Exception as e:  # pragma: no cover - defensive
+        logger.error("[Missions] resume failed: %s", e, exc_info=True)
+        return {"success": False, "error": f"Failed to resume mission: {str(e)[:300]}"}
+
+
+async def cancel_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Cancel a mission (any non-terminal → cancelled)."""
+    run, err = _resolve_run(db, workspace_id, params)
+    if err:
+        return err
+    from services.coordinator_service import CoordinatorService
+
+    actor_id = _actor(params)
+    try:
+        updated = CoordinatorService().cancel_mission(db, run.id, actor_id)
+        return _ok(updated, "cancelled")
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+    except Exception as e:  # pragma: no cover - defensive
+        logger.error("[Missions] cancel failed: %s", e, exc_info=True)
+        return {"success": False, "error": f"Failed to cancel mission: {str(e)[:300]}"}
+
+
+async def replan_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Replan a failed mission (failed → replanning → running)."""
+    run, err = _resolve_run(db, workspace_id, params)
+    if err:
+        return err
+    from services.coordinator_service import CoordinatorService
+
+    actor_id = _actor(params)
+    try:
+        updated = await CoordinatorService().replan_mission(
+            db, run.id, actor_id, notes=params.get("notes"),
+        )
+        return _ok(updated, "replanned → running")
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+    except Exception as e:  # pragma: no cover - defensive
+        logger.error("[Missions] replan failed: %s", e, exc_info=True)
+        return {"success": False, "error": f"Failed to replan mission: {str(e)[:300]}"}
+
+
+async def update_mission_plan(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """PRD-163 S4/Q57: apply approval-time task/agent edits to an awaiting-approval
+    mission (e.g. reassign a task's agent) so they persist into execution."""
+    run, err = _resolve_run(db, workspace_id, params)
+    if err:
+        return err
+    task_edits = params.get("task_edits")
+    if not isinstance(task_edits, list) or not task_edits:
+        return {"success": False, "error": "task_edits must be a non-empty list"}
+    from services.coordinator_service import CoordinatorService
+
+    actor_id = _actor(params)
+    try:
+        updated = CoordinatorService().update_mission_plan(db, run.id, actor_id, task_edits)
+        return _ok(updated, "plan updated")
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+    except Exception as e:  # pragma: no cover - defensive
+        logger.error("[Missions] update_mission_plan failed: %s", e, exc_info=True)
+        return {"success": False, "error": f"Failed to update mission plan: {str(e)[:300]}"}

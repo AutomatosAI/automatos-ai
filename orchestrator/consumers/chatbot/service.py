@@ -105,9 +105,10 @@ class ToolExecutionTracker:
     SEARCH_TOOLS = {
         'search_knowledge', 'semantic_search', 'search_codebase',
         'search_tables', 'search_images', 'search_formulas',
-        'search_multimodal'
-        # PRD-156 S3: smart_query_database / query_database removed — NL2SQL is
-        # off the chat surface until PRD-160 re-enables it workspace-scoped.
+        'search_multimodal',
+        # PRD-160 S1: NL2SQL re-enabled workspace-scoped & in-process. Treated as
+        # a search tool so semantically-similar repeat questions are deduped.
+        'smart_query_database', 'query_database',
     }
 
     TOOL_RETRY_LIMITS = {
@@ -118,6 +119,11 @@ class ToolExecutionTracker:
         'list_directory': 5,
         'read_file': 8,
         'write_file': 5,
+        # PRD-160 S1: NL2SQL is expensive and self-corrects internally
+        # (max_retries=2); cap turn-level reuse low to match the 2-attempt
+        # contract advertised in the tool description.
+        'smart_query_database': 2,
+        'query_database': 2,
         'platform_default': 25,
         'workspace_default': 8,
         'default': 5,
@@ -1131,8 +1137,13 @@ class StreamingChatService:
         if latest_text and full_response and smart_chat:
             try:
                 _stored = await smart_chat.store(latest_text, full_response, chat_id)
-                if _stored:
-                    _tier = getattr(smart_chat.orchestrator.memory_manager, '_last_tier', 'conversation')
+                _mm = smart_chat.orchestrator.memory_manager
+                _facts_stored = getattr(_mm, '_last_l3_facts_stored', 0)
+                # PRD-159 S5: honest event — emit ONLY after durable facts were
+                # actually persisted to L3, with the real tier. Zero-fact turns
+                # (e.g. "user said hello") produce NO memory_stored event.
+                if _stored and _facts_stored > 0:
+                    _tier = getattr(_mm, '_last_tier', 'conversation')
                     yield self.streaming_handler.format_aisdk_memory_stored(
                         memory={
                             "userMessage": latest_text[:200],
@@ -1207,6 +1218,7 @@ class StreamingChatService:
         tool_data: Dict[str, Any],
         use_tools: Optional[List[Dict[str, Any]]],
         composio_result: Any = None,
+        user_id: Optional[int] = None,
     ) -> AsyncGenerator[Any, None]:
         """Drive :class:`ToolLoopExecutor` from the chat surface.
 
@@ -1229,6 +1241,18 @@ class StreamingChatService:
         # State shared by callbacks within this turn.
         last_tool_name: Optional[str] = None
         empty_streak = 0
+
+        # PRD-163 S1/Q56: resolve the chatting user's clerk id once, so a mission
+        # created mid-chat is attributed to THEM (created_by) — not the agent — and
+        # plan-ready / awaiting-approval notifications land for the right person.
+        _driving_clerk: Optional[str] = None
+        if user_id:
+            try:
+                from core.models import User
+                _row = self.db.query(User.clerk_user_id).filter(User.id == user_id).first()
+                _driving_clerk = _row[0] if _row else None
+            except Exception:
+                _driving_clerk = None
         cumulative_attempts: Dict[str, int] = {}
         followup_messages: List[Dict[str, Any]] = []
 
@@ -1290,6 +1314,7 @@ class StreamingChatService:
                 agent_id=agent_runtime.agent_id if hasattr(agent_runtime, "agent_id") else 1,
                 workspace_id=ws_id,
                 original_intent=user_text,
+                caller_context={"user_id": _driving_clerk} if _driving_clerk else None,
             )
 
             # Search-spiral detection (chat-only signal).
@@ -2048,6 +2073,7 @@ class StreamingChatService:
                 async for chunk in self._stream_tool_loop(
                     response, llm_messages, agent_runtime, tool_data, use_tools,
                     composio_result=_composio_result,
+                    user_id=user_id,
                 ):
                     if isinstance(chunk, dict) and chunk.get('_final_response'):
                         final_response = chunk['_final_response']

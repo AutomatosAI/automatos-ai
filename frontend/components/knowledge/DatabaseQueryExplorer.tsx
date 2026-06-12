@@ -36,7 +36,8 @@ import {
   Send,
   FileDown,
   Trash2,
-  RefreshCw
+  RefreshCw,
+  ThumbsUp
 } from 'lucide-react'
 import { toast } from 'sonner'
 import apiClient from '@/lib/api-client'
@@ -227,6 +228,29 @@ export function DatabaseQueryExplorer({ selectedSource, sources, onSourceDeleted
       toast.success('Query results added to context')
     } catch (error: any) {
       toast.error(error?.message || 'Failed to send to context')
+    }
+  }
+
+  // PRD-160 S3: thumbs-up saves the question/SQL pair as a VERIFIED training
+  // example so Auto retrieves it few-shot for similar future questions.
+  const handleMarkVerified = async () => {
+    if (!query || !generatedSQL || !selectedSourceId) {
+      toast.error('Run a query first')
+      return
+    }
+    try {
+      await apiClient.request(`/api/knowledge/sources/database/${selectedSourceId}/examples`, {
+        method: 'POST',
+        body: {
+          question: query,
+          sql: generatedSQL,
+          is_verified: true,
+          verification_source: 'user',
+        } as any,
+      })
+      toast.success('Saved as a verified example — Auto will learn from it')
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to save training example')
     }
   }
 
@@ -447,6 +471,10 @@ export function DatabaseQueryExplorer({ selectedSource, sources, onSourceDeleted
                 <Button variant="ghost" size="sm" onClick={handleExportCSV}>
                   <FileDown className="h-4 w-4 mr-1" />
                   Export CSV
+                </Button>
+                <Button variant="ghost" size="sm" onClick={handleMarkVerified}>
+                  <ThumbsUp className="h-4 w-4 mr-1" />
+                  Save as Verified
                 </Button>
                 <Button variant="ghost" size="sm" onClick={handleSendToContext}>
                   <Send className="h-4 w-4 mr-1" />

@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useMemo, useState } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useRouter } from 'next/navigation'
 import { ArrowLeft, Pause, Play, X, Eye, Target, Check, XCircle, Save, RefreshCw, RotateCcw } from 'lucide-react'
 import Link from 'next/link'
 import { cn } from '@/lib/utils'
@@ -30,7 +30,6 @@ import { MissionBudgetBar } from './mission-budget-bar'
 import { MissionDAGCanvas } from './mission-dag-canvas'
 import { MissionActivityFeed } from './mission-activity-feed'
 import { TaskInspector } from './task-inspector'
-import { HumanReviewPanel } from './human-review-panel'
 import { MissionResultsPanel } from './mission-results-panel'
 import { MissionFieldPanel } from './mission-field-panel'
 import { useMission, usePauseMission, useResumeMission, useCancelMission, useApproveMission, useRejectMission, useSaveAsRoutine, useReplanMission, useRerunMission } from '@/hooks/use-missions-api'
@@ -52,9 +51,6 @@ interface MissionDetailPageProps {
 
 export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
   const router = useRouter()
-  const searchParams = useSearchParams()
-  const showReview = searchParams?.get('tab') === 'review'
-
   const { data: mission, isLoading } = useMission(missionId)
   const { selectedTaskId, setSelectedTaskId, planModifications, clearPlanModifications } = useMissionStore()
 
@@ -117,7 +113,6 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
   }
 
   const isTerminal = (TERMINAL_RUN_STATES as readonly string[]).includes(mission.state)
-  const isReviewable = mission.state === 'awaiting_human'
 
   return (
     <div className="flex flex-col h-full">
@@ -526,11 +521,11 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
       <div className="flex-1 min-h-0">
         <ResizablePanelGroup direction="horizontal" className="h-full">
           {/* DAG panel */}
-          <ResizablePanel defaultSize={showReview || isReviewable ? 50 : 60} minSize={30}>
+          <ResizablePanel defaultSize={60} minSize={30}>
             <div className="relative h-full">
               <MissionDAGCanvas
                 tasks={mission.tasks}
-                mode={mission.state === 'awaiting_approval' ? 'plan' : isReviewable ? 'review' : 'execution'}
+                mode={mission.state === 'awaiting_approval' ? 'plan' : 'execution'}
                 selectedTaskId={selectedTaskId}
                 onTaskSelect={handleTaskSelect}
                 className="h-full"
@@ -549,15 +544,9 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
 
           <ResizableHandle withHandle />
 
-          {/* Right panel: Results / Review / Activity Feed */}
-          <ResizablePanel defaultSize={showReview || isReviewable || isTerminal ? 50 : 40} minSize={25}>
-            {(showReview || isReviewable) ? (
-              <HumanReviewPanel
-                missionId={missionId}
-                tasks={mission.tasks}
-                className="h-full"
-              />
-            ) : isTerminal ? (
+          {/* Right panel: Results / Activity Feed */}
+          <ResizablePanel defaultSize={isTerminal ? 50 : 40} minSize={25}>
+            {isTerminal ? (
               <div className="h-full flex flex-col overflow-hidden">
                 <div className="p-3 border-b border-border flex items-center gap-1 shrink-0">
                   <button

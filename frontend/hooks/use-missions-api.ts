@@ -12,7 +12,7 @@ import type {
   MissionDetailResponse,
   MissionApproveRequest,
   MissionRejectRequest,
-  MissionReviewRequest,
+  MissionPlanEditRequest,
   MissionCreateRequest,
   MissionResponse,
   RunState,
@@ -180,15 +180,15 @@ export function useRejectMission() {
   })
 }
 
-// ── Human Review ──────────────────────────────────────────────
+// ── Edit Plan (PRD-163 S4/Q57: approval-time task/agent edits) ─
 
-export function useReviewMission() {
+export function useUpdateMissionPlan() {
   const queryClient = useQueryClient()
 
-  return useMutation<MissionResponse, Error, { id: string; body: MissionReviewRequest }>({
+  return useMutation<MissionResponse, Error, { id: string; body: MissionPlanEditRequest }>({
     mutationFn: ({ id, body }) =>
-      apiClient.request<MissionResponse>(`/api/missions/${id}/review`, {
-        method: 'POST',
+      apiClient.request<MissionResponse>(`/api/missions/${id}/plan`, {
+        method: 'PATCH',
         body: body as unknown as BodyInit,
       }),
     onSuccess: (_data, { id }) => {
