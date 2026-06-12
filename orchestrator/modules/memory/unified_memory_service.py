@@ -24,7 +24,7 @@ import asyncio
 import hashlib
 import json
 import logging
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Union
 
@@ -130,8 +130,6 @@ class SessionMemory:
     """
 
     summary: str = ""
-    decisions: List[str] = field(default_factory=list)
-    action_items: List[str] = field(default_factory=list)
     exchange_count: int = 0
     last_updated: str = ""  # ISO-8601 string for JSON serialisation
     ended: bool = False
@@ -142,9 +140,14 @@ class SessionMemory:
 
     @classmethod
     def from_json(cls, raw: str) -> "SessionMemory":
-        """Deserialise from JSON string."""
+        """Deserialise from JSON string.
+
+        Tolerant of unknown keys so sessions written before PRD-159 removed the
+        dead ``decisions``/``action_items`` fields still load cleanly.
+        """
         data = json.loads(raw)
-        return cls(**data)
+        known = {f.name for f in fields(cls)}
+        return cls(**{k: v for k, v in data.items() if k in known})
 
 
 # ---------------------------------------------------------------------------
@@ -1359,8 +1362,6 @@ class UnifiedMemoryService:
             # Naive truncation to last 500 chars (Phase 2 adds LLM rolling summary)
             session = SessionMemory(
                 summary=combined[-500:],
-                decisions=list(session.decisions),
-                action_items=list(session.action_items),
                 exchange_count=session.exchange_count + 1,
                 last_updated=datetime.now(timezone.utc).isoformat(),
                 ended=session.ended,
@@ -1383,301 +1384,86 @@ class UnifiedMemoryService:
                 exc_info=True,
             )
 
-    async def end_session(
-        self,
-        workspace_id: str,
-        conversation_id: str,
-    ) -> None:
+    async def run_sleep_time_consolidation(
+        self, workspace_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """PRD-159 S4: contradiction-based consolidation — the primary lifecycle.
+
+        For each workspace, fetch L3 memories, then plan + apply:
+          - fold near-duplicates into one canonical (delete the rest),
+          - resolve contradictions by recency+confidence (delete/archive the
+            loser, reason logged).
+
+        This replaces time-decay as the way memories leave the active set:
+        memories are superseded by newer/contradicting facts or merged, not aged
+        out. Promotion (L2→L3) stays in ``run_promotion_all``.
         """
-        Mark session as ended and set a short TTL for the consolidation window.
+        from modules.memory.operations.contradiction import plan_consolidation
 
-        The session stays in Redis for MEMORY_SESSION_CONSOLIDATION_TTL_SECONDS
-        (default 1 hour) so the hourly consolidation job can promote important
-        decisions to L2 before the key expires.
-
-        Redis failures are logged but never break chat.
-        """
-        from config import config
-
-        redis_client = self._get_redis()
-        if redis_client is None:
-            return
-
-        ns = self.namespace(workspace_id)
-        key = ns.session(conversation_id)
-        consolidation_ttl = config.MEMORY_SESSION_CONSOLIDATION_TTL_SECONDS
-
-        try:
-            loop = asyncio.get_event_loop()
-            conn = redis_client.get_redis()
-
-            raw: Optional[str] = await loop.run_in_executor(None, conn.get, key)
-            if raw is None:
-                logger.debug("[UnifiedMemoryService] end_session key=%s — no session found", key)
-                return
-
-            session = SessionMemory.from_json(raw)
-            ended_session = SessionMemory(
-                summary=session.summary,
-                decisions=list(session.decisions),
-                action_items=list(session.action_items),
-                exchange_count=session.exchange_count,
-                last_updated=datetime.now(timezone.utc).isoformat(),
-                ended=True,
-            )
-
-            payload = ended_session.to_json()
-            await loop.run_in_executor(
-                None,
-                lambda: conn.setex(key, consolidation_ttl, payload),
-            )
-            logger.info(
-                "[UnifiedMemoryService] end_session key=%s ttl=%ds exchanges=%d",
-                key,
-                consolidation_ttl,
-                ended_session.exchange_count,
-            )
-        except Exception:
-            logger.error(
-                "[UnifiedMemoryService] end_session failed for key=%s",
-                key,
-                exc_info=True,
-            )
-
-    # ------------------------------------------------------------------
-    # L1→L2 Session Consolidation
-    # ------------------------------------------------------------------
-
-    async def consolidate_session(
-        self,
-        workspace_id: str,
-        conversation_id: str,
-    ) -> Dict[str, int]:
-        """
-        Consolidate an ended L1 session into L2 short-term memory.
-
-        Reads the Redis session, extracts decisions and action items, stores
-        each as a separate L2 entry with ``content_type='session_decision'``
-        and ``importance=0.6``, then stores the session summary as a separate
-        L2 entry. Deletes the L1 Redis key after successful consolidation.
-
-        Returns:
-            {"items_stored": N} count, or {"items_stored": 0} on failure.
-        """
-        redis_client = self._get_redis()
-        if redis_client is None:
-            return {"items_stored": 0}
-
-        ns = self.namespace(workspace_id)
-        key = ns.session(conversation_id)
-
-        try:
-            loop = asyncio.get_event_loop()
-            conn = redis_client.get_redis()
-
-            raw: Optional[str] = await loop.run_in_executor(None, conn.get, key)
-            if raw is None:
-                logger.debug(
-                    "[UnifiedMemoryService] consolidate_session key=%s — no session",
-                    key,
+        if workspace_id:
+            workspace_ids: List[str] = [workspace_id]
+        else:
+            try:
+                loop = asyncio.get_event_loop()
+                workspace_ids = await loop.run_in_executor(
+                    None, self._get_active_workspace_ids_sync
                 )
-                return {"items_stored": 0}
+            except Exception:
+                logger.error(
+                    "[UnifiedMemoryService] run_sleep_time_consolidation: "
+                    "workspace fetch failed",
+                    exc_info=True,
+                )
+                workspace_ids = []
 
-            session = SessionMemory.from_json(raw)
-            items_stored = 0
-
-            meta_base = {
-                "conversation_id": conversation_id,
-                "source": "session_consolidation",
-                "exchange_count": session.exchange_count,
-            }
-
-            # Store each decision as a separate L2 entry
-            for decision in session.decisions:
-                if not decision or not decision.strip():
+        merged = 0
+        superseded = 0
+        errors = 0
+        for ws_id in workspace_ids:
+            try:
+                memories = await self.get_all_memories(ws_id, limit=200)
+                if not memories:
                     continue
-                row_id = await self.store_short_term(
-                    workspace_id=workspace_id,
-                    content=f"Session decision: {decision}",
-                    content_type="session_decision",
-                    importance=0.6,
-                    metadata={**meta_base, "kind": "decision"},
-                )
-                if row_id:
-                    items_stored += 1
-
-            # Store each action item as a separate L2 entry
-            for action in session.action_items:
-                if not action or not action.strip():
-                    continue
-                row_id = await self.store_short_term(
-                    workspace_id=workspace_id,
-                    content=f"Action item: {action}",
-                    content_type="session_decision",
-                    importance=0.6,
-                    metadata={**meta_base, "kind": "action_item"},
-                )
-                if row_id:
-                    items_stored += 1
-
-            # Store session summary as an L2 entry (captures rolling context)
-            if session.summary and session.summary.strip():
-                row_id = await self.store_short_term(
-                    workspace_id=workspace_id,
-                    content=f"Session summary ({session.exchange_count} exchanges): {session.summary}",
-                    content_type="session_decision",
-                    importance=0.5,
-                    metadata={**meta_base, "kind": "summary"},
-                )
-                if row_id:
-                    items_stored += 1
-
-            # Delete the L1 Redis key after successful consolidation
-            await loop.run_in_executor(None, conn.delete, key)
-
-            logger.info(
-                "[UnifiedMemoryService] consolidate_session key=%s items_stored=%d",
-                key,
-                items_stored,
-            )
-            return {"items_stored": items_stored}
-
-        except Exception:
-            logger.error(
-                "[UnifiedMemoryService] consolidate_session failed key=%s",
-                key,
-                exc_info=True,
-            )
-            return {"items_stored": 0}
-
-    async def run_session_consolidation(self) -> Dict[str, Any]:
-        """
-        Scan Redis for ended sessions and consolidate them into L2.
-
-        Uses SCAN (not KEYS) to iterate ``mem:session:*`` keys safely at
-        production scale. For each session where ``ended=True``, calls
-        ``consolidate_session()`` to promote decisions/action_items to L2
-        and delete the L1 key.
-
-        Returns:
-            {"sessions_scanned": N, "sessions_consolidated": M, "total_items": K,
-             "errors": E}
-        """
-        redis_client = self._get_redis()
-        if redis_client is None:
-            logger.warning(
-                "[UnifiedMemoryService] run_session_consolidation: Redis unavailable"
-            )
-            return {
-                "sessions_scanned": 0,
-                "sessions_consolidated": 0,
-                "total_items": 0,
-                "errors": 0,
-            }
-
-        try:
-            loop = asyncio.get_event_loop()
-            conn = redis_client.get_redis()
-
-            # Collect ended session keys via SCAN
-            ended_sessions: List[Dict[str, str]] = []
-
-            def _scan_ended_sessions() -> List[Dict[str, str]]:
-                """
-                Synchronous SCAN over mem:session:* keys, returning those
-                where session.ended == True, along with parsed workspace_id
-                and conversation_id.
-                """
-                results: List[Dict[str, str]] = []
-                for key in conn.scan_iter(match="mem:session:*", count=100):
-                    try:
-                        raw = conn.get(key)
-                        if raw is None:
-                            continue
-                        session = SessionMemory.from_json(raw)
-                        if not session.ended:
-                            continue
-
-                        # Parse workspace_id and conversation_id from key
-                        # Key format: mem:session:{workspace_id}:{conversation_id}
-                        # scan_iter returns bytes — decode to str first
-                        key_str = key.decode("utf-8") if isinstance(key, bytes) else key
-                        parts = key_str.split(":", 3)  # ["mem", "session", ws_id, conv_id]
-                        if len(parts) < 4:
-                            logger.warning(
-                                "[UnifiedMemoryService] run_session_consolidation: "
-                                "unexpected key format: %s",
-                                key,
-                            )
-                            continue
-
-                        results.append({
-                            "workspace_id": parts[2],
-                            "conversation_id": parts[3],
-                        })
-                    except Exception:
-                        logger.error(
-                            "[UnifiedMemoryService] run_session_consolidation: "
-                            "error reading key=%s",
-                            key,
-                            exc_info=True,
+                plan = plan_consolidation(memories)
+                # Fold near-duplicates → delete the non-canonical members.
+                for mg in plan.merges:
+                    for dup_id in mg.merged_from:
+                        if dup_id and await self.delete_memory(dup_id, ws_id):
+                            merged += 1
+                # Contradictions → the loser leaves the active set (reason logged).
+                for s in plan.supersessions:
+                    loser_id = str(s.loser.get("id") or "")
+                    if loser_id and await self.delete_memory(loser_id, ws_id):
+                        superseded += 1
+                        logger.info(
+                            "[UnifiedMemoryService] consolidation superseded "
+                            "id=%s (%s)",
+                            loser_id,
+                            s.reason,
                         )
-                return results
+            except Exception:
+                errors += 1
+                logger.error(
+                    "[UnifiedMemoryService] run_sleep_time_consolidation failed "
+                    "for ws=%s",
+                    ws_id,
+                    exc_info=True,
+                )
 
-            ended_sessions = await loop.run_in_executor(None, _scan_ended_sessions)
-
-            sessions_consolidated = 0
-            total_items = 0
-            errors = 0
-
-            for info in ended_sessions:
-                try:
-                    result = await self.consolidate_session(
-                        workspace_id=info["workspace_id"],
-                        conversation_id=info["conversation_id"],
-                    )
-                    if result["items_stored"] > 0:
-                        sessions_consolidated += 1
-                        total_items += result["items_stored"]
-                    else:
-                        # Session existed but had nothing to store — still count
-                        sessions_consolidated += 1
-                except Exception:
-                    logger.error(
-                        "[UnifiedMemoryService] run_session_consolidation: "
-                        "failed for ws=%s conv=%s",
-                        info["workspace_id"],
-                        info["conversation_id"],
-                        exc_info=True,
-                    )
-                    errors += 1
-
-            logger.info(
-                "[UnifiedMemoryService] run_session_consolidation complete: "
-                "scanned=%d consolidated=%d items=%d errors=%d",
-                len(ended_sessions),
-                sessions_consolidated,
-                total_items,
-                errors,
-            )
-            return {
-                "sessions_scanned": len(ended_sessions),
-                "sessions_consolidated": sessions_consolidated,
-                "total_items": total_items,
-                "errors": errors,
-            }
-
-        except Exception:
-            logger.error(
-                "[UnifiedMemoryService] run_session_consolidation failed",
-                exc_info=True,
-            )
-            return {
-                "sessions_scanned": 0,
-                "sessions_consolidated": 0,
-                "total_items": 0,
-                "errors": 0,
-            }
+        logger.info(
+            "[UnifiedMemoryService] run_sleep_time_consolidation complete: "
+            "workspaces=%d merged=%d superseded=%d errors=%d",
+            len(workspace_ids),
+            merged,
+            superseded,
+            errors,
+        )
+        return {
+            "workspaces_processed": len(workspace_ids),
+            "merged": merged,
+            "superseded": superseded,
+            "errors": errors,
+        }
 
     # ------------------------------------------------------------------
     # Cross-layer
