@@ -237,7 +237,12 @@ class NL2SQLTrainingExample(Base):
     usage_count = Column(Integer, default=0)
     last_used_at = Column(DateTime)
 
-    embedding_id = Column(String(255))  # reference to vector store
+    embedding_id = Column(String(255))  # legacy reference to external vector store
+    # PRD-160 S3: persist the question embedding (JSONB float array) so verified
+    # pairs can be retrieved by semantic similarity (cosine) for few-shot, rather
+    # than computed-then-discarded. Matches the platform's semantic-embedding
+    # convention (PRD-64 agents.semantic_embedding is JSONB, not pgvector).
+    embedding = Column(JSON)
 
     extra_metadata = Column('metadata', JSON, default={})
 

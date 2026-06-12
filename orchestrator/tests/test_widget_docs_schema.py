@@ -33,12 +33,15 @@ def _seed_doc(db, ws, filename="brief.pdf", chunks=("alpha content", "beta conte
         {"fn": filename, "ws": ws},
     ).scalar()
     for i, c in enumerate(chunks):
+        # chunks scope via document_id -> documents.workspace_id; the chunk
+        # table itself carries no workspace_id in the test schema (and the
+        # widget endpoints read chunks by document_id, never by workspace).
         db.execute(
             text(
-                "INSERT INTO document_chunks (document_id, chunk_index, content, workspace_id) "
-                "VALUES (:doc, :idx, :content, :ws)"
+                "INSERT INTO document_chunks (document_id, chunk_index, content) "
+                "VALUES (:doc, :idx, :content)"
             ),
-            {"doc": doc_id, "idx": i, "content": c, "ws": ws},
+            {"doc": doc_id, "idx": i, "content": c},
         )
     db.flush()
     return doc_id
@@ -46,10 +49,10 @@ def _seed_doc(db, ws, filename="brief.pdf", chunks=("alpha content", "beta conte
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_get_document_reassembles_content_from_chunks(db_session):
+async def test_get_document_reassembles_content_from_chunks(db_session, seed_workspace):
     from api.widgets.documents import get_document
 
-    ws = str(uuid.uuid4())
+    ws = seed_workspace()  # FK parent for documents/document_chunks.workspace_id
     doc_id = _seed_doc(db_session, ws, filename="brief.pdf", chunks=("alpha content", "beta content"))
     auth = types.SimpleNamespace(workspace_id=uuid.UUID(ws), team=None)
 
@@ -62,11 +65,11 @@ async def test_get_document_reassembles_content_from_chunks(db_session):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_search_groups_chunks_and_resolves_filenames(db_session, monkeypatch):
+async def test_search_groups_chunks_and_resolves_filenames(db_session, seed_workspace, monkeypatch):
     from api.widgets.documents import search_documents, DocumentSearchRequest
     from modules.rag.service import RAGService
 
-    ws = str(uuid.uuid4())
+    ws = seed_workspace()  # FK parent for documents/document_chunks.workspace_id
     doc_id = _seed_doc(db_session, ws, filename="report.pdf")
 
     # Stand in for the real vector retrieval: two chunks of the same doc.

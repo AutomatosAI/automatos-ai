@@ -338,5 +338,53 @@ class TestSecurityScenarios:
                 validator.validate_and_rewrite(query, schema_metadata=schema)
 
 
+class TestCrossSchemaAndAst:
+    """PRD-160 S2: sqlglot AST validation — cross-schema rejection and
+    that CTE/UNION inner tables are validated (the old regex blocked them)."""
+
+    def test_cross_schema_reference_rejected(self):
+        validator = SQLValidator()
+        schema = {"tables": [{"name": "users"}]}
+        with pytest.raises(SQLValidationError, match="[Cc]ross-schema"):
+            validator.validate_and_rewrite(
+                "SELECT * FROM analytics.users", schema_metadata=schema
+            )
+
+    def test_default_schema_qualifier_allowed(self):
+        validator = SQLValidator()
+        schema = {"tables": [{"name": "users"}]}
+        sql, _ = validator.validate_and_rewrite(
+            "SELECT * FROM public.users", schema_metadata=schema
+        )
+        assert "users" in sql.lower()
+
+    def test_cte_inner_table_is_allowlisted(self):
+        validator = SQLValidator()
+        schema = {"tables": [{"name": "users"}]}
+        # CTE selecting from a forbidden table must still be caught.
+        with pytest.raises(SQLValidationError, match="unknown table"):
+            validator.validate_and_rewrite(
+                "WITH c AS (SELECT * FROM secrets) SELECT * FROM c",
+                schema_metadata=schema,
+            )
+
+    def test_cte_referencing_allowed_table_passes(self):
+        validator = SQLValidator()
+        schema = {"tables": [{"name": "users"}]}
+        sql, _ = validator.validate_and_rewrite(
+            "WITH c AS (SELECT id FROM users) SELECT * FROM c",
+            schema_metadata=schema,
+        )
+        assert "LIMIT" in sql.upper()
+
+    def test_select_into_rejected(self):
+        validator = SQLValidator()
+        schema = {"tables": [{"name": "users"}]}
+        with pytest.raises(SQLValidationError, match="Only SELECT"):
+            validator.validate_and_rewrite(
+                "SELECT * INTO copy FROM users", schema_metadata=schema
+            )
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

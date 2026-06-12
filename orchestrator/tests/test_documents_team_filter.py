@@ -35,10 +35,10 @@ def _seed(db, ws, n, team_access_sql):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_team_filter_and_counts_are_server_side(db_session):
+async def test_team_filter_and_counts_are_server_side(db_session, seed_workspace):
     from api.documents import list_documents, document_team_counts
 
-    ws = str(uuid.uuid4())
+    ws = seed_workspace()  # FK parent for documents.workspace_id
     # 120 docs total: 60 support, 40 sales, 20 public — exceeds the 100 page.
     _seed(db_session, ws, 60, "ARRAY['support']")
     _seed(db_session, ws, 40, "ARRAY['sales']")
@@ -71,10 +71,10 @@ async def test_team_filter_and_counts_are_server_side(db_session):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_no_team_param_returns_all(db_session):
+async def test_no_team_param_returns_all(db_session, seed_workspace):
     from api.documents import list_documents
 
-    ws = str(uuid.uuid4())
+    ws = seed_workspace()  # FK parent for documents.workspace_id
     _seed(db_session, ws, 10, "ARRAY['support']")
     _seed(db_session, ws, 5, "ARRAY['sales']")
     db_session.flush()
