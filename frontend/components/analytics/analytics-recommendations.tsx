@@ -63,10 +63,10 @@ const typeConfig: Record<Recommendation['type'], TypeStyles> = {
     ctaText: 'text-blue-300', ctaHoverBg: 'hover:bg-blue-500/25',
   },
   quota: {
-    icon: TrendingUp, color: 'text-orange-400',
-    bg: 'bg-orange-500/10', border: 'border-orange-500/20',
-    ctaBg: 'bg-orange-500/15', ctaBorder: 'border-orange-500/30',
-    ctaText: 'text-orange-300', ctaHoverBg: 'hover:bg-orange-500/25',
+    icon: TrendingUp, color: 'text-warning',
+    bg: 'bg-warning/10', border: 'border-warning/20',
+    ctaBg: 'bg-warning/15', ctaBorder: 'border-warning/30',
+    ctaText: 'text-warning', ctaHoverBg: 'hover:bg-warning/25',
   },
 }
 
@@ -108,7 +108,7 @@ export function AnalyticsRecommendations({ recommendations, isLoading }: Props) 
     <Card className="glass-card">
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          <Sparkles className="w-5 h-5 text-orange-400" />
+          <Sparkles className="w-5 h-5 text-warning" />
           Recommendations
           <Badge variant="secondary" className="text-xs">{visible.length}</Badge>
         </CardTitle>

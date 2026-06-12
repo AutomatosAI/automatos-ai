@@ -252,8 +252,14 @@ class GraphifyService:
             None, partial(surprising_connections, graph, communities)
         )
 
+        # 5b. Build-time community reports (PRD-165 S3): cheap-LLM titles +
+        # summaries for the top-N communities, ranked by size. Degrades to
+        # ranks-only on any LLM failure — never fails the build.
+        from modules.knowledge.community_reports import generate_community_reports
+        community_reports = await generate_community_reports(graph, communities)
+
         # 6. Export artefacts
-        await self._export_graph(ws, graph, communities, top_gods)
+        await self._export_graph(ws, graph, communities, top_gods, community_reports)
 
         # 7. Build and save meta
         meta = self._build_meta(graph, communities, top_gods)
@@ -562,6 +568,197 @@ class GraphifyService:
         )
 
     # ------------------------------------------------------------------
+    # PRD-165 S2: cluster-first drill-in + path-finding
+    # Server-side subgraph extraction so the client never downloads the full
+    # graph.json (Q28 — ends full-graph downloads, LightRAG pattern).
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _node_payload(graph: "nx.Graph", node_id: Any) -> Dict[str, Any]:
+        """A single node in the {id,label,file_type,community,source_file}
+        shape the force renderer + node side-panel consume."""
+        attrs = graph.nodes.get(node_id, {})
+        return {
+            "id": str(node_id),
+            "label": attrs.get("label", str(node_id)),
+            "file_type": attrs.get("file_type"),
+            "community": attrs.get("community"),
+            "source_file": attrs.get("source_file"),
+            "confidence": attrs.get("confidence"),
+        }
+
+    @staticmethod
+    def _edge_payload(u: Any, v: Any, data: Dict[str, Any]) -> Dict[str, Any]:
+        """A single link in the renderer's edge shape."""
+        score = data.get("confidence_score")
+        if score is None:
+            score = data.get("confidence", data.get("weight", 1.0))
+        try:
+            score = float(score)
+        except (TypeError, ValueError):
+            score = 1.0
+        return {
+            "source": str(u),
+            "target": str(v),
+            "relation": data.get("relation", "related_to"),
+            "confidence": data.get("confidence", score),
+            "confidence_score": score,
+        }
+
+    def _serialize_subgraph(self, graph: "nx.Graph", node_ids: List[Any]) -> Dict[str, Any]:
+        """Induced subgraph: the given nodes + every edge between them, in
+        {nodes, links} form. Pure/sync — callers run it in an executor."""
+        present = [n for n in node_ids if n in graph]
+        present_set = set(present)
+        nodes = [self._node_payload(graph, n) for n in present]
+        links = [
+            self._edge_payload(u, v, data)
+            for u, v, data in graph.edges(present, data=True)
+            if u in present_set and v in present_set
+        ]
+        return {"nodes": nodes, "links": links}
+
+    async def community_subgraph(
+        self, graph: "nx.Graph", member_ids: List[str], max_nodes: int = 300,
+    ) -> Dict[str, Any]:
+        """Induced subgraph for a community's members, capped at ``max_nodes``
+        (highest-degree first so the cap keeps the structurally important
+        nodes). Sets ``truncated`` honestly when the cap bites."""
+        members = [n for n in member_ids if n in graph]
+        truncated = False
+        if len(members) > max_nodes:
+            members.sort(key=lambda n: graph.degree(n), reverse=True)
+            members = members[:max_nodes]
+            truncated = True
+        loop = asyncio.get_event_loop()
+        data = await loop.run_in_executor(
+            None, partial(self._serialize_subgraph, graph, members)
+        )
+        data["truncated"] = truncated
+        return data
+
+    async def node_neighbors_subgraph(
+        self, graph: "nx.Graph", node_id: str, max_nodes: int = 150,
+    ) -> Optional[Dict[str, Any]]:
+        """The node + its 1-hop neighbourhood as a {nodes, links} subgraph
+        ('expand from here'). ``None`` when the node is absent."""
+        if node_id not in graph:
+            return None
+        neighbours = list(graph.neighbors(node_id))
+        if len(neighbours) > max_nodes:
+            neighbours.sort(key=lambda n: graph.degree(n), reverse=True)
+            neighbours = neighbours[:max_nodes]
+        ids = [node_id, *neighbours]
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, partial(self._serialize_subgraph, graph, ids)
+        )
+
+    async def shortest_path(
+        self, graph: "nx.Graph", source: str, target: str,
+    ) -> Dict[str, Any]:
+        """Shortest path between two nodes: an ordered node list + the
+        {nodes, links} subgraph along it. Powers platform_graph_path + the UI
+        path-finding mode."""
+        if source not in graph:
+            return {"found": False, "error": f"Node '{source}' not found in the graph."}
+        if target not in graph:
+            return {"found": False, "error": f"Node '{target}' not found in the graph."}
+
+        loop = asyncio.get_event_loop()
+
+        def _compute():
+            try:
+                return nx.shortest_path(graph, source, target)
+            except nx.NetworkXNoPath:
+                return None
+
+        path = await loop.run_in_executor(None, _compute)
+        if path is None:
+            return {"found": False, "error": "No path connects the two nodes."}
+
+        sub = self._serialize_subgraph(graph, path)
+        return {
+            "found": True,
+            "length": len(path) - 1,
+            "path": [self._node_payload(graph, n) for n in path],
+            "nodes": sub["nodes"],
+            "links": sub["links"],
+        }
+
+    async def search_nodes(
+        self, graph: "nx.Graph", query: str, limit: int = 25,
+    ) -> List[Dict[str, Any]]:
+        """Label search for search-to-focus. Ranked exact > prefix > substring,
+        ties broken by degree (the more-connected node first)."""
+        q = (query or "").strip().lower()
+        if not q:
+            return []
+
+        def _search():
+            scored = []
+            for nid, attrs in graph.nodes(data=True):
+                label = str(attrs.get("label", nid))
+                ll = label.lower()
+                if q == ll:
+                    rank = 0
+                elif ll.startswith(q):
+                    rank = 1
+                elif q in ll:
+                    rank = 2
+                else:
+                    continue
+                scored.append((rank, -graph.degree(nid), nid, label, attrs))
+            scored.sort(key=lambda t: (t[0], t[1]))
+            return [
+                {
+                    "id": str(nid),
+                    "label": label,
+                    "file_type": attrs.get("file_type"),
+                    "community": attrs.get("community"),
+                }
+                for _rank, _negdeg, nid, label, attrs in scored[:limit]
+            ]
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, _search)
+
+    async def set_community_label(
+        self,
+        workspace_id: str,
+        community_id: int,
+        title: str,
+        summary: Optional[str] = None,
+    ) -> bool:
+        """Persist a user-edited community title/summary into communities.json
+        (PRD-165 S3 — labels are editable, and the ``edited`` flag stops the
+        next build's LLM titling from clobbering a hand-set label). Returns
+        False if the community or the communities file is missing."""
+        ws = DbWorkspaceClient(str(workspace_id))
+        result = await ws.read_file(_COMMUNITIES_JSON_PATH)
+        if not result.get("success") or not result.get("content"):
+            return False
+        try:
+            communities = json.loads(result["content"])
+        except (json.JSONDecodeError, TypeError):
+            return False
+
+        found = False
+        for c in communities:
+            if c.get("community_id") == community_id:
+                c["title"] = title.strip()[:80]
+                if summary is not None:
+                    c["summary"] = summary.strip()[:240]
+                c["edited"] = True
+                found = True
+                break
+        if not found:
+            return False
+
+        await self._write_json(ws, _COMMUNITIES_JSON_PATH, communities)
+        return True
+
+    # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
@@ -804,6 +1001,7 @@ class GraphifyService:
         graph: nx.Graph,
         communities: Dict[int, List[str]],
         god_node_list: List[Any],
+        community_reports: Optional[Dict[int, Dict[str, Any]]] = None,
     ) -> None:
         """Export graph artefacts to workspace files."""
         loop = asyncio.get_event_loop()
@@ -820,7 +1018,7 @@ class GraphifyService:
         await self._write_json(ws, _GRAPH_JSON_PATH, graph_data)
 
         # communities.json
-        community_data = self._format_communities(communities)
+        community_data = self._format_communities(communities, community_reports)
         await self._write_json(ws, _COMMUNITIES_JSON_PATH, community_data)
 
         # graph.html — use graphify's to_html (writes to temp file, then upload)
@@ -878,15 +1076,31 @@ class GraphifyService:
     @staticmethod
     def _format_communities(
         communities: Dict[int, List[str]],
+        reports: Optional[Dict[int, Dict[str, Any]]] = None,
     ) -> List[Dict[str, Any]]:
         """Format community data for export.
 
-        Takes the communities dict from ``cluster()`` (maps community_id → member list).
+        Takes the communities dict from ``cluster()`` (maps community_id → member
+        list) and merges in any PRD-165 S3 report (``title``/``summary``/``rank``).
         """
-        return [
-            {"community_id": cid, "member_count": len(members), "members": members}
-            for cid, members in sorted(communities.items())
-        ]
+        reports = reports or {}
+        out: List[Dict[str, Any]] = []
+        for cid, members in sorted(communities.items()):
+            entry: Dict[str, Any] = {
+                "community_id": cid,
+                "member_count": len(members),
+                "members": members,
+            }
+            report = reports.get(cid)
+            if report:
+                if report.get("title"):
+                    entry["title"] = report["title"]
+                if report.get("summary"):
+                    entry["summary"] = report["summary"]
+                if report.get("rank") is not None:
+                    entry["rank"] = report["rank"]
+            out.append(entry)
+        return out
 
     @staticmethod
     def _build_meta(

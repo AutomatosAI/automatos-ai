@@ -255,7 +255,7 @@ export function UploadProviderModal({
 
               <div className="w-full bg-secondary rounded-full h-2">
                 <motion.div
-                  className="bg-gradient-to-r from-orange-500 to-red-500 h-2 rounded-full"
+                  className="bg-gradient-to-r from-warning to-red-500 h-2 rounded-full"
                   initial={{ width: 0 }}
                   animate={{ width: `${uploadProgress}%` }}
                   transition={{ duration: 0.3 }}

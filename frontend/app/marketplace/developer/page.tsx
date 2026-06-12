@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { MainLayout } from '@/components/layout/main-layout'
 import { PageHeader } from '@/components/shared/page-header'
+import { ErrorState } from '@/components/shared'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
@@ -187,10 +188,14 @@ export default function DeveloperDashboardPage() {
   const [loadingWidgets, setLoadingWidgets] = useState(true)
   const [loadingAnalytics, setLoadingAnalytics] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [refreshKey, setRefreshKey] = useState(0)
 
   // --- fetch data on mount --------------------------------------------------
   useEffect(() => {
     let cancelled = false
+    setError(null)
+    setLoadingWidgets(true)
+    setLoadingAnalytics(true)
 
     async function fetchWidgets() {
       try {
@@ -225,7 +230,7 @@ export default function DeveloperDashboardPage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [refreshKey])
 
   // --- render ---------------------------------------------------------------
   return (
@@ -328,15 +333,8 @@ export default function DeveloperDashboardPage() {
             </Card>
           ) : error ? (
             <Card className="glass-card">
-              <CardContent className="py-12 text-center">
-                <p className="text-sm text-destructive mb-4">{error}</p>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => window.location.reload()}
-                >
-                  Retry
-                </Button>
+              <CardContent>
+                <ErrorState description={error} onRetry={() => setRefreshKey((k) => k + 1)} />
               </CardContent>
             </Card>
           ) : widgets.length === 0 ? (

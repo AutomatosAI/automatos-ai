@@ -269,7 +269,7 @@ export function CodeGraphPanel() {
           <CardContent className="p-4">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-3 min-w-0">
-                <div className="w-10 h-10 rounded-2xl bg-black/20 border border-orange-500/10 flex items-center justify-center shrink-0">
+                <div className="w-10 h-10 rounded-2xl bg-black/20 border border-warning/10 flex items-center justify-center shrink-0">
                   <Database className="w-5 h-5 text-info" />
                 </div>
                 <div className="min-w-0">
@@ -288,7 +288,7 @@ export function CodeGraphPanel() {
           <CardContent className="p-4">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-3 min-w-0">
-                <div className="w-10 h-10 rounded-2xl bg-black/20 border border-orange-500/10 flex items-center justify-center shrink-0">
+                <div className="w-10 h-10 rounded-2xl bg-black/20 border border-warning/10 flex items-center justify-center shrink-0">
                   <FileCode className="w-5 h-5 text-success" />
                 </div>
                 <div className="min-w-0">
@@ -307,7 +307,7 @@ export function CodeGraphPanel() {
           <CardContent className="p-4">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-3 min-w-0">
-                <div className="w-10 h-10 rounded-2xl bg-black/20 border border-orange-500/10 flex items-center justify-center shrink-0">
+                <div className="w-10 h-10 rounded-2xl bg-black/20 border border-warning/10 flex items-center justify-center shrink-0">
                   <Code2 className="w-5 h-5 text-agent" />
                 </div>
                 <div className="min-w-0">
@@ -326,15 +326,15 @@ export function CodeGraphPanel() {
           <CardContent className="p-4">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-3 min-w-0">
-                <div className="w-10 h-10 rounded-2xl bg-black/20 border border-orange-500/10 flex items-center justify-center shrink-0">
-                  <Network className="w-5 h-5 text-orange-400" />
+                <div className="w-10 h-10 rounded-2xl bg-black/20 border border-warning/10 flex items-center justify-center shrink-0">
+                  <Network className="w-5 h-5 text-warning" />
                 </div>
                 <div className="min-w-0">
                   <div className="text-2xl font-bold leading-none">{(stats.totalRelationships / 1000).toFixed(1)}K</div>
                   <div className="text-sm text-muted-foreground truncate">Relationships</div>
                 </div>
               </div>
-              <div className="shrink-0 text-right text-xs text-orange-400">
+              <div className="shrink-0 text-right text-xs text-warning">
                 Code connections
               </div>
             </div>

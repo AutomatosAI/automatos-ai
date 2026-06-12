@@ -23,7 +23,7 @@ export const DELIVERABLE_ACCENTS = {
   image:       { hex: '#c084fc', tw: 'text-agent',  label: 'Images'       },
   document:    { hex: '#cbd5e1', tw: 'text-slate-300',   label: 'Documents'    },
   code:        { hex: '#34d399', tw: 'text-success', label: 'Code'         },
-  slide:       { hex: '#fb923c', tw: 'text-orange-400',  label: 'Slides'       },
+  slide:       { hex: '#fb923c', tw: 'text-warning',  label: 'Slides'       },
   spreadsheet: { hex: '#4ade80', tw: 'text-success',   label: 'Spreadsheets' },
   blog_post:   { hex: '#22d3ee', tw: 'text-cyan-400',    label: 'Blog Posts'   },
 } as const

@@ -113,10 +113,13 @@ def test_create_endpoint_forwards_dialect():
 
 
 # ---------------------------------------------------------------------------
-# S12.4 — entity-KG endpoints require auth (401 without credentials)
+# S12.4 — entity-KG endpoints removed in PRD-165 (graph consolidation)
 # ---------------------------------------------------------------------------
-# Required query/path params are supplied so the ONLY failure mode is auth:
-# the hybrid dependency 401s before field validation or any DB query.
+# The PRD-21 entity explorer (/entities/*, /stats/entities) was deleted in
+# PRD-165 — the workspace graph is the single canonical surface and agents query
+# it via the platform_graph_* tools, not REST. With REQUIRE_AUTH on and no
+# credentials a *deleted* route 404s (routing misses before auth runs), so this
+# now guards against the endpoints being reintroduced.
 _ENTITY_REQUESTS = [
     ("GET", "/api/knowledge/entities"),
     ("GET", "/api/knowledge/entities/search?query=foo&limit=10"),
@@ -141,10 +144,10 @@ def _kg_client(monkeypatch):
 
 
 @pytest.mark.parametrize("method,path", _ENTITY_REQUESTS)
-def test_entity_kg_endpoint_401_without_auth(monkeypatch, method, path):
+def test_entity_kg_endpoint_removed(monkeypatch, method, path):
     client = _kg_client(monkeypatch)
     resp = client.request(method, path)
-    assert resp.status_code == 401, f"{method} {path} -> {resp.status_code} {resp.text[:200]}"
+    assert resp.status_code == 404, f"{method} {path} should be deleted -> {resp.status_code} {resp.text[:200]}"
 
 
 def _dependency_calls(dependant):
@@ -157,11 +160,11 @@ def _dependency_calls(dependant):
 
 
 def test_every_knowledge_graph_route_carries_hybrid_gate():
-    # Non-vacuity + regression: EVERY route on the router (the 7 newly gated
-    # entity endpoints + the 3 already-gated graph endpoints) carries the
-    # hybrid auth dependency, so a future entity route is gated at birth.
+    # Non-vacuity + regression: EVERY remaining route on the router (the
+    # workspace-graph import/build/delete endpoints) carries the hybrid auth
+    # dependency, so a future graph route is gated at birth.
     routes = [r for r in kg_router.routes if isinstance(r, APIRoute)]
-    assert len(routes) >= 7
+    assert len(routes) >= 3
     for route in routes:
         assert get_request_context_hybrid in _dependency_calls(route.dependant), (
             f"{route.path} is not auth-gated"

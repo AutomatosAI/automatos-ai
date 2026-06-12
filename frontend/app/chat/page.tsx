@@ -176,7 +176,7 @@ export default function ChatPage() {
                 transition={{ type: 'spring', stiffness: 320, damping: 30 }}
                 className="absolute left-0 top-0 z-20 h-full w-[320px]"
               >
-                <div className="h-full rounded-r-3xl border-r border-orange-500/20 bg-background/35 backdrop-blur-xl shadow-[0_0_80px_rgba(0,0,0,0.55)]">
+                <div className="h-full rounded-r-3xl border-r border-warning/20 bg-background/35 backdrop-blur-xl shadow-[0_0_80px_rgba(0,0,0,0.55)]">
                   <AppSidebar onChatSelect={handleChatSelect} onNewChat={handleNewChat} />
                 </div>
               </motion.aside>

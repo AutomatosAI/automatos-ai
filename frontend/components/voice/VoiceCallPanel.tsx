@@ -49,7 +49,7 @@ const STATE_COLORS: Record<VoiceStreamState, string> = {
   connecting: 'text-warning',
   connected: 'text-success',
   speaking: 'text-info',
-  processing: 'text-orange-400',
+  processing: 'text-warning',
   responding: 'text-agent',
   error: 'text-destructive',
 }
@@ -116,7 +116,7 @@ export function VoiceCallPanel({
       exit={{ opacity: 0, y: 20 }}
       className="fixed inset-x-0 bottom-0 z-50 mx-auto max-w-lg p-4 md:bottom-4"
     >
-      <div className="rounded-3xl border-2 border-orange-500/30 bg-background/95 backdrop-blur-xl shadow-2xl shadow-orange-500/10 overflow-hidden">
+      <div className="rounded-3xl border-2 border-warning/30 bg-background/95 backdrop-blur-xl shadow-2xl shadow-warning/10 overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-5 pt-4 pb-2">
           <div className="flex items-center gap-3">
@@ -155,7 +155,7 @@ export function VoiceCallPanel({
                 className={`text-xs ${
                   entry.role === 'user'
                     ? 'text-info/80'
-                    : 'text-orange-300'
+                    : 'text-warning'
                 }`}
               >
                 <span className="font-medium">
@@ -178,7 +178,7 @@ export function VoiceCallPanel({
                 animate={{ scale: 1, opacity: 1 }}
                 exit={{ scale: 0.8, opacity: 0 }}
               >
-                <Loader2 className="w-12 h-12 animate-spin text-orange-400" />
+                <Loader2 className="w-12 h-12 animate-spin text-warning" />
               </motion.div>
             ) : state === 'speaking' ? (
               <motion.div
@@ -209,7 +209,7 @@ export function VoiceCallPanel({
                 {[...Array(5)].map((_, i) => (
                   <motion.div
                     key={i}
-                    className="w-1.5 bg-orange-400 rounded-full"
+                    className="w-1.5 bg-warning rounded-full"
                     animate={{ height: [8, 20, 8] }}
                     transition={{
                       repeat: Infinity,
@@ -227,7 +227,7 @@ export function VoiceCallPanel({
                 {[0, 1, 2].map((i) => (
                   <motion.div
                     key={i}
-                    className="w-2 h-2 rounded-full bg-orange-400"
+                    className="w-2 h-2 rounded-full bg-warning"
                     animate={{ opacity: [0.3, 1, 0.3] }}
                     transition={{
                       repeat: Infinity,

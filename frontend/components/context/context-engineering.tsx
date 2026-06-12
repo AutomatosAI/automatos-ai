@@ -497,7 +497,7 @@ export function ContextEngineering() {
                         </div>
                         <div className="w-full bg-secondary rounded-full h-1">
                           <div 
-                            className="bg-gradient-to-r from-orange-500 to-red-500 h-1 rounded-full transition-all duration-300"
+                            className="bg-gradient-to-r from-warning to-red-500 h-1 rounded-full transition-all duration-300"
                             style={{ width: `${query.confidence * 100}%` }}
                           />
                         </div>

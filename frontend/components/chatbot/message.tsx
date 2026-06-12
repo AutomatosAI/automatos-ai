@@ -334,7 +334,7 @@ export function Message({
         <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
           isUser
             ? 'bg-info'
-            : 'bg-gradient-to-br from-orange-500/40 to-red-500/30 ring-1 ring-orange-500/25 shadow-[0_0_12px_rgba(249,115,22,0.15)]'
+            : 'bg-gradient-to-br from-warning/40 to-red-500/30 ring-1 ring-warning/25 shadow-[0_0_12px_rgba(249,115,22,0.15)]'
         }`}>
           {isUser ? (
             <User className="w-5 h-5 text-white" />

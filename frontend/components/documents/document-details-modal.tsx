@@ -290,7 +290,7 @@ export function DocumentDetailsModal({
                         </div>
                         <div>
                           <p className="text-sm font-medium text-muted-foreground">Document ID</p>
-                          <p className="font-semibold text-orange-400">#{document?.id}</p>
+                          <p className="font-semibold text-warning">#{document?.id}</p>
                         </div>
                       </CardContent>
                     </Card>
@@ -423,7 +423,7 @@ export function DocumentDetailsModal({
                             <p className="text-sm text-muted-foreground">Process Time</p>
                           </div>
                           <div className="text-center p-3 bg-background/50 rounded-lg">
-                            <p className="text-2xl font-bold text-orange-400">{document?.processing_info?.success_rate}%</p>
+                            <p className="text-2xl font-bold text-warning">{document?.processing_info?.success_rate}%</p>
                             <p className="text-sm text-muted-foreground">Success Rate</p>
                           </div>
                         </div>
@@ -450,7 +450,7 @@ export function DocumentDetailsModal({
                             <p className="text-sm text-muted-foreground">Downloads</p>
                           </div>
                           <div className="text-center p-4 bg-background/50 rounded-lg">
-                            <p className="text-sm font-bold text-orange-400">{formatDate(document?.access_info?.last_accessed)}</p>
+                            <p className="text-sm font-bold text-warning">{formatDate(document?.access_info?.last_accessed)}</p>
                             <p className="text-sm text-muted-foreground">Last Accessed</p>
                           </div>
                         </div>

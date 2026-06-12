@@ -7,7 +7,7 @@
  * knowledge graph (graph-viz-utils.ts).
  */
 import type { FieldPattern } from '@/hooks/use-missions-api'
-import { GRAPH_PALETTE, NEUTRAL_TYPE_COLOR } from '../knowledge/graph-viz-utils'
+import { GRAPH_PALETTE, NEUTRAL_TYPE_COLOR } from '../graph/graph-viz-utils'
 
 // The hub node every agent links to. A constant id so links resolve.
 export const FIELD_CORE_ID = '__field_core__'

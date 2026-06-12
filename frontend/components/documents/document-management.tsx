@@ -39,6 +39,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { PageHeader } from '@/components/shared/page-header'
 import { StatsBar } from '@/components/shared/stats-bar'
+import { DeleteConfirmation } from '@/components/shared/delete-confirmation'
 import { CodeGraphPanel } from '@/components/knowledge/CodeGraphPanel'
 import { BusinessGraphPanel } from '@/components/knowledge/BusinessGraphPanel'
 import { MemoryTab } from '@/components/knowledge/memory-tab'
@@ -336,6 +337,7 @@ export function DocumentManagement() {
   const [documentToDelete, setDocumentToDelete] = useState<{id: number, filename: string} | null>(null)
   const [showAddDatabaseModal, setShowAddDatabaseModal] = useState(false)
   const [showUploadModal, setShowUploadModal] = useState(false)
+  const [sourceToDelete, setSourceToDelete] = useState<{ id: number; name: string } | null>(null)
   const [graphImporting, setGraphImporting] = useState(false)
   const graphFileRef = useRef<HTMLInputElement>(null)
 
@@ -729,7 +731,7 @@ export function DocumentManagement() {
             </TabsTrigger>
             <TabsTrigger value="businessgraph" className="flex items-center space-x-2">
               <Network className="w-4 h-4" />
-              <span>Business Graph</span>
+              <span>Knowledge Graph</span>
             </TabsTrigger>
             <TabsTrigger value="memory" className="flex items-center space-x-2">
               <Brain className="w-4 h-4" />
@@ -998,7 +1000,7 @@ export function DocumentManagement() {
                             <h3 className="text-lg font-semibold">Uploading...</h3>
                             <div className="w-full bg-secondary rounded-full h-2">
                               <div
-                                className="bg-gradient-to-r from-orange-500 to-red-500 h-2 rounded-full transition-all duration-300 animate-pulse"
+                                className="bg-gradient-to-r from-warning to-red-500 h-2 rounded-full transition-all duration-300 animate-pulse"
                               />
                             </div>
                             <p className="text-sm text-muted-foreground">Processing files...</p>
@@ -1101,11 +1103,7 @@ export function DocumentManagement() {
                             variant="outline" 
                             size="sm"
                             className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                            onClick={() => {
-                              if (window.confirm(`Delete database source "${source.name}"? This cannot be undone.`)) {
-                                deleteSource(source.id)
-                              }
-                            }}
+                            onClick={() => setSourceToDelete({ id: Number(source.id), name: String(source.name) })}
                           >
                             <Trash2 className="w-4 h-4" />
                           </Button>
@@ -1238,7 +1236,17 @@ export function DocumentManagement() {
         onClose={() => setShowAddDatabaseModal(false)}
         onSuccess={() => {
           // Refresh database sources after adding
-          window.location.reload()
+          refreshDatabaseSources()
+        }}
+      />
+
+      <DeleteConfirmation
+        open={!!sourceToDelete}
+        onOpenChange={(open) => !open && setSourceToDelete(null)}
+        title="Delete database source?"
+        itemName={sourceToDelete ? `the database source "${sourceToDelete.name}"` : undefined}
+        onConfirm={async () => {
+          if (sourceToDelete) await deleteSource(sourceToDelete.id)
         }}
       />
 
