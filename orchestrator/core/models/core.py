@@ -169,6 +169,29 @@ class LLMUsage(Base):
     created_at = Column(DateTime, default=func.now())
 
 # Database Models
+class Team(Base):
+    """PRD-158 S1: a real (small) Teams entity per workspace.
+
+    ``normalized_name`` is the canonical (lowercased/trimmed) form from
+    ``core.team_access.normalize_team`` — unique per workspace, so 'Support' and
+    'support' are one team. ``name`` keeps a human display label. Documents stay
+    multi-team via ``documents.team_access``; agents are single-team via
+    ``agents.team`` (schema leaves room for multi-team later).
+    """
+    __tablename__ = 'teams'
+    __table_args__ = (
+        UniqueConstraint('workspace_id', 'normalized_name', name='uq_teams_workspace_normalized'),
+        Index('ix_teams_workspace', 'workspace_id'),
+        {'extend_existing': True},
+    )
+
+    id = Column(Integer, primary_key=True)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey('workspaces.id', ondelete='CASCADE'), nullable=False)
+    name = Column(String(100), nullable=False)
+    normalized_name = Column(String(100), nullable=False)
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+
+
 class Agent(Base):
     __tablename__ = 'agents'
     __table_args__ = (
@@ -1503,6 +1526,18 @@ class BoardTask(Base):
     blocked_at = Column(DateTime(timezone=True), nullable=True)
     blocked_reason = Column(Text, nullable=True)
     attachment_ids = Column(JSONB, default=list, server_default='[]')  # PRD-127: ephemeral attachments
+    # PRD-161: dispatch lease — claim/lease/requeue so assigned work executes
+    # exactly once. lease_until is the active claim's deadline (a worker holding
+    # it past this is presumed crashed → the sweeper requeues); attempts is the
+    # retry counter (Q41: 2 attempts then 'failed').
+    lease_until = Column(DateTime(timezone=True), nullable=True)
+    attempts = Column(Integer, nullable=False, default=0, server_default='0')
+    # PRD-161 Q44: reviewer feedback carried into the next execution's context
+    # when a task is rejected back to the same agent. Cleared once consumed.
+    review_feedback = Column(Text, nullable=True)
+    # PRD-161 S5: set once the SLA-breach notification has fired, so the sweeper
+    # flags an overdue task exactly once instead of every tick.
+    sla_breach_notified = Column(Boolean, nullable=False, default=False, server_default='false')
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
@@ -1532,6 +1567,10 @@ class BoardTask(Base):
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
             "planning_data": self.planning_data,
+            "lease_until": self.lease_until.isoformat() if self.lease_until else None,
+            "attempts": self.attempts or 0,
+            "review_feedback": self.review_feedback,
+            "sla_breach_notified": bool(self.sla_breach_notified),
             "sla_deadline": self.sla_deadline.isoformat() if self.sla_deadline else None,
             "blocked_at": self.blocked_at.isoformat() if self.blocked_at else None,
             "blocked_reason": self.blocked_reason,

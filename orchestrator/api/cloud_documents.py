@@ -61,6 +61,10 @@ class CloudFileResponse(BaseModel):
 
 class SelectFolderRequest(BaseModel):
     root_folder_path: str = Field(..., min_length=1)
+    default_team_access: Optional[List[str]] = Field(
+        default=None,
+        description="PRD-158: teams applied to docs synced from this connection (normalized server-side)",
+    )
 
 
 class SelectFolderResponse(BaseModel):
@@ -344,6 +348,10 @@ async def select_folder(
     try:
         conn = _get_connection_or_404(db, connection_id, ctx.workspace_id)
 
+        # PRD-158 S2/Q5: normalize the connection's default team(s) once, here.
+        from core.team_access import ensure_teams
+        default_team_access = ensure_teams(db, ctx.workspace_id, body.default_team_access or [])
+
         # Upsert sync config
         sync_cfg = db.query(CloudSyncConfig).filter(
             CloudSyncConfig.connection_id == connection_id
@@ -352,11 +360,13 @@ async def select_folder(
         if sync_cfg:
             sync_cfg.root_folder_path = body.root_folder_path
             sync_cfg.sync_enabled = True
+            sync_cfg.default_team_access = default_team_access
         else:
             sync_cfg = CloudSyncConfig(
                 connection_id=connection_id,
                 root_folder_path=body.root_folder_path,
                 sync_enabled=True,
+                default_team_access=default_team_access,
             )
             db.add(sync_cfg)
 

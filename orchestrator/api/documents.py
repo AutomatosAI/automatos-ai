@@ -549,12 +549,13 @@ async def list_documents(
     status: Optional[str] = None,
     file_type: Optional[str] = None,
     search: Optional[str] = None,
+    team: Optional[str] = Query(None, description="PRD-158: team scope; normalized server-side"),
     db: Session = Depends(get_db)
 ):
     """List documents with filtering and pagination"""
     try:
         query = db.query(Document).filter(Document.workspace_id == ctx.workspace_id)
-        
+
         # Apply filters
         if status:
             query = query.filter(Document.status == status)
@@ -567,7 +568,21 @@ async def list_documents(
                     Document.description.ilike(f"%{search}%")
                 )
             )
-        
+
+        # PRD-158 S3: server-side team scope through the centralized builder.
+        # Case-insensitive overlap so legacy mixed-case team_access still matches
+        # (new writes are normalized in S2); public docs (empty team_access) always show.
+        from modules.rag.retrieval_filters import build_retrieval_filters
+        _scope = build_retrieval_filters(workspace_id=ctx.workspace_id, team=team)
+        if _scope.has_team_restriction:
+            query = query.filter(
+                text(
+                    "(team_access = '{}' OR EXISTS ("
+                    "SELECT 1 FROM unnest(team_access) ta "
+                    "WHERE LOWER(TRIM(ta)) = ANY(CAST(:team_terms AS text[]))))"
+                )
+            ).params(team_terms=_scope.team_terms)
+
         documents = query.order_by(Document.upload_date.desc()).offset(skip).limit(limit).all()
         
         return [
@@ -646,6 +661,39 @@ async def unpin_document_from_chat(
     from modules.rag.pinned_context import unpin_document
 
     return unpin_document(db, chat_id=chat_id, document_id=document_id, workspace_id=ctx.workspace_id)
+
+
+@router.get("/team-counts")
+async def document_team_counts(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """PRD-158 S3: per-team document counts, aggregated server-side over ALL docs
+    in the workspace (not the paginated ≤100 page). Teams are normalized
+    (lowercased) so mixed-case team_access collapses into one count.
+
+    Registered before GET /{document_id} so the literal path isn't captured.
+    """
+    rows = db.execute(
+        text(
+            "SELECT LOWER(TRIM(ta)) AS team, COUNT(DISTINCT d.id) AS cnt "
+            "FROM documents d, unnest(d.team_access) ta "
+            "WHERE d.workspace_id = CAST(:ws AS uuid) AND TRIM(ta) <> '' "
+            "GROUP BY LOWER(TRIM(ta)) ORDER BY team"
+        ),
+        {"ws": str(ctx.workspace_id)},
+    ).fetchall()
+    counts = {r.team: int(r.cnt) for r in rows}
+
+    untagged = db.execute(
+        text("SELECT COUNT(*) FROM documents WHERE workspace_id = CAST(:ws AS uuid) AND team_access = '{}'"),
+        {"ws": str(ctx.workspace_id)},
+    ).scalar()
+    total = db.execute(
+        text("SELECT COUNT(*) FROM documents WHERE workspace_id = CAST(:ws AS uuid)"),
+        {"ws": str(ctx.workspace_id)},
+    ).scalar()
+    return {"counts": counts, "untagged": int(untagged or 0), "total": int(total or 0)}
 
 
 @router.get("/{document_id}", response_model=DocumentResponse)

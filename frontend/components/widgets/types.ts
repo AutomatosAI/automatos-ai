@@ -29,6 +29,25 @@ export type WidgetType =
   | 'chat'        // Embedded chat (for SDK)
   // PRD-66: Physical workspace code viewer
   | 'coding_canvas'  // Monaco-based workspace file browser + editor
+  // PRD-163 S4: in-chat mission plan approval card
+  | 'mission_approval'  // Approve/reject an auto-created mission plan
+
+export interface MissionApprovalTask {
+  title: string
+  agent_role?: string
+  sequence?: number
+}
+
+export interface MissionApprovalWidgetData {
+  mission_id: string
+  goal: string
+  state?: string
+  task_count: number
+  tasks: MissionApprovalTask[]
+  cost_estimate_usd?: number
+  cost_ceiling_usd?: number
+  approval_deadline_at?: string
+}
 
 /**
  * Widget position in the canvas grid

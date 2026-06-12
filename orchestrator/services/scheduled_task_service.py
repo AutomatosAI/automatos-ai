@@ -10,7 +10,6 @@ injecting the task description as the opening message.
 """
 
 import logging
-import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from uuid import UUID
@@ -19,22 +18,13 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from config import config
+from services.schedule_util import is_valid_cron, next_run as _util_next_run
 
 logger = logging.getLogger(__name__)
 
 # Limits
 MAX_TASKS_PER_AGENT = 10
 MAX_RECURRING_PER_WORKSPACE = 25
-
-# Cron validation — 5-field standard cron (minute hour dom month dow)
-_CRON_RE = re.compile(
-    r"^("
-    r"(\*|[0-9]{1,2}(-[0-9]{1,2})?(,[0-9]{1,2}(-[0-9]{1,2})?)*(/[0-9]{1,2})?)"
-    r"\s+){4}"
-    r"(\*|[0-9]{1,2}(-[0-9]{1,2})?(,[0-9]{1,2}(-[0-9]{1,2})?)*(/[0-9]{1,2})?)"
-    r"$"
-)
-
 
 class ScheduledTaskService:
     """Creates, lists, cancels, and executes agent-scheduled tasks."""
@@ -80,14 +70,9 @@ class ScheduledTaskService:
             except (ValueError, TypeError):
                 return {"success": False, "error": f"Invalid ISO datetime: {schedule}. Use format: 2026-03-11T09:00:00Z"}
         else:
-            # Validate using the same CronTrigger the scheduler will use
-            try:
-                parts = schedule.strip().split()
-                if len(parts) != 5:
-                    raise ValueError("Expected 5 fields")
-                from apscheduler.triggers.cron import CronTrigger
-                CronTrigger(minute=parts[0], hour=parts[1], day=parts[2], month=parts[3], day_of_week=parts[4])
-            except Exception:
+            # Validate with the shared cron util (croniter — standard crontab
+            # semantics, the same the calendar and firing use post-PRD-162).
+            if not is_valid_cron(schedule):
                 return {"success": False, "error": f"Invalid cron expression: {schedule}. Use 5-field format: '0 9 * * 1' (minute hour dom month dow)"}
 
         # Validate agents exist in workspace
@@ -464,14 +449,9 @@ class ScheduledTaskService:
                 run_at = datetime.fromisoformat(schedule.replace("Z", "+00:00"))
                 trigger = DateTrigger(run_date=run_at)
             else:
-                parts = schedule.strip().split()
-                trigger = CronTrigger(
-                    minute=parts[0],
-                    hour=parts[1],
-                    day=parts[2],
-                    month=parts[3],
-                    day_of_week=parts[4],
-                )
+                # Standard crontab semantics so firing matches the calendar's
+                # croniter next_run (PRD-162 — one schedule truth).
+                trigger = CronTrigger.from_crontab(schedule)
 
             # APScheduler needs a sync wrapper for async execute_task
             import asyncio
@@ -497,21 +477,8 @@ class ScheduledTaskService:
 
     @staticmethod
     def _next_cron_run(cron_expr: str) -> Optional[datetime]:
-        """Compute next run time from a cron expression."""
-        try:
-            from apscheduler.triggers.cron import CronTrigger
-
-            parts = cron_expr.strip().split()
-            trigger = CronTrigger(
-                minute=parts[0],
-                hour=parts[1],
-                day=parts[2],
-                month=parts[3],
-                day_of_week=parts[4],
-            )
-            return trigger.get_next_fire_time(None, datetime.now(timezone.utc))
-        except Exception:
-            return None
+        """Next run from a cron expression via the shared schedule util (croniter)."""
+        return _util_next_run(cron_expr, now=datetime.now(timezone.utc))
 
     async def load_active_tasks_to_scheduler(self) -> int:
         """

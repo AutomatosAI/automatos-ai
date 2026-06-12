@@ -44,21 +44,14 @@ tool_integration = None
 def get_services():
     global db_service, cache_service, tool_integration
     if not db_service:
-        from core.llm import create_llm_manager
-        from modules.rag import RAGService
-        from modules.search.services.context_engineering_service import ContextEngineeringService
-        from core.services.audit_service import AuditService
-        
-        db_service = DatabaseKnowledgeService(
-            credential_resolver=get_credential_resolver(),
-            llm_provider=create_llm_manager(service_name="orchestrator"),
-            rag_service=RAGService(),
-            context_engineering=ContextEngineeringService(),
-            audit_service=AuditService()
-        )
+        # PRD-160 S1: single construction site shared with the in-process
+        # agent path (modules.nl2sql.get_database_knowledge_service).
+        from modules.nl2sql import get_database_knowledge_service
+
+        db_service = get_database_knowledge_service()
         cache_service = get_database_cache_service()
         tool_integration = get_database_tool_integration()
-    
+
     return db_service, cache_service, tool_integration
 
 
@@ -181,18 +174,28 @@ async def query_database(
     service, cache, _ = get_services()
 
     try:
+        uid = str(ctx.user.id) if ctx.user and getattr(ctx.user, "id", None) else None
         result = await service.smart_query(
             source_id=str(source_id),
             text=request.query,
-            user_id="1",  # TODO: Get from auth
+            user_id=uid or "1",
             agent_id=None,
             # W3-S9: scope the source lookup to the authenticated workspace
             # so a workspace A token can't use workspace B's source_id.
             workspace_id=str(ctx.workspace_id),
         )
 
+        # PRD-160 S4: every NL query lands one audit row (best-effort).
+        await service.write_nl_audit(
+            source_id=source_id,
+            user_id=uid,
+            agent_id=None,
+            nl_query=request.query,
+            result=result if isinstance(result, dict) else {},
+        )
+
         return result
-    
+
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
@@ -431,31 +434,34 @@ async def list_query_templates(
     ]
 
 
-@router.post("/{source_id}/template/execute")
+@router.post("/templates/{template_id}/execute")
 async def execute_template(
-    source_id: int,
-    request: QueryTemplateExecute,
+    template_id: int,
+    body: Dict[str, Any] = Body(...),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
+    """Execute a saved Query Template against its source (PRD-160 S4).
+
+    Path matches the frontend's call (templates/{id}/execute with source_id in
+    the body); the previous /{source_id}/template/execute stub returned empty
+    data, so the Execute button could never succeed.
     """
-    Execute a query template with parameters.
-    """
+    source_id = body.get("source_id")
+    if not source_id:
+        raise HTTPException(status_code=400, detail="source_id is required")
+
     service, _, _ = get_services()
-    
-    try:
-        # This would execute the template
-        # Implementation would be in the service
-        return {
-            "success": True,
-            "template_id": request.template_id,
-            "data": [],
-            "visualization_type": "table"
-        }
-    
-    except Exception as e:
-        logging.getLogger(__name__).error(f"Failed to execute template for source {source_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=400, detail="Template execution failed")
+    result = await service.execute_template(
+        source_id=int(source_id),
+        template_id=template_id,
+        parameters=body.get("parameters") or {},
+        workspace_id=str(ctx.workspace_id),  # workspace-scoped source lookup
+        max_rows=int(body.get("max_rows", 1000)),
+    )
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "Template execution failed"))
+    return result
 
 
 @router.post("/{source_id}/query/sql")

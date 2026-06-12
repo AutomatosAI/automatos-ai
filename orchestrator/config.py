@@ -248,6 +248,44 @@ class Config:
             return os.getenv("GRAPHIFY_MODEL")
 
     @property
+    def MEMORY_DISTILL_MODEL(self) -> str:
+        """Cheap-tier model for L3 memory distillation (PRD-159 D11/Q16).
+
+        The distiller runs ~1×/chat turn, so it is deliberately pinned to a cheap
+        model rather than the conversation tier. Resolves system_settings
+        (memory.distill_model) → env MEMORY_DISTILL_MODEL → DEFAULT_LLM_MODEL
+        (already a fast/cheap flash tier)."""
+        from core.llm.defaults import DEFAULT_LLM_MODEL
+        try:
+            from core.llm.manager import get_system_setting
+            return get_system_setting(
+                "memory", "distill_model",
+                os.getenv("MEMORY_DISTILL_MODEL", DEFAULT_LLM_MODEL),
+            )
+        except Exception:
+            return os.getenv("MEMORY_DISTILL_MODEL", DEFAULT_LLM_MODEL)
+
+    @property
+    def MEMORY_RELEVANCE_FLOOR(self) -> float:
+        """Server-side similarity floor for L3 recall (PRD-159 S3).
+
+        Scored search results below this are never injected, so low-relevance
+        junk can't leak into context. Resolves system_settings
+        (memory.relevance_floor) → env MEMORY_RELEVANCE_FLOOR → 0.3."""
+        try:
+            from core.llm.manager import get_system_setting
+            val = get_system_setting(
+                "memory", "relevance_floor",
+                os.getenv("MEMORY_RELEVANCE_FLOOR", "0.3"),
+            )
+            return float(val)
+        except Exception:
+            try:
+                return float(os.getenv("MEMORY_RELEVANCE_FLOOR", "0.3"))
+            except (TypeError, ValueError):
+                return 0.3
+
+    @property
     def COORDINATOR_TASK_MAX_TOKENS(self) -> int:
         """Mission task max_tokens — canonical System LLM max_tokens (PRD-136)."""
         try:
@@ -408,6 +446,29 @@ class Config:
     DEFAULT_MAX_CONCURRENT_TOTAL: int = int(os.getenv("DEFAULT_MAX_CONCURRENT_TOTAL", "3"))
     DEFAULT_MAX_CONCURRENT_RUNNING: int = int(os.getenv("DEFAULT_MAX_CONCURRENT_RUNNING", "3"))
     DEFAULT_MAX_CONCURRENT_PENDING: int = int(os.getenv("DEFAULT_MAX_CONCURRENT_PENDING", "10"))
+
+    # =============================================================================
+    # BOARD DISPATCH SPINE (PRD-161: claim/lease/requeue)
+    # =============================================================================
+    # One Postgres-native dispatch loop: assigned BoardTasks are claimed with
+    # FOR UPDATE SKIP LOCKED (exactly-once), leased, and requeued on crash.
+    BOARD_DISPATCH_ENABLED: bool = os.getenv("BOARD_DISPATCH_ENABLED", "true").lower() == "true"
+    # Lease a claimed task holds before the sweeper presumes the worker dead.
+    BOARD_DISPATCH_LEASE_SECONDS: int = int(os.getenv("BOARD_DISPATCH_LEASE_SECONDS", "600"))
+    # Poll fallback cadence when no NOTIFY arrives (NOTIFY drives sub-second pickup).
+    BOARD_DISPATCH_POLL_SECONDS: float = float(os.getenv("BOARD_DISPATCH_POLL_SECONDS", "5"))
+    # Tasks claimed per loop tick (a tick claims a batch, runs each individually).
+    BOARD_DISPATCH_CLAIM_BATCH: int = int(os.getenv("BOARD_DISPATCH_CLAIM_BATCH", "10"))
+    # Q41: attempts before a task is terminal 'failed' (crash → requeue until here).
+    BOARD_DISPATCH_MAX_ATTEMPTS: int = int(os.getenv("BOARD_DISPATCH_MAX_ATTEMPTS", "2"))
+    # Per-agent concurrency slots: at most this many of an agent's tasks run at
+    # once; the rest stay 'assigned' (the DB is the queue — double-texting is
+    # queued, never dropped). The claim honours this via in_progress counts.
+    BOARD_DISPATCH_AGENT_SLOTS: int = int(os.getenv("BOARD_DISPATCH_AGENT_SLOTS", "2"))
+    # S5: done tasks older than this drop off the active board (retained in DB).
+    BOARD_ARCHIVE_DONE_DAYS: int = int(os.getenv("BOARD_ARCHIVE_DONE_DAYS", "30"))
+    # S5: SSE board-event ping cadence (server tells clients to refetch).
+    BOARD_SSE_PING_SECONDS: float = float(os.getenv("BOARD_SSE_PING_SECONDS", "10"))
 
     WORKER_INTERNAL_URL: str = os.getenv("WORKER_INTERNAL_URL", "http://localhost:8081")
     WORKER_INTERNAL_TOKEN: str = os.getenv("WORKER_INTERNAL_TOKEN", "")

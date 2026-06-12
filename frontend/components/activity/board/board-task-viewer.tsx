@@ -1,6 +1,6 @@
 'use client'
 
-import { Bot, Clock, CheckCircle2, AlertCircle, RotateCcw, Loader2, FileText, ExternalLink, Tag, Calendar, User, Shield, Workflow } from 'lucide-react'
+import { Bot, Clock, CheckCircle2, AlertCircle, RotateCcw, Loader2, FileText, ExternalLink, Tag, Calendar, User, Shield, Workflow, Play } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { PremiumIcon } from '@/components/shared'
@@ -9,7 +9,7 @@ import { useQuery } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
 import type { BoardTask } from '@/types/board'
 import { PRIORITY_CONFIG, STATUS_CONFIG } from '@/types/board'
-import { useUpdateTaskStatus, useApproveTask, useRejectTask } from '@/hooks/use-board-tasks'
+import { useUpdateTaskStatus, useApproveTask, useRejectTask, useRunTask } from '@/hooks/use-board-tasks'
 import { useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
 
@@ -425,6 +425,7 @@ export function BoardTaskViewer({ task: propTask, open, onOpenChange }: BoardTas
   const updateStatus = useUpdateTaskStatus()
   const approveTask = useApproveTask()
   const rejectTask = useRejectTask()
+  const runTask = useRunTask()
 
   if (!task) return null
 
@@ -447,6 +448,16 @@ export function BoardTaskViewer({ task: propTask, open, onOpenChange }: BoardTas
   const handleReject = (feedback?: string) => {
     rejectTask.mutate({ taskId: task.id, feedback })
   }
+
+  // PRD-161 S5: re-dispatch a failed/idle/blocked task on demand.
+  const handleRunNow = () => {
+    runTask.mutate({ taskId: task.id })
+  }
+  const canRunNow =
+    task.status === 'assigned' ||
+    task.status === 'inbox' ||
+    task.status === 'failed' ||
+    task.status === 'blocked'
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -508,6 +519,32 @@ export function BoardTaskViewer({ task: propTask, open, onOpenChange }: BoardTas
           {task.status === 'in_progress' && <InProgressContent task={task} />}
           {task.status === 'review' && <ReviewContent task={task} onStatusChange={handleStatusChange} onApprove={handleApprove} onReject={handleReject} />}
           {task.status === 'done' && <DoneContent task={task} onStatusChange={handleStatusChange} />}
+
+          {/* PRD-161 S5: failed tasks surface the error + a re-run affordance. */}
+          {task.status === 'failed' && task.error_message && (
+            <div className="rounded-lg border border-[hsl(var(--destructive))]/30 bg-[hsl(var(--destructive))]/5 p-3 text-sm text-[hsl(var(--destructive))]">
+              {task.error_message}
+            </div>
+          )}
+
+          {/* PRD-161 S5: Run Now — dispatch the task immediately through the board loop. */}
+          {canRunNow && (
+            <div className="mt-4">
+              <Button
+                onClick={handleRunNow}
+                disabled={runTask.isPending || !task.assignee}
+                className="w-full"
+              >
+                <Play className="w-4 h-4 mr-2" />
+                {runTask.isPending ? 'Dispatching…' : 'Run Now'}
+              </Button>
+              {!task.assignee && (
+                <p className="text-xs text-muted-foreground mt-1.5 text-center">
+                  Assign an agent to run this task.
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Deep link to Execution Kitchen for recipe tasks */}
           <div className="mt-4">

@@ -252,36 +252,14 @@ class _FakeReq:
         return self._body
 
 
-# --- dispatch-on-assign predicate (pure) ---------------------------------
+# --- dispatch is NOTIFY-driven (PRD-161): create/assign fire pg_notify and
+#     leave the task 'assigned'; the dispatch loop claims + runs it. The inline
+#     _dispatch_on_assign and the _should_dispatch_on_assign predicate are gone.
 
-def test_should_dispatch_on_assign_happy_path():
+def test_create_with_assignee_notifies_dispatch(monkeypatch):
     from api import board_tasks as bt
-    assert bt._should_dispatch_on_assign(_stub_task()) is True
-
-
-def test_should_dispatch_skips_recipe_mirror():
-    """Recipe-mirror tasks are driven by the recipe executor, not the board."""
-    from api import board_tasks as bt
-    assert bt._should_dispatch_on_assign(_stub_task(source_type="recipe")) is False
-
-
-def test_should_dispatch_skips_already_running():
-    """Double-fire guard: an in_progress task is already running."""
-    from api import board_tasks as bt
-    assert bt._should_dispatch_on_assign(_stub_task(status="in_progress")) is False
-
-
-def test_should_dispatch_skips_unassigned():
-    from api import board_tasks as bt
-    assert bt._should_dispatch_on_assign(_stub_task(assigned_agent_id=None)) is False
-
-
-# --- integration: assign → execution starts same tick (mock executor) -----
-
-def test_create_with_assignee_dispatches_execution(monkeypatch):
-    from api import board_tasks as bt
-    calls = []
-    monkeypatch.setattr(bt, "_launch_task_execution", lambda **kw: calls.append(kw))
+    notifies = []
+    monkeypatch.setattr(bt, "notify_task_available", lambda db, **kw: notifies.append(kw))
 
     ctx = _ns(workspace_id=_WS_ID, user=_ns(clerk_user_id="u1", id=1))
     db = _FakeSession(agent=_ns(id=7))
@@ -289,17 +267,17 @@ def test_create_with_assignee_dispatches_execution(monkeypatch):
 
     result = asyncio.run(bt.create_task(req, ctx=ctx, db=db))
 
-    assert len(calls) == 1, "create-with-assignee must dispatch execution same tick"
-    assert calls[0]["agent_id"] == 7
-    assert calls[0]["task_id"] == 4242
-    assert result["status"] == "in_progress"
+    assert len(notifies) == 1, "create-with-assignee must notify the dispatch loop"
+    assert notifies[0]["task_id"] == 4242
+    # The loop claims it (assigned -> in_progress); the handler leaves it assigned.
+    assert result["status"] == "assigned"
 
 
-def test_assign_endpoint_dispatches_execution(monkeypatch):
+def test_assign_endpoint_notifies_dispatch(monkeypatch):
     from api import board_tasks as bt
     from core.models.core import BoardTask
-    calls = []
-    monkeypatch.setattr(bt, "_launch_task_execution", lambda **kw: calls.append(kw))
+    notifies = []
+    monkeypatch.setattr(bt, "notify_task_available", lambda db, **kw: notifies.append(kw))
 
     task = BoardTask(
         id=5, workspace_id=_WS_ID, title="t", status="inbox",
@@ -311,16 +289,17 @@ def test_assign_endpoint_dispatches_execution(monkeypatch):
 
     result = asyncio.run(bt.update_task(5, req, ctx=ctx, db=db))
 
-    assert len(calls) == 1, "the assign endpoint must dispatch execution same tick"
-    assert calls[0]["agent_id"] == 9
-    assert result["status"] == "in_progress"
+    assert len(notifies) == 1, "the assign endpoint must notify the dispatch loop"
+    assert result["status"] == "assigned"
 
 
-def test_reassign_running_task_does_not_double_fire(monkeypatch):
+def test_reassign_running_task_does_not_notify(monkeypatch):
+    """A task already in_progress must not be re-dispatched: notify only fires on
+    a freshly 'assigned' task (the claim query also filters status='assigned')."""
     from api import board_tasks as bt
     from core.models.core import BoardTask
-    calls = []
-    monkeypatch.setattr(bt, "_launch_task_execution", lambda **kw: calls.append(kw))
+    notifies = []
+    monkeypatch.setattr(bt, "notify_task_available", lambda db, **kw: notifies.append(kw))
 
     task = BoardTask(
         id=6, workspace_id=_WS_ID, title="t", status="in_progress",
@@ -330,17 +309,17 @@ def test_reassign_running_task_does_not_double_fire(monkeypatch):
     db = _FakeSession(agent=_ns(id=2), task=task)
     req = _FakeReq({"assigned_agent_id": 2})
 
-    result = asyncio.run(bt.update_task(6, req, ctx=ctx, db=db))
+    asyncio.run(bt.update_task(6, req, ctx=ctx, db=db))
 
-    assert calls == [], "a running task must not re-launch on re-assign"
-    assert result["status"] == "in_progress"
+    assert notifies == [], "a running task must not be re-dispatched on re-assign"
 
 
-def test_assign_on_recipe_mirror_task_does_not_dispatch(monkeypatch):
+def test_assign_on_recipe_mirror_task_does_not_notify(monkeypatch):
+    """Recipe-mirror tasks are driven by the recipe executor, never the board."""
     from api import board_tasks as bt
     from core.models.core import BoardTask
-    calls = []
-    monkeypatch.setattr(bt, "_launch_task_execution", lambda **kw: calls.append(kw))
+    notifies = []
+    monkeypatch.setattr(bt, "notify_task_available", lambda db, **kw: notifies.append(kw))
 
     task = BoardTask(
         id=8, workspace_id=_WS_ID, title="t", status="inbox",
@@ -352,48 +331,171 @@ def test_assign_on_recipe_mirror_task_does_not_dispatch(monkeypatch):
 
     asyncio.run(bt.update_task(8, req, ctx=ctx, db=db))
 
-    assert calls == [], "recipe-mirror tasks are not board-dispatched"
+    assert notifies == [], "recipe-mirror tasks are not board-dispatched"
 
 
-# --- priority CASE: urgent > high > medium > low --------------------------
+# --- priority ordering moved into the dispatch claim SQL (PRD-161) ---------
 
-def _load_heartbeat_service():
-    """Load services/heartbeat_service.py directly from file so services/__init__
-    (heavy) never fires. apscheduler is already stubbed at module load."""
+def test_dispatch_claim_orders_by_semantic_priority():
+    """urgent > high > medium > low, encoded as data in the claim query — NOT an
+    alphabetical ``ORDER BY priority`` string sort (which buries 'high' last)."""
+    from services import board_dispatcher as bd
+    sql = bd._PRIORITY_ORDER_SQL
+    assert sql.index("'urgent'") < sql.index("'high'") < sql.index("'medium'")
+    assert "THEN 0" in sql and "THEN 1" in sql and "THEN 2" in sql
+
+
+def test_heartbeat_no_longer_dispatches_board_tasks():
+    """The 3-task fold-in is deleted from the heartbeat (no shim): the marker
+    string and the priority-order helper it used are both gone."""
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    path = os.path.join(here, "services", "heartbeat_service.py")
-    spec = importlib.util.spec_from_file_location("hbs_under_test", path)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
-def test_priority_rank_is_semantic_not_alphabetical():
-    hbs = _load_heartbeat_service()
-    rank = hbs._BOARD_TASK_PRIORITY_RANK
-    ordered = sorted(["low", "urgent", "medium", "high"], key=rank.get)
-    assert ordered == ["urgent", "high", "medium", "low"]
-    # The shipped bug: ORDER BY priority DESC is an alphabetical string sort.
-    alpha_desc = sorted(["low", "urgent", "medium", "high"], reverse=True)
-    assert alpha_desc == ["urgent", "medium", "low", "high"]  # 'high' wrongly last
-    assert ordered != alpha_desc
-
-
-def test_assigned_task_order_uses_priority_case_not_string_desc():
-    hbs = _load_heartbeat_service()
-    expr = hbs._board_task_priority_order()
-    assert type(expr).__name__ == "Case"
-    compiled = str(expr.compile(compile_kwargs={"literal_binds": True}))
-    for p in ("urgent", "high", "medium", "low"):
-        assert p in compiled
-
-
-def test_heartbeat_source_no_longer_uses_priority_string_desc():
-    """Guard: the broken ``BoardTask.priority.desc()`` ordering is gone and the
-    CASE helper is what the assigned-task scan orders by."""
-    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    path = os.path.join(here, "services", "heartbeat_service.py")
-    with open(path) as f:
+    with open(os.path.join(here, "services", "heartbeat_service.py")) as f:
         src = f.read()
-    assert "BoardTask.priority.desc()" not in src
-    assert "_board_task_priority_order()" in src
+    assert "ASSIGNED TASKS (Priority Work)" not in src
+    assert "_board_task_priority_order" not in src
+
+
+# --- S3: honest lifecycle (failed state, Q44 rejection feedback) -----------
+
+def test_reject_returns_to_same_agent_with_feedback(monkeypatch):
+    """Q44: a rejected review goes back to the SAME agent as 'assigned' with the
+    feedback in review_feedback (carried into the redo's context), not to inbox."""
+    from api import board_tasks as bt
+    from core.models.core import BoardTask
+    notifies = []
+    monkeypatch.setattr(bt, "notify_task_available", lambda db, **kw: notifies.append(kw))
+
+    task = BoardTask(
+        id=11, workspace_id=_WS_ID, title="t", status="review",
+        assigned_agent_id=5, source_type="user", review_mode="human",
+    )
+    ctx = _ns(workspace_id=_WS_ID, user=_ns(clerk_user_id="u1", id=1))
+    db = _FakeSession(agent=_ns(id=5), task=task)
+    req = _FakeReq({"feedback": "Tighten the headline."})
+
+    result = asyncio.run(bt.reject_task(11, req, ctx=ctx, db=db))
+
+    assert result["status"] == "assigned", "Q44: reject returns to the same agent, not inbox"
+    assert result["assigned_agent_id"] == 5
+    assert task.review_feedback == "Tighten the headline."
+    assert task.attempts == 0, "a human redo is a fresh attempt cycle"
+    assert len(notifies) == 1, "reject must re-dispatch the task through the loop"
+
+
+def test_reject_without_assigned_agent_is_422():
+    from api import board_tasks as bt
+    from core.models.core import BoardTask
+    from fastapi import HTTPException
+    import pytest as _pytest
+
+    task = BoardTask(id=12, workspace_id=_WS_ID, title="t", status="review",
+                     assigned_agent_id=None, source_type="user")
+    ctx = _ns(workspace_id=_WS_ID, user=_ns(clerk_user_id="u1", id=1))
+    db = _FakeSession(task=task)
+    req = _FakeReq({"feedback": "x"})
+
+    with _pytest.raises(HTTPException) as ei:
+        asyncio.run(bt.reject_task(12, req, ctx=ctx, db=db))
+    assert ei.value.status_code == 422
+
+
+def test_task_failed_dispatches_task_failed_notification(monkeypatch):
+    """A crashed execution fires a task_failed event (not a silent done)."""
+    from api import board_tasks as bt
+    import core.services.notification_dispatcher as nd
+    from core.models.core import BoardTask
+    captured = {}
+
+    class _FakeDispatcher:
+        def __init__(self, db, ws):
+            pass
+
+        async def dispatch(self, **kw):
+            captured.update(kw)
+            return {}
+
+    monkeypatch.setattr(nd, "NotificationDispatcher", _FakeDispatcher)
+
+    task = BoardTask(id=13, workspace_id=_WS_ID, title="render report",
+                     status="failed", assigned_agent_id=3, error_message="boom")
+    db = _FakeSession(agent=_ns(id=3, name="ATLAS"), task=task)
+
+    asyncio.run(bt._dispatch_task_failed(db, _WS_ID, task))
+
+    assert captured.get("event_type") == "task_failed"
+    assert captured.get("status") == "error"
+    assert "boom" in (captured.get("message") or "")
+
+
+# --- S4: the blocking Composio call is offloaded so it can't stall the loop --
+
+def test_composio_execute_is_offloaded_to_thread():
+    """PRD-161 S4 event-loop guard: the synchronous Composio SDK call runs via
+    asyncio.to_thread inside the async executor, so one slow tool call can't
+    block other in-flight board-task claims/executions."""
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    with open(os.path.join(here, "core", "composio", "tool_executor.py")) as f:
+        src = f.read()
+    # The blocking SDK call is wrapped, not called inline on the event loop.
+    assert "asyncio.to_thread(" in src
+    assert "self.client.execute_action," in src
+
+
+# --- S5: Run-Now + SLA archive + SSE auth ----------------------------------
+
+def test_run_now_redispatches_idle_task(monkeypatch):
+    from api import board_tasks as bt
+    from core.models.core import BoardTask
+    notifies = []
+    monkeypatch.setattr(bt, "notify_task_available", lambda db, **kw: notifies.append(kw))
+
+    task = BoardTask(id=21, workspace_id=_WS_ID, title="t", status="failed",
+                     assigned_agent_id=4, source_type="user", attempts=2)
+    ctx = _ns(workspace_id=_WS_ID, user=_ns(clerk_user_id="u1", id=1))
+    db = _FakeSession(agent=_ns(id=4), task=task)
+
+    result = asyncio.run(bt.run_task_now(21, ctx=ctx, db=db))
+
+    assert result["status"] == "assigned"
+    assert task.attempts == 0, "Run Now resets the attempt cycle"
+    assert task.lease_until is None
+    assert len(notifies) == 1, "Run Now re-dispatches through the loop"
+
+
+def test_run_now_requires_an_agent():
+    from api import board_tasks as bt
+    from core.models.core import BoardTask
+    from fastapi import HTTPException
+    import pytest as _p
+
+    task = BoardTask(id=22, workspace_id=_WS_ID, title="t", status="failed", assigned_agent_id=None)
+    ctx = _ns(workspace_id=_WS_ID, user=_ns(clerk_user_id="u1", id=1))
+    db = _FakeSession(task=task)
+    with _p.raises(HTTPException) as ei:
+        asyncio.run(bt.run_task_now(22, ctx=ctx, db=db))
+    assert ei.value.status_code == 422
+
+
+def test_run_now_rejects_already_running_task():
+    from api import board_tasks as bt
+    from core.models.core import BoardTask
+    from fastapi import HTTPException
+    import pytest as _p
+
+    task = BoardTask(id=23, workspace_id=_WS_ID, title="t", status="in_progress", assigned_agent_id=4)
+    ctx = _ns(workspace_id=_WS_ID, user=_ns(clerk_user_id="u1", id=1))
+    db = _FakeSession(agent=_ns(id=4), task=task)
+    with _p.raises(HTTPException) as ei:
+        asyncio.run(bt.run_task_now(23, ctx=ctx, db=db))
+    assert ei.value.status_code == 409
+
+
+def test_sse_stream_gated_by_tasks_read_scope():
+    """SSE board events ride the read-only PRD-09 TASKS_READ dep — no new scope,
+    shared hybrid auth untouched (test_board_sdk_auth.py is not modified)."""
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    with open(os.path.join(here, "api", "board_tasks.py")) as f:
+        src = f.read()
+    assert "async def stream_board_events(" in src
+    block = src[src.index("async def stream_board_events("):][:400]
+    assert "require_task_context(TASKS_READ)" in block

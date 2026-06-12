@@ -1,0 +1,25 @@
+{
+  "description": "PRD-160 S5 seeded NL2SQL eval set. golden_sql is the reference; the harness compares a candidate's result set to the golden's (execution accuracy). Portable SQL (SQLite + Postgres). Target set size: 30 (extend freely).",
+  "questions": [
+    {"id": "q01", "tags": ["count"], "question": "How many customers are there?", "golden_sql": "SELECT COUNT(*) FROM customers"},
+    {"id": "q02", "tags": ["filter"], "question": "List all products in the Software category", "golden_sql": "SELECT * FROM products WHERE category = 'Software'"},
+    {"id": "q03", "tags": ["aggregate"], "question": "What is the total revenue across all orders?", "golden_sql": "SELECT SUM(total) FROM orders"},
+    {"id": "q04", "tags": ["group"], "question": "How many orders did each customer place?", "golden_sql": "SELECT customer_id, COUNT(*) FROM orders GROUP BY customer_id"},
+    {"id": "q05", "tags": ["order", "limit"], "question": "What are the three most expensive products?", "golden_sql": "SELECT * FROM products ORDER BY price DESC LIMIT 3"},
+    {"id": "q06", "tags": ["filter", "count"], "question": "How many customers are from the USA?", "golden_sql": "SELECT COUNT(*) FROM customers WHERE country = 'USA'"},
+    {"id": "q07", "tags": ["aggregate"], "question": "What is the average order total?", "golden_sql": "SELECT AVG(total) FROM orders"},
+    {"id": "q08", "tags": ["filter"], "question": "List the orders that are completed", "golden_sql": "SELECT * FROM orders WHERE status = 'completed'"},
+    {"id": "q09", "tags": ["group"], "question": "Show each product category and how many products are in it", "golden_sql": "SELECT category, COUNT(*) FROM products GROUP BY category"},
+    {"id": "q10", "tags": ["group", "join"], "question": "What is the total quantity sold per product?", "golden_sql": "SELECT product_id, SUM(quantity) FROM order_items GROUP BY product_id"},
+    {"id": "q11", "tags": ["join", "distinct"], "question": "Which customers have placed at least one order? Show their names.", "golden_sql": "SELECT DISTINCT c.name FROM customers c JOIN orders o ON c.id = o.customer_id"},
+    {"id": "q12", "tags": ["filter", "count"], "question": "How many active customers are there?", "golden_sql": "SELECT COUNT(*) FROM customers WHERE status = 'active'"},
+    {"id": "q13", "tags": ["group", "order", "limit"], "question": "List the top 5 customers by total order value", "golden_sql": "SELECT customer_id, SUM(total) AS total_value FROM orders GROUP BY customer_id ORDER BY total_value DESC LIMIT 5"},
+    {"id": "q14", "tags": ["order", "limit"], "question": "What is the single most expensive product?", "golden_sql": "SELECT * FROM products ORDER BY price DESC LIMIT 1"},
+    {"id": "q15", "tags": ["count"], "question": "How many orders are there in total?", "golden_sql": "SELECT COUNT(*) FROM orders"},
+    {"id": "q16", "tags": ["filter", "order"], "question": "List hardware products ordered from cheapest to most expensive", "golden_sql": "SELECT * FROM products WHERE category = 'Hardware' ORDER BY price ASC"},
+    {"id": "q17", "tags": ["aggregate", "filter"], "question": "What is the total value of completed orders?", "golden_sql": "SELECT SUM(total) FROM orders WHERE status = 'completed'"},
+    {"id": "q18", "tags": ["group", "having"], "question": "Which customers placed more than one order? Show the customer id and order count.", "golden_sql": "SELECT customer_id, COUNT(*) FROM orders GROUP BY customer_id HAVING COUNT(*) > 1"},
+    {"id": "q19", "tags": ["join", "group"], "question": "What is the total revenue per country?", "golden_sql": "SELECT c.country, SUM(o.total) FROM customers c JOIN orders o ON c.id = o.customer_id GROUP BY c.country"},
+    {"id": "q20", "tags": ["distinct"], "question": "List the distinct order statuses", "golden_sql": "SELECT DISTINCT status FROM orders"}
+  ]
+}

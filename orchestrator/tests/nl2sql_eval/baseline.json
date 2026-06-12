@@ -1,0 +1,6 @@
+{
+  "accuracy": 0.0,
+  "recorded_at": "2026-06-12",
+  "set_size": 20,
+  "note": "PRD-160 S5 baseline. 0.0 until a generation run with a real LLM records a number; the gate is no-regression-vs-baseline, so bump this after a green eval run. Success metric (PRD): >= baseline+15pts on a 30-question set after S2+S3."
+}

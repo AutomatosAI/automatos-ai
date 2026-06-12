@@ -117,7 +117,10 @@ async def _resolve_attachments_for_planning(
 # Constants
 # ---------------------------------------------------------------------------
 
-MIN_TASKS = 3
+# PRD-163 S2/Q55: the 3-task floor is removed — a single-task plan is legal.
+# Decomposition still prefers multiple tasks for genuinely complex goals, but the
+# validator no longer rejects a 1-task plan.
+MIN_TASKS = 1
 MAX_TASKS = 20
 MAX_PLAN_RETRIES = 3
 TOKENS_PER_TASK_ESTIMATE = 2000  # legacy fallback

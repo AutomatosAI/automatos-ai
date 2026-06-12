@@ -41,6 +41,7 @@ from api.workflow_recipes import router as workflow_recipes_router, webhook_rout
 from api.webhooks import router as general_webhooks_router
 from api.marketplace import router as marketplace_router
 from api.documents import router as documents_router
+from api.teams import router as teams_router  # PRD-158: Teams entity
 from api.cache import router as cache_router
 from api.system import router as system_router
 from api.memory import router as memory_router
@@ -503,6 +504,18 @@ async def lifespan(app: FastAPI):
                 report, BootstrapStage.SCHEDULER_INIT, lambda: None, skip_condition=True
             )
 
+        # ── PRD-161: board dispatch spine (single claim/lease/requeue loop) ──
+        # Assigned BoardTasks flow through this, not the heartbeat fold-in.
+        if trust_passed and config.BOARD_DISPATCH_ENABLED:
+            import asyncio as _asyncio
+            from services.board_dispatcher import run_dispatch_loop
+
+            app.state.board_dispatch_stop = _asyncio.Event()
+            app.state.board_dispatch_task = _asyncio.create_task(
+                run_dispatch_loop(stop_event=app.state.board_dispatch_stop)
+            )
+            logger.info("Board dispatch loop started (PRD-161)")
+
         # ── Ready ──
         report.ready_at = datetime.now(timezone.utc)
         await run_stage(report, BootstrapStage.READY, lambda: None)
@@ -539,6 +552,19 @@ async def lifespan(app: FastAPI):
             logger.info("Unified scheduler stopped")
         except Exception:
             pass
+
+    # PRD-161: stop the board dispatch loop
+    _bd_task = getattr(app.state, "board_dispatch_task", None)
+    if _bd_task is not None:
+        _bd_stop = getattr(app.state, "board_dispatch_stop", None)
+        if _bd_stop is not None:
+            _bd_stop.set()
+        _bd_task.cancel()
+        try:
+            await _bd_task
+        except Exception:
+            pass
+        logger.info("Board dispatch loop stopped")
 
     # PRD-55: Stop ChannelManager
     if config.CHANNELS_ENABLED:
@@ -863,6 +889,7 @@ app.include_router(general_webhooks_router)  # General workspace webhooks (no au
 app.include_router(marketplace_router)  # Community Marketplace
 app.include_router(document_generation_router)  # PRD-63: Must be BEFORE documents_router (has /templates, /generated specific routes that would otherwise be caught by documents_router's /{document_id} catch-all → 422)
 app.include_router(documents_router)
+app.include_router(teams_router)  # PRD-158: Teams entity (list/create)
 app.include_router(blog_router)  # Authenticated blog management (Deliverables → Blogs)
 app.include_router(cache_router)  # Cache management and monitoring
 app.include_router(system_router)

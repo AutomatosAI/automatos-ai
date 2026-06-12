@@ -86,17 +86,17 @@ class SQLExampleStore:
         example_id = str(uuid.uuid4())
         embedding_id = None
 
-        # Generate embedding for the question
+        # PRD-160 S3: compute AND PERSIST the question embedding (it was computed
+        # then discarded). Stored as a JSON float array so verified pairs can be
+        # retrieved by cosine similarity for few-shot, with no O(N) re-embedding.
+        embedding_vector = None
         em = self._get_embedding_manager()
         if em:
             try:
-                embedding = em.embed_text(question)
-                if embedding is not None:
-                    # Store in vector store for similarity search
-                    from modules.search.vector_store.store import SearchMode
+                vec = em.embed_text(question)
+                if vec is not None:
+                    embedding_vector = [float(x) for x in vec]
                     embedding_id = f"{self.COLLECTION_NAME}:{example_id}"
-                    # We store metadata alongside embedding for filtered retrieval
-                    logger.debug(f"Generated embedding for example: {example_id}")
             except Exception as e:
                 logger.warning(f"Embedding generation failed, continuing without: {e}")
 
@@ -110,6 +110,7 @@ class SQLExampleStore:
                 is_verified=is_verified,
                 verification_source=verification_source,
                 embedding_id=embedding_id,
+                embedding=embedding_vector,
                 extra_metadata=metadata or {},
                 created_by=created_by,
             )
@@ -156,10 +157,28 @@ class SQLExampleStore:
             if not all_examples:
                 return []
 
-            # Note: Embedding-based similarity requires a vector store to avoid
-            # O(N) re-embedding. Until embeddings are persisted in a vector store,
-            # we use the keyword fallback which is fast and effective for moderate
-            # example counts. The embedding_id field is reserved for future use.
+            # PRD-160 S3: embeddings are now persisted (add_example), so rank
+            # verified pairs by cosine similarity of the question embedding.
+            # The per-(workspace, source) verified set is small, so an in-process
+            # cosine scan is plenty — and it needs no O(N) re-embedding. Falls
+            # back to keyword overlap when embeddings are unavailable.
+            em = self._get_embedding_manager()
+            q_vec = None
+            if em:
+                try:
+                    raw = em.embed_text(question)
+                    if raw is not None:
+                        q_vec = [float(x) for x in raw]
+                except Exception as e:
+                    logger.warning(f"Question embedding failed, keyword fallback: {e}")
+
+            embedded = [ex for ex in all_examples if getattr(ex, "embedding", None)]
+            if q_vec and embedded:
+                ranked = self._embedding_similarity(
+                    q_vec, embedded, limit, min_similarity, db
+                )
+                if ranked:
+                    return ranked
 
             # Fallback: keyword-based similarity
             return self._keyword_similarity(question, all_examples, limit, db)
@@ -188,6 +207,49 @@ class SQLExampleStore:
             similarity = overlap / total if total > 0 else 0
             if similarity > 0.1:
                 scored.append((similarity, ex))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        results = []
+        for sim, ex in scored[:limit]:
+            results.append({
+                "id": ex.id,
+                "question": ex.question,
+                "sql": ex.sql,
+                "tables_used": ex.tables_used,
+                "similarity": round(sim, 3),
+                "is_verified": ex.is_verified,
+                "usage_count": ex.usage_count or 0,
+            })
+            ex.usage_count = (ex.usage_count or 0) + 1
+            ex.last_used_at = datetime.utcnow()
+
+        if results:
+            db.commit()
+
+        return results
+
+    def _embedding_similarity(
+        self,
+        question_vector: List[float],
+        examples: list,
+        limit: int,
+        min_similarity: float,
+        db,
+    ) -> List[Dict[str, Any]]:
+        """Rank persisted examples by cosine similarity to the question vector.
+
+        PRD-160 S3: the verified-pair embeddings are stored on the row, so this
+        is a cheap in-process scan (no re-embedding). Mismatched-dimension or
+        malformed vectors are skipped rather than failing the retrieval.
+        """
+        scored = []
+        for ex in examples:
+            try:
+                sim = self._cosine_similarity(question_vector, ex.embedding)
+            except Exception:
+                continue
+            if sim >= min_similarity:
+                scored.append((sim, ex))
 
         scored.sort(key=lambda x: x[0], reverse=True)
         results = []

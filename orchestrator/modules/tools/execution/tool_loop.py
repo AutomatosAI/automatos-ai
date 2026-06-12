@@ -29,8 +29,37 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from .tool_execution_tracker import ToolExecutionTracker
+from core.utils.stuck_detector import StuckDetector, action_key
 
 logger = logging.getLogger(__name__)
+
+
+def _round_signature(tool_calls: List["ToolCall"]) -> str:
+    """Stable fingerprint of one round's tool calls (name + arguments)."""
+    parts = []
+    for tc in tool_calls:
+        fn = tc.get("function") if isinstance(tc, dict) else None
+        name = (fn or {}).get("name") if isinstance(fn, dict) else None
+        name = name or (tc.get("name") if isinstance(tc, dict) else "") or ""
+        args = (fn or {}).get("arguments") if isinstance(fn, dict) else None
+        if args is None and isinstance(tc, dict):
+            args = tc.get("arguments") or tc.get("args")
+        parts.append(action_key(name, args))
+    return "|".join(parts)
+
+
+def _record_stuck_learning(workspace_id: Any, signature: str) -> None:
+    """PRD-161 S4: write a task_learning memory when PRD-159's sink exists,
+    otherwise log. The import fails cleanly until PRD-159 lands."""
+    try:
+        from modules.memory.task_learning import record_task_learning  # type: ignore
+
+        record_task_learning(workspace_id=workspace_id, kind="stuck_loop", detail=signature)
+    except Exception:
+        logger.info(
+            "[tool-loop] stuck-loop learning (no PRD-159 sink yet): ws=%s sig=%s",
+            workspace_id, signature,
+        )
 
 
 # Public types — callers can import these for static typing.
@@ -130,6 +159,8 @@ class ToolLoopExecutor:
         self.max_iterations = max(1, int(max_iterations))
         self.content_truncate_tokens = max(0, int(content_truncate_tokens))
         self.tracker = tracker if tracker is not None else ToolExecutionTracker()
+        # PRD-161 S4: per-run same-action-loop breaker (OpenHands-style).
+        self._stuck = StuckDetector()
 
     # ------------------------------------------------------------------
     # Public API
@@ -175,6 +206,19 @@ class ToolLoopExecutor:
                 "[tool-loop] iteration %d: %d tool call(s)",
                 iteration, len(current.tool_calls or []),
             )
+
+            # PRD-161 S4: stuck-loop breaker. If the agent emits the identical
+            # tool call(s) several rounds running, it's looping on a dead end —
+            # break before burning the whole iteration budget (and the spend).
+            self._stuck.record(_round_signature(current.tool_calls or []))
+            if self._stuck.is_stuck():
+                logger.warning(
+                    "[tool-loop] stuck: identical action repeated — breaking at "
+                    "iteration %d (workspace=%s)", iteration, workspace_id,
+                )
+                _record_stuck_learning(workspace_id, self._stuck._history[-1])
+                max_reached = True
+                break
 
             # finish_reason=length recovery: if the LLM ran out of output mid
             # tool_call, the JSON arguments are likely malformed. Don't burn

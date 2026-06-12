@@ -235,6 +235,140 @@ class DatabaseKnowledgeService:
 
         return result
     
+    # ------------------------------------------------------------------
+    # PRD-160 S2 — accuracy stack: execution guards + value sampling
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _quote_ident(dialect: str, ident: str) -> str:
+        if (dialect or "").lower().startswith("mysql"):
+            return "`" + str(ident).replace("`", "``") + "`"
+        return '"' + str(ident).replace('"', '""') + '"'
+
+    def _nl2sql_connection_string(self, credentials: Dict[str, Any], dialect: str) -> str:
+        """Build a SQLAlchemy URL for a knowledge source's database."""
+        host = credentials.get("host")
+        port = credentials.get("port")
+        database = credentials.get("database")
+        user = credentials.get("user") or credentials.get("username")
+        password = credentials.get("password")
+        d = (dialect or "").lower()
+        if d.startswith("postgres"):
+            return f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}"
+        if d.startswith("mysql"):
+            return f"mysql+pymysql://{user}:{password}@{host}:{port}/{database}"
+        raise ValueError(f"Unsupported dialect: {dialect}")
+
+    @staticmethod
+    def _statement_timeout_sql(dialect: str, seconds: int) -> Optional[str]:
+        ms = int(max(1, seconds) * 1000)
+        d = (dialect or "").lower()
+        if d.startswith("postgres"):
+            return f"SET statement_timeout = {ms}"
+        if d.startswith("mysql"):
+            return f"SET max_execution_time = {ms}"
+        return None
+
+    def _run_sql_with_guards(
+        self, source, credentials: Dict[str, Any], sql: str,
+        params: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[List[str], List[Dict[str, Any]]]:
+        """Execute a validated read-only query under a per-statement timeout,
+        after an EXPLAIN dry-run.
+
+        PRD-160 S2: the timeout bounds a runaway query; the EXPLAIN runs the
+        planner over the statement first, so malformed / bad-column SQL fails
+        cheaply and feeds the self-correction loop *before* a full table scan.
+        Raises on any failure (the caller's retry loop catches it).
+
+        PRD-160 S4: ``params`` carries bound parameters for Query Template
+        execution (``:name`` placeholders), kept as binds so values are never
+        string-interpolated into the SQL.
+        """
+        conn_str = self._nl2sql_connection_string(credentials, source.dialect)
+        timeout_s = getattr(source, "query_timeout_seconds", None) or 30
+        binds = params or {}
+        engine = create_engine(conn_str, pool_pre_ping=True)
+        try:
+            with engine.connect() as conn:
+                timeout_sql = self._statement_timeout_sql(source.dialect, timeout_s)
+                if timeout_sql:
+                    conn.execute(text(timeout_sql))
+                conn.execute(text(f"EXPLAIN {sql}"), binds)  # dry-run validation
+                result = conn.execute(text(sql), binds)
+                columns = list(result.keys())
+                rows = [dict(zip(columns, row)) for row in result.fetchall()]
+                return columns, rows
+        finally:
+            engine.dispose()
+
+    def _augment_schema_with_samples(
+        self,
+        source,
+        credentials: Dict[str, Any],
+        schema_metadata: Dict[str, Any],
+        max_distinct: int = 12,
+        max_columns: int = 40,
+    ) -> None:
+        """Populate ``col['samples']`` for low-cardinality columns, in place.
+
+        PRD-160 S2: grounding generation in real categorical values (e.g.
+        status ∈ {active, churned, trial}) sharply cuts wrong-literal errors.
+        Only text/enum/bool columns are probed, and a value set is kept only
+        when small (≤ max_distinct) — high-cardinality columns (ids,
+        timestamps, free text) never reach the prompt. Best-effort: any
+        failure leaves the schema untouched. The generator already renders
+        ``col['samples']`` into the prompt (nl2sql_service._build_prompt).
+        """
+        tables = schema_metadata.get("tables") or []
+        if not tables:
+            return
+        try:
+            conn_str = self._nl2sql_connection_string(credentials, source.dialect)
+        except ValueError:
+            return
+        engine = create_engine(conn_str, pool_pre_ping=True)
+        sampled = 0
+        try:
+            with engine.connect() as conn:
+                to = self._statement_timeout_sql(source.dialect, 5)
+                if to:
+                    conn.execute(text(to))
+                for table in tables:
+                    tname = table.get("name")
+                    if not tname:
+                        continue
+                    for col in (table.get("columns") or []):
+                        if sampled >= max_columns:
+                            return
+                        cname = col.get("name")
+                        ctype = (col.get("type") or "").lower()
+                        if not cname or col.get("samples"):
+                            continue
+                        # Categorical-ish only: char/varchar/enum/bool. Skip
+                        # numeric ids, timestamps, blobs, and free-form text.
+                        if not any(t in ctype for t in ("char", "enum", "bool")):
+                            continue
+                        tq = self._quote_ident(source.dialect, tname)
+                        cq = self._quote_ident(source.dialect, cname)
+                        try:
+                            rows = conn.execute(
+                                text(
+                                    f"SELECT DISTINCT {cq} AS v FROM {tq} "
+                                    f"WHERE {cq} IS NOT NULL LIMIT :lim"
+                                ),
+                                {"lim": max_distinct + 1},
+                            ).fetchall()
+                            vals = [r[0] for r in rows]
+                            if 0 < len(vals) <= max_distinct:
+                                col["samples"] = [str(v) for v in vals]
+                                sampled += 1
+                        except Exception:
+                            continue
+        except Exception as e:  # noqa: BLE001 — sampling is best-effort
+            logger.debug(f"value sampling skipped: {e}")
+        finally:
+            engine.dispose()
+
     async def query_database(
         self,
         source_id: str,
@@ -341,6 +475,13 @@ class DatabaseKnowledgeService:
         except Exception as e:
             logger.warning(f"ContextService unavailable for NL2SQL, proceeding without: {e}")
 
+        # PRD-160 S2: ground generation in real low-cardinality column values
+        # (status ∈ {active, churned}, …) so the LLM emits correct literals.
+        try:
+            self._augment_schema_with_samples(source, credentials, schema_metadata)
+        except Exception as e:
+            logger.debug(f"value sampling skipped: {e}")
+
         # PRD-61 US-005: Error self-correction loop
         last_error = None
         attempted_sqls = []
@@ -352,6 +493,10 @@ class DatabaseKnowledgeService:
             sql, explanation, metadata = nl2sql.generate_sql(
                 question=natural_language_query,
                 schema_metadata=schema_metadata,
+                # PRD-160 S4: inject the per-connection semantic layer (business
+                # metrics/dimensions + admin instructions) so definitions steer
+                # generation. It was stored but never passed to the generator.
+                semantic_layer=source.semantic_layer,
                 dialect=source.dialect,
                 examples=few_shot_examples if few_shot_examples else None,
                 error_context=last_error,
@@ -404,26 +549,11 @@ class DatabaseKnowledgeService:
                     "corrections": attempted_sqls
                 }
 
-            # Step 6: Execute
+            # Step 6: Execute under PRD-160 S2 guards — per-statement timeout
+            # bounds runaway queries; EXPLAIN dry-run catches bad SQL cheaply
+            # and (on failure) feeds the self-correction loop below.
             try:
-                host = credentials.get("host")
-                port = credentials.get("port")
-                database = credentials.get("database")
-                user = credentials.get("user") or credentials.get("username")
-                password = credentials.get("password")
-
-                if source.dialect.lower().startswith('postgres'):
-                    conn_str = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}"
-                elif source.dialect.lower().startswith('mysql'):
-                    conn_str = f"mysql+pymysql://{user}:{password}@{host}:{port}/{database}"
-                else:
-                    raise ValueError(f"Unsupported dialect: {source.dialect}")
-
-                engine = create_engine(conn_str, pool_pre_ping=True)
-                with engine.connect() as conn:
-                    result = conn.execute(text(validated_sql))
-                    columns = list(result.keys())
-                    rows = [dict(zip(columns, row)) for row in result.fetchall()]
+                columns, rows = self._run_sql_with_guards(source, credentials, validated_sql)
 
                 execution_time = (datetime.utcnow() - start_time).total_seconds() * 1000
 
@@ -842,3 +972,217 @@ Rules:
                 source_id, text, user_id, agent_id,
                 workspace_id=workspace_id,
             )
+
+    async def resolve_source_id(
+        self,
+        workspace_id: str,
+        database_name: Optional[str] = None,
+        db_session: Optional[Session] = None,
+    ) -> Optional[str]:
+        """Resolve a workspace's database source to a concrete ``source_id``.
+
+        PRD-160 S1: the agent tool exposes an optional ``database_name`` but
+        the query pipeline addresses a source by id. Resolution is ALWAYS
+        scoped to the caller's workspace so an agent can never reach another
+        workspace's source by guessing a name. When ``database_name`` is
+        provided it is matched case-insensitively within the workspace;
+        otherwise, a workspace with exactly one active source uses it. Zero
+        matches and an ambiguous no-name pick (multiple active sources) both
+        return ``None`` — the caller surfaces a helpful message rather than
+        silently querying the wrong database.
+
+        ``db_session`` is opt-in: the in-process executor passes its request
+        session (saving a pooled connection); callers that omit it get a
+        short-lived one.
+        """
+        from core.database.database import SessionLocal
+        from core.models.database_knowledge import DatabaseKnowledgeSource as DBKSource
+
+        if not workspace_id:
+            return None
+        own_session = db_session is None
+        session = db_session or SessionLocal()
+        try:
+            q = session.query(DBKSource).filter(
+                DBKSource.workspace_id == str(workspace_id),
+                DBKSource.is_active.is_(True),
+            )
+            if database_name and database_name.strip():
+                src = q.filter(DBKSource.name.ilike(database_name.strip())).first()
+                return str(src.id) if src else None
+            sources = q.order_by(DBKSource.created_at.desc()).all()
+            if len(sources) == 1:
+                return str(sources[0].id)
+            # zero or ambiguous (multiple sources, none named) → caller decides
+            return None
+        finally:
+            if own_session:
+                session.close()
+
+    def _decrypt_source_credentials(self, source) -> Dict[str, Any]:
+        """Resolve + decrypt a source's DB credentials (shared by the NL path
+        and PRD-160 S4 template execution)."""
+        from core.credentials.service import CredentialStore
+        from core.database.database import SessionLocal
+        from core.credentials.encryption import EncryptionService
+
+        db_session = SessionLocal()
+        try:
+            cred_store = CredentialStore(db_session)
+            credential = cred_store.get_credential(source.credential_id)
+            if not credential:
+                raise ValueError(f"Credential {source.credential_id} not found")
+            encryption = EncryptionService()
+            return encryption.decrypt_dict(credential.encrypted_data)
+        finally:
+            db_session.close()
+
+    async def execute_template(
+        self,
+        source_id,
+        template_id,
+        parameters: Optional[Dict[str, Any]] = None,
+        workspace_id: Optional[str] = None,
+        max_rows: int = 1000,
+    ) -> Dict[str, Any]:
+        """Execute a saved Query Template (PRD-160 S4).
+
+        The frontend's "Execute Query" button had no working backend route. This
+        loads the workspace-scoped template, validates its SQL (SELECT-only +
+        table allowlist via the AST validator, which preserves ``:name``
+        placeholders), and runs it under the S2 guards with BOUND parameters so
+        values are never interpolated into the SQL.
+        """
+        parameters = parameters or {}
+        source = await self._get_source(str(source_id), workspace_id=workspace_id)
+
+        from core.database.database import SessionLocal
+        from core.models.database_knowledge import DatabaseQueryTemplate
+
+        db = SessionLocal()
+        try:
+            tmpl = db.query(DatabaseQueryTemplate).filter(
+                DatabaseQueryTemplate.id == int(template_id),
+                DatabaseQueryTemplate.source_id == int(source_id),
+            ).first()
+            if not tmpl:
+                return {"success": False, "error": "Template not found",
+                        "data": [], "columns": [], "row_count": 0}
+            sql_template = tmpl.sql_template
+            viz = tmpl.visualization_type or "table"
+            if sql_template:
+                tmpl.usage_count = (tmpl.usage_count or 0) + 1
+                db.commit()
+        finally:
+            db.close()
+
+        if not sql_template:
+            return {"success": False, "error": "Template has no SQL to execute",
+                    "data": [], "columns": [], "row_count": 0}
+
+        credentials = self._decrypt_source_credentials(source)
+
+        validator = SQLValidator(
+            max_limit=min(int(max_rows or 1000), source.max_rows_limit or 1000)
+        )
+        try:
+            validated_sql, _ = validator.validate_and_rewrite(
+                sql_template, schema_metadata=source.schema_metadata
+            )
+        except Exception as e:  # SQLValidationError or parse failure
+            return {"success": False, "error": f"Template SQL invalid: {e}",
+                    "data": [], "columns": [], "row_count": 0}
+
+        try:
+            columns, rows = self._run_sql_with_guards(
+                source, credentials, validated_sql, params=parameters
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"Template {template_id} execution failed: {e}")
+            return {"success": False, "error": "Template execution failed",
+                    "data": [], "columns": [], "row_count": 0}
+
+        return {"success": True, "sql": validated_sql, "data": rows,
+                "columns": columns, "row_count": len(rows),
+                "visualization_type": viz}
+
+    async def write_nl_audit(
+        self,
+        *,
+        source_id,
+        user_id=None,
+        agent_id=None,
+        nl_query: str,
+        result: Dict[str, Any],
+    ) -> None:
+        """Write one ``DatabaseQueryAudit`` row for a natural-language query.
+
+        PRD-160 S4: both NL entry points — the in-process agent tool and the
+        ``/query`` API route — call this so every NL query lands exactly one
+        audit row (workspace via the source FK, agent, SQL, outcome). Workspace
+        is carried by the workspace-scoped source per the PRD-156 S3 source-join
+        audit convention, so no separate column is needed. Best-effort: a failed
+        audit write never breaks the query.
+        """
+        from core.database.database import SessionLocal
+        from core.models.database_knowledge import DatabaseQueryAudit
+
+        try:
+            try:
+                uid = int(user_id) if user_id not in (None, "") else None
+            except (TypeError, ValueError):
+                uid = None
+            conf = result.get("confidence")
+            conf_score = conf.get("score") if isinstance(conf, dict) else None
+            db = SessionLocal()
+            try:
+                db.add(DatabaseQueryAudit(
+                    tenant_id=1,  # legacy integer column
+                    source_id=int(source_id),
+                    user_id=uid,
+                    agent_id=str(agent_id) if agent_id not in (None, "") else None,
+                    natural_language_query=nl_query or "",
+                    generated_sql=result.get("sql"),
+                    validated_sql=result.get("sql"),
+                    execution_time_ms=int(result.get("execution_time_ms") or 0),
+                    row_count=int(result.get("row_count") or 0),
+                    success=bool(result.get("success")),
+                    error_message=result.get("error"),
+                    confidence_score=conf_score,
+                ))
+                db.commit()
+            finally:
+                db.close()
+        except Exception as e:  # noqa: BLE001 — audit is best-effort
+            logger.warning(f"NL2SQL audit write failed (non-fatal): {e}")
+
+
+# ---------------------------------------------------------------------------
+# Canonical service accessor (PRD-160 S1)
+# ---------------------------------------------------------------------------
+_db_knowledge_service_singleton: Optional["DatabaseKnowledgeService"] = None
+
+
+def get_database_knowledge_service() -> "DatabaseKnowledgeService":
+    """Return the shared :class:`DatabaseKnowledgeService` singleton.
+
+    PRD-160 S1: the in-process agent path (``exec_research``) and the API
+    routes (``api/database_knowledge.get_services``) must construct the
+    service from ONE place so its dependencies are wired identically
+    everywhere — the API layer previously owned the only construction site,
+    which an in-process tool executor cannot import without a modules→api
+    layering inversion. Lazily builds the singleton with the same deps.
+    """
+    global _db_knowledge_service_singleton
+    if _db_knowledge_service_singleton is None:
+        from core.credentials.resolver import get_credential_resolver
+        from core.llm import create_llm_manager
+
+        _db_knowledge_service_singleton = DatabaseKnowledgeService(
+            credential_resolver=get_credential_resolver(),
+            llm_provider=create_llm_manager(service_name="orchestrator"),
+            rag_service=RAGService(),
+            context_engineering=ContextEngineeringService(),
+            audit_service=AuditService(),
+        )
+    return _db_knowledge_service_singleton

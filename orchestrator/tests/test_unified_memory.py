@@ -210,23 +210,31 @@ class TestSessionMemory:
     def test_round_trip(self):
         original = SessionMemory(
             summary="pricing talk",
-            decisions=["tier-2"],
-            action_items=["send invoice"],
             exchange_count=3,
             last_updated="2026-03-12T10:00:00+00:00",
             ended=False,
         )
         restored = SessionMemory.from_json(original.to_json())
         assert restored.summary == original.summary
-        assert restored.decisions == original.decisions
-        assert restored.action_items == original.action_items
         assert restored.exchange_count == 3
         assert restored.ended is False
+
+    def test_from_json_ignores_unknown_keys(self):
+        # PRD-159 removed decisions/action_items; pre-existing Redis payloads
+        # that still carry them must load cleanly (tolerant deserialisation).
+        import json as _json
+        raw = _json.dumps({
+            "summary": "x", "exchange_count": 1, "ended": False,
+            "decisions": ["old"], "action_items": ["legacy"],
+        })
+        s = SessionMemory.from_json(raw)
+        assert s.summary == "x"
+        assert s.exchange_count == 1
+        assert not hasattr(s, "decisions")
 
     def test_defaults(self):
         s = SessionMemory()
         assert s.summary == ""
-        assert s.decisions == []
         assert s.exchange_count == 0
         assert s.ended is False
 
@@ -274,18 +282,6 @@ class TestL1Session:
         stored = SessionMemory.from_json(mock_redis_conn.setex.call_args[0][2])
         assert stored.exchange_count == 2
         assert "Q2" in stored.summary
-
-    @pytest.mark.asyncio
-    async def test_end_session_sets_flag_and_short_ttl(self, service, mock_redis_conn):
-        session = SessionMemory(summary="s", decisions=["d1"], exchange_count=5)
-        mock_redis_conn.get.return_value = session.to_json()
-        await service.end_session(WS_ID, CONV_ID)
-
-        _, ttl, payload = mock_redis_conn.setex.call_args[0]
-        assert ttl == 3600
-        stored = SessionMemory.from_json(payload)
-        assert stored.ended is True
-        assert stored.exchange_count == 5
 
     @pytest.mark.asyncio
     async def test_redis_failure_returns_none(self, service, mock_redis_conn):
@@ -427,76 +423,52 @@ class TestL3:
 
 
 # ===========================================================================
-# 5. L1→L2 Consolidation
+# 5. Sleep-time consolidation (PRD-159 S4) — replaces the dead L1→L2 session
+#    decision scan. Contradiction-based invalidation is the primary lifecycle:
+#    near-duplicates merge into one canonical (rest deleted), contradictions
+#    supersede by recency+confidence. The pure algorithm is covered in
+#    test_memory_consolidation.py; here we test the service applies the plan.
 # ===========================================================================
 
 
-class TestConsolidation:
+class TestSleepTimeConsolidation:
 
     @pytest.mark.asyncio
-    async def test_consolidate_with_decisions(self, service, mock_redis_conn):
-        session = SessionMemory(
-            summary="pricing talk",
-            decisions=["tier-2", "launch Q2"],
-            action_items=["send proposal"],
-            exchange_count=10,
-            ended=True,
-        )
-        mock_redis_conn.get.return_value = session.to_json()
+    async def test_merges_dups_via_delete(self, service):
+        mems = [
+            {"id": "1", "memory": "InBuildUK is a UK smoke ventilation contractor.",
+             "created_at": "2026-06-10", "metadata": {"importance": 0.9}},
+            {"id": "2", "memory": "InBuildUK is a UK smoke ventilation contractor.",
+             "created_at": "2026-06-01", "metadata": {"importance": 0.4}},
+            {"id": "3", "memory": "The user prefers British spelling.",
+             "created_at": "2026-06-05", "metadata": {"importance": 0.7}},
+        ]
+        deleted = []
 
-        with patch.object(service, "store_short_term", new_callable=AsyncMock) as mock_st:
-            mock_st.return_value = str(uuid.uuid4())
-            result = await service.consolidate_session(WS_ID, CONV_ID)
+        async def _del(mid, ws, agent_id=None):
+            deleted.append(mid)
+            return True
 
-        # 2 decisions + 1 action item + 1 summary = 4 L2 entries
-        assert result["items_stored"] == 4
-        assert mock_st.call_count == 4
-        mock_redis_conn.delete.assert_called_once()
+        with patch.object(service, "get_all_memories", new_callable=AsyncMock) as mock_get, \
+             patch.object(service, "delete_memory", side_effect=_del):
+            mock_get.return_value = mems
+            result = await service.run_sleep_time_consolidation(workspace_id=WS_ID)
 
-    @pytest.mark.asyncio
-    async def test_consolidate_no_session(self, service, mock_redis_conn):
-        mock_redis_conn.get.return_value = None
-        result = await service.consolidate_session(WS_ID, CONV_ID)
-        assert result["items_stored"] == 0
-
-    @pytest.mark.asyncio
-    async def test_consolidate_empty(self, service, mock_redis_conn):
-        session = SessionMemory(summary="hi", decisions=[], action_items=[], exchange_count=1, ended=True)
-        mock_redis_conn.get.return_value = session.to_json()
-
-        with patch.object(service, "store_short_term", new_callable=AsyncMock) as mock_st:
-            mock_st.return_value = str(uuid.uuid4())
-            result = await service.consolidate_session(WS_ID, CONV_ID)
-
-        assert result["items_stored"] == 1  # Just summary
+        # 1 & 2 are duplicates → canonical "1" (higher importance) kept, "2" deleted.
+        assert result["workspaces_processed"] == 1
+        assert result["merged"] == 1
+        assert deleted == ["2"]
 
     @pytest.mark.asyncio
-    async def test_run_consolidation_scans(self, service, mock_redis_conn):
-        ended = SessionMemory(summary="done", decisions=["d1"], exchange_count=3, ended=True)
-        active = SessionMemory(summary="active", exchange_count=1, ended=False)
+    async def test_empty_workspace_is_noop(self, service):
+        with patch.object(service, "get_all_memories", new_callable=AsyncMock) as mock_get, \
+             patch.object(service, "delete_memory", new_callable=AsyncMock) as mock_del:
+            mock_get.return_value = []
+            result = await service.run_sleep_time_consolidation(workspace_id=WS_ID)
 
-        key1 = f"mem:session:{WS_ID}:conv-1"
-        key2 = f"mem:session:{WS_ID}:conv-2"
-
-        # scan_iter returns byte keys matching mem:session:*
-        mock_redis_conn.scan_iter.return_value = iter([key1.encode(), key2.encode()])
-
-        def get_side_effect(key):
-            k = key.decode() if isinstance(key, bytes) else key
-            if k == key1:
-                return ended.to_json()
-            if k == key2:
-                return active.to_json()
-            return None
-
-        mock_redis_conn.get.side_effect = get_side_effect
-
-        with patch.object(service, "store_short_term", new_callable=AsyncMock) as mock_st:
-            mock_st.return_value = str(uuid.uuid4())
-            result = await service.run_session_consolidation()
-
-        # Only the ended session should be consolidated
-        assert result["sessions_consolidated"] >= 1
+        assert result["merged"] == 0
+        assert result["superseded"] == 0
+        mock_del.assert_not_called()
 
 
 # ===========================================================================

@@ -80,7 +80,7 @@ export function useBoardTasks(filters?: BoardFilters) {
       if (typeFilter && t.type !== typeFilter) return false
 
       if (col.status === 'done') {
-        return t.status === 'done' || t.status === ('completed' as any) || t.status === ('failed' as any)
+        return t.status === 'done' || t.status === ('completed' as any)
       }
       if (col.status === 'in_progress') {
         return t.status === 'in_progress' || t.status === ('running' as any)
@@ -176,6 +176,25 @@ export function useRejectTask() {
   })
 }
 
+/**
+ * PRD-161 S5: Run a task now — re-dispatch it immediately through the board loop.
+ */
+export function useRunTask() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({ taskId }: { taskId: string }) => {
+      return apiClient.request(`/api/v1/tasks/${taskId}/run-now`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+      })
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: boardQueryKeys.all })
+    },
+  })
+}
+
 // ============= HELPERS =============
 
 /**
@@ -212,6 +231,7 @@ function mapTaskToBoardTask(item: any): BoardTask {
     started_at: item.started_at ?? undefined,
     completed_at: item.completed_at ?? undefined,
     error_message: item.error_message ?? undefined,
+    attempts: item.attempts ?? 0,
     source_id: item.source_id ?? String(item.id),
     project_id: item.orchestration_run_id
       ? item.orchestration_run_id.slice(0, 8)

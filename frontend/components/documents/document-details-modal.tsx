@@ -30,6 +30,8 @@ import { Separator } from '@/components/ui/separator'
 import { Progress } from '@/components/ui/progress'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { apiClient } from '@/lib/api-client'
+import { TeamMultiSelect } from './team-multi-select'
+import { useUpdateDocumentTeamAccess } from '@/hooks/use-teams'
 
 interface DocumentDetailsModalProps {
   documentId: number | null
@@ -47,6 +49,7 @@ interface DocumentDetails {
   file_size?: number
   status?: string
   chunk_count?: number
+  team_access?: string[]
   upload_date?: string
   processed_date?: string | null
   processing_stages?: Array<{
@@ -111,6 +114,9 @@ export function DocumentDetailsModal({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState('overview')
+  // PRD-158 S4: editable team_access for this document.
+  const [teamAccess, setTeamAccess] = useState<string[]>([])
+  const updateTeams = useUpdateDocumentTeamAccess()
 
   useEffect(() => {
     if (open && documentId) {
@@ -127,6 +133,7 @@ export function DocumentDetailsModal({
     try {
       const details = await apiClient.request<DocumentDetails>(`/api/documents/${documentId}`)
       setDocument(details)
+      setTeamAccess(details.team_access || [])
     } catch (err) {
       console.error('Error loading document details:', err)
       setError(err instanceof Error ? err?.message : 'Failed to load document details')
@@ -335,6 +342,28 @@ export function DocumentDetailsModal({
                       </CardContent>
                     </Card>
                   )}
+
+                  {/* PRD-158 S4: team management after upload */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-base">Team Access</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <p className="text-sm text-muted-foreground">
+                        Restrict this document to specific teams. Empty = visible to all teams.
+                      </p>
+                      <TeamMultiSelect value={teamAccess} onChange={setTeamAccess} />
+                      <div className="flex justify-end">
+                        <Button
+                          size="sm"
+                          disabled={updateTeams.isLoading || !documentId}
+                          onClick={() => documentId && updateTeams.mutate({ id: documentId, teamAccess })}
+                        >
+                          {updateTeams.isLoading ? 'Saving…' : 'Save teams'}
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
                 </TabsContent>
 
                 <TabsContent value="processing" className="space-y-6 mt-6">

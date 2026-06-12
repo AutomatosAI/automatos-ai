@@ -331,3 +331,30 @@ class TestDispatchReadyBudgetGate:
             )
         ]
         assert len(budget_events) == 0
+
+
+# ---------------------------------------------------------------------------
+# PRD-163 S5: dollar-ceiling budget (replaces the token-estimate pause).
+# An explicit config['cost_ceiling'] (USD) drives the gate; otherwise the token
+# estimate is priced out at COORDINATOR_COST_PER_1K_TOKENS ($0.003/1k).
+# ---------------------------------------------------------------------------
+
+class TestDollarCeiling:
+    def test_cost_ceiling_exceeded(self):
+        # 200k tokens -> $0.60 > $0.30 ceiling -> EXCEEDED
+        run = _make_run(config={"cost_ceiling": 0.30}, tokens_used=200_000)
+        assert MissionDispatcher._get_budget_status(run) == BudgetStatus.EXCEEDED
+
+    def test_cost_ceiling_healthy_under_half(self):
+        # 50k tokens -> $0.15 = 25% of a $0.60 ceiling -> HEALTHY
+        run = _make_run(config={"cost_ceiling": 0.60}, tokens_used=50_000)
+        assert MissionDispatcher._get_budget_status(run) == BudgetStatus.HEALTHY
+
+    def test_dollar_ceiling_overrides_token_estimate(self):
+        # The token estimate alone would read healthy, but the small $ ceiling wins.
+        run = _make_run(
+            token_budget_estimate=10_000_000, tokens_used=100_000,
+            config={"cost_ceiling": 0.10},
+        )
+        # cost = $0.30 > $0.10 ceiling -> EXCEEDED
+        assert MissionDispatcher._get_budget_status(run) == BudgetStatus.EXCEEDED

@@ -107,3 +107,59 @@ jobs:
             -o faulthandler_timeout=90 \
             -p no:cacheprovider \
             -v
+
+  # PRD-160 S5 — NL2SQL regression eval. NON-REQUIRED (same posture as the test
+  # net). Self-contained: it seeds an in-memory SQLite DB, so it needs no
+  # Postgres service. The always-on checks prove every golden SQL executes and
+  # passes the S2 validator; the generation-accuracy eval (no-regression vs
+  # baseline.json) runs only when RUN_NL2SQL_EVAL=1 with an LLM configured.
+  nl2sql-eval:
+    name: NL2SQL eval (non-required)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      # Dummy values keep any import-time config resolution from failing; the
+      # eval itself uses SQLite, not these. Flip RUN_NL2SQL_EVAL on (with an
+      # embedding/LLM provider) to run the full generation-accuracy eval.
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: test_db
+      ENVIRONMENT: development
+
+    defaults:
+      run:
+        working-directory: orchestrator
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: orchestrator/requirements.txt
+
+      - name: Install system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 \
+            libcairo2 libffi-dev libmagic1 ghostscript
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run NL2SQL eval
+        run: |
+          pytest tests/nl2sql_eval \
+            --timeout=120 \
+            --timeout-method=thread \
+            -p no:cacheprovider \
+            -v

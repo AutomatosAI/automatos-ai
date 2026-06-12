@@ -29,8 +29,9 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { 
-  DropdownMenu, 
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import {
+  DropdownMenu,
   DropdownMenuContent, 
   DropdownMenuItem, 
   DropdownMenuTrigger 
@@ -63,6 +64,7 @@ import { ProviderBrowser } from './provider-browser'
 import { LocalStorageBrowser } from './local-storage-browser'
 // API hooks
 import { useDocuments, useDocumentStats, useUploadDocument, useDeleteDocument } from '@/hooks/use-document-api'
+import { useTeams, useDocumentTeamCounts } from '@/hooks/use-teams'
 import { useDatabaseKnowledge } from '@/hooks/use-database-knowledge'
 import { useCloudConnections, useTriggerSync, useSelectRootFolder } from '@/hooks/use-cloud-storage'
 
@@ -341,9 +343,13 @@ export function DocumentManagement() {
   const [selectedProvider, setSelectedProvider] = useState<any>(null)
   const [showProviderBrowser, setShowProviderBrowser] = useState(false)
   const [selectedSearchResult, setSelectedSearchResult] = useState<SearchResult | null>(null)
+  // PRD-158 S3: page-level team filter (also the agent-eye-view scope).
+  const [teamFilter, setTeamFilter] = useState<string | null>(null)
 
   // API hooks
-  const { data: documents = [], isLoading, error } = useDocuments()
+  const { data: documents = [], isLoading, error } = useDocuments(teamFilter ?? undefined)
+  const { data: teams = [] } = useTeams()
+  const { data: teamCounts } = useDocumentTeamCounts()
   const { data: documentStats } = useDocumentStats()
   const uploadDocumentMutation = useUploadDocument()
   const deleteDocumentMutation = useDeleteDocument()
@@ -361,6 +367,13 @@ export function DocumentManagement() {
     getSchemaMetadata,
     fetchSources: refreshDatabaseSources
   } = useDatabaseKnowledge()
+
+  // PRD-160 S4: one source selection shared across all six Database tabs
+  // (previously every tab hardcoded databaseSources[0]).
+  const [selectedDbSourceId, setSelectedDbSourceId] = useState<string | number | null>(null)
+  const activeDbSource = (databaseSources || []).find(
+    (s: any) => String(s.id) === String(selectedDbSourceId)
+  ) || databaseSources?.[0]
 
   // Cloud storage hooks
   const { data: cloudConnections = [], isLoading: cloudConnectionsLoading, error: cloudConnectionsError } = useCloudConnections()
@@ -661,6 +674,38 @@ export function DocumentManagement() {
 
       {/* Stats Overview */}
       <StatsBar stats={stats} />
+
+      {/* PRD-158 S3: page-level team filter + per-team counts + agent-eye-view */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-2">
+          <Filter className="w-4 h-4 text-muted-foreground" />
+          <Select
+            value={teamFilter ?? 'all'}
+            onValueChange={(v) => setTeamFilter(v === 'all' ? null : v)}
+          >
+            <SelectTrigger className="w-[240px]">
+              <SelectValue placeholder="All teams" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">
+                All teams ({teamCounts?.total ?? documents.length})
+              </SelectItem>
+              {teams.map((t) => (
+                <SelectItem key={t.id} value={t.normalized_name}>
+                  {t.name} ({teamCounts?.counts?.[t.normalized_name] ?? 0})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        {teamFilter && (
+          <Badge variant="secondary" className="gap-1.5">
+            <Eye className="w-3 h-3" />
+            Agent-eye view: “{teams.find((t) => t.normalized_name === teamFilter)?.name ?? teamFilter}”
+            sees public + its own documents
+          </Badge>
+        )}
+      </div>
 
       {/* Document Management Tabs */}
       <motion.div
@@ -1025,7 +1070,15 @@ export function DocumentManagement() {
                 ) : (
                   <div className="grid gap-4 md:grid-cols-2">
                     {databaseSources.map((source: any) => (
-                      <div key={source.id} className="p-4 border rounded-lg">
+                      <div
+                        key={source.id}
+                        onClick={() => setSelectedDbSourceId(source.id)}
+                        className={`p-4 border rounded-lg cursor-pointer transition-colors ${
+                          String(activeDbSource?.id) === String(source.id)
+                            ? 'border-primary ring-1 ring-primary bg-primary/5'
+                            : 'hover:border-primary/50'
+                        }`}
+                      >
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-2">
                             <Database className="w-5 h-5 text-success" />
@@ -1076,19 +1129,19 @@ export function DocumentManagement() {
               </TabsList>
               
               <TabsContent value="explorer" className="space-y-6">
-                <DatabaseQueryExplorer 
-                  selectedSource={databaseSources?.[0]}
+                <DatabaseQueryExplorer
+                  selectedSource={activeDbSource}
                   sources={databaseSources || []}
                   onSourceDeleted={refreshDatabaseSources}
                 />
               </TabsContent>
               
               <TabsContent value="semantic" className="space-y-6">
-                {databaseSources && databaseSources.length > 0 ? (
+                {activeDbSource ? (
                   <SemanticLayerBuilder
-                    sourceId={String(databaseSources[0].id)}
-                    sourceName={databaseSources[0].name}
-                    dialect={databaseSources[0].dialect || 'postgresql'}
+                    sourceId={String(activeDbSource.id)}
+                    sourceName={activeDbSource.name}
+                    dialect={activeDbSource.dialect || 'postgresql'}
                   />
                 ) : (
                   <Card className="glass-card">
@@ -1101,15 +1154,15 @@ export function DocumentManagement() {
               </TabsContent>
               
               <TabsContent value="templates" className="space-y-6">
-                <QueryTemplatesGrid 
+                <QueryTemplatesGrid
                   templates={templates || []}
-                  selectedSource={databaseSources?.[0]}
+                  selectedSource={activeDbSource}
                 />
               </TabsContent>
 
               <TabsContent value="training" className="space-y-6">
-                {databaseSources && databaseSources.length > 0 ? (
-                  <TrainingExamplesManager sourceId={databaseSources[0].id} />
+                {activeDbSource ? (
+                  <TrainingExamplesManager sourceId={activeDbSource.id} />
                 ) : (
                   <Card className="glass-card">
                     <CardContent className="p-8 text-center text-muted-foreground">
@@ -1122,13 +1175,13 @@ export function DocumentManagement() {
 
               <TabsContent value="schema" className="space-y-6">
                 <SchemaBrowser
-                  sourceId={databaseSources?.[0]?.id}
+                  sourceId={activeDbSource?.id}
                   getSchemaMetadata={getSchemaMetadata}
                 />
               </TabsContent>
 
               <TabsContent value="audit" className="space-y-6">
-                <AuditHistory sourceId={databaseSources?.[0]?.id} />
+                <AuditHistory sourceId={activeDbSource?.id} />
               </TabsContent>
             </Tabs>
           </TabsContent>

@@ -10,6 +10,7 @@ psycopg2-binary==2.9.9
 asyncpg==0.29.0
 pgvector==0.2.4
 sqlparse>=0.5.4
+sqlglot>=25.5.1  # PRD-160 S2: AST-based NL2SQL SQL validation (SELECT-only, table allowlist, cross-schema)
 greenlet>=3.0.0
 
 # Data validation
@@ -36,6 +37,7 @@ psutil==5.9.6
 
 # Scheduling (heartbeat service)
 apscheduler>=3.10
+croniter>=2.0  # PRD-162: stateless next_run math for the calendar/schedule truth
 
 # Network & async
 aiofiles==23.2.1
