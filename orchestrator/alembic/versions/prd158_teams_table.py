@@ -42,6 +42,11 @@ def upgrade() -> None:
     # normalized_name is the lowercased/trimmed canonical form (one team per
     # workspace+normalized); MIN(name) picks a deterministic display name, so
     # 'Support'/'support' collapse to a single 'Support' team.
+    #
+    # `workspace_id IS NOT NULL` guards against orphaned rows: an agent/document can
+    # carry a team string while having a NULL workspace_id (e.g. a pre-tenancy 'Onboarding'
+    # agent). teams.workspace_id is NOT NULL, so such rows must be excluded or the whole
+    # transactional migration aborts and the deploy crash-loops.
     op.execute(
         """
         INSERT INTO teams (workspace_id, name, normalized_name)
@@ -49,11 +54,11 @@ def upgrade() -> None:
         FROM (
             SELECT workspace_id, TRIM(team) AS name, LOWER(TRIM(team)) AS normalized_name
             FROM agents
-            WHERE team IS NOT NULL AND TRIM(team) <> ''
+            WHERE team IS NOT NULL AND TRIM(team) <> '' AND workspace_id IS NOT NULL
             UNION ALL
             SELECT workspace_id, TRIM(t) AS name, LOWER(TRIM(t)) AS normalized_name
             FROM documents, unnest(team_access) AS t
-            WHERE team_access IS NOT NULL AND TRIM(t) <> ''
+            WHERE team_access IS NOT NULL AND TRIM(t) <> '' AND workspace_id IS NOT NULL
         ) src
         WHERE normalized_name <> ''
         GROUP BY workspace_id, normalized_name
