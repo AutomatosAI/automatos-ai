@@ -31,7 +31,7 @@ const TEAM_PALETTE: Array<{ border: string; badge: string }> = [
   { border: 'border-green-500/60',   badge: 'bg-green-500/15 text-green-300 border-green-500/30' },
   { border: 'border-purple-500/60',  badge: 'bg-purple-500/15 text-purple-300 border-purple-500/30' },
   { border: 'border-pink-500/60',    badge: 'bg-pink-500/15 text-pink-300 border-pink-500/30' },
-  { border: 'border-orange-500/60',  badge: 'bg-orange-500/15 text-orange-300 border-orange-500/30' },
+  { border: 'border-warning/60',  badge: 'bg-warning/15 text-warning border-warning/30' },
   { border: 'border-yellow-500/60',  badge: 'bg-yellow-500/15 text-yellow-300 border-yellow-500/30' },
   { border: 'border-cyan-500/60',    badge: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30' },
   { border: 'border-indigo-500/60',  badge: 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30' },

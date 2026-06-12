@@ -70,8 +70,8 @@ export function AnalyticsOverview({ days }: OverviewProps) {
       value: overview?.agents.total || 0,
       sub: `${overview?.agents.active || 0} active`,
       icon: Bot,
-      color: 'text-orange-400',
-      bgColor: 'from-orange-500/20 to-orange-500/5',
+      color: 'text-warning',
+      bgColor: 'from-warning/20 to-warning/5',
     },
     {
       label: 'Missions / Runs',
@@ -111,7 +111,7 @@ export function AnalyticsOverview({ days }: OverviewProps) {
         value: card.value,
         change: card.sub,
         icon: card.icon,
-        iconColor: card.color.replace('text-orange-400', 'text-primary')
+        iconColor: card.color.replace('text-warning', 'text-primary')
           .replace('text-purple-400', 'text-[hsl(var(--info))]')
           .replace('text-green-400', 'text-[hsl(var(--success))]')
           .replace('text-blue-400', 'text-[hsl(var(--agent))]'),

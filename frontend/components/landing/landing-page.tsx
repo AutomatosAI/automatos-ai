@@ -65,7 +65,7 @@ const coreFeatures = [
     icon: Bot,
     title: 'Mission Control',
     description: 'Describe a goal and Automatos decomposes it into tasks, assigns specialist agents, executes, verifies, and reports back.',
-    gradient: 'from-orange-500 to-red-500',
+    gradient: 'from-warning to-red-500',
     features: ['Intelligent Task Decomposition', 'Automated Agent Assignment', 'Built-in Verification', 'Real-time Progress Tracking']
   },
   {
@@ -137,7 +137,7 @@ const dashboardFeatures = [
     icon: MessageSquare,
     title: 'Agent Reports',
     description: 'Daily standups, task reports, and deliverables from every agent — graded and searchable.',
-    color: 'text-orange-400'
+    color: 'text-warning'
   }
 ]
 
@@ -200,7 +200,7 @@ export function LandingPage() {
           </Badge>
           <h1 className="text-6xl md:text-7xl font-bold leading-tight">
             Your AI Team That{' '}
-            <span className="gradient-text bg-gradient-to-r from-orange-500 via-red-500 to-pink-500">
+            <span className="gradient-text bg-gradient-to-r from-warning via-red-500 to-pink-500">
               Runs Your Business
             </span>
           </h1>
@@ -212,7 +212,7 @@ export function LandingPage() {
 
         <motion.div variants={itemVariants} className="flex flex-col sm:flex-row gap-4 justify-center">
           <Link href="/agents">
-            <Button size="lg" className="text-lg px-8 py-4 bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600">
+            <Button size="lg" className="text-lg px-8 py-4 bg-gradient-to-r from-warning to-red-500 hover:from-warning hover:to-red-600">
               <Play className="w-5 h-5 mr-2" />
               Start Your First Mission
             </Button>
@@ -239,7 +239,7 @@ export function LandingPage() {
               transition={{ duration: 0.6, delay: index * 0.1 }}
             >
               <div className="flex justify-center mb-2">
-                <metric.icon className="w-8 h-8 text-orange-500" />
+                <metric.icon className="w-8 h-8 text-warning" />
               </div>
               <div className="text-3xl font-bold">{metric.value}</div>
               <div className="text-sm text-muted-foreground">{metric.label}</div>
@@ -276,7 +276,7 @@ export function LandingPage() {
               whileHover={{ scale: 1.02, y: -5 }}
               transition={{ duration: 0.3 }}
             >
-              <Card className="glass-card h-full border-0 shadow-2xl hover:shadow-orange-500/10">
+              <Card className="glass-card h-full border-0 shadow-2xl hover:shadow-warning/10">
                 <CardHeader className="space-y-4">
                   <div className={`w-16 h-16 rounded-2xl bg-gradient-to-br ${feature.gradient} flex items-center justify-center`}>
                     <feature.icon className="w-8 h-8 text-white" />
@@ -333,7 +333,7 @@ export function LandingPage() {
               transition={{ duration: 0.3 }}
             >
               <Card className="glass-card h-full border-0 text-center p-6">
-                <div className="w-12 h-12 mx-auto mb-4 rounded-xl bg-gradient-to-br from-orange-500 to-red-500 flex items-center justify-center">
+                <div className="w-12 h-12 mx-auto mb-4 rounded-xl bg-gradient-to-br from-warning to-red-500 flex items-center justify-center">
                   <func.icon className="w-6 h-6 text-white" />
                 </div>
                 <h3 className="text-lg font-semibold mb-2">{func.title}</h3>
@@ -472,7 +472,7 @@ export function LandingPage() {
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center pt-4">
               <Link href="/agents">
-                <Button size="lg" className="text-lg px-12 py-4 bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600">
+                <Button size="lg" className="text-lg px-12 py-4 bg-gradient-to-r from-warning to-red-500 hover:from-warning hover:to-red-600">
                   <Zap className="w-5 h-5 mr-2" />
                   Start Your First Mission
                 </Button>

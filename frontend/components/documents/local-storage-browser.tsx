@@ -181,7 +181,7 @@ export function LocalStorageBrowser({
       <Card className="glass-card">
         <CardHeader>
           <CardTitle className="text-lg flex items-center gap-2">
-            <File className="w-5 h-5 text-orange-400" />
+            <File className="w-5 h-5 text-warning" />
             Documents ({filteredDocuments.length})
           </CardTitle>
         </CardHeader>
@@ -221,7 +221,7 @@ export function LocalStorageBrowser({
                           checked={selectedIds.has(doc.id)}
                           onCheckedChange={() => toggleSelect(doc.id)}
                         />
-                        <TypeIcon className="w-5 h-5 text-orange-400 shrink-0" />
+                        <TypeIcon className="w-5 h-5 text-warning shrink-0" />
                         <div className="flex-1 min-w-0">
                           <p className="font-medium truncate">{doc.filename}</p>
                           <div className="flex items-center gap-4 text-xs text-muted-foreground mt-1">
@@ -314,7 +314,7 @@ export function LocalStorageBrowser({
                             onCheckedChange={() => toggleSelect(doc.id)}
                             onClick={(e) => e.stopPropagation()}
                           />
-                          <TypeIcon className="w-8 h-8 text-orange-400" />
+                          <TypeIcon className="w-8 h-8 text-warning" />
                         </div>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>

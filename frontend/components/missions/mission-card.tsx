@@ -1,9 +1,11 @@
 'use client'
 
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Target, Clock, Coins, MoreHorizontal, Pause, Play, X, Trash2 } from 'lucide-react'
 import { motion, useReducedMotion } from 'framer-motion'
 import { Button } from '@/components/ui/button'
+import { DeleteConfirmation } from '@/components/shared'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -29,6 +31,7 @@ export function MissionCard({ mission, index }: MissionCardProps) {
   const resumeMutation = useResumeMission()
   const cancelMutation = useCancelMission()
   const deleteMutation = useDeleteMission()
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
 
   // Parse plan for task stats (plan is JSONB with tasks array)
   const planTasks = (mission.plan as { tasks?: Array<Record<string, unknown>> })?.tasks ?? []
@@ -94,10 +97,9 @@ export function MissionCard({ mission, index }: MissionCardProps) {
             {isTerminal && (
               <DropdownMenuItem
                 className="text-destructive"
-                onClick={() => {
-                  if (window.confirm('Delete this mission? This cannot be undone.')) {
-                    deleteMutation.mutate(mission.id)
-                  }
+                onSelect={(e) => {
+                  e.preventDefault()
+                  setConfirmDeleteOpen(true)
                 }}
               >
                 <Trash2 className="w-4 h-4 mr-2" /> Delete
@@ -105,6 +107,14 @@ export function MissionCard({ mission, index }: MissionCardProps) {
             )}
           </DropdownMenuContent>
         </DropdownMenu>
+
+        <DeleteConfirmation
+          open={confirmDeleteOpen}
+          onOpenChange={setConfirmDeleteOpen}
+          title="Delete this mission?"
+          description="This permanently deletes the mission and its tasks. This cannot be undone."
+          onConfirm={() => deleteMutation.mutateAsync(mission.id)}
+        />
       </div>
 
       {/* Title + description */}

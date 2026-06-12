@@ -27,7 +27,9 @@
 18. [Dark Theme](#18-dark-theme)
 19. [Light Theme](#19-light-theme)
 20. [Do's and Don'ts](#20-dos-and-donts)
-21. [Shared Components](#21-shared-components)
+21. [Shared Components](#21-shared-components) · [21.7 UI-State Primitives](#217-ui-state-primitives-empty-state--loading-state--error-state--delete-confirmation)
+22. [Studio Design Language (`sh-*` / `cc-*`)](#22-studio-design-language-sh---cc-)
+23. [Canonical Terms](#23-canonical-terms)
 
 ---
 
@@ -89,6 +91,8 @@ All colors are defined as CSS custom properties in `globals.css` using HSL forma
 <div className="text-orange-400" />
 <div style={{ background: 'rgba(255, 107, 53, 0.3)' }} />
 ```
+
+> **Enforced (PRD-169 S3):** `orange-*` Tailwind utilities are **ESLint-blocked** (`no-restricted-syntax` in `.eslintrc.json`). Amber / caution / pending states use the **`warning`** token — `text-warning`, `bg-warning/10`, `border-warning/30`. Hardcoded hex inside `className` (e.g. `text-[#111827]`) is reserved for fixed-palette surfaces only (code editors, markdown renderers, designed gradient cards); never for app chrome, which must read tokens so the light and dark themes both render correctly.
 
 ### Using Color with Opacity
 
@@ -905,6 +909,89 @@ Slot-based card for grid/list items. Enforces consistent card structure across a
 
 ---
 
+### 21.7 UI-State Primitives (`empty-state` · `loading-state` · `error-state` · `delete-confirmation`)
+
+The four canonical UI-state surfaces (PRD-169 S2). Every focus surface uses **these** — do not hand-roll "no results" blocks, spinners, "failed to load" cards, or `window.confirm()` delete flows.
+
+```tsx
+import { EmptyState, LoadingState, ErrorState, DeleteConfirmation } from '@/components/shared'
+
+// EMPTY — { icon, title, description, action? }
+<EmptyState icon={Inbox} title="No missions yet" description="Create your first mission to get started." action={<Button>New mission</Button>} />
+
+// LOADING — one primitive, six contexts: variant='list'|'cards'|'page'|'inline'|'spinner'
+<LoadingState variant="cards" count={6} />
+<LoadingState variant="spinner" label="Loading configuration…" />
+
+// ERROR — derives its message from `error`, or pass `description`; `onRetry` renders the retry button
+<ErrorState error={err} onRetry={() => refetch()} />
+
+// DELETE — replaces window.confirm(); async-aware (closes on resolve, stays open + lets you toast on throw)
+const [open, setOpen] = useState(false)
+<DeleteConfirmation
+  open={open}
+  onOpenChange={setOpen}
+  itemName="the agent “Researcher”"
+  onConfirm={() => deleteMutation.mutateAsync(id)}
+/>
+```
+
+**Rules:**
+- **Never** use `window.confirm` / `window.location.reload()` — `DeleteConfirmation` for destructive intent; react-query `refetch()` / a `refreshKey` for "refresh data". Both are ESLint-watched focus-surface anti-patterns.
+- `Skeleton` (`components/ui/skeleton.tsx`) is the loading **atom**; `LoadingState` composes it into the standard shapes. Reach for `LoadingState` first.
+- Error surfaces must be honest — surface the real message, never a blank/again-blank state. Don't `catch { console.error() }` and render nothing.
+
+---
+
+## 22. Studio Design Language (`sh-*` / `cc-*`)
+
+Per **D8 (studio is the future)**, the studio surfaces use two prefixed class families defined in `app/globals.css` (~165 classes — the source of truth). Until classic is fully retired (PRD-169 S1), both languages coexist; **all new surfaces use studio + the Tailwind tokens above**, never classic.
+
+### `sh-*` — Studio shell / chrome
+The persistent frame: sidebar, header, page-tabs, and the chat layout.
+
+| Family | Principal classes | Role |
+|--------|-------------------|------|
+| Shell layout | `sh-shell` `sh-main` `sh-fullbleed` | Viewport-bound shell; main scrolls internally |
+| Sidebar (SIDE-B, 232px) | `sh-side` `sh-brand` `sh-brand-row` `sh-toggle` `sh-ws-card` `sh-group` `sh-group-rule` `sh-item` `sh-ic` `sh-ct` `sh-footer` | Labelled studio sidebar + workspace card + nav items |
+| Header (HEAD-A, editorial) | `sh-headbar` `sh-cmdk` `sh-utils` `sh-profile` `sh-av` `sh-kbd` `sh-icon-btn` | Editorial header: ⌘K, alerts, profile |
+| Page tabs | `sh-tabs` `sh-tab` `sh-tab-ct` | Sub-nav under the header |
+| Chat | `sh-chat-*` (`sh-chat-grid` `sh-chat-main` `sh-chat-rail` `sh-chat-thread*` `sh-chat-dag*` `sh-chat-deliverable` …) | Studio chat layout, thread rail, DAG run trace |
+
+### `cc-*` — Command Center surface
+The Command Center content surface: panels, board, calendar, schedule, roster, stats.
+
+| Family | Principal classes | Role |
+|--------|-------------------|------|
+| Page scaffold | `cc-page` `cc-head` `cc-headrow` `cc-h1` `cc-eyebrow` `cc-sub` `cc-toolbar` | Editorial page header + toolbar |
+| Panels | `cc-panel` `cc-panel-head` `cc-panel-empty` `cc-body` | Standard content panel + empty state |
+| Board (kanban) | `cc-kb-grid` `cc-kb-col` `cc-kb-lane` `cc-kb-card` `cc-kb-head` `cc-kb-empty` | Board lanes + task cards |
+| Calendar | `cc-cal-*` (`cc-cal-grid` `cc-cal-month*` `cc-cal-event` `cc-cal-nowline` `cc-cal-toolbar` …) | Week + month calendar |
+| Schedule / roster | `cc-sched*` `cc-roster*` | Schedule list + agent roster |
+| Stats / status | `cc-stats` `cc-sum-grid` `cc-status-pill` `cc-pill-ok` `cc-pill-info` `cc-filter-pill` `cc-seg` `cc-tabs` `cc-tab` | KPI strip, status pills, segmented controls |
+
+**Rules:**
+- Studio classes are **structure + chrome**; colour still comes from the token palette (§2) — never hardcode hex inside studio CSS.
+- Used by `components/command-center/**` and `components/assignments/studio/**`. New studio screens follow the same prefix + grouping convention.
+
+---
+
+## 23. Canonical Terms
+
+The product vocabulary. The UI and any agent-authored copy **must** use the left column. (Mirrors the platform `CLAUDE.md`.)
+
+| Use | Never |
+|-----|-------|
+| **Playbook** | ~~Recipe~~ (legacy) |
+| **Mission** | ~~Workflow~~, ~~Job~~ |
+| **Task** | (canonical `BoardTask`; mission sub-tasks are `OrchestrationTask`) |
+| **Deliverable** | ~~Output~~, ~~Workspace file~~, ~~Artifact~~ (user-facing) |
+| **Knowledge Graph** | ~~Business Graph~~ |
+| **Command Center** | ~~Activity~~ |
+| **Auto** | "the assistant" — Auto is a proper noun |
+
+---
+
 ## File Reference
 
 | File | Purpose |
@@ -927,8 +1014,13 @@ Slot-based card for grid/list items. Enforces consistent card structure across a
 | `components/shared/stats-bar.tsx` | StatsBar component |
 | `components/shared/filter-tabs.tsx` | FilterTabs component |
 | `components/shared/item-card.tsx` | ItemCard component |
+| `components/shared/empty-state.tsx` | EmptyState primitive (§21.7) |
+| `components/shared/loading-state.tsx` | LoadingState primitive (§21.7) |
+| `components/shared/error-state.tsx` | ErrorState primitive (§21.7) |
+| `components/shared/delete-confirmation.tsx` | DeleteConfirmation primitive (§21.7) |
+| `app/globals.css` (studio block) | `sh-*` / `cc-*` studio classes (~165) — see §22 |
 
 ---
 
-*Last updated: 2026-02-06*
+*Last updated: 2026-06-12 (PRD-169 — UX Consistency & Design System)*
 *Maintained by: Automatos AI Platform Team*

@@ -35,7 +35,7 @@ const STATUS_CONFIG: Record<Project['status'], { label: string; className: strin
 
 const PRIORITY_DOT: Record<Project['priority'], string> = {
   urgent: 'bg-destructive',
-  high: 'bg-orange-500',
+  high: 'bg-warning',
   medium: 'bg-warning',
   low: 'bg-success',
 }

@@ -75,8 +75,8 @@ export function ProviderBrowser({
   const [filterStatus, setFilterStatus] = useState<string>('all')
 
   // Use react-query hooks to fetch folders and files
-  const { data: folders = [], isLoading: foldersLoading, error: foldersError } = useCloudFolders(connectionId, currentPath)
-  const { data: files = [], isLoading: filesLoading, error: filesError } = useCloudFiles(connectionId, currentPath, false)
+  const { data: folders = [], isLoading: foldersLoading, error: foldersError, refetch: refetchFolders } = useCloudFolders(connectionId, currentPath)
+  const { data: files = [], isLoading: filesLoading, error: filesError, refetch: refetchFiles } = useCloudFiles(connectionId, currentPath, false)
 
   const loading = foldersLoading || filesLoading
 
@@ -191,8 +191,8 @@ export function ProviderBrowser({
             variant="outline"
             size="sm"
             onClick={() => {
-              // React-query will auto-refresh on focus/mount
-              window.location.reload()
+              refetchFolders()
+              refetchFiles()
             }}
             disabled={loading}
           >
@@ -236,7 +236,7 @@ export function ProviderBrowser({
         </Card>
         <Card className="glass-card">
           <CardContent className="p-4">
-            <div className="text-2xl font-bold text-orange-400">{syncStats.pending}</div>
+            <div className="text-2xl font-bold text-warning">{syncStats.pending}</div>
             <div className="text-xs text-muted-foreground">Pending</div>
           </CardContent>
         </Card>
@@ -250,14 +250,14 @@ export function ProviderBrowser({
 
       {/* Folder Selection Notice & Current Path */}
       {!rootFolder || rootFolder === '/' ? (
-        <Card className="glass-card border-orange-500/30 bg-orange-500/5">
+        <Card className="glass-card border-warning/30 bg-warning/5">
           <CardContent className="p-4">
             <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-full bg-orange-500/10 flex items-center justify-center shrink-0">
-                <AlertCircle className="w-5 h-5 text-orange-400" />
+              <div className="w-10 h-10 rounded-full bg-warning/10 flex items-center justify-center shrink-0">
+                <AlertCircle className="w-5 h-5 text-warning" />
               </div>
               <div className="flex-1">
-                <h4 className="font-semibold text-orange-400 mb-1">Select a Folder to Sync</h4>
+                <h4 className="font-semibold text-warning mb-1">Select a Folder to Sync</h4>
                 <p className="text-sm text-muted-foreground mb-3">
                   Navigate to the folder you want to sync, then click "Set as Root Folder" to select it.
                   This prevents syncing your entire {providerName} which may take a long time.
@@ -418,7 +418,7 @@ export function ProviderBrowser({
       <Card className="glass-card">
         <CardHeader>
           <CardTitle className="text-lg flex items-center gap-2">
-            <File className="w-5 h-5 text-orange-400" />
+            <File className="w-5 h-5 text-warning" />
             Files ({filteredFiles.length})
           </CardTitle>
         </CardHeader>
@@ -448,7 +448,7 @@ export function ProviderBrowser({
                     className="flex items-center justify-between p-4 rounded-lg bg-secondary/30 hover:bg-secondary/50 transition-colors"
                   >
                     <div className="flex items-center gap-3 flex-1 min-w-0">
-                      <File className="w-5 h-5 text-orange-400 shrink-0" />
+                      <File className="w-5 h-5 text-warning shrink-0" />
                       <div className="flex-1 min-w-0">
                         <p className="font-medium truncate">{file.name}</p>
                         <div className="flex items-center gap-4 text-xs text-muted-foreground mt-1">

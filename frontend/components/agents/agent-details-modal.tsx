@@ -29,6 +29,7 @@ import {
   Terminal
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { ErrorState, LoadingState } from '@/components/shared'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
@@ -139,7 +140,7 @@ export function AgentDetailsModal({
   const [showShareDialog, setShowShareDialog] = useState(false)
 
   // Use real API hooks
-  const { data: agent, isLoading: loading, error: agentError } = useAgent(agentId?.toString() || '')
+  const { data: agent, isLoading: loading, error: agentError, refetch: refetchAgent } = useAgent(agentId?.toString() || '')
   const { data: agentPerformance } = useAgentPerformance(agentId?.toString() || '')
   const { data: agentLogs } = useAgentLogs(agentId?.toString() || '')
   // Plugin state for the Plugins tab
@@ -299,24 +300,11 @@ export function AgentDetailsModal({
           
           <CardContent className="overflow-y-auto p-6">
             {loading && (
-              <div className="flex items-center justify-center py-12">
-                <div className="text-center">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-                  <p className="text-muted-foreground">Loading agent details...</p>
-                </div>
-              </div>
+              <LoadingState variant="spinner" label="Loading agent details…" className="py-12" />
             )}
 
             {error && (
-              <div className="flex items-center justify-center py-12">
-                <div className="text-center">
-                  <AlertTriangle className="h-8 w-8 text-[hsl(var(--destructive))] mx-auto mb-4" />
-                  <p className="text-[hsl(var(--destructive))] mb-4">Error: {error}</p>
-                  <Button onClick={() => window.location.reload()} variant="outline">
-                    Try Again
-                  </Button>
-                </div>
-              </div>
+              <ErrorState description={error} onRetry={() => refetchAgent()} className="py-12" />
             )}
 
             {agent && (

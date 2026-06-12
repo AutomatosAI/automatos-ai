@@ -307,7 +307,7 @@ export function PerformanceAnalytics() {
             )}
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-3 min-w-0">
-                <div className="w-10 h-10 rounded-2xl bg-black/20 border border-orange-500/10 flex items-center justify-center shrink-0">
+                <div className="w-10 h-10 rounded-2xl bg-black/20 border border-warning/10 flex items-center justify-center shrink-0">
                   <metric.icon className={`w-5 h-5 ${metric.color}`} />
                 </div>
                 <div className="min-w-0">
@@ -465,7 +465,7 @@ export function PerformanceAnalytics() {
                     </p>
                     <div className="w-full bg-secondary rounded-full h-2 mt-2">
                       <div 
-                        className={`h-2 rounded-full transition-all duration-300 ${value.improvement_percentage > 0 ? 'bg-gradient-to-r from-green-400 to-emerald-500' : 'bg-gradient-to-r from-red-400 to-orange-500'}`}
+                        className={`h-2 rounded-full transition-all duration-300 ${value.improvement_percentage > 0 ? 'bg-gradient-to-r from-green-400 to-emerald-500' : 'bg-gradient-to-r from-red-400 to-warning'}`}
                         style={{ width: `${Math.min(100, Math.abs(value.improvement_percentage))}%` }}
                     />
                   </div>

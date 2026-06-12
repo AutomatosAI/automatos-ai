@@ -772,7 +772,7 @@ export function EnhancedOrchestratorView({
     switch (priority) {
       case 'low': return 'text-muted-foreground'
       case 'normal': return 'text-info'
-      case 'high': return 'text-orange-400'
+      case 'high': return 'text-warning'
       case 'critical': return 'text-destructive'
     }
   }

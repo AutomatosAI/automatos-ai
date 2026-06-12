@@ -65,7 +65,7 @@ export interface LLMModelCardProps {
 
 const PROVIDER_COLORS: Record<string, string> = {
   openai: 'bg-success/15 text-success border-success/30',
-  anthropic: 'bg-orange-500/15 text-orange-400 border-orange-500/30',
+  anthropic: 'bg-warning/15 text-warning border-warning/30',
   google: 'bg-info/15 text-info border-info/30',
   openrouter: 'bg-agent/15 text-agent border-agent/30',
   meta: 'bg-sky-500/15 text-sky-400 border-sky-500/30',
