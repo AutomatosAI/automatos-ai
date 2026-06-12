@@ -1,0 +1,236 @@
+{
+  "project": "Automatos AI Platform — PRD-153 One-Command Local Run (Compose Consolidation + Schema Lifecycle, Open-Core Capstone)",
+  "branchName": "ralph/prd-153-one-command-run",
+  "description": "Integration capstone of the open-core program, LAST in the stack: branch cut from ralph/prd-152-mem0-decoupling tip (worktree ../automatos-ai-prd153); PRD-150 (AUTH_PROVIDER=local), PRD-151 (MinIO storage factory), PRD-152 (mem0/internal-services local-safe defaults) are assumed DONE on the base. If they are only partially done, this PRD's smoke honestly FAILS — do NOT work around missing decoupling with shims, REQUIRE_AUTH hacks beyond what envs/api.defaults already encodes, or skipped checks. GOAL: from a clean checkout, `cp .env.example .env` (3 secrets + 1 LLM key) then ONE command `docker compose up --build` boots the whole platform with ZERO external SaaS (no Clerk, no AWS, no hosted mem0), and a smoke flow passes: local identity (unauthenticated request resolves a workspace), create a Task (POST /api/v1/tasks), get a chat/Auto response (POST /api/chat). METHOD: (0) hotfix the broken initdb mount + seed path; (1) one schema lifecycle — alembic single head, from-zero replay proven by test, then DELETE init_complete_schema.sql and orchestrator/core/database/migrations/ and move migrate+seed into one entrypoint shared with Railway; (2) one compose — fold infrastructure/docker-compose.{yml,core,data,memory,monitoring,voice}.yml into the root file as default services + profiles (observability/voice/optimizer/tools) and DELETE them, with project-name isolation (no container_name:, no fixed volume/network name:, all host ports env-parameterized); (3) env layering — compose env_file: wiring to the already-committed envs/*.defaults, .env.example rewritten to secrets-only, aggregated boot-time required-var validation; (4) scripts/compose-smoke.sh — the load-bearing artifact: boots an ISOLATED project (default -p automatos-smoke, ports 15432/16379/18000/13000/16333/19000/18765/15433) so it NEVER collides with the dev stack running on this machine, runs the golden checks, always cleans up only its own project; (5) CI smoke workflow + QUICKSTART rewrite. EVERY iteration: re-read docs/PRDS/PRD-153-ONE-COMMAND-LOCAL-RUN.md and CLAUDE.md; tip must stay green and stackable after every commit. ENV NOTE: the fresh worktree has no Python venv — prefer validating via docker (compose config, docker compose run/exec backend pytest ...); if host pytest is needed, create .venv from orchestrator/requirements.txt once and reuse. OUT OF SCOPE: Kubernetes/Helm, auth/storage/mem0 code changes (150/151/152 own them), landing-site containers (leave infrastructure/docker-compose.landing.yml in place), Railway config changes (railway.json, railway-manifest.json, per-service env — byte-untouched except the shared entrypoint), performance tuning, publishing/licensing, flipping CI required-checks, running migrations against ANY database other than the smoke project's own scratch postgres.\n\nVERIFIER AMENDMENTS (BINDING — adversarial re-verification 2026-06-09; these OVERRIDE story text where they conflict):\n1. envs/api.defaults + envs/frontend.defaults + envs/observability.defaults are UNTRACKED on main. The overnight orchestrator copies envs/ into this worktree; P153-S1's FIRST act is `git add envs/ && commit` so they become tracked on this branch (S5/S7/S8 and both compose gates depend on it).\n2. LLM key for the smoke chat check: root .env keys are EMPTY; compose-smoke.sh must source ANTHROPIC_API_KEY/OPENAI_API_KEY from orchestrator/.env (copied into the worktree by the orchestrator) or the ambient shell — never commit or print them.\n3. S2 MUST create the worktree-root venv: python3 -m venv .venv && .venv/bin/pip install -r orchestrator/requirements.txt (the guard-test gate uses .venv; bare host `python` has no pytest). All test invocations use python3 / .venv.\n4. S12's dead-reference sweep grep MUST exclude its own scaffolding and history: add --exclude-dir=ralph, exempt the envs/observability.defaults provenance comment, and exempt orchestrator/alembic/versions/ historical docstrings (prd142_wave4_harness_store.py mentions init_complete_schema.sql and legitimately survives on the repair path).\n5. S3: the post-squash single-root check is: test \"$(grep -rl 'down_revision = None' orchestrator/alembic/versions | wc -l)\" -eq 1. The from-zero integration test needs a pgvector-unavailable skip guard (CI postgres:15 ships no pgvector). If the repair path (not squash) wins, record that in the story's DONE note — the sweep exemption in (4) covers the surviving docstring.\n6. S7 AC1 = five SEPARATE grep -q checks ANDed (a single alternation grep proves any-one, not all-five). S11 AC4's path-existence loop needs `|| exit 1` inside the body.\n7. S9's dev-stack before/after untouched comparison runs ONLY if a dev stack is actually up (docker ps non-empty); otherwise skip with a note — Docker had 0 containers at planning time.\n8. S5 AC1 (frontend present in the no-profile service set) is point-in-time — S8 later moves frontend behind the dev profile; do not transcribe S5's check into any final gate.\n9. Additional owned files: S11 also fixes the stale boot-path/exec docs at docs/deployment-infrastructure/docker-compose-setup.md:~93, docs/deployment-infrastructure/_index.md:~81/~142, docs/overview/system-architecture.md:~187, docs/getting-started/_index.md:~133. S12 also DELETES the root Dockerfile.backend (verified zero references; it bakes the retired echo'd minimal entrypoint).\n10. UNIVERSAL: 'grep -c ... returns 0' executes as '! grep -q ...'; commit-message ACs are discipline, not gates; every docker/compose invocation in smoke tooling is -p scoped and uses --wait-timeout; re-locate by content.",
+  "userStories": [
+    {
+      "id": "P153-S1",
+      "title": "Phase-0 hotfix: fix initdb mount path, entrypoint seed path, gitignore envs/*.local",
+      "description": "Three verified breakages, all one-liners. (1) docker-compose.yml line 35 mounts ./orchestrator/database/init_complete_schema.sql — that dir does NOT exist; the real file is orchestrator/core/database/init_complete_schema.sql. Fix the mount path. (2) docker-entrypoint.sh line 64 runs `python database/load_seed_data.py` from /app — orchestrator/database/ does not exist; the loader lives at core/database/load_seed_data.py. Fix to `python core/database/load_seed_data.py`. (3) .gitignore has no rule for envs/*.local (verified: `git check-ignore envs/api.local` exits 1) although envs/api.defaults documents that override layer — add `envs/*.local` under the env-files section. Do NOT restructure anything else yet; later stories delete the initdb mount entirely. Validate compose still renders with dummy secrets.",
+      "acceptanceCriteria": [
+        "grep -c 'orchestrator/core/database/init_complete_schema.sql' docker-compose.yml returns 1 and grep -c 'orchestrator/database/init_complete_schema' docker-compose.yml (the old broken path, no core/) returns 0",
+        "grep -c 'core/database/load_seed_data.py' docker-entrypoint.sh returns 1 and ! grep -q 'python database/load_seed_data.py' docker-entrypoint.sh",
+        "git check-ignore envs/api.local exits 0",
+        "env POSTGRES_PASSWORD=x REDIS_PASSWORD=x API_KEY=x docker compose config -q exits 0"
+      ],
+      "files": [
+        "docker-compose.yml",
+        "docker-entrypoint.sh",
+        ".gitignore",
+        "envs/api.defaults (untracked on main — commit it)",
+        "envs/frontend.defaults (untracked on main — commit it)",
+        "envs/observability.defaults (untracked on main — commit it)"
+      ]
+    },
+    {
+      "id": "P153-S2",
+      "title": "Alembic single head: guard test (RED) then merge heads (GREEN)",
+      "description": "orchestrator/alembic/versions/ has 125 revisions with ~44 heads (verified; ~41 files have down_revision=None 'standalone — applied manually'). The Dockerfile CMDs use `alembic upgrade heads` (plural) to cope. TDD: create orchestrator/tests/test_alembic_lifecycle.py with test_single_head using alembic.script.ScriptDirectory (no DB needed): load alembic.ini config from the orchestrator dir, assert len(get_heads()) == 1. Run it — must FAIL first. Then `cd orchestrator && alembic merge heads -m \"prd153 merge to single head\"` (alembic heads listing is offline; if env.py demands env vars, export dummy POSTGRES_* — never point it at a real DB). Multiple ROOTS are fine at this stage; only heads must collapse to one. NOTE the stacked base may have added PRD-150/151/152 migrations — merge whatever heads exist on THIS branch. Do not touch Dockerfile CMDs yet (S4 owns the boot path). For host pytest, bootstrap a venv from orchestrator/requirements.txt (alembic+pytest are in it) or run via docker compose run --rm --no-deps backend.",
+      "acceptanceCriteria": [
+        "cd orchestrator && python -m pytest tests/test_alembic_lifecycle.py::test_single_head -q passes (was demonstrably red before the merge revision — note the red run in the commit message)",
+        "cd orchestrator && alembic heads | grep -c '(head)' outputs 1",
+        "git status --porcelain shows exactly one new versions/*.py merge revision plus the new test file"
+      ],
+      "files": [
+        "NEW: orchestrator/tests/test_alembic_lifecycle.py",
+        "orchestrator/alembic/versions/",
+        "orchestrator/alembic/env.py"
+      ]
+    },
+    {
+      "id": "P153-S3",
+      "title": "Alembic-from-zero replay green: repair, or squash to a verified base (Q1 policy)",
+      "description": "Prove empty DB → `alembic upgrade head` → table parity with SQLAlchemy metadata. TDD: extend orchestrator/tests/test_alembic_lifecycle.py with test_upgrade_from_zero (mark @pytest.mark.integration): connect to the Postgres from env (get_database_url, same resolver as conftest.py), CREATE DATABASE alembic_zero_<rand> via autocommit admin connection, run alembic upgrade head against it programmatically (alembic.command.upgrade with sqlalchemy.url override), then assert set(information_schema tables) ⊇ set(Base.metadata.tables) where models are imported exactly like orchestrator/scripts/init_test_db.py does (core.models * PLUS modules.memory.models — env.py currently imports only core.models Base; fix env.py to import the same set so autogenerate/parity see memory tables). Drop the scratch DB in teardown. EXPECT RED: ~41 disconnected down_revision=None roots ALTER tables whose CREATEs they race. POLICY (pre-agreed): attempt at most 3 targeted revision repairs; if still red, SQUASH — delete ALL files in orchestrator/alembic/versions/ and generate ONE base revision id `prd153_base` whose upgrade() starts with CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\"/vector/pg_trgm (mirroring init_complete_schema.sql lines 10-12) then creates the full schema (autogenerate against an empty scratch DB, or Base.metadata.create_all(op.get_bind()) if autogenerate output is broken — parity test is the arbiter either way). Port any raw-SQL triggers/functions the old revisions created if the parity test or grep of deleted revisions shows them (e.g. composio usage trigger). test_single_head must stay green. NEVER run alembic against the dev stack DB or any non-scratch DB. Squash consequence for Railway (alembic stamp) is human-gated — record it in the commit message.",
+      "acceptanceCriteria": [
+        "cd orchestrator && python -m pytest tests/test_alembic_lifecycle.py -q -m integration passes against a live Postgres (DATABASE_URL/POSTGRES_* from env; dev stack service or scratch container)",
+        "cd orchestrator && python -m pytest tests/test_alembic_lifecycle.py::test_single_head -q still passes",
+        "If squashed: ls orchestrator/alembic/versions/*.py | wc -l is small (1-3: base + any PRD-150/152 revisions deliberately re-chained) and grep -L 'down_revision' finds no orphan roots; commit message documents repair-vs-squash verdict and the Railway stamp requirement"
+      ],
+      "files": [
+        "orchestrator/tests/test_alembic_lifecycle.py",
+        "orchestrator/alembic/env.py",
+        "orchestrator/alembic/versions/",
+        "orchestrator/scripts/init_test_db.py"
+      ]
+    },
+    {
+      "id": "P153-S4",
+      "title": "Retire init SQL + raw migrations; one entrypoint owns wait→migrate→seed→start; seed required-green",
+      "description": "Delete the two parallel schema mechanisms now that S3's replay is CI-green. (1) MOVE docker-entrypoint.sh → orchestrator/docker-entrypoint.sh (build context is ./orchestrator so it can be COPY'd); rewrite: wait_for_postgres → `alembic upgrade head` (singular) → seed → exec \"$@\". Seed step becomes required-green: remove the 'will continue anyway' warn path — failed seed exits non-zero and kills boot. (2) orchestrator/Dockerfile: COPY the real entrypoint instead of the echo'd minimal one (both stages), and strip `alembic upgrade heads && ` from BOTH CMDs (lines ~90 and ~140) so migration lives only in the entrypoint (shared compose/Railway boot contract — FR-7: nothing else in the Dockerfile changes). (3) docker-compose.yml: delete the initdb SQL mount AND the ./docker-entrypoint.sh bind-mount (now baked; the ./orchestrator:/app dev mount does not hide /usr/local/bin). (4) DELETE orchestrator/core/database/init_complete_schema.sql and the whole orchestrator/core/database/migrations/ dir (9 SQL + README) — audit each script first: post-squash the parity test proves representation; record per-file verdict (represented/dead) in the commit message. (5) DELETE orchestrator/core/database/init_database.py (verified orphan: main.py imports init_database from core/database/database.py, not this file; it also references the nonexistent orchestrator/database/ path). (6) orchestrator/core/database/load_seed_data.py: return False if ANY sub-step fails (today system-settings/models/skills/personas/plugin-categories swallow exceptions and it still prints SUCCESS); keep idempotency (ON CONFLICT paths exist). Seed must leave config._required_int_setting keys present (seeds/seed_system_settings.py) or chat 500s later.",
+      "acceptanceCriteria": [
+        "test ! -f orchestrator/core/database/init_complete_schema.sql && test ! -d orchestrator/core/database/migrations && test ! -f orchestrator/core/database/init_database.py && test ! -f docker-entrypoint.sh && test -f orchestrator/docker-entrypoint.sh",
+        "! grep -rn 'alembic upgrade heads' orchestrator/Dockerfile orchestrator/docker-entrypoint.sh docker-compose.yml",
+        "! grep -q 'init_complete_schema' docker-compose.yml && ! grep -q 'docker-entrypoint-initdb' docker-compose.yml && bash -n orchestrator/docker-entrypoint.sh",
+        "grep -q 'alembic upgrade head' orchestrator/docker-entrypoint.sh && ! grep -q 'will continue anyway' orchestrator/docker-entrypoint.sh",
+        "env POSTGRES_PASSWORD=x REDIS_PASSWORD=x API_KEY=x docker compose config -q exits 0; cd orchestrator && python -m pytest tests/test_alembic_lifecycle.py -q -m 'not integration' passes"
+      ],
+      "files": [
+        "docker-entrypoint.sh",
+        "NEW: orchestrator/docker-entrypoint.sh",
+        "orchestrator/Dockerfile",
+        "docker-compose.yml",
+        "orchestrator/core/database/init_complete_schema.sql",
+        "orchestrator/core/database/migrations/",
+        "orchestrator/core/database/init_database.py",
+        "orchestrator/core/database/load_seed_data.py"
+      ]
+    },
+    {
+      "id": "P153-S5",
+      "title": "Fold core services into the default profile + project-name isolation (no container_name, no fixed volume names)",
+      "description": "Rewrite docker-compose.yml services to the G3 default set: postgres(pgvector:pg16 — keep, do not chase data.yml's pg18 for the main DB), redis, backend, frontend, workspace-worker (REMOVE profiles:[\"workers\"] — default now), qdrant (transpose from infrastructure/docker-compose.data.yml incl. its curl /healthz healthcheck and 6333/6334 env-parameterized ports QDRANT_PORT/QDRANT_GRPC_PORT), minio (NEW service: image minio/minio, command server /data --console-address :9001, MINIO_ROOT_USER=${AWS_ACCESS_KEY_ID} MINIO_ROOT_PASSWORD=${AWS_SECRET_ACCESS_KEY} per envs/api.defaults contract, ports ${MINIO_PORT:-9000}/${MINIO_CONSOLE_PORT:-9001}, healthcheck curl -f http://localhost:9000/minio/health/live, named volume), mem0-pgvector + mem0-server (transpose from infrastructure/docker-compose.memory.yml: pgvector:pg18, MEM0_PG_* vars, port ${MEM0_PORT:-8765}; FIRST check what the PRD-152 base branch did for mem0 packaging — if mem0-server still builds from ../automatos-mem0/openmemory/api (sibling repo), put the mem0 pair behind profiles:[\"memory\"] and plan COMPOSE_PROFILES=dev,memory as the .env.example default in S7; sibling exists on this machine so the gate still exercises it). ISOLATION (the gate boots a second stack beside the running dev stack): DELETE every container_name: line; REMOVE fixed name: from ALL volumes and the network (compose then prefixes them with the project name); verify every host port binding is ${VAR:-default}. depends_on: backend → postgres+redis service_healthy only (qdrant/minio/mem0 are graceful-degrade per envs/api.defaults — service_started at most); workspace-worker → postgres+redis healthy; frontend → backend healthy. Do not add env_file wiring yet (S7).",
+      "acceptanceCriteria": [
+        "env POSTGRES_PASSWORD=x REDIS_PASSWORD=x API_KEY=x MEM0_PG_PASSWORD=x AWS_ACCESS_KEY_ID=x AWS_SECRET_ACCESS_KEY=x docker compose config --services lists postgres redis backend frontend workspace-worker qdrant minio (and mem0-server mem0-pgvector when COMPOSE_PROFILES=memory is added to the env prefix)",
+        "grep -c 'container_name:' docker-compose.yml returns 0",
+        "with the same env prefix: docker compose -p prd153iso config | grep -E '^\\s+name: automatos_' returns nothing (no fixed volume/network names defeating -p isolation)",
+        "grep -cE '\"[0-9]+:[0-9]+\"' docker-compose.yml returns 0 (every host port is env-parameterized)",
+        "! grep -q 'profiles: \\[\"workers\"\\]' docker-compose.yml (workspace-worker is default)"
+      ],
+      "files": [
+        "docker-compose.yml",
+        "infrastructure/docker-compose.data.yml",
+        "infrastructure/docker-compose.memory.yml",
+        "envs/api.defaults"
+      ]
+    },
+    {
+      "id": "P153-S6",
+      "title": "Fold optional profiles (observability/voice/optimizer/tools) and DELETE the six infrastructure compose files",
+      "description": "Add profile services to root docker-compose.yml then delete the sources. observability: NOT folded — monitoring (prometheus/grafana/loki/alertmanager/postgres-exporter/redis-exporter/log-relay) lives in the standalone ../automatos-monitoring repo and was removed from automatos-ai (PR #436). Add NO observability profile to root compose; if infrastructure/docker-compose.monitoring.yml is still present, just delete it. voice profile: voice-service, voice-pipeline from infrastructure/docker-compose.voice.yml. optimizer profile: agent-opt-worker building ./services/agent-opt-worker (in-repo — verified) modeled on infrastructure/docker-compose.core.yml's def. tools profile: rename adminer+gotenberg from profile \"all\" to \"tools\" (G4); backend's GOTENBERG_URL already targets the service DNS. Sibling-repo build context ../automatos-voice stays as-is — the voice profile service doesn't build unless enabled; the caveat goes into QUICKSTART (S11). (../automatos-monitoring is no longer referenced — monitoring is out of this repo.) Then DELETE: infrastructure/docker-compose.yml, .core.yml, .data.yml, .memory.yml, .monitoring.yml, .voice.yml AND infrastructure/.env.example (superseded by root .env.example + envs/). LEAVE infrastructure/docker-compose.landing.yml (Q2: migrating it to the landing repo is out of scope; M2 tolerates it). No container_name/fixed names in the new services either.",
+      "acceptanceCriteria": [
+        "ls infrastructure/docker-compose*.yml lists ONLY infrastructure/docker-compose.landing.yml; test ! -f infrastructure/.env.example",
+        "env POSTGRES_PASSWORD=x REDIS_PASSWORD=x API_KEY=x MEM0_PG_PASSWORD=x AWS_ACCESS_KEY_ID=x AWS_SECRET_ACCESS_KEY=x docker compose --profile voice --profile optimizer --profile tools --profile memory config -q exits 0",
+        "same env prefix: docker compose config --services (no profiles) does NOT list voice-service/voice-pipeline/agent-opt-worker/adminer/gotenberg; with the three --profile flags (voice/optimizer/tools) it DOES. prometheus/grafana/loki/alertmanager are absent entirely (monitoring removed, not profiled)",
+        "grep -c 'container_name:' docker-compose.yml returns 0 and ! grep -rn 'pgvector:5432' docker-compose.yml",
+        "! grep -q 'profiles: \\[\"all\"\\]' docker-compose.yml"
+      ],
+      "files": [
+        "docker-compose.yml",
+        "infrastructure/docker-compose.yml",
+        "infrastructure/docker-compose.core.yml",
+        "infrastructure/docker-compose.data.yml",
+        "infrastructure/docker-compose.memory.yml",
+        "infrastructure/docker-compose.monitoring.yml",
+        "infrastructure/docker-compose.voice.yml",
+        "infrastructure/.env.example",
+        "promtail-config.yml",
+        "envs/observability.defaults"
+      ]
+    },
+    {
+      "id": "P153-S7",
+      "title": "Env layering: env_file wiring to envs/*.defaults, secrets-only .env.example (hook carve-out), aggregated boot validation",
+      "description": "(1) docker-compose.yml: wire env_file per service — backend: [envs/api.defaults, {path: envs/api.local, required: false}]; frontend + frontend-prod-when-it-exists: [envs/frontend.defaults, {path: envs/frontend.local, required: false}]; observability-profile services: envs/observability.defaults. Do NOT add observability.defaults to the backend's env_file (it would point LOKI_URL at an absent service when the profile is off) — envs/api.local is the documented override, per the files' own comments. Shrink environment: blocks to (a) secrets interpolation from .env (POSTGRES_PASSWORD, REDIS_PASSWORD, API_KEY, OPENAI/ANTHROPIC keys, AWS_ACCESS_KEY_ID/SECRET, MEM0_PG_PASSWORD, MEM0_API_KEY, obs secrets) and (b) host-port-derived browser URLs (NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:${API_PORT:-8000}}, same pattern for WS) — environment: beats env_file so isolated-port runs stay correct. Prove no var dropped: capture `docker compose config` (dummy-secrets env prefix) before and after; the after-set of backend/frontend env keys must be a superset (diff in commit message). (2) .claude/hooks/block-secrets.sh: add a narrow allow for *.example BEFORE the block patterns (pre-approved openQuestion; touch nothing else in the hook). (3) Rewrite .env.example to the secrets-only contract: POSTGRES_PASSWORD/REDIS_PASSWORD/API_KEY with `openssl rand -hex 32` instructions, one-LLM-key slot, MinIO root creds as AWS_ACCESS_KEY_ID/SECRET, MEM0_API_KEY/MEM0_PG_PASSWORD, obs-profile secrets (GF_SECURITY_ADMIN_PASSWORD/LOG_RELAY_SECRET/ALERT_INGEST_TOKEN, commented), host-port overrides (commented), COMPOSE_PROFILES=dev,memory default (dev profile arrives in S8 — set plain `memory` here if S8 hasn't landed, S8 updates it), pointer to envs/ two-layer rule; REMOVE topology vars (NEXT_PUBLIC_API_URL etc. live in envs/) and Clerk block (SaaS-only per envs/frontend.defaults). (4) orchestrator/main.py lifespan startup: call config.validate() extended to also require REDIS_PASSWORD and POSTGRES_PASSWORD presence; on failure log EVERY missing var in one aggregated error and raise (import-time behavior unchanged — tests stay green). TDD: NEW orchestrator/tests/test_config_validation.py asserting validate() aggregates multiple missing vars into one report.",
+      "acceptanceCriteria": [
+        "env POSTGRES_PASSWORD=x REDIS_PASSWORD=x API_KEY=x MEM0_PG_PASSWORD=x AWS_ACCESS_KEY_ID=x AWS_SECRET_ACCESS_KEY=x docker compose config | grep -E 'POSTGRES_HOST: postgres|MEM0_API_URL|QDRANT_URL|S3_ENDPOINT_URL|NEXT_PUBLIC_EDITION: oss' finds all five (env_file wiring live)",
+        "printf '{\"tool_input\":{\"file_path\":\"/repo/.env.example\"}}' | bash .claude/hooks/block-secrets.sh exits 0 AND printf '{\"tool_input\":{\"file_path\":\"/repo/.env\"}}' | bash .claude/hooks/block-secrets.sh exits 2",
+        "grep -q 'MEM0_PG_PASSWORD' .env.example && grep -q 'AWS_ACCESS_KEY_ID' .env.example && ! grep -q 'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=' .env.example && ! grep -q '^NEXT_PUBLIC_API_URL=' .env.example",
+        "cd orchestrator && python -m pytest tests/test_config_validation.py -q passes",
+        "grep -c 'env_file' docker-compose.yml >= 2 and commit message contains the before/after rendered-config key diff"
+      ],
+      "files": [
+        "docker-compose.yml",
+        ".env.example",
+        ".claude/hooks/block-secrets.sh",
+        "orchestrator/main.py",
+        "orchestrator/config.py",
+        "NEW: orchestrator/tests/test_config_validation.py",
+        "envs/api.defaults",
+        "envs/frontend.defaults"
+      ]
+    },
+    {
+      "id": "P153-S8",
+      "title": "Frontend production-mode option: dev/prod profile pair (US-006)",
+      "description": "frontend/Dockerfile already has development, builder (ARG NEXT_PUBLIC_API_URL...) and production (standalone) stages — reuse, don't rebuild. A bind-mounted source tree breaks the standalone target and compose cannot conditionally mount, so use a profile pair in the ONE compose file: existing `frontend` service gets profiles:[\"dev\"] (unchanged hot-reload mounts, target development); NEW `frontend-prod` service: profiles:[\"prod\"], build target production with build args NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:${API_PORT:-8000}} (NEXT_PUBLIC_* are baked at build time — note from envs/frontend.defaults), NO source volumes, same ${FRONTEND_PORT:-3000} mapping, env_file envs/frontend.defaults, depends_on backend healthy. Default UX: .env.example ships COMPOSE_PROFILES=dev,memory so plain `docker compose up` boots the dev frontend; switching is editing that one var to prod. Update envs/frontend.defaults comment block if stale. scripts/compose-smoke.sh (S9) will run COMPOSE_PROFILES=dev,memory. Prove the production path actually builds once.",
+      "acceptanceCriteria": [
+        "env POSTGRES_PASSWORD=x REDIS_PASSWORD=x API_KEY=x AWS_ACCESS_KEY_ID=x AWS_SECRET_ACCESS_KEY=x MEM0_PG_PASSWORD=x COMPOSE_PROFILES=prod docker compose config shows frontend-prod with target: production and NO ./frontend bind mount; COMPOSE_PROFILES=dev shows frontend with target: development and the hot-reload mounts; neither config lists both",
+        "grep -q 'COMPOSE_PROFILES=dev' .env.example",
+        "same env prefix with COMPOSE_PROFILES=prod: docker compose build frontend-prod exits 0 (real standalone build)",
+        "docker compose config -q passes for COMPOSE_PROFILES=dev and =prod"
+      ],
+      "files": [
+        "docker-compose.yml",
+        "frontend/Dockerfile",
+        ".env.example",
+        "envs/frontend.defaults"
+      ]
+    },
+    {
+      "id": "P153-S9",
+      "title": "scripts/compose-smoke.sh: isolated one-command boot + golden-path checks (login/identity, Task, chat)",
+      "description": "THE capstone artifact; the acceptance gate and CI both run it. NEW scripts/compose-smoke.sh (bash, set -euo pipefail). Defaults (overridable via env): SMOKE_PROJECT=automatos-smoke, COMPOSE_PROFILES=dev,memory (drop memory automatically if ../automatos-mem0 is absent AND mem0-server still needs the sibling build context), ports POSTGRES 15432, REDIS 16379, API 18000, FRONTEND 13000, QDRANT 16333/16334, MINIO 19000/19001, MEM0 18765, MEM0_PG 15433 — never the dev-stack defaults. Behavior: (1) generate a throwaway env file via mktemp (NEVER committed, NEVER named *.env in-repo): random secrets via openssl rand -hex, the port set, COMPOSE_PROFILES; pass LLM keys through from caller env, else parse ANTHROPIC_API_KEY/OPENAI_API_KEY out of the main checkout's root .env if readable; (2) `docker compose -p $SMOKE_PROJECT --env-file $TMP up -d --build --wait` (every docker compose invocation carries -p and --env-file; NOTHING in the script may touch other projects — no bare down, no prune); (3) checks, each with retries/timeouts and loud failure: GET :18000/health → 200; GET :13000/ → 200; identity: GET :18000/api/v1/tasks with NO Clerk headers → 200 JSON (PRD-150 local identity; adapt to the actual PRD-150 surface found on the branch — the invariant is zero Clerk vars anywhere); create Task: POST :18000/api/v1/tasks {\"title\":\"PRD-153 smoke\"} → 2xx with id; chat: POST :18000/api/chat {\"message\":{\"content\":\"Reply with the word pong\"}} → 200 and non-empty streamed text within 120s (REQUIRED when an LLM key is present; hard-fail with a clear message if no key — gate supplies one); in-container: `exec -T backend alembic heads | grep -c '(head)'` == 1, `exec -T backend alembic current` shows head, `exec -T postgres psql -U postgres -d orchestrator_db -tc 'SELECT COUNT(*) FROM credential_types'` > 0 (seed green); service health: qdrant :16333/healthz, minio :19000/minio/health/live, workspace-worker via `exec -T workspace-worker curl -fsS localhost:8081/health`, mem0 :18765/health when memory profile on; isolation proof: `docker compose -p $SMOKE_PROJECT --env-file $TMP config | grep -c container_name:` == 0; (4) flags: --config-only (render config -q for default and for observability/voice/optimizer/tools/prod profile combos with the generated env, no boot), --keep (skip teardown), --full (additionally: doc upload + RAG answer [PRD-151], L3 store/recall [PRD-152] — best-effort extension, not gate-blocking); (5) trap EXIT → `docker compose -p $SMOKE_PROJECT --env-file $TMP down -v` + rm tempfile. First full boot WILL surface integration bugs from S2–S8 (entrypoint, seed strictness, depends_on) — fixing those here is in scope; keep fixes minimal and re-run until green.",
+      "acceptanceCriteria": [
+        "bash scripts/compose-smoke.sh --config-only exits 0",
+        "bash scripts/compose-smoke.sh exits 0 with ANTHROPIC_API_KEY or OPENAI_API_KEY available (full isolated boot: health, frontend, identity-without-Clerk, Task created, chat text received, single alembic head, seed sentinel, qdrant/minio/worker healthy)",
+        "after the run: docker ps --format '{{.Names}}' | grep -c automatos-smoke returns 0 AND docker volume ls --format '{{.Name}}' | grep -c automatos-smoke returns 0 (teardown proven)",
+        "grep -c '\\-p \"\\?${\\?SMOKE_PROJECT' scripts/compose-smoke.sh equals the number of docker compose invocations (no unscoped compose command; manual count in commit message) and ! grep -E 'docker (system|volume|image) prune' scripts/compose-smoke.sh",
+        "the dev stack's containers/volumes (automatos_postgres etc.) appear in docker ps/volume ls unchanged before vs after (record in commit message)"
+      ],
+      "files": [
+        "NEW: scripts/compose-smoke.sh",
+        "docker-compose.yml",
+        "orchestrator/docker-entrypoint.sh",
+        "orchestrator/core/database/load_seed_data.py"
+      ]
+    },
+    {
+      "id": "P153-S10",
+      "title": "CI compose-boot smoke workflow (the M1 ratchet, non-required for now)",
+      "description": "NEW .github/workflows/compose-smoke.yml reusing scripts/compose-smoke.sh — CI is the compose path's only consumer, so this is the story that stops the rot. Mirror .github/workflows/test.yml conventions: concurrency group with cancel-in-progress, timeout-minutes (25 — the PRD's <10min budget needs registry-backed layer cache; note that as a TODO comment, do not pretend), triggers: pull_request to main + push, BOTH gated by paths: [docker-compose.yml, orchestrator/Dockerfile, frontend/Dockerfile, orchestrator/docker-entrypoint.sh, orchestrator/alembic/**, orchestrator/config.py, envs/**, .env.example, scripts/compose-smoke.sh, services/**, .github/workflows/compose-smoke.yml], plus workflow_dispatch. Job: ubuntu-latest, docker buildx cache via type=gha (cache-from/cache-to on the compose build or docker/build-push-action warm-up of the backend image), run `bash scripts/compose-smoke.sh` with COMPOSE_PROFILES=dev (NO memory — the sibling automatos-mem0 repo is not checked out in CI; the script's auto-drop handles it) and SMOKE_REQUIRE_CHAT conditional on secrets.ANTHROPIC_API_KEY being non-empty (add that knob to the script if S9 didn't: chat check mandatory when a key exists, explicit SKIPPED line when not). Upload `docker compose -p automatos-smoke logs` as an artifact on failure. Do NOT touch branch protection / required checks (human-gated). Validate YAML locally — no actionlint assumed: python yaml parse + structural greps.",
+      "acceptanceCriteria": [
+        "python3 -c \"import yaml,sys; yaml.safe_load(open('.github/workflows/compose-smoke.yml'))\" exits 0",
+        "grep -q 'compose-smoke.sh' .github/workflows/compose-smoke.yml && grep -q 'workflow_dispatch' .github/workflows/compose-smoke.yml && grep -q 'concurrency' .github/workflows/compose-smoke.yml && grep -q 'timeout-minutes' .github/workflows/compose-smoke.yml",
+        "grep -q 'paths:' .github/workflows/compose-smoke.yml and the path list includes docker-compose.yml, orchestrator/alembic/**, envs/** and scripts/compose-smoke.sh",
+        "bash scripts/compose-smoke.sh --config-only still exits 0 (script changes for CI knobs didn't break local mode)"
+      ],
+      "files": [
+        "NEW: .github/workflows/compose-smoke.yml",
+        "scripts/compose-smoke.sh",
+        ".github/workflows/test.yml"
+      ]
+    },
+    {
+      "id": "P153-S11",
+      "title": "QUICKSTART rewrite + stale-docs path fixes (US-010, US-007 framing)",
+      "description": "QUICKSTART.md is verified-stale (claims 'No .env file needed', publishes fake default passwords, references Workflows/Chatbot tabs). Rewrite: prerequisites (Docker Desktop / docker compose >= 2.24 for env_file required:false, 16GB RAM guidance); the one command (cp .env.example .env → fill 3 secrets + 1 LLM key per the generation instructions → docker compose up --build); the two-layer env rule in one paragraph ('secrets in .env; never edit envs/*.defaults; personal overrides in envs/*.local'); service map table (service → host port env var → default port: backend API_PORT 8000, frontend FRONTEND_PORT 3000, postgres 5432, redis 6379, qdrant 6333, minio 9000/9001, mem0 8765); profile catalogue (dev|prod frontend pair via COMPOSE_PROFILES, memory, observability, voice, optimizer, tools) with the sibling-repo build caveat for memory/observability/voice; production frontend mode (US-006); the interim/local auth story per PRD-150 outcome (zero Clerk vars — 'what is NOT in OSS: Clerk/SaaS auth, hosted mem0, AWS S3' honest edition framing); troubleshooting (port collisions → override *_PORT in .env, Apple Silicon note for workspace-worker Playwright/Chromium, low-RAM → drop memory/observability profiles, full reset `docker compose down -v`); smoke script usage (scripts/compose-smoke.sh runs an isolated stack on offset ports). Use canonical terms: Playbook, Mission, Task, Auto, Deliverable. Fix the two stale doc references to init_complete_schema.sql found by grep: docs/getting-started/installation-setup.md and docs/community-marketplace/browsing-installing-items.md (point at the alembic+seed lifecycle). README.md: only the quick-start section if it contradicts (verify first).",
+      "acceptanceCriteria": [
+        "! grep -q 'No .env file needed' QUICKSTART.md && ! grep -q 'automatos_dev_pass' QUICKSTART.md && ! grep -q 'docker-compose up' QUICKSTART.md (v2 syntax 'docker compose' only)",
+        "grep -q 'COMPOSE_PROFILES' QUICKSTART.md && grep -q 'envs/' QUICKSTART.md && grep -q 'compose-smoke.sh' QUICKSTART.md",
+        "! grep -rn 'init_complete_schema' docs/ QUICKSTART.md README.md --include='*.md' | grep -v PRDS (PRD docs are historical record, exempt)",
+        "every repo path mentioned in QUICKSTART.md exists: for p in $(grep -oE '(scripts|envs|orchestrator|frontend)/[A-Za-z0-9_./-]+' QUICKSTART.md | sort -u); do test -e $p; done",
+        "grep -ci 'workflow' QUICKSTART.md returns 0 (canonical term is Mission; GitHub Actions references excepted — if needed say 'CI job')"
+      ],
+      "files": [
+        "QUICKSTART.md",
+        "README.md",
+        "docs/getting-started/installation-setup.md",
+        "docs/community-marketplace/browsing-installing-items.md",
+        "docs/deployment-infrastructure/docker-compose-setup.md",
+        "docs/deployment-infrastructure/_index.md",
+        "docs/overview/system-architecture.md",
+        "docs/getting-started/_index.md"
+      ]
+    },
+    {
+      "id": "P153-S12",
+      "title": "PRD acceptance run + dead-code sweep (always last)",
+      "description": "(1) Run the full acceptance gate exactly as the overnight harness will: every shellCheck in scripts/ralph/acceptance-prd153.sh / this story's ACs, including a complete `bash scripts/compose-smoke.sh` run. (2) Dead-code sweep for orphans the earlier stories left: grep -rn for 'infrastructure/docker-compose' (only landing + historical PRD docs may remain), 'init_complete_schema', 'init_database' (the deleted core/database file — main.py's import from core.database.database is a DIFFERENT symbol and stays), 'database/load_seed_data.py' old path, 'alembic upgrade heads', '--profile workers', 'profile all', fixed 'automatos_postgres|automatos_redis|automatos_backend|automatos_frontend' container names (scripts and docs that exec into them now break — fix to `docker compose exec <service>` form; orchestrator/core/database/migrations/README.md is deleted but scripts/run_migration.py at repo root targeted it: delete scripts/run_migration.py if nothing else references it, else document), stale .env.example keys vs config.py reads. (3) Re-run the orchestrator targeted suites and the static gate greps. (4) Honest closure: anything that cannot be fixed inside this iteration is recorded as BLOCKED with file:line in scripts/ralph/progress.txt per loop convention — never papered over. Do NOT 'fix' acceptance failures caused by incomplete PRD-150/151/152 surfaces — report them; that failure mode is by design.",
+      "acceptanceCriteria": [
+        "bash scripts/compose-smoke.sh exits 0",
+        "bash -c '[ -z \"$(ls infrastructure/docker-compose*.yml 2>/dev/null | grep -v landing)\" ]' passes; test ! -f orchestrator/core/database/init_complete_schema.sql; test ! -d orchestrator/core/database/migrations; ! grep -rn 'alembic upgrade heads' orchestrator/Dockerfile orchestrator/docker-entrypoint.sh docker-compose.yml",
+        "! grep -rn 'init_complete_schema\\|docker-compose.core.yml\\|docker-compose.data.yml\\|docker-compose.memory.yml\\|docker-compose.monitoring.yml\\|docker-compose.voice.yml' scripts/ orchestrator/ frontend/ services/ envs/ .github/ --include='*' 2>/dev/null returns nothing",
+        "cd orchestrator && python -m pytest tests/test_alembic_lifecycle.py tests/test_config_validation.py -q -m 'not integration' passes (and -m integration against the available Postgres)",
+        "git status --porcelain is empty after the final commit; progress.txt records per-story status + any BLOCKED items with file:line"
+      ],
+      "files": [
+        "scripts/compose-smoke.sh",
+        "scripts/run_migration.py",
+        "scripts/ralph/progress.txt",
+        "docker-compose.yml",
+        "QUICKSTART.md",
+        "Dockerfile.backend (root duplicate — delete, zero references)"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,85 @@
+{
+  "project": "Automatos AI Platform — PRD-170 Code Canvas: Claude Agent SDK Embed (Remediation Chain net-new track)",
+  "branchName": "ralph/prd-170-code-canvas-sdk",
+  "description": "Branch from main after PRD-156 merges. BINDING D3: headless Claude Agent SDK session per workspace runs in the worker container; the platform UI renders the session — file tree, streaming turns, diff approvals, commit/push. SUBSTRATE EXISTS, reuse it: workspace_read_file/write_file/list_dir/grep/exec/git tools (modules/tools/discovery/workspace_actions.py:19-341) + worker-container file/exec API (api/workspace_files.py, mounted main.py:1023). Q85: workspace_files POST /exec is the one exec surface (unmounted workspace_exec.py router DELETED). Q38/Q41: codegraph indexes the workspace clone. D11: session token budgets surfaced in UI. Full spec docs/PRDS/PRD-170-CODE-CANVAS-AGENT-SDK.md.",
+  "userStories": [
+    {
+      "id": "P170-S1",
+      "title": "SDK session service in the worker container",
+      "description": "Session manager: start/resume/stop a headless claude (Agent SDK) session per workspace; transcript + state persist on the worker volume (sessions survive orchestrator restarts); platform proxy POST /api/workspaces/{id}/canvas/sessions with RequestContext auth; one active session per workspace v1; session cannot escape its workspace mount.",
+      "acceptanceCriteria": [
+        "Lifecycle integration test against a seeded workspace container",
+        "Resume-after-restart test (state on volume)",
+        "Path-escape attempt blocked (tenancy test)",
+        "cd orchestrator && pytest -q green"
+      ],
+      "files": ["orchestrator/api/workspace_files.py", "services/"]
+    },
+    {
+      "id": "P170-S2",
+      "title": "Worker provisioning for wizard workspaces",
+      "description": "Wizard-created workspaces have NO worker container (workspace_files.py:33-47 DB-fallback note). Provision-on-demand at first canvas open (default: per-workspace container for isolation; a shared sandboxed runner needs a decision memo in the PR if chosen instead); honest provisioning progress + failure states in UI.",
+      "acceptanceCriteria": [
+        "Wizard workspace → open canvas → working session (e2e)",
+        "Provisioning failure shows honest error + retry — verify in browser using dev-browser skill",
+        "cd orchestrator && pytest -q green"
+      ],
+      "files": ["infrastructure/", "orchestrator/"]
+    },
+    {
+      "id": "P170-S3",
+      "title": "Event stream → session UI",
+      "description": "Bridge SDK session events (assistant text, tool calls, file edits, permission requests) over the existing SSE channel shape; session panel renders streaming turns beside the file tree; useWorkspaceFiles tree live-refreshes on agent edits; event schema versioned and validated (reachability-style test kills name drift).",
+      "acceptanceCriteria": [
+        "'Create a README' → streamed turns + tree refresh — verify in browser using dev-browser skill",
+        "Event schema vitest validation; drift negative-fixture fails",
+        "Typecheck passes"
+      ],
+      "files": ["frontend/components/widgets/CodingCanvasWidget/", "orchestrator/consumers/"]
+    },
+    {
+      "id": "P170-S4",
+      "title": "Diff approval loop",
+      "description": "SDK permission prompts map to UI approval cards; file edits render as diffs (in-bundle diff viewer preferred — any new heavy dep needs an S1-style memo); approve applies / deny reverts and informs the session; per-turn auto-accept toggle (session-scoped, default OFF, visibly indicated).",
+      "acceptanceCriteria": [
+        "Proposal → diff card → approve applies / deny reverts+informs (e2e both paths)",
+        "Auto-accept toggle honored + indicated — verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "files": ["frontend/components/widgets/CodingCanvasWidget/"]
+    },
+    {
+      "id": "P170-S5",
+      "title": "Git: branch-per-session, commit, push with platform identity",
+      "description": "Default branch canvas/<session-id>; commit from UI with generated editable message; push via the EXISTING workspace_git tool using GitHub App installation tokens (PRD-165 base) and platform actor identity (PRD-168 pattern); PR-open link-out v1. No token material in logs/errors (PRD-154 S12 test class re-applied).",
+      "acceptanceCriteria": [
+        "Commit+push e2e on a test repo; author/committer attributed",
+        "Token-leak negative tests green",
+        "cd orchestrator && pytest -q green"
+      ],
+      "files": ["orchestrator/modules/tools/discovery/workspace_actions.py"]
+    },
+    {
+      "id": "P170-S6",
+      "title": "Codegraph over the workspace clone",
+      "description": "Index the workspace clone (local-path scope, Q38) on session start + on commit; the SDK session gets the PRD-165 codegraph tool family pointed at the workspace index so the agent navigates by call graph, not just grep.",
+      "acceptanceCriteria": [
+        "Agent answers 'what calls X?' about workspace code inside a session (integration test)",
+        "Index refreshes on commit (test)",
+        "cd orchestrator && pytest -q green"
+      ],
+      "files": ["orchestrator/modules/codegraph/"]
+    },
+    {
+      "id": "P170-S7",
+      "title": "Cleanup: one exec surface, dead affordances out",
+      "description": "DELETE the never-mounted workspace_exec.py router (Q85 resolution — workspace_files POST /exec + the session shell cover it); remove read-only-era dead affordances in CodingCanvasWidget; terminal panel = SDK bash tool with approval, not a separate surface.",
+      "acceptanceCriteria": [
+        "workspace_exec.py gone; contract + reachability green",
+        "InteractiveTerminal 404 path eliminated (the component now targets the session)",
+        "Typecheck passes; cd orchestrator && pytest -q green"
+      ],
+      "files": ["orchestrator/api/workspace_exec.py", "frontend/components/workspace/"]
+    }
+  ]
+}

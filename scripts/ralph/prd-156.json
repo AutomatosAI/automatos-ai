@@ -1,0 +1,66 @@
+{
+  "project": "Automatos AI Platform — PRD-156 Security & Tenancy Hardening (Remediation Chain Night 1, stacked on PRD-155)",
+  "branchName": "ralph/prd-156-security-tenancy",
+  "description": "Branch from ralph/prd-155-route-contract tip. Closes every confirmed cross-tenant and injection hole BEFORE the PRD-150 open-core split widens exposure. Constraints: PRD-09 — board SDK-key reads stay on the narrow scope-gated dependency, do NOT touch shared hybrid auth; all identity threading auth-provider-agnostic (PRD-150). BINDING: Q6 multimodal gets workspace-scoping only (freeze), Q15 mem0 token auth now, Q13 mock /api/v1/memory deleted. Full spec docs/PRDS/PRD-156-SECURITY-TENANCY-HARDENING.md. security-reviewer agent pass on the final diff is part of acceptance.",
+  "userStories": [
+    {
+      "id": "P156-S1",
+      "title": "Workspace+team scoping on multimodal search; persist team_access; fix similarity SQL",
+      "description": "All four multimodal tools (search_tables/search_images/search_formulas/search_multimodal, modules/rag/services/multimodal_knowledge_tools.py:65-401) query knowledge_items with NO workspace clause — cross-tenant leak exposed to every agent via unified_executor.py:108-111. Add mandatory workspace_id + team filtering via the shared filter helper. Persist the team_access form field that upload silently drops (api/knowledge_multimodal.py:258). Fix the broken similarity subquery (WHERE content = :query exact-match → embed the query text properly so ranking is real).",
+      "acceptanceCriteria": [
+        "Tenancy matrix test: workspace B items never returned to workspace A across all four tools",
+        "Uploaded team_access persists and filters retrieval (test)",
+        "Novel-query similarity returns ranked results, no NULL ordering (test)",
+        "cd orchestrator && pytest -q green"
+      ],
+      "files": ["orchestrator/modules/rag/services/multimodal_knowledge_tools.py", "orchestrator/api/knowledge_multimodal.py"]
+    },
+    {
+      "id": "P156-S2",
+      "title": "Token auth on the OpenMemory (mem0) server",
+      "description": "The mem0 server has ZERO auth — any process with network reach can read/write/delete every workspace's memories by guessing user_id strings; the orchestrator already sends Authorization: Token MEM0_API_KEY (mem0_client.py:160) which is ignored. Add one FastAPI auth dependency in the automatos-mem0 fork (sibling repo) validating the token on every router, key from env, provider-agnostic. Orchestrator unchanged. Document the Railway env var in the PR (chain rule: env BEFORE deploy).",
+      "acceptanceCriteria": [
+        "Fork tests: missing/wrong token → 401, correct token → 200, all routers",
+        "Orchestrator integration suite green against the patched server",
+        "Railway env documented in PR description"
+      ],
+      "files": ["../automatos-mem0/openmemory/api/app/"]
+    },
+    {
+      "id": "P156-S3",
+      "title": "NL2SQL tenancy: scope queries/audit/analytics; disable unsafe paths",
+      "description": "Thread workspace scoping through NL2SQL query, audit, and analytics endpoints. DISABLE (do not shim) the query_main_database fallback and the unauthenticated HTTP self-call — the proper in-process path is PRD-160; until then the unsafe path is OFF. Remove NL2SQL from intent-classifier suggested_tools (smart_tool_router.py:80-84, intent_classifier.py:275) so it is unreachable from chat until PRD-160 re-enables it scoped.",
+      "acceptanceCriteria": [
+        "Cross-workspace NL2SQL matrix test fails closed",
+        "Grep gate: query_main_database unreachable from any chat tool surface",
+        "Audit + analytics endpoints workspace-scoped (tests)",
+        "cd orchestrator && pytest -q green"
+      ],
+      "files": ["orchestrator/modules/nl2sql/", "orchestrator/consumers/chatbot/smart_tool_router.py", "orchestrator/consumers/chatbot/intent_classifier.py"]
+    },
+    {
+      "id": "P156-S4",
+      "title": "Template IDOR + Jinja2 sandbox + WeasyPrint fetch allowlist",
+      "description": "Template CRUD has confirmed cross-workspace IDOR — add workspace ownership checks on every read/update/delete. Rendering moves to Jinja2 SandboxedEnvironment (SSTI confirmed exploitable). WeasyPrint gets a url_fetcher allowlist: no file://, no link-local/internal-network fetches from user templates.",
+      "acceptanceCriteria": [
+        "IDOR tests: workspace B cannot read/update/delete A's template",
+        "SSTI payload fixtures render inert (test)",
+        "url_fetcher refuses file:// and internal IPs (test)",
+        "Existing template tests updated for sandbox; cd orchestrator && pytest -q green"
+      ],
+      "files": ["orchestrator/modules/documents/template_service.py", "orchestrator/api/templates.py"]
+    },
+    {
+      "id": "P156-S5",
+      "title": "Remaining closures: widget-memory ownership, content-path auth, scoped analytics, delete mock memory router",
+      "description": "(1) widget_memory.py:277-280 deletes any memory id with no ownership check — mirror the correct pattern from memory_stats.py:462-470. (2) GET /api/documents/content (path-read, api/documents.py:411-452) has no auth dependency — add RequestContext. (3) RAG analytics (modules/rag/service.py:1007-1168) and document_usage writes (api/documents.py:1080,1362) query/write across ALL workspaces — scope them. (4) DELETE the mock /api/v1/memory router + AdvancedMemoryManager (api/memory.py — fake CRUD, random.uniform stats, unscoped in-process global; BINDING Q13) and remove its frontend callers; the route-contract suite proves nothing still called it.",
+      "acceptanceCriteria": [
+        "Ownership/auth tests per closure",
+        "api/memory.py mock surface deleted; contract suite green",
+        "Analytics endpoints return workspace-scoped data only (test)",
+        "cd orchestrator && pytest -q green; security-reviewer agent run on the diff reports no CRITICAL/HIGH"
+      ],
+      "files": ["orchestrator/api/widget_memory.py", "orchestrator/api/documents.py", "orchestrator/modules/rag/service.py", "orchestrator/api/memory.py"]
+    }
+  ]
+}

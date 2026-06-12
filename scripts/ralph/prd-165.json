@@ -1,0 +1,65 @@
+{
+  "project": "Automatos AI Platform — PRD-165 Graph Consolidation: KG UX + CodeGraph Agent Surface (Remediation Chain Block B)",
+  "branchName": "ralph/prd-165-graph-consolidation",
+  "description": "Branch from main after Night-1 — re-verify refs (PRD-154 S6/S8 landed export + search fixes). One GraphView shell for every graph surface; a KG users can drill into; CodeGraph promoted to a real agent capability; legacy entity-KG deleted. BINDING: Q23 consolidate on PRD-126 workspace graph (PRD-21 explorer deleted), Q25 chips collapsed + persisted prefs, Q27 connector styling as data, Q28 server-side cluster-first drill-in, Q29 LLM community reports ON, Q30 'Knowledge Graph' label, Q31 auto-index, Q32 codegraph tools for ALL agents, Q33 webhook reindex, Q34 EnhancedVectorStore deleted, Q36 GitHub App tokens. Full spec docs/PRDS/PRD-165-GRAPH-CONSOLIDATION.md.",
+  "userStories": [
+    {
+      "id": "P165-S1",
+      "title": "Shared GraphView shell; delete losing engines",
+      "description": "One shell component: toolbar, collapsible legend (collapsed by default, live counts, persisted per user+workspace), palette-from-CSS-vars, error boundary, empty/loading states, node-detail side-panel slot. Engines: react-force-graph (force) + ReactFlow (DAGs). KG viz, codegraph viz, and mission DAG consume it. DELETE raw-D3 and remaining three.js graph stacks from the bundle.",
+      "acceptanceCriteria": [
+        "Three surfaces on the shell (KG, codegraph, mission DAG)",
+        "d3 graph + dead engines out of package.json; bundle delta in PR",
+        "Legend collapse + pref persistence — verify in browser using dev-browser skill; vitest for pref store",
+        "Typecheck passes"
+      ],
+      "files": ["frontend/components/shared/", "frontend/components/knowledge/", "frontend/package.json"]
+    },
+    {
+      "id": "P165-S2",
+      "title": "KG drill-in: server-side subgraph, side panel, path mode",
+      "description": "Server-side subgraph endpoint (cluster-first: communities → expand → neighbors) ends full-graph.json downloads. Node side panel: properties, source-document provenance, connected entities, expand-from-here. Path-finding between two nodes as UI mode + platform_graph_path tool. Search-to-focus.",
+      "acceptanceCriteria": [
+        "50k-node fixture initial paint < 3s via cluster view (benchmark)",
+        "Community → node → source document drill round-trip — verify in browser using dev-browser skill",
+        "platform_graph_path registered + reachability green",
+        "cd orchestrator && pytest -q green"
+      ],
+      "files": ["orchestrator/api/", "frontend/components/knowledge/"]
+    },
+    {
+      "id": "P165-S3",
+      "title": "LLM community reports (build-time), editable labels",
+      "description": "GraphRAG-pattern community titles/summaries/rank generated at build time on the cheap model (D11); sidebar lists named clusters; labels user-editable + persisted; reports flow through platform_graph_communities (rewired PRD-154 S6).",
+      "acceptanceCriteria": [
+        "Build produces titled communities (LLM mocked for determinism)",
+        "Label edit persists (API test)",
+        "cd orchestrator && pytest -q green"
+      ],
+      "files": ["orchestrator/modules/", "frontend/components/knowledge/"]
+    },
+    {
+      "id": "P165-S4",
+      "title": "CodeGraph as an agent capability",
+      "description": "Register the three implemented-but-unregistered executors (call-graph :517, architecture :546, /ask :589 in api/codegraph.py) + list_projects/get_symbol via the 3-file pattern (Q32: all agents). Semantic routing inside search_codebase; results carry path:line + signature + staleness stamp. Auto-index on repo connect; webhook-triggered incremental reindex honoring auto_reindex (Q33). GitHub App installation tokens replace PAT handling (Q36). DELETE EnhancedVectorStore — standardize on the working pgvector path (Q34).",
+      "acceptanceCriteria": [
+        "Agent answers 'what calls X?' and 'what breaks if I change Y?' on a seeded repo (integration tests)",
+        "Webhook reindex test; stale results stamped",
+        "EnhancedVectorStore deleted (no shim); reachability green",
+        "cd orchestrator && pytest -q green"
+      ],
+      "files": ["orchestrator/api/codegraph.py", "orchestrator/modules/codegraph/", "orchestrator/modules/tools/discovery/"]
+    },
+    {
+      "id": "P165-S5",
+      "title": "Legacy deletion + canonical naming",
+      "description": "DELETE the PRD-21 entity explorer UI + its endpoints (auth-gated since PRD-154; Q23/Q24 resolution), dead viz controls, and rename every user-facing 'Business Graph' to 'Knowledge Graph' (CLAUDE.md §10 canonical terms, document-management.tsx:685-688 etc.).",
+      "acceptanceCriteria": [
+        "Endpoints + components deleted; contract suite green",
+        "Grep gate: zero user-facing 'Business Graph'",
+        "Typecheck passes; cd orchestrator && pytest -q green"
+      ],
+      "files": ["orchestrator/api/knowledge_graph.py", "frontend/components/documents/document-management.tsx"]
+    }
+  ]
+}
