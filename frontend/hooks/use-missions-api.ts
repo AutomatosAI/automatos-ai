@@ -81,6 +81,27 @@ export interface FieldPattern {
   created_at: string
   last_accessed: string
   is_archived: boolean
+  // PRD-166 S1: provenance + soft-archive surfaced for the inspector.
+  mission_id?: string | null
+  expired_at?: string | null
+}
+
+// PRD-166 S4: retrieval-trace — which patterns fired for a query and why.
+export interface FieldTraceHit {
+  id: string
+  key: string
+  value: string
+  score: number
+  cosine_similarity: number
+  decayed_strength: number
+  agent_id: number
+  mission_id?: string | null
+}
+
+export interface FieldTraceResponse {
+  field_id: string | null
+  query: string
+  results: FieldTraceHit[]
 }
 
 export interface FieldStability {
@@ -124,6 +145,18 @@ export function useMissionField(id: string | null, enabled = true) {
     enabled: !!id && enabled,
     staleTime: 5_000,
     refetchInterval: 8_000,
+  })
+}
+
+// PRD-166 S4: run a retrieval-trace query against a mission's field for the
+// inspector (which patterns fire for a given query, and why).
+export function useFieldQuery(missionId: string | null) {
+  return useMutation<FieldTraceResponse, Error, { query: string; topK?: number }>({
+    mutationFn: ({ query, topK }) =>
+      apiClient.request<FieldTraceResponse>(`/api/missions/${missionId}/field/query`, {
+        method: 'POST',
+        body: JSON.stringify({ query, top_k: topK ?? 0 }) as unknown as BodyInit,
+      }),
   })
 }
 

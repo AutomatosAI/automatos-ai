@@ -277,7 +277,7 @@ export function MissionFieldPanel({ missionId, className }: MissionFieldPanelPro
             <span className="text-xs">Field is empty. Waiting for agent activity...</span>
           </div>
         ) : (
-          <MissionFieldViz patterns={patterns} className="absolute inset-0" />
+          <MissionFieldViz missionId={missionId} patterns={patterns} className="absolute inset-0" />
         )}
       </div>
     </div>

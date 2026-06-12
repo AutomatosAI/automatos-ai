@@ -103,7 +103,6 @@ const PAGE_MOCK_CONFIG: Record<string, boolean> = {
   'analytics': false,        // ✅ Use real APIs - working endpoints
   'context': false,          // ✅ Use real APIs - all context endpoints working
   'memory': false,           // ✅ Use real APIs - all memory endpoints working
-  'field-theory': false,     // ✅ Use real APIs - all field theory endpoints working
   'multi-agent': false,      // ✅ Use real APIs - coordination/reasoning working
   'orchestrator': false,     // ✅ Use real APIs - task submission working
 
@@ -2009,40 +2008,6 @@ class ApiClient {
   }) {
     return this.request(`/api/agents/${agentId}/persona`, {
       method: 'PUT',
-      body: JSON.stringify(data)
-    })
-  }
-
-  // Enhanced Analytics Methods
-  // ===== FIELD THEORY ENDPOINTS (All Working ✅) =====
-  async getFieldTheoryHealth() {
-    return this.request('/api/field-theory/health')
-  }
-
-  async updateFieldContext(data: { session_id: string, context_data: any, field_type?: string }) {
-    return this.request('/api/field-theory/fields/update', {
-      method: 'POST',
-      body: JSON.stringify(data)
-    })
-  }
-
-  async propagateField(data: { source: string, targets?: string[], propagation_steps?: number }) {
-    return this.request('/api/field-theory/fields/propagate', {
-      method: 'POST',
-      body: JSON.stringify(data)
-    })
-  }
-
-  async modelFieldInteractions(data: { task_id: number, user_id: number, similarity_threshold?: number }) {
-    return this.request('/api/field-theory/fields/interactions', {
-      method: 'POST',
-      body: JSON.stringify(data)
-    })
-  }
-
-  async manageDynamicFields(data: { session_id: string, context?: any }) {
-    return this.request('/api/field-theory/fields/dynamic', {
-      method: 'POST',
       body: JSON.stringify(data)
     })
   }

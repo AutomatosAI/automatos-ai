@@ -1085,6 +1085,19 @@ async def get_system_state_summary(ctx: RequestContext = Depends(get_request_con
     Provides a comprehensive summary of the current system state.
     """
     try:
+        # PRD-166 S2: real field-memory health — ping Qdrant instead of a
+        # hardcoded 'healthy', so an outage is actually reported.
+        field_theory_status = "unknown"
+        try:
+            from modules.context.factory import get_shared_context
+            _field = get_shared_context()
+            _inner = getattr(_field, "_inner", _field) if _field else None
+            if _inner is not None and hasattr(_inner, "health"):
+                _h = await _inner.health()
+                field_theory_status = "healthy" if _h.get("healthy") else "unhealthy"
+        except Exception:
+            field_theory_status = "unhealthy"
+
         state_summary = {
             "summary_id": f"summary_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}",
             "system_status": "operational",
@@ -1093,7 +1106,7 @@ async def get_system_state_summary(ctx: RequestContext = Depends(get_request_con
                 "api_server": "healthy",
                 "database": "healthy",
                 "multi_agent_system": "healthy",
-                "field_theory": "healthy",
+                "field_theory": field_theory_status,
                 "document_processor": "healthy",
                 "learning_system": "healthy"
             },
