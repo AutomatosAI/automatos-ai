@@ -99,11 +99,10 @@ def test_embedding_similarity_ranks_closest_pair_first():
 
 
 def test_get_similar_examples_prefers_embeddings_over_keyword():
-    store = _store()
     db = MagicMock()
     em = MagicMock()
     em.embed_text.return_value = [1.0, 0.0]
-    store.embedding_manager = em
+    store = _store(db_session=db, embedding_manager=em)
 
     rows = [
         _example(1, "totally different words", [1.0, 0.02]),  # close by vector

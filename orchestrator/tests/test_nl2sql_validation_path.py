@@ -119,19 +119,26 @@ class TestValidatorBlocksUnsafeSQL:
 
     def test_validator_raises_on_subquery_insert(self):
         v = VAL_MOD.SQLValidator(max_limit=100)
-        # The "must start with SELECT" check passes; the deny-keyword scan
-        # over the full statement catches the hidden INSERT.
-        with pytest.raises(VAL_MOD.SQLValidationError, match="forbidden keyword"):
+        # A write hidden in a subquery is rejected. PRD-160 S2: the AST
+        # validator refuses any non-SELECT node (and unparseable SQL) rather
+        # than scanning for keyword substrings.
+        with pytest.raises(VAL_MOD.SQLValidationError):
             v.validate_and_rewrite(
                 "SELECT * FROM (INSERT INTO users (name) VALUES ('x') "
                 "RETURNING *) AS t"
             )
 
-    def test_validator_raises_on_cte_union_escape(self):
+    def test_validator_blocks_union_escape_to_unlisted_table(self):
         v = VAL_MOD.SQLValidator(max_limit=100)
-        with pytest.raises(VAL_MOD.SQLValidationError):
+        # PRD-160 S2: a UNION (or CTE) that reaches a table outside the
+        # connection's schema is blocked — the AST validator allowlists EVERY
+        # table in the tree, including inside UNIONs/CTEs (the old regex blocked
+        # them wholesale, which also rejected safe CTEs).
+        schema = {"tables": [{"name": "users"}]}
+        with pytest.raises(VAL_MOD.SQLValidationError, match="unknown table"):
             v.validate_and_rewrite(
-                "WITH x AS (SELECT * FROM users) SELECT * FROM x"
+                "SELECT * FROM users UNION SELECT * FROM secrets",
+                schema_metadata=schema,
             )
 
     def test_validator_caps_limit_for_read_only_safety(self):
@@ -236,9 +243,9 @@ class TestValidatorRunsBeforeExecute:
         # PRD-160 S2: the dry-run EXPLAIN must precede the real execution so
         # bad SQL fails on the planner, cheaply, and feeds self-correction.
         idx_explain = guards_body.find('EXPLAIN {sql}')
-        idx_execute = guards_body.find("conn.execute(text(sql))")
+        idx_execute = guards_body.find("conn.execute(text(sql)")  # may be (sql) or (sql, binds)
         assert idx_explain >= 0, "EXPLAIN dry-run not found in _run_sql_with_guards"
-        assert idx_execute >= 0, "conn.execute(text(sql)) not found in _run_sql_with_guards"
+        assert idx_execute >= 0, "conn.execute(text(sql) not found in _run_sql_with_guards"
         assert idx_explain < idx_execute, "EXPLAIN must run before the real query"
 
     def test_guards_apply_statement_timeout(self, guards_body: str):
@@ -450,10 +457,12 @@ def _load_service_module():
         "modules.nl2sql.query.nl2sql_service": {
             "NaturalLanguageToSQLService": MagicMock,
         },
-        "modules.nl2sql.query.validator": {
-            "SQLValidator": MagicMock,
-            "SQLValidationError": Exception,
-        },
+        # NOTE: modules.nl2sql.query.validator is intentionally NOT stubbed.
+        # Post-PRD-160 S2 the validator is lightweight (sqlglot + stdlib), so
+        # service.py imports the real one. Stubbing it here used to overwrite
+        # the real module's SQLValidationError with Exception, which corrupted
+        # SQLValidator for every other test in the session (test_validator's
+        # reject tests then caught nothing).
         "modules.tools.services.pandas_ai_service": {
             "get_pandasai_service": MagicMock,
         },
@@ -461,13 +470,18 @@ def _load_service_module():
     for name, attrs in stub_targets.items():
         mod = sys.modules.get(name)
         if mod is None:
+            # We own this stub module — populate the symbols service.py imports.
             mod = types.ModuleType(name)
             sys.modules[name] = mod
-        # Add (or overwrite) the symbols the service file imports — even if
-        # the module was previously path-stubbed, we still need its
-        # attributes for ``from X import Y`` to resolve.
-        for k, v in attrs.items():
-            setattr(mod, k, v)
+            for k, v in attrs.items():
+                setattr(mod, k, v)
+        else:
+            # A real (or path-stubbed) module is already present. Only ADD
+            # symbols that are missing — NEVER clobber a real attribute, or we
+            # corrupt that module for the rest of the test session.
+            for k, v in attrs.items():
+                if not hasattr(mod, k):
+                    setattr(mod, k, v)
 
     # core.models.database_knowledge.DatabaseKnowledgeSource — used inside
     # _get_source for the query model class. The column attributes need
@@ -532,7 +546,30 @@ def _load_service_module():
     return mod
 
 
-SERVICE_MOD = _load_service_module()
+def _load_service_module_isolated():
+    """Load the service module, then restore sys.modules to its prior state.
+
+    ``_load_service_module`` loads service.py under the CANONICAL name
+    ``modules.nl2sql.service`` (and stubs its deps) so this file can probe
+    ``DatabaseKnowledgeService`` without the heavy package __init__. Left in
+    place, those canonical-name stubs leak into every other test module in the
+    same pytest process (e.g. test_nl2sql_accuracy_stack imports the real
+    service). We keep the returned module (this file's private copy) but snap
+    sys.modules back so nothing else sees the stubs. Modules imported during
+    the load are fully initialised, so removing+re-importing them later is safe.
+    """
+    _snapshot = dict(sys.modules)
+    try:
+        return _load_service_module()
+    finally:
+        for _k in list(sys.modules):
+            if _k not in _snapshot:
+                del sys.modules[_k]
+            elif sys.modules[_k] is not _snapshot[_k]:
+                sys.modules[_k] = _snapshot[_k]
+
+
+SERVICE_MOD = _load_service_module_isolated()
 
 
 class TestGetSourceFiltersByWorkspace:

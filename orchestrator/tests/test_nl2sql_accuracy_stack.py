@@ -155,6 +155,8 @@ def test_self_correction_recovers_within_two_retries():
     source = SimpleNamespace(
         dialect="postgresql", workspace_id="ws-1", credential_id=1,
         schema_metadata={"tables": [{"name": "users"}]},
+        semantic_layer=None,  # PRD-160 S4 reads source.semantic_layer
+        query_timeout_seconds=30, max_rows_limit=1000,
     )
     svc._get_source = AsyncMock(return_value=source)
     svc._augment_schema_with_samples = MagicMock()
