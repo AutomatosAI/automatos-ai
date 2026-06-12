@@ -672,6 +672,11 @@ class UnifiedMemoryService:
 
         try:
             results = await self._mem0.get_all(user_id=user_id, limit=limit, workspace_id=workspace_id)
+            # PRD-159 S3: daily logs are time-ordered (newest first) and bounded,
+            # not an arbitrary first-N slice — recall surfaces the most recent
+            # operational activity deterministically.
+            results.sort(key=lambda m: (m or {}).get("created_at") or "", reverse=True)
+            results = results[:limit]
             logger.debug(
                 "[UnifiedMemoryService] get_all_daily_logs user_id=%s → %d items",
                 user_id,
