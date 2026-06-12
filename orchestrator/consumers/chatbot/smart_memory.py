@@ -81,6 +81,10 @@ class SmartMemoryManager:
         self._cache_ttl = 120  # 2 minutes
         self._storage_queue: List[Tuple] = []
         self._storage_task = None
+        # PRD-159 S5: honest memory_stored SSE — the tier that actually persisted
+        # and how many durable facts were written this turn (0 → no SSE).
+        self._last_tier: Optional[str] = None
+        self._last_l3_facts_stored: int = 0
 
     @property
     def unified_service(self):
@@ -545,6 +549,9 @@ class SmartMemoryManager:
             # visible failure via False return (§H: never silent), even though
             # L2 still got the verbatim turn.
             l3_ok = any(r[1] and not r[1].get("error") for r in results)
+            # PRD-159 S5: how many durable facts actually persisted to L3 this
+            # turn — drives the honest memory_stored SSE (0 → no event fired).
+            self._last_l3_facts_stored = len(facts) if l3_ok else 0
             success = (l3_ok or not facts) and not l3_raised
 
             if success:

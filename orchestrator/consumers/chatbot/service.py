@@ -1131,8 +1131,13 @@ class StreamingChatService:
         if latest_text and full_response and smart_chat:
             try:
                 _stored = await smart_chat.store(latest_text, full_response, chat_id)
-                if _stored:
-                    _tier = getattr(smart_chat.orchestrator.memory_manager, '_last_tier', 'conversation')
+                _mm = smart_chat.orchestrator.memory_manager
+                _facts_stored = getattr(_mm, '_last_l3_facts_stored', 0)
+                # PRD-159 S5: honest event — emit ONLY after durable facts were
+                # actually persisted to L3, with the real tier. Zero-fact turns
+                # (e.g. "user said hello") produce NO memory_stored event.
+                if _stored and _facts_stored > 0:
+                    _tier = getattr(_mm, '_last_tier', 'conversation')
                     yield self.streaming_handler.format_aisdk_memory_stored(
                         memory={
                             "userMessage": latest_text[:200],
