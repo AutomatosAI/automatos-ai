@@ -506,6 +506,7 @@ class CoordinatorService:
         self._scheduler = None
         self._owns_scheduler: bool = False
         self._last_archive_at: Optional[datetime] = None
+        self._last_field_compaction_at: Optional[datetime] = None  # PRD-166 S1
         self._field = None  # Lazy-init via factory
 
     def _get_field(self):
@@ -544,10 +545,12 @@ class CoordinatorService:
             )
             team_ids = [a.id for a in agents]
 
-            # Seed the field with the mission goal
+            # Seed the field with the mission goal. PRD-166 S1: carry provenance
+            # so patterns keep workspace/mission lineage into the workspace field.
             field_id = await field.create_context(
                 team_agent_ids=team_ids,
                 initial_data={"mission_goal": run.goal},
+                provenance={"workspace_id": str(run.workspace_id), "mission_id": str(run.id)},
             )
 
             # Store field_id in run config (no migration needed — JSONB)
@@ -595,6 +598,11 @@ class CoordinatorService:
                 value=str(task.output)[:4000],  # Cap to prevent embedding blow-up
                 agent_id=agent_id,
                 strength=1.0,
+                provenance={
+                    "workspace_id": str(run.workspace_id),
+                    "mission_id": str(run.id),
+                    "task_id": str(task.id),
+                },
             )
             logger.info(
                 "[PRD-108] Injected output from task %s into field %s",
@@ -636,6 +644,7 @@ class CoordinatorService:
                     ),
                     agent_id=0,
                     strength=1.2,  # Above default so reference material ranks higher
+                    provenance={"workspace_id": str(workspace_id)},
                 )
                 logger.info("[PRD-108] Seeded field %s with doc %s (%s)", field_id, doc_id, doc.filename)
             except Exception as e:
@@ -791,11 +800,23 @@ class CoordinatorService:
             .limit(50)
             .all()
         )
+        field = self._get_field()
+        field_inner = getattr(field, "_inner", field) if field else None
         for run in terminal_with_fields:
             cfg = run.config or {}
             field_id = cfg.get("field_id")
             if not field_id or cfg.get("field_archived"):
                 continue
+            # PRD-166 S1: merge the mission field into the workspace-persistent
+            # field — stamp workspace_id + expired_at on its points so they join
+            # cross-mission recall while the mission-scoped view soft-archives.
+            if field_inner is not None and hasattr(field_inner, "archive_into_workspace"):
+                try:
+                    await field_inner.archive_into_workspace(field_id, str(run.workspace_id))
+                except Exception:
+                    logger.warning(
+                        "[Field] archive_into_workspace failed for run %s", run.id, exc_info=True,
+                    )
             # Archive in place — data and field_id are retained so the
             # /field endpoint can still read this mission's field.
             run.config = {
@@ -1042,6 +1063,9 @@ class CoordinatorService:
                 # --- Save output docs for completed missions ---
                 await self._save_pending_output_documents(db)
                 db.commit()
+
+                # --- PRD-166 S1: field compaction (throttled to once per hour) ---
+                await self._maybe_compact_fields(summary)
 
                 # --- Archive phase (throttled to once per hour) ---
                 self._maybe_archive(db, summary)
@@ -2941,6 +2965,32 @@ class CoordinatorService:
     # ------------------------------------------------------------------
     # Archival (PRD-82B US-009)
     # ------------------------------------------------------------------
+
+    async def _maybe_compact_fields(self, summary: Dict[str, Any]) -> None:
+        """PRD-166 S1: retention/compaction for field memory — prune dead patterns
+        so the shared Qdrant collection stays bounded as workspace fields compound
+        across missions. Throttled to once per hour (expensive scan); errors never
+        affect the rest of the tick. The prune decision is the unit-tested
+        ``field_scoring.is_prunable``."""
+        now = datetime.now(timezone.utc)
+        if (
+            self._last_field_compaction_at is not None
+            and (now - self._last_field_compaction_at).total_seconds() < 3600
+        ):
+            return
+        self._last_field_compaction_at = now
+
+        field = self._get_field()
+        inner = getattr(field, "_inner", field) if field else None
+        if inner is None or not hasattr(inner, "compact"):
+            return
+        try:
+            pruned = await inner.compact()
+            if pruned:
+                summary["field_pruned"] = pruned
+                logger.info("[Coordinator] Field compaction pruned %d pattern(s)", pruned)
+        except Exception:
+            logger.warning("[Coordinator] Field compaction failed", exc_info=True)
 
     def _maybe_archive(self, db: Session, summary: Dict[str, Any]) -> None:
         """

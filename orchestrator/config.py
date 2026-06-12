@@ -776,6 +776,18 @@ class Config:
     FIELD_REINFORCE_CAP: float = float(os.getenv("FIELD_REINFORCE_CAP", "2.0"))
     FIELD_ARCHIVAL_THRESHOLD: float = float(os.getenv("FIELD_ARCHIVAL_THRESHOLD", "0.05"))
     FIELD_BOUNDARY_PERMEABILITY: float = float(os.getenv("FIELD_BOUNDARY_PERMEABILITY", "1.0"))
+    # PRD-166 S2: adaptive half-life — each access divides the decay rate by
+    # (1 + scale·access_count), so reused patterns persist longer.
+    FIELD_HALF_LIFE_ACCESS_SCALE: float = float(os.getenv("FIELD_HALF_LIFE_ACCESS_SCALE", "0.5"))
+    # PRD-166 S2/D11: query shape is config, not hardcoded caps.
+    FIELD_QUERY_TOP_K: int = int(os.getenv("FIELD_QUERY_TOP_K", "10"))
+    FIELD_QUERY_OVER_FETCH: int = int(os.getenv("FIELD_QUERY_OVER_FETCH", "3"))
+    # Token budget for a field digest/query result block; over-budget → truncated=True.
+    FIELD_QUERY_TOKEN_BUDGET: int = int(os.getenv("FIELD_QUERY_TOKEN_BUDGET", "1200"))
+    # PRD-166 S1: compaction prunes points whose decayed strength falls below this
+    # HARD floor (stricter than archival — archived stays queryable, pruned is deleted).
+    FIELD_PRUNE_THRESHOLD: float = float(os.getenv("FIELD_PRUNE_THRESHOLD", "0.01"))
+    FIELD_COMPACTION_MAX_SCAN: int = int(os.getenv("FIELD_COMPACTION_MAX_SCAN", "10000"))
     SHARED_CONTEXT_BACKEND: str = os.getenv("SHARED_CONTEXT_BACKEND", "vector_field")  # "vector_field" or "redis"
 
     # =============================================================================

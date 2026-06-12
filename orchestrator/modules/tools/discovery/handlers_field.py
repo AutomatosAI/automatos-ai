@@ -40,56 +40,75 @@ async def field_query(
     params: Dict[str, Any],
     **kwargs,
 ) -> Dict[str, Any]:
-    """Query the shared mission field for relevant patterns."""
+    """Query the field for relevant patterns.
+
+    PRD-166 S1/Q20: prefer the active mission field (``field_id``); with no
+    mission field, fall back to **workspace-persistent** recall across every
+    mission that has run here. Only fails when neither has any memory yet.
+    PRD-166 S2/D11: the result block is trimmed to a token budget and reports
+    ``truncated`` — never a silent cap.
+    """
     query_text = params.get("query", "")
-    top_k = params.get("top_k", 10)
+    top_k = params.get("top_k") or 0  # 0 → config default (FIELD_QUERY_TOP_K)
     field_id = params.get("field_id") or kwargs.get("field_id")
     agent_id = _actor_agent_id(params, kwargs)
 
     if not query_text:
         return {"success": False, "error": "query is required"}
 
-    if not field_id:
-        return {
-            "success": False,
-            "error": "No shared field available — this tool only works during missions.",
-        }
-
     try:
+        from config import config
+        from modules.context import field_scoring
         from modules.context.factory import get_shared_context
 
         field = get_shared_context()
         if not field:
             return {"success": False, "error": "Shared context backend unavailable"}
-        results = await field.query(
-            context_id=field_id,
-            query=query_text,
-            agent_id=agent_id,
-            top_k=top_k,
-        )
+        inner = getattr(field, "_inner", field)
+
+        scope = "mission"
+        if field_id:
+            results = await field.query(
+                context_id=field_id, query=query_text, agent_id=agent_id, top_k=top_k,
+            )
+        elif hasattr(inner, "query_workspace"):
+            # Q20: no active mission field → workspace-persistent recall (if any).
+            scope = "workspace"
+            results = await inner.query_workspace(
+                str(workspace_id), query_text, agent_id, top_k,
+            )
+        else:
+            results = []
 
         if not results:
+            if not field_id and scope == "workspace":
+                return {
+                    "success": True, "results": [], "scope": scope, "truncated": False,
+                    "message": "No field memory yet — patterns appear once missions run in this workspace.",
+                }
             return {
-                "success": True,
-                "results": [],
+                "success": True, "results": [], "scope": scope, "truncated": False,
                 "message": "No relevant patterns found in the field.",
             }
 
-        # Format for agent consumption
-        formatted = []
-        for r in results:
-            formatted.append({
-                "key": r["key"],
-                "value": r["value"],
-                "relevance": round(r["score"], 4),
-                "from_agent": r["agent_id"],
-                "strength": round(r["decayed_strength"], 4),
-            })
+        formatted = [{
+            "key": r["key"],
+            "value": r["value"],
+            "relevance": round(r["score"], 4),
+            "from_agent": r.get("agent_id", 0),
+            "strength": round(r["decayed_strength"], 4),
+            "mission_id": r.get("mission_id"),
+        } for r in results]
 
+        kept, truncated = field_scoring.budget_results(
+            formatted, config.FIELD_QUERY_TOKEN_BUDGET,
+        )
         return {
             "success": True,
-            "results": formatted,
-            "count": len(formatted),
+            "results": kept,
+            "count": len(kept),
+            "truncated": truncated,
+            "scope": scope,
         }
 
     except Exception as e:
