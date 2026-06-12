@@ -27,6 +27,7 @@ load_dotenv(env_path)
 
 # Import centralized config
 from config import config
+from router_manifest import mount_manifest_routers  # PRD-155 S3: fail-loud router mounts
 
 # Import database and models
 from core.database.database import init_database, get_db, SessionLocal
@@ -39,14 +40,6 @@ from api.workflow_templates import router as workflow_templates_router
 from api.workflow_recipes import router as workflow_recipes_router, webhook_router as recipe_webhook_router
 from api.webhooks import router as general_webhooks_router
 from api.marketplace import router as marketplace_router
-try:
-    from api.shopify import router as shopify_router
-except ImportError:
-    shopify_router = None
-try:
-    from api.sites import router as sites_router
-except ImportError:
-    sites_router = None
 from api.documents import router as documents_router
 from api.cache import router as cache_router
 from api.system import router as system_router
@@ -66,16 +59,6 @@ from api.system_settings import router as system_settings_router  # System Setti
 from api.tools import router as tools_router
 from api.wizard import router as wizard_router  # PRD-130: Business Intake Wizard (PoC)
 from api.onboarding_agents import router as onboarding_agents_router
-# PRD-36: Composio Integration (optional module)
-try:
-    from api.composio import router as composio_router
-except ImportError:
-    composio_router = None
-# PRD-42: Cloud Document Sync with S3 Vectors (optional module)
-try:
-    from api.cloud_documents import router as cloud_documents_router
-except ImportError:
-    cloud_documents_router = None
 from api.statistics import router as statistics_router
 from api.permissions import router as permissions_router
 from api.skills import router as skills_router
@@ -86,10 +69,6 @@ from api.team import router as team_router, public_router as team_public_router 
 from api.routing import router as routing_router  # PRD-50: Universal Orchestrator Router
 from api.admin_plugins import router as admin_plugins_router  # PRD-42: Admin Plugin Marketplace
 from api.admin_workspaces import router as admin_workspaces_router  # Admin workspace lifecycle (pause/delete)
-try:
-    from api.admin_prompts import router as admin_prompts_router  # PRD-58: System Prompt Management
-except ImportError:
-    admin_prompts_router = None
 from api.marketplace_plugins import router as marketplace_plugins_router  # PRD-42: Public Marketplace Plugins
 from api.workspace_plugins import router as workspace_plugins_router  # PRD-42: Workspace Plugin Enablement
 from api.workspace_skills import router as workspace_skills_router  # PRD-71: Workspace Skill Enablement
@@ -100,37 +79,6 @@ from api.notifications import (  # PRD-128: Unified notification system
     router as notifications_router,
     preferences_router as notification_preferences_router,
 )
-# Pilot Helper Widget: Jira bug reports (optional — Composio dependency)
-try:
-    from api.bug_reports import router as bug_reports_router
-except ImportError:
-    bug_reports_router = None
-# US-012: Widget Email operations (optional — Composio dependency)
-try:
-    from api.widget_email import router as widget_email_router
-except ImportError:
-    widget_email_router = None
-# PRD-37: SaaS Foundation stubs (optional — may not exist in all branches)
-try:
-    from api.auth import router as auth_router
-except ImportError:
-    auth_router = None
-try:
-    from api.api_keys import router as api_keys_router
-except ImportError:
-    api_keys_router = None
-try:
-    from api.evaluation import router as evaluation_router
-except ImportError:
-    evaluation_router = None
-try:
-    from api.widgets.router import router as widget_api_router
-except ImportError:
-    widget_api_router = None
-try:
-    from api.widget_marketplace import router as widget_marketplace_router
-except ImportError:
-    widget_marketplace_router = None
 
 # PRD-56: Workspace Tasks
 from api.tasks import router as tasks_router
@@ -140,12 +88,6 @@ from api.attachments import router as attachments_router
 
 # PRD-66: Workspace File Browser (Code Viewer Widget)
 from api.workspace_files import router as workspace_files_router
-# PRD-66: Workspace GitHub Integration (repo listing + cloning)
-try:
-    from api.workspace_github import router as workspace_github_router
-except ImportError:
-    logging.getLogger(__name__).warning("workspace_github router unavailable", exc_info=True)
-    workspace_github_router = None
 
 # Import MISSING API routers
 from api.analytics_api import router as analytics_api_router
@@ -162,11 +104,6 @@ from api.recommendations import router as recommendations_router
 from api.chat import router as chat_router  # PRD-27: New streaming chat with history
 # document_processing removed - use api/documents.py instead
 from api.agent_endpoints import router as agent_endpoints_router
-# PRD-37: Workspace context (optional module - may not exist in all branches)
-try:
-    from api.workspaces import router as workspaces_router
-except ImportError:
-    workspaces_router = None
 # redis_websocket removed - using AI SDK SSE streaming instead
 from api.models_endpoints import router as models_router  # PRD-15: Model management
 from api.llm_marketplace import router as llm_marketplace_router  # PRD-54: LLM Marketplace
@@ -180,39 +117,6 @@ from api.database_knowledge import router as database_knowledge_router  # PRD-21
 from api.database_analytics import router as database_analytics_router  # PRD-21: Real database analytics
 from api.document_generation import router as document_generation_router  # PRD-63: Document Generation
 from api.widget_workflows import router as widget_workflows_router  # US-014: Widget Workflow Control
-
-# PRD-72: Activity Command Centre
-try:
-    from api.activity import router as activity_router
-except ImportError:
-    activity_router = None
-
-# PRD-55: Autonomous Assistant Platform (optional modules)
-try:
-    from api.heartbeat import router as heartbeat_router
-except ImportError:
-    heartbeat_router = None
-try:
-    from api.channels import router as channels_router
-except ImportError:
-    channels_router = None
-
-# PRD-72: Activity Command Centre
-try:
-    from api.activity import router as activity_router
-except ImportError:
-    activity_router = None
-
-# PRD-74: Voice Chat
-try:
-    from api.chat_voice import router as chat_voice_router
-except ImportError:
-    chat_voice_router = None
-# PRD-74 Phase 2: Voice Profiles
-try:
-    from api.voice_profiles import router as voice_profiles_router
-except ImportError:
-    voice_profiles_router = None
 
 # Import Dashboard Integration (PRD-06)
 from api.dashboard_integration import (
@@ -822,17 +726,11 @@ app.add_middleware(
 )
 
 # PRD-38.4: Widget SDK middleware
-try:
-    from api.widgets.cors import WidgetCORSMiddleware
-    app.add_middleware(WidgetCORSMiddleware)
-except ImportError:
-    pass
+from api.widgets.cors import WidgetCORSMiddleware
+from api.widgets.rate_limit import WidgetRateLimitMiddleware
 
-try:
-    from api.widgets.rate_limit import WidgetRateLimitMiddleware
-    app.add_middleware(WidgetRateLimitMiddleware)
-except ImportError:
-    pass
+app.add_middleware(WidgetCORSMiddleware)
+app.add_middleware(WidgetRateLimitMiddleware)
 
 # Rate limiting (US-017)
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -963,10 +861,6 @@ app.include_router(workflow_recipes_router)  # US-009: Renamed from templates
 app.include_router(recipe_webhook_router)  # Recipe webhook triggers (no auth)
 app.include_router(general_webhooks_router)  # General workspace webhooks (no auth)
 app.include_router(marketplace_router)  # Community Marketplace
-if shopify_router is not None:
-    app.include_router(shopify_router)  # Shopify App Store provisioning & webhook forwarding
-if sites_router is not None:
-    app.include_router(sites_router)  # PRD-008-A: per-merchant Sites CRUD (any channel type)
 app.include_router(document_generation_router)  # PRD-63: Must be BEFORE documents_router (has /templates, /generated specific routes that would otherwise be caught by documents_router's /{document_id} catch-all → 422)
 app.include_router(documents_router)
 app.include_router(blog_router)  # Authenticated blog management (Deliverables → Blogs)
@@ -989,10 +883,6 @@ app.include_router(system_settings_router)  # System Settings Management
 app.include_router(tools_router)
 app.include_router(wizard_router)  # PRD-130: Business Intake Wizard (PoC)
 app.include_router(onboarding_agents_router)
-if composio_router is not None:
-    app.include_router(composio_router)  # PRD-36: Composio Integration (500+ tools)
-if cloud_documents_router is not None:
-    app.include_router(cloud_documents_router)  # PRD-42: Cloud Document Sync
 app.include_router(statistics_router)
 app.include_router(permissions_router)
 app.include_router(skills_router)
@@ -1014,22 +904,16 @@ app.include_router(recommendations_router)
 app.include_router(chat_router)  # PRD-27: New streaming chat with SSE, history, and artifacts
 # document_processing_router removed - api/documents.py handles all document processing
 app.include_router(agent_endpoints_router)
-if workspaces_router is not None:
-    app.include_router(workspaces_router)  # PRD-37: Workspace context
 app.include_router(database_knowledge_router)  # PRD-21: Database Knowledge
 app.include_router(database_analytics_router)  # PRD-21: Database Analytics
 app.include_router(tasks_router)  # PRD-56: Workspace task management
 app.include_router(attachments_router)  # PRD-127: Ephemeral multimodal attachments
 app.include_router(workspace_files_router)  # PRD-66: Workspace file browser
-if workspace_github_router is not None:
-    app.include_router(workspace_github_router)  # PRD-66: Workspace GitHub integration
 app.include_router(team_router)  # PRD-37: Team Management
 app.include_router(team_public_router)  # Accept-invitation public endpoints
 app.include_router(routing_router)  # PRD-50: Universal Orchestrator Router
 app.include_router(admin_plugins_router)  # PRD-42: Admin Plugin Marketplace
 app.include_router(admin_workspaces_router)  # Admin workspace lifecycle
-if admin_prompts_router is not None:
-    app.include_router(admin_prompts_router)  # PRD-58: System Prompt Management
 app.include_router(marketplace_plugins_router)  # PRD-42: Public Marketplace Plugins
 app.include_router(llm_marketplace_router)  # PRD-54: LLM Provider Marketplace
 app.include_router(openrouter_marketplace_router)  # OpenRouter Model Cache (separate sync)
@@ -1043,84 +927,16 @@ app.include_router(workspace_skills_router)  # PRD-71: Workspace Skill Enablemen
 app.include_router(agent_plugins_router)  # PRD-42: Agent Plugin Assignment
 app.include_router(personas_router)  # PRD-42: Persona API
 app.include_router(generated_images_router)  # Generated image serving from S3
-if bug_reports_router is not None:
-    app.include_router(bug_reports_router)  # Pilot Helper Widget: Jira bug reports
 app.include_router(notifications_router)  # PRD-128: Unified notification system
 app.include_router(notification_preferences_router)  # PRD-128: Notification preferences
-if widget_email_router is not None:
-    app.include_router(widget_email_router)  # US-012: Widget Email operations
-if auth_router is not None:
-    app.include_router(auth_router)  # PRD-37: Auth endpoints
-if api_keys_router is not None:
-    app.include_router(api_keys_router)  # PRD-37: API key management
-if widget_api_router is not None:
-    app.include_router(widget_api_router)  # PRD-38.4: Widget SDK API
-if widget_marketplace_router is not None:
-    app.include_router(widget_marketplace_router)  # PRD-38.5: Widget Marketplace
-if evaluation_router is not None:
-    app.include_router(evaluation_router)  # Evaluation methodologies
 
-# PRD-72: Activity Command Centre
-if activity_router is not None:
-    app.include_router(activity_router)
-
-# PRD-76: Agent Reports
-try:
-    from api.reports import router as reports_router
-    app.include_router(reports_router)
-except ImportError as e:
-    logger.warning("Could not load reports router: %s", e)
-
-# PRD-129: Workspace Outputs Hub — deliverables gallery
-try:
-    from api.deliverables import router as deliverables_router
-    app.include_router(deliverables_router)
-except ImportError as e:
-    logger.warning("Could not load deliverables router: %s", e)
-
-# PRD-72: Board Tasks
-try:
-    from api.board_tasks import router as board_tasks_router
-    app.include_router(board_tasks_router)
-except ImportError as e:
-    logger.warning("Could not load board tasks router: %s", e)
-
-# PRD-82A: Sequential Mission Coordinator
-try:
-    from api.missions import router as missions_router, agent_telemetry_router
-    app.include_router(missions_router)
-    app.include_router(agent_telemetry_router)
-except ImportError as e:
-    logger.warning("Could not load missions router: %s", e)
-
-# Cluster 1A: Assignments recommendations
-try:
-    from api.assignments import router as assignments_router
-    app.include_router(assignments_router)
-except ImportError as e:
-    logger.warning("Could not load assignments router: %s", e)
-
-# PRD-77: Agent Self-Scheduling
-try:
-    from api.scheduled_tasks import router as scheduled_tasks_router
-    app.include_router(scheduled_tasks_router)
-except ImportError as e:
-    logger.warning("Could not load scheduled tasks router: %s", e)
-
-# PRD-55: Autonomous Assistant Platform
-if heartbeat_router is not None:
-    app.include_router(heartbeat_router)
-if channels_router is not None:
-    app.include_router(channels_router)
-if activity_router is not None:
-    app.include_router(activity_router)  # PRD-72: Activity Command Centre
-
-# PRD-74: Voice Chat
-if chat_voice_router is not None:
-    app.include_router(chat_voice_router)
-# PRD-74 Phase 2: Voice Profiles
-if voice_profiles_router is not None:
-    app.include_router(voice_profiles_router)
+# PRD-155 S3: conditionally-mounted routers — previously a wall of silent
+# import guards that swallowed failures into `x_router = None` (two of which,
+# api.auth and api.evaluation, failed on every boot unnoticed). router_manifest.py
+# declares each as required or optional; a required router that fails to import now
+# aborts boot naming it, unless ALLOW_DEGRADED_BOOT is set. Mounted after the core
+# routers so it never disturbs their catch-all ordering.
+mount_manifest_routers(app, allow_degraded=config.ALLOW_DEGRADED_BOOT)
 
 # PRD-73: Monitoring Stack Integration
 # Prometheus /metrics endpoint + request instrumentation
@@ -1148,13 +964,6 @@ try:
     logger.info("Loki log query API enabled at /api/logs/query")
 except Exception as e:
     logger.warning(f"Loki log query API disabled: {e}")
-
-# PRD-74: Voice Chat (duplicate guard — first registration above)
-if chat_voice_router is not None:
-    pass  # already registered above
-# PRD-74 Phase 2: Voice Profiles (duplicate guard)
-if voice_profiles_router is not None:
-    pass  # already registered above
 
 # Register Dashboard Routes (PRD-06)
 register_dashboard_routes(app)

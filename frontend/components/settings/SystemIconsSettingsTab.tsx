@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { PremiumIcon, IconSelector } from '@/components/shared';
 import { Save, Loader2, ChevronDown, ChevronRight } from 'lucide-react';
 import { useSystemIcons, useIconStyle, useUpdateSystemConfigKey } from '@/hooks/use-system-config-api';
-import { useToast } from '@/components/ui/use-toast';
+import { toast } from 'sonner'
 import { cn } from '@/lib/utils';
 
 // ─── Icon Mapping Definitions ────────────────────────────────────────
@@ -295,7 +295,6 @@ function IconStylePicker({
 // ─── Main Component ──────────────────────────────────────────────────
 
 export function SystemIconsSettingsTab() {
-    const { toast } = useToast();
     const [mappings, setMappings] = useState<Record<string, string | null>>({});
 
     const { data: iconMappings, isLoading } = useSystemIcons();
@@ -321,17 +320,10 @@ export function SystemIconsSettingsTab() {
                 key: 'system_icon_mappings',
                 value: mappings
             });
-            toast({
-                title: 'Success',
-                description: 'System icon mappings saved successfully.',
-            });
+            toast('Success', { description: 'System icon mappings saved successfully.' });
         } catch (error) {
             console.error('Failed to save mappings', error);
-            toast({
-                title: 'Error',
-                description: 'Failed to save system icon mappings.',
-                variant: 'destructive'
-            });
+            toast.error('Error', { description: 'Failed to save system icon mappings.' });
         }
     };
 
@@ -348,17 +340,10 @@ export function SystemIconsSettingsTab() {
                 key: 'active_icon_style',
                 value: styleId,
             });
-            toast({
-                title: 'Style updated',
-                description: `Icons switched to ${ICON_STYLES.find(s => s.id === styleId)?.label ?? styleId}`,
-            });
+            toast('Style updated', { description: `Icons switched to ${ICON_STYLES.find(s => s.id === styleId)?.label ?? styleId}` });
         } catch (error) {
             console.error('Failed to update icon style', error);
-            toast({
-                title: 'Error',
-                description: 'Failed to update icon style.',
-                variant: 'destructive',
-            });
+            toast.error('Error', { description: 'Failed to update icon style.' });
         }
     };
 

@@ -37,7 +37,7 @@ import { Progress } from '@/components/ui/progress'
 import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { toast } from 'react-hot-toast'
+import { toast } from 'sonner'
 
 // API hooks
 import { useUploadDocument } from '@/hooks/use-document-api'

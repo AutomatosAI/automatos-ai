@@ -42,7 +42,7 @@ import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Skeleton } from '@/components/ui/skeleton'
-import { toast } from 'react-hot-toast'
+import { toast } from 'sonner'
 
 // API hooks
 import { useAgent, useAgentConfig, useUpdateAgentConfig } from '@/hooks/use-agent-api'

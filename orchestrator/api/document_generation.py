@@ -145,7 +145,7 @@ async def get_template(
     from modules.documents.template_service import DocumentTemplateService
 
     service = DocumentTemplateService(db)
-    template = service.get_template(template_id)
+    template = service.get_template(template_id, ctx.workspace_id)
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
     return {
@@ -177,7 +177,7 @@ async def update_template(
 
     service = DocumentTemplateService(db)
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
-    template = service.update_template(template_id, **updates)
+    template = service.update_template(template_id, ctx.workspace_id, **updates)
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
     return {"id": str(template.id), "name": template.name, "updated": True}
@@ -193,7 +193,7 @@ async def delete_template(
     from modules.documents.template_service import DocumentTemplateService
 
     service = DocumentTemplateService(db)
-    deleted = service.delete_template(template_id)
+    deleted = service.delete_template(template_id, ctx.workspace_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Template not found")
     return {"deleted": True}
@@ -211,7 +211,7 @@ async def preview_template(
     from modules.documents.template_service import DocumentTemplateService
 
     tmpl_service = DocumentTemplateService(db)
-    template = tmpl_service.get_template(template_id)
+    template = tmpl_service.get_template(template_id, ctx.workspace_id)
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
 

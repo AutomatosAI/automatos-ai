@@ -9,7 +9,6 @@ import { MobileSidebar } from './mobile-sidebar'
 import { Header } from './header'
 import { StudioSidebar } from './studio-sidebar'
 import { StudioHeader } from './studio-header'
-import { StudioTicker } from './studio-ticker'
 import { StudioPageTabs } from './studio-page-tabs'
 import { AutoWidget } from '../chatbot/chat-widget'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
@@ -89,7 +88,7 @@ export function MainLayout({ children, fullBleed = false }: MainLayoutProps) {
   }
 
   // ────────────────────────────────────────────────────────────────────
-  // Studio shell — render the CD round-4 chrome (sidebar + header + ticker)
+  // Studio shell — render the CD round-4 chrome (sidebar + header)
   // when .studio is active and we're on desktop. Mobile keeps the existing
   // sheet pattern for now. Falls through to classic layout below.
   // ────────────────────────────────────────────────────────────────────
@@ -101,7 +100,6 @@ export function MainLayout({ children, fullBleed = false }: MainLayoutProps) {
           onToggle={toggleStudioSidebar}
         />
         <div className="sh-main">
-          <StudioTicker />
           <StudioHeader />
           {!fullBleed && <StudioPageTabs />}
           {fullBleed ? (

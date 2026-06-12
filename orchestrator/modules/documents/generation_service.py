@@ -18,9 +18,42 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
+import ipaddress
+import socket
+from urllib.parse import urlparse
+
 import jinja2
+from jinja2.sandbox import SandboxedEnvironment
 import jsonschema
 from sqlalchemy.orm import Session
+
+
+def _safe_url_fetcher(url, *args, **kwargs):
+    """WeasyPrint URL fetcher that blocks file:// and internal/non-public network
+    targets from user-controlled templates (PRD-156 S4 — SSRF).
+
+    Inline ``data:`` URIs (embedded chart images) are allowed; ``http(s)`` is
+    allowed only to PUBLIC addresses; everything else — file://, and
+    private/loopback/link-local hosts such as 10.x / 127.x / 169.254.x (the cloud
+    metadata endpoint) — is refused.
+    """
+    parsed = urlparse(url)
+    scheme = (parsed.scheme or "").lower()
+    if scheme == "data":
+        from weasyprint import default_url_fetcher
+        return default_url_fetcher(url, *args, **kwargs)
+    if scheme not in ("http", "https"):
+        raise ValueError(f"Blocked non-http(s) URL scheme in template: {scheme!r}")
+    host = parsed.hostname or ""
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        raise ValueError(f"Cannot resolve template URL host: {host!r}")
+    for info in infos:
+        if not ipaddress.ip_address(info[4][0]).is_global:
+            raise ValueError(f"Blocked non-public address in template URL: {host!r}")
+    from weasyprint import default_url_fetcher
+    return default_url_fetcher(url, *args, **kwargs)
 
 try:
     import boto3
@@ -88,7 +121,9 @@ class DocumentGenerationService:
         self.db = db
         self.workspace_id = workspace_id
         self.template_service = DocumentTemplateService(db)
-        self._jinja_env = jinja2.Environment(autoescape=True)
+        # PRD-156 S4: SandboxedEnvironment blocks SSTI (e.g. accessing __globals__
+        # via cycler/class chains) in user-authored template content.
+        self._jinja_env = SandboxedEnvironment(autoescape=True)
 
     # ------------------------------------------------------------------
     # Public dispatch
@@ -111,7 +146,7 @@ class DocumentGenerationService:
         # Resolve template
         template = None
         if template_id:
-            template = self.template_service.get_template(template_id)
+            template = self.template_service.get_template(template_id, ws)
         elif template_name:
             template = self.template_service.get_template_by_name(ws, template_name)
 
@@ -187,7 +222,7 @@ class DocumentGenerationService:
         # Generate PDF
         output_path = self._output_path(workspace_id, title, "pdf")
         try:
-            HTML(string=rendered_html).write_pdf(output_path)
+            HTML(string=rendered_html, url_fetcher=_safe_url_fetcher).write_pdf(output_path)
         except Exception as e:
             raise RuntimeError(f"PDF generation failed: {e}")
 

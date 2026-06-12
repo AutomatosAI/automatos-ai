@@ -1,0 +1,16 @@
+{
+  "extends": ["next/core-web-vitals"],
+  "rules": {
+    "no-restricted-syntax": [
+      "error",
+      {
+        "selector": "CallExpression[callee.name='fetch'][arguments.0.value=/^\\u002Fapi/]",
+        "message": "Use apiClient instead of raw fetch('/api…'). Raw fetch bypasses the configured base URL and auth headers and 404s in split-origin deploys."
+      },
+      {
+        "selector": "CallExpression[callee.name='fetch'][arguments.0.quasis.0.value.raw=/^\\u002Fapi/]",
+        "message": "Use apiClient instead of raw fetch(`/api…`). Raw fetch bypasses the configured base URL and auth headers and 404s in split-origin deploys."
+      }
+    ]
+  }
+}

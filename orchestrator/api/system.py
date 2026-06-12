@@ -10,7 +10,7 @@ from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
-from datetime import datetime
+from datetime import datetime, timezone
 import psutil
 
 from core.database.database import get_db
@@ -846,11 +846,7 @@ async def get_item(
             "active_agents": active_agents,
             "inactive_agents": inactive_agents,
             "agents_by_type": agent_types,
-            "average_performance": 85.5,  # Placeholder
-            "total_executions": 0,  # Placeholder
-            "successful_executions": 0,  # Placeholder
-            "failed_executions": 0,  # Placeholder
-            "timestamp": "2025-08-01T12:57:03Z"
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
     except Exception as e:
         logger.error(f"Error getting agent stats: {e}")

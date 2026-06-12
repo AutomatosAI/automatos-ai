@@ -46,7 +46,7 @@ import {
 } from '@/hooks/use-playbook-api'
 import { useSystemIcons } from '@/hooks/use-system-config-api'
 import { useAgents } from '@/hooks/use-agent-api'
-import { useToast } from '@/hooks/use-toast'
+import { toast } from 'sonner'
 import { CreatePlaybookModal } from './create-playbook-modal'
 import { ViewPlaybookModal } from './view-playbook-modal'
 import { PlaybookSuggestionsPanel } from './playbook-suggestions-panel'
@@ -158,7 +158,6 @@ export function PlaybooksTab({
   const recordUsageMutation = useRecordPlaybookUsage()
   const executePlaybookMutation = useExecutePlaybook()
   const submitToMarketplaceMutation = useSubmitPlaybookToMarketplace()
-  const { toast } = useToast()
   const cookingRef = useRef(false)
 
   // Fetch suggestions for the selected playbook when viewing
@@ -194,11 +193,7 @@ export function PlaybooksTab({
     setCookingPlaybookId(playbookId)
     try {
       const result: any = await executePlaybookMutation.mutateAsync({ playbookId: playbookId })
-      toast({
-        title: 'Playbook Started',
-        description: `"${playbook.name}" is now running.`,
-        variant: 'default',
-      })
+      toast('Playbook Started', { description: `"${playbook.name}" is now running.` })
       if (onExecuteRecipe && result?.recipe_execution_id) {
         onExecuteRecipe(0, {
           recipeExecutionId: result.recipe_execution_id,
@@ -213,11 +208,7 @@ export function PlaybooksTab({
         })
       }
     } catch (error: any) {
-      toast({
-        title: 'Execution Failed',
-        description: error?.message || 'Failed to start playbook execution',
-        variant: 'destructive',
-      })
+      toast.error('Execution Failed', { description: error?.message || 'Failed to start playbook execution' })
     } finally {
       setCookingPlaybookId(null)
       cookingRef.current = false
@@ -286,13 +277,13 @@ export function PlaybooksTab({
       })
 
       if (result.auto_approved) {
-        toast({ title: 'Published to Marketplace', description: 'Your playbook is now live in the marketplace!', variant: 'default' })
+        toast('Published to Marketplace', { description: 'Your playbook is now live in the marketplace!' })
       } else {
-        toast({ title: 'Submitted for Approval', description: 'Your playbook has been submitted and is awaiting approval.', variant: 'default' })
+        toast('Submitted for Approval', { description: 'Your playbook has been submitted and is awaiting approval.' })
       }
       refetch()
     } catch (error: any) {
-      toast({ title: 'Submission Failed', description: error?.message || 'Failed to submit playbook to marketplace', variant: 'destructive' })
+      toast.error('Submission Failed', { description: error?.message || 'Failed to submit playbook to marketplace' })
     } finally {
       setSharingPlaybookId(null)
     }

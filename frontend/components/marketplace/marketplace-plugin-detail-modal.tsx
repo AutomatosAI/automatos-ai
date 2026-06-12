@@ -43,7 +43,7 @@ import {
   Star,
   Package,
 } from 'lucide-react'
-import { useToast } from '@/hooks/use-toast'
+import { toast } from 'sonner'
 import { apiClient } from '@/lib/api-client'
 
 // ===================================================================
@@ -116,7 +116,6 @@ export function MarketplacePluginDetailModal({
   isAdmin,
   onApproved,
 }: MarketplacePluginDetailModalProps) {
-  const { toast } = useToast()
   const [plugin, setPlugin] = useState<PluginDetail | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -162,11 +161,11 @@ export function MarketplacePluginDetailModal({
     setAdminActionLoading(true)
     try {
       await apiClient.post(`/api/admin/plugins/${plugin.id}/approve`)
-      toast({ title: 'Plugin approved', description: `${plugin.name} is now available in the marketplace.` })
+      toast('Plugin approved', { description: `${plugin.name} is now available in the marketplace.` })
       onApproved?.()
       onClose()
     } catch (err: any) {
-      toast({ title: 'Approve failed', description: err?.message || 'Could not approve plugin', variant: 'destructive' })
+      toast.error('Approve failed', { description: err?.message || 'Could not approve plugin' })
     } finally {
       setAdminActionLoading(false)
     }
@@ -177,11 +176,11 @@ export function MarketplacePluginDetailModal({
     setAdminActionLoading(true)
     try {
       await apiClient.post(`/api/admin/plugins/${plugin.id}/reject`)
-      toast({ title: 'Plugin rejected', description: `${plugin.name} has been rejected.` })
+      toast('Plugin rejected', { description: `${plugin.name} has been rejected.` })
       onApproved?.()
       onClose()
     } catch (err: any) {
-      toast({ title: 'Reject failed', description: err?.message || 'Could not reject plugin', variant: 'destructive' })
+      toast.error('Reject failed', { description: err?.message || 'Could not reject plugin' })
     } finally {
       setAdminActionLoading(false)
     }

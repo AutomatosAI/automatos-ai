@@ -137,7 +137,8 @@ async def create_database_source(
             name=source.name,
             credential_id=source.credential_id,
             workspace_id=ctx.workspace_id,
-            description=source.description
+            description=source.description,
+            dialect=source.dialect,
         )
         
         # Create tools for agents
@@ -672,6 +673,20 @@ async def list_audit_entries(
     db: Session = Depends(get_db)
 ):
     """List query audit entries for a database source."""
+    # PRD-156 S3: verify the source belongs to the caller's workspace before
+    # returning its audit (natural-language queries + generated SQL are
+    # sensitive). Without this, any workspace could read another's audit by
+    # guessing a source_id.
+    source = (
+        db.query(DatabaseKnowledgeSource)
+        .filter(
+            DatabaseKnowledgeSource.id == source_id,
+            DatabaseKnowledgeSource.workspace_id == ctx.workspace_id,
+        )
+        .first()
+    )
+    if not source:
+        raise HTTPException(status_code=404, detail="Database source not found")
     entries = (
         db.query(DatabaseQueryAudit)
         .filter(DatabaseQueryAudit.source_id == source_id)

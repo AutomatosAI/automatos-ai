@@ -82,13 +82,14 @@ export const STUDIO_MENU_FOOTER: StudioFooterItem[] = [
  * their own tabs as part of their editorial page frame and are deliberately
  * absent from this map.
  *
- * Tab counts here are seed values for display before the page mounts and
- * fetches the real numbers — pages that care wire their own dynamic counts.
+ * Labels only — no seed counts. The previous placeholder badges (All 18,
+ * Outputs 41, Skills 24…) fabricated numbers pilots read as real (PRD-154 S10).
+ * Pages with honest counts wire their own dynamic numbers.
  */
-export const STUDIO_PAGE_TABS: Record<string, Array<[string, number]>> = {
-  assign:  [['All', 18], ['Mine', 4], ['Scheduled', 9], ['Drafts', 2]],
-  deliv:   [['Outputs', 41], ['Blogs', 6], ['Templates', 12], ['Explorer', 0]],
-  agents:  [['Roster', 11], ['Skills', 24], ['Lineage', 0], ['Settings', 0]],
+export const STUDIO_PAGE_TABS: Record<string, string[]> = {
+  assign:  ['All', 'Mine', 'Scheduled', 'Drafts'],
+  deliv:   ['Outputs', 'Blogs', 'Templates', 'Explorer'],
+  agents:  ['Roster', 'Skills', 'Lineage', 'Settings'],
 };
 
 /**

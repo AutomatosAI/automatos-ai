@@ -2,7 +2,7 @@
 'use client'
 
 import React, { useState, useRef, useMemo, useEffect } from 'react'
-import toast from 'react-hot-toast'
+import { toast } from 'sonner'
 import { motion } from 'framer-motion'
 import { useInView } from 'react-intersection-observer'
 import {

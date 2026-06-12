@@ -63,6 +63,7 @@ export function GlobalSearch() {
     query,
     setQuery,
     loading,
+    error,
     pages,
     tasks,
     agents,
@@ -87,7 +88,12 @@ export function GlobalSearch() {
       />
       <CommandList>
         {loading && <CommandEmpty>Searching...</CommandEmpty>}
-        {!loading && !hasAnyResults && (
+        {!loading && error && (
+          <div className="px-3 py-3 text-sm text-destructive" role="alert">
+            {error}
+          </div>
+        )}
+        {!loading && !error && !hasAnyResults && (
           <CommandEmpty>No results found.</CommandEmpty>
         )}
 

@@ -1,0 +1,2973 @@
+{
+  "route_count": 742,
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/"
+    },
+    {
+      "method": "GET",
+      "path": "/analytics/agent-selection/analysis"
+    },
+    {
+      "method": "GET",
+      "path": "/analytics/dashboard/summary"
+    },
+    {
+      "method": "GET",
+      "path": "/api/activity/agent-reports"
+    },
+    {
+      "method": "GET",
+      "path": "/api/activity/board/stats"
+    },
+    {
+      "method": "GET",
+      "path": "/api/activity/feed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/activity/schedule"
+    },
+    {
+      "method": "GET",
+      "path": "/api/activity/stats"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/analytics/costs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/analytics/dashboard"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/plugins/backfill-categories"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/plugins/import-github"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/plugins/pending"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/plugins/upload"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/admin/plugins/{plugin_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/plugins/{plugin_id}/approve"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/plugins/{plugin_id}/deactivate"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/plugins/{plugin_id}/reject"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/plugins/{plugin_id}/scan"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/prompts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/prompts/categories"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/prompts/{prompt_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/prompts/{prompt_id}/assess"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/prompts/{prompt_id}/assessment-runs"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/admin/prompts/{prompt_id}/futureagi-toggle"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/prompts/{prompt_id}/rollback"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/prompts/{prompt_id}/versions"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/prompts/{prompt_id}/versions"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/admin/prompts/{prompt_id}/versions/{version_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/prompts/{prompt_id}/versions/{version_id}/activate"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/workspaces"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/admin/workspaces/{workspace_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/workspaces/{workspace_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/workspaces/{workspace_id}/pause"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/workspaces/{workspace_id}/purge"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/workspaces/{workspace_id}/restore"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/workspaces/{workspace_id}/resume"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agents/"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/active"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agents/batch-create"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agents/bulk"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agents/create-specialized"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/health"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/org-chart"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agents/reindex-embeddings"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/stats"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/types"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/agents/{agent_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/{agent_id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/agents/{agent_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agents/{agent_id}/add-skills"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/{agent_id}/assembled-context"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agents/{agent_id}/execute"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agents/{agent_id}/learn"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/{agent_id}/logs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/{agent_id}/mission-history"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/{agent_id}/model-config"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/agents/{agent_id}/model-config"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/{agent_id}/model-usage"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/{agent_id}/performance"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/{agent_id}/persona"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/agents/{agent_id}/persona"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/{agent_id}/plugins"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/agents/{agent_id}/plugins"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/{agent_id}/skills"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agents/{agent_id}/skills"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/agents/{agent_id}/skills/{skill_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/{agent_id}/status"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agents/{agent_id}/switch-model"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agents/{agent_id}/test-capabilities"
+    },
+    {
+      "method": "GET",
+      "path": "/api/alerts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/alerts/ingest"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/activation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/agents"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/agents/{agent_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/analytics/charts/generate"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/charts/presets"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/composio/actions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/composio/agent-tools"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/composio/apps"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/composio/daily-volume"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/composio/error-breakdown"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/composio/execution-stats"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/composio/performance-by-action"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/composio/recent-executions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/context"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/dashboard/all-metrics"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/dashboard/efficiency-score"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/dashboard/error-rate-by-type"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/dashboard/overview"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/dashboard/queue-depth"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/dashboard/success-rate"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/dashboard/system-load-trend"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/dashboard/task-completion-time"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/errors/by-subsystem"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/learning"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/llm/comparison"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/llm/costs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/llm/costs/daily-by-model"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/llm/openrouter/credits"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/llm/openrouter/key-info"
+    },
+    {
+      "method": "POST",
+      "path": "/api/analytics/llm/openrouter/sync"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/llm/projections"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/llm/recommendations"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/llm/summary"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/llm/usage"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/performance/agent-ranking"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/performance/all-enhancements"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/performance/bottlenecks"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/performance/cost-per-execution"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/performance/peak-usage-hours"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/performance/predictive-alerts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/performance/sla-compliance"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/primitive-health"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/realtime"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/selection-health"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/system/health"
+    },
+    {
+      "method": "POST",
+      "path": "/api/analytics/track/agent-execution"
+    },
+    {
+      "method": "POST",
+      "path": "/api/analytics/track/context-optimization"
+    },
+    {
+      "method": "POST",
+      "path": "/api/analytics/track/learning-progress"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/websocket/status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/widget-engagement"
+    },
+    {
+      "method": "GET",
+      "path": "/api/api-keys"
+    },
+    {
+      "method": "POST",
+      "path": "/api/api-keys"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/api-keys/{key_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/assignments/recommended"
+    },
+    {
+      "method": "POST",
+      "path": "/api/attachments"
+    },
+    {
+      "method": "GET",
+      "path": "/api/attachments/health"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/attachments/{attachment_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/attachments/{attachment_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/blog/cover-image/upload"
+    },
+    {
+      "method": "POST",
+      "path": "/api/blog/missions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/blog/posts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/blog/posts"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/blog/posts/{post_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/blog/posts/{post_id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/blog/posts/{post_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/blog/posts/{post_id}/publish"
+    },
+    {
+      "method": "POST",
+      "path": "/api/blog/posts/{post_id}/unpublish"
+    },
+    {
+      "method": "POST",
+      "path": "/api/bug-reports/"
+    },
+    {
+      "method": "POST",
+      "path": "/api/cache/clear/{namespace}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/cache/invalidate/cloud/{connection_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/cache/stats"
+    },
+    {
+      "method": "GET",
+      "path": "/api/channels"
+    },
+    {
+      "method": "POST",
+      "path": "/api/channels"
+    },
+    {
+      "method": "GET",
+      "path": "/api/channels/analytics"
+    },
+    {
+      "method": "GET",
+      "path": "/api/channels/platforms"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/channels/{channel_id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/channels/{channel_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/channels/{channel_id}/start"
+    },
+    {
+      "method": "POST",
+      "path": "/api/channels/{channel_id}/stop"
+    },
+    {
+      "method": "POST",
+      "path": "/api/channels/{channel_id}/test"
+    },
+    {
+      "method": "POST",
+      "path": "/api/chat"
+    },
+    {
+      "method": "GET",
+      "path": "/api/chat/agents"
+    },
+    {
+      "method": "GET",
+      "path": "/api/chat/history"
+    },
+    {
+      "method": "GET",
+      "path": "/api/chat/search"
+    },
+    {
+      "method": "POST",
+      "path": "/api/chat/voice"
+    },
+    {
+      "method": "GET",
+      "path": "/api/chat/voice/audio/{message_id}"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/chat/vote"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/chat/{chat_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/chat/{chat_id}"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/chat/{chat_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/chat/{chat_id}/messages"
+    },
+    {
+      "method": "POST",
+      "path": "/api/chat/{chat_id}/switch-agent"
+    },
+    {
+      "method": "GET",
+      "path": "/api/cloud-documents/connections"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/cloud-documents/connections/{connection_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/cloud-documents/connections/{connection_id}/files"
+    },
+    {
+      "method": "GET",
+      "path": "/api/cloud-documents/connections/{connection_id}/folders"
+    },
+    {
+      "method": "POST",
+      "path": "/api/cloud-documents/connections/{connection_id}/select-folder"
+    },
+    {
+      "method": "POST",
+      "path": "/api/cloud-documents/connections/{connection_id}/sync"
+    },
+    {
+      "method": "GET",
+      "path": "/api/cloud-documents/connections/{connection_id}/sync-status"
+    },
+    {
+      "method": "POST",
+      "path": "/api/cloud-documents/rag/query"
+    },
+    {
+      "method": "GET",
+      "path": "/api/cloud-documents/sync-jobs/{job_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/code-graph/call-graph"
+    },
+    {
+      "method": "GET",
+      "path": "/api/code-graph/health"
+    },
+    {
+      "method": "POST",
+      "path": "/api/code-graph/index/github"
+    },
+    {
+      "method": "GET",
+      "path": "/api/code-graph/projects"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/code-graph/projects/{project_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/code-graph/projects/{project_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/code-graph/projects/{project_id}/architecture"
+    },
+    {
+      "method": "POST",
+      "path": "/api/code-graph/projects/{project_id}/ask"
+    },
+    {
+      "method": "POST",
+      "path": "/api/code-graph/projects/{project_id}/reindex"
+    },
+    {
+      "method": "GET",
+      "path": "/api/code-graph/search/semantic"
+    },
+    {
+      "method": "GET",
+      "path": "/api/code-graph/search/symbols"
+    },
+    {
+      "method": "POST",
+      "path": "/api/composio/agents/{agent_id}/apps/{app_name}/disable-all"
+    },
+    {
+      "method": "POST",
+      "path": "/api/composio/agents/{agent_id}/apps/{app_name}/enable-all"
+    },
+    {
+      "method": "GET",
+      "path": "/api/composio/agents/{agent_id}/apps/{app_name}/features"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/composio/agents/{agent_id}/apps/{app_name}/features"
+    },
+    {
+      "method": "GET",
+      "path": "/api/composio/apps"
+    },
+    {
+      "method": "GET",
+      "path": "/api/composio/apps/{app_name}/actions"
+    },
+    {
+      "method": "POST",
+      "path": "/api/composio/connect/{app_name}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/composio/connect/{app_name}/callback"
+    },
+    {
+      "method": "GET",
+      "path": "/api/composio/connections"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/composio/connections/{app_name}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/composio/linkedin/test-upload-init"
+    },
+    {
+      "method": "GET",
+      "path": "/api/composio/triggers"
+    },
+    {
+      "method": "POST",
+      "path": "/api/composio/triggers/subscribe"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/composio/triggers/{subscription_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/composio/webhook"
+    },
+    {
+      "method": "POST",
+      "path": "/api/context/add"
+    },
+    {
+      "method": "POST",
+      "path": "/api/context/initialize"
+    },
+    {
+      "method": "GET",
+      "path": "/api/context/memory-stats"
+    },
+    {
+      "method": "GET",
+      "path": "/api/context/optimize"
+    },
+    {
+      "method": "GET",
+      "path": "/api/context/patterns"
+    },
+    {
+      "method": "GET",
+      "path": "/api/context/performance"
+    },
+    {
+      "method": "GET",
+      "path": "/api/context/queries/recent"
+    },
+    {
+      "method": "GET",
+      "path": "/api/context/rag/config"
+    },
+    {
+      "method": "POST",
+      "path": "/api/context/rag/config"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/context/rag/config/{config_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/context/rag/config/{config_id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/context/rag/config/{config_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/context/rag/{config_id}/test"
+    },
+    {
+      "method": "GET",
+      "path": "/api/context/sources"
+    },
+    {
+      "method": "GET",
+      "path": "/api/context/stats"
+    },
+    {
+      "method": "POST",
+      "path": "/api/context/summarize"
+    },
+    {
+      "method": "GET",
+      "path": "/api/context/system/health"
+    },
+    {
+      "method": "GET",
+      "path": "/api/credentials/"
+    },
+    {
+      "method": "POST",
+      "path": "/api/credentials/"
+    },
+    {
+      "method": "GET",
+      "path": "/api/credentials/audit/logs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/credentials/cache/clear"
+    },
+    {
+      "method": "GET",
+      "path": "/api/credentials/health"
+    },
+    {
+      "method": "POST",
+      "path": "/api/credentials/resolve"
+    },
+    {
+      "method": "GET",
+      "path": "/api/credentials/stats"
+    },
+    {
+      "method": "GET",
+      "path": "/api/credentials/types"
+    },
+    {
+      "method": "GET",
+      "path": "/api/credentials/types/by-name/{type_name}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/credentials/types/categories"
+    },
+    {
+      "method": "GET",
+      "path": "/api/credentials/types/{type_id}"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/credentials/{credential_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/credentials/{credential_id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/credentials/{credential_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/credentials/{credential_id}/test"
+    },
+    {
+      "method": "GET",
+      "path": "/api/database/analytics/performance"
+    },
+    {
+      "method": "GET",
+      "path": "/api/database/analytics/stats"
+    },
+    {
+      "method": "GET",
+      "path": "/api/database/analytics/top-queries"
+    },
+    {
+      "method": "GET",
+      "path": "/api/deliverables"
+    },
+    {
+      "method": "POST",
+      "path": "/api/deliverables/retention"
+    },
+    {
+      "method": "GET",
+      "path": "/api/deliverables/stats"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/deliverables/{deliverable_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/deliverables/{deliverable_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/analytics"
+    },
+    {
+      "method": "POST",
+      "path": "/api/documents/analytics/track"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/analytics/usage"
+    },
+    {
+      "method": "POST",
+      "path": "/api/documents/bulk-team-access"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/content"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/download"
+    },
+    {
+      "method": "POST",
+      "path": "/api/documents/generate"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/generated/{filename}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/queue/status"
+    },
+    {
+      "method": "POST",
+      "path": "/api/documents/rag/retrieve"
+    },
+    {
+      "method": "POST",
+      "path": "/api/documents/reprocess-all"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/reprocess-status"
+    },
+    {
+      "method": "POST",
+      "path": "/api/documents/search"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/templates"
+    },
+    {
+      "method": "POST",
+      "path": "/api/documents/templates"
+    },
+    {
+      "method": "POST",
+      "path": "/api/documents/templates/upload"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/documents/templates/{template_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/templates/{template_id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/documents/templates/{template_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/documents/templates/{template_id}/preview"
+    },
+    {
+      "method": "POST",
+      "path": "/api/documents/upload"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/documents/{document_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/{document_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/{document_id}/content"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/{document_id}/delete-impact"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/{document_id}/download"
+    },
+    {
+      "method": "POST",
+      "path": "/api/documents/{document_id}/reprocess"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/documents/{document_id}/team-access"
+    },
+    {
+      "method": "GET",
+      "path": "/api/emails"
+    },
+    {
+      "method": "POST",
+      "path": "/api/emails"
+    },
+    {
+      "method": "GET",
+      "path": "/api/emails/{email_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/emails/{email_id}/reply"
+    },
+    {
+      "method": "GET",
+      "path": "/api/execution-history/execution/{execution_id}/details"
+    },
+    {
+      "method": "GET",
+      "path": "/api/execution-history/execution/{execution_id}/stages"
+    },
+    {
+      "method": "GET",
+      "path": "/api/execution-history/workflow/{workflow_id}/all"
+    },
+    {
+      "method": "GET",
+      "path": "/api/execution-history/workflow/{workflow_id}/latest"
+    },
+    {
+      "method": "GET",
+      "path": "/api/generated-images/{image_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/github/health"
+    },
+    {
+      "method": "POST",
+      "path": "/api/github/webhook"
+    },
+    {
+      "method": "POST",
+      "path": "/api/harness/prescriptions/{rx_id}/approve"
+    },
+    {
+      "method": "POST",
+      "path": "/api/harness/prescriptions/{rx_id}/reject"
+    },
+    {
+      "method": "GET",
+      "path": "/api/harness/self-learning"
+    },
+    {
+      "method": "GET",
+      "path": "/api/health/endpoints"
+    },
+    {
+      "method": "GET",
+      "path": "/api/heartbeat/agents/{agent_id}/config"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/heartbeat/agents/{agent_id}/config"
+    },
+    {
+      "method": "GET",
+      "path": "/api/heartbeat/agents/{agent_id}/history"
+    },
+    {
+      "method": "GET",
+      "path": "/api/heartbeat/agents/{agent_id}/last"
+    },
+    {
+      "method": "POST",
+      "path": "/api/heartbeat/agents/{agent_id}/run"
+    },
+    {
+      "method": "GET",
+      "path": "/api/heartbeat/analytics"
+    },
+    {
+      "method": "GET",
+      "path": "/api/heartbeat/orchestrator/history"
+    },
+    {
+      "method": "POST",
+      "path": "/api/heartbeat/orchestrator/run"
+    },
+    {
+      "method": "GET",
+      "path": "/api/heartbeat/status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/heartbeat/workspace"
+    },
+    {
+      "method": "GET",
+      "path": "/api/heartbeat/{heartbeat_id}/executions"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/heartbeat/{heartbeat_id}/toggle"
+    },
+    {
+      "method": "GET",
+      "path": "/api/keys"
+    },
+    {
+      "method": "POST",
+      "path": "/api/keys"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/keys/platform"
+    },
+    {
+      "method": "GET",
+      "path": "/api/keys/platform-status"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/keys/platform/{provider}"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/keys/{key_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/keys/{key_id}/test"
+    },
+    {
+      "method": "GET",
+      "path": "/api/knowledge/entities"
+    },
+    {
+      "method": "POST",
+      "path": "/api/knowledge/entities/find-connection"
+    },
+    {
+      "method": "GET",
+      "path": "/api/knowledge/entities/search"
+    },
+    {
+      "method": "GET",
+      "path": "/api/knowledge/entities/{entity_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/knowledge/entities/{entity_id}/documents"
+    },
+    {
+      "method": "GET",
+      "path": "/api/knowledge/entities/{entity_id}/graph"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/knowledge/graph"
+    },
+    {
+      "method": "POST",
+      "path": "/api/knowledge/graph/build"
+    },
+    {
+      "method": "POST",
+      "path": "/api/knowledge/graph/import"
+    },
+    {
+      "method": "POST",
+      "path": "/api/knowledge/items"
+    },
+    {
+      "method": "GET",
+      "path": "/api/knowledge/items/{item_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/knowledge/search"
+    },
+    {
+      "method": "POST",
+      "path": "/api/knowledge/share"
+    },
+    {
+      "method": "GET",
+      "path": "/api/knowledge/sources/database/"
+    },
+    {
+      "method": "POST",
+      "path": "/api/knowledge/sources/database/"
+    },
+    {
+      "method": "GET",
+      "path": "/api/knowledge/sources/database/cache/stats"
+    },
+    {
+      "method": "GET",
+      "path": "/api/knowledge/sources/database/templates/list"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/knowledge/sources/database/{source_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/knowledge/sources/database/{source_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/knowledge/sources/database/{source_id}/audit"
+    },
+    {
+      "method": "GET",
+      "path": "/api/knowledge/sources/database/{source_id}/benchmark/history"
+    },
+    {
+      "method": "POST",
+      "path": "/api/knowledge/sources/database/{source_id}/benchmark/run"
+    },
+    {
+      "method": "GET",
+      "path": "/api/knowledge/sources/database/{source_id}/examples"
+    },
+    {
+      "method": "POST",
+      "path": "/api/knowledge/sources/database/{source_id}/examples"
+    },
+    {
+      "method": "POST",
+      "path": "/api/knowledge/sources/database/{source_id}/examples/import"
+    },
+    {
+      "method": "GET",
+      "path": "/api/knowledge/sources/database/{source_id}/examples/stats"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/knowledge/sources/database/{source_id}/examples/{example_id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/knowledge/sources/database/{source_id}/examples/{example_id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/knowledge/sources/database/{source_id}/examples/{example_id}/verify"
+    },
+    {
+      "method": "POST",
+      "path": "/api/knowledge/sources/database/{source_id}/introspect"
+    },
+    {
+      "method": "POST",
+      "path": "/api/knowledge/sources/database/{source_id}/query"
+    },
+    {
+      "method": "POST",
+      "path": "/api/knowledge/sources/database/{source_id}/query/sql"
+    },
+    {
+      "method": "GET",
+      "path": "/api/knowledge/sources/database/{source_id}/schema"
+    },
+    {
+      "method": "POST",
+      "path": "/api/knowledge/sources/database/{source_id}/schema/refresh"
+    },
+    {
+      "method": "POST",
+      "path": "/api/knowledge/sources/database/{source_id}/semantic"
+    },
+    {
+      "method": "POST",
+      "path": "/api/knowledge/sources/database/{source_id}/template/execute"
+    },
+    {
+      "method": "GET",
+      "path": "/api/knowledge/stats"
+    },
+    {
+      "method": "GET",
+      "path": "/api/knowledge/stats/entities"
+    },
+    {
+      "method": "GET",
+      "path": "/api/knowledge/types"
+    },
+    {
+      "method": "POST",
+      "path": "/api/knowledge/upload"
+    },
+    {
+      "method": "GET",
+      "path": "/api/kpi/agent-performance"
+    },
+    {
+      "method": "GET",
+      "path": "/api/kpi/approval-gates"
+    },
+    {
+      "method": "GET",
+      "path": "/api/kpi/cost-tracker"
+    },
+    {
+      "method": "GET",
+      "path": "/api/kpi/decisions-needed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/kpi/playbook-metrics"
+    },
+    {
+      "method": "GET",
+      "path": "/api/learning/effectiveness-report"
+    },
+    {
+      "method": "POST",
+      "path": "/api/learning/feedback"
+    },
+    {
+      "method": "POST",
+      "path": "/api/learning/feedback/process"
+    },
+    {
+      "method": "GET",
+      "path": "/api/learning/insights/aggregate"
+    },
+    {
+      "method": "GET",
+      "path": "/api/logs/label/{label_name}/values"
+    },
+    {
+      "method": "GET",
+      "path": "/api/logs/labels"
+    },
+    {
+      "method": "GET",
+      "path": "/api/logs/query"
+    },
+    {
+      "method": "GET",
+      "path": "/api/marketplace/featured"
+    },
+    {
+      "method": "GET",
+      "path": "/api/marketplace/items"
+    },
+    {
+      "method": "GET",
+      "path": "/api/marketplace/items/pending"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/marketplace/items/{item_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/marketplace/items/{item_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/marketplace/items/{item_id}/approve"
+    },
+    {
+      "method": "POST",
+      "path": "/api/marketplace/items/{item_id}/install"
+    },
+    {
+      "method": "POST",
+      "path": "/api/marketplace/items/{item_id}/toggle-featured"
+    },
+    {
+      "method": "GET",
+      "path": "/api/marketplace/llm/categories"
+    },
+    {
+      "method": "GET",
+      "path": "/api/marketplace/llm/compare"
+    },
+    {
+      "method": "GET",
+      "path": "/api/marketplace/llm/installed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/marketplace/llm/installed-ids"
+    },
+    {
+      "method": "GET",
+      "path": "/api/marketplace/llm/models"
+    },
+    {
+      "method": "GET",
+      "path": "/api/marketplace/llm/models/{model_id:path}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/marketplace/llm/models/{model_id:path}/install"
+    },
+    {
+      "method": "POST",
+      "path": "/api/marketplace/llm/models/{model_id:path}/uninstall"
+    },
+    {
+      "method": "GET",
+      "path": "/api/marketplace/llm/providers"
+    },
+    {
+      "method": "GET",
+      "path": "/api/marketplace/plugins"
+    },
+    {
+      "method": "GET",
+      "path": "/api/marketplace/plugins/categories"
+    },
+    {
+      "method": "GET",
+      "path": "/api/marketplace/plugins/{plugin_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/marketplace/plugins/{plugin_id}/content"
+    },
+    {
+      "method": "POST",
+      "path": "/api/marketplace/submit"
+    },
+    {
+      "method": "GET",
+      "path": "/api/marketplace/updates"
+    },
+    {
+      "method": "GET",
+      "path": "/api/memory"
+    },
+    {
+      "method": "POST",
+      "path": "/api/memory"
+    },
+    {
+      "method": "GET",
+      "path": "/api/memory/search"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/memory/{memory_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/missions"
+    },
+    {
+      "method": "POST",
+      "path": "/api/missions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/missions/archive"
+    },
+    {
+      "method": "GET",
+      "path": "/api/missions/archive/{archive_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/missions/stats"
+    },
+    {
+      "method": "POST",
+      "path": "/api/missions/upload"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/missions/{mission_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/missions/{mission_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/missions/{mission_id}/approve"
+    },
+    {
+      "method": "POST",
+      "path": "/api/missions/{mission_id}/cancel"
+    },
+    {
+      "method": "GET",
+      "path": "/api/missions/{mission_id}/checkpoints"
+    },
+    {
+      "method": "GET",
+      "path": "/api/missions/{mission_id}/cost"
+    },
+    {
+      "method": "GET",
+      "path": "/api/missions/{mission_id}/events"
+    },
+    {
+      "method": "GET",
+      "path": "/api/missions/{mission_id}/field"
+    },
+    {
+      "method": "POST",
+      "path": "/api/missions/{mission_id}/pause"
+    },
+    {
+      "method": "POST",
+      "path": "/api/missions/{mission_id}/reject"
+    },
+    {
+      "method": "POST",
+      "path": "/api/missions/{mission_id}/replan"
+    },
+    {
+      "method": "POST",
+      "path": "/api/missions/{mission_id}/resume"
+    },
+    {
+      "method": "POST",
+      "path": "/api/missions/{mission_id}/review"
+    },
+    {
+      "method": "POST",
+      "path": "/api/missions/{mission_id}/save-as-routine"
+    },
+    {
+      "method": "GET",
+      "path": "/api/models/"
+    },
+    {
+      "method": "GET",
+      "path": "/api/models/by-task/{task_type}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/models/estimate-cost"
+    },
+    {
+      "method": "GET",
+      "path": "/api/models/providers/"
+    },
+    {
+      "method": "POST",
+      "path": "/api/models/recommend"
+    },
+    {
+      "method": "GET",
+      "path": "/api/models/stats/"
+    },
+    {
+      "method": "GET",
+      "path": "/api/models/{model_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/notification-preferences"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/notification-preferences"
+    },
+    {
+      "method": "GET",
+      "path": "/api/notification-preferences/"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/notification-preferences/"
+    },
+    {
+      "method": "GET",
+      "path": "/api/notifications"
+    },
+    {
+      "method": "GET",
+      "path": "/api/notifications/"
+    },
+    {
+      "method": "POST",
+      "path": "/api/notifications/read-all"
+    },
+    {
+      "method": "GET",
+      "path": "/api/notifications/unread-count"
+    },
+    {
+      "method": "POST",
+      "path": "/api/notifications/{notification_id}/dismiss"
+    },
+    {
+      "method": "POST",
+      "path": "/api/notifications/{notification_id}/read"
+    },
+    {
+      "method": "GET",
+      "path": "/api/openrouter/models"
+    },
+    {
+      "method": "GET",
+      "path": "/api/openrouter/providers"
+    },
+    {
+      "method": "GET",
+      "path": "/api/openrouter/stats"
+    },
+    {
+      "method": "POST",
+      "path": "/api/openrouter/sync"
+    },
+    {
+      "method": "GET",
+      "path": "/api/openrouter/sync/history"
+    },
+    {
+      "method": "GET",
+      "path": "/api/patterns/"
+    },
+    {
+      "method": "POST",
+      "path": "/api/patterns/"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/patterns/{pattern_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/patterns/{pattern_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/personas"
+    },
+    {
+      "method": "GET",
+      "path": "/api/personas/{persona_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/playbooks"
+    },
+    {
+      "method": "POST",
+      "path": "/api/playbooks/mine"
+    },
+    {
+      "method": "GET",
+      "path": "/api/policy/abtest/get"
+    },
+    {
+      "method": "POST",
+      "path": "/api/policy/abtest/set"
+    },
+    {
+      "method": "GET",
+      "path": "/api/policy/{policy_id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/policy/{policy_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/policy/{policy_id}/assemble"
+    },
+    {
+      "method": "POST",
+      "path": "/api/query/platform-help"
+    },
+    {
+      "method": "POST",
+      "path": "/api/recommendations/generate"
+    },
+    {
+      "method": "GET",
+      "path": "/api/reports"
+    },
+    {
+      "method": "GET",
+      "path": "/api/reports/agent/{agent_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/reports/stats"
+    },
+    {
+      "method": "GET",
+      "path": "/api/reports/{report_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/reports/{report_id}/download"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/reports/{report_id}/grade"
+    },
+    {
+      "method": "GET",
+      "path": "/api/routing/cache/stats"
+    },
+    {
+      "method": "POST",
+      "path": "/api/routing/corrections"
+    },
+    {
+      "method": "GET",
+      "path": "/api/routing/decisions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/routing/rules"
+    },
+    {
+      "method": "POST",
+      "path": "/api/routing/rules"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/routing/rules/{rule_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/routing/semantic/reindex"
+    },
+    {
+      "method": "GET",
+      "path": "/api/routing/semantic/status"
+    },
+    {
+      "method": "POST",
+      "path": "/api/routing/triggers/setup"
+    },
+    {
+      "method": "GET",
+      "path": "/api/settings/onboarding-agents"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/settings/onboarding-agents/{slug}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/shopify/connect"
+    },
+    {
+      "method": "POST",
+      "path": "/api/shopify/deactivate"
+    },
+    {
+      "method": "POST",
+      "path": "/api/shopify/events"
+    },
+    {
+      "method": "POST",
+      "path": "/api/shopify/provision"
+    },
+    {
+      "method": "POST",
+      "path": "/api/shopify/sync"
+    },
+    {
+      "method": "POST",
+      "path": "/api/shopify/sync/orders/start"
+    },
+    {
+      "method": "GET",
+      "path": "/api/shopify/sync/orders/status"
+    },
+    {
+      "method": "POST",
+      "path": "/api/shopify/sync/products/start"
+    },
+    {
+      "method": "GET",
+      "path": "/api/shopify/sync/status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sites"
+    },
+    {
+      "method": "POST",
+      "path": "/api/sites"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sites/{site_id}"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/sites/{site_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/sites/{site_id}/callback/test"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/sites/{site_id}/settings"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system-settings/"
+    },
+    {
+      "method": "POST",
+      "path": "/api/system-settings/"
+    },
+    {
+      "method": "POST",
+      "path": "/api/system-settings/bulk-update"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system-settings/by-category"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system-settings/categories"
+    },
+    {
+      "method": "POST",
+      "path": "/api/system-settings/reset-to-defaults"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system-settings/stats"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/system-settings/{setting_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system-settings/{setting_id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/system-settings/{setting_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/agent-statistics"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/agent-types"
+    },
+    {
+      "method": "POST",
+      "path": "/api/system/agent/{agent_id}/execute"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/agent/{agent_id}/status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/agents/statistics"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/config"
+    },
+    {
+      "method": "POST",
+      "path": "/api/system/config"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/config/{config_key}"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/system/config/{config_key}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/health"
+    },
+    {
+      "method": "POST",
+      "path": "/api/system/learning-state/update"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/metrics"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/patterns/statistics"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/performance-baseline"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/performance-comparison"
+    },
+    {
+      "method": "POST",
+      "path": "/api/system/performance-test"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/performance/statistics"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/rag"
+    },
+    {
+      "method": "POST",
+      "path": "/api/system/rag"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/rag/{config_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/system/rag/{config_id}/test"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/skills/statistics"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/state/summary"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/test-route"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks"
+    },
+    {
+      "method": "POST",
+      "path": "/api/tasks/submit"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/{task_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/tasks/{task_id}/cancel"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/{task_id}/events"
+    },
+    {
+      "method": "POST",
+      "path": "/api/team/accept-invitation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/team/invitation-info"
+    },
+    {
+      "method": "GET",
+      "path": "/api/templates/"
+    },
+    {
+      "method": "GET",
+      "path": "/api/templates/creation-wizard/config"
+    },
+    {
+      "method": "GET",
+      "path": "/api/templates/templates/skills/suggestions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/templates/templates/{agent_type}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/tools/add-to-workspace"
+    },
+    {
+      "method": "POST",
+      "path": "/api/tools/connect"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tools/connected"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tools/debug/connections"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tools/marketplace"
+    },
+    {
+      "method": "POST",
+      "path": "/api/tools/refresh-connections"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/tools/remove-from-workspace/{app_name}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tools/stats"
+    },
+    {
+      "method": "POST",
+      "path": "/api/tools/sync"
+    },
+    {
+      "method": "POST",
+      "path": "/api/tools/sync/backfill-params"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tools/sync/history"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tools/workspace"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tools/{app_name}/actions"
+    },
+    {
+      "method": "POST",
+      "path": "/api/tools/{app_name}/actions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tools/{app_name}/suggestions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tools/{app_name}/triggers"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/memory/augment/{memory_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/memory/backup"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/memory/browse"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/memory/clear"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/memory/consolidate"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/memory/external-knowledge"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/memory/health"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/memory/layers"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/memory/optimize"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/memory/restore"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/memory/retrieve"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/memory/retrieve/{session_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/memory/search"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/memory/stats"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/memory/stats/agents"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/memory/stats/real"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/memory/stats/recent"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/memory/stats/timeseries/access-patterns"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/memory/stats/timeseries/consolidation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/memory/store"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/memory/{memory_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/memory/{memory_id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/memory/{memory_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/scheduled-tasks"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/scheduled-tasks/{task_id}/status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/skills"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/skills/admin/cleanup-old-mappings"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/skills/agents/{agent_id}/skills"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/skills/agents/{agent_id}/skills"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/skills/agents/{agent_id}/skills"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/skills/recommend"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/skills/sources"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/skills/sources/git"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/skills/sources/{source_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/skills/sources/{source_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/skills/sources/{source_id}/rollback"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/skills/sources/{source_id}/update"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/skills/{skill_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/skills/{skill_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/skills/{skill_id}/content"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/tasks"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/tasks"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/tasks/plan"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/tasks/plan/refine"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/tasks/{task_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/tasks/{task_id}"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/tasks/{task_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/tasks/{task_id}/approve"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/tasks/{task_id}/reject"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/tasks/{task_id}/status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/voice/health"
+    },
+    {
+      "method": "GET",
+      "path": "/api/voice/profiles"
+    },
+    {
+      "method": "POST",
+      "path": "/api/voice/profiles"
+    },
+    {
+      "method": "POST",
+      "path": "/api/voice/profiles/clone"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/voice/profiles/{profile_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/voice/profiles/{profile_id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/voice/profiles/{profile_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/voice/profiles/{profile_id}/preview"
+    },
+    {
+      "method": "GET",
+      "path": "/api/webhooks/recipe/{webhook_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/webhooks/recipe/{webhook_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/webhooks/ws/{workspace_key}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/webhooks/ws/{workspace_key}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/widget-marketplace/categories"
+    },
+    {
+      "method": "GET",
+      "path": "/api/widget-marketplace/developer/analytics"
+    },
+    {
+      "method": "GET",
+      "path": "/api/widget-marketplace/developer/widgets"
+    },
+    {
+      "method": "GET",
+      "path": "/api/widget-marketplace/featured"
+    },
+    {
+      "method": "GET",
+      "path": "/api/widget-marketplace/installed"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/widget-marketplace/reviews/{review_id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/widget-marketplace/reviews/{review_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/widget-marketplace/widgets"
+    },
+    {
+      "method": "POST",
+      "path": "/api/widget-marketplace/widgets"
+    },
+    {
+      "method": "GET",
+      "path": "/api/widget-marketplace/widgets/{widget_id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/widget-marketplace/widgets/{widget_id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/widget-marketplace/widgets/{widget_id}/approve"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/widget-marketplace/widgets/{widget_id}/install"
+    },
+    {
+      "method": "POST",
+      "path": "/api/widget-marketplace/widgets/{widget_id}/install"
+    },
+    {
+      "method": "GET",
+      "path": "/api/widget-marketplace/widgets/{widget_id}/reviews"
+    },
+    {
+      "method": "POST",
+      "path": "/api/widget-marketplace/widgets/{widget_id}/reviews"
+    },
+    {
+      "method": "POST",
+      "path": "/api/widget-marketplace/widgets/{widget_id}/submit"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/widget-marketplace/widgets/{widget_id}/suspend"
+    },
+    {
+      "method": "POST",
+      "path": "/api/widgets/api/widget/documents/search"
+    },
+    {
+      "method": "GET",
+      "path": "/api/widgets/api/widget/documents/{document_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/widgets/auth"
+    },
+    {
+      "method": "GET",
+      "path": "/api/widgets/blog/categories"
+    },
+    {
+      "method": "GET",
+      "path": "/api/widgets/blog/posts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/widgets/blog/posts/{slug}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/widgets/blog/tags"
+    },
+    {
+      "method": "POST",
+      "path": "/api/widgets/callback"
+    },
+    {
+      "method": "POST",
+      "path": "/api/widgets/chat"
+    },
+    {
+      "method": "GET",
+      "path": "/api/widgets/chat/{conversation_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/widgets/config"
+    },
+    {
+      "method": "POST",
+      "path": "/api/widgets/data/execute"
+    },
+    {
+      "method": "POST",
+      "path": "/api/widgets/data/query"
+    },
+    {
+      "method": "GET",
+      "path": "/api/widgets/docs/categories"
+    },
+    {
+      "method": "POST",
+      "path": "/api/widgets/docs/search"
+    },
+    {
+      "method": "GET",
+      "path": "/api/widgets/docs/{document_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/widgets/health"
+    },
+    {
+      "method": "POST",
+      "path": "/api/wizard/plan/{profile_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/wizard/profile/{profile_id}"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/wizard/profile/{profile_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/wizard/progress/{profile_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/wizard/scan/{profile_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/wizard/scrape/{profile_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/wizard/start"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workflow-recipes"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workflow-recipes"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workflow-recipes/categories/list"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workflow-recipes/featured/list"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workflow-recipes/install/{recipe_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workflow-recipes/stats/dashboard"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workflow-recipes/submit"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/workflow-recipes/{recipe_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workflow-recipes/{recipe_id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/workflow-recipes/{recipe_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workflow-recipes/{recipe_id}/assess-quality"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workflow-recipes/{recipe_id}/execute"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workflow-recipes/{recipe_id}/executions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workflow-recipes/{recipe_id}/executions/{execution_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workflow-recipes/{recipe_id}/executions/{execution_id}/cancel"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workflow-recipes/{recipe_id}/executions/{execution_id}/steps/{step_order}/logs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workflow-recipes/{recipe_id}/learn"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workflow-recipes/{recipe_id}/suggestions"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workflow-recipes/{recipe_id}/use"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workflow-templates"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workflow-templates"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workflow-templates/categories/list"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workflow-templates/featured/list"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/workflow-templates/{template_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workflow-templates/{template_id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/workflow-templates/{template_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workflow-templates/{template_id}/use"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workflows"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workflows"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workflows/active"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/workflows/cleanup/old"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workflows/execute"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workflows/executions/"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workflows/executions/"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workflows/executions/{execution_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workflows/executions/{execution_id}/cancel"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workflows/executions/{execution_id}/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workflows/executions/{execution_id}/stream/aisdk"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workflows/stats/dashboard"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workflows/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workflows/templates/recommended"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/workflows/{workflow_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workflows/{workflow_id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/workflows/{workflow_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workflows/{workflow_id}/cancel"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workflows/{workflow_id}/duplicate"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workflows/{workflow_id}/execute"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workflows/{workflow_id}/execute-advanced"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workflows/{workflow_id}/live-progress"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workflows/{workflow_id}/pause"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workflows/{workflow_id}/resume"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workflows/{workflow_id}/status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspaces/current"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspaces/current/byok-preferences"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/workspaces/current/byok-preferences"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspaces/current/integrations"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/workspaces/current/integrations"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspaces/current/memory-stats"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspaces/current/orchestrator"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/workspaces/current/orchestrator"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspaces/{workspace_id}/exec"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspaces/{workspace_id}/files"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspaces/{workspace_id}/files/content"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/workspaces/{workspace_id}/files/content"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspaces/{workspace_id}/files/raw"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspaces/{workspace_id}/github/clone"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspaces/{workspace_id}/github/repos"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspaces/{workspace_id}/personas"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/workspaces/{workspace_id}/personas/{persona_id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/workspaces/{workspace_id}/personas/{persona_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspaces/{workspace_id}/plugins"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspaces/{workspace_id}/plugins"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/workspaces/{workspace_id}/plugins/{plugin_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspaces/{workspace_id}/skills"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspaces/{workspace_id}/skills"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspaces/{workspace_id}/skills/available"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspaces/{workspace_id}/skills/create"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/workspaces/{workspace_id}/skills/{skill_id}"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/workspaces/{workspace_id}/skills/{skill_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspaces/{workspace_id}/skills/{skill_id}/content"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/workspaces/{workspace_id}/skills/{skill_id}/owned"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspaces/{workspace_id}/team/invitations"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/workspaces/{workspace_id}/team/invitations/{invitation_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspaces/{workspace_id}/team/invite"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspaces/{workspace_id}/team/members"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/workspaces/{workspace_id}/team/members/{member_id}"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/workspaces/{workspace_id}/team/members/{member_id}/role"
+    },
+    {
+      "method": "GET",
+      "path": "/docs"
+    },
+    {
+      "method": "GET",
+      "path": "/docs/oauth2-redirect"
+    },
+    {
+      "method": "GET",
+      "path": "/exports/{file_path:path}"
+    },
+    {
+      "method": "GET",
+      "path": "/health"
+    },
+    {
+      "method": "GET",
+      "path": "/health/bootstrap"
+    },
+    {
+      "method": "GET",
+      "path": "/health/ready"
+    },
+    {
+      "method": "GET",
+      "path": "/openapi.json"
+    },
+    {
+      "method": "POST",
+      "path": "/permissions/assign"
+    },
+    {
+      "method": "GET",
+      "path": "/permissions/assignments"
+    },
+    {
+      "method": "GET",
+      "path": "/permissions/audit"
+    },
+    {
+      "method": "POST",
+      "path": "/permissions/bulk-assign"
+    },
+    {
+      "method": "GET",
+      "path": "/permissions/health"
+    },
+    {
+      "method": "GET",
+      "path": "/permissions/matrix"
+    },
+    {
+      "method": "DELETE",
+      "path": "/permissions/revoke"
+    },
+    {
+      "method": "GET",
+      "path": "/redoc"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/workflows/executions/{execution_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/workflows/{workflow_id}/executions"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/workflows/{workflow_id}/live-progress"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/workflows/{workflow_id}/store-orchestration-event"
+    }
+  ]
+}

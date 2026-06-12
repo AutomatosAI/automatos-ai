@@ -61,7 +61,7 @@ import { Switch } from '@/components/ui/switch'
 import { Input } from '@/components/ui/input'
 import { Search, Loader2 } from 'lucide-react'
 import { apiClient } from '@/lib/api-client'
-import { useToast } from '@/hooks/use-toast'
+import { toast } from 'sonner'
 
 // ... (keep ToolDetailsModalProps)
 
@@ -76,7 +76,6 @@ export function ToolDetailsModal({
   loading = false,
   initialTab
 }: ToolDetailsModalProps) {
-  const { toast } = useToast()
   const [activeTab, setActiveTab] = useState<'features' | 'triggers'>(initialTab || 'features')
   const [actions, setActions] = useState<any[]>([])
   const [actionsLoading, setActionsLoading] = useState(false)
@@ -117,10 +116,10 @@ export function ToolDetailsModal({
       await (apiClient as any).post(`/api/tools/${tool.name}/actions`, {
         actions: enabledList
       })
-      toast({ title: "Updated", description: "Permissions saved." })
+      toast("Updated", { description: "Permissions saved." })
     } catch (error) {
       console.error("Failed to save permissions", error)
-      toast({ title: "Error", description: "Failed to save permissions", variant: "destructive" })
+      toast.error("Error", { description: "Failed to save permissions" })
       // Revert on error
       setActions(actions)
     }
@@ -176,11 +175,11 @@ export function ToolDetailsModal({
                     await (apiClient as any).post(`/api/tools/${tool.name}/actions`, {
                       actions: enabledList
                     })
-                    toast({ title: "Settings Saved", description: `${enabledList.length} features enabled.` })
+                    toast("Settings Saved", { description: `${enabledList.length} features enabled.` })
                     onClose()
                   } catch (e: any) {
                     console.error("Save failed:", e)
-                    toast({ title: "Error", description: `Failed to save: ${e.message || "Unknown error"}`, variant: "destructive" })
+                    toast.error("Error", { description: `Failed to save: ${e.message || "Unknown error"}` })
                   }
                 }}
                 variant="outline"

@@ -28,7 +28,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
-import { useToast } from '@/hooks/use-toast'
+import { toast } from 'sonner'
 import { ViewToggle } from '@/components/shared/view-toggle'
 import { useViewMode } from '@/hooks/use-view-mode'
 import { ToolLogo } from '@/components/ui/tool-logo'
@@ -64,7 +64,6 @@ interface MarketplaceToolsTabProps {
 }
 
 export function MarketplaceToolsTab({ searchQuery }: MarketplaceToolsTabProps) {
-    const { toast } = useToast()
     const { isAdmin } = useSystemRole()
     const syncCacheMutation = useSyncToolsCache()
     const [viewMode, setViewMode] = useViewMode('mp-tools')
@@ -267,15 +266,9 @@ export function MarketplaceToolsTab({ searchQuery }: MarketplaceToolsTabProps) {
 
             const statusMsg = (result as any)?.status
             if (statusMsg === 'already_added') {
-                toast({
-                    title: 'Already in Workspace',
-                    description: `${app.display_name} is already in your workspace.`,
-                })
+                toast('Already in Workspace', { description: `${app.display_name} is already in your workspace.` })
             } else {
-                toast({
-                    title: 'Added to Workspace',
-                    description: `${app.display_name} has been added. Go to Tools > Applications to connect it.`,
-                })
+                toast('Added to Workspace', { description: `${app.display_name} has been added. Go to Tools > Applications to connect it.` })
             }
         } catch (error) {
             console.error('[ADD_TO_WORKSPACE] Failed:', error)
@@ -289,11 +282,7 @@ export function MarketplaceToolsTab({ searchQuery }: MarketplaceToolsTabProps) {
                 errorMsg = JSON.stringify(error)
             }
 
-            toast({
-                title: 'Failed to add',
-                description: `Failed to add ${app.display_name}: ${errorMsg}`,
-                variant: 'destructive',
-            })
+            toast.error('Failed to add', { description: `Failed to add ${app.display_name}: ${errorMsg}` })
         }
     }
 
@@ -302,16 +291,9 @@ export function MarketplaceToolsTab({ searchQuery }: MarketplaceToolsTabProps) {
             await disconnectApp.mutateAsync(appName)
             refetchApps()
             refetchWorkspace()
-            toast({
-                title: 'Disconnected',
-                description: `${appName} has been disconnected.`,
-            })
+            toast('Disconnected', { description: `${appName} has been disconnected.` })
         } catch (error) {
-            toast({
-                title: 'Error',
-                description: 'Failed to disconnect app',
-                variant: 'destructive',
-            })
+            toast.error('Error', { description: 'Failed to disconnect app' })
         }
     }
 

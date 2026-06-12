@@ -55,7 +55,7 @@ import { apiClient } from '@/lib/api-client'
 import { ViewToggle } from '@/components/shared/view-toggle'
 import { useViewMode } from '@/hooks/use-view-mode'
 import { ActiveWorkflowsPanel } from './active-workflows-panel'
-import { toast } from '@/components/ui/use-toast'
+import { toast } from 'sonner'
 import { HistoryTab } from './history-tab'
 // MonitoringTab removed — analytics consolidated into /analytics
 import { PlaybooksTab } from './playbooks-tab'
@@ -394,11 +394,7 @@ export function WorkflowManagement() {
       console.log('Workflow created successfully:', result)
       
       // Show success toast
-      toast({
-        title: "✅ Workflow Created",
-        description: `"${workflowForm.name}" has been created successfully and is now active.`,
-        variant: "default"
-      })
+      toast("✅ Workflow Created", { description: `"${workflowForm.name}" has been created successfully and is now active.` })
 
       // Reload workflow data to show the new workflow
       await loadWorkflowData()
@@ -458,11 +454,7 @@ export function WorkflowManagement() {
       setError(errorMessage)
       
       // Show error toast
-      toast({
-        title: "❌ Failed to Create Workflow",
-        description: errorMessage,
-        variant: "destructive"
-      })
+      toast.error("❌ Failed to Create Workflow", { description: errorMessage })
     } finally {
       setIsCreating(false)
     }

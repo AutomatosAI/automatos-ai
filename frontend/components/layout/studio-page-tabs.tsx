@@ -28,11 +28,11 @@ export function StudioPageTabs() {
   const tabs = STUDIO_PAGE_TABS[menuId];
   if (!tabs || tabs.length === 0) return null;
 
-  const activeTab = searchParams?.get('tab') ?? slugify(tabs[0][0]);
+  const activeTab = searchParams?.get('tab') ?? slugify(tabs[0]);
 
   return (
     <nav className="sh-tabs" aria-label="Page sections">
-      {tabs.map(([label, count]) => {
+      {tabs.map((label) => {
         const slug = slugify(label);
         const isActive = slug === activeTab;
         const href = `${pathname}?tab=${slug}`;
@@ -44,7 +44,6 @@ export function StudioPageTabs() {
             aria-current={isActive ? 'page' : undefined}
           >
             <span>{label}</span>
-            {count > 0 && <span className="sh-tab-ct">{count}</span>}
           </Link>
         );
       })}

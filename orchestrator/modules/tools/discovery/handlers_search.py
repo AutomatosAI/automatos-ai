@@ -254,7 +254,7 @@ async def delete_memory(db: Session, workspace_id: UUID, params: Dict[str, Any])
         if memory_id not in owned_ids:
             return {"success": False, "error": "Memory not found or not owned by this workspace"}
 
-        deleted = await service.delete_memory(memory_id=memory_id)
+        deleted = await service.delete_memory(memory_id=memory_id, workspace_id=ws_id)
 
         if deleted:
             return {"success": True, "message": f"Memory {memory_id} deleted"}

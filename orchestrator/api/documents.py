@@ -412,7 +412,10 @@ async def download_document(path: str = Query(..., description="Full path to doc
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/content")
-async def get_document_content_by_path(path: str = Query(..., description="Full path to document")):
+async def get_document_content_by_path(
+    path: str = Query(..., description="Full path to document"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
     """
     Get document content as text for artifact viewer.
     
@@ -1154,7 +1157,10 @@ async def semantic_search(
                     "query": query,
                     "results_count": len(aggregated_results),
                     "execution_time_ms": execution_time_ms,
-                    "metadata": json.dumps({"min_similarity": min_similarity}),
+                    # PRD-156 S5: attribute each usage row to its workspace (the
+                    # table has no workspace_id column; metadata JSONB carries it so
+                    # analytics can filter by metadata->>'workspace_id' without a migration).
+                    "metadata": json.dumps({"min_similarity": min_similarity, "workspace_id": str(ctx.workspace_id)}),
                     "timestamp": datetime.now()
                 }
             )
@@ -1437,6 +1443,7 @@ async def rag_retrieve(
                     "results_count": len(formatted_chunks),
                     "execution_time_ms": execution_time_ms,
                     "metadata": json.dumps({
+                        "workspace_id": str(ctx.workspace_id),  # PRD-156 S5: attribute usage to workspace
                         "max_chunks": max_chunks,
                         "max_tokens": max_tokens,
                         "diversity": diversity,
@@ -1638,9 +1645,10 @@ async def get_usage_analytics(
                 SELECT event_type, COUNT(*) as count
                 FROM document_usage
                 WHERE timestamp >= :start_time
+                    AND metadata->>'workspace_id' = :workspace_id
                 GROUP BY event_type
             """)
-            event_counts_result = db.execute(event_counts_query, {"start_time": start_time}).fetchall()
+            event_counts_result = db.execute(event_counts_query, {"start_time": start_time, "workspace_id": str(ctx.workspace_id)}).fetchall()
             for row in event_counts_result:
                 usage_event_counts[row.event_type] = row.count
                 usage_total_events += row.count
@@ -1653,13 +1661,14 @@ async def get_usage_analytics(
                 FROM document_usage
                 WHERE event_type IN ('document_searched', 'rag_query')
                     AND timestamp >= :start_time
+                    AND metadata->>'workspace_id' = :workspace_id
                     AND metadata->>'query' IS NOT NULL
                 GROUP BY metadata->>'query'
                 ORDER BY count DESC
                 LIMIT 10
             """)
 
-            search_terms_result = db.execute(search_terms_query, {"start_time": start_time}).fetchall()
+            search_terms_result = db.execute(search_terms_query, {"start_time": start_time, "workspace_id": str(ctx.workspace_id)}).fetchall()
             popular_search_terms = [
                 {"query": row.query, "count": row.count}
                 for row in search_terms_result
@@ -1938,9 +1947,9 @@ async def update_document_team_access(
 
     result = db.execute(
         text(
-            "UPDATE documents SET team_access = :teams, updated_at = NOW() "
+            "UPDATE documents SET team_access = :teams "
             "WHERE id = :doc_id AND workspace_id = :ws "
-            "RETURNING id, title, team_access"
+            "RETURNING id, filename, team_access"
         ),
         {"teams": clean_teams, "doc_id": document_id, "ws": str(ctx.workspace_id)},
     ).fetchone()
@@ -1951,7 +1960,7 @@ async def update_document_team_access(
 
     return {
         "id": result.id,
-        "title": result.title,
+        "filename": result.filename,
         "team_access": result.team_access,
     }
 
@@ -1975,9 +1984,9 @@ async def bulk_update_team_access(
 
     rows = db.execute(
         text(
-            "UPDATE documents SET team_access = :teams, updated_at = NOW() "
+            "UPDATE documents SET team_access = :teams "
             "WHERE id = ANY(:ids) AND workspace_id = :ws "
-            "RETURNING id, title, team_access"
+            "RETURNING id, filename, team_access"
         ),
         {"teams": clean_teams, "ids": body.document_ids, "ws": str(ctx.workspace_id)},
     ).fetchall()
@@ -1986,7 +1995,7 @@ async def bulk_update_team_access(
     return {
         "updated": len(rows),
         "documents": [
-            {"id": r.id, "title": r.title, "team_access": r.team_access}
+            {"id": r.id, "filename": r.filename, "team_access": r.team_access}
             for r in rows
         ],
     }

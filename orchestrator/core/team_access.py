@@ -45,3 +45,27 @@ def effective_team(
 
 # SQL clause reusable across endpoints (bind :team parameter)
 TEAM_FILTER_CLAUSE = "AND (team_access = '{}' OR :team = ANY(team_access))"
+
+
+def metadata_team_filter_clause(
+    json_col: str = "metadata",
+    key: str = "team_access",
+) -> str:
+    """Team-filter clause for tables that store ``team_access`` inside a JSONB
+    column instead of a top-level ``ARRAY`` column.
+
+    ``knowledge_items`` (multimodal KB) has no ``team_access`` column — its
+    scoping lives in ``metadata->'team_access'`` — so the array-column
+    ``TEAM_FILTER_CLAUSE`` does not apply. Semantics are identical: an empty /
+    absent list is visible to all; otherwise the bound ``:team`` must be a
+    member. Bind the ``:team`` parameter (already normalized via
+    ``normalize_team``).
+
+    >>> metadata_team_filter_clause()
+    "AND (COALESCE(metadata->'team_access', '[]'::jsonb) = '[]'::jsonb OR metadata->'team_access' @> to_jsonb(:team::text))"
+    """
+    col = f"{json_col}->'{key}'"
+    return (
+        f"AND (COALESCE({col}, '[]'::jsonb) = '[]'::jsonb "
+        f"OR {col} @> to_jsonb(:team::text))"
+    )
