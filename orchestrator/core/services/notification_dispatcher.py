@@ -46,6 +46,8 @@ VALID_EVENT_TYPES: frozenset[str] = frozenset(
     {
         "heartbeat_complete",
         "task_complete",
+        "task_failed",
+        "task_sla_breach",
         "mission_plan_ready",
         "mission_step_complete",
         "mission_complete",
