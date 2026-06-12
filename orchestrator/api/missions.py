@@ -1113,6 +1113,7 @@ async def query_mission_field(
 @router.get("/{mission_id}/field")
 async def get_mission_field(
     mission_id: UUID,
+    scope: str = "mission",
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -1168,12 +1169,16 @@ async def get_mission_field(
             except Exception:
                 pass
 
-        # Get patterns and stability from the inner (unwrapped) backend
+        # Get patterns and stability from the inner (unwrapped) backend.
+        # PRD-166 S1/S4: scope='workspace' shows the workspace-persistent field
+        # (every mission's patterns), 'mission' (default) shows just this run's.
         inner = field._inner
         patterns = []
         stability = {"stability": 0.0, "pattern_count": 0}
 
-        if hasattr(inner, "get_patterns"):
+        if scope == "workspace" and hasattr(inner, "get_workspace_patterns"):
+            patterns = await inner.get_workspace_patterns(str(run.workspace_id))
+        elif hasattr(inner, "get_patterns"):
             patterns = await inner.get_patterns(field_id)
         if hasattr(inner, "measure_stability"):
             stability = await inner.measure_stability(field_id)

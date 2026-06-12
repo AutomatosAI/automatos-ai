@@ -138,10 +138,13 @@ export interface MissionFieldResponse {
   metrics: FieldMetrics | null
 }
 
-export function useMissionField(id: string | null, enabled = true) {
+export type FieldScope = 'mission' | 'workspace'
+
+export function useMissionField(id: string | null, enabled = true, scope: FieldScope = 'mission') {
   return useQuery<MissionFieldResponse>({
-    queryKey: missionQueryKeys.field(id!),
-    queryFn: () => apiClient.request<MissionFieldResponse>(`/api/missions/${id}/field`),
+    queryKey: [...missionQueryKeys.field(id!), scope],
+    queryFn: () =>
+      apiClient.request<MissionFieldResponse>(`/api/missions/${id}/field?scope=${scope}`),
     enabled: !!id && enabled,
     staleTime: 5_000,
     refetchInterval: 8_000,

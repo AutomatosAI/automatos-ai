@@ -1,10 +1,10 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { Brain, Zap, TrendingDown, Eye, Users, Activity, Clock, BarChart3, AlertTriangle, ServerCrash } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useMissionField } from '@/hooks/use-missions-api'
-import type { FieldPattern } from '@/hooks/use-missions-api'
+import type { FieldPattern, FieldScope } from '@/hooks/use-missions-api'
 import dynamic from 'next/dynamic'
 
 const MissionFieldViz = dynamic(
@@ -113,7 +113,8 @@ function PatternCard({ pattern, agentIndex, maxStrength }: {
 }
 
 export function MissionFieldPanel({ missionId, className }: MissionFieldPanelProps) {
-  const { data, isLoading } = useMissionField(missionId)
+  const [scope, setScope] = useState<FieldScope>('mission')
+  const { data, isLoading } = useMissionField(missionId, true, scope)
 
   const agentMap = useMemo(() => {
     if (!data?.patterns) return new Map<number, number>()
@@ -196,11 +197,23 @@ export function MissionFieldPanel({ missionId, className }: MissionFieldPanelPro
         <div className="flex items-center justify-between">
           <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
             <Brain className="w-3.5 h-3.5" />
-            Shared Field
+            {scope === 'workspace' ? 'Workspace Field' : 'Shared Field'}
           </h3>
-          <span className="text-[10px] font-mono text-muted-foreground/60">
-            {data.backend}
-          </span>
+          {/* PRD-166 S1/S4: mission ↔ workspace-persistent field scope */}
+          <div className="flex items-center gap-1 rounded-md border border-border p-0.5">
+            {(['mission', 'workspace'] as FieldScope[]).map((s) => (
+              <button
+                key={s}
+                onClick={() => setScope(s)}
+                className={cn(
+                  'px-1.5 py-0.5 text-[10px] rounded transition-colors capitalize',
+                  scope === s ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Stability gauge */}

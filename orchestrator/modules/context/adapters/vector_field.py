@@ -504,19 +504,27 @@ class VectorFieldSharedContext(SharedContextPort):
     # ── Pattern listing (for field visualizer) ─────────────────
 
     async def get_patterns(self, context_id: str) -> list[dict[str, Any]]:
-        """Return all patterns in the field with computed decayed strength.
+        """Return all patterns in ONE mission field with decayed strength.
 
         Used by the field visualizer API to show the live state of the field.
         Does NOT trigger Hebbian reinforcement (read-only).
         """
+        return await self._list_patterns(self._field_filter(context_id), f"field={context_id}")
+
+    async def get_workspace_patterns(self, workspace_id: str) -> list[dict[str, Any]]:
+        """PRD-166 S1/S4: every pattern accumulated across a workspace's missions,
+        for the workspace-scoped Field view. Read-only."""
+        return await self._list_patterns(self._workspace_filter(workspace_id), f"ws={workspace_id}")
+
+    async def _list_patterns(self, scroll_filter: Filter, label: str) -> list[dict[str, Any]]:
         try:
             points, _ = await self._client.scroll(
                 collection_name=SHARED_COLLECTION,
-                scroll_filter=self._field_filter(context_id),
-                limit=10000,
+                scroll_filter=scroll_filter,
+                limit=config.FIELD_COMPACTION_MAX_SCAN,
             )
         except Exception:
-            logger.debug("[Field] get_patterns scroll failed for %s", context_id, exc_info=True)
+            logger.debug("[Field] get_patterns scroll failed for %s", label, exc_info=True)
             return []
 
         now = datetime.now(timezone.utc)
