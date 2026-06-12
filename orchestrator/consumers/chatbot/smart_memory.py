@@ -453,15 +453,22 @@ class SmartMemoryManager:
             results: List[tuple] = []
             l3_raised = False
             for fact in facts:
+                # Defensive: tolerate a bare string (legacy/edge) and skip a
+                # malformed fact rather than crash the turn — the L2 transcript
+                # write below must NEVER be lost to one bad L3 fact (PRD-142 W3-S7).
+                if isinstance(fact, str):
+                    fact = {"fact": fact, "type": DEFAULT_FACT_TYPE, "importance": 0.5}
+                if not isinstance(fact, dict) or not fact.get("fact"):
+                    continue
                 fact_meta = {
                     **base_metadata,
-                    "category": fact["type"],
-                    "importance": fact["importance"],
+                    "category": fact.get("type", DEFAULT_FACT_TYPE),
+                    "importance": fact.get("importance", 0.5),
                 }
                 try:
                     fact_results = await self.unified_service.store_two_tier(
                         workspace_id=workspace_id,
-                        messages=[{"role": "user", "content": fact["fact"][:max_chars]}],
+                        messages=[{"role": "user", "content": str(fact["fact"])[:max_chars]}],
                         agent_id=agent_id,
                         tier=tier,
                         metadata=fact_meta,

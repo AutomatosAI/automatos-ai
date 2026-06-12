@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 # Similarity at/above this is a near-duplicate (merge); a contradiction is high
 # subject-overlap with a conflicting value, handled separately.
 DEFAULT_DUP_THRESHOLD = 0.82
-DEFAULT_SUBJECT_OVERLAP = 0.6
+DEFAULT_SUBJECT_OVERLAP = 0.5
 
 
 def _text(m: Dict[str, Any]) -> str:
