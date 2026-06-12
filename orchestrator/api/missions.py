@@ -489,6 +489,47 @@ async def import_mission_plan(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+class ApprovalPolicyRequest(BaseModel):
+    policy: Optional[str] = Field(None, description="always_ask | auto_below_budget | full_auto")
+    approval_dollar_ceiling: Optional[float] = Field(None, ge=0)
+    auto_proceed_after_seconds: Optional[int] = Field(None, ge=1)
+
+
+@router.get("/approval-policy")
+async def get_mission_approval_policy(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """PRD-163 S3: the workspace's mission approval policy."""
+    from core.services.approval_policy import load_approval_policy
+
+    return load_approval_policy(db, ctx.workspace_id)
+
+
+@router.put("/approval-policy")
+async def set_mission_approval_policy(
+    body: ApprovalPolicyRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """PRD-163 S3: update the workspace's mission approval policy."""
+    from core.services.approval_policy import set_approval_policy
+
+    try:
+        result = set_approval_policy(
+            db,
+            ctx.workspace_id,
+            policy=body.policy,
+            approval_dollar_ceiling=body.approval_dollar_ceiling,
+            auto_proceed_after_seconds=body.auto_proceed_after_seconds,
+        )
+        db.commit()
+        return result
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
 @router.get("")
 async def list_missions(
     state: Optional[str] = Query(None, description="Filter by state (e.g., 'running', 'completed')"),

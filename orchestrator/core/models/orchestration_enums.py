@@ -70,6 +70,7 @@ class EventType(str, Enum):
     RUN_PLANNING_STARTED = "run_planning_started"
     RUN_PLAN_READY = "run_plan_ready"
     RUN_APPROVED = "run_approved"
+    RUN_AUTO_APPROVED = "run_auto_approved"  # PRD-163 S3: policy auto-approval (distinct audit)
     RUN_REJECTED = "run_rejected"
     RUN_STARTED = "run_started"
     RUN_PAUSED = "run_paused"

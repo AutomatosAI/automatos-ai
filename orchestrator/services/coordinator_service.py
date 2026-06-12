@@ -934,6 +934,16 @@ class CoordinatorService:
                         db.rollback()
                         summary["errors"].append(str(run.id))
 
+                # --- PRD-163 S3: approval countdowns — auto-proceed expired plans ---
+                try:
+                    n = self.check_approval_countdowns(db)
+                    if n:
+                        db.commit()
+                        summary["countdown_auto_approved"] = n
+                except Exception:
+                    logger.warning("[Coordinator] approval countdown sweep failed", exc_info=True)
+                    db.rollback()
+
                 # --- PRD-108: Clean up fields for terminal runs ---
                 await self._cleanup_terminal_fields(db)
                 db.commit()  # Persist field_id removal to stop destroy loop
@@ -1749,26 +1759,55 @@ class CoordinatorService:
             },
         )
 
-        # Auto-approve or await approval. PRD-163 S2: plan_only is an explicit
-        # "just plan, don't execute" request — it always awaits approval, never
-        # auto-approves (overriding any auto_approve config / policy).
-        auto_approve = (
-            False if mission_config.get("plan_only")
-            else mission_config.get("auto_approve", False)
-        )
-        if auto_approve:
+        # PRD-163 S3: decide auto-approve vs await-approval via the workspace
+        # approval policy ($ ceiling / full_auto + §12.3 gate). plan_only always
+        # awaits (S2). A per-request auto_approve from chat is an explicit override.
+        from core.services.approval_policy import evaluate_approval, ApprovalDecision
+
+        estimated_cost = self._estimate_cost_usd(decomposition.token_estimate)
+        if mission_config.get("plan_only"):
+            decision = ApprovalDecision(
+                auto_approve=False, reason="plan_only", policy="plan_only",
+                ceiling=None, estimated_cost=estimated_cost, countdown_seconds=None,
+            )
+        else:
+            decision = evaluate_approval(
+                db, workspace_id, estimated_cost,
+                override_auto_approve=bool(mission_config.get("auto_approve", False)),
+            )
+
+        if decision.auto_approve:
             transition_run(
                 db=db,
                 run=run,
                 new_state=RunState.RUNNING,
                 actor_type=ActorType.COORDINATOR,
                 actor_id="coordinator",
-                reason="Auto-approved",
+                reason=f"Auto-approved: {decision.reason}",
+            )
+            # PRD-163 S3: distinct audit event with the policy + ceiling snapshot.
+            emit_event(
+                db=db,
+                run_id=run.id,
+                event_type=EventType.RUN_AUTO_APPROVED,
+                actor_type=ActorType.COORDINATOR,
+                actor_id="coordinator",
+                payload=decision.audit_snapshot(),
             )
             self._queue_initial_tasks(db, run)
             await self._create_mission_field(db, run)
-            logger.info("Mission %s auto-approved → running", run.id)
+            logger.info("Mission %s auto-approved (%s) → running", run.id, decision.reason)
         else:
+            # PRD-163 S3: countdown — store a deadline; the tick loop auto-proceeds
+            # when it passes (cancelled by an explicit approve/reject in the meantime).
+            if decision.countdown_seconds:
+                from datetime import datetime, timezone, timedelta
+                deadline = datetime.now(timezone.utc) + timedelta(seconds=decision.countdown_seconds)
+                run.config = {
+                    **(run.config or {}),
+                    "approval_deadline_at": deadline.isoformat(),
+                    "approval_countdown_seconds": decision.countdown_seconds,
+                }
             transition_run(
                 db=db,
                 run=run,
@@ -1776,9 +1815,61 @@ class CoordinatorService:
                 actor_type=ActorType.COORDINATOR,
                 actor_id="coordinator",
             )
-            logger.info("Mission %s → awaiting_approval", run.id)
+            logger.info("Mission %s → awaiting_approval (%s)", run.id, decision.reason)
 
         return run
+
+    def _estimate_cost_usd(self, token_estimate: int) -> float:
+        """PRD-163 S3/S5: dollar cost for a token estimate — the currency the
+        approval policy and budget ceilings are denominated in."""
+        tokens = max(0, int(token_estimate or 0))
+        return (tokens / 1000.0) * Config.COORDINATOR_COST_PER_1K_TOKENS
+
+    def check_approval_countdowns(self, db: Session, workspace_id: Optional[UUID] = None) -> int:
+        """PRD-163 S3: auto-proceed any awaiting-approval mission whose countdown
+        deadline has passed. Returns the number auto-approved. ``workspace_id=None``
+        sweeps every workspace (the coordinator tick uses this). Cancelable: an
+        explicit approve/reject moves the run out of awaiting_approval, so it is
+        no longer a candidate here.
+        """
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc)
+        q = db.query(OrchestrationRun).filter(
+            OrchestrationRun.state == RunState.AWAITING_APPROVAL.value,
+        )
+        if workspace_id is not None:
+            q = q.filter(OrchestrationRun.workspace_id == workspace_id)
+        candidates = q.all()
+        proceeded = 0
+        for run in candidates:
+            cfg = run.config or {}
+            deadline_raw = cfg.get("approval_deadline_at")
+            if not deadline_raw:
+                continue
+            try:
+                deadline = datetime.fromisoformat(deadline_raw)
+                if deadline.tzinfo is None:
+                    deadline = deadline.replace(tzinfo=timezone.utc)
+            except (ValueError, TypeError):
+                continue
+            if now < deadline:
+                continue
+            transition_run(
+                db=db, run=run, new_state=RunState.RUNNING,
+                actor_type=ActorType.COORDINATOR, actor_id="coordinator",
+                reason="Auto-approved: approval countdown elapsed",
+            )
+            emit_event(
+                db=db, run_id=run.id, event_type=EventType.RUN_AUTO_APPROVED,
+                actor_type=ActorType.COORDINATOR, actor_id="coordinator",
+                payload={"auto_approved": True, "reason": "countdown_elapsed",
+                         "deadline_at": deadline_raw},
+            )
+            self._queue_initial_tasks(db, run)
+            proceeded += 1
+            logger.info("Mission %s auto-proceeded (countdown elapsed)", run.id)
+        return proceeded
 
     # ------------------------------------------------------------------
     # Lifecycle: approve_plan
