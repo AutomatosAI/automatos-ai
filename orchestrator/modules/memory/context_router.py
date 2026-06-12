@@ -478,14 +478,14 @@ class ContextRouter:
                 signals.is_live_data,
             ]))
         )
-        fetch_long_term = (
-            signals.is_personal_fact
-            or not any([
-                signals.is_temporal,
-                signals.is_knowledge_query,
-                signals.is_live_data,
-            ])
-        )
+        # PRD-159 S3: operational memories (tool_outcome / task_learning /
+        # playbook_pattern / …) live in L3 and must be recallable for ANY
+        # query — including temporal ("why did the deploy mission fail?") and
+        # knowledge queries — not gated behind the temporal-regex signal. The
+        # server-side relevance floor in search_long_term keeps irrelevant junk
+        # out instead of this coarse signal gate. Live-data queries (weather,
+        # prices) still skip memory.
+        fetch_long_term = not signals.is_live_data
         fetch_temporal = signals.is_temporal and signals.temporal_window is not None
         # Daily logs on default path (no strong signal)
         fetch_daily = not any([

@@ -1831,13 +1831,47 @@ class ApiClient {
     })
   }
 
-  async getDocuments() {
-    return this.request('/api/documents/')
+  async getDocuments(team?: string) {
+    // PRD-158 S3: optional server-side team filter.
+    const qs = team ? `?team=${encodeURIComponent(team)}` : ''
+    return this.request(`/api/documents/${qs}`)
   }
 
   // PRD-157 S6: real processing-queue status (replaces the FALLBACK_DATA placebo).
   async getProcessingQueue() {
     return this.request('/api/documents/queue/status')
+  }
+
+  // PRD-158: Teams entity.
+  async getTeams(): Promise<Array<{ id: number; name: string; normalized_name: string }>> {
+    return this.request('/api/teams')
+  }
+
+  async createTeam(name: string): Promise<{ id: number; name: string; normalized_name: string }> {
+    return this.request('/api/teams', {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    })
+  }
+
+  // PRD-158 S3: per-team document counts (server-side aggregate).
+  async getDocumentTeamCounts(): Promise<{ counts: Record<string, number>; untagged: number; total: number }> {
+    return this.request('/api/documents/team-counts')
+  }
+
+  // PRD-158 S4: team-access edits (backend PATCH/bulk endpoints already exist).
+  async updateDocumentTeamAccess(documentId: number, teamAccess: string[]) {
+    return this.request(`/api/documents/${documentId}/team-access`, {
+      method: 'PATCH',
+      body: JSON.stringify({ team_access: teamAccess }),
+    })
+  }
+
+  async bulkUpdateTeamAccess(documentIds: number[], teamAccess: string[]) {
+    return this.request('/api/documents/bulk-team-access', {
+      method: 'POST',
+      body: JSON.stringify({ document_ids: documentIds, team_access: teamAccess }),
+    })
   }
 
   async getDocument(id: string) {

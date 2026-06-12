@@ -24,6 +24,19 @@ logger = logging.getLogger(__name__)
 _MAX_RETRIES = 1                # One retry with backoff
 
 
+def filter_by_relevance_floor(results: List[Dict], floor: float) -> List[Dict]:
+    """Drop scored results below the similarity floor (PRD-159 S3).
+
+    Results without a score are kept (cannot judge); scored-but-below-floor are
+    dropped so low-relevance junk is never injected into context. A floor <= 0
+    disables filtering.
+    """
+    if not floor or floor <= 0:
+        return results
+    return [r for r in results if r.get("score") is None or (r.get("score") or 0) >= floor]
+
+
+
 class _CircuitBreaker:
     """Simple circuit breaker for Mem0 calls."""
     __slots__ = ("failures", "last_failure_time", "is_open", "threshold", "cooldown")
@@ -469,6 +482,14 @@ class Mem0Client:
             ),
             reverse=True,
         )
+        # PRD-159 S3: apply the server-side relevance floor so sub-floor junk is
+        # never injected into recall.
+        try:
+            from config import config
+            floor = float(getattr(config, "MEMORY_RELEVANCE_FLOOR", 0.3))
+        except Exception:
+            floor = 0.3
+        results = filter_by_relevance_floor(results, floor)
         return results[:limit]
 
     async def get_all(

@@ -10,6 +10,7 @@ import {
   RefreshCw,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { TeamMultiSelect } from '@/components/documents/team-multi-select'
 import {
   useCloudFolders,
   useSelectFolder,
@@ -107,6 +108,7 @@ interface Props {
 
 export function FolderNavigator({ connectionId, currentRootPath, onFolderSelected }: Props) {
   const [selectedPath, setSelectedPath] = useState<string | null>(currentRootPath)
+  const [defaultTeamAccess, setDefaultTeamAccess] = useState<string[]>([])
 
   const { data: rootFolders = [], isLoading } = useCloudFolders(connectionId, '/')
   const selectFolderMutation = useSelectFolder()
@@ -116,6 +118,7 @@ export function FolderNavigator({ connectionId, currentRootPath, onFolderSelecte
     await selectFolderMutation.mutateAsync({
       connectionId,
       rootFolderPath: selectedPath,
+      defaultTeamAccess,
     })
     onFolderSelected?.()
   }
@@ -157,6 +160,15 @@ export function FolderNavigator({ connectionId, currentRootPath, onFolderSelecte
           Selected: <span className="text-foreground font-medium">{selectedPath}</span>
         </div>
       )}
+
+      {/* PRD-158 S2/Q5: default team for documents synced from this connection */}
+      <div className="space-y-1.5">
+        <div className="text-sm font-medium">Default team for synced documents</div>
+        <p className="text-xs text-muted-foreground">
+          Documents synced from this connection are scoped to these teams. Leave empty for all teams.
+        </p>
+        <TeamMultiSelect value={defaultTeamAccess} onChange={setDefaultTeamAccess} />
+      </div>
 
       {/* Confirm button */}
       <Button

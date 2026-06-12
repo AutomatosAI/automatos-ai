@@ -23,6 +23,21 @@ from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
+# PRD-159 S1 — operational memory taxonomy (Zep ontology incl. `procedure`).
+# The distiller emits a {fact, type, importance} object per durable fact; `type`
+# is validated against this set and stored as the memory `category` so recall
+# and the Explorer can filter operational knowledge by kind.
+MEMORY_FACT_TYPES = frozenset({
+    "tool_outcome",     # a tool/Composio call's notable result (failure, quirk, new id)
+    "task_learning",    # what was learned from a mission/task succeeding or failing
+    "playbook_pattern", # a reusable pattern surfaced while running a playbook
+    "user_fact",        # stable fact about the user
+    "business_fact",    # stable fact about their business/domain
+    "preference",       # a stated preference
+    "procedure",        # a how-to / standard operating procedure
+})
+DEFAULT_FACT_TYPE = "task_learning"
+
 
 @dataclass
 class UserContext:
@@ -66,6 +81,10 @@ class SmartMemoryManager:
         self._cache_ttl = 120  # 2 minutes
         self._storage_queue: List[Tuple] = []
         self._storage_task = None
+        # PRD-159 S5: honest memory_stored SSE — the tier that actually persisted
+        # and how many durable facts were written this turn (0 → no SSE).
+        self._last_tier: Optional[str] = None
+        self._last_l3_facts_stored: int = 0
 
     @property
     def unified_service(self):
@@ -92,81 +111,33 @@ class SmartMemoryManager:
 
     def _classify_memory_tier(self, user_message: str, assistant_response: str) -> str:
         """
-        Classify where a memory should be stored.
+        Classify where a memory should be stored. Returns "global" or "agent".
 
-        Returns: "global", "agent", or "both"
+        PRD-159 S5: the "both"-tier double-write default is REMOVED. Every
+        exchange used to write to BOTH the workspace and agent namespaces,
+        doubling the Mem0 rows and the Explorer count for one memory. The default
+        is now a SINGLE workspace namespace ("global"); the agent namespace is
+        used only when the user gives an explicit agent-scoped instruction. The
+        fragile single-character keywords ('#'/'@') that misrouted ordinary
+        messages to the agent tier are gone.
 
-        Classification rules:
-        - Personal facts (name, location, job, general info) → global
-        - Tool/workflow-related (Slack, email patterns, contacts for tools) → agent
-        - Preferences → both (useful everywhere)
-
-        IMPORTANT: Only classify based on the USER message, not the assistant
-        response. The assistant mentioning "slack" or "github" in an explanation
-        shouldn't misclassify a personal question as agent-specific.
+        Only the USER message is classified — the assistant response contains
+        tool names in explanations that caused false positives.
         """
-        # Only use USER message for classification — assistant response
-        # contains tool names in explanations that cause false positives
         combined = user_message.lower()
 
-        # Tool/workflow-specific keywords → agent-specific memory
-        # These are things specific to how tools are used
-        tool_keywords = [
-            # Communication tools
-            "slack", "channel", "#", "dm", "message to",
-            "gmail", "email to", "send email", "cc", "bcc", "forward",
-            # Dev tools
-            "github", "repository", "repo", "branch", "pr", "pull request",
-            "jira", "ticket", "issue",
-            # Data tools
-            "database", "table", "query", "sql", "api", "endpoint",
-            # File tools
-            "spreadsheet", "document", "file", "folder", "drive", "upload",
-            # Workflow patterns
-            "when i ask", "for this agent", "in this context"
-        ]
-
-        # Personal/global keywords → global memory (who the user IS)
-        personal_keywords = [
-            "my name", "i am", "i'm", "call me",
-            "i work at", "i work for", "my job", "my role",
-            "i live", "from ireland", "from portugal", "i'm from",
-            "born", "age", "founder", "ceo", "coo", "manager",
-            "my company", "my team", "my organization"
-        ]
-
-        # Preference keywords → both tiers (useful everywhere)
-        preference_keywords = [
-            "prefer", "favorite", "like to", "don't like",
-            "usually", "my style", "i want", "i need"
-        ]
-
-        # Strong agent indicators (override others)
+        # Explicit agent-scoped instructions → store under the agent namespace.
+        # These are durable directions about how THIS agent should act, not
+        # passing mentions of a tool name.
         strong_agent_keywords = [
-            "always cc", "default channel", "send to", "post to",
-            "my slack", "my email", "contact", "@"
+            "always cc", "default channel", "for this agent", "in this context",
+            "when i ask you", "post to", "send to",
         ]
-
-        has_tool = any(kw in combined for kw in tool_keywords)
-        has_personal = any(kw in combined for kw in personal_keywords)
-        has_preference = any(kw in combined for kw in preference_keywords)
-        has_strong_agent = any(kw in combined for kw in strong_agent_keywords)
-
-        # Strong agent indicators take precedence
-        if has_strong_agent:
+        if any(kw in combined for kw in strong_agent_keywords):
             return "agent"
-        elif has_personal and has_tool:
-            return "both"  # Personal + tool context → store everywhere
-        elif has_preference and has_tool:
-            return "both"  # Tool preference → useful in both tiers
-        elif has_preference:
-            return "both"  # General preference → both
-        elif has_tool:
-            return "agent"  # Pure tool-specific
-        elif has_personal:
-            return "global"  # Pure personal fact
-        else:
-            return "both"  # Default to both — let Mem0 decide what's worth extracting
+
+        # Everything else → single workspace namespace. No double-write.
+        return "global"
 
     def _get_cache_key(self, workspace_id: str, agent_id: Optional[int], query: str) -> str:
         """Create cache key for memory lookups (includes agent for agent-specific cache)."""
@@ -452,25 +423,17 @@ class SmartMemoryManager:
                 agent_id=agent_id,
             )
 
+            # PRD-159 S1: NO raw-exchange fallback. A failed distill
+            # (``facts is None``) or an exchange with nothing durable
+            # (``facts == []``) writes NOTHING to L3 — the L2 transcript below
+            # still preserves the verbatim turn. This is what ends the
+            # "user said hello" era: junk never reaches Mem0.
             if facts is None:
-                # Distillation failed (LLM/parse error) — fall back to the raw
-                # exchange so a transient outage never drops the memory.
-                l3_messages = [
-                    {"role": "user", "content": user_message[:max_chars]},
-                    {"role": "assistant", "content": assistant_response[:max_chars]},
-                ]
-                distilled = False
-            elif facts:
-                # Durable facts found → store those, not the raw turns.
-                l3_messages = [
-                    {"role": "user", "content": fact[:max_chars]} for fact in facts
-                ]
-                distilled = True
-            else:
-                # facts == [] → nothing durable in this exchange. Skip L3 so we
-                # don't store episodic noise; L2 still keeps the transcript.
-                l3_messages = None
-                distilled = True
+                logger.info(
+                    "[SmartMemory] Distill failed — L3 skipped; transcript kept in L2"
+                )
+                facts = []
+            distilled = True
 
             base_metadata = {
                 "chat_id": chat_id,
@@ -480,26 +443,41 @@ class SmartMemoryManager:
                 "distilled": distilled,
             }
 
-            # PRD-142 W3-S7 (§H "failure path tested — never silently
-            # swallowed"): wrap the L3 write in try/except so a Mem0 outage
-            # cannot prevent the L2 transcript write below. Without this
-            # guard an exception from store_two_tier would skip past the
-            # transcript persistence and lose the turn entirely.
+            # Each durable fact is stored with its OWN typed metadata (category +
+            # importance) so tier/category/importance stay filterable in semantic
+            # search and the Explorer (PRD-159 S1/S3/S5). store_two_tier applies
+            # one metadata dict per call, so we write per fact — facts/turn is
+            # small (0..N), so this stays cheap.
+            # PRD-142 W3-S7 (§H): the L3 write is guarded so a Mem0 outage cannot
+            # prevent the L2 transcript write below.
             results: List[tuple] = []
             l3_raised = False
-            if l3_messages is not None:
+            for fact in facts:
+                # Defensive: tolerate a bare string (legacy/edge) and skip a
+                # malformed fact rather than crash the turn — the L2 transcript
+                # write below must NEVER be lost to one bad L3 fact (PRD-142 W3-S7).
+                if isinstance(fact, str):
+                    fact = {"fact": fact, "type": DEFAULT_FACT_TYPE, "importance": 0.5}
+                if not isinstance(fact, dict) or not fact.get("fact"):
+                    continue
+                fact_meta = {
+                    **base_metadata,
+                    "category": fact.get("type", DEFAULT_FACT_TYPE),
+                    "importance": fact.get("importance", 0.5),
+                }
                 try:
-                    results = await self.unified_service.store_two_tier(
+                    fact_results = await self.unified_service.store_two_tier(
                         workspace_id=workspace_id,
-                        messages=l3_messages,
+                        messages=[{"role": "user", "content": str(fact["fact"])[:max_chars]}],
                         agent_id=agent_id,
                         tier=tier,
-                        metadata=base_metadata,
+                        metadata=fact_meta,
                     )
+                    results.extend(fact_results)
                 except Exception:
                     l3_raised = True
                     logger.warning(
-                        "[SmartMemory] L3 store_two_tier raised — L2 "
+                        "[SmartMemory] L3 store_two_tier raised for a fact — L2 "
                         "transcript will still persist", exc_info=True,
                     )
 
@@ -530,7 +508,10 @@ class SmartMemoryManager:
             # visible failure via False return (§H: never silent), even though
             # L2 still got the verbatim turn.
             l3_ok = any(r[1] and not r[1].get("error") for r in results)
-            success = (l3_ok or l3_messages is None) and not l3_raised
+            # PRD-159 S5: how many durable facts actually persisted to L3 this
+            # turn — drives the honest memory_stored SSE (0 → no event fired).
+            self._last_l3_facts_stored = len(facts) if l3_ok else 0
+            success = (l3_ok or not facts) and not l3_raised
 
             if success:
                 if l3_ok:
@@ -566,23 +547,30 @@ class SmartMemoryManager:
         *,
         workspace_id: str,
         agent_id: Optional[int],
-    ) -> Optional[List[str]]:
-        """Distil 0..N durable facts from a chat exchange for the L3 (Mem0) feed.
+    ) -> Optional[List[Dict[str, Any]]]:
+        """Distil 0..N typed durable facts from a chat exchange for the L3 feed.
+
+        Each fact is ``{"fact": str, "type": <taxonomy>, "importance": float}``.
+        The distiller runs on the cheap model tier (``config.MEMORY_DISTILL_MODEL``)
+        — ~1 LLM call/turn (PRD-159 D11/Q16).
 
         Returns:
-            - ``list[str]`` of durable facts (possibly empty → nothing worth
-              keeping; caller should skip L3),
-            - ``None`` on LLM/parse failure so the caller can fall back to the
-              raw exchange rather than silently dropping the memory.
+            - ``list[dict]`` of typed facts (possibly empty → nothing durable;
+              caller skips L3),
+            - ``None`` on LLM/parse failure. PRD-159 S1: the caller stores
+              NOTHING on failure (no raw-exchange fallback) — the L2 transcript
+              still preserves the verbatim turn.
         """
         prompt = self._build_distill_prompt(user_message, assistant_response)
         try:
             # Imported here (not at module top) so tests can monkeypatch
             # ``core.llm.create_llm_manager`` and have it take effect per call.
             from core.llm import create_llm_manager
+            from config import config
 
             llm = create_llm_manager(
                 service_name="memory_integration",
+                model=config.MEMORY_DISTILL_MODEL,
                 workspace_id=workspace_id,
                 agent_id=agent_id,
                 request_type="memory_distill",
@@ -601,32 +589,56 @@ class SmartMemoryManager:
 
     @staticmethod
     def _build_distill_prompt(user_message: str, assistant_response: str) -> str:
-        """Prompt that asks the LLM for durable knowledge, not interaction logs."""
+        """Prompt for typed operational memory (PRD-159 S1).
+
+        No transient-event exclusion: tool outcomes, task/mission learnings and
+        playbook patterns are exactly the operational memories we now WANT. The
+        ``type`` field classifies them instead of a blanket ban filtering them
+        out.
+        """
         return (
-            "You are curating long-term memory for an AI assistant. From the "
-            "single chat exchange below, extract only DURABLE facts worth "
-            "remembering for future conversations — stable knowledge about the "
-            "user, their business, their domain, their preferences, or decisions "
-            "and constraints that will still matter weeks from now.\n\n"
-            "Do NOT record transient interaction events (e.g. 'user asked to run "
-            "a mission', 'assistant said it would do X', 'user was informed "
-            "that…'). Those are conversation logs, not knowledge.\n\n"
-            "Write each fact as a standalone, third-person statement that makes "
+            "You are curating long-term memory for an AI assistant (\"Auto\"). "
+            "From the single chat exchange below, extract durable facts worth "
+            "remembering for future work — both operational knowledge (what a "
+            "tool call revealed, what a mission/task taught, a reusable playbook "
+            "pattern) and stable knowledge about the user, their business, their "
+            "domain, and their preferences.\n\n"
+            "Classify each fact with a `type` from this taxonomy:\n"
+            "- tool_outcome: a notable result of a tool/integration call "
+            "(a failure + its cause, an auth quirk, a rate limit, a new channel/"
+            "record id, a schema surprise)\n"
+            "- task_learning: what was learned from a mission or task succeeding "
+            "or failing\n"
+            "- playbook_pattern: a reusable pattern/approach surfaced while "
+            "working\n"
+            "- user_fact: a stable fact about the user\n"
+            "- business_fact: a stable fact about their business or domain\n"
+            "- preference: a stated preference (tone, format, tools, cadence)\n"
+            "- procedure: a how-to or standing instruction for getting something "
+            "done\n\n"
+            "Write each `fact` as a standalone, third-person statement that makes "
             "sense without the surrounding conversation. Preserve specifics "
-            "(names, standards, numbers, spellings).\n\n"
-            "Return ONLY a JSON array of strings. If nothing durable is worth "
-            "keeping, return an empty array [].\n\n"
+            "(names, standards, numbers, ids, spellings). Set `importance` in "
+            "[0,1] (0.8+ = load-bearing, 0.3 = minor). Skip pure pleasantries and "
+            "chit-chat with no durable content.\n\n"
+            "Return ONLY a JSON array of objects "
+            "{\"fact\": str, \"type\": str, \"importance\": number}. "
+            "If nothing durable is worth keeping, return an empty array [].\n\n"
             f"User: {user_message}\n"
             f"Assistant: {assistant_response}\n\n"
-            "Durable facts (JSON array):"
+            "Typed durable facts (JSON array):"
         )
 
     @staticmethod
-    def _parse_distilled_facts(content: str) -> Optional[List[str]]:
-        """Parse the LLM output into a list of facts.
+    def _parse_distilled_facts(content: str) -> Optional[List[Dict[str, Any]]]:
+        """Parse the LLM output into a list of typed ``{fact, type, importance}``.
 
-        Tolerates prose and ```json code fences around the array. Returns the
-        parsed list (possibly empty), or ``None`` if no JSON array can be found.
+        Tolerates prose and ```json code fences around the array. Each item is
+        normalised: ``type`` is validated against ``MEMORY_FACT_TYPES`` (unknown
+        → ``DEFAULT_FACT_TYPE``) and ``importance`` is coerced to a [0,1] float
+        (default 0.5). Items without a non-empty ``fact`` string are dropped.
+        Returns the parsed list (possibly empty), or ``None`` if no JSON array
+        can be found.
         """
         if not content:
             return None
@@ -648,7 +660,29 @@ class SmartMemoryManager:
             return None
         if not isinstance(parsed, list):
             return None
-        return [str(f).strip() for f in parsed if str(f).strip()]
+
+        out: List[Dict[str, Any]] = []
+        for item in parsed:
+            # Tolerate a bare string (older shape) by typing it as the default.
+            if isinstance(item, str):
+                fact_text = item.strip()
+                ftype, importance = DEFAULT_FACT_TYPE, 0.5
+            elif isinstance(item, dict):
+                fact_text = str(item.get("fact", "")).strip()
+                ftype = str(item.get("type", DEFAULT_FACT_TYPE)).strip()
+                if ftype not in MEMORY_FACT_TYPES:
+                    ftype = DEFAULT_FACT_TYPE
+                try:
+                    importance = float(item.get("importance", 0.5))
+                except (ValueError, TypeError):
+                    importance = 0.5
+                importance = max(0.0, min(1.0, importance))
+            else:
+                continue
+            if not fact_text:
+                continue
+            out.append({"fact": fact_text, "type": ftype, "importance": importance})
+        return out
 
     # ---------------------------------------------------------------
     # Daily Log Summary (US-011 / US-012)

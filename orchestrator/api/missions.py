@@ -87,13 +87,13 @@ class MissionCreateRequest(BaseModel):
         max_length=100,
         description="Template ID hint — bypass LLM matching and use this template directly",
     )
-
-
-ALLOWED_MODIFICATION_KEYS = {"task_overrides", "notes", "agent_overrides"}
+    plan_only: bool = Field(
+        False,
+        description="PRD-163 S2: plan only — produce the plan and await approval, never auto-execute",
+    )
 
 
 class MissionApproveRequest(BaseModel):
-    modifications: Optional[Dict[str, Any]] = Field(None, description="Optional plan modifications")
     max_concurrent_override: Optional[int] = Field(
         None, ge=1, le=10, description="Override max_concurrent for this mission"
     )
@@ -104,51 +104,30 @@ class MissionApproveRequest(BaseModel):
         None, description="Skip task verification (for benchmarks/testing)",
     )
 
-    @validator("modifications")
-    def validate_modifications(cls, v):
-        if v is None:
-            return v
-        unknown = set(v.keys()) - ALLOWED_MODIFICATION_KEYS
-        if unknown:
-            raise ValueError(f"Unknown modification keys: {unknown}")
-        # Cap total serialised size to prevent memory abuse
-        import json
-        if len(json.dumps(v)) > 10_000:
-            raise ValueError("Modifications payload too large (max 10KB)")
-        return v
+
+# PRD-163 S4/Q57: approval-time plan editing. The old `modifications`-on-approve
+# stub never applied — edits now PATCH the plan (task rows) before approval.
+class MissionTaskEdit(BaseModel):
+    task_id: Optional[str] = Field(None, description="Task row UUID")
+    temp_id: Optional[str] = Field(None, description="Planner temp id")
+    sequence_number: Optional[int] = Field(None, ge=1, description="1-based task sequence")
+    agent_role: Optional[str] = Field(None, max_length=200)
+    title: Optional[str] = Field(None, max_length=500)
+    description: Optional[str] = Field(None, max_length=5000)
+
+
+class MissionPlanEditRequest(BaseModel):
+    task_edits: List[MissionTaskEdit] = Field(
+        ..., min_items=1, max_items=200,
+        description="Per-task field edits to apply before approval",
+    )
 
 
 class MissionRejectRequest(BaseModel):
     reason: str = Field(..., min_length=1, max_length=2000, description="Rejection reason")
 
 
-class MissionReviewRequest(BaseModel):
-    verdict: str = Field(..., pattern="^(accept|reject)$", description="'accept' or 'reject'")
-    task_feedback: Optional[Dict[str, str]] = Field(
-        None,
-        description="Map of task_id → feedback string. On reject, tasks with feedback get re-queued.",
-    )
-    feedback: Optional[str] = Field(
-        None,
-        max_length=5000,
-        description="General rejection feedback (when rejecting without flagging specific tasks).",
-    )
-
-    @validator("task_feedback")
-    def validate_task_feedback(cls, v):
-        if v is None:
-            return v
-        if len(v) > 50:
-            raise ValueError("Too many task feedback entries (max 50)")
-        from uuid import UUID as UUIDType
-        validated = {}
-        for k, val in v.items():
-            try:
-                UUIDType(k)
-            except ValueError:
-                raise ValueError(f"Invalid task ID (not a UUID): {k}")
-            validated[k] = val[:2000]  # cap feedback length
-        return validated
+# PRD-163 S5/Q53: MissionReviewRequest removed with the retired human-review surface.
 
 
 class TaskResponse(BaseModel):
@@ -161,6 +140,7 @@ class TaskResponse(BaseModel):
     state: str
     state_type: str
     assigned_agent_id: Optional[int] = None
+    depends_on: List[str] = Field(default_factory=list)  # PRD-163 S5: real DAG edges
     attempt_number: int = 0
     tokens_used: int = 0
     estimated_tokens: int = 4000
@@ -339,8 +319,12 @@ def _run_to_response(run: OrchestrationRun) -> dict:
     }
 
 
-def _task_to_response(task: OrchestrationTask) -> dict:
-    """Convert an OrchestrationTask ORM object to a TaskResponse dict."""
+def _task_to_response(task: OrchestrationTask, depends_on: Optional[List[str]] = None) -> dict:
+    """Convert an OrchestrationTask ORM object to a TaskResponse dict.
+
+    ``depends_on`` (PRD-163 S5) carries the task's real dependency edges so the
+    DAG canvas can render them.
+    """
     return {
         "id": str(task.id),
         "title": task.title,
@@ -351,6 +335,7 @@ def _task_to_response(task: OrchestrationTask) -> dict:
         "state": task.state,
         "state_type": task.state_type,
         "assigned_agent_id": task.assigned_agent_id,
+        "depends_on": depends_on or [],
         "attempt_number": task.attempt_number or 0,
         "tokens_used": task.tokens_used or 0,
         "estimated_tokens": getattr(task, "estimated_tokens", None) or 4000,
@@ -419,6 +404,8 @@ async def create_mission(
     mission_config = dict(body.config) if body.config else {}
     if body.template_id:
         mission_config["template_id"] = body.template_id
+    if body.plan_only:
+        mission_config["plan_only"] = True
 
     try:
         run = await coordinator.create_mission(
@@ -443,6 +430,85 @@ async def create_mission(
         db.rollback()
         logger.error("Failed to create mission: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+class PlanImportRequest(BaseModel):
+    goal: str = Field(..., min_length=1, max_length=10000, description="Mission goal")
+    plan: Dict[str, Any] = Field(..., description="Pre-built plan: {tasks:[...], dependencies:[...]}")
+    config: Optional[Dict[str, Any]] = Field(None, description="Optional mission config overrides")
+
+
+@router.post("/import-plan", status_code=201)
+async def import_mission_plan(
+    body: PlanImportRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """PRD-163 S2: create a mission from a pre-built (possibly chat-edited) plan and
+    execute it verbatim — the planner is NOT re-run, so the executed DAG matches the
+    given plan exactly (Q54). The mission lands in awaiting_approval."""
+    coordinator = get_coordinator_service()
+    try:
+        run = coordinator.import_plan(
+            db=db,
+            workspace_id=ctx.workspace_id,
+            goal=body.goal,
+            plan=body.plan,
+            created_by=ctx.user.id or "unknown",
+            config=body.config,
+        )
+        db.commit()
+        return _run_to_response(run)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(exc))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        db.rollback()
+        logger.error("Failed to import plan: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+class ApprovalPolicyRequest(BaseModel):
+    policy: Optional[str] = Field(None, description="always_ask | auto_below_budget | full_auto")
+    approval_dollar_ceiling: Optional[float] = Field(None, ge=0)
+    auto_proceed_after_seconds: Optional[int] = Field(None, ge=1)
+
+
+@router.get("/approval-policy")
+async def get_mission_approval_policy(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """PRD-163 S3: the workspace's mission approval policy."""
+    from core.services.approval_policy import load_approval_policy
+
+    return load_approval_policy(db, ctx.workspace_id)
+
+
+@router.put("/approval-policy")
+async def set_mission_approval_policy(
+    body: ApprovalPolicyRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """PRD-163 S3: update the workspace's mission approval policy."""
+    from core.services.approval_policy import set_approval_policy
+
+    try:
+        result = set_approval_policy(
+            db,
+            ctx.workspace_id,
+            policy=body.policy,
+            approval_dollar_ceiling=body.approval_dollar_ceiling,
+            auto_proceed_after_seconds=body.auto_proceed_after_seconds,
+        )
+        db.commit()
+        return result
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.get("")
@@ -873,8 +939,20 @@ async def get_mission(
             if e.event_type == "permission_denied"
         ]
 
+        # PRD-163 S5: real dependency edges for the DAG canvas.
+        _deps_map: Dict[str, List[str]] = {}
+        if tasks:
+            from core.models.orchestration import OrchestrationTaskDependency
+            _dep_rows = (
+                db.query(OrchestrationTaskDependency)
+                .filter(OrchestrationTaskDependency.task_id.in_([t.id for t in tasks]))
+                .all()
+            )
+            for d in _dep_rows:
+                _deps_map.setdefault(str(d.task_id), []).append(str(d.depends_on_task_id))
+
         result = _run_to_response(run)
-        result["tasks"] = [_task_to_response(t) for t in tasks]
+        result["tasks"] = [_task_to_response(t, _deps_map.get(str(t.id), [])) for t in tasks]
         result["recent_events"] = [_event_to_response(e) for e in events]
         result["permission_denials"] = permission_denials
         return result
@@ -1084,6 +1162,47 @@ async def get_mission_field(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+@router.patch("/{mission_id}/plan")
+async def update_mission_plan(
+    mission_id: UUID,
+    body: MissionPlanEditRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """PRD-163 S4/Q57: apply approval-time task/agent edits before approval.
+
+    Edits the OrchestrationTask rows the dispatcher will execute (so an edited
+    agent_role persists into execution) and mirrors them into the plan snapshot.
+    Valid only while the mission is awaiting approval.
+    """
+    try:
+        run = _get_run_for_workspace(db, mission_id, ctx.workspace_id)
+        if RunState(run.state) != RunState.AWAITING_APPROVAL:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Mission is in '{run.state}' state, expected 'awaiting_approval'",
+            )
+        task_edits = [e.dict(exclude_none=True) for e in body.task_edits]
+        coordinator = get_coordinator_service()
+        run = coordinator.update_mission_plan(
+            db=db,
+            run_id=run.id,
+            actor_id=ctx.user.id or "unknown",
+            task_edits=task_edits,
+        )
+        db.commit()
+        return _run_to_response(run)
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        db.rollback()
+        logger.error("Failed to edit mission plan %s: %s", mission_id, exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
 @router.post("/{mission_id}/approve")
 async def approve_plan(
     mission_id: UUID,
@@ -1114,7 +1233,6 @@ async def approve_plan(
             db=db,
             run_id=run.id,
             actor_id=ctx.user.id or "unknown",
-            modifications=body.modifications,
         )
         db.commit()
         return _run_to_response(run)
@@ -1168,44 +1286,9 @@ async def reject_plan(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/{mission_id}/review")
-async def review_mission(
-    mission_id: UUID,
-    body: MissionReviewRequest,
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db),
-):
-    """Submit human review: accept or reject with per-task feedback."""
-    try:
-        run = _get_run_for_workspace(db, mission_id, ctx.workspace_id)
-
-        if RunState(run.state) != RunState.AWAITING_HUMAN:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Mission is in '{run.state}' state, expected 'awaiting_human'",
-            )
-
-        coordinator = get_coordinator_service()
-        run = coordinator.review_mission(
-            db=db,
-            run_id=run.id,
-            actor_id=ctx.user.id or "unknown",
-            verdict=body.verdict,
-            task_feedback=body.task_feedback,
-            feedback=body.feedback,
-        )
-        db.commit()
-        return _run_to_response(run)
-
-    except HTTPException:
-        raise
-    except (ConflictError, InvalidTransitionError) as exc:
-        db.rollback()
-        raise HTTPException(status_code=409, detail=str(exc))
-    except Exception as exc:
-        db.rollback()
-        logger.error("Failed to review mission %s: %s", mission_id, exc, exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error")
+# PRD-163 S5/Q53: the human-review (AWAITING_HUMAN) final-review surface is
+# retired — verified missions auto-complete. The POST /{id}/review endpoint and
+# MissionReviewRequest model were removed with it.
 
 
 class MissionReplanRequest(BaseModel):

@@ -3,9 +3,10 @@ MemoryJobScheduler — Background Jobs for Unified Memory (PRD-79)
 ================================================================
 Registers three recurring jobs on the UnifiedScheduler:
 
-1. **Session Consolidation** (hourly) — L1 Redis → L2 Postgres
-   Expired sessions (end_session called >1hr ago) are scanned, decisions
-   and action items extracted, stored in L2, and L1 keys deleted.
+1. **Consolidation** (periodic) — contradiction-based invalidation (PRD-159 S4)
+   Per workspace, near-duplicate L3 memories merge into one canonical and
+   contradictions supersede by recency+confidence (loser removed). This is the
+   primary memory lifecycle, replacing the dead L1 session-decision scan.
 
 2. **Decay Scoring** (hourly) — Ebbinghaus retention scoring on L2
    Updates decay_score for all active L2 rows and archives items
@@ -58,9 +59,9 @@ class MemoryJobScheduler:
             app_config, "MEMORY_PROMOTION_HOUR_UTC", 3
         )
 
-        # Hourly: Session consolidation (L1 → L2)
+        # Periodic: contradiction-based consolidation (PRD-159 S4)
         self._scheduler.add_job(
-            self._run_session_consolidation,
+            self._run_consolidation,
             "interval",
             seconds=consolidation_interval,
             id=self.JOB_ID_CONSOLIDATION,
@@ -135,26 +136,28 @@ class MemoryJobScheduler:
     # Job: Session Consolidation (L1 → L2)
     # ------------------------------------------------------------------
 
-    async def _run_session_consolidation(self):
-        """Scan expired L1 sessions, extract decisions, store in L2."""
+    async def _run_consolidation(self):
+        """PRD-159 S4: contradiction-based consolidation — merge near-duplicates
+        and supersede contradictions (recency+confidence) across workspaces. The
+        primary memory lifecycle, replacing the dead L1 session-decision scan."""
         try:
             from modules.memory.unified_memory_service import (
                 get_unified_memory_service,
             )
 
             service = get_unified_memory_service()
-            result = await service.run_session_consolidation()
+            result = await service.run_sleep_time_consolidation()
             logger.info(
-                "[MemoryJobs] Session consolidation complete: "
-                "scanned=%d, consolidated=%d, items=%d, errors=%d",
-                result.get("sessions_scanned", 0),
-                result.get("sessions_consolidated", 0),
-                result.get("total_items", 0),
+                "[MemoryJobs] Consolidation complete: "
+                "workspaces=%d, merged=%d, superseded=%d, errors=%d",
+                result.get("workspaces_processed", 0),
+                result.get("merged", 0),
+                result.get("superseded", 0),
                 result.get("errors", 0),
             )
         except Exception as e:
             logger.error(
-                "[MemoryJobs] Session consolidation failed: %s",
+                "[MemoryJobs] Consolidation failed: %s",
                 e,
                 exc_info=True,
             )
