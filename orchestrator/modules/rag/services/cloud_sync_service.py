@@ -352,6 +352,11 @@ class CloudSyncService:
                         if document_id:
                             from core.models import Document
                             doc = self.db.query(Document).get(document_id)
+                            # PRD-158 S2/Q5: a cloud-synced doc inherits the
+                            # connection's default team(s) (already normalized).
+                            if doc is not None and sync_config.default_team_access:
+                                doc.team_access = list(sync_config.default_team_access)
+                                self.db.commit()
                             chunk_count = doc.chunk_count if doc else 0
                             doc_status = doc.status if doc else "failed"
                             logger.info(f"📊 Checking document {document_id} status: {doc_status}, chunks: {chunk_count}")

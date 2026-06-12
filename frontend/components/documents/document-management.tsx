@@ -29,8 +29,9 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { 
-  DropdownMenu, 
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import {
+  DropdownMenu,
   DropdownMenuContent, 
   DropdownMenuItem, 
   DropdownMenuTrigger 
@@ -63,6 +64,7 @@ import { ProviderBrowser } from './provider-browser'
 import { LocalStorageBrowser } from './local-storage-browser'
 // API hooks
 import { useDocuments, useDocumentStats, useUploadDocument, useDeleteDocument } from '@/hooks/use-document-api'
+import { useTeams, useDocumentTeamCounts } from '@/hooks/use-teams'
 import { useDatabaseKnowledge } from '@/hooks/use-database-knowledge'
 import { useCloudConnections, useTriggerSync, useSelectRootFolder } from '@/hooks/use-cloud-storage'
 
@@ -341,9 +343,13 @@ export function DocumentManagement() {
   const [selectedProvider, setSelectedProvider] = useState<any>(null)
   const [showProviderBrowser, setShowProviderBrowser] = useState(false)
   const [selectedSearchResult, setSelectedSearchResult] = useState<SearchResult | null>(null)
+  // PRD-158 S3: page-level team filter (also the agent-eye-view scope).
+  const [teamFilter, setTeamFilter] = useState<string | null>(null)
 
   // API hooks
-  const { data: documents = [], isLoading, error } = useDocuments()
+  const { data: documents = [], isLoading, error } = useDocuments(teamFilter ?? undefined)
+  const { data: teams = [] } = useTeams()
+  const { data: teamCounts } = useDocumentTeamCounts()
   const { data: documentStats } = useDocumentStats()
   const uploadDocumentMutation = useUploadDocument()
   const deleteDocumentMutation = useDeleteDocument()
@@ -661,6 +667,38 @@ export function DocumentManagement() {
 
       {/* Stats Overview */}
       <StatsBar stats={stats} />
+
+      {/* PRD-158 S3: page-level team filter + per-team counts + agent-eye-view */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-2">
+          <Filter className="w-4 h-4 text-muted-foreground" />
+          <Select
+            value={teamFilter ?? 'all'}
+            onValueChange={(v) => setTeamFilter(v === 'all' ? null : v)}
+          >
+            <SelectTrigger className="w-[240px]">
+              <SelectValue placeholder="All teams" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">
+                All teams ({teamCounts?.total ?? documents.length})
+              </SelectItem>
+              {teams.map((t) => (
+                <SelectItem key={t.id} value={t.normalized_name}>
+                  {t.name} ({teamCounts?.counts?.[t.normalized_name] ?? 0})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        {teamFilter && (
+          <Badge variant="secondary" className="gap-1.5">
+            <Eye className="w-3 h-3" />
+            Agent-eye view: “{teams.find((t) => t.normalized_name === teamFilter)?.name ?? teamFilter}”
+            sees public + its own documents
+          </Badge>
+        )}
+      </div>
 
       {/* Document Management Tabs */}
       <motion.div
