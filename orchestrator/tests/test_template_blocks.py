@@ -215,6 +215,17 @@ def test_brand_logo_unresolved_when_no_logo():
 # --------------------------------------------------------------------------- #
 
 
+def test_docx_image_fetch_rejects_non_image_local_paths():
+    # Path-traversal hardening: non-image local paths are refused at the extension
+    # gate before any file is opened (PRD-167 security review fix).
+    from modules.documents.blocks.docx_renderer import _safe_image_bytes
+
+    assert _safe_image_bytes("../../etc/passwd") is None
+    assert _safe_image_bytes("/etc/shadow") is None
+    assert _safe_image_bytes("file:///etc/passwd") is None
+    assert _safe_image_bytes("") is None
+
+
 def test_legacy_mapper_builds_blocks():
     doc = blocks_from_legacy(
         {

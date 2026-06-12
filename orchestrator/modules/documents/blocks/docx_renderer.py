@@ -16,18 +16,29 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import os
 import socket
 from dataclasses import dataclass, field
 from io import BytesIO
+from pathlib import Path
 from typing import Dict, List, Optional
 from urllib.parse import urlparse
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from .schema import BlockDocument
 
 logger = logging.getLogger(__name__)
 
 _MAX_IMAGE_BYTES = 10 * 1024 * 1024  # 10 MB cap on fetched images
+_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
+
+
+class _NoRedirect(HTTPRedirectHandler):
+    """Refuse to follow redirects — a public URL must not 30x into a private host
+    (SSRF). Returning None makes urllib raise instead of following."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: D401
+        return None
 
 
 @dataclass
@@ -50,20 +61,42 @@ def _hex_to_rgb(value: Optional[str]):
         return None
 
 
+def _safe_local_image(src: str) -> Optional[BytesIO]:
+    """Read a local/upload image, confined under the workspace document-storage root.
+
+    Rejects path traversal (``../``, absolute paths escaping the root) and non-image
+    extensions, so a template can't coerce an arbitrary-file read (e.g. ``/etc/passwd``)."""
+    if os.path.splitext(src)[1].lower() not in _IMAGE_EXTS:
+        return None
+    try:
+        from config import config
+
+        root = Path(config.DOCUMENT_STORAGE_DIR).resolve()
+    except Exception:  # noqa: BLE001 — config unavailable
+        return None
+    candidate = (root / src.lstrip("/\\")).resolve()
+    if root != candidate and root not in candidate.parents:
+        logger.warning("[DocxRender] refusing image path outside storage root: %r", src)
+        return None
+    try:
+        with open(candidate, "rb") as fh:
+            return BytesIO(fh.read(_MAX_IMAGE_BYTES + 1))
+    except OSError:
+        return None
+
+
 def _safe_image_bytes(src: str) -> Optional[BytesIO]:
     """Best-effort, SSRF-guarded image fetch for DOCX embedding.
 
-    Local/upload paths are read from disk; http(s) URLs are fetched only when every
-    resolved address is public (mirrors the PRD-156 S4 WeasyPrint SSRF posture). Any
-    failure returns ``None`` (the caller falls back to alt text)."""
+    Local/upload paths are read only from within the document-storage root
+    (:func:`_safe_local_image`); http(s) URLs are fetched only when every resolved
+    address is public AND redirects are refused (a 30x must not pivot into a private
+    host — mirrors and tightens the PRD-156 S4 WeasyPrint SSRF posture). Any failure
+    returns ``None`` (the caller falls back to alt text)."""
     if not src:
         return None
     if not src.startswith(("http://", "https://")):
-        try:
-            with open(src, "rb") as fh:
-                return BytesIO(fh.read(_MAX_IMAGE_BYTES + 1))
-        except OSError:
-            return None
+        return _safe_local_image(src)
     parsed = urlparse(src)
     host = parsed.hostname or ""
     try:
@@ -74,8 +107,11 @@ def _safe_image_bytes(src: str) -> Optional[BytesIO]:
         if not ipaddress.ip_address(info[4][0]).is_global:
             logger.warning("[DocxRender] refusing non-public image host %r", host)
             return None
+    opener = build_opener(_NoRedirect)
     try:
-        with urlopen(Request(src, headers={"User-Agent": "Automatos-DocGen"}), timeout=5) as resp:  # noqa: S310 — guarded above
+        with opener.open(Request(src, headers={"User-Agent": "Automatos-DocGen"}), timeout=5) as resp:  # noqa: S310 — host validated + redirects refused
+            if getattr(resp, "status", 200) in (301, 302, 303, 307, 308):
+                return None
             data = resp.read(_MAX_IMAGE_BYTES + 1)
         if len(data) > _MAX_IMAGE_BYTES:
             return None
