@@ -1085,7 +1085,44 @@ class ApiClient {
     return this.request('/api/code-graph/health')
   }
 
-  // ===== BUSINESS GRAPH ENDPOINTS =====
+  // ===== KNOWLEDGE GRAPH ENDPOINTS =====
+
+  // PRD-165 S2 — cluster-first drill-in. Server-side subgraph queries so big
+  // graphs never ship the full graph.json to the browser (Q28).
+
+  /** Community overview — the cluster-first entry point (id, size, title?). */
+  async graphCommunitiesOverview() {
+    return this.request('/api/knowledge/graph/communities')
+  }
+
+  /** Induced subgraph for one community's members ({nodes, links}, capped). */
+  async graphCommunitySubgraph(communityId: number, maxNodes = 300) {
+    return this.request(`/api/knowledge/graph/community/${communityId}?max_nodes=${maxNodes}`)
+  }
+
+  /** A node + its 1-hop neighbourhood ('expand from here'). */
+  async graphExpandNode(nodeId: string, maxNodes = 150) {
+    return this.request(`/api/knowledge/graph/node/${encodeURIComponent(nodeId)}/neighbors?max_nodes=${maxNodes}`)
+  }
+
+  /** Shortest path between two node ids ({found, path, nodes, links}). */
+  async graphPath(source: string, target: string) {
+    return this.request(`/api/knowledge/graph/path?source=${encodeURIComponent(source)}&target=${encodeURIComponent(target)}`)
+  }
+
+  /** Label search for search-to-focus ({matches: [{id,label,...}]}). */
+  async graphSearchNodes(query: string, limit = 25) {
+    return this.request(`/api/knowledge/graph/search?q=${encodeURIComponent(query)}&limit=${limit}`)
+  }
+
+  /** Rename a community / edit its summary (PRD-165 S3 — editable labels). */
+  async graphSetCommunityLabel(communityId: number, title: string, summary?: string) {
+    return this.request(`/api/knowledge/graph/community/${communityId}/label`, {
+      method: 'PATCH',
+      body: JSON.stringify(summary !== undefined ? { title, summary } : { title }),
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
 
   async importBusinessGraph(file: File, merge: boolean = false) {
     const formData = new FormData()

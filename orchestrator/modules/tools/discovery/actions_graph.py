@@ -103,6 +103,46 @@ def register_graph_actions(registry: ActionRegistry) -> None:
     ))
 
     registry.register(ActionDefinition(
+        name="platform_graph_path",
+        description=(
+            "Find the shortest path between two concepts in the knowledge graph. "
+            "Returns the ordered chain of nodes connecting the source to the target "
+            "plus the hop count. Use to answer 'how is X related to Y?' or "
+            "'what connects X and Y?'."
+        ),
+        category="graph",
+        parameters={
+            "type": "object",
+            "properties": {
+                "source": {
+                    "type": "string",
+                    "description": (
+                        "Start concept name or label. Case-insensitive, supports "
+                        "partial matches. Example: 'pricing'."
+                    ),
+                },
+                "target": {
+                    "type": "string",
+                    "description": (
+                        "End concept name or label. Case-insensitive, supports "
+                        "partial matches. Example: 'customer churn'."
+                    ),
+                },
+            },
+            "required": ["source", "target"],
+        },
+        permission_level="read",
+        promoted=True,
+        tags=["graph", "path", "connection", "relationship", "explore"],
+        examples=[
+            "how is pricing connected to customer churn?",
+            "what links authentication and billing?",
+            "find the path between onboarding and retention",
+            "shortest path from product to revenue",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
         name="platform_graph_communities",
         description=(
             "List the auto-detected business-domain communities (clusters) in the "

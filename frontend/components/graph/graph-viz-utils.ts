@@ -1,9 +1,12 @@
 /**
- * Pure helpers for the knowledge-graph force visualisation.
+ * Pure helpers shared by every graph surface on the GraphView shell
+ * (PRD-165 S1). Engine-agnostic: no react-force-graph / reactflow imports, so
+ * they unit-test without dragging a renderer into the test runner and are
+ * shared by the KG force view, the codegraph DAG, the mission DAG, and the
+ * field viz (PRD-166) — node colours and legend swatches never drift.
  *
- * Extracted from BusinessGraphVisualization.tsx so they can be unit-tested
- * without dragging next/dynamic + react-force-graph into the test runner, and
- * shared with the panel legend so node colours and chip swatches never drift.
+ * Moved here from components/knowledge/graph-viz-utils.ts in PRD-165: the
+ * palette is no longer KG-specific, it's the shell's.
  */
 
 // ── Link-endpoint id extraction ──────────────────────────────────────────
@@ -61,4 +64,26 @@ export function colorForCommunity(community: number | null | undefined): string 
   if (community == null) return NEUTRAL_COMMUNITY_COLOR
   const len = GRAPH_PALETTE.length
   return GRAPH_PALETTE[((community % len) + len) % len]
+}
+
+// ── Chrome from CSS vars (PRD-165 S1: palette-from-CSS-vars) ──────────────
+// The categorical NODE palette above is intentionally fixed data (Q26). The
+// shell *chrome* — most importantly the canvas background — must read theme
+// tokens so the graph is legible in light theme too (the old hardcoded
+// `#0a0d14` / `#111827` were invisible-text traps). Resolve a CSS custom
+// property at call time with a dark fallback so it stays correct before the
+// var is defined and under SSR/jsdom (where getComputedStyle is unreliable).
+export function cssVar(name: string, fallback: string): string {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return fallback
+  try {
+    const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+    return v || fallback
+  } catch {
+    return fallback
+  }
+}
+
+/** Canvas/background colour for force renderers — theme token, dark fallback. */
+export function graphCanvasBackground(): string {
+  return cssVar('--graph-canvas', '#0a0d14')
 }

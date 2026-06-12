@@ -76,19 +76,11 @@ class CodeGraphService:
         self.embedding_manager = create_embedding_manager()
         logger.info(f"CodeGraphService using {self.embedding_manager.get_provider_info()['provider']} embeddings")
         
-        # NEW: Initialize EnhancedVectorStore for centralized vector search
+        # PRD-165 S4 (Q34): codegraph standardises on the in-DB pgvector path,
+        # not the EnhancedVectorStore wrapper. semantic_search falls through to
+        # the SQL pgvector query (the proven path) whenever _vector_store is
+        # None — which is now always.
         self._vector_store = None
-        try:
-            from modules.search import EnhancedVectorStore
-            from config import config
-            db_url = config.DATABASE_URL
-            self._vector_store = EnhancedVectorStore(
-                database_url=db_url,
-                table_name="codegraph_symbols"  # Use CodeGraph's existing table
-            )
-            logger.info("✅ CodeGraphService using EnhancedVectorStore for semantic search")
-        except Exception as e:
-            logger.warning(f"EnhancedVectorStore not available, using fallback: {e}")
         
         # Initialize tree-sitter parser (PRD-62: 14+ language support)
         self._treesitter_parser = None
@@ -149,7 +141,13 @@ class CodeGraphService:
             Indexing results with statistics
         """
         start_time = time.time()
-        
+
+        # PRD-165 S4 (Q36): default to the resolved GitHub token — a GitHub App
+        # installation token when the App is configured, else the PAT.
+        if auth_token is None:
+            from modules.codegraph.github_auth import resolve_github_token
+            auth_token = await resolve_github_token()
+
         logger.info(f"Starting GitHub indexing: {project_name} from {github_url}")
         
         # Check if project already exists in this workspace
@@ -1283,11 +1281,10 @@ class CodeGraphService:
         limit: int = 10,
         workspace_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """
-        Semantic search using centralized EnhancedVectorStore.
-        
-        MIGRATED: Now uses modules.search.EnhancedVectorStore for consistent vector search.
-        Old SQL-based implementation kept below for rollback if needed.
+        """Semantic search over codegraph_symbols via the in-DB pgvector index.
+
+        PRD-165 S4 (Q34): standardised on the pgvector path; the
+        EnhancedVectorStore wrapper was removed from codegraph.
         """
         start_time = time.time()
         
@@ -1305,72 +1302,7 @@ class CodeGraphService:
         # Generate query embedding
         query_embedding = await self.embedding_manager.generate_embedding(query)
         
-        # Use centralized EnhancedVectorStore if available
-        if self._vector_store:
-            try:
-                from modules.search import SearchMode, RankingStrategy, SearchFilter
-                
-                # Initialize vector store if needed
-                if not self._vector_store.pool:
-                    await self._vector_store.initialize()
-                
-                logger.info(f"🔎 Using EnhancedVectorStore for semantic search: limit={limit}")
-                
-                # Create filter for this project
-                search_filter = SearchFilter(
-                    metadata_filters={"project_id": str(project_id)}
-                )
-                
-                # Perform search using centralized vector store
-                search_results = await self._vector_store.search(
-                    query_embedding=query_embedding,
-                    mode=SearchMode.SEMANTIC,
-                    ranking_strategy=RankingStrategy.SIMILARITY,
-                    limit=limit,
-                    search_filter=search_filter,
-                    query_text=query
-                )
-                
-                # Convert SearchResult objects to CodeGraph's expected format
-                symbols = []
-                for result in search_results:
-                    doc = result.document
-                    symbols.append({
-                        "id": doc.metadata.get('id', doc.id),
-                        "symbol_type": doc.metadata.get('symbol_type', ''),
-                        "name": doc.metadata.get('name', ''),
-                        "qualified_name": doc.metadata.get('qualified_name', ''),
-                        "file_path": doc.metadata.get('file_path', ''),
-                        "line_number": doc.metadata.get('line_number', 0),
-                        "signature": doc.metadata.get('signature', ''),
-                        "docstring": doc.metadata.get('docstring', ''),
-                        "code_snippet": doc.content,
-                        "similarity": float(result.similarity_score)
-                    })
-                
-                execution_time = (time.time() - start_time) * 1000
-                prompt_block = self._format_prompt_block(symbols, query)
-                
-                # Log query (best-effort; never fails the search)
-                self._log_query(project_id, "semantic", query, len(symbols), execution_time, workspace_id)
-
-                logger.info(f"✅ Retrieved {len(symbols)} symbols using EnhancedVectorStore")
-                
-                return {
-                    "project": project_name,
-                    "query": query,
-                    "count": len(symbols),
-                    "results": symbols,
-                    "prompt_block": prompt_block,
-                    "execution_time_ms": round(execution_time, 2)
-                }
-                
-            except Exception as e:
-                logger.warning(f"EnhancedVectorStore search failed, falling back to SQL: {e}")
-                # Fall through to SQL fallback below
-        
-        # FALLBACK: Original SQL-based implementation (kept for rollback)
-        logger.info("Using fallback SQL-based semantic search")
+        # PRD-165 S4 (Q34): the in-DB pgvector query is the single semantic path.
         # Validate embedding values are numeric and build safe string for parameterized query
         embedding_str = '[' + ','.join(str(float(v)) for v in query_embedding) + ']'
 

@@ -7,6 +7,10 @@
   :root {
     /* Light theme (default) */
     --background: 0 0% 98%;
+    /* Graph canvas background — read by the GraphView shell (PRD-165 S1).
+       Dark for now in both themes (graph nodes/labels are tuned for a dark
+       canvas); PRD-169 S3 sets the light value with the full light-theme pass. */
+    --graph-canvas: #0a0d14;
     --foreground: 0 0% 10%;
     --card: 0 0% 100%;
     --card-foreground: 0 0% 10%;
@@ -81,6 +85,7 @@
   .dark {
     /* Dark theme */
     --background: 0 0% 6%;
+    --graph-canvas: #0a0d14;
     --foreground: 0 0% 98%;
     --card: 0 0% 8%;
     --card-foreground: 0 0% 98%;

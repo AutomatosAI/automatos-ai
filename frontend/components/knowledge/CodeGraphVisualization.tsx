@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react'
 import { apiClient } from '@/lib/api-client'
+import { GraphErrorBoundary } from '../graph'
 import ReactFlow, {
   Node,
   Edge,
@@ -512,6 +513,7 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
               </div>
             </div>
           ) : (
+            <GraphErrorBoundary>
             <ReactFlow
               nodes={nodes}
               edges={edges}
@@ -578,6 +580,7 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
                 </div>
               </Panel>
             </ReactFlow>
+            </GraphErrorBoundary>
           )}
         </div>
 

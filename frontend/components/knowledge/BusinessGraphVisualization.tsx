@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Business Graph Visualization — WebGL/Canvas force-directed graph.
+ * Knowledge Graph Visualization — WebGL/Canvas force-directed graph.
  *
  * Features (PRD-009 Phase-2 polish):
  *  - Color modes: by node type OR by community (toggleable from panel)
@@ -26,7 +26,7 @@ import React, {
   useImperativeHandle,
 } from "react";
 import dynamic from "next/dynamic";
-import { idOf, colorForType, colorForCommunity } from "./graph-viz-utils";
+import { idOf, colorForType, colorForCommunity, graphCanvasBackground } from "../graph/graph-viz-utils";
 
 const ForceGraph2D = dynamic(() => import("react-force-graph-2d"), {
   ssr: false,
@@ -512,7 +512,7 @@ const BusinessGraphVisualization = forwardRef<
           graphData={renderData}
           width={size.w}
           height={size.h}
-          backgroundColor="#0a0d14"
+          backgroundColor={graphCanvasBackground()}
           nodeRelSize={4}
           nodeCanvasObject={nodeCanvasObject}
           nodePointerAreaPaint={nodePointerAreaPaint}

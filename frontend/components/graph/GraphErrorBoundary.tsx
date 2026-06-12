@@ -13,12 +13,13 @@ interface Props {
 }
 
 /**
- * Localised error boundary for the business graph view. Without this, any
- * exception thrown by the WebGL renderer (e.g. a malformed node, a missing
- * peer dep at runtime) bubbles all the way to Next's root boundary and
- * shows "Application error: a client-side exception has occurred", which
- * is opaque and ugly. Catching it here lets the rest of the dashboard
- * stay usable while we surface a real message.
+ * Localised error boundary for any graph surface on the GraphView shell
+ * (PRD-165 S1 — generalised from the KG-only boundary). Without this, an
+ * exception thrown by a renderer (a malformed node, a missing peer dep at
+ * runtime, a non-finite coordinate) bubbles to Next's root boundary and shows
+ * the opaque "Application error: a client-side exception has occurred".
+ * Catching it here keeps the rest of the dashboard usable and surfaces a real
+ * message — and reassures the user the agent can still query the graph.
  */
 export class GraphErrorBoundary extends React.Component<Props, State> {
   constructor(props: Props) {
@@ -35,7 +36,7 @@ export class GraphErrorBoundary extends React.Component<Props, State> {
 
   componentDidCatch(error: unknown, info: unknown) {
     // eslint-disable-next-line no-console
-    console.error("[BusinessGraph] render error:", error, info);
+    console.error("[GraphView] render error:", error, info);
   }
 
   render() {
