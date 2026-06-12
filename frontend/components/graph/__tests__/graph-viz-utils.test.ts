@@ -3,6 +3,7 @@ import {
   idOf,
   colorForType,
   colorForCommunity,
+  graphCanvasBackground,
   GRAPH_PALETTE,
   NEUTRAL_TYPE_COLOR,
   NEUTRAL_COMMUNITY_COLOR,
@@ -89,5 +90,24 @@ describe('colorForCommunity', () => {
   it('returns the neutral colour for an unclustered node (null/undefined)', () => {
     expect(colorForCommunity(null)).toBe(NEUTRAL_COMMUNITY_COLOR)
     expect(colorForCommunity(undefined)).toBe(NEUTRAL_COMMUNITY_COLOR)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// graphCanvasBackground — CSS-var chrome with a dark fallback (PRD-165 S1
+// palette-from-CSS-vars). In jsdom the var is unset, so it must fall back
+// rather than return an empty string (which would paint the canvas black-on-
+// transparent and break the light-theme fix).
+// ---------------------------------------------------------------------------
+
+describe('graphCanvasBackground', () => {
+  it('falls back to the dark default when --graph-canvas is unset', () => {
+    expect(graphCanvasBackground()).toBe('#0a0d14')
+  })
+
+  it('reads the CSS var when defined on :root', () => {
+    document.documentElement.style.setProperty('--graph-canvas', '#ffffff')
+    expect(graphCanvasBackground()).toBe('#ffffff')
+    document.documentElement.style.removeProperty('--graph-canvas')
   })
 })

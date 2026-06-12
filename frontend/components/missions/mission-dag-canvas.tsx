@@ -12,6 +12,7 @@ import ReactFlow, {
   type Edge,
 } from 'reactflow'
 import 'reactflow/dist/style.css'
+import { GraphView } from '../graph'
 import { MissionTaskNode, type MissionTaskNodeData } from './mission-task-node'
 import type { TaskResponse, TaskState } from '@/types/missions'
 
@@ -212,8 +213,11 @@ export function MissionDAGCanvas({
     [onTaskSelect],
   )
 
+  // Consumes the shared GraphView shell (PRD-165 S1): error boundary +
+  // fullscreen + consistent framing. bareArea keeps the DAG borderless inside
+  // the mission page; fillHeight lets it fill the height the page already sets.
   return (
-    <div className={className} style={{ width: '100%', height: '100%', position: 'relative' }}>
+    <GraphView fillHeight bareArea className={className}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -241,6 +245,6 @@ export function MissionDAGCanvas({
           className="!bg-background/80 !border-border !rounded-lg"
         />
       </ReactFlow>
-    </div>
+    </GraphView>
   )
 }
