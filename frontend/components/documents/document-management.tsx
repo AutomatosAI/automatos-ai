@@ -729,7 +729,7 @@ export function DocumentManagement() {
             </TabsTrigger>
             <TabsTrigger value="businessgraph" className="flex items-center space-x-2">
               <Network className="w-4 h-4" />
-              <span>Business Graph</span>
+              <span>Knowledge Graph</span>
             </TabsTrigger>
             <TabsTrigger value="memory" className="flex items-center space-x-2">
               <Brain className="w-4 h-4" />

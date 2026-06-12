@@ -1609,7 +1609,7 @@ class ApiClient {
     return this.request('/api/code-graph/health')
   }
 
-  // ===== BUSINESS GRAPH ENDPOINTS =====
+  // ===== KNOWLEDGE GRAPH ENDPOINTS =====
 
   async importBusinessGraph(file: File, merge: boolean = false) {
     const formData = new FormData()

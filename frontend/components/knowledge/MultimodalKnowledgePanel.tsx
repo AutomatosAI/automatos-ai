@@ -40,7 +40,6 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { apiClient } from '@/lib/api-client'
-import KnowledgeGraphVisualizer from './KnowledgeGraphVisualizer'
 
 // Knowledge type icons
 const knowledgeTypeIcons = {
@@ -393,10 +392,6 @@ export function MultimodalKnowledgePanel() {
             <Network className="w-4 h-4" />
             <span className="hidden sm:inline">Diagrams</span>
           </TabsTrigger>
-          <TabsTrigger value="graph" className="flex items-center space-x-2">
-            <Brain className="w-4 h-4" />
-            <span className="hidden sm:inline">Graph</span>
-          </TabsTrigger>
         </TabsList>
 
         {/* Content Grid */}
@@ -408,7 +403,7 @@ export function MultimodalKnowledgePanel() {
                 <p className="text-muted-foreground">Loading knowledge items...</p>
               </div>
             </div>
-          ) : knowledgeItems.length === 0 && activeType !== 'graph' ? (
+          ) : knowledgeItems.length === 0 ? (
             <Card className="glass-card">
               <CardContent className="p-12 text-center">
                 <Database className="w-16 h-16 mx-auto text-muted-foreground mb-4" />
@@ -423,10 +418,6 @@ export function MultimodalKnowledgePanel() {
                 </p>
               </CardContent>
             </Card>
-          ) : activeType === 'graph' ? (
-            <div className="h-[800px]">
-              <KnowledgeGraphVisualizer />
-            </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {knowledgeItems.map((item, index) => {
