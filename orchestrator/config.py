@@ -248,6 +248,24 @@ class Config:
             return os.getenv("GRAPHIFY_MODEL")
 
     @property
+    def MEMORY_DISTILL_MODEL(self) -> str:
+        """Cheap-tier model for L3 memory distillation (PRD-159 D11/Q16).
+
+        The distiller runs ~1×/chat turn, so it is deliberately pinned to a cheap
+        model rather than the conversation tier. Resolves system_settings
+        (memory.distill_model) → env MEMORY_DISTILL_MODEL → DEFAULT_LLM_MODEL
+        (already a fast/cheap flash tier)."""
+        from core.llm.defaults import DEFAULT_LLM_MODEL
+        try:
+            from core.llm.manager import get_system_setting
+            return get_system_setting(
+                "memory", "distill_model",
+                os.getenv("MEMORY_DISTILL_MODEL", DEFAULT_LLM_MODEL),
+            )
+        except Exception:
+            return os.getenv("MEMORY_DISTILL_MODEL", DEFAULT_LLM_MODEL)
+
+    @property
     def COORDINATOR_TASK_MAX_TOKENS(self) -> int:
         """Mission task max_tokens — canonical System LLM max_tokens (PRD-136)."""
         try:
