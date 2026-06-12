@@ -464,16 +464,21 @@ class TestOneAssemblerGrepGate:
     def test_pack_rag_goes_through_the_choke_point(self):
         # planning_knowledge retrieves via RAGService.retrieve, and retrieve()
         # derives scope through build_retrieval_filters (PRD-157 choke point).
+        # The section may NAME the choke point in prose, but must neither
+        # import nor call it — scope derivation belongs to RAGService.retrieve.
         section_src = (
             ORCH_ROOT / "modules" / "context" / "sections" / "planning_knowledge.py"
         ).read_text()
         assert "get_rag_service" in section_src
         assert ".retrieve(" in section_src
-        assert "build_retrieval_filters" not in section_src, (
+        assert "build_retrieval_filters(" not in section_src, (
             "the section must not re-derive scope — RAGService.retrieve owns that"
         )
+        assert "retrieval_filters import" not in section_src, (
+            "the section must not import the filter builder directly"
+        )
         rag_src = (ORCH_ROOT / "modules" / "rag" / "service.py").read_text()
-        assert "build_retrieval_filters" in rag_src
+        assert "build_retrieval_filters(" in rag_src
 
 
 # ===========================================================================
