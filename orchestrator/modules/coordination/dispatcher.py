@@ -884,6 +884,12 @@ class MissionDispatcher:
                         f"\n## Quality Requirements\n{verification_criteria}"
                     )
 
+            # PRD-166 S3: pinned field digest — accumulated knowledge relevant to
+            # this task, surfaced up front so the agent doesn't have to query for it.
+            field_digest = task.input_context.get("field_digest") if isinstance(task.input_context, dict) else None
+            if field_digest:
+                parts.append(f"\n{field_digest}")
+
             # PRD-108: Tell agents about the shared field
             field_id = task.input_context.get("field_id") if isinstance(task.input_context, dict) else None
             if field_id:

@@ -133,3 +133,26 @@ def budget_results(
         kept.append(r)
         used += cost
     return kept, len(kept) < len(results)
+
+
+def format_digest(
+    patterns: list,
+    *,
+    key_key: str = "key",
+    value_key: str = "value",
+    truncated: bool = False,
+) -> str:
+    """PRD-166 S3: render ranked field patterns as a compact prompt block pinned
+    into a task's dispatch prompt — the agent sees accumulated knowledge without
+    having to call the query tool first. Pure (string in, string out)."""
+    lines = [
+        "## Field memory (accumulated knowledge for this work)",
+        "Relevant findings from earlier tasks/missions, ranked by resonance:",
+    ]
+    for p in patterns:
+        key = str(p.get(key_key, "")).strip()
+        value = str(p.get(value_key, "")).strip()
+        lines.append(f"- **{key}**: {value}" if key else f"- {value}")
+    if truncated:
+        lines.append("- _(more lower-ranked patterns omitted for budget)_")
+    return "\n".join(lines)

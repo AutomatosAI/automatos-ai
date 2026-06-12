@@ -611,6 +611,70 @@ class CoordinatorService:
         except Exception as e:
             logger.warning("[PRD-108] Failed to inject task output: %r", e, exc_info=True)
 
+    async def _attach_field_digest(
+        self,
+        db: Session,
+        run: OrchestrationRun,
+        task: OrchestrationTask,
+        field_id: str,
+        agent_id: int,
+    ) -> None:
+        """PRD-166 S3: pin a budgeted field digest into a task's dispatch prompt.
+
+        Queries the field for knowledge relevant to this task and stores a
+        budget-trimmed digest in ``task.input_context['field_digest']``. When the
+        mission is tight on budget (CRITICAL/EXCEEDED) the digest is DROPPED to
+        save tokens and a ``RUN_FIELD_CONTEXT_DROPPED`` warning is emitted — the
+        budget-gate checkpoint for field context.
+        """
+        field = self._get_field()
+        if not field:
+            return
+
+        # Budget-gate: drop the digest rather than spend tokens we don't have.
+        try:
+            from modules.coordination.dispatcher import BudgetStatus, MissionDispatcher
+            status = MissionDispatcher._get_budget_status(run)
+        except Exception:
+            status, BudgetStatus = None, None
+        if status is not None and status in (BudgetStatus.CRITICAL, BudgetStatus.EXCEEDED):
+            emit_event(
+                db=db,
+                run_id=run.id,
+                event_type=EventType.RUN_FIELD_CONTEXT_DROPPED,
+                actor_type=ActorType.COORDINATOR,
+                actor_id="coordinator",
+                task_id=task.id,
+                payload={"reason": "budget", "budget_status": status.value},
+            )
+            logger.info("[Field] Digest dropped for budget on task %s (%s)", task.id, status.value)
+            return
+
+        try:
+            from modules.context import field_scoring
+            query = f"{task.title or ''}\n{task.description or ''}".strip() or (run.goal or "")
+            results = await field.query(
+                context_id=field_id,
+                query=query,
+                agent_id=agent_id,
+                top_k=Config.FIELD_QUERY_TOP_K,
+            )
+        except Exception:
+            logger.warning("[Field] digest query failed for task %s", task.id, exc_info=True)
+            return
+
+        if not results:
+            return
+        rows = [{"key": r["key"], "value": r["value"]} for r in results]
+        kept, truncated = field_scoring.budget_results(rows, Config.FIELD_QUERY_TOKEN_BUDGET)
+        if not kept:
+            return
+        task.input_context = {
+            **(task.input_context or {}),
+            "field_digest": field_scoring.format_digest(kept, truncated=truncated),
+        }
+        logger.info("[Field] Pinned digest (%d patterns) into task %s", len(kept), task.id)
+
     async def _seed_field_with_documents(
         self,
         db: Session,
@@ -1464,6 +1528,9 @@ class CoordinatorService:
                 **(task.input_context or {}),
                 "field_id": field_id,
             }
+            # PRD-166 S3: pin a budgeted field digest into the prompt so the agent
+            # starts with accumulated knowledge instead of having to query for it.
+            await self._attach_field_digest(db, run, task, field_id, agent_id)
 
         # PRD-127: Get attachment_ids for this task
         task_attachment_ids: List[str] = []

@@ -11,6 +11,7 @@ from modules.context.field_scoring import (
     budget_results,
     decayed_strength,
     estimate_tokens,
+    format_digest,
     is_prunable,
     recency_factor,
     resonance,
@@ -115,3 +116,24 @@ def test_estimate_tokens():
     assert estimate_tokens("") == 0
     assert estimate_tokens("abcd") == 1
     assert estimate_tokens("a" * 400) == 100
+
+
+# ── S3 dispatch digest formatting ──────────────────────────────
+
+def test_format_digest_renders_patterns():
+    digest = format_digest([
+        {"key": "finding_1", "value": "the API rate-limits at 100 rps"},
+        {"key": "finding_2", "value": "auth uses Clerk JWTs"},
+    ])
+    assert "Field memory" in digest
+    assert "finding_1" in digest and "100 rps" in digest
+    assert "finding_2" in digest
+
+
+def test_format_digest_notes_truncation():
+    assert "omitted for budget" in format_digest(
+        [{"key": "k", "value": "v"}], truncated=True,
+    )
+    assert "omitted for budget" not in format_digest(
+        [{"key": "k", "value": "v"}], truncated=False,
+    )
