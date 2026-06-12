@@ -36,12 +36,12 @@ const handleApiError = (error: any, message = 'API request failed'): void => {
 }
 
 /**
- * Get all documents
+ * Get all documents. PRD-158 S3: optional server-side team filter.
  */
-export function useDocuments() {
+export function useDocuments(team?: string) {
   return useQuery({
-    queryKey: documentQueryKeys.documents,
-    queryFn: () => apiClient.getDocuments(),
+    queryKey: [...documentQueryKeys.documents, team ?? null],
+    queryFn: () => apiClient.getDocuments(team),
     retry: 2,
     staleTime: 30000,
     onError: (error) => handleApiError(error, 'Failed to load documents')

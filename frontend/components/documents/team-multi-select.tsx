@@ -119,7 +119,7 @@ export function TeamMultiSelect({
               <button
                 type="button"
                 onClick={handleCreate}
-                disabled={createTeam.isPending}
+                disabled={createTeam.isLoading}
                 className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm text-primary hover:bg-accent disabled:opacity-50"
               >
                 <Plus className="w-4 h-4" /> Create &quot;{search.trim()}&quot;
