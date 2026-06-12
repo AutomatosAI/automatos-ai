@@ -216,7 +216,7 @@ async def create_rag_config(rag_data: RAGConfigCreate, ctx: RequestContext = Dep
             top_k=rag_data.top_k,
             similarity_threshold=rag_data.similarity_threshold,
             configuration=rag_data.configuration or {},
-            created_by="system"  # TODO: Get from auth context
+            created_by=ctx.clerk_user_id or "system",  # PRD-168 S4: real actor
         )
         
         db.add(rag_config)

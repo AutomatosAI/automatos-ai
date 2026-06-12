@@ -217,7 +217,7 @@ async def handle_request(
             # tags=tag_list if tag_list else None,  # TEMPORARILY DISABLED - SQLAlchemy array bug
             description=description,
             team_access=team_access_list,
-            created_by="system"  # TODO: Get from auth context
+            created_by=ctx.clerk_user_id or "system",  # PRD-168 S4: real actor
         )
         
         db.add(document)
