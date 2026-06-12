@@ -33,12 +33,15 @@ def _seed_doc(db, ws, filename="brief.pdf", chunks=("alpha content", "beta conte
         {"fn": filename, "ws": ws},
     ).scalar()
     for i, c in enumerate(chunks):
+        # chunks scope via document_id -> documents.workspace_id; the chunk
+        # table itself carries no workspace_id in the test schema (and the
+        # widget endpoints read chunks by document_id, never by workspace).
         db.execute(
             text(
-                "INSERT INTO document_chunks (document_id, chunk_index, content, workspace_id) "
-                "VALUES (:doc, :idx, :content, :ws)"
+                "INSERT INTO document_chunks (document_id, chunk_index, content) "
+                "VALUES (:doc, :idx, :content)"
             ),
-            {"doc": doc_id, "idx": i, "content": c, "ws": ws},
+            {"doc": doc_id, "idx": i, "content": c},
         )
     db.flush()
     return doc_id
