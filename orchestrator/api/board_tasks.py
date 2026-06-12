@@ -6,6 +6,7 @@ CRUD + planning endpoints for the lightweight task board (PRD-72).
 Tasks follow a Kanban lifecycle: inbox -> assigned -> in_progress -> review -> blocked -> done.
 """
 
+import asyncio
 import json
 import logging
 from datetime import datetime, timedelta, timezone
@@ -13,8 +14,10 @@ from typing import Any, Dict, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from config import config
 from core.auth.hybrid import get_request_context_hybrid, require_task_context
 from core.auth.dependencies import RequestContext
 from core.auth.scopes import TASKS_READ
@@ -23,11 +26,12 @@ from core.models.core import BoardTask
 from core.models import Agent
 from core.utils.exception_telemetry import record_error
 from core.utils.background_tasks import launch_guarded
+from services.board_dispatcher import notify_task_available
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/tasks", tags=["board-tasks"])
 
-VALID_STATUSES = {"inbox", "assigned", "in_progress", "review", "blocked", "done"}
+VALID_STATUSES = {"inbox", "assigned", "in_progress", "review", "blocked", "done", "failed"}
 VALID_PRIORITIES = {"urgent", "high", "medium", "low"}
 VALID_REVIEW_MODES = {"human", "llm", "auto"}
 
@@ -203,6 +207,40 @@ async def _dispatch_task_complete(db: Session, workspace_id, task: BoardTask) ->
         )
 
 
+async def _dispatch_task_failed(db: Session, workspace_id, task: BoardTask) -> None:
+    """Fire a ``task_failed`` event (PRD-161 S3).
+
+    Mirrors ``_dispatch_task_complete`` but signals an error terminal state, so
+    the user is told the task did NOT succeed — previously a crashed execution
+    closed silently as 'done'. Never raises into the execution flow.
+    """
+    try:
+        from core.services.notification_dispatcher import NotificationDispatcher
+
+        agent_name = None
+        if task.assigned_agent_id:
+            agent = db.query(Agent).filter(Agent.id == task.assigned_agent_id).first()
+            agent_name = agent.name if agent else f"agent-{task.assigned_agent_id}"
+
+        dispatcher = NotificationDispatcher(db, str(workspace_id))
+        await dispatcher.dispatch(
+            event_type="task_failed",
+            title=f"Task failed: {task.title}",
+            message=(task.error_message or "Execution failed")[:500],
+            link_type="task",
+            link_id=str(task.id),
+            agent_id=task.assigned_agent_id,
+            agent_name=agent_name,
+            status="error",
+        )
+    except Exception:
+        logger.error(
+            "[BoardTasks] task_failed dispatch failed for task %s",
+            getattr(task, "id", "?"),
+            exc_info=True,
+        )
+
+
 # ── Helpers ──────────────────────────────────────────────────────────
 
 def _enrich_with_agents(tasks: list, db: Session, workspace_id) -> list:
@@ -304,8 +342,11 @@ async def create_task(
     db.commit()
     db.refresh(task)
 
-    # Assignment dispatches execution immediately (no opt-in heartbeat wait).
-    _dispatch_on_assign(task, ctx.workspace_id, db)
+    # PRD-161: assignment = immediate dispatch via the board loop (Q39/Q40).
+    # A created-as-assigned task notifies the claimant; the dispatch loop claims
+    # it (FOR UPDATE SKIP LOCKED) and runs it — no inline launch, no heartbeat wait.
+    if task.status == "assigned" and task.assigned_agent_id and task.source_type != "recipe":
+        notify_task_available(db, workspace_id=ctx.workspace_id, task_id=task.id)
 
     logger.info("[BoardTasks] Created task %d in workspace %s", task.id, ctx.workspace_id)
     return task.to_dict()
@@ -348,6 +389,17 @@ async def list_tasks(
         like_term = f"%{search}%"
         query = query.filter(BoardTask.title.ilike(like_term))
 
+    # PRD-161 S5: archive — done tasks completed longer ago than the configured
+    # window drop off the active board (retained in the DB, just not surfaced).
+    archive_before = datetime.now(timezone.utc) - timedelta(days=config.BOARD_ARCHIVE_DONE_DAYS)
+    query = query.filter(
+        ~(
+            (BoardTask.status == "done")
+            & BoardTask.completed_at.isnot(None)
+            & (BoardTask.completed_at < archive_before)
+        )
+    )
+
     total = query.count()
     tasks = (
         query.order_by(BoardTask.created_at.desc())
@@ -360,6 +412,40 @@ async def list_tasks(
         "tasks": _enrich_with_agents(tasks, db, ctx.workspace_id),
         "total": total,
     }
+
+
+@router.get("/stream")
+async def stream_board_events(
+    ctx: RequestContext = Depends(require_task_context(TASKS_READ)),
+):
+    """SSE board events (read-only; PRD-09 ``TASKS_READ`` narrow dep).
+
+    A server-push refresh signal: emits ``board_changed`` on connect and every
+    ``BOARD_SSE_PING_SECONDS`` so clients refetch without tight polling. Rides the
+    existing read-only ``TASKS_READ`` scope — the shared hybrid auth is untouched
+    and no write scope is introduced (Q42).
+    """
+    workspace_id = str(ctx.workspace_id)
+
+    async def event_generator():
+        payload = json.dumps({"workspace_id": workspace_id})
+        yield f"event: board_changed\ndata: {payload}\n\n"
+        try:
+            while True:
+                await asyncio.sleep(config.BOARD_SSE_PING_SECONDS)
+                yield f"event: board_changed\ndata: {payload}\n\n"
+        except asyncio.CancelledError:
+            return
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/{task_id}")
@@ -484,11 +570,15 @@ async def update_task(
             review_mode=task.review_mode or "auto",
             attachment_ids=task.attachment_ids,  # PRD-127
         )
-    elif "assigned_agent_id" in body:
-        # The assign endpoint dispatches execution the moment a task is
-        # assigned. _dispatch_on_assign self-guards (only 'assigned' tasks),
-        # so re-assigning a running task never double-fires.
-        _dispatch_on_assign(task, ctx.workspace_id, db)
+    elif (
+        "assigned_agent_id" in body
+        and task.status == "assigned"
+        and task.assigned_agent_id
+        and task.source_type != "recipe"
+    ):
+        # PRD-161: assigning notifies the dispatch loop (single spine); the loop
+        # claims 'assigned' tasks only, so re-assigning a running task is a no-op.
+        notify_task_available(db, workspace_id=ctx.workspace_id, task_id=task.id)
 
     logger.info("[BoardTasks] Updated task %d", task.id)
     return task.to_dict()
@@ -637,8 +727,12 @@ async def reject_task(
     db: Session = Depends(get_db),
 ):
     """
-    Reject a board task in review status with optional feedback.
-    Moves task back to inbox with feedback stored in error_message.
+    Reject a board task in review status with reviewer feedback (PRD-161 Q44).
+
+    Returns the task to the SAME agent as 'assigned' — not dumped back to inbox —
+    with the feedback carried into the next execution's context (review_feedback),
+    so the agent redoes the work with the correction. The dispatch loop picks the
+    re-assigned task up immediately.
     """
     task = db.query(BoardTask).filter(
         BoardTask.id == task_id,
@@ -649,26 +743,76 @@ async def reject_task(
 
     if task.status != "review":
         raise HTTPException(status_code=422, detail=f"Task must be in review status (currently: {task.status})")
+    if not task.assigned_agent_id:
+        raise HTTPException(status_code=422, detail="Cannot reject a task with no assigned agent")
 
     body = await request.json()
     feedback = (body.get("feedback") or "").strip()
 
-    task.status = "inbox"
+    # Q44: back to the same agent for another attempt, feedback in context.
+    task.status = "assigned"
     task.started_at = None
     task.completed_at = None
-    if feedback:
-        task.error_message = f"Rejected: {feedback}"
-
+    task.result = None
+    task.lease_until = None
+    task.attempts = 0  # a human-driven redo is a fresh attempt cycle
+    task.review_feedback = feedback or None
     db.commit()
     db.refresh(task)
 
-    logger.info("[BoardTasks] Task %d rejected%s", task.id, f" with feedback: {feedback}" if feedback else "")
+    # Wake the dispatch loop so the redo starts immediately (single spine).
+    if task.source_type != "recipe":
+        notify_task_available(db, workspace_id=ctx.workspace_id, task_id=task.id)
+
+    logger.info("[BoardTasks] Task %d rejected → re-assigned to agent %s%s",
+                task.id, task.assigned_agent_id,
+                f" with feedback: {feedback}" if feedback else "")
     return {
         "success": True,
         "task_id": task.id,
         "status": task.status,
+        "assigned_agent_id": task.assigned_agent_id,
         "feedback": feedback or None,
     }
+
+
+@router.post("/{task_id}/run-now")
+async def run_task_now(
+    task_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """PRD-161 S5: dispatch a task immediately.
+
+    Resets the task to a fresh ``assigned`` claim (clears lease + attempts) and
+    notifies the dispatch loop, so a failed, idle, or just-created task can be
+    re-run on demand from the board. A task already in_progress is left alone.
+    """
+    task = db.query(BoardTask).filter(
+        BoardTask.id == task_id,
+        BoardTask.workspace_id == ctx.workspace_id,
+    ).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if not task.assigned_agent_id:
+        raise HTTPException(status_code=422, detail="Assign an agent before running the task")
+    if task.status == "in_progress":
+        raise HTTPException(status_code=409, detail="Task is already running")
+
+    task.status = "assigned"
+    task.lease_until = None
+    task.attempts = 0
+    task.completed_at = None
+    task.started_at = None
+    db.commit()
+    db.refresh(task)
+
+    if task.source_type != "recipe":
+        notify_task_available(db, workspace_id=ctx.workspace_id, task_id=task.id)
+
+    logger.info("[BoardTasks] Run Now → task %d re-dispatched to agent %s",
+                task.id, task.assigned_agent_id)
+    return {"success": True, "task_id": task.id, "status": task.status}
 
 
 @router.patch("/{task_id}/status")
@@ -799,10 +943,13 @@ def _launch_task_execution(
             try:
                 task = db.query(BoardTask).get(task_id)
                 if task and task.status == "in_progress":
-                    task.status = "done"
+                    # PRD-161 S3: fail honestly — a crashed execution becomes
+                    # terminal 'failed', not a silent 'done' with an error blob.
+                    task.status = "failed"
                     task.error_message = str(e)[:500]
                     task.completed_at = datetime.now(timezone.utc)
                     db.commit()
+                    await _dispatch_task_failed(db, workspace_id, task)
                     # Surface failures the same way successes are surfaced.
                     await _auto_create_task_report(
                         db, workspace_id, task,
@@ -825,46 +972,6 @@ def _launch_task_execution(
         agent_id=agent_id,
         extra={"task_id": task_id},
     )
-
-
-def _should_dispatch_on_assign(task: BoardTask) -> bool:
-    """A board task starts executing the instant it is assigned to an agent.
-
-    Skipped when there is no agent, when the task is not in the freshly
-    'assigned' state (a task already in_progress is running — re-assigning it
-    must NOT launch a second execution), or when it is a recipe-mirror task
-    (the recipe executor drives those). This replaces the old reliance on an
-    opt-in heartbeat pickup that most agents never enable.
-    """
-    return (
-        task.assigned_agent_id is not None
-        and task.status == "assigned"
-        and task.source_type != "recipe"
-    )
-
-
-def _dispatch_on_assign(task: BoardTask, workspace_id, db: Session) -> bool:
-    """Move an assigned task to in_progress and launch its agent immediately.
-
-    Returns True when execution was launched. in_progress is set before the
-    launch so _launch_task_execution's completion path (guarded on
-    status == "in_progress") can persist the result.
-    """
-    if not _should_dispatch_on_assign(task):
-        return False
-    task.status = "in_progress"
-    task.started_at = datetime.now(timezone.utc)
-    db.commit()
-    db.refresh(task)
-    _launch_task_execution(
-        task_id=task.id,
-        agent_id=task.assigned_agent_id,
-        workspace_id=str(workspace_id),
-        prompt=task.raw_prompt or task.description or task.title,
-        review_mode=task.review_mode or "auto",
-        attachment_ids=task.attachment_ids,
-    )
-    return True
 
 
 # ── Planning mode ────────────────────────────────────────────────────

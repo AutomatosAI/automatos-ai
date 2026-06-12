@@ -51,9 +51,10 @@ const COLUMN_META: Record<BoardStatus, { label: string; color: string }> = {
   review:      { label: 'Review',      color: 'hsl(45 80% 60%)' },
   blocked:     { label: 'Blocked',     color: 'hsl(15 76% 44%)' },
   done:        { label: 'Done',        color: 'hsl(82 30% 33%)' },
+  failed:      { label: 'Failed',      color: 'hsl(0 62% 38%)' },
 }
 const COLUMNS_ORDER: BoardStatus[] = [
-  'inbox', 'assigned', 'in_progress', 'review', 'blocked', 'done',
+  'inbox', 'assigned', 'in_progress', 'review', 'blocked', 'done', 'failed',
 ]
 const LANE_COLUMNS = COLUMNS_ORDER.filter((c) => c !== 'done')
 
@@ -276,6 +277,27 @@ function KanbanCard({
             {(task.priority === 'urgent' || task.priority === 'high') && (
               <span className="high">· {task.priority.toUpperCase()}</span>
             )}
+            {(task.attempts ?? 0) > 0 && task.status !== 'done' && (
+              <span
+                className="high"
+                style={{ color: 'hsl(0 72% 60%)' }}
+                title={`Agent missed its ack deadline — task requeued ${task.attempts}×`}
+              >
+                · UNRESPONSIVE
+              </span>
+            )}
+            {task.sla_deadline &&
+              task.status !== 'done' &&
+              task.status !== 'failed' &&
+              new Date(task.sla_deadline).getTime() < Date.now() && (
+                <span
+                  className="high"
+                  style={{ color: 'hsl(0 72% 60%)' }}
+                  title={`SLA breached — was due ${new Date(task.sla_deadline).toLocaleString()}`}
+                >
+                  · OVERDUE
+                </span>
+              )}
           </div>
           <div className="ttl">{task.name}</div>
           {!isCompact && task.description && (

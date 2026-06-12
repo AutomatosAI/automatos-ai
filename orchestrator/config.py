@@ -409,6 +409,29 @@ class Config:
     DEFAULT_MAX_CONCURRENT_RUNNING: int = int(os.getenv("DEFAULT_MAX_CONCURRENT_RUNNING", "3"))
     DEFAULT_MAX_CONCURRENT_PENDING: int = int(os.getenv("DEFAULT_MAX_CONCURRENT_PENDING", "10"))
 
+    # =============================================================================
+    # BOARD DISPATCH SPINE (PRD-161: claim/lease/requeue)
+    # =============================================================================
+    # One Postgres-native dispatch loop: assigned BoardTasks are claimed with
+    # FOR UPDATE SKIP LOCKED (exactly-once), leased, and requeued on crash.
+    BOARD_DISPATCH_ENABLED: bool = os.getenv("BOARD_DISPATCH_ENABLED", "true").lower() == "true"
+    # Lease a claimed task holds before the sweeper presumes the worker dead.
+    BOARD_DISPATCH_LEASE_SECONDS: int = int(os.getenv("BOARD_DISPATCH_LEASE_SECONDS", "600"))
+    # Poll fallback cadence when no NOTIFY arrives (NOTIFY drives sub-second pickup).
+    BOARD_DISPATCH_POLL_SECONDS: float = float(os.getenv("BOARD_DISPATCH_POLL_SECONDS", "5"))
+    # Tasks claimed per loop tick (a tick claims a batch, runs each individually).
+    BOARD_DISPATCH_CLAIM_BATCH: int = int(os.getenv("BOARD_DISPATCH_CLAIM_BATCH", "10"))
+    # Q41: attempts before a task is terminal 'failed' (crash → requeue until here).
+    BOARD_DISPATCH_MAX_ATTEMPTS: int = int(os.getenv("BOARD_DISPATCH_MAX_ATTEMPTS", "2"))
+    # Per-agent concurrency slots: at most this many of an agent's tasks run at
+    # once; the rest stay 'assigned' (the DB is the queue — double-texting is
+    # queued, never dropped). The claim honours this via in_progress counts.
+    BOARD_DISPATCH_AGENT_SLOTS: int = int(os.getenv("BOARD_DISPATCH_AGENT_SLOTS", "2"))
+    # S5: done tasks older than this drop off the active board (retained in DB).
+    BOARD_ARCHIVE_DONE_DAYS: int = int(os.getenv("BOARD_ARCHIVE_DONE_DAYS", "30"))
+    # S5: SSE board-event ping cadence (server tells clients to refetch).
+    BOARD_SSE_PING_SECONDS: float = float(os.getenv("BOARD_SSE_PING_SECONDS", "10"))
+
     WORKER_INTERNAL_URL: str = os.getenv("WORKER_INTERNAL_URL", "http://localhost:8081")
     WORKER_INTERNAL_TOKEN: str = os.getenv("WORKER_INTERNAL_TOKEN", "")
 

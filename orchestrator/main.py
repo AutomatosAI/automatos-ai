@@ -503,6 +503,18 @@ async def lifespan(app: FastAPI):
                 report, BootstrapStage.SCHEDULER_INIT, lambda: None, skip_condition=True
             )
 
+        # ── PRD-161: board dispatch spine (single claim/lease/requeue loop) ──
+        # Assigned BoardTasks flow through this, not the heartbeat fold-in.
+        if trust_passed and config.BOARD_DISPATCH_ENABLED:
+            import asyncio as _asyncio
+            from services.board_dispatcher import run_dispatch_loop
+
+            app.state.board_dispatch_stop = _asyncio.Event()
+            app.state.board_dispatch_task = _asyncio.create_task(
+                run_dispatch_loop(stop_event=app.state.board_dispatch_stop)
+            )
+            logger.info("Board dispatch loop started (PRD-161)")
+
         # ── Ready ──
         report.ready_at = datetime.now(timezone.utc)
         await run_stage(report, BootstrapStage.READY, lambda: None)
@@ -539,6 +551,19 @@ async def lifespan(app: FastAPI):
             logger.info("Unified scheduler stopped")
         except Exception:
             pass
+
+    # PRD-161: stop the board dispatch loop
+    _bd_task = getattr(app.state, "board_dispatch_task", None)
+    if _bd_task is not None:
+        _bd_stop = getattr(app.state, "board_dispatch_stop", None)
+        if _bd_stop is not None:
+            _bd_stop.set()
+        _bd_task.cancel()
+        try:
+            await _bd_task
+        except Exception:
+            pass
+        logger.info("Board dispatch loop stopped")
 
     # PRD-55: Stop ChannelManager
     if config.CHANNELS_ENABLED:

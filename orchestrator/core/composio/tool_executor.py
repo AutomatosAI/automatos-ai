@@ -11,6 +11,7 @@ This executor:
 - Formats response for unified executor
 """
 
+import asyncio
 import logging
 import tempfile
 from pathlib import Path
@@ -729,10 +730,14 @@ class ComposioToolExecutor:
 
         # Execute via Composio
         try:
-            result = self.client.execute_action(
+            # PRD-161 S4: the Composio SDK call is blocking; off-load it to a
+            # worker thread so one slow tool call can't stall the event loop —
+            # and therefore can't stall other in-flight board-task claims/runs.
+            result = await asyncio.to_thread(
+                self.client.execute_action,
                 action=action_upper,
                 params=params,
-                entity_id=composio_entity_id
+                entity_id=composio_entity_id,
             )
 
             execution_time = int((time.time() - start_time) * 1000)

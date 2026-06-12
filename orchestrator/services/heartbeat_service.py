@@ -45,32 +45,9 @@ PRIMITIVE_NAMES = frozenset({
 PRIMITIVE_STATUSES = frozenset({"green", "degraded", "down"})
 
 
-# ---------------------------------------------------------------------------
-# Board-task pickup priority (PRD-154 · P154-S4)
-#
-# A raw ``ORDER BY priority DESC`` sorts the string column ALPHABETICALLY
-# (urgent, medium, low, high) — 'high' lands dead last, so an urgent and a
-# low-priority task outrank a high one. Rank the canonical priorities as DATA
-# instead; lower rank = higher priority, ordered ASC, so urgent > high >
-# medium > low. (Canonical set: api/board_tasks.py VALID_PRIORITIES.)
-# ---------------------------------------------------------------------------
-
-_BOARD_TASK_PRIORITY_RANK = {"urgent": 0, "high": 1, "medium": 2, "low": 3}
-
-
-def _board_task_priority_order():
-    """SQLAlchemy ORDER BY expression ranking ``BoardTask.priority`` semantically.
-
-    Unknown values sort last. Built from ``_BOARD_TASK_PRIORITY_RANK`` so the
-    ordering stays a single source of truth with no inline magic numbers.
-    """
-    from sqlalchemy import case
-    from core.models.core import BoardTask
-
-    return case(
-        *[(BoardTask.priority == _p, _r) for _p, _r in _BOARD_TASK_PRIORITY_RANK.items()],
-        else_=len(_BOARD_TASK_PRIORITY_RANK),
-    )
+# Board-task pickup priority now lives in the dispatch claim query
+# (services/board_dispatcher.py, _PRIORITY_ORDER_SQL) — PRD-161 moved task
+# dispatch out of the heartbeat.
 
 
 def emit_primitive_finding(
@@ -932,48 +909,11 @@ class HeartbeatService:
                 )
                 auto_act = hb_config.get("auto_act", False)
 
-                # --- PRD-72: Scan for assigned board tasks ---
-                assigned_tasks = []
-                task_context = ""
-                try:
-                    from core.models.core import BoardTask
-                    assigned_tasks = (
-                        db.query(BoardTask)
-                        .filter(
-                            BoardTask.assigned_agent_id == agent_id,
-                            BoardTask.status == "assigned",
-                            BoardTask.workspace_id == workspace_id,
-                        )
-                        .order_by(_board_task_priority_order().asc(), BoardTask.created_at.asc())
-                        .limit(3)
-                        .all()
-                    )
-                    if assigned_tasks:
-                        task_lines = []
-                        for t in assigned_tasks:
-                            t.status = "in_progress"
-                            t.started_at = datetime.utcnow()
-                            task_lines.append(
-                                f"- [TASK-{t.id}] {t.title}: {t.description or ''}"
-                            )
-                        db.commit()
-                        task_context = (
-                            "\n\n## ASSIGNED TASKS (Priority Work)\n"
-                            "You have tasks assigned to you. Complete them and report results.\n"
-                            + "\n".join(task_lines)
-                            + "\n\nAfter completing each task, use platform_submit_report or respond with results."
-                        )
-                        logger.info(
-                            "[Heartbeat] Agent %s picked up %d assigned tasks",
-                            agent_id,
-                            len(assigned_tasks),
-                        )
-                except Exception as task_err:
-                    logger.warning(
-                        "[Heartbeat] Failed to scan board tasks for agent=%s: %s",
-                        agent_id,
-                        task_err,
-                    )
+                # PRD-161: board-task pickup moved OUT of the heartbeat into the
+                # dedicated dispatch loop (services/board_dispatcher.py), which
+                # claims each assigned task with FOR UPDATE SKIP LOCKED and runs
+                # it individually. The heartbeat is monitoring/recurring only now
+                # (Q40) — it no longer batches 3 tasks into one prompt.
 
                 # PRD-140 Phase 1 — opt-in cadence blocks (e.g. team_review
                 # when this agent has team_lead_enabled=True). Same module as
@@ -990,7 +930,6 @@ class HeartbeatService:
                         if auto_act
                         else "Report findings only."
                     )
-                    + task_context
                 )
 
                 # Execute through AgentFactory so the agent has its full toolset
@@ -1027,29 +966,6 @@ class HeartbeatService:
                         {"check": "llm_analysis", "detail": str(llm_text)[:1000]}
                     )
                     result["tokens_used"] = exec_result.get("tokens_used", 0) if isinstance(exec_result, dict) else 0
-
-                    # PRD-72: Auto-complete board tasks after successful execution
-                    if assigned_tasks:
-                        try:
-                            from core.models.core import BoardTask as BT
-                            for t in assigned_tasks:
-                                t_fresh = db.query(BT).get(t.id)
-                                if t_fresh and t_fresh.status == "in_progress":
-                                    t_fresh.status = "done" if t_fresh.review_mode == "auto" else "review"
-                                    t_fresh.completed_at = datetime.utcnow()
-                                    t_fresh.result = str(llm_text)[:2000]
-                            db.commit()
-                            logger.info(
-                                "[Heartbeat] Agent %s completed %d tasks",
-                                agent_id,
-                                len(assigned_tasks),
-                            )
-                        except Exception as tc_err:
-                            logger.warning(
-                                "[Heartbeat] Failed to complete board tasks for agent=%s: %s",
-                                agent_id,
-                                tc_err,
-                            )
 
                 except Exception as exec_err:
                     logger.warning(
