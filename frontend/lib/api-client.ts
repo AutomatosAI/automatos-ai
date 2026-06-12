@@ -897,70 +897,70 @@ class ApiClient {
       })
     }
     const query = queryParams.toString()
-    return this.request(`/api/playbooks${query ? '?' + query : ''}`)
+    return this.request(`/api/workflow-recipes${query ? '?' + query : ''}`)
   }
 
   async getWorkflowRecipeById(recipeId: string) {
-    return this.request(`/api/playbooks/${recipeId}`)
+    return this.request(`/api/workflow-recipes/${recipeId}`)
   }
 
   async createWorkflowRecipe(recipeData: any) {
-    return this.request('/api/playbooks', {
+    return this.request('/api/workflow-recipes', {
       method: 'POST',
       body: JSON.stringify(recipeData)
     })
   }
 
   async updateWorkflowRecipe(recipeId: string, recipeData: any) {
-    return this.request(`/api/playbooks/${recipeId}`, {
+    return this.request(`/api/workflow-recipes/${recipeId}`, {
       method: 'PUT',
       body: JSON.stringify(recipeData)
     })
   }
 
   async deleteWorkflowRecipe(recipeId: string) {
-    return this.request(`/api/playbooks/${recipeId}`, {
+    return this.request(`/api/workflow-recipes/${recipeId}`, {
       method: 'DELETE'
     })
   }
 
   async recordRecipeUsage(recipeId: string) {
-    return this.request(`/api/playbooks/${recipeId}/use`, {
+    return this.request(`/api/workflow-recipes/${recipeId}/use`, {
       method: 'POST'
     })
   }
 
   async getFeaturedRecipes(limit?: number) {
-    return this.request(`/api/playbooks/featured/list${limit ? '?limit=' + limit : ''}`)
+    return this.request(`/api/workflow-recipes/featured/list${limit ? '?limit=' + limit : ''}`)
   }
 
   async getRecipeCategories() {
-    return this.request('/api/playbooks/categories/list')
+    return this.request('/api/workflow-recipes/categories/list')
   }
 
   // Marketplace recipe endpoints
   async submitRecipeToMarketplace(params: { recipe_id: string; category?: string; icon?: string }) {
-    return this.request('/api/playbooks/submit', {
+    return this.request('/api/workflow-recipes/submit', {
       method: 'POST',
       body: JSON.stringify(params)
     })
   }
 
   async installRecipeFromMarketplace(recipeId: number) {
-    return this.request(`/api/playbooks/install/${recipeId}`, {
+    return this.request(`/api/workflow-recipes/install/${recipeId}`, {
       method: 'POST'
     })
   }
 
   async executeRecipe(recipeId: string, inputData?: Record<string, any>) {
-    return this.request(`/api/playbooks/${recipeId}/execute`, {
+    return this.request(`/api/workflow-recipes/${recipeId}/execute`, {
       method: 'POST',
       body: JSON.stringify({ input_data: inputData || {} })
     })
   }
 
   async getRecipeSuggestions(recipeId: string) {
-    return this.request(`/api/playbooks/${recipeId}/suggestions`)
+    return this.request(`/api/workflow-recipes/${recipeId}/suggestions`)
   }
 
   async getRecipeExecutions(recipeId: string, params?: { status?: string; skip?: number; limit?: number }) {
@@ -969,21 +969,21 @@ class ApiClient {
     if (params?.skip !== undefined) queryParams.append('skip', params.skip.toString())
     if (params?.limit !== undefined) queryParams.append('limit', params.limit.toString())
     const query = queryParams.toString()
-    return this.request(`/api/playbooks/${recipeId}/executions${query ? '?' + query : ''}`)
+    return this.request(`/api/workflow-recipes/${recipeId}/executions${query ? '?' + query : ''}`)
   }
 
   async getRecipeExecution(recipeId: string, executionId: string) {
-    return this.request(`/api/playbooks/${recipeId}/executions/${executionId}`)
+    return this.request(`/api/workflow-recipes/${recipeId}/executions/${executionId}`)
   }
 
   async cancelRecipeExecution(recipeId: string, executionId: string) {
-    return this.request(`/api/playbooks/${recipeId}/executions/${executionId}/cancel`, {
+    return this.request(`/api/workflow-recipes/${recipeId}/executions/${executionId}/cancel`, {
       method: 'POST'
     })
   }
 
   async getRecipeStepFullLogs(recipeId: string, executionId: string, stepOrder: number) {
-    return this.request(`/api/playbooks/${recipeId}/executions/${executionId}/steps/${stepOrder}/logs`)
+    return this.request(`/api/workflow-recipes/${recipeId}/executions/${executionId}/steps/${stepOrder}/logs`)
   }
 
   // ===== CODEGRAPH ENDPOINTS (PRD-11) =====

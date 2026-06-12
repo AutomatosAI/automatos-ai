@@ -52,6 +52,7 @@ from api.memory_stats import router as memory_stats_router
 from api.context_policy import router as context_policy_router
 from api.codegraph import router as codegraph_router  # PRD-11: New CodeGraph implementation
 from api.github_webhooks import router as github_webhooks_router  # GitHub PR automation
+from api.api_playbooks import router as playbooks_router
 from api.patterns import router as patterns_router
 from api.context import router as context_router
 from api.credentials import router as credentials_router  # PRD-18: Enhanced credentials
@@ -902,6 +903,7 @@ app.include_router(execution_history_router)  # Enhanced execution history API
 app.include_router(context_policy_router)
 app.include_router(codegraph_router)  # PRD-11: CodeGraph
 app.include_router(github_webhooks_router)  # GitHub PR automation
+app.include_router(playbooks_router)
 app.include_router(patterns_router)
 app.include_router(context_router)
 app.include_router(credentials_router)  # PRD-18: Enhanced credentials with management

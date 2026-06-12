@@ -3,7 +3,7 @@ import { apiClient } from '@/lib/api-client'
 
 // Query key factory
 export const playbookKeys = {
-  all: ['playbooks'] as const,
+  all: ['workflow-recipes'] as const,
   lists: () => [...playbookKeys.all, 'list'] as const,
   list: (params?: any) => [...playbookKeys.lists(), params] as const,
   details: () => [...playbookKeys.all, 'detail'] as const,

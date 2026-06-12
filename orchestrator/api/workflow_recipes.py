@@ -19,7 +19,7 @@ from sqlalchemy import or_, and_, func as sa_func
 from core.database.database import get_db
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/playbooks", tags=["playbooks"])
+router = APIRouter(prefix="/api/workflow-recipes", tags=["workflow-recipes"])
 
 # Import the model from main models file
 from core.models import WorkflowTemplate as WorkflowRecipe  # Aliased for transition
