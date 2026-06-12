@@ -152,12 +152,23 @@ def _db_returning(runs):
     return db
 
 
+def _field_with_inner():
+    """A shared-context mock whose inner backend has async archive/destroy, so
+    PRD-166 S1's merge-into-workspace (which IS allowed to touch the backend)
+    runs while we still assert the field is never DESTROYED."""
+    field = MagicMock()
+    field._inner = MagicMock()
+    field._inner.archive_into_workspace = AsyncMock()
+    field._inner.destroy_context = AsyncMock()
+    return field
+
+
 def test_cleanup_terminal_fields_archives_not_destroys():
-    """Terminal field is archived in place: data kept, field_id kept, marked."""
+    """Terminal field: merged into the workspace field (archive_into_workspace)
+    and marked — but NEVER destroyed; data + field_id are kept."""
     svc = _coordinator()
-    # Archiving is pure metadata — it must NOT touch the field backend at all
-    # (no _get_field → no destroy_context).
-    svc._get_field = MagicMock()
+    field = _field_with_inner()
+    svc._get_field = MagicMock(return_value=field)
 
     run = MagicMock()
     run.id = uuid.uuid4()
@@ -166,7 +177,10 @@ def test_cleanup_terminal_fields_archives_not_destroys():
 
     asyncio.run(svc._cleanup_terminal_fields(db))
 
-    svc._get_field.assert_not_called()
+    # PRD-166 S1: merged into the workspace field, NOT destroyed.
+    field._inner.archive_into_workspace.assert_awaited_once()
+    assert field._inner.archive_into_workspace.await_args.args[0] == "f1"
+    field._inner.destroy_context.assert_not_awaited()
     # field_id retained → the /field endpoint can still query it post-completion.
     assert run.config["field_id"] == "f1"
     # Archived markers stamped.
@@ -178,9 +192,10 @@ def test_cleanup_terminal_fields_archives_not_destroys():
 def test_cleanup_archived_field_stays_queryable():
     """Proxy for 'archived field queryable post-completion': after archiving,
     the field_id the /field endpoint reads is still present and the backend
-    was never asked to tear the field down."""
+    was never asked to tear the field down (destroy)."""
     svc = _coordinator()
-    svc._get_field = MagicMock()
+    field = _field_with_inner()
+    svc._get_field = MagicMock(return_value=field)
 
     run = MagicMock()
     run.id = uuid.uuid4()
@@ -190,13 +205,14 @@ def test_cleanup_archived_field_stays_queryable():
     asyncio.run(svc._cleanup_terminal_fields(db))
 
     assert run.config.get("field_id") == "abc-123"
-    svc._get_field.assert_not_called()
+    field._inner.destroy_context.assert_not_awaited()
 
 
 def test_cleanup_skips_already_archived_runs():
-    """An already-archived run is not re-stamped or destroyed (idempotent)."""
+    """An already-archived run is not re-stamped, re-merged, or destroyed."""
     svc = _coordinator()
-    svc._get_field = MagicMock()
+    field = _field_with_inner()
+    svc._get_field = MagicMock(return_value=field)
 
     run = MagicMock()
     run.id = uuid.uuid4()
@@ -209,7 +225,9 @@ def test_cleanup_skips_already_archived_runs():
 
     asyncio.run(svc._cleanup_terminal_fields(db))
 
-    svc._get_field.assert_not_called()
+    # Already archived → skipped: neither re-merged nor destroyed.
+    field._inner.archive_into_workspace.assert_not_awaited()
+    field._inner.destroy_context.assert_not_awaited()
     assert run.config["field_expired_at"] == "2026-01-01T00:00:00+00:00"
 
 

@@ -200,6 +200,7 @@ def adapter(mock_qdrant, mock_embedder):
     inst._archival_threshold = 0.05
     inst._boundary_permeability = 1.0
     inst._dimension = 2048
+    inst._half_life_access_scale = 0.5  # PRD-166 S2: adaptive half-life
     # PRD-108: the single shared collection is bootstrapped once via
     # ensure_shared_collection(). Behavioural tests pin it done so the
     # method-under-test runs without the bootstrap side-trip; the dedicated
@@ -214,7 +215,9 @@ def adapter(mock_qdrant, mock_embedder):
 
 
 class TestComputeDecayedStrength:
-    """S(t) = S₀ × e^(−λt) × access_boost, λ=0.1, boost capped at 2.0."""
+    """PRD-166 S2: stability × recency = S₀ × access_boost × e^(−λ_eff·t),
+    λ_eff = 0.1 / (1 + 0.5·access_count) (adaptive half-life), boost capped at 2.0.
+    For access_count=0 this is identical to the original fixed-λ formula."""
 
     def test_zero_age_no_accesses(self, adapter):
         result = adapter._compute_decayed_strength(1.0, age_hours=0.0, access_count=0)
@@ -259,10 +262,13 @@ class TestComputeDecayedStrength:
         assert math.isclose(result, 0.5, rel_tol=1e-9)
 
     def test_decay_combined_with_access_boost(self, adapter):
-        # S(2, count=10) = 1.0 × e^(-0.2) × 1.5
-        expected = math.exp(-0.2) * 1.5
+        # PRD-166 S2 adaptive half-life: count=10 → boost=1.5, λ_eff=0.1/(1+0.5*10)=0.1/6
+        # S(2,count=10) = 1.5 × e^(-(0.1/6)·2)
+        expected = 1.5 * math.exp(-(0.1 / 6.0) * 2.0)
         result = adapter._compute_decayed_strength(1.0, age_hours=2.0, access_count=10)
         assert math.isclose(result, expected, rel_tol=1e-9)
+        # And it decays SLOWER than the old fixed-λ formula (the point of adaptive)
+        assert result > math.exp(-0.2) * 1.5
 
     def test_zero_initial_strength_always_zero(self, adapter):
         result = adapter._compute_decayed_strength(0.0, age_hours=5.0, access_count=50)
@@ -301,8 +307,8 @@ class TestCreateContext:
         adapter._bootstrap_done = False
         mock_qdrant.collection_exists.return_value = False
         await adapter.create_context([1])
-        # Four indexes: field_id, content_hash, agent_id, created_at
-        assert mock_qdrant.create_payload_index.await_count == 4
+        # Five indexes: field_id, workspace_id (PRD-166 S1), content_hash, agent_id, created_at
+        assert mock_qdrant.create_payload_index.await_count == 5
 
     @pytest.mark.asyncio
     async def test_bootstrap_skipped_when_collection_present(self, adapter, mock_qdrant):
