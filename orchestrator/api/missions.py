@@ -87,6 +87,10 @@ class MissionCreateRequest(BaseModel):
         max_length=100,
         description="Template ID hint — bypass LLM matching and use this template directly",
     )
+    plan_only: bool = Field(
+        False,
+        description="PRD-163 S2: plan only — produce the plan and await approval, never auto-execute",
+    )
 
 
 ALLOWED_MODIFICATION_KEYS = {"task_overrides", "notes", "agent_overrides"}
@@ -419,6 +423,8 @@ async def create_mission(
     mission_config = dict(body.config) if body.config else {}
     if body.template_id:
         mission_config["template_id"] = body.template_id
+    if body.plan_only:
+        mission_config["plan_only"] = True
 
     try:
         run = await coordinator.create_mission(
@@ -442,6 +448,44 @@ async def create_mission(
     except Exception as exc:
         db.rollback()
         logger.error("Failed to create mission: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+class PlanImportRequest(BaseModel):
+    goal: str = Field(..., min_length=1, max_length=10000, description="Mission goal")
+    plan: Dict[str, Any] = Field(..., description="Pre-built plan: {tasks:[...], dependencies:[...]}")
+    config: Optional[Dict[str, Any]] = Field(None, description="Optional mission config overrides")
+
+
+@router.post("/import-plan", status_code=201)
+async def import_mission_plan(
+    body: PlanImportRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """PRD-163 S2: create a mission from a pre-built (possibly chat-edited) plan and
+    execute it verbatim — the planner is NOT re-run, so the executed DAG matches the
+    given plan exactly (Q54). The mission lands in awaiting_approval."""
+    coordinator = get_coordinator_service()
+    try:
+        run = coordinator.import_plan(
+            db=db,
+            workspace_id=ctx.workspace_id,
+            goal=body.goal,
+            plan=body.plan,
+            created_by=ctx.user.id or "unknown",
+            config=body.config,
+        )
+        db.commit()
+        return _run_to_response(run)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(exc))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        db.rollback()
+        logger.error("Failed to import plan: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 

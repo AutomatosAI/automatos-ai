@@ -1721,92 +1721,9 @@ class CoordinatorService:
             )
             raise
 
-        # Store the plan on the run
-        run.plan = {
-            "tasks": [
-                {
-                    "temp_id": t.temp_id,
-                    "title": t.title,
-                    "description": t.description,
-                    "agent_role": t.agent_role,
-                    "sequence_number": t.sequence_number,
-                    "task_type": t.task_type,
-                    "complexity": getattr(t, "complexity", "moderate"),
-                    "parallel_group": getattr(t, "parallel_group", None),
-                }
-                for t in decomposition.tasks
-            ],
-            "dependencies": [
-                {
-                    "from": d.from_task_temp_id,
-                    "to": d.to_task_temp_id,
-                }
-                for d in decomposition.dependencies
-            ],
-        }
-        run.token_budget_estimate = decomposition.token_estimate
-        run.max_concurrent = decomposition.max_concurrent
-
-        # Persist template metadata for completion handler (e.g. app_builder → zip output)
-        if decomposition.template_used:
-            run.config = {
-                **(run.config or {}),
-                "template_used": decomposition.template_used,
-            }
-
-        # Create OrchestrationTask rows
-        temp_id_to_task: Dict[str, OrchestrationTask] = {}
-        for planned in decomposition.tasks:
-            task = OrchestrationTask(
-                run_id=run.id,
-                title=planned.title,
-                description=planned.description,
-                task_type=planned.task_type,
-                sequence_number=planned.sequence_number,
-                agent_role=planned.agent_role,
-                state=TaskState.PENDING.value,
-                state_type="initial",
-                verification_criteria=planned.verification_criteria or None,
-                input_context={
-                    "required_tools": planned.required_tools,
-                } if planned.required_tools else None,
-                max_retries=run.max_retries,
-                complexity=getattr(planned, "complexity", "moderate"),
-                parallel_group=getattr(planned, "parallel_group", None),
-                estimated_tokens=COMPLEXITY_TOKEN_BUDGET.get(
-                    getattr(planned, "complexity", "moderate"), 4000
-                ),
-            )
-            db.add(task)
-            db.flush()  # Get task.id
-            temp_id_to_task[planned.temp_id] = task
-
-            emit_event(
-                db=db,
-                run_id=run.id,
-                event_type=EventType.TASK_CREATED,
-                actor_type=ActorType.COORDINATOR,
-                actor_id="coordinator",
-                task_id=task.id,
-                payload={
-                    "title": planned.title,
-                    "sequence_number": planned.sequence_number,
-                    "agent_role": planned.agent_role,
-                },
-            )
-
-        # Create dependency edges
-        for dep in decomposition.dependencies:
-            from_task = temp_id_to_task.get(dep.from_task_temp_id)
-            to_task = temp_id_to_task.get(dep.to_task_temp_id)
-            if from_task and to_task:
-                dep_row = OrchestrationTaskDependency(
-                    task_id=to_task.id,
-                    depends_on_task_id=from_task.id,
-                )
-                db.add(dep_row)
-
-        db.flush()
+        # Store the plan + create task/dependency rows (PRD-163 S2: shared
+        # with import_plan so an imported plan persists the exact given DAG).
+        temp_id_to_task = self._persist_decomposition(db, run, decomposition)
 
         # Create board tasks for kanban visibility
         try:
@@ -1832,8 +1749,13 @@ class CoordinatorService:
             },
         )
 
-        # Auto-approve or await approval
-        auto_approve = mission_config.get("auto_approve", False)
+        # Auto-approve or await approval. PRD-163 S2: plan_only is an explicit
+        # "just plan, don't execute" request — it always awaits approval, never
+        # auto-approves (overriding any auto_approve config / policy).
+        auto_approve = (
+            False if mission_config.get("plan_only")
+            else mission_config.get("auto_approve", False)
+        )
         if auto_approve:
             transition_run(
                 db=db,
@@ -1861,6 +1783,186 @@ class CoordinatorService:
     # ------------------------------------------------------------------
     # Lifecycle: approve_plan
     # ------------------------------------------------------------------
+
+    def _persist_decomposition(
+        self,
+        db: Session,
+        run: OrchestrationRun,
+        decomposition,
+    ) -> Dict[str, OrchestrationTask]:
+        """Write a decomposition (planner output OR an imported plan) to
+        ``run.plan`` + OrchestrationTask / dependency rows. Returns the
+        temp_id -> task map. PRD-163 S2: shared by create_mission and import_plan
+        so an imported plan persists the EXACT given DAG (no re-decomposition)."""
+        run.plan = {
+            "tasks": [
+                {
+                    "temp_id": t.temp_id,
+                    "title": t.title,
+                    "description": t.description,
+                    "agent_role": t.agent_role,
+                    "sequence_number": t.sequence_number,
+                    "task_type": t.task_type,
+                    "complexity": getattr(t, "complexity", "moderate"),
+                    "parallel_group": getattr(t, "parallel_group", None),
+                }
+                for t in decomposition.tasks
+            ],
+            "dependencies": [
+                {"from": d.from_task_temp_id, "to": d.to_task_temp_id}
+                for d in decomposition.dependencies
+            ],
+        }
+        run.token_budget_estimate = decomposition.token_estimate
+        run.max_concurrent = decomposition.max_concurrent
+        if decomposition.template_used:
+            run.config = {**(run.config or {}), "template_used": decomposition.template_used}
+
+        temp_id_to_task: Dict[str, OrchestrationTask] = {}
+        for planned in decomposition.tasks:
+            task = OrchestrationTask(
+                run_id=run.id,
+                title=planned.title,
+                description=planned.description,
+                task_type=planned.task_type,
+                sequence_number=planned.sequence_number,
+                agent_role=planned.agent_role,
+                state=TaskState.PENDING.value,
+                state_type="initial",
+                verification_criteria=planned.verification_criteria or None,
+                input_context={"required_tools": planned.required_tools} if planned.required_tools else None,
+                max_retries=run.max_retries,
+                complexity=getattr(planned, "complexity", "moderate"),
+                parallel_group=getattr(planned, "parallel_group", None),
+                estimated_tokens=COMPLEXITY_TOKEN_BUDGET.get(
+                    getattr(planned, "complexity", "moderate"), 4000
+                ),
+            )
+            db.add(task)
+            db.flush()  # Get task.id
+            temp_id_to_task[planned.temp_id] = task
+
+            emit_event(
+                db=db,
+                run_id=run.id,
+                event_type=EventType.TASK_CREATED,
+                actor_type=ActorType.COORDINATOR,
+                actor_id="coordinator",
+                task_id=task.id,
+                payload={
+                    "title": planned.title,
+                    "sequence_number": planned.sequence_number,
+                    "agent_role": planned.agent_role,
+                },
+            )
+
+        for dep in decomposition.dependencies:
+            from_task = temp_id_to_task.get(dep.from_task_temp_id)
+            to_task = temp_id_to_task.get(dep.to_task_temp_id)
+            if from_task and to_task:
+                db.add(OrchestrationTaskDependency(
+                    task_id=to_task.id,
+                    depends_on_task_id=from_task.id,
+                ))
+
+        db.flush()
+        return temp_id_to_task
+
+    def import_plan(
+        self,
+        db: Session,
+        workspace_id: UUID,
+        goal: str,
+        plan: Dict[str, Any],
+        created_by: str,
+        config: Optional[Dict[str, Any]] = None,
+    ) -> OrchestrationRun:
+        """PRD-163 S2: create a mission from a pre-built plan WITHOUT re-running the
+        planner. The given tasks/dependencies are persisted verbatim and the
+        mission lands in awaiting_approval. Used by the plan-import endpoint and by
+        Auto when a chat-approved plan should execute exactly as agreed (Q54)."""
+        from modules.coordination.planner import (
+            DecompositionResult,
+            PlannedTask,
+            PlannedDependency,
+        )
+
+        raw_tasks = plan.get("tasks") or []
+        if not raw_tasks:
+            raise ValueError("Imported plan has no tasks")
+
+        planned_tasks: List[PlannedTask] = []
+        for idx, t in enumerate(raw_tasks):
+            temp_id = str(t.get("temp_id") or t.get("id") or f"t{idx + 1}")
+            planned_tasks.append(PlannedTask(
+                temp_id=temp_id,
+                title=str(t.get("title") or f"Task {idx + 1}"),
+                description=str(t.get("description") or ""),
+                agent_role=str(t.get("agent_role") or "generalist"),
+                sequence_number=int(t.get("sequence_number", idx + 1)),
+                task_type=str(t.get("task_type") or "execution"),
+                verification_criteria=t.get("verification_criteria") or [],
+                required_tools=t.get("required_tools") or [],
+                dependencies=[str(d) for d in (t.get("dependencies") or [])],
+                complexity=str(t.get("complexity") or "moderate"),
+                parallel_group=t.get("parallel_group"),
+            ))
+
+        valid_ids = {pt.temp_id for pt in planned_tasks}
+        deps: List[PlannedDependency] = []
+        for d in (plan.get("dependencies") or []):
+            frm = str(d.get("from") or d.get("from_task_temp_id") or "")
+            to = str(d.get("to") or d.get("to_task_temp_id") or "")
+            if frm in valid_ids and to in valid_ids:
+                deps.append(PlannedDependency(from_task_temp_id=frm, to_task_temp_id=to))
+
+        token_estimate = int(plan.get("token_estimate") or sum(
+            COMPLEXITY_TOKEN_BUDGET.get(pt.complexity, 4000) for pt in planned_tasks
+        ))
+        decomposition = DecompositionResult(
+            tasks=planned_tasks,
+            dependencies=deps,
+            token_estimate=token_estimate,
+            max_concurrent=int(plan.get("max_concurrent", 1)),
+        )
+
+        mission_config = {**(config or {}), "imported_plan": True}
+        run = OrchestrationRun(
+            workspace_id=workspace_id,
+            goal=goal,
+            created_by=created_by,
+            config=mission_config,
+            state=RunState.PENDING.value,
+            state_type="initial",
+            max_retries=mission_config.get("max_retries", Config.COORDINATOR_MAX_TASK_RETRIES),
+            max_concurrent=decomposition.max_concurrent,
+        )
+        db.add(run)
+        db.flush()
+
+        emit_event(
+            db=db, run_id=run.id, event_type=EventType.RUN_CREATED,
+            actor_type=ActorType.HUMAN, actor_id=created_by,
+            payload={"goal": goal[:500], "imported": True},
+        )
+        transition_run(
+            db=db, run=run, new_state=RunState.PLANNING,
+            actor_type=ActorType.COORDINATOR, actor_id="coordinator",
+        )
+
+        self._persist_decomposition(db, run, decomposition)
+
+        emit_event(
+            db=db, run_id=run.id, event_type=EventType.RUN_PLAN_READY,
+            actor_type=ActorType.COORDINATOR, actor_id="coordinator",
+            payload={"task_count": len(planned_tasks), "imported": True},
+        )
+        transition_run(
+            db=db, run=run, new_state=RunState.AWAITING_APPROVAL,
+            actor_type=ActorType.COORDINATOR, actor_id="coordinator",
+        )
+        logger.info("Imported plan -> mission %s (%d tasks) awaiting_approval", run.id, len(planned_tasks))
+        return run
 
     def approve_plan(
         self,
