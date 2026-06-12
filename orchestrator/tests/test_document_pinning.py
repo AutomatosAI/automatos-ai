@@ -121,21 +121,21 @@ def test_pin_inject_and_unpin(db_session):
     ws = str(uuid.uuid4())
     # a user + chat + document with chunks
     user_id = db_session.execute(
-        text("INSERT INTO users (email) VALUES (:e) RETURNING id"),
-        {"e": f"{uuid.uuid4()}@t.test"},
+        text("INSERT INTO users (email, username) VALUES (:e, :u) RETURNING id"),
+        {"e": f"{uuid.uuid4()}@t.test", "u": f"pin-{uuid.uuid4().hex[:12]}"},
     ).scalar()
     chat_id = str(uuid.uuid4())
     db_session.execute(
         text(
             "INSERT INTO chats (id, user_id, workspace_id, title) "
-            "VALUES (:id::uuid, :uid, :ws::uuid, 'pin-test')"
+            "VALUES (CAST(:id AS uuid), :uid, CAST(:ws AS uuid), 'pin-test')"
         ),
         {"id": chat_id, "uid": user_id, "ws": ws},
     )
     doc_id = db_session.execute(
         text(
             "INSERT INTO documents (filename, workspace_id, team_access, status, upload_date) "
-            "VALUES ('pinned.txt', :ws::uuid, '{}', 'processed', NOW()) RETURNING id"
+            "VALUES ('pinned.txt', CAST(:ws AS uuid), '{}', 'processed', NOW()) RETURNING id"
         ),
         {"ws": ws},
     ).scalar()

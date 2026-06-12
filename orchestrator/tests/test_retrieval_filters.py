@@ -206,7 +206,7 @@ def test_tenancy_matrix(db_session, agent_team, doc_team_access, expected_visibl
         text(
             """
             INSERT INTO documents (filename, workspace_id, team_access, status, upload_date)
-            VALUES (:fn, :ws::uuid, :team_access, 'processed', NOW())
+            VALUES (:fn, CAST(:ws AS uuid), :team_access, 'processed', NOW())
             RETURNING id
             """
         ),
@@ -231,7 +231,7 @@ def test_tenancy_matrix_isolates_other_workspace(db_session):
         text(
             """
             INSERT INTO documents (filename, workspace_id, team_access, status, upload_date)
-            VALUES (:fn, :ws::uuid, '{}', 'processed', NOW())
+            VALUES (:fn, CAST(:ws AS uuid), '{}', 'processed', NOW())
             RETURNING id
             """
         ),

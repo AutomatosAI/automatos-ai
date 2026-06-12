@@ -390,7 +390,7 @@ class RAGService:
                         UPDATE documents
                         SET last_accessed = NOW(),
                             rag_query_count = COALESCE(rag_query_count, 0) + 1
-                        WHERE id = ANY(:ids::int[]) AND workspace_id = :ws::uuid
+                        WHERE id = ANY(CAST(:ids AS int[])) AND workspace_id = CAST(:ws AS uuid)
                     """),
                     {"ids": list(doc_ids), "ws": str(workspace_id)},
                 )
@@ -412,19 +412,32 @@ class RAGService:
         )
         return str(doc_id) if doc_id else None
 
+    @staticmethod
+    def _candidate_is_public(c: Dict) -> bool:
+        """True when a candidate's document carries no team restriction.
+
+        ``team_access`` empty or absent → visible workspace-wide; a non-empty list
+        → team-restricted. Consulted only on the DB-error fallback, where the live
+        access-check is unavailable and we degrade to candidate metadata.
+        """
+        meta = c.get("metadata", {}) or {}
+        return not meta.get("team_access")
+
     async def _filter_by_team(
         self,
         candidates: List[Dict],
         team: str,
         workspace_id: str,
     ) -> List[Dict]:
-        """PRD-157 S1: filter candidates to team-accessible documents via the
-        centralized fail-closed scope helper.
+        """Filter candidates to team-accessible documents through the centralized
+        fail-closed scope helper (PRD-157 S1), preserving the PRD-154 S2 contract:
 
-        Replaces the old fail-open inline SQL: any scope error now drops the
-        candidates (returns ``[]``) instead of passing them through, and
-        candidates whose document cannot be identified are excluded when a team
-        restriction is active (their access cannot be verified).
+        * a team-restricted document is NEVER leaked;
+        * a DB error degrades to **public docs only** (empty ``team_access``) and
+          logs at error level — a transient hiccup must neither blank the results
+          nor expose a restricted doc;
+        * a candidate with no identifiable document is not document-scoped, so it
+          passes through (document ``team_access`` cannot apply to it).
         """
         from modules.rag.retrieval_filters import build_retrieval_filters, allowed_document_ids
 
@@ -434,21 +447,28 @@ class RAGService:
 
         doc_ids = {d for d in (self._candidate_doc_id(c) for c in candidates) if d}
         if not doc_ids:
-            # Team restriction active but no identifiable documents → cannot verify → fail closed.
-            logger.info("PRD-157 team filter: no document ids on candidates, failing closed")
-            return []
+            return candidates  # nothing document-scoped to verify
 
         from core.database.database import SessionLocal
 
-        db = SessionLocal()
         try:
-            allowed_ids = allowed_document_ids(db, doc_ids, filters)
-        finally:
-            db.close()
+            db = SessionLocal()
+            try:
+                allowed_ids = allowed_document_ids(db, doc_ids, filters)
+            finally:
+                db.close()
+        except Exception:
+            # Fail CLOSED to public docs: never leak a team-restricted document on a
+            # DB error, but public docs degrade gracefully (PRD-154 S2).
+            logger.error(
+                "team filter access-check failed; returning public docs only (fail-closed)",
+                exc_info=True,
+            )
+            return [c for c in candidates if self._candidate_is_public(c)]
 
         filtered = [c for c in candidates if self._candidate_doc_id(c) in allowed_ids]
         logger.info(
-            f"PRD-157 team filter: {len(candidates)} → {len(filtered)} candidates (team={filters.team})"
+            f"team filter: {len(candidates)} → {len(filtered)} candidates (team={filters.team})"
         )
         return filtered
 

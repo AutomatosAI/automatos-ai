@@ -470,7 +470,7 @@ async def grep_documents(db: Session, workspace_id: UUID, params: Dict[str, Any]
     chunk_rows = db.execute(
         sa_text(
             "SELECT document_id, chunk_index, content FROM document_chunks "
-            "WHERE document_id = ANY(:ids::int[]) ORDER BY document_id, chunk_index LIMIT :scan"
+            "WHERE document_id = ANY(CAST(:ids AS int[])) ORDER BY document_id, chunk_index LIMIT :scan"
         ),
         {"ids": list(doc_names.keys()), "scan": _GREP_MAX_SCAN_CHUNKS},
     ).fetchall()

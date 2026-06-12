@@ -127,10 +127,10 @@ def build_retrieval_filters(
 # the public sentinel; ``&&`` is PostgreSQL array overlap.
 
 SCOPE_WHERE_TEAM = (
-    "workspace_id = :workspace_id::uuid "
-    "AND (team_access = '{}' OR team_access && :team_terms::text[])"
+    "workspace_id = CAST(:workspace_id AS uuid) "
+    "AND (team_access = '{}' OR team_access && CAST(:team_terms AS text[]))"
 )
-SCOPE_WHERE_WORKSPACE_ONLY = "workspace_id = :workspace_id::uuid"
+SCOPE_WHERE_WORKSPACE_ONLY = "workspace_id = CAST(:workspace_id AS uuid)"
 
 
 def scope_where_clause(filters: RetrievalFilters) -> str:
@@ -167,7 +167,7 @@ def allowed_document_ids(
 
     sql = (
         "SELECT id::text FROM documents "
-        f"WHERE id = ANY(:ids::int[]) AND {scope_where_clause(filters)}"
+        f"WHERE id = ANY(CAST(:ids AS int[])) AND {scope_where_clause(filters)}"
     )
     params = {"ids": int_ids, **filters.sql_params()}
     try:

@@ -83,7 +83,7 @@ def _seed_doc(db, workspace_id, team_access="{}", n_chunks=12):
         text(
             """
             INSERT INTO documents (filename, workspace_id, team_access, status, upload_date)
-            VALUES (:fn, :ws::uuid, :ta, 'processed', NOW())
+            VALUES (:fn, CAST(:ws AS uuid), :ta, 'processed', NOW())
             RETURNING id
             """
         ),
@@ -152,7 +152,7 @@ async def test_grep_documents_matches_and_scopes(db_session):
         text(
             """
             INSERT INTO documents (filename, workspace_id, team_access, status, upload_date)
-            VALUES ('grep.txt', :ws::uuid, '{}', 'processed', NOW())
+            VALUES ('grep.txt', CAST(:ws AS uuid), '{}', 'processed', NOW())
             RETURNING id
             """
         ),

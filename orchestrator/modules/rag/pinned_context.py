@@ -39,7 +39,7 @@ def pin_document(
         sa_text(
             """
             INSERT INTO pinned_documents (chat_id, document_id, workspace_id, created_by_user_id)
-            VALUES (:chat::uuid, :doc, :ws::uuid, :uid)
+            VALUES (CAST(:chat AS uuid), :doc, CAST(:ws AS uuid), :uid)
             ON CONFLICT (chat_id, document_id) DO NOTHING
             """
         ),
@@ -58,7 +58,7 @@ def unpin_document(db: Any, *, chat_id: Any, document_id: Any, workspace_id: Any
         sa_text(
             """
             DELETE FROM pinned_documents
-            WHERE chat_id = :chat::uuid AND document_id = :doc AND workspace_id = :ws::uuid
+            WHERE chat_id = CAST(:chat AS uuid) AND document_id = :doc AND workspace_id = CAST(:ws AS uuid)
             """
         ),
         {"chat": str(chat_id), "doc": document_id, "ws": str(workspace_id)},
@@ -74,7 +74,7 @@ def list_pinned(db: Any, *, chat_id: Any, workspace_id: Any) -> List[Dict[str, A
             SELECT p.document_id, d.filename, p.created_at
             FROM pinned_documents p
             JOIN documents d ON d.id = p.document_id
-            WHERE p.chat_id = :chat::uuid AND p.workspace_id = :ws::uuid
+            WHERE p.chat_id = CAST(:chat AS uuid) AND p.workspace_id = CAST(:ws AS uuid)
             ORDER BY p.created_at
             """
         ),
@@ -111,7 +111,7 @@ def build_pinned_context(
             SELECT p.document_id, d.filename
             FROM pinned_documents p
             JOIN documents d ON d.id = p.document_id
-            WHERE p.chat_id = :chat::uuid AND p.workspace_id = :ws::uuid
+            WHERE p.chat_id = CAST(:chat AS uuid) AND p.workspace_id = CAST(:ws AS uuid)
             ORDER BY p.created_at
             """
         ),
