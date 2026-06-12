@@ -105,9 +105,10 @@ class ToolExecutionTracker:
     SEARCH_TOOLS = {
         'search_knowledge', 'semantic_search', 'search_codebase',
         'search_tables', 'search_images', 'search_formulas',
-        'search_multimodal'
-        # PRD-156 S3: smart_query_database / query_database removed — NL2SQL is
-        # off the chat surface until PRD-160 re-enables it workspace-scoped.
+        'search_multimodal',
+        # PRD-160 S1: NL2SQL re-enabled workspace-scoped & in-process. Treated as
+        # a search tool so semantically-similar repeat questions are deduped.
+        'smart_query_database', 'query_database',
     }
 
     TOOL_RETRY_LIMITS = {
@@ -118,6 +119,11 @@ class ToolExecutionTracker:
         'list_directory': 5,
         'read_file': 8,
         'write_file': 5,
+        # PRD-160 S1: NL2SQL is expensive and self-corrects internally
+        # (max_retries=2); cap turn-level reuse low to match the 2-attempt
+        # contract advertised in the tool description.
+        'smart_query_database': 2,
+        'query_database': 2,
         'platform_default': 25,
         'workspace_default': 8,
         'default': 5,

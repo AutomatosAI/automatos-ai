@@ -407,6 +407,7 @@ class UnifiedToolExecutor:
                         agent_id,
                         workspace_id=workspace_id,
                         trace_id=trace,
+                        caller_context=caller_context,
                     )
                 except TypeError:
                     result = await executor_func(tool_name, parameters, agent_id)
@@ -456,11 +457,17 @@ class UnifiedToolExecutor:
             agent_id=agent_id,
         )
 
-    async def _execute_database_tool(self, tool_name, parameters, agent_id, **kw):
-        return await exec_research.execute_database_tool(self, tool_name, parameters, agent_id)
+    async def _execute_database_tool(self, tool_name, parameters, agent_id, workspace_id=None, caller_context=None, **kw):
+        return await exec_research.execute_database_tool(
+            self, tool_name, parameters, agent_id,
+            workspace_id=workspace_id, caller_context=caller_context,
+        )
 
-    async def _execute_smart_database_tool(self, tool_name, parameters, agent_id, **kw):
-        return await exec_research.execute_smart_database_tool(self, tool_name, parameters, agent_id)
+    async def _execute_smart_database_tool(self, tool_name, parameters, agent_id, workspace_id=None, caller_context=None, **kw):
+        return await exec_research.execute_smart_database_tool(
+            self, tool_name, parameters, agent_id,
+            workspace_id=workspace_id, caller_context=caller_context,
+        )
 
     async def _execute_multimodal_tool(self, tool_name, parameters, agent_id, workspace_id=None, **kw):
         return await exec_multimodal.execute_multimodal_tool(self, tool_name, parameters, agent_id, workspace_id=workspace_id)

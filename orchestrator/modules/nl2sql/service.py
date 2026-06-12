@@ -842,3 +842,80 @@ Rules:
                 source_id, text, user_id, agent_id,
                 workspace_id=workspace_id,
             )
+
+    async def resolve_source_id(
+        self,
+        workspace_id: str,
+        database_name: Optional[str] = None,
+        db_session: Optional[Session] = None,
+    ) -> Optional[str]:
+        """Resolve a workspace's database source to a concrete ``source_id``.
+
+        PRD-160 S1: the agent tool exposes an optional ``database_name`` but
+        the query pipeline addresses a source by id. Resolution is ALWAYS
+        scoped to the caller's workspace so an agent can never reach another
+        workspace's source by guessing a name. When ``database_name`` is
+        provided it is matched case-insensitively within the workspace;
+        otherwise, a workspace with exactly one active source uses it. Zero
+        matches and an ambiguous no-name pick (multiple active sources) both
+        return ``None`` — the caller surfaces a helpful message rather than
+        silently querying the wrong database.
+
+        ``db_session`` is opt-in: the in-process executor passes its request
+        session (saving a pooled connection); callers that omit it get a
+        short-lived one.
+        """
+        from core.database.database import SessionLocal
+        from core.models.database_knowledge import DatabaseKnowledgeSource as DBKSource
+
+        if not workspace_id:
+            return None
+        own_session = db_session is None
+        session = db_session or SessionLocal()
+        try:
+            q = session.query(DBKSource).filter(
+                DBKSource.workspace_id == str(workspace_id),
+                DBKSource.is_active.is_(True),
+            )
+            if database_name and database_name.strip():
+                src = q.filter(DBKSource.name.ilike(database_name.strip())).first()
+                return str(src.id) if src else None
+            sources = q.order_by(DBKSource.created_at.desc()).all()
+            if len(sources) == 1:
+                return str(sources[0].id)
+            # zero or ambiguous (multiple sources, none named) → caller decides
+            return None
+        finally:
+            if own_session:
+                session.close()
+
+
+# ---------------------------------------------------------------------------
+# Canonical service accessor (PRD-160 S1)
+# ---------------------------------------------------------------------------
+_db_knowledge_service_singleton: Optional["DatabaseKnowledgeService"] = None
+
+
+def get_database_knowledge_service() -> "DatabaseKnowledgeService":
+    """Return the shared :class:`DatabaseKnowledgeService` singleton.
+
+    PRD-160 S1: the in-process agent path (``exec_research``) and the API
+    routes (``api/database_knowledge.get_services``) must construct the
+    service from ONE place so its dependencies are wired identically
+    everywhere — the API layer previously owned the only construction site,
+    which an in-process tool executor cannot import without a modules→api
+    layering inversion. Lazily builds the singleton with the same deps.
+    """
+    global _db_knowledge_service_singleton
+    if _db_knowledge_service_singleton is None:
+        from core.credentials.resolver import get_credential_resolver
+        from core.llm import create_llm_manager
+
+        _db_knowledge_service_singleton = DatabaseKnowledgeService(
+            credential_resolver=get_credential_resolver(),
+            llm_provider=create_llm_manager(service_name="orchestrator"),
+            rag_service=RAGService(),
+            context_engineering=ContextEngineeringService(),
+            audit_service=AuditService(),
+        )
+    return _db_knowledge_service_singleton

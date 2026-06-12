@@ -44,21 +44,14 @@ tool_integration = None
 def get_services():
     global db_service, cache_service, tool_integration
     if not db_service:
-        from core.llm import create_llm_manager
-        from modules.rag import RAGService
-        from modules.search.services.context_engineering_service import ContextEngineeringService
-        from core.services.audit_service import AuditService
-        
-        db_service = DatabaseKnowledgeService(
-            credential_resolver=get_credential_resolver(),
-            llm_provider=create_llm_manager(service_name="orchestrator"),
-            rag_service=RAGService(),
-            context_engineering=ContextEngineeringService(),
-            audit_service=AuditService()
-        )
+        # PRD-160 S1: single construction site shared with the in-process
+        # agent path (modules.nl2sql.get_database_knowledge_service).
+        from modules.nl2sql import get_database_knowledge_service
+
+        db_service = get_database_knowledge_service()
         cache_service = get_database_cache_service()
         tool_integration = get_database_tool_integration()
-    
+
     return db_service, cache_service, tool_integration
 
 

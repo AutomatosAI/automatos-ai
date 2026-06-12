@@ -39,28 +39,46 @@ if _camelot_unlocatable():  # pragma: no cover - env-dependent
     _sys.modules.setdefault("camelot", _types.ModuleType("camelot"))
 
 
-# --- A: unsafe executors disabled, query_main_database deleted ----------------
+# --- A: re-enabled path fails closed without scope; query_main_database deleted -
+#
+# PRD-160 S1 re-enables both executors as workspace-scoped, in-process tools.
+# The security contract is no longer "always disabled" but "refuses to run
+# without a workspace context" — the defense-in-depth backstop if the path is
+# reached (e.g. a Playbook step) without scope. The unscoped raw-SQL helper
+# stays deleted.
 
-def test_database_tool_is_disabled():
+def test_database_tool_refuses_without_workspace():
     from modules.tools.execution import exec_research
 
     r = asyncio.run(exec_research.execute_database_tool(None, "query_database", {"query": "x"}, 1))
-    assert r["success"] is False and r["disabled"] is True
+    assert r["success"] is False
+    assert "disabled" not in r  # no longer a hard-disabled stub
+    assert "workspace" in r["error"].lower()
 
 
-def test_smart_database_tool_is_disabled():
+def test_smart_database_tool_refuses_without_workspace():
     from modules.tools.execution import exec_research
 
     r = asyncio.run(
         exec_research.execute_smart_database_tool(None, "smart_query_database", {"query": "x"}, 1)
     )
-    assert r["success"] is False and r["disabled"] is True
+    assert r["success"] is False
+    assert "disabled" not in r
+    assert "workspace" in r["error"].lower()
 
 
-def test_query_main_database_is_deleted():
+def test_query_main_database_stays_deleted():
+    """The unscoped raw-SQL fallback must never come back, even re-enabled."""
     from modules.tools.execution import exec_research
 
     assert not hasattr(exec_research, "query_main_database")
+
+
+def test_executors_make_no_http_self_call():
+    """PRD-160 S1 grep gate: the in-process path imports no HTTP client."""
+    code = (ORCH / "modules/tools/execution/exec_research.py").read_text()
+    body = "\n".join(l for l in code.splitlines() if not l.strip().startswith("#"))
+    assert "httpx" not in body and "requests" not in body and "aiohttp" not in body
 
 
 # --- B: query_main_database unreachable from chat; tools off the surface -------
@@ -83,17 +101,17 @@ def test_no_query_main_database_call_in_chat_surface(rel):
     assert "query_main_database(" not in code, f"{rel} still calls query_main_database"
 
 
-def test_nl2sql_tools_removed_from_chat_registry():
+def test_nl2sql_tools_present_in_chat_registry():
+    """PRD-160 S1: NL2SQL is back on the chat surface (workspace-scoped)."""
     svc = (ORCH / "consumers/chatbot/service.py").read_text()
     block = re.search(r"SEARCH_TOOLS\s*=\s*\{(.*?)\}", svc, re.S).group(1)
     code = "\n".join(l for l in block.splitlines() if not l.strip().startswith("#"))
-    assert "'smart_query_database'" not in code
-    assert "'query_database'" not in code
+    assert "'smart_query_database'" in code  # re-enabled
 
     ic = (ORCH / "consumers/chatbot/intent_classifier.py").read_text()
-    assert '["smart_query_database", "query_database"]' not in ic  # old suggestion gone
     data_branch = ic.split("Check for data/analytics queries")[1][:500]
-    assert "suggested = []" in data_branch  # NL2SQL no longer suggested from chat
+    assert "smart_query_database" in data_branch  # suggested again, scoped
+    assert "suggested = []" not in data_branch
 
 
 # --- C: analytics + audit endpoints workspace-scoped --------------------------

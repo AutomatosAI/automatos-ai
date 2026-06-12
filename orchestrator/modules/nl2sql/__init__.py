@@ -46,6 +46,7 @@ from .service import (
     DatabaseDialect,
     SemanticMetric,
     SemanticDimension,
+    get_database_knowledge_service,
 )
 
 # Query generation
@@ -85,6 +86,7 @@ NLToSQLService = NaturalLanguageToSQLService
 __all__ = [
     # Main service
     "DatabaseKnowledgeService",
+    "get_database_knowledge_service",
     "DatabaseDialect",
     "SemanticMetric",
     "SemanticDimension",
