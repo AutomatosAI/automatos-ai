@@ -25,52 +25,9 @@ export const documentQueryKeys = {
   storageAnalytics: ['documents', 'storage'],
 }
 
-// Common fallback data for improved UX when API is unavailable
-const FALLBACK_DATA = {
-  documents: [
-    { id: 'fallback-1', filename: 'Example Document 1.pdf', status: 'processed', file_size: 1240000, chunk_count: 12, upload_date: new Date().toISOString() },
-    { id: 'fallback-2', filename: 'Example Document 2.docx', status: 'processing', file_size: 520000, chunk_count: 5, upload_date: new Date().toISOString() },
-    { id: 'fallback-3', filename: 'Sample Report.txt', status: 'error', file_size: 45000, chunk_count: 2, upload_date: new Date().toISOString() }
-  ],
-  documentStats: {
-    total_documents: 3,
-    total_processed: 2,
-    total_processing: 1,
-    total_error: 0,
-    total_size_mb: 1.8,
-    total_chunks: 19,
-    avg_processing_time_sec: 35
-  },
-  processingQueue: {
-    pipeline_status: 'idle',
-    total_documents: 0,
-    processing_documents: 0,
-    completed_documents: 0,
-    failed_documents: 0,
-    success_rate: 100,
-    avg_processing_time: '0s',
-    queue_status: {
-      pending: 0,
-      active_workers: 0,
-      estimated_completion: 'N/A'
-    },
-    processing_stages: [
-      { stage: 'Upload', status: 'idle', documents_count: 0, avg_duration: '0s', success_rate: 100 },
-      { stage: 'Parse', status: 'idle', documents_count: 0, avg_duration: '0s', success_rate: 100 },
-      { stage: 'Chunk', status: 'idle', documents_count: 0, avg_duration: '0s', success_rate: 100 },
-      { stage: 'Embed', status: 'idle', documents_count: 0, avg_duration: '0s', success_rate: 100 },
-      { stage: 'Index', status: 'idle', documents_count: 0, avg_duration: '0s', success_rate: 100 }
-    ],
-    recent_activity: [],
-    active_jobs: [],
-    last_updated: new Date().toISOString()
-  },
-  documentCategories: [
-    { id: 'reports', name: 'Reports', count: 1 },
-    { id: 'contracts', name: 'Contracts', count: 1 },
-    { id: 'emails', name: 'Emails', count: 1 }
-  ]
-}
+// PRD-157 S6: the FALLBACK_DATA placebo (fake "Example Document 1.pdf" et al.)
+// was removed. On API failure the hooks now surface the real error/empty state
+// instead of pretending documents, stats and a queue exist.
 
 // Common error handler for mutations
 const handleApiError = (error: any, message = 'API request failed'): void => {
@@ -87,7 +44,6 @@ export function useDocuments() {
     queryFn: () => apiClient.getDocuments(),
     retry: 2,
     staleTime: 30000,
-    placeholderData: FALLBACK_DATA.documents,
     onError: (error) => handleApiError(error, 'Failed to load documents')
   })
 }
@@ -114,7 +70,6 @@ export function useDocumentStats() {
     queryFn: () => apiClient.getDocumentAnalytics(),
     retry: 2,
     staleTime: 60000,
-    placeholderData: FALLBACK_DATA.documentStats,
     onError: (error) => handleApiError(error, 'Failed to load document statistics')
   })
 }
@@ -125,10 +80,11 @@ export function useDocumentStats() {
 export function useDocumentCategories() {
   return useQuery({
     queryKey: documentQueryKeys.documentCategories,
-    queryFn: () => Promise.resolve(FALLBACK_DATA.documentCategories), // Placeholder until API is available
+    // PRD-157 S6: no categories API yet — return an honest empty list instead
+    // of fabricated categories.
+    queryFn: () => Promise.resolve([]),
     retry: 2,
     staleTime: 60000 * 5, // 5 minutes
-    placeholderData: FALLBACK_DATA.documentCategories,
   })
 }
 
@@ -152,11 +108,11 @@ export function useProcessingStatus(documentId: string | null) {
 export function useProcessingQueue() {
   return useQuery({
     queryKey: documentQueryKeys.processingQueue,
-    queryFn: () => Promise.resolve(FALLBACK_DATA.processingQueue), // Placeholder until API is ready
+    // PRD-157 S6: call the real queue endpoint instead of returning fake status.
+    queryFn: () => apiClient.getProcessingQueue(),
     retry: 2,
     refetchInterval: 30000, // Poll every 30 seconds instead of 10 to reduce frequency
     staleTime: 15000, // Data is considered fresh for 15 seconds
-    placeholderData: FALLBACK_DATA.processingQueue,
     onError: (error) => handleApiError(error, 'Failed to load processing queue')
   })
 }

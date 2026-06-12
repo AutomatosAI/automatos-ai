@@ -131,7 +131,7 @@ def test_j4_mission_lifecycle_and_restart_durability():
 
 def test_j5_document_rag_ingest_and_assembly():
     """A raw document flows through the real retrieval primitives end-to-end:
-    chunk → score quality → knapsack-select within a token budget → assemble a
+    chunk → score quality → token-budget-select → assemble a
     context block. W2-S10 unit-tests each primitive; this proves they *compose*
     into a usable, budget-respecting context — the break a unit test can't see."""
     from modules.rag.service import RAGService
@@ -154,20 +154,23 @@ def test_j5_document_rag_ingest_and_assembly():
     weights = [max(1, len(t) // 4) for t in texts]  # ~4 chars/token
     assert all(v > 0.0 for v in values)
 
-    # 3. Select the best chunks that fit a tight token budget.
-    budget = max(weights)  # only room for roughly one chunk
-    selected = svc._knapsack_dp(values, weights, budget, max_items=len(texts))
-    assert selected, "knapsack should select at least one chunk within budget"
-    assert sum(weights[i] for i in selected) <= budget, "selection must fit the budget"
+    # 3. Select the best chunks that fit a tight token budget (PRD-157 budgeter
+    #    replaced the knapsack DP; whole-chunk, score-ordered, within budget).
+    from modules.rag.budget import select_within_budget
 
-    # 4. Assemble the selected chunks into a context block.
-    picked = [
-        {"source_file": "q4.md", "similarity": values[i], "content": texts[i]}
-        for i in selected
+    budget = max(weights)  # only room for roughly one chunk
+    candidates = [
+        {"source_file": "q4.md", "similarity": values[i], "content": texts[i], "tokens": weights[i]}
+        for i in range(len(texts))
     ]
-    context = svc._format_context(picked, "how did revenue grow")
-    assert "## Retrieved Context for: how did revenue grow" in context
-    assert any(texts[i][:20] in context for i in selected)
+    selection = select_within_budget(candidates, budget, max_chunks=len(texts))
+    assert selection.chunks, "budgeter should select at least one chunk within budget"
+    assert selection.total_tokens <= budget, "selection must fit the budget"
+
+    # 4. Assemble the selected chunks into a context block with numbered citations.
+    context = svc._format_context(selection.chunks, "how did revenue grow")
+    assert "## Retrieved context for: how did revenue grow" in context
+    assert any(c["content"][:20] in context for c in selection.chunks)
 
 
 # ===========================================================================

@@ -1,0 +1,67 @@
+{
+  "project": "Automatos AI Platform — PRD-164 Planning Intelligence & Integration Seams (Remediation Chain PAYOFF)",
+  "branchName": "ralph/prd-164-planning-intelligence",
+  "description": "Branch from main ONLY after PRD-157, 159, 163, 166 are ALL merged — acceptance must FAIL honestly if read-side dependencies are missing (PRD-153 rule, no shims). The platform starts to FLOW: planners consult RAG+memory+graph+roster, agent selection goes semantic, outputs feed back into knowledge (D6), chat renders platform actions, recurring agents learn. BINDING: Q58 flywheel ON by default (workspace opt-out), Q60 heartbeat agents get memory, Q61 one planning ContextService mode, Q62 TOOL_WIDGET_MAP deleted, Q21 blended agent matching, Q22 field digest replaces 8K stuffing. PROTECTED: recipe (20) + hint (25) suites. Full spec docs/PRDS/PRD-164-PLANNING-INTELLIGENCE-SEAMS.md.",
+  "userStories": [
+    {
+      "id": "P164-S1",
+      "title": "Planning Context Pack consumed by all three planners",
+      "description": "One ContextService 'planning' mode injecting: RAG retrieval on the goal (PRD-157 path), top-k mission summaries + task failures (PRD-159 recall), KG subgraph (PRD-165 endpoint), roster + performance. Consumed by MissionPlanner (planner.py:699 area), board plan_task (board_tasks.py:824 area), and AutoBrain — no parallel context assemblies.",
+      "acceptanceCriteria": [
+        "Golden test: seeded prior failure visibly changes a new plan",
+        "All three planners consume the pack (grep gate: no parallel assembly)",
+        "Pack respects token budget on oversized fixtures (test)",
+        "cd orchestrator && pytest -q green"
+      ],
+      "files": ["orchestrator/modules/context_service/", "orchestrator/modules/coordination/planner.py", "orchestrator/api/board_tasks.py"]
+    },
+    {
+      "id": "P164-S2",
+      "title": "Semantic agent matching with reasons",
+      "description": "AgentMatcher: embedded capability cards (Qdrant) + historical task performance from mission memory + live field signal (PRD-166) → ranked agents with reasons; explicit agent_overrides always win (PRD-163 S4). One embedding call per dispatch accepted (Q21).",
+      "acceptanceCriteria": [
+        "Golden matrix: 10 task fixtures → expected top agent (ties allowed)",
+        "Override always wins (test)",
+        "Match reasons logged on the task and visible to the approval card",
+        "cd orchestrator && pytest -q green"
+      ],
+      "files": ["orchestrator/modules/coordination/", "orchestrator/modules/agents/"]
+    },
+    {
+      "id": "P164-S3",
+      "title": "Output flywheel: agent outputs become retrievable knowledge",
+      "description": "Mission syntheses, generated documents, and submitted reports route through the EXISTING ingestion manager (chunked, searchable, graph-extracted) tagged source_type='agent_output'; KG incremental build learns the three source types it currently drops; deliverables get list/get agent tools + a mission-page tab; mission completion can emit generate_document (feature-flag if PRD-167 unmerged). Per-workspace opt-out honored (Q58).",
+      "acceptanceCriteria": [
+        "Completed mission's synthesis retrievable via RAG next turn (e2e test)",
+        "Seeded report's entities appear in the KG (test)",
+        "Opt-out workspace ingests nothing (test)",
+        "Auto lists its own deliverables via tool (reachability + integration test)",
+        "cd orchestrator && pytest -q green"
+      ],
+      "files": ["orchestrator/modules/rag/ingestion/manager.py", "orchestrator/modules/coordination/reconciler.py", "orchestrator/modules/tools/discovery/"]
+    },
+    {
+      "id": "P164-S4",
+      "title": "Field-digest dispatch + bounded replanning",
+      "description": "Replace the 8K-char upstream-output stuffing with the PRD-166 field digest under a per-task budget (Q22); bounded replanning (LLMCompiler-style joiner) + progress ledger/stall counter (Magentic-One pattern) on mission execution with audit trail.",
+      "acceptanceCriteria": [
+        "Dispatch prompt size drops ≥60% on the multi-task fixture; golden task still passes",
+        "Induced stall triggers replan-or-halt within bounds + audit (test)",
+        "cd orchestrator && pytest -q green"
+      ],
+      "files": ["orchestrator/modules/coordination/coordinator_service.py"]
+    },
+    {
+      "id": "P164-S5",
+      "title": "Chat renders the platform; heartbeat agents learn",
+      "description": "DELETE dead TOOL_WIDGET_MAP (frontend/components/widgets/router.ts — zero callers, stale names; Q62). Live widget routing for: mission cards (163 base), board tasks, deliverables, documents, schedule, memory writes — widget keys validated against the tool registry in the PRD-155 reachability test so name drift is impossible. Heartbeat agents get scoped memory recall + write hooks (Q60 — statelessness by design ends, modes.py:74-87 area).",
+      "acceptanceCriteria": [
+        "Each listed tool result renders its widget — verify in browser using dev-browser skill",
+        "Widget-key drift fails reachability test (negative fixture)",
+        "Heartbeat run recalls its previous run's memory (test)",
+        "Hint suite (25) + recipe suite (20) green; cd orchestrator && pytest -q green; typecheck passes"
+      ],
+      "files": ["frontend/components/widgets/router.ts", "orchestrator/modules/agents/modes.py"]
+    }
+  ]
+}

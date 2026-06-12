@@ -1083,6 +1083,25 @@ class Chat(Base):
     )
 
 
+class PinnedDocument(Base):
+    """PRD-157 S5: a document pinned to a chat so its content is always present
+    in that conversation's context (within the token budget)."""
+    __tablename__ = 'pinned_documents'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    chat_id = Column(UUID(as_uuid=True), ForeignKey('chats.id', ondelete='CASCADE'), nullable=False)
+    document_id = Column(Integer, ForeignKey('documents.id', ondelete='CASCADE'), nullable=False)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey('workspaces.id', ondelete='CASCADE'), nullable=False)
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+    created_by_user_id = Column(Integer, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint('chat_id', 'document_id', name='uq_pinned_chat_document'),
+        Index('ix_pinned_documents_chat', 'chat_id'),
+        {'extend_existing': True},
+    )
+
+
 class Message(Base):
     """Individual message within a chat (PRD-27)"""
     __tablename__ = 'messages'

@@ -27,6 +27,25 @@ def init_db():
     # Create all tables
     Base.metadata.create_all(bind=engine)
 
+    # Raw-DDL tables create_all() can't build (no SQLAlchemy model). The RAG chunk
+    # store is a pgvector table created in prod via init_complete_schema.sql; the
+    # integration tests (read_document / grep / pinned docs) only read
+    # document_id / chunk_index / content, and the stock postgres:15 CI service has
+    # no pgvector extension — so build the vector-free shape those tests need.
+    from sqlalchemy import text as _raw_sql
+
+    with engine.begin() as conn:
+        conn.execute(_raw_sql("""
+            CREATE TABLE IF NOT EXISTS document_chunks (
+                id SERIAL PRIMARY KEY,
+                document_id INTEGER REFERENCES documents(id) ON DELETE CASCADE,
+                chunk_index INTEGER NOT NULL,
+                content TEXT NOT NULL,
+                metadata JSONB DEFAULT '{}'::jsonb,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """))
+
     print("✅ Database initialized successfully!")
     print(f"   Tables created: {len(Base.metadata.tables)}")
 

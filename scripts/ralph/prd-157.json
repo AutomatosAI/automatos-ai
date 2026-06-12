@@ -1,0 +1,75 @@
+{
+  "project": "Automatos AI Platform — PRD-157 RAG Content & Retrieval Quality (Remediation Chain Block A)",
+  "branchName": "ralph/prd-157-rag-retrieval",
+  "description": "Branch from main AFTER Night-1 (154/155/156) merges — RE-VERIFY file:line refs against the merged main before building. Agents must actually read what the platform knows: one scoping choke point, document-reading tools, token-budgeted citation context, placebo/dead surfaces deleted. BINDING: D1 teams enforcement, D11 token budgets (Q8 capped excerpts + paged continuation), Q4 suppress out-of-scope doc widgets. Full spec docs/PRDS/PRD-157-RAG-CONTENT-RETRIEVAL.md.",
+  "userStories": [
+    {
+      "id": "P157-S1",
+      "title": "Centralized retrieval filter builder through every search path",
+      "description": "build_retrieval_filters(agent|context) → {workspace_id, team_terms} in ONE module, consumed by RAG retrieve, UI semantic search (api/documents.py:935 area), the RAG-test endpoint, multimodal tools (PRD-156 base), and KG retrieval. Fail-closed everywhere; lowercase team normalization inside the builder. Optional defense-in-depth: mirror team ACL into S3 filterable metadata with __PUBLIC__ sentinel.",
+      "acceptanceCriteria": [
+        "One grep-able choke point; tenancy matrix extended over every path",
+        "'Support'/'support' normalize to a match (test)",
+        "cd orchestrator && pytest -q green"
+      ],
+      "files": ["orchestrator/modules/rag/", "orchestrator/api/documents.py"]
+    },
+    {
+      "id": "P157-S2",
+      "title": "read_document + grep_documents agent tools (paged, scoped, budgeted)",
+      "description": "Letta-pattern paged reading: read_document(id, page|offset) over the existing /api/documents/{id}/content service path; grep_documents(pattern, team?) over chunk text. 3-file platform-tool registration. Results carry source_id, page markers, staleness timestamp; respect S1 filters and a per-call token budget (D11).",
+      "acceptanceCriteria": [
+        "Agent reads past char 500 of a seeded 10-page doc in chat (integration test)",
+        "Team-scoped agent blocked from other teams' docs (matrix test)",
+        "PRD-155 reachability gate green for both tools",
+        "cd orchestrator && pytest -q green"
+      ],
+      "files": ["orchestrator/modules/tools/discovery/actions_documents.py", "orchestrator/modules/tools/discovery/handlers_documents.py"]
+    },
+    {
+      "id": "P157-S3",
+      "title": "Token-budgeted context assembly + numbered citations",
+      "description": "One model-aware token budgeter (whole-chunk accumulation) replaces the 6000-char hard cut (consumers/chatbot/service.py:1269-1271) and the other char-truncation sites on the context path. RAGFlow-style numbered sources [1]..[n] + source map injected so answers cite.",
+      "acceptanceCriteria": [
+        "Budgeter unit suite (limits, chunk boundaries, score ordering)",
+        "Chat answer cites numbered sources mapping to real doc ids (integration test)",
+        "Grep gate: no char-slice truncation on the agent context path",
+        "Existing chat/formatter tests updated; cd orchestrator && pytest -q green"
+      ],
+      "files": ["orchestrator/consumers/chatbot/service.py", "orchestrator/modules/rag/result_formatter.py"]
+    },
+    {
+      "id": "P157-S4",
+      "title": "Retrieval perf pass",
+      "description": "Cache RAGConfig (today up to 7 SessionLocals per instantiation, service.py:47-95); reuse the S3 backend client (:798-803 builds per query); access tracking truly async (no blocking session, :321-349); knapsack DP (:674-732) replaced by the S3 budgeter.",
+      "acceptanceCriteria": [
+        "pytest-benchmark: p50 retrieval ≤ 50% of baseline on the seeded corpus (before/after in PR)",
+        "Instrumentation test: no per-query backend/config construction",
+        "cd orchestrator && pytest -q green"
+      ],
+      "files": ["orchestrator/modules/rag/service.py"]
+    },
+    {
+      "id": "P157-S5",
+      "title": "Document pinning + scope-honest doc widgets",
+      "description": "Pin a document to a conversation/agent: pinned docs always join context within budget. Human-facing '[View Document]' widgets/links suppressed for docs outside the answering agent's team scope (BINDING Q4).",
+      "acceptanceCriteria": [
+        "Pinned doc persists in context across turns (test)",
+        "Scoped-agent chat renders no out-of-scope doc links — verify in browser using dev-browser skill",
+        "Typecheck passes; cd orchestrator && pytest -q green"
+      ],
+      "files": ["orchestrator/consumers/chatbot/tool_router.py", "frontend/components/chat/"]
+    },
+    {
+      "id": "P157-S6",
+      "title": "Delete placebo + dead RAG surfaces",
+      "description": "Delete: placebo Configure-RAG settings the backend never reads (enable_graph_retrieval/graph_max_hops, configure-rag-modal.tsx:47-114 — PRD-164 reintroduces real ones); unmounted duplicate router modules/rag/services/knowledge_multimodal.py (~700 dead lines); orphan use-rag-feedback.ts; FALLBACK_DATA fake documents (use-document-api.ts:29-43) replaced by an honest error state.",
+      "acceptanceCriteria": [
+        "Dead files gone; contract suite green",
+        "API failure shows error state, not 'Example Document 1.pdf' — verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "files": ["frontend/components/context/configure-rag-modal.tsx", "frontend/hooks/use-document-api.ts", "orchestrator/modules/rag/services/knowledge_multimodal.py"]
+    }
+  ]
+}

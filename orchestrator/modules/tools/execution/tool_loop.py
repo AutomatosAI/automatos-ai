@@ -104,7 +104,7 @@ class ToolLoopExecutor:
             llm_callback=lambda msgs, tools: llm_manager.generate_response(msgs, tools=tools),
             tool_callback=lambda name, args, call_id, ws: my_tool_executor(name, args, ...),
             max_iterations=config.CHATBOT_MAX_TOOL_ITERATIONS,
-            content_truncate_chars=6000,
+            content_truncate_tokens=2000,
         )
         result = await executor.run(
             initial_response=response,
@@ -122,13 +122,13 @@ class ToolLoopExecutor:
         llm_callback: LLMCallback,
         tool_callback: ToolCallback,
         max_iterations: int = 10,
-        content_truncate_chars: int = 6000,
+        content_truncate_tokens: int = 2000,
         tracker: Optional[ToolExecutionTracker] = None,
     ) -> None:
         self._llm = llm_callback
         self._tool = tool_callback
         self.max_iterations = max(1, int(max_iterations))
-        self.content_truncate_chars = max(0, int(content_truncate_chars))
+        self.content_truncate_tokens = max(0, int(content_truncate_tokens))
         self.tracker = tracker if tracker is not None else ToolExecutionTracker()
 
     # ------------------------------------------------------------------
@@ -314,7 +314,7 @@ class ToolLoopExecutor:
             start = time.time()
             try:
                 result = await self._tool(name, args, call_id, workspace_id)
-                content = _result_to_llm_context(result, self.content_truncate_chars)
+                content = _result_to_llm_context(result, self.content_truncate_tokens)
                 success = True
             except Exception as exc:  # noqa: BLE001 — surface as tool error to LLM
                 logger.error("[tool-loop] %s raised: %s", name, exc, exc_info=True)
@@ -429,8 +429,12 @@ def _tc_args(tc: ToolCall) -> Dict[str, Any]:
     return dict(args_str or {})
 
 
-def _result_to_llm_context(result: Any, truncate_chars: int) -> str:
-    """Coerce the tool callback's return into a string the LLM can consume."""
+def _result_to_llm_context(result: Any, truncate_tokens: int) -> str:
+    """Coerce the tool callback's return into a string the LLM can consume.
+
+    PRD-157 S3: oversized tool results are truncated on a *token* boundary
+    (model-aware), not by a raw char slice.
+    """
     if isinstance(result, dict):
         ctx = result.get("llm_context")
         if ctx is None:
@@ -438,8 +442,10 @@ def _result_to_llm_context(result: Any, truncate_chars: int) -> str:
             ctx = raw if isinstance(raw, str) else json.dumps(raw, default=str)
     else:
         ctx = str(result)
-    if truncate_chars and len(ctx) > truncate_chars:
-        ctx = ctx[:truncate_chars] + f"\n... (truncated {len(ctx) - truncate_chars} chars)"
+    if truncate_tokens:
+        from modules.rag.budget import truncate_to_token_budget
+
+        ctx = truncate_to_token_budget(ctx, truncate_tokens)
     return ctx
 
 

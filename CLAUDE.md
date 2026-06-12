@@ -147,4 +147,16 @@ New is a privilege earned by ruling out reuse, not a starting position.
 
 **Last updated:** 2026-04-25
 
-**TL;DR:** This is a mature codebase. Reuse first, build last. Delete what you replace. Ask before assuming. Read the graph and memory before grepping. Don't reinvent what shipped in PRDs 1–135.
+## 12. Descoping is the user's call — NEVER defer unilaterally
+
+Do **not** carve scope out to "follow-on PRD", "Phase 2", "out of scope", "deferred to PRD-X", or "a separate effort" on your own initiative. That is **Gerard's decision, not yours.**
+
+- If a piece is needed for the feature to **actually work end-to-end**, it **is** the work — build it now. "It works" means the user can use it for its stated purpose, not that the happy path compiles.
+- If a piece is genuinely large and separable, **surface the choice and let Gerard decide** — present it as an open question, never as an already-settled deferral.
+- When you catch yourself about to write "follow-on", "out of scope", "Phase 2", or "deferred", **stop**: either do it, or ask. Do not narrate a deferral as if it were decided.
+
+Gerard writes the PRDs. Silently shrinking their scope wastes that work and erodes trust. Finish what the PRD set out to do.
+
+---
+
+**TL;DR:** This is a mature codebase. Reuse first, build last. Delete what you replace. Ask before assuming. Read the graph and memory before grepping. Don't reinvent what shipped in PRDs 1–135. **Don't defer scope — that's Gerard's call (§12).**

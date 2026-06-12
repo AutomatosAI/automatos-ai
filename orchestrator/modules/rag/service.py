@@ -13,7 +13,7 @@ import logging
 import json
 import os
 from typing import List, Dict, Any, Optional, Tuple
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 # Accurate token counting
 try:
@@ -42,57 +42,67 @@ class RAGResult:
     query: str
     diversity_score: float = 0.0
     information_gain: float = 0.0
+    # PRD-157 S3: numbered-citation source map — [{citation, source_file, document_id, score}]
+    sources_map: List[Dict[str, Any]] = field(default_factory=list)
+
+
+# PRD-157 S4: RAGConfig used to open up to 7 SessionLocal()s per instantiation
+# (one per setting). Load them once, in a single session, and memoize — so the
+# per-request RAGService construction costs zero DB round-trips after warm-up.
+_RAG_SETTINGS_CACHE: Optional[Dict[str, str]] = None
+
+
+def _load_rag_settings(force: bool = False) -> Dict[str, str]:
+    """Load all RAG-related system_settings in ONE session (memoized).
+
+    Only a successful read is cached, so a transient DB error falls back to
+    defaults without poisoning the cache.
+    """
+    global _RAG_SETTINGS_CACHE
+    if _RAG_SETTINGS_CACHE is not None and not force:
+        return _RAG_SETTINGS_CACHE
+    try:
+        from core.database.database import SessionLocal
+        from core.models.system_settings import SystemSetting
+
+        db = SessionLocal()
+        try:
+            rows = db.query(SystemSetting.key, SystemSetting.value).all()
+            settings = {k: v for k, v in rows if v is not None}
+        finally:
+            db.close()
+        _RAG_SETTINGS_CACHE = settings  # cache only on success
+        return settings
+    except Exception:
+        logger.error("Failed to load RAG settings, using defaults", exc_info=True)
+        return {}
+
+
+def reset_rag_settings_cache() -> None:
+    """Drop the memoized RAG settings (call after changing them at runtime)."""
+    global _RAG_SETTINGS_CACHE
+    _RAG_SETTINGS_CACHE = None
 
 
 def _get_rag_setting_int(key: str, default: int) -> int:
-    """Get RAG setting from system_settings"""
+    raw = _load_rag_settings().get(key)
     try:
-        from core.database.database import SessionLocal
-        from core.models.system_settings import SystemSetting
-        db = SessionLocal()
-        try:
-            setting = db.query(SystemSetting).filter(SystemSetting.key == key).first()
-            if setting and setting.value:
-                return int(setting.value)
-        finally:
-            db.close()
-    except Exception:
-        logger.error("Failed to read RAG setting '%s' (int), using default=%d", key, default, exc_info=True)
-    return default
+        return int(raw) if raw not in (None, "") else default
+    except (TypeError, ValueError):
+        return default
 
 
 def _get_rag_setting_str(key: str, default: str) -> str:
-    """Get RAG setting string from system_settings"""
-    try:
-        from core.database.database import SessionLocal
-        from core.models.system_settings import SystemSetting
-        db = SessionLocal()
-        try:
-            setting = db.query(SystemSetting).filter(SystemSetting.key == key).first()
-            if setting and setting.value is not None:
-                return setting.value
-        finally:
-            db.close()
-    except Exception:
-        logger.error("Failed to read RAG setting '%s' (str), using default='%s'", key, default, exc_info=True)
-    return default
+    raw = _load_rag_settings().get(key)
+    return raw if raw is not None else default
 
 
 def _get_rag_setting_float(key: str, default: float) -> float:
-    """Get RAG setting from system_settings"""
+    raw = _load_rag_settings().get(key)
     try:
-        from core.database.database import SessionLocal
-        from core.models.system_settings import SystemSetting
-        db = SessionLocal()
-        try:
-            setting = db.query(SystemSetting).filter(SystemSetting.key == key).first()
-            if setting and setting.value:
-                return float(setting.value)
-        finally:
-            db.close()
-    except Exception:
-        logger.error("Failed to read RAG setting '%s' (float), using default=%s", key, default, exc_info=True)
-    return default
+        return float(raw) if raw not in (None, "") else default
+    except (TypeError, ValueError):
+        return default
 
 
 @dataclass
@@ -155,6 +165,9 @@ class RAGService:
     ):
         self.config = config or RAGConfig()
         self._workspace_id = workspace_id
+        # PRD-157 S4: one initialized S3 backend per workspace, reused across
+        # queries instead of rebuilt+reinitialized on every _get_candidates call.
+        self._s3_backends: Dict[str, Any] = {}
         self._context_optimizer = None
         self._semantic_chunker = None
         self._embedding_manager = None
@@ -252,11 +265,26 @@ class RAGService:
             except Exception as e:
                 logger.warning(f"Query enhancement failed, using original: {e}")
         
-        # PRD-124: normalize team name and over-fetch to compensate for post-filter reduction
-        if team:
-            from core.team_access import normalize_team
-            team = normalize_team(team)
-        team_multiplier = 2 if team else 1
+        # PRD-157 S1: derive the scope through the single fail-closed choke point.
+        # A team restriction without a workspace is unscoped → fail closed.
+        from modules.rag.retrieval_filters import build_retrieval_filters, RetrievalScopeError
+        try:
+            filters = build_retrieval_filters(
+                workspace_id=workspace_id,
+                team=team,
+                require_workspace=bool(team),
+            )
+        except RetrievalScopeError:
+            logger.warning("retrieve() requested team scope without workspace_id — failing closed")
+            return RAGResult(
+                chunks=[],
+                formatted_context="No relevant context found.",
+                total_tokens=0,
+                sources=[],
+                query=query,
+            )
+        team = filters.team  # canonical (lowercased) team or None
+        team_multiplier = 2 if filters.has_team_restriction else 1
 
         # Multi-query retrieval with RRF fusion
         if len(queries_to_search) > 1 and self.config.enable_rrf_fusion:
@@ -312,11 +340,35 @@ class RAGService:
             # Fallback to basic retrieval
             result = self._basic_retrieval(query, candidates, max_chunks, max_tokens)
 
-        # Track document access for analytics (fire-and-forget)
+        # Track document access for analytics (PRD-157 S4: fire-and-forget, run
+        # off the event loop so it never blocks the retrieval response).
         if result.chunks and workspace_id:
-            self._track_document_access(result.chunks, workspace_id)
+            self._schedule_access_tracking(result.chunks, workspace_id)
 
         return result
+
+    def _schedule_access_tracking(self, chunks: List[Dict[str, Any]], workspace_id: str) -> None:
+        """Run the (blocking) access-tracking update without blocking the caller.
+
+        Inside the async retrieve path this offloads to a worker thread and does
+        not await it; with no running loop (sync caller) it runs inline.
+        """
+        import asyncio
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop is not None:
+            task = loop.create_task(
+                asyncio.to_thread(self._track_document_access, chunks, workspace_id)
+            )
+            # Keep a reference so the task isn't garbage-collected mid-flight.
+            self._pending_tracking = getattr(self, "_pending_tracking", set())
+            self._pending_tracking.add(task)
+            task.add_done_callback(lambda t: self._pending_tracking.discard(t))
+        else:
+            self._track_document_access(chunks, workspace_id)
 
     def _track_document_access(self, chunks: List[Dict[str, Any]], workspace_id: str) -> None:
         """Update last_accessed timestamp on documents retrieved via RAG."""
@@ -338,7 +390,7 @@ class RAGService:
                         UPDATE documents
                         SET last_accessed = NOW(),
                             rag_query_count = COALESCE(rag_query_count, 0) + 1
-                        WHERE id = ANY(:ids::int[]) AND workspace_id = :ws::uuid
+                        WHERE id = ANY(CAST(:ids AS int[])) AND workspace_id = CAST(:ws AS uuid)
                     """),
                     {"ids": list(doc_ids), "ws": str(workspace_id)},
                 )
@@ -348,76 +400,76 @@ class RAGService:
         except Exception as e:
             logger.debug(f"Document access tracking failed: {e}")
     
+    @staticmethod
+    def _candidate_doc_id(c: Dict) -> Optional[str]:
+        """Best-effort document id for a candidate chunk (S3 stores it as external_file_id)."""
+        meta = c.get("metadata", {}) or {}
+        doc_id = (
+            c.get("document_id")
+            or meta.get("document_id")
+            or meta.get("doc_id")
+            or meta.get("external_file_id")
+        )
+        return str(doc_id) if doc_id else None
+
+    @staticmethod
+    def _candidate_is_public(c: Dict) -> bool:
+        """True when a candidate's document carries no team restriction.
+
+        ``team_access`` empty or absent → visible workspace-wide; a non-empty list
+        → team-restricted. Consulted only on the DB-error fallback, where the live
+        access-check is unavailable and we degrade to candidate metadata.
+        """
+        meta = c.get("metadata", {}) or {}
+        return not meta.get("team_access")
+
     async def _filter_by_team(
         self,
         candidates: List[Dict],
         team: str,
         workspace_id: str,
     ) -> List[Dict]:
-        """PRD-124: Filter candidates to only include chunks from team-accessible documents.
+        """Filter candidates to team-accessible documents through the centralized
+        fail-closed scope helper (PRD-157 S1), preserving the PRD-154 S2 contract:
 
-        Queries PostgreSQL for document IDs where:
-          team_access = '{}' (empty = visible to all) OR team = ANY(team_access)
+        * a team-restricted document is NEVER leaked;
+        * a DB error degrades to **public docs only** (empty ``team_access``) and
+          logs at error level — a transient hiccup must neither blank the results
+          nor expose a restricted doc;
+        * a candidate with no identifiable document is not document-scoped, so it
+          passes through (document ``team_access`` cannot apply to it).
         """
-        # Collect unique document IDs from candidates
-        doc_ids: set = set()
-        for c in candidates:
-            meta = c.get("metadata", {})
-            doc_id = meta.get("document_id") or meta.get("doc_id") or meta.get("external_file_id")
-            if doc_id:
-                doc_ids.add(str(doc_id))
+        from modules.rag.retrieval_filters import build_retrieval_filters, allowed_document_ids
 
+        filters = build_retrieval_filters(workspace_id=workspace_id, team=team)
+        if not filters.has_team_restriction:
+            return candidates  # no team → workspace-only, nothing to post-filter
+
+        doc_ids = {d for d in (self._candidate_doc_id(c) for c in candidates) if d}
         if not doc_ids:
-            return candidates  # No doc IDs to filter — pass through
+            return candidates  # nothing document-scoped to verify
+
+        from core.database.database import SessionLocal
 
         try:
-            from core.database.database import SessionLocal
-            from sqlalchemy import text as sa_text
-
             db = SessionLocal()
             try:
-                rows = db.execute(
-                    sa_text("""
-                        SELECT id::text FROM documents
-                        WHERE id = ANY(:ids::int[])
-                          AND workspace_id = :ws::uuid
-                          AND (team_access = '{}' OR :team = ANY(team_access))
-                    """),
-                    {"ids": list(doc_ids), "ws": str(workspace_id), "team": team},
-                ).fetchall()
-                allowed_ids = {str(r[0]) for r in rows}
+                allowed_ids = allowed_document_ids(db, doc_ids, filters)
             finally:
                 db.close()
-        except Exception as e:
-            # Fail CLOSED (BINDING Q1): a DB error must never leak team-restricted
-            # chunks. Surface only the docs we can prove are public (empty
-            # team_access, mirrored into chunk metadata at ingestion).
-            public_only = [
-                c for c in candidates
-                if not (c.get("metadata", {}) or {}).get("team_access")
-            ]
+        except Exception:
+            # Fail CLOSED to public docs: never leak a team-restricted document on a
+            # DB error, but public docs degrade gracefully (PRD-154 S2).
             logger.error(
-                "Team filtering query failed — failing closed to %d public-only "
-                "candidate(s) of %d (team=%s): %s",
-                len(public_only), len(candidates), team, e, exc_info=True,
+                "team filter access-check failed; returning public docs only (fail-closed)",
+                exc_info=True,
             )
-            return public_only
+            return [c for c in candidates if self._candidate_is_public(c)]
 
-        filtered = [
-            c for c in candidates
-            if str(
-                c.get("metadata", {}).get("document_id")
-                or c.get("metadata", {}).get("doc_id")
-                or c.get("metadata", {}).get("external_file_id")
-                or ""
-            ) in allowed_ids
-            or not (  # Keep candidates without doc ID (shouldn't happen, but safe)
-                c.get("metadata", {}).get("document_id")
-                or c.get("metadata", {}).get("doc_id")
-                or c.get("metadata", {}).get("external_file_id")
-            )
-        ]
-        logger.info(f"PRD-124 team filter: {len(candidates)} → {len(filtered)} candidates (team={team})")
+        filtered = [c for c in candidates if self._candidate_doc_id(c) in allowed_ids]
+        logger.info(
+            f"team filter: {len(candidates)} → {len(filtered)} candidates (team={filters.team})"
+        )
         return filtered
 
     async def _multi_query_retrieval_with_rrf(
@@ -543,7 +595,9 @@ class RAGService:
         max_tokens: int,
         diversity: float
     ) -> RAGResult:
-        """Use REAL 0/1 knapsack DP algorithm with content quality and source diversity"""
+        """Score candidates (content quality + source diversity), then select whole
+        chunks under the token budget (PRD-157 S3 budgeter) and assemble numbered
+        citations. Replaces the former pure-Python knapsack DP."""
         
         logger.info(f"🔍 Starting optimization: {len(candidates)} candidates, max_chunks={max_chunks}, max_tokens={max_tokens}")
         
@@ -589,55 +643,49 @@ class RAGService:
                 preview = content[:100].replace('\n', ' ')
                 logger.info(f"  Candidate {i+1}: base={base_relevance:.3f}, quality={quality_score:.2f}, source_penalty={source_penalty:.2f}, final={adjusted_score:.3f}, tokens={item.token_count}, source={source}, preview='{preview}...'")
         
-        # Calculate information value for each chunk
-        values = [item.relevance_score for item in context_items]
-        weights = [item.token_count for item in context_items]
-        
-        logger.info(f"📊 Value range: {min(values):.3f} - {max(values):.3f}, Weight range: {min(weights)} - {max(weights)} tokens")
-        
-        # Apply REAL 0/1 Knapsack Dynamic Programming
-        logger.info(f"🎯 Running 0/1 Knapsack DP algorithm with quality-adjusted scores...")
-        selected_indices = self._knapsack_dp(values, weights, max_tokens, max_chunks)
-        
-        logger.info(f"✅ Knapsack selected {len(selected_indices)} items: {selected_indices}")
-        
-        # Get selected contexts
-        selected_contexts = [context_items[i] for i in selected_indices]
-        
-        # Log selected chunks
-        for i, idx in enumerate(selected_indices):
-            ctx = context_items[idx]
-            preview = ctx.content[:80].replace('\n', ' ')
-            logger.info(f"  Selected {i+1}: idx={idx}, score={ctx.relevance_score:.3f}, tokens={ctx.token_count}, source={ctx.source}, preview='{preview}...'")
-        
-        # Format results
-        chunks = []
-        total_tokens = 0
-        final_source_counts = {}
-        for ctx in selected_contexts:
-            chunks.append({
-                "content": ctx.content,
-                "source_file": ctx.source,
-                "similarity": ctx.relevance_score,
-                "tokens": ctx.token_count,
-                "document_id": ctx.metadata.get("document_id") if ctx.metadata else None,
-                "metadata": ctx.metadata.get("original_metadata", {}) if ctx.metadata else {},
-            })
-            total_tokens += ctx.token_count
-            final_source_counts[ctx.source] = final_source_counts.get(ctx.source, 0) + 1
-        
-        # Calculate diversity score
+        # PRD-157 S3/S4: token-budgeted whole-chunk selection replaces the
+        # pure-Python knapsack DP. context_items already carry the
+        # quality-adjusted relevance score and per-chunk token count computed
+        # above; the budgeter accumulates whole chunks highest-score-first under
+        # the token budget, then assembles numbered [1]..[n] citations.
+        from modules.rag.budget import select_within_budget, assemble_with_citations
+
+        scored_chunks = [
+            {
+                "content": item.content,
+                "source_file": item.source,
+                "similarity": item.relevance_score,
+                "tokens": item.token_count,
+                "document_id": item.metadata.get("document_id") if item.metadata else None,
+                "metadata": item.metadata.get("original_metadata", {}) if item.metadata else {},
+            }
+            for item in context_items
+        ]
+
+        selection = select_within_budget(
+            scored_chunks, max_tokens, max_chunks=max_chunks, score_key="similarity"
+        )
+        chunks = selection.chunks
+        total_tokens = selection.total_tokens
+
+        final_source_counts: Dict[str, int] = {}
+        for c in chunks:
+            final_source_counts[c["source_file"]] = final_source_counts.get(c["source_file"], 0) + 1
         diversity_score = len(final_source_counts) / len(chunks) if chunks else 0.0
-        
-        logger.info(f"📈 Results: {len(chunks)} chunks, {total_tokens} tokens, source_diversity={diversity_score:.2f}")
-        logger.info(f"📁 Source distribution: {final_source_counts}")
-        
-        # Format context
-        formatted_context = self._format_context(chunks, query)
-        
-        info_gain = sum(values[i] for i in selected_indices) / len(values) if values else 0.0
-        logger.info(f"💡 Information gain: {info_gain:.3f}")
-        
+
+        logger.info(
+            "Token-budgeted selection: %d/%d chunks, %d tokens (budget=%d), dropped=%d, diversity=%.2f",
+            len(chunks), len(scored_chunks), total_tokens, max_tokens, selection.dropped, diversity_score,
+        )
+
+        # Numbered, citation-grade context assembly [1]..[n] + source map.
+        formatted_context, sources_map = assemble_with_citations(chunks, query)
+
+        all_values = [item.relevance_score for item in context_items]
+        info_gain = (
+            sum(c["similarity"] for c in chunks) / len(all_values) if all_values else 0.0
+        )
+
         return RAGResult(
             chunks=chunks,
             formatted_context=formatted_context,
@@ -645,7 +693,8 @@ class RAGService:
             sources=list(set(c["source_file"] for c in chunks)),
             query=query,
             diversity_score=diversity_score,
-            information_gain=info_gain
+            information_gain=info_gain,
+            sources_map=sources_map,
         )
     
     def _calculate_content_quality(self, text: str) -> float:
@@ -681,67 +730,6 @@ class RAGService:
             return 0.85
         else:
             return 1.0
-    
-    
-    def _knapsack_dp(
-        self,
-        values: List[float],
-        weights: List[int],
-        capacity: int,
-        max_items: int
-    ) -> List[int]:
-        """
-        REAL 0/1 Knapsack with Dynamic Programming
-        
-        Finds optimal subset of items that:
-        1. Maximizes total value
-        2. Stays within weight capacity
-        3. Respects max_items constraint
-        
-        Time: O(n * capacity * max_items)
-        Space: O(n * capacity * max_items)
-        """
-        n = len(values)
-        if n == 0 or capacity <= 0 or max_items <= 0:
-            logger.warning(f"⚠️ Knapsack: invalid params n={n}, capacity={capacity}, max_items={max_items}")
-            return []
-        
-        logger.info(f"🎒 Knapsack DP: n={n} items, capacity={capacity} tokens, max_items={max_items}")
-        
-        # DP table: dp[i][w][k] = max value using first i items, weight w, k items selected
-        # For memory efficiency, use 2D table and track item count separately
-        dp = [[0.0 for _ in range(capacity + 1)] for _ in range(n + 1)]
-        item_count = [[0 for _ in range(capacity + 1)] for _ in range(n + 1)]
-        
-        # Build DP table
-        for i in range(1, n + 1):
-            for w in range(capacity + 1):
-                # Option 1: Don't include item i-1
-                dp[i][w] = dp[i-1][w]
-                item_count[i][w] = item_count[i-1][w]
-                
-                # Option 2: Include item i-1 (if it fits and we haven't hit max_items)
-                if weights[i-1] <= w and item_count[i-1][w - weights[i-1]] < max_items:
-                    value_with_item = dp[i-1][w - weights[i-1]] + values[i-1]
-                    
-                    if value_with_item > dp[i][w]:
-                        dp[i][w] = value_with_item
-                        item_count[i][w] = item_count[i-1][w - weights[i-1]] + 1
-        
-        # Backtrack to find selected items
-        selected = []
-        w = capacity
-        for i in range(n, 0, -1):
-            # Check if item i-1 was included
-            if dp[i][w] != dp[i-1][w]:
-                selected.append(i-1)
-                w -= weights[i-1]
-        
-        final_value = dp[n][capacity]
-        final_weight = sum(weights[i] for i in selected)
-        logger.info(f"✅ Knapsack result: {len(selected)} items, total_value={final_value:.3f}, total_weight={final_weight} tokens")
-        
-        return list(reversed(selected))
     
     
     def _basic_retrieval(
@@ -789,6 +777,23 @@ class RAGService:
             query=query
         )
     
+    async def _get_s3_backend(self, workspace_id: str):
+        """PRD-157 S4: reuse one initialized S3VectorsBackend per workspace.
+
+        The backend is workspace-scoped, so caching by workspace_id is safe and
+        removes the boto3 client + bucket/index checks from every query (the RRF
+        path calls _get_candidates up to 5x per retrieve()).
+        """
+        key = str(workspace_id)
+        backend = self._s3_backends.get(key)
+        if backend is None:
+            from modules.search.vector_store.backends.s3_vectors_backend import S3VectorsBackend
+
+            backend = S3VectorsBackend(workspace_id=key)
+            await backend.initialize()
+            self._s3_backends[key] = backend
+        return backend
+
     async def _get_candidates(self, query: str, limit: int = 20, min_similarity: float = 0.5, workspace_id: str = None) -> List[Dict]:
         """
         Get candidate chunks via S3 Vectors.
@@ -810,10 +815,8 @@ class RAGService:
             # Generate query embedding
             query_embedding = await self._embedding_manager.generate_embedding(query)
 
-            # Create S3VectorsBackend for this workspace
-            from modules.search.vector_store.backends.s3_vectors_backend import S3VectorsBackend
-            vector_store = S3VectorsBackend(workspace_id=effective_workspace_id)
-            await vector_store.initialize()
+            # PRD-157 S4: reuse the per-workspace S3 backend (built+initialized once).
+            vector_store = await self._get_s3_backend(effective_workspace_id)
 
             logger.info(f"🔎 S3 Vectors search: workspace={effective_workspace_id}, min_similarity={min_similarity}, limit={limit}")
 
@@ -946,22 +949,15 @@ class RAGService:
         return candidates
 
     def _format_context(self, chunks: List[Dict], query: str) -> str:
-        """Format chunks into context string"""
-        
-        if not chunks:
-            return "No relevant context found."
-        
-        parts = [f"## Retrieved Context for: {query}\n"]
-        
-        for i, chunk in enumerate(chunks, 1):
-            source = chunk.get("source_file", "unknown")
-            similarity = chunk.get("similarity", 0)
-            content = chunk.get("content", "")
-            
-            parts.append(f"\n### Source {i}: {source} (relevance: {similarity:.0%})")
-            parts.append(content)
-        
-        return "\n".join(parts)
+        """Format chunks into a numbered-citation context string (PRD-157 S3).
+
+        Delegates to the shared budget assembler so every retrieval path renders
+        sources as ``[1]..[n]`` consistently.
+        """
+        from modules.rag.budget import assemble_with_citations
+
+        formatted_context, _ = assemble_with_citations(chunks, query)
+        return formatted_context
     
     async def enhance_prompt_with_context(
         self,

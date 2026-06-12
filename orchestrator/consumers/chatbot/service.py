@@ -54,6 +54,10 @@ from modules.tools.tool_router import (
 
 logger = logging.getLogger(__name__)
 
+# PRD-157 S3: token budget for a single tool result fed back into the LLM loop
+# (replaces the former 6000/4000-char cuts). Truncation is token-aware.
+_TOOL_RESULT_TOKEN_BUDGET = 2000
+
 
 # =============================================================================
 # TOOL LOOP PREVENTION UTILITIES
@@ -1004,6 +1008,31 @@ class StreamingChatService:
     # owns description+persona injection for both chatbot and non-chatbot
     # modes — see modules/context/sections/identity.py.
 
+    def _inject_pinned_documents(
+        self, llm_messages: List[Dict[str, Any]], chat_id: Optional[str]
+    ) -> None:
+        """PRD-157 S5: prepend the chat's pinned-document content as a system
+        message so it is always present in context (within the token budget).
+
+        Inserted after any leading system prompt and before user/history. Best
+        effort — a failure never breaks the turn.
+        """
+        if not chat_id or self.workspace_id is None:
+            return
+        try:
+            from modules.rag.pinned_context import build_pinned_system_message
+
+            content = build_pinned_system_message(
+                self.db, chat_id=chat_id, workspace_id=self.workspace_id
+            )
+            if not content:
+                return
+            insert_at = 1 if (llm_messages and llm_messages[0].get("role") == "system") else 0
+            llm_messages.insert(insert_at, {"role": "system", "content": content})
+            logger.info("[PRD-157 S5] injected pinned-document context for chat %s", chat_id)
+        except Exception:
+            logger.warning("[PRD-157 S5] pinned-document injection failed", exc_info=True)
+
     # ─────────────────────────────────────────────────────────────────────
     # Composio per-action tool injection
     # ─────────────────────────────────────────────────────────────────────
@@ -1272,8 +1301,9 @@ class StreamingChatService:
             cumulative_attempts[name] = cumulative_attempts.get(name, 0) + 1
 
             llm_context = result.get("llm_context", str(result.get("raw_result", "")))
-            if len(llm_context) > 6000:
-                llm_context = llm_context[:6000] + f"\n... (truncated {len(llm_context) - 6000} chars)"
+            # PRD-157 S3: token-budgeted truncation (model-aware), not a char cut.
+            from modules.rag.budget import truncate_to_token_budget
+            llm_context = truncate_to_token_budget(llm_context, _TOOL_RESULT_TOKEN_BUDGET)
 
             # Frontend data emission (widget tool-data).
             frontend_data = result.get("frontend_data", {})
@@ -1399,7 +1429,7 @@ class StreamingChatService:
             llm_callback=_llm_callback,
             tool_callback=_tool_callback,
             max_iterations=max_iterations,
-            content_truncate_chars=6000,
+            content_truncate_tokens=2000,
         )
 
         async def _runner():
@@ -1481,8 +1511,9 @@ class StreamingChatService:
             llm_context = f"Error executing {tool_name}: {exc}"
             logger.error(f"[Composio direct] {tool_name} exception: {exc}", exc_info=True)
 
-        if len(llm_context) > 4000:
-            llm_context = llm_context[:4000] + "\n... (truncated)"
+        # PRD-157 S3: token-budgeted truncation (model-aware), not a char cut.
+        from modules.rag.budget import truncate_to_token_budget
+        llm_context = truncate_to_token_budget(llm_context, _TOOL_RESULT_TOKEN_BUDGET)
         return llm_context
 
     def _track_search_spiral(
@@ -1919,6 +1950,9 @@ class StreamingChatService:
                 force_text_only=force_text_only,
             )
 
+            # PRD-157 S5: keep the chat's pinned documents always in context.
+            self._inject_pinned_documents(llm_messages, chat_id)
+
             if orchestrated:
                 logger.info(
                     f"[SmartChat] intent={orchestrated.intent.value} "
@@ -2108,6 +2142,8 @@ class StreamingChatService:
             llm_messages = self.prompt_analyzer.convert_to_llm_messages(
                 messages, available_tools=tools,
             )
+            # PRD-157 S5: keep the chat's pinned documents always in context.
+            self._inject_pinned_documents(llm_messages, chat_id)
             assistant_parts = []
 
             if hasattr(llm_manager, 'generate_response_stream'):

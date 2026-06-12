@@ -594,6 +594,60 @@ async def list_documents(
         logger.error(f"Error listing documents: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PRD-157 S5: document pinning (pin a document to a chat/conversation)
+# Registered before GET /{document_id} so the literal /pins path isn't captured.
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/pins")
+async def list_pinned_documents(
+    chat_id: str = Query(..., description="Chat/conversation id"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """List the documents pinned to a chat."""
+    from modules.rag.pinned_context import list_pinned
+
+    return {"pinned": list_pinned(db, chat_id=chat_id, workspace_id=ctx.workspace_id)}
+
+
+@router.post("/{document_id}/pin")
+async def pin_document_to_chat(
+    document_id: int,
+    chat_id: str = Query(..., description="Chat/conversation id to pin the document to"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Pin a document to a chat so its content is always in that conversation's context."""
+    from modules.rag.pinned_context import pin_document
+
+    _uid = getattr(getattr(ctx, "user", None), "id", None)
+    res = pin_document(
+        db,
+        chat_id=chat_id,
+        document_id=document_id,
+        workspace_id=ctx.workspace_id,
+        user_id=_uid if isinstance(_uid, int) else None,
+    )
+    if not res.get("success"):
+        raise HTTPException(status_code=404, detail=res.get("error", "Could not pin document"))
+    return res
+
+
+@router.delete("/{document_id}/pin")
+async def unpin_document_from_chat(
+    document_id: int,
+    chat_id: str = Query(..., description="Chat/conversation id to unpin the document from"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Unpin a document from a chat."""
+    from modules.rag.pinned_context import unpin_document
+
+    return unpin_document(db, chat_id=chat_id, document_id=document_id, workspace_id=ctx.workspace_id)
+
+
 @router.get("/{document_id}", response_model=DocumentResponse)
 async def get_document(
     document_id: int,
@@ -883,6 +937,7 @@ async def semantic_search(
     limit: int = Query(10, ge=1, le=50, description="Maximum number of results"),
     min_similarity: float = Query(0.70, ge=0.0, le=1.0, description="Minimum similarity score"),
     document_ids: Optional[List[int]] = Query(None, description="Optional filter by document IDs"),
+    team: Optional[str] = Query(None, description="Optional team scope (PRD-157 S1); normalized server-side"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
@@ -974,6 +1029,16 @@ async def semantic_search(
                     existing["best_similarity"] = similarity
                     existing["best_excerpt"] = chunk_text
                     existing["best_chunk_index"] = chunk_index
+
+        # PRD-157 S1: route surfaced documents through the centralized fail-closed
+        # scope choke point. Workspace is already enforced per-hit above; this adds
+        # team scoping (no-op when no team is supplied, preserving prior behaviour).
+        from modules.rag.retrieval_filters import build_retrieval_filters, allowed_document_ids
+        _scope = build_retrieval_filters(workspace_id=ctx.workspace_id, team=team)
+        if _scope.has_team_restriction and doc_order:
+            _allowed = allowed_document_ids(db, doc_order, _scope)
+            doc_order = [d for d in doc_order if str(d) in _allowed]
+            grouped_results = {d: v for d, v in grouped_results.items() if str(d) in _allowed}
 
         # Fetch limited previews + stats for surfaced docs
         # Collect doc_ids and calculate preview ranges upfront

@@ -567,6 +567,56 @@ class ToolRouter:
     def __init__(self):
         self.formatter = ToolResultFormatter
 
+    def _filter_frontend_docs_by_scope(
+        self,
+        frontend_data: Dict[str, Any],
+        agent_id: Optional[int],
+        workspace_id: Optional[UUID],
+    ) -> Dict[str, Any]:
+        """PRD-157 S5: drop document widgets the answering agent can't access.
+
+        Honest doc widgets: a scoped agent must not surface ``[View Document]``
+        links for documents outside its workspace/team. Documents with no id are
+        kept (they carry no working link to leak). Fail-open is avoided — any
+        error simply leaves the data unchanged rather than dropping everything.
+        """
+        if not isinstance(frontend_data, dict):
+            return frontend_data
+        docs = frontend_data.get("documents")
+        if not docs or workspace_id is None:
+            return frontend_data
+        doc_ids = [d.get("document_id") for d in docs if isinstance(d, dict) and d.get("document_id") is not None]
+        if not doc_ids:
+            return frontend_data
+        try:
+            from core.database.database import SessionLocal
+            from modules.rag.retrieval_filters import build_retrieval_filters, allowed_document_ids
+            from modules.tools.discovery.handlers_documents import _resolve_agent_team
+
+            db = SessionLocal()
+            try:
+                team = _resolve_agent_team(db, agent_id)
+                filters = build_retrieval_filters(workspace_id=str(workspace_id), team=team)
+                allowed = allowed_document_ids(db, doc_ids, filters)
+            finally:
+                db.close()
+        except Exception:
+            logger.warning("[PRD-157 S5] doc-widget scope filter failed; leaving data unchanged", exc_info=True)
+            return frontend_data
+
+        kept = [
+            d for d in docs
+            if not (isinstance(d, dict) and d.get("document_id") is not None)
+            or str(d.get("document_id")) in allowed
+        ]
+        if len(kept) != len(docs):
+            logger.info(
+                "[PRD-157 S5] suppressed %d out-of-scope document widget(s)",
+                len(docs) - len(kept),
+            )
+            frontend_data = {**frontend_data, "documents": kept}
+        return frontend_data
+
     async def execute_and_format(
         self,
         tool_name: str,
@@ -644,6 +694,11 @@ class ToolRouter:
 
             if success:
                 frontend_data = self.formatter.format_for_frontend(result, tool_name)
+                # PRD-157 S5: suppress document widgets/links the answering agent
+                # is not scoped to see (out-of-workspace or out-of-team).
+                frontend_data = self._filter_frontend_docs_by_scope(
+                    frontend_data, agent_id, workspace_id
+                )
                 llm_context = self.formatter.format_for_llm(result, tool_name)
 
                 logger.info(f"[tool-trace {trace_id}] {tool_name} succeeded")

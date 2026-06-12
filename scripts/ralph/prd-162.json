@@ -1,0 +1,54 @@
+{
+  "project": "Automatos AI Platform — PRD-162 Calendar & Schedule Truth (Remediation Chain Block A lead)",
+  "branchName": "ralph/prd-162-calendar-truth",
+  "description": "Branch from main after Night-1 — FIRST of Block A (owner-facing pain). Root cause: APScheduler in-process state exists in 1 of 4 uvicorn workers, so 75% of loads return empty 200s. Calendar becomes a stateless DB read — seconds, identical on all workers. BINDING: D8 studio CalendarTab canonical (classic deleted after porting its widgets), Q46 unified feed, Q48 browser-local render, Q49 always render configured crons, Q50 30-60s TTL, Q51 scheduler stays in-API with to_thread. Full spec docs/PRDS/PRD-162-CALENDAR-SCHEDULE-TRUTH.md.",
+  "userStories": [
+    {
+      "id": "P162-S1",
+      "title": "DB-first get_schedule: stateless, one query, structured recurrence",
+      "description": "Rewrite get_schedule to read agents.configuration['heartbeat'] + workflow_templates.schedule_config + scheduled_tasks from the DB and compute next_run statelessly (croniter — verify dep, add explicitly if transitive); return structured {cron_expression, interval_minutes, timezone, active_hours}. Collapse the heartbeat-workspace N+1 to one DISTINCT ON query. DELETE the three regex schedule parsers for one shared cron util.",
+      "acceptanceCriteria": [
+        "Identical response across app instances (multi-boot test)",
+        "p95 < 500ms with 200 seeded schedules (benchmark test)",
+        "One SQL round-trip for the list (query-count assertion)",
+        "Regex parsers deleted; structured schema test; cd orchestrator && pytest -q green"
+      ],
+      "files": ["orchestrator/services/activity_service.py", "orchestrator/api/"]
+    },
+    {
+      "id": "P162-S2",
+      "title": "Unified feed + month view + health banner",
+      "description": "Merge heartbeats, playbook crons, scheduled_tasks, one-shot runs, and mission SLA deadlines into typed feed items; month view renders scheduled/paused/missed states; scheduler-health banner from a real health endpoint that never blocks render (configured crons ALWAYS render — Q49).",
+      "acceptanceCriteria": [
+        "Feed test: all five source types with discriminators",
+        "Calendar paints < 2s on seeded data — verify in browser using dev-browser skill",
+        "Paused scheduler: banner + crons still render — verify in browser using dev-browser skill",
+        "cd orchestrator && pytest -q green; typecheck passes"
+      ],
+      "files": ["frontend/components/command-center/calendar-tab.tsx", "orchestrator/services/activity_service.py"]
+    },
+    {
+      "id": "P162-S3",
+      "title": "platform_get_schedule tool",
+      "description": "Expose the DB-first service via the 3-file platform-tool pattern so Auto answers 'what's scheduled?' from the same truth the calendar shows.",
+      "acceptanceCriteria": [
+        "Tool returns workspace-scoped unified feed (test)",
+        "PRD-155 reachability gate green",
+        "cd orchestrator && pytest -q green"
+      ],
+      "files": ["orchestrator/modules/tools/discovery/"]
+    },
+    {
+      "id": "P162-S4",
+      "title": "Client cache + classic calendar deletion",
+      "description": "React Query cache 30-60s TTL + background refetch; REMOVE the PRD-154 S11 stopgap (moot). Port next-up/always-running widgets from components/activity/calendar/ into studio CalendarTab, then DELETE the classic calendar tree (delete-what-you-replace; D8).",
+      "acceptanceCriteria": [
+        "Stopgap retry code gone (grep gate)",
+        "components/activity/calendar/ deleted; contract suite green; no orphan nav links",
+        "Refresh instant from cache with background update — verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "files": ["frontend/components/command-center/calendar-tab.tsx", "frontend/components/activity/calendar/"]
+    }
+  ]
+}

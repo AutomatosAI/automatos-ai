@@ -1,0 +1,54 @@
+{
+  "project": "Automatos AI Platform — PRD-166 Field Memory Core (Remediation Chain Block B)",
+  "branchName": "ralph/prd-166-field-memory-core",
+  "description": "Branch from main after PRD-165 merges (uses the GraphView shell) — re-verify refs (PRD-154 S7 landed viz swap, archive, _agent_id). BINDING D7: workspace-persistent field compounding across missions, powering agent selection (consumed by PRD-164). Q19 graph primary + retrieval-trace inspector secondary; Q20 field tools mission-gated until workspace fields exist; D11 budgets from config; Qdrant stays (measure before redis). Full spec docs/PRDS/PRD-166-FIELD-MEMORY-CORE.md.",
+  "userStories": [
+    {
+      "id": "P166-S1",
+      "title": "Workspace-persistent field lifecycle with provenance",
+      "description": "Mission fields MERGE into a per-workspace field at terminal (beyond PRD-154's archive): episode payloads carry provenance (mission_id, task_id, agent_id, timestamps); expired_at soft-archive preserves the frozen mission view; retention/compaction job keeps Qdrant bounded (decay + consolidation).",
+      "acceptanceCriteria": [
+        "Two sequential missions → workspace field contains both with provenance (test)",
+        "Compaction prunes low-stability, keeps high-stability (test)",
+        "Completed mission renders frozen field AND links to workspace field — verify in browser using dev-browser skill",
+        "cd orchestrator && pytest -q green"
+      ],
+      "files": ["orchestrator/modules/coordination/coordinator_service.py", "orchestrator/jobs/"]
+    },
+    {
+      "id": "P166-S2",
+      "title": "Honest scoring + budgeted query + real health",
+      "description": "Three-factor scoring (similarity × stability × recency, adaptive half-life); token-budgeted query API returning {patterns, truncated} — budgets from config, NO silent caps (D11); field health check reflects actual Qdrant state (replace hardcoded 'healthy').",
+      "acceptanceCriteria": [
+        "Scoring unit suite with golden rankings",
+        "Oversize results flag truncated + chunk correctly (test)",
+        "Induced Qdrant outage → unhealthy (test)",
+        "cd orchestrator && pytest -q green"
+      ],
+      "files": ["orchestrator/modules/"]
+    },
+    {
+      "id": "P166-S3",
+      "title": "Dispatch digest + budget-gate warning",
+      "description": "Pinned field digest joins task dispatch prompts within budget (PRD-164 swaps the 8K stuffing; this story provides the digest API + dispatch hook); when field context is dropped for budget, a checkpoint warning event is emitted (no silent loss).",
+      "acceptanceCriteria": [
+        "Dispatched task prompt contains the digest within budget (test)",
+        "Drop emits warning event (test)",
+        "cd orchestrator && pytest -q green"
+      ],
+      "files": ["orchestrator/modules/coordination/coordinator_service.py"]
+    },
+    {
+      "id": "P166-S4",
+      "title": "Viz on the shared shell + trace inspector + zombie deletion",
+      "description": "Field viz consumes the PRD-165 GraphView shell with real node+edge data (edges were missing). Detail panel = Letta-style retrieval-trace inspector (which patterns fired for which query). FINISH deleting the /field-theory zombie: page tree + api-client.ts:2466-2496 methods — zero references remain.",
+      "acceptanceCriteria": [
+        "Live mission + workspace field render via the shell — verify in browser using dev-browser skill",
+        "Inspector shows the trace for a test query — verify in browser using dev-browser skill",
+        "/field-theory route + client methods gone; contract suite green",
+        "Typecheck passes"
+      ],
+      "files": ["frontend/components/missions/mission-field-viz.tsx", "frontend/app/field-theory/", "frontend/lib/api-client.ts"]
+    }
+  ]
+}

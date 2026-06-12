@@ -1,7 +1,7 @@
 """Document handlers for PlatformActionExecutor."""
 
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from sqlalchemy import func
@@ -302,3 +302,201 @@ async def upload_document(db: Session, workspace_id: UUID, params: Dict[str, Any
         db.rollback()
         logger.error("[PlatformExecutor] upload_document failed: %s", exc, exc_info=True)
         return {"success": False, "error": str(exc)}
+
+
+# ---------------------------------------------------------------------------
+# PRD-157 S2: document-reading tools (read_document, grep_documents)
+# ---------------------------------------------------------------------------
+
+_READ_PAGE_TOKEN_BUDGET = 2000   # D11: token-budgeted page per read_document call
+_GREP_MAX_SCAN_CHUNKS = 5000     # bound the literal scan
+_GREP_SNIPPET_TOKENS = 120       # per-match snippet token budget
+
+
+def _resolve_agent_team(db: Session, agent_id: Any) -> Optional[str]:
+    """Look up an agent's team for retrieval scoping. None when unknown."""
+    if not agent_id:
+        return None
+    try:
+        from core.models import Agent
+
+        row = db.query(Agent).filter(Agent.id == int(agent_id)).first()
+        return getattr(row, "team", None) if row else None
+    except Exception:
+        return None
+
+
+async def read_document(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Paged full-content reading of a document, workspace+team scoped (S1),
+    token-budgeted per page (D11). Lets an agent read past the short search snippet.
+    """
+    from sqlalchemy import text as sa_text
+    from core.models import Document
+    from modules.rag.retrieval_filters import build_retrieval_filters, allowed_document_ids
+    from modules.rag.budget import count_tokens
+
+    document_id = params.get("document_id")
+    if not document_id:
+        return {"success": False, "error": "Missing required parameter: document_id"}
+    try:
+        document_id = int(document_id)
+    except (TypeError, ValueError):
+        return {"success": False, "error": "document_id must be an integer"}
+
+    try:
+        page = max(0, int(params.get("page") or 0))
+    except (TypeError, ValueError):
+        page = 0
+
+    # S1 scope: workspace always enforced; team enforced when the agent has one.
+    team = _resolve_agent_team(db, params.get("_agent_id"))
+    filters = build_retrieval_filters(workspace_id=str(workspace_id), team=team)
+    if str(document_id) not in allowed_document_ids(db, [document_id], filters):
+        return {"success": False, "error": "Document not found or not accessible"}
+
+    doc = db.query(Document).filter(Document.id == document_id).first()
+    if not doc:
+        return {"success": False, "error": "Document not found"}
+
+    rows = db.execute(
+        sa_text(
+            "SELECT chunk_index, content FROM document_chunks "
+            "WHERE document_id = :doc_id ORDER BY chunk_index"
+        ),
+        {"doc_id": document_id},
+    ).fetchall()
+    if not rows:
+        return {"success": False, "error": "Document has no readable content yet"}
+
+    # Pack chunks into deterministic, token-budgeted pages (never split a chunk).
+    pages: List[Dict[str, Any]] = []
+    buf: List[str] = []
+    buf_tokens = 0
+    start_idx = rows[0].chunk_index
+    prev_idx = rows[0].chunk_index
+    for row in rows:
+        tok = count_tokens(row.content or "")
+        if buf and buf_tokens + tok > _READ_PAGE_TOKEN_BUDGET:
+            pages.append({"start": start_idx, "end": prev_idx, "content": "\n\n".join(buf)})
+            buf, buf_tokens, start_idx = [], 0, row.chunk_index
+        buf.append(row.content or "")
+        buf_tokens += tok
+        prev_idx = row.chunk_index
+    if buf:
+        pages.append({"start": start_idx, "end": prev_idx, "content": "\n\n".join(buf)})
+
+    total_pages = len(pages)
+    # An explicit offset wins: jump to the page containing that chunk index.
+    offset = params.get("offset")
+    if offset is not None:
+        try:
+            off = int(offset)
+            for idx, pg in enumerate(pages):
+                if pg["start"] <= off <= pg["end"]:
+                    page = idx
+                    break
+        except (TypeError, ValueError):
+            pass
+    if page >= total_pages:
+        page = total_pages - 1
+    current = pages[page]
+
+    return {
+        "success": True,
+        "document_id": document_id,
+        "source_id": document_id,
+        "filename": doc.original_filename or doc.filename,
+        "file_type": doc.file_type,
+        "page": page,
+        "total_pages": total_pages,
+        "has_more": page < total_pages - 1,
+        "next_page": page + 1 if page < total_pages - 1 else None,
+        "chunk_range": {"start": current["start"], "end": current["end"]},
+        "content": current["content"],
+        "staleness": {
+            "uploaded_at": doc.upload_date.isoformat() if doc.upload_date else None,
+            "last_accessed": doc.last_accessed.isoformat()
+            if getattr(doc, "last_accessed", None)
+            else None,
+        },
+    }
+
+
+async def grep_documents(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Regex search over document chunk text, workspace+team scoped (S1).
+
+    The agent's own team is the security boundary; an explicit ``team`` param can
+    only narrow within it (``effective_team`` prefers the agent team when set).
+    """
+    import re
+    from sqlalchemy import text as sa_text
+    from core.team_access import effective_team
+    from modules.rag.retrieval_filters import build_retrieval_filters, scope_where_clause
+    from modules.rag.budget import truncate_to_token_budget
+
+    pattern = params.get("pattern")
+    if not pattern or not str(pattern).strip():
+        return {"success": False, "error": "Missing required parameter: pattern"}
+    try:
+        rx = re.compile(pattern, re.IGNORECASE)
+    except re.error as exc:
+        return {"success": False, "error": f"Invalid regular expression: {exc}"}
+
+    try:
+        limit = max(1, min(int(params.get("limit") or 20), 200))
+    except (TypeError, ValueError):
+        limit = 20
+
+    agent_team = _resolve_agent_team(db, params.get("_agent_id"))
+    team = effective_team(agent_team, params.get("team"))
+    filters = build_retrieval_filters(workspace_id=str(workspace_id), team=team)
+
+    # 1. resolve accessible documents (workspace + team) — no join ambiguity.
+    docs_sql = f"SELECT id, filename FROM documents WHERE {scope_where_clause(filters)}"
+    doc_params: Dict[str, Any] = dict(filters.sql_params())
+    only_doc = params.get("document_id")
+    if only_doc:
+        try:
+            doc_params["only_doc"] = int(only_doc)
+            docs_sql += " AND id = :only_doc"
+        except (TypeError, ValueError):
+            return {"success": False, "error": "document_id must be an integer"}
+    doc_rows = db.execute(sa_text(docs_sql), doc_params).fetchall()
+    doc_names = {r.id: r.filename for r in doc_rows}
+    if not doc_names:
+        return {"success": True, "pattern": pattern, "matches": [], "count": 0, "scanned_chunks": 0}
+
+    # 2. scan their chunk text (bounded) and regex-match.
+    chunk_rows = db.execute(
+        sa_text(
+            "SELECT document_id, chunk_index, content FROM document_chunks "
+            "WHERE document_id = ANY(CAST(:ids AS int[])) ORDER BY document_id, chunk_index LIMIT :scan"
+        ),
+        {"ids": list(doc_names.keys()), "scan": _GREP_MAX_SCAN_CHUNKS},
+    ).fetchall()
+
+    matches: List[Dict[str, Any]] = []
+    for row in chunk_rows:
+        content = row.content or ""
+        if not rx.search(content):
+            continue
+        matches.append(
+            {
+                "document_id": row.document_id,
+                "source_id": row.document_id,
+                "filename": doc_names.get(row.document_id),
+                "chunk_index": row.chunk_index,
+                "snippet": truncate_to_token_budget(content, _GREP_SNIPPET_TOKENS),
+            }
+        )
+        if len(matches) >= limit:
+            break
+
+    return {
+        "success": True,
+        "pattern": pattern,
+        "matches": matches,
+        "count": len(matches),
+        "scanned_chunks": len(chunk_rows),
+        "truncated": len(chunk_rows) >= _GREP_MAX_SCAN_CHUNKS,
+    }

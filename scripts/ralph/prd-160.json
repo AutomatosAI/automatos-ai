@@ -1,0 +1,64 @@
+{
+  "project": "Automatos AI Platform — PRD-160 NL2SQL Agent Path & Accuracy Stack (Remediation Chain Block B)",
+  "branchName": "ralph/prd-160-nl2sql-accuracy",
+  "description": "Branch from main after Night-1 (needs PRD-156 S3 scoping) — re-verify refs. NL2SQL becomes a first-class workspace-safe Auto tool with a Vanna/WrenAI-style accuracy stack on the existing DatabaseKnowledgeService. BINDING Q59 + §5 defaults: admin-instructions semantic layer v1, Query Templates implemented not deleted, verified-pair few-shot training. Full spec docs/PRDS/PRD-160-NL2SQL-AGENT-PATH-ACCURACY.md.",
+  "userStories": [
+    {
+      "id": "P160-S1",
+      "title": "In-process scoped agent path; delete the HTTP self-call",
+      "description": "smart_query_database calls DatabaseKnowledgeService.smart_query IN-PROCESS (delete the unauthenticated httpx self-call), threading workspace + connection scope from PRD-156 S3; honor database_name; re-enable in intent-classifier suggested_tools.",
+      "acceptanceCriteria": [
+        "Grep gate: no httpx self-call remains",
+        "Cross-workspace matrix green",
+        "Auto answers a seeded NL question via the tool (integration test)",
+        "cd orchestrator && pytest -q green"
+      ],
+      "files": ["orchestrator/modules/nl2sql/query/nl2sql_service.py", "orchestrator/modules/tools/discovery/"]
+    },
+    {
+      "id": "P160-S2",
+      "title": "Accuracy stack: AST validation, dry-run, bounded self-correction, value sampling",
+      "description": "sqlglot AST validator (SELECT-only, table allowlist from connection scope); EXPLAIN dry-run + statement_timeout; self-correction retries=2 feeding errors back; low-cardinality column value sampling into prompt context.",
+      "acceptanceCriteria": [
+        "Validator suite: UPDATE/DELETE/DDL/multi-statement/cross-schema rejected",
+        "Seeded bad-column question recovers within 2 retries (test)",
+        "Runaway query bounded by timeout (test)",
+        "cd orchestrator && pytest -q green"
+      ],
+      "files": ["orchestrator/modules/nl2sql/"]
+    },
+    {
+      "id": "P160-S3",
+      "title": "Training loop that trains: pgvector pairs + few-shot retrieval",
+      "description": "Persist question-SQL pair embeddings to pgvector (example_store.py:90-101 computes then DISCARDS them today); retrieve top-k verified pairs few-shot into generation; SQL Explorer thumbs-up marks pairs verified; Training tab manages the library.",
+      "acceptanceCriteria": [
+        "Golden test: similar question pulls the verified pair few-shot and improves S5 eval",
+        "Verified-pair CRUD via Training tab (API test + dev-browser verify)",
+        "cd orchestrator && pytest -q green"
+      ],
+      "files": ["orchestrator/modules/nl2sql/query/example_store.py", "frontend/components/knowledge/"]
+    },
+    {
+      "id": "P160-S4",
+      "title": "Semantic layer v1 + audit truth + template execute",
+      "description": "Admin-instructions semantic layer (per-connection business definitions injected into generation) on existing tables; NL-path writes audit rows (fills the Audit History tab PRD-154 revived); shared source selector across all six tabs; implement the Query Templates execute path (the button that could never succeed — no backend route existed).",
+      "acceptanceCriteria": [
+        "Definitions measurably steer generation (golden test)",
+        "Every NL query writes one audit row: workspace, agent, SQL, outcome (test)",
+        "Template execute round-trips — verify in browser using dev-browser skill",
+        "cd orchestrator && pytest -q green"
+      ],
+      "files": ["orchestrator/modules/nl2sql/", "frontend/components/knowledge/QueryTemplatesGrid.tsx"]
+    },
+    {
+      "id": "P160-S5",
+      "title": "Eval harness in CI",
+      "description": "sql-eval-style regression suite over the verified-pair library against a seeded schema; CI non-required job (test-net precedent); accuracy reported in PR; gate = no regression vs recorded baseline.",
+      "acceptanceCriteria": [
+        "pytest tests/nl2sql_eval -q produces an accuracy score; baseline recorded",
+        "CI job wired; red on induced regression fixture"
+      ],
+      "files": ["orchestrator/tests/nl2sql_eval/", ".github/workflows/test.yml"]
+    }
+  ]
+}
