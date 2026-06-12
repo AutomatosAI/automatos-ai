@@ -415,19 +415,32 @@ class MissionDispatcher:
         )
 
     @staticmethod
-    def _get_budget_status(run: OrchestrationRun) -> BudgetStatus:
-        """
-        Compute the budget health status for a run.
+    def _budget_ceiling_usd(run: OrchestrationRun) -> float:
+        """PRD-163 S5: the run's DOLLAR budget ceiling — an explicit
+        ``config['cost_ceiling']`` when set, otherwise the plan's token estimate
+        priced out at the configured rate. 0 = unlimited."""
+        config = run.config or {}
+        ceiling = config.get("cost_ceiling")
+        if isinstance(ceiling, (int, float)) and ceiling > 0:
+            return float(ceiling)
+        budget_tokens = run.token_budget_estimate or 0
+        return (budget_tokens / 1000.0) * Config.COORDINATOR_COST_PER_1K_TOKENS
 
-        Returns HEALTHY if no budget is set (unlimited).
-        """
-        budget = run.token_budget_estimate
-        if not budget or budget <= 0:
+    @staticmethod
+    def _cost_used_usd(run: OrchestrationRun) -> float:
+        """Actual dollar cost incurred so far (tokens_used priced out)."""
+        return ((run.tokens_used or 0) / 1000.0) * Config.COORDINATOR_COST_PER_1K_TOKENS
+
+    @staticmethod
+    def _get_budget_status(run: OrchestrationRun) -> BudgetStatus:
+        """Budget health as a fraction of the DOLLAR ceiling consumed (PRD-163 S5:
+        $ ceilings replace the token-estimate pause). HEALTHY when no ceiling is
+        set (unlimited)."""
+        ceiling = MissionDispatcher._budget_ceiling_usd(run)
+        if ceiling <= 0:
             return BudgetStatus.HEALTHY
 
-        used = run.tokens_used or 0
-        pct = (used / budget) * 100
-
+        pct = (MissionDispatcher._cost_used_usd(run) / ceiling) * 100
         if pct > 100:
             return BudgetStatus.EXCEEDED
         if pct >= 80:
@@ -450,8 +463,8 @@ class MissionDispatcher:
             'defer' — skip this task but continue checking others.
             'block' — stop dispatching entirely, pause the run.
         """
-        budget = run.token_budget_estimate
-        if not budget or budget <= 0:
+        ceiling_usd = MissionDispatcher._budget_ceiling_usd(run)
+        if ceiling_usd <= 0:
             return "allow"
 
         # User can disable budget pausing via mission config
@@ -470,8 +483,8 @@ class MissionDispatcher:
 
         if status == BudgetStatus.WARNING:
             logger.warning(
-                "Budget WARNING for run %s: %d/%d tokens used — dispatching task %s anyway",
-                run.id, run.tokens_used or 0, budget, task.id,
+                "Budget WARNING for run %s: $%.2f/$%.2f used — dispatching task %s anyway",
+                run.id, MissionDispatcher._cost_used_usd(run), ceiling_usd, task.id,
             )
             emit_event(
                 db=db,
@@ -480,8 +493,9 @@ class MissionDispatcher:
                 actor_type=ActorType.COORDINATOR,
                 actor_id="dispatcher",
                 payload={
+                    "cost_used_usd": round(MissionDispatcher._cost_used_usd(run), 4),
+                    "cost_ceiling_usd": round(ceiling_usd, 4),
                     "tokens_used": run.tokens_used or 0,
-                    "token_budget_estimate": budget,
                     "task_id": str(task.id),
                 },
             )
@@ -502,8 +516,8 @@ class MissionDispatcher:
 
         # EXCEEDED
         logger.warning(
-            "Budget EXCEEDED for run %s: %d/%d tokens — blocking dispatch",
-            run.id, run.tokens_used or 0, budget,
+            "Budget EXCEEDED for run %s: $%.2f/$%.2f — blocking dispatch",
+            run.id, MissionDispatcher._cost_used_usd(run), ceiling_usd,
         )
         return "block"
 

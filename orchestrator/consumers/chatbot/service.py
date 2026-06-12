@@ -1207,6 +1207,7 @@ class StreamingChatService:
         tool_data: Dict[str, Any],
         use_tools: Optional[List[Dict[str, Any]]],
         composio_result: Any = None,
+        user_id: Optional[int] = None,
     ) -> AsyncGenerator[Any, None]:
         """Drive :class:`ToolLoopExecutor` from the chat surface.
 
@@ -1229,6 +1230,18 @@ class StreamingChatService:
         # State shared by callbacks within this turn.
         last_tool_name: Optional[str] = None
         empty_streak = 0
+
+        # PRD-163 S1/Q56: resolve the chatting user's clerk id once, so a mission
+        # created mid-chat is attributed to THEM (created_by) — not the agent — and
+        # plan-ready / awaiting-approval notifications land for the right person.
+        _driving_clerk: Optional[str] = None
+        if user_id:
+            try:
+                from core.models import User
+                _row = self.db.query(User.clerk_user_id).filter(User.id == user_id).first()
+                _driving_clerk = _row[0] if _row else None
+            except Exception:
+                _driving_clerk = None
         cumulative_attempts: Dict[str, int] = {}
         followup_messages: List[Dict[str, Any]] = []
 
@@ -1290,6 +1303,7 @@ class StreamingChatService:
                 agent_id=agent_runtime.agent_id if hasattr(agent_runtime, "agent_id") else 1,
                 workspace_id=ws_id,
                 original_intent=user_text,
+                caller_context={"user_id": _driving_clerk} if _driving_clerk else None,
             )
 
             # Search-spiral detection (chat-only signal).
@@ -2048,6 +2062,7 @@ class StreamingChatService:
                 async for chunk in self._stream_tool_loop(
                     response, llm_messages, agent_runtime, tool_data, use_tools,
                     composio_result=_composio_result,
+                    user_id=user_id,
                 ):
                     if isinstance(chunk, dict) and chunk.get('_final_response'):
                         final_response = chunk['_final_response']
