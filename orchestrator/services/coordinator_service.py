@@ -1130,7 +1130,7 @@ class CoordinatorService:
             _cleanup_ephemeral_agents(db, run)
 
         if RunState(run.state) == RunState.VERIFYING:
-            await self._build_and_advance_to_awaiting_human(db, run)
+            await self._complete_verified_run(db, run)
             db.refresh(run)
 
         # PRD-142 W3-S11: missions primitive heartbeat at terminal boundary.
@@ -2146,132 +2146,6 @@ class CoordinatorService:
         return run
 
     # ------------------------------------------------------------------
-    # Lifecycle: review_mission
-    # ------------------------------------------------------------------
-
-    def review_mission(
-        self,
-        db: Session,
-        run_id: UUID,
-        actor_id: str,
-        verdict: str,
-        task_feedback: Optional[Dict[str, str]] = None,
-        feedback: Optional[str] = None,
-    ) -> OrchestrationRun:
-        """
-        Submit human review after all tasks are verified.
-
-        Args:
-            verdict: 'accept' or 'reject'
-            task_feedback: Optional dict mapping task_id → feedback string.
-                          On reject, tasks with feedback get re-queued.
-            feedback: Optional general rejection feedback (no per-task flags needed).
-        """
-        run = self._get_run(db, run_id)
-
-        if verdict == "accept":
-            transition_run(
-                db=db,
-                run=run,
-                new_state=RunState.COMPLETED,
-                actor_type=ActorType.HUMAN,
-                actor_id=actor_id,
-            )
-            emit_event(
-                db=db,
-                run_id=run.id,
-                event_type=EventType.RUN_COMPLETED,
-                actor_type=ActorType.HUMAN,
-                actor_id=actor_id,
-            )
-            VerificationService.clear_cache(run.id)
-            logger.info("Mission %s accepted by %s → completed", run_id, actor_id)
-
-        elif verdict == "reject":
-            # Re-queue specific tasks with feedback
-            requeued_count = 0
-            if task_feedback:
-                for task_id_str, fb in task_feedback.items():
-                    task = (
-                        db.query(OrchestrationTask)
-                        .filter(
-                            and_(
-                                OrchestrationTask.id == task_id_str,
-                                OrchestrationTask.run_id == run_id,
-                            )
-                        )
-                        .first()
-                    )
-                    if task:
-                        self._requeue_task_with_feedback(
-                            db, task, fb, actor_id,
-                        )
-                        requeued_count += 1
-
-            # Feedback-only rejection: re-queue the last verified task with the feedback
-            if requeued_count == 0 and feedback:
-                last_task = (
-                    db.query(OrchestrationTask)
-                    .filter(
-                        and_(
-                            OrchestrationTask.run_id == run_id,
-                            OrchestrationTask.state == TaskState.VERIFIED.value,
-                        )
-                    )
-                    .order_by(OrchestrationTask.sequence_number.desc())
-                    .first()
-                )
-                if last_task:
-                    self._requeue_task_with_feedback(
-                        db, last_task, feedback, actor_id,
-                    )
-                    requeued_count += 1
-
-            # Build reason string
-            if requeued_count > 0:
-                reason = f"Human rejected — {requeued_count} tasks re-queued"
-            elif feedback:
-                reason = f"Human rejected with feedback: {feedback[:200]}"
-            else:
-                reason = "Human rejected"
-
-            # Transition run back to running for re-execution
-            transition_run(
-                db=db,
-                run=run,
-                new_state=RunState.RUNNING,
-                actor_type=ActorType.HUMAN,
-                actor_id=actor_id,
-                reason=reason,
-            )
-
-            event_payload: Dict[str, object] = {
-                "verdict": "reject",
-                "tasks_requeued": requeued_count,
-            }
-            if feedback:
-                event_payload["feedback"] = feedback
-
-            emit_event(
-                db=db,
-                run_id=run.id,
-                event_type=EventType.RUN_RESUMED,
-                actor_type=ActorType.HUMAN,
-                actor_id=actor_id,
-                payload=event_payload,
-            )
-
-            logger.info(
-                "Mission %s rejected by %s — %d tasks re-queued, general_feedback=%s",
-                run_id,
-                actor_id,
-                requeued_count,
-                bool(feedback),
-            )
-
-        return run
-
-    # ------------------------------------------------------------------
     # Lifecycle: pause / resume / cancel
     # ------------------------------------------------------------------
 
@@ -3073,7 +2947,7 @@ class CoordinatorService:
 
         return archived_count
 
-    async def _build_and_advance_to_awaiting_human(
+    async def _complete_verified_run(
         self,
         db: Session,
         run: OrchestrationRun,

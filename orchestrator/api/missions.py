@@ -126,33 +126,7 @@ class MissionRejectRequest(BaseModel):
     reason: str = Field(..., min_length=1, max_length=2000, description="Rejection reason")
 
 
-class MissionReviewRequest(BaseModel):
-    verdict: str = Field(..., pattern="^(accept|reject)$", description="'accept' or 'reject'")
-    task_feedback: Optional[Dict[str, str]] = Field(
-        None,
-        description="Map of task_id → feedback string. On reject, tasks with feedback get re-queued.",
-    )
-    feedback: Optional[str] = Field(
-        None,
-        max_length=5000,
-        description="General rejection feedback (when rejecting without flagging specific tasks).",
-    )
-
-    @validator("task_feedback")
-    def validate_task_feedback(cls, v):
-        if v is None:
-            return v
-        if len(v) > 50:
-            raise ValueError("Too many task feedback entries (max 50)")
-        from uuid import UUID as UUIDType
-        validated = {}
-        for k, val in v.items():
-            try:
-                UUIDType(k)
-            except ValueError:
-                raise ValueError(f"Invalid task ID (not a UUID): {k}")
-            validated[k] = val[:2000]  # cap feedback length
-        return validated
+# PRD-163 S5/Q53: MissionReviewRequest removed with the retired human-review surface.
 
 
 class TaskResponse(BaseModel):
@@ -1271,44 +1245,9 @@ async def reject_plan(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/{mission_id}/review")
-async def review_mission(
-    mission_id: UUID,
-    body: MissionReviewRequest,
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db),
-):
-    """Submit human review: accept or reject with per-task feedback."""
-    try:
-        run = _get_run_for_workspace(db, mission_id, ctx.workspace_id)
-
-        if RunState(run.state) != RunState.AWAITING_HUMAN:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Mission is in '{run.state}' state, expected 'awaiting_human'",
-            )
-
-        coordinator = get_coordinator_service()
-        run = coordinator.review_mission(
-            db=db,
-            run_id=run.id,
-            actor_id=ctx.user.id or "unknown",
-            verdict=body.verdict,
-            task_feedback=body.task_feedback,
-            feedback=body.feedback,
-        )
-        db.commit()
-        return _run_to_response(run)
-
-    except HTTPException:
-        raise
-    except (ConflictError, InvalidTransitionError) as exc:
-        db.rollback()
-        raise HTTPException(status_code=409, detail=str(exc))
-    except Exception as exc:
-        db.rollback()
-        logger.error("Failed to review mission %s: %s", mission_id, exc, exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error")
+# PRD-163 S5/Q53: the human-review (AWAITING_HUMAN) final-review surface is
+# retired — verified missions auto-complete. The POST /{id}/review endpoint and
+# MissionReviewRequest model were removed with it.
 
 
 class MissionReplanRequest(BaseModel):
