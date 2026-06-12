@@ -75,14 +75,22 @@ export interface ActivityFeedFilters {
   offset?: number
 }
 
+export interface ScheduleRecurrence {
+  cron_expression: string | null
+  interval_minutes: number | null
+  timezone: string
+  active_hours: Record<string, unknown> | null
+}
+
 export interface ScheduleItem {
   id: string
   name: string
-  type: 'routine' | 'recipe'
+  type: 'routine' | 'recipe' | 'task'
   next_run_at: string | null
   frequency: string
   agent_name: string | null
   agent_id: number | null
+  recurrence?: ScheduleRecurrence
 }
 
 export interface ScheduleResponse {
@@ -166,36 +174,22 @@ export function useActivityStats(period: string = '1d') {
 }
 
 /**
- * PRD-154 S11 stopgap. The real root cause (the scheduler only lives on 1 of 4
- * workers) is fixed in PRD-162. Until then a `scheduler_active: false` 200 means
- * THIS worker has no live scheduler — its empty `scheduled` list is noise, not
- * truth. Treat it as a transient error so React Query retries (hitting another
- * worker) and the calendar shows a retry affordance instead of caching empty.
- */
-export function scheduleOrThrow(data: ScheduleResponse): ScheduleResponse {
-  if (data?.scheduler_active === false) {
-    throw new Error('Scheduler is not active on this worker yet.')
-  }
-  return data
-}
-
-/**
- * Fetch upcoming scheduled routines/recipes for the calendar widget.
+ * Fetch the workspace schedule for the calendar (PRD-162).
+ *
+ * The endpoint is now a stateless DB read — identical on every worker — so the
+ * PRD-154 S11 stopgap (throw-on-inactive + aggressive worker-hop retry) is gone.
+ * This is a plain cached query: a 30–60s `staleTime` serves instantly from cache
+ * while the background `refetchInterval` keeps it fresh, and `keepPreviousData`
+ * means a refetch never blanks the calendar.
  */
 export function useActivitySchedule(range: string = '7d') {
   return useQuery<ScheduleResponse>({
     queryKey: activityQueryKeys.schedule(range),
-    queryFn: async () =>
-      scheduleOrThrow(
-        await apiClient.request<ScheduleResponse>(`/api/activity/schedule?range=${range}`, {
-          signal: AbortSignal.timeout(15000),
-        }),
-      ),
+    queryFn: () =>
+      apiClient.request<ScheduleResponse>(`/api/activity/schedule?range=${range}`),
     refetchInterval: 60000,
-    staleTime: 30000,
+    staleTime: 45000,
     keepPreviousData: true,
-    retry: 2,
-    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 10000),
   })
 }
 

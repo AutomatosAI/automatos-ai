@@ -154,6 +154,19 @@ function buildMonthGrid(anchor: Date): DayCell[] {
   })
 }
 
+/** Relative "in 12m / in 3h / in 2d" label for the Next Up list. */
+function formatNextRun(iso: string | null): string {
+  if (!iso) return ''
+  const ms = new Date(iso).getTime() - Date.now()
+  if (Number.isNaN(ms)) return ''
+  if (ms <= 0) return 'now'
+  const mins = Math.round(ms / 60000)
+  if (mins < 60) return `in ${mins}m`
+  const hrs = Math.round(mins / 60)
+  if (hrs < 24) return `in ${hrs}h`
+  return `in ${Math.round(hrs / 24)}d`
+}
+
 export function CalendarTab() {
   const router = useRouter()
   const [mode, setMode] = useState<ViewMode>('week')
@@ -165,6 +178,20 @@ export function CalendarTab() {
 
   const week = useMemo(() => buildWeek(anchor), [anchor])
   const monthCells = useMemo(() => buildMonthGrid(anchor), [anchor])
+
+  // Ported from the deleted classic ActivityCalendar (PRD-162 S4): the soonest
+  // upcoming items, straight from the DB-first schedule feed.
+  const nextUp = useMemo(() => {
+    const items = schedule?.scheduled ?? []
+    return [...items]
+      .filter((i) => i.next_run_at)
+      .sort(
+        (a, b) =>
+          new Date(a.next_run_at as string).getTime() -
+          new Date(b.next_run_at as string).getTime(),
+      )
+      .slice(0, 6)
+  }, [schedule])
 
   const visibleDays = useMemo<DayCell[]>(() => {
     if (mode === 'day') {
@@ -499,7 +526,7 @@ export function CalendarTab() {
           role="alert"
           style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}
         >
-          <span>Couldn’t load the schedule — the scheduler may still be starting up.</span>
+          <span>Couldn’t load the schedule.</span>
           <button type="button" className="cc-btn" onClick={() => refetch()}>
             Retry
           </button>
@@ -527,6 +554,54 @@ export function CalendarTab() {
               )
             })}
           </div>
+        </div>
+      )}
+
+      {nextUp.length > 0 && (
+        <div
+          className="cc-cal-nextup"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            flexWrap: 'wrap',
+            padding: '8px 10px',
+            marginBottom: 8,
+            border: '1px solid hsl(var(--border))',
+            borderRadius: 8,
+            background: 'hsl(var(--card) / 0.4)',
+          }}
+        >
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              textTransform: 'uppercase',
+              letterSpacing: 0.4,
+              color: 'hsl(var(--muted-foreground))',
+            }}
+          >
+            Next up
+          </span>
+          {nextUp.map((item) => (
+            <span
+              key={item.id}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }}
+            >
+              <span
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: 999,
+                  background: 'hsl(var(--muted-foreground))',
+                }}
+              />
+              <span style={{ fontWeight: 500 }}>{item.name}</span>
+              <span style={{ color: 'hsl(var(--muted-foreground))' }}>
+                {formatNextRun(item.next_run_at)}
+              </span>
+            </span>
+          ))}
         </div>
       )}
 
