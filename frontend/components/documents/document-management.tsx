@@ -362,6 +362,13 @@ export function DocumentManagement() {
     fetchSources: refreshDatabaseSources
   } = useDatabaseKnowledge()
 
+  // PRD-160 S4: one source selection shared across all six Database tabs
+  // (previously every tab hardcoded databaseSources[0]).
+  const [selectedDbSourceId, setSelectedDbSourceId] = useState<string | number | null>(null)
+  const activeDbSource = (databaseSources || []).find(
+    (s: any) => String(s.id) === String(selectedDbSourceId)
+  ) || databaseSources?.[0]
+
   // Cloud storage hooks
   const { data: cloudConnections = [], isLoading: cloudConnectionsLoading, error: cloudConnectionsError } = useCloudConnections()
   const triggerSyncMutation = useTriggerSync()
@@ -1025,7 +1032,15 @@ export function DocumentManagement() {
                 ) : (
                   <div className="grid gap-4 md:grid-cols-2">
                     {databaseSources.map((source: any) => (
-                      <div key={source.id} className="p-4 border rounded-lg">
+                      <div
+                        key={source.id}
+                        onClick={() => setSelectedDbSourceId(source.id)}
+                        className={`p-4 border rounded-lg cursor-pointer transition-colors ${
+                          String(activeDbSource?.id) === String(source.id)
+                            ? 'border-primary ring-1 ring-primary bg-primary/5'
+                            : 'hover:border-primary/50'
+                        }`}
+                      >
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-2">
                             <Database className="w-5 h-5 text-success" />
@@ -1076,19 +1091,19 @@ export function DocumentManagement() {
               </TabsList>
               
               <TabsContent value="explorer" className="space-y-6">
-                <DatabaseQueryExplorer 
-                  selectedSource={databaseSources?.[0]}
+                <DatabaseQueryExplorer
+                  selectedSource={activeDbSource}
                   sources={databaseSources || []}
                   onSourceDeleted={refreshDatabaseSources}
                 />
               </TabsContent>
               
               <TabsContent value="semantic" className="space-y-6">
-                {databaseSources && databaseSources.length > 0 ? (
+                {activeDbSource ? (
                   <SemanticLayerBuilder
-                    sourceId={String(databaseSources[0].id)}
-                    sourceName={databaseSources[0].name}
-                    dialect={databaseSources[0].dialect || 'postgresql'}
+                    sourceId={String(activeDbSource.id)}
+                    sourceName={activeDbSource.name}
+                    dialect={activeDbSource.dialect || 'postgresql'}
                   />
                 ) : (
                   <Card className="glass-card">
@@ -1101,15 +1116,15 @@ export function DocumentManagement() {
               </TabsContent>
               
               <TabsContent value="templates" className="space-y-6">
-                <QueryTemplatesGrid 
+                <QueryTemplatesGrid
                   templates={templates || []}
-                  selectedSource={databaseSources?.[0]}
+                  selectedSource={activeDbSource}
                 />
               </TabsContent>
 
               <TabsContent value="training" className="space-y-6">
-                {databaseSources && databaseSources.length > 0 ? (
-                  <TrainingExamplesManager sourceId={databaseSources[0].id} />
+                {activeDbSource ? (
+                  <TrainingExamplesManager sourceId={activeDbSource.id} />
                 ) : (
                   <Card className="glass-card">
                     <CardContent className="p-8 text-center text-muted-foreground">
@@ -1122,13 +1137,13 @@ export function DocumentManagement() {
 
               <TabsContent value="schema" className="space-y-6">
                 <SchemaBrowser
-                  sourceId={databaseSources?.[0]?.id}
+                  sourceId={activeDbSource?.id}
                   getSchemaMetadata={getSchemaMetadata}
                 />
               </TabsContent>
 
               <TabsContent value="audit" className="space-y-6">
-                <AuditHistory sourceId={databaseSources?.[0]?.id} />
+                <AuditHistory sourceId={activeDbSource?.id} />
               </TabsContent>
             </Tabs>
           </TabsContent>

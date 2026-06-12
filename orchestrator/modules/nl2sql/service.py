@@ -269,7 +269,8 @@ class DatabaseKnowledgeService:
         return None
 
     def _run_sql_with_guards(
-        self, source, credentials: Dict[str, Any], sql: str
+        self, source, credentials: Dict[str, Any], sql: str,
+        params: Optional[Dict[str, Any]] = None,
     ) -> Tuple[List[str], List[Dict[str, Any]]]:
         """Execute a validated read-only query under a per-statement timeout,
         after an EXPLAIN dry-run.
@@ -278,17 +279,22 @@ class DatabaseKnowledgeService:
         planner over the statement first, so malformed / bad-column SQL fails
         cheaply and feeds the self-correction loop *before* a full table scan.
         Raises on any failure (the caller's retry loop catches it).
+
+        PRD-160 S4: ``params`` carries bound parameters for Query Template
+        execution (``:name`` placeholders), kept as binds so values are never
+        string-interpolated into the SQL.
         """
         conn_str = self._nl2sql_connection_string(credentials, source.dialect)
         timeout_s = getattr(source, "query_timeout_seconds", None) or 30
+        binds = params or {}
         engine = create_engine(conn_str, pool_pre_ping=True)
         try:
             with engine.connect() as conn:
                 timeout_sql = self._statement_timeout_sql(source.dialect, timeout_s)
                 if timeout_sql:
                     conn.execute(text(timeout_sql))
-                conn.execute(text(f"EXPLAIN {sql}"))  # dry-run validation
-                result = conn.execute(text(sql))
+                conn.execute(text(f"EXPLAIN {sql}"), binds)  # dry-run validation
+                result = conn.execute(text(sql), binds)
                 columns = list(result.keys())
                 rows = [dict(zip(columns, row)) for row in result.fetchall()]
                 return columns, rows
@@ -487,6 +493,10 @@ class DatabaseKnowledgeService:
             sql, explanation, metadata = nl2sql.generate_sql(
                 question=natural_language_query,
                 schema_metadata=schema_metadata,
+                # PRD-160 S4: inject the per-connection semantic layer (business
+                # metrics/dimensions + admin instructions) so definitions steer
+                # generation. It was stored but never passed to the generator.
+                semantic_layer=source.semantic_layer,
                 dialect=source.dialect,
                 examples=few_shot_examples if few_shot_examples else None,
                 error_context=last_error,
@@ -1008,6 +1018,143 @@ Rules:
         finally:
             if own_session:
                 session.close()
+
+    def _decrypt_source_credentials(self, source) -> Dict[str, Any]:
+        """Resolve + decrypt a source's DB credentials (shared by the NL path
+        and PRD-160 S4 template execution)."""
+        from core.credentials.service import CredentialStore
+        from core.database.database import SessionLocal
+        from core.credentials.encryption import EncryptionService
+
+        db_session = SessionLocal()
+        try:
+            cred_store = CredentialStore(db_session)
+            credential = cred_store.get_credential(source.credential_id)
+            if not credential:
+                raise ValueError(f"Credential {source.credential_id} not found")
+            encryption = EncryptionService()
+            return encryption.decrypt_dict(credential.encrypted_data)
+        finally:
+            db_session.close()
+
+    async def execute_template(
+        self,
+        source_id,
+        template_id,
+        parameters: Optional[Dict[str, Any]] = None,
+        workspace_id: Optional[str] = None,
+        max_rows: int = 1000,
+    ) -> Dict[str, Any]:
+        """Execute a saved Query Template (PRD-160 S4).
+
+        The frontend's "Execute Query" button had no working backend route. This
+        loads the workspace-scoped template, validates its SQL (SELECT-only +
+        table allowlist via the AST validator, which preserves ``:name``
+        placeholders), and runs it under the S2 guards with BOUND parameters so
+        values are never interpolated into the SQL.
+        """
+        parameters = parameters or {}
+        source = await self._get_source(str(source_id), workspace_id=workspace_id)
+
+        from core.database.database import SessionLocal
+        from core.models.database_knowledge import DatabaseQueryTemplate
+
+        db = SessionLocal()
+        try:
+            tmpl = db.query(DatabaseQueryTemplate).filter(
+                DatabaseQueryTemplate.id == int(template_id),
+                DatabaseQueryTemplate.source_id == int(source_id),
+            ).first()
+            if not tmpl:
+                return {"success": False, "error": "Template not found",
+                        "data": [], "columns": [], "row_count": 0}
+            sql_template = tmpl.sql_template
+            viz = tmpl.visualization_type or "table"
+            if sql_template:
+                tmpl.usage_count = (tmpl.usage_count or 0) + 1
+                db.commit()
+        finally:
+            db.close()
+
+        if not sql_template:
+            return {"success": False, "error": "Template has no SQL to execute",
+                    "data": [], "columns": [], "row_count": 0}
+
+        credentials = self._decrypt_source_credentials(source)
+
+        validator = SQLValidator(
+            max_limit=min(int(max_rows or 1000), source.max_rows_limit or 1000)
+        )
+        try:
+            validated_sql, _ = validator.validate_and_rewrite(
+                sql_template, schema_metadata=source.schema_metadata
+            )
+        except Exception as e:  # SQLValidationError or parse failure
+            return {"success": False, "error": f"Template SQL invalid: {e}",
+                    "data": [], "columns": [], "row_count": 0}
+
+        try:
+            columns, rows = self._run_sql_with_guards(
+                source, credentials, validated_sql, params=parameters
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"Template {template_id} execution failed: {e}")
+            return {"success": False, "error": "Template execution failed",
+                    "data": [], "columns": [], "row_count": 0}
+
+        return {"success": True, "sql": validated_sql, "data": rows,
+                "columns": columns, "row_count": len(rows),
+                "visualization_type": viz}
+
+    async def write_nl_audit(
+        self,
+        *,
+        source_id,
+        user_id=None,
+        agent_id=None,
+        nl_query: str,
+        result: Dict[str, Any],
+    ) -> None:
+        """Write one ``DatabaseQueryAudit`` row for a natural-language query.
+
+        PRD-160 S4: both NL entry points — the in-process agent tool and the
+        ``/query`` API route — call this so every NL query lands exactly one
+        audit row (workspace via the source FK, agent, SQL, outcome). Workspace
+        is carried by the workspace-scoped source per the PRD-156 S3 source-join
+        audit convention, so no separate column is needed. Best-effort: a failed
+        audit write never breaks the query.
+        """
+        from core.database.database import SessionLocal
+        from core.models.database_knowledge import DatabaseQueryAudit
+
+        try:
+            try:
+                uid = int(user_id) if user_id not in (None, "") else None
+            except (TypeError, ValueError):
+                uid = None
+            conf = result.get("confidence")
+            conf_score = conf.get("score") if isinstance(conf, dict) else None
+            db = SessionLocal()
+            try:
+                db.add(DatabaseQueryAudit(
+                    tenant_id=1,  # legacy integer column
+                    source_id=int(source_id),
+                    user_id=uid,
+                    agent_id=str(agent_id) if agent_id not in (None, "") else None,
+                    natural_language_query=nl_query or "",
+                    generated_sql=result.get("sql"),
+                    validated_sql=result.get("sql"),
+                    execution_time_ms=int(result.get("execution_time_ms") or 0),
+                    row_count=int(result.get("row_count") or 0),
+                    success=bool(result.get("success")),
+                    error_message=result.get("error"),
+                    confidence_score=conf_score,
+                ))
+                db.commit()
+            finally:
+                db.close()
+        except Exception as e:  # noqa: BLE001 — audit is best-effort
+            logger.warning(f"NL2SQL audit write failed (non-fatal): {e}")
 
 
 # ---------------------------------------------------------------------------

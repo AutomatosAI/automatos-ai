@@ -90,22 +90,24 @@ async def _run_nl2sql(
             "and none was named — pass 'database_name' to choose one."
         )
 
+    agent = str(agent_id) if agent_id is not None else None
     try:
         if method == "smart_query":
-            return await service.smart_query(
+            result = await service.smart_query(
                 source_id=source_id,
                 text=query,
                 user_id=user_id,
-                agent_id=str(agent_id) if agent_id is not None else None,
+                agent_id=agent,
                 workspace_id=ws_id,
             )
-        return await service.query_database(
-            source_id=source_id,
-            natural_language_query=query,
-            user_id=user_id,
-            agent_id=str(agent_id) if agent_id is not None else None,
-            workspace_id=ws_id,
-        )
+        else:
+            result = await service.query_database(
+                source_id=source_id,
+                natural_language_query=query,
+                user_id=user_id,
+                agent_id=agent,
+                workspace_id=ws_id,
+            )
     except Exception as e:  # noqa: BLE001 — surface a safe message, never leak internals
         logger.error(
             "Agent %s NL2SQL '%s' failed (workspace=%s): %s",
@@ -115,6 +117,19 @@ async def _run_nl2sql(
             e,
         )
         return _error("Database query failed.")
+
+    # PRD-160 S4: every NL query lands one audit row (best-effort).
+    try:
+        await service.write_nl_audit(
+            source_id=source_id,
+            user_id=user_id or None,
+            agent_id=agent,
+            nl_query=query,
+            result=result if isinstance(result, dict) else {},
+        )
+    except Exception:  # noqa: BLE001
+        pass
+    return result
 
 
 async def execute_database_tool(
