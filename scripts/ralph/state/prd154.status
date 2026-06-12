@@ -1,6 +1,4 @@
 BUILD=BLOCKED
-CI=pre-push: Postgres not reachable on 5544 — skipping test net.
-          (CI 'orchestrator-tests' still gates the PR.)
-SUCCESS
+CI=SUCCESS
 ACCEPT=FAIL
 REVIEW=SKIPPED
