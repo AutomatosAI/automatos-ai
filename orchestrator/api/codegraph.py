@@ -7,8 +7,11 @@ REST API for code indexing and intelligent search.
 
 import logging
 import asyncio
+import hashlib
+import hmac
+import json
 from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, Query, Body
+from fastapi import APIRouter, Depends, HTTPException, Query, Body, Request, Header
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from pydantic import BaseModel, Field
@@ -615,3 +618,99 @@ async def ask_code_question(
     except Exception as e:
         logger.error(f"NL code query error: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# ---------------------------------------------------------------------------
+# PRD-165 S4: GitHub push webhook -> incremental reindex (honours auto_reindex)
+# ---------------------------------------------------------------------------
+
+def _norm_repo(url: Optional[str]) -> str:
+    """Normalise a repo URL for loose matching (scheme / .git / trailing slash)."""
+    if not url:
+        return ""
+    u = url.strip().lower()
+    for prefix in ("https://", "http://", "git://", "ssh://", "git@"):
+        if u.startswith(prefix):
+            u = u[len(prefix):]
+    u = u.replace("github.com:", "github.com/")
+    if u.endswith(".git"):
+        u = u[:-4]
+    return u.rstrip("/")
+
+
+@router.post("/webhook/github")
+async def github_push_webhook(
+    request: Request,
+    x_hub_signature_256: str = Header(default=""),
+    x_github_event: str = Header(default=""),
+):
+    """GitHub push webhook → reindex matching projects that have auto_reindex on.
+
+    Signature-verified with GITHUB_WEBHOOK_SECRET. Returns immediately; each
+    reindex runs in the background (PRD-165 S4 / Q33).
+    """
+    body = await request.body()
+
+    secret = config.GITHUB_WEBHOOK_SECRET
+    if secret:
+        expected = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected, x_hub_signature_256 or ""):
+            raise HTTPException(status_code=401, detail="Invalid webhook signature")
+
+    if x_github_event and x_github_event != "push":
+        return {"success": True, "ignored_event": x_github_event}
+
+    try:
+        payload = json.loads(body or b"{}")
+    except (json.JSONDecodeError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    repo = payload.get("repository") or {}
+    candidates = {
+        _norm_repo(repo.get("clone_url")),
+        _norm_repo(repo.get("html_url")),
+        _norm_repo(repo.get("git_url")),
+        _norm_repo(repo.get("ssh_url")),
+    }
+    candidates.discard("")
+    if not candidates:
+        return {"success": True, "reindexed": [], "reason": "no repository url in payload"}
+
+    from core.database.database import SessionLocal
+    db = SessionLocal()
+    try:
+        rows = db.execute(text(
+            "SELECT id, name, source_url, branch, workspace_id, auto_reindex "
+            "FROM codegraph_projects WHERE source_type = 'github'"
+        )).fetchall()
+    finally:
+        db.close()
+
+    targets = [r for r in rows if r.auto_reindex and _norm_repo(r.source_url) in candidates]
+    if not targets:
+        return {"success": True, "reindexed": [], "reason": "no matching auto_reindex project"}
+
+    background_tasks: set = getattr(router, "_background_tasks", set())
+    if not hasattr(router, "_background_tasks"):
+        router._background_tasks = background_tasks
+
+    async def _reindex(name: str, url: str, branch: Optional[str], wsid: str):
+        from core.database.database import SessionLocal as _SL
+        d = _SL()
+        try:
+            await CodeGraphService(d).index_github_project(
+                project_name=name, github_url=url, branch=branch or "main", workspace_id=wsid,
+            )
+        except Exception:
+            logger.exception("webhook reindex failed for %s", name)
+        finally:
+            d.close()
+
+    reindexed = []
+    for r in targets:
+        task = asyncio.create_task(_reindex(r.name, r.source_url, r.branch, str(r.workspace_id)))
+        background_tasks.add(task)
+        task.add_done_callback(background_tasks.discard)
+        reindexed.append(r.name)
+
+    return {"success": True, "reindexed": reindexed, "count": len(reindexed)}

@@ -211,6 +211,14 @@ from modules.tools.discovery.handlers_graph import (
     handle_graph_stats,
     handle_graph_path,
 )
+from modules.tools.discovery.handlers_codegraph import (
+    codegraph_list_projects,
+    codegraph_search,
+    codegraph_get_symbol,
+    codegraph_call_graph,
+    codegraph_dependencies,
+    codegraph_architecture,
+)
 from modules.tools.discovery.handlers_analytics_enhanced import (
     get_success_rate,
     get_completion_time,
@@ -488,6 +496,13 @@ class PlatformActionExecutor:
             "platform_graph_impact": handle_graph_impact,
             "platform_graph_stats": handle_graph_stats,
             "platform_graph_path": handle_graph_path,
+            # PRD-165 S4: CodeGraph as an agent capability
+            "platform_codegraph_list_projects": codegraph_list_projects,
+            "platform_codegraph_search": codegraph_search,
+            "platform_codegraph_get_symbol": codegraph_get_symbol,
+            "platform_codegraph_call_graph": codegraph_call_graph,
+            "platform_codegraph_dependencies": codegraph_dependencies,
+            "platform_codegraph_architecture": codegraph_architecture,
         }
 
     def _workspace_has_admin_owner(self) -> bool:
