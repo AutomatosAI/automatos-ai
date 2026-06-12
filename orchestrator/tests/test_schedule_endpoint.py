@@ -133,10 +133,11 @@ class _FakeScheduleDB:
     calls so a test can prove there is no per-row N+1.
     """
 
-    def __init__(self, agents=None, templates=None, tasks=None, raise_on_query=None):
+    def __init__(self, agents=None, templates=None, tasks=None, missions=None, raise_on_query=None):
         self._agents = agents or []
         self._templates = templates or []
         self._tasks = tasks or []
+        self._missions = missions or []
         self._raise_on_query = raise_on_query
         self.query_calls = 0
         self.execute_calls = 0
@@ -150,7 +151,10 @@ class _FakeScheduleDB:
 
     def execute(self, stmt, params=None):
         self.execute_calls += 1
-        return _FakeResult(self._tasks)
+        # get_schedule calls execute() in a fixed order: scheduled_tasks first,
+        # then mission SLAs.
+        rows = self._tasks if self.execute_calls == 1 else self._missions
+        return _FakeResult(rows)
 
     def rollback(self):
         self.rollbacks += 1
@@ -196,7 +200,7 @@ def test_get_schedule_no_n_plus_one_at_scale():
     out = _svc(db).get_schedule(range_days=7)
     assert len(out["scheduled"]) == 200
     assert db.query_calls == 2      # agents + templates, regardless of row count
-    assert db.execute_calls == 1    # scheduled tasks
+    assert db.execute_calls == 2    # scheduled tasks + mission SLAs (one each)
 
 
 @_needs_croniter
@@ -243,6 +247,38 @@ def test_get_schedule_disabled_heartbeat_excluded():
     out = _svc(db).get_schedule(range_days=7)
     ids = {i["id"] for i in out["scheduled"]}
     assert "routine-2" in ids and "routine-1" not in ids
+
+
+# ── S2: mission SLA deadlines (the 5th feed source) ────────────────────────
+
+@_needs_croniter
+def test_get_schedule_includes_mission_sla_deadlines():
+    """Uncompleted missions with an SLA deadline appear as a 'mission' feed item."""
+    from datetime import datetime, timezone, timedelta
+    soon = (datetime.now(timezone.utc) + timedelta(days=1)).replace(microsecond=0)
+    db = _FakeScheduleDB(
+        agents=[],
+        templates=[],
+        tasks=[],
+        missions=[_Row(id=7, goal="Ship PRD-162\nwith calendar truth", state="running", deadline=soon)],
+    )
+    out = _svc(db).get_schedule(range_days=30)
+    mission = next(i for i in out["scheduled"] if i["type"] == "mission")
+    assert mission["id"] == "mission-7"
+    assert mission["name"] == "Ship PRD-162"  # first line of the goal only
+    assert mission["frequency"] == "SLA deadline"
+    assert mission["next_run_at"] == soon.isoformat()
+
+
+def test_scheduler_health_returns_none_when_unknown():
+    """The advisory health probe never raises: a failing query → healthy=None."""
+
+    class _BoomExec(_FakeScheduleDB):
+        def execute(self, stmt, params=None):
+            raise RuntimeError("no heartbeat_results table here")
+
+    out = _svc(_BoomExec()).get_scheduler_health()
+    assert out == {"healthy": None, "last_fired_at": None}
 
 
 # ── S3: platform_get_schedule tool ─────────────────────────────────────────

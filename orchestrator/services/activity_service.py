@@ -724,6 +724,7 @@ class ActivityService:
             self._heartbeat_items,
             self._playbook_cron_items,
             self._scheduled_task_items,
+            self._mission_sla_items,
         ):
             try:
                 items.extend(source(now, horizon))
@@ -736,6 +737,82 @@ class ActivityService:
         # "active". Whether the scheduler is actually firing is a separate,
         # non-blocking health signal (PRD-162 S2 banner) and never gates render.
         return {"scheduled": items, "scheduler_active": True}
+
+    def get_scheduler_health(self) -> Dict[str, Any]:
+        """Advisory, worker-invariant scheduler health for the banner (Q49).
+
+        NEVER gates the calendar render — the listing is DB-authoritative. This
+        only answers "is the scheduler actually firing?" by checking when a
+        heartbeat last ran (DB-backed, so identical on every worker). ``healthy``
+        is None when we can't tell (no history / probe failed) so the banner can
+        stay quiet rather than cry wolf.
+        """
+        try:
+            row = self.db.execute(
+                text(
+                    """
+                    SELECT MAX(hr.created_at) AS last
+                    FROM heartbeat_results hr
+                    JOIN agents a
+                      ON a.workspace_id = :ws
+                     AND hr.source_type = 'agent'
+                     AND hr.source_id ~ '^[0-9]+$'
+                     AND a.id = CAST(hr.source_id AS INTEGER)
+                    """
+                ),
+                {"ws": self._ws_str},
+            ).fetchone()
+        except Exception as e:  # noqa: BLE001 — advisory probe, never raises to the UI
+            logger.warning("scheduler health probe failed: %s", e)
+            self.db.rollback()
+            return {"healthy": None, "last_fired_at": None}
+
+        last_fired = _as_utc(row.last) if row else None
+        if last_fired is None:
+            return {"healthy": None, "last_fired_at": None}
+        healthy = (datetime.now(timezone.utc) - last_fired) < timedelta(hours=2)
+        return {"healthy": healthy, "last_fired_at": last_fired.isoformat()}
+
+    def _mission_sla_items(
+        self, now: datetime, horizon: datetime
+    ) -> List[Dict[str, Any]]:
+        """Mission SLA deadlines — ONE query over active (uncompleted) missions
+        with a deadline. A past deadline on a still-running mission surfaces as a
+        missed SLA (the frontend styles past-due items distinctly)."""
+        rows = self.db.execute(
+            text(
+                """
+                SELECT id, goal, state, deadline
+                FROM orchestration_runs
+                WHERE workspace_id = :ws
+                  AND deadline IS NOT NULL
+                  AND completed_at IS NULL
+                """
+            ),
+            {"ws": self._ws_str},
+        ).fetchall()
+        items: List[Dict[str, Any]] = []
+        for row in rows:
+            deadline = _as_utc(row.deadline)
+            if deadline is None or deadline > horizon:
+                continue
+            goal = ((row.goal or "").strip() or "Mission").splitlines()[0]
+            items.append({
+                "id": f"mission-{row.id}",
+                "name": goal[:80],
+                "type": "mission",
+                "next_run_at": deadline.isoformat(),
+                "frequency": "SLA deadline",
+                "agent_name": None,
+                "agent_id": None,
+                "recurrence": {
+                    "cron_expression": None,
+                    "interval_minutes": None,
+                    "timezone": "UTC",
+                    "active_hours": None,
+                },
+            })
+        return items
 
     def _heartbeat_items(
         self, now: datetime, horizon: datetime

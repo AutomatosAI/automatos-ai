@@ -21,7 +21,7 @@
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { ChevronLeft, ChevronRight, Zap } from 'lucide-react'
-import { useActivitySchedule } from '@/hooks/use-activity-api'
+import { useActivitySchedule, useSchedulerHealth } from '@/hooks/use-activity-api'
 import { useHeartbeats } from '@/hooks/use-heartbeats-api'
 import { toneFor } from './agent-tones'
 
@@ -175,6 +175,7 @@ export function CalendarTab() {
   const range = mode === 'month' ? '30d' : '7d'
   const { data: schedule, isLoading, isError, refetch } = useActivitySchedule(range)
   const { data: heartbeats } = useHeartbeats()
+  const { data: health } = useSchedulerHealth()
 
   const week = useMemo(() => buildWeek(anchor), [anchor])
   const monthCells = useMemo(() => buildMonthGrid(anchor), [anchor])
@@ -520,6 +521,28 @@ export function CalendarTab() {
         </span>
       </div>
 
+      {health?.healthy === false && (
+        <div
+          className="cc-cal-health"
+          role="status"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '6px 10px',
+            marginBottom: 8,
+            fontSize: 12,
+            border: '1px solid hsl(45 80% 55% / 0.4)',
+            borderRadius: 8,
+            background: 'hsl(45 80% 55% / 0.08)',
+            color: 'hsl(45 80% 55%)',
+          }}
+        >
+          <Zap style={{ width: 12, height: 12 }} />
+          Scheduler hasn’t fired recently — configured schedules still shown below.
+        </div>
+      )}
+
       {isError && (
         <div
           className="cc-panel-empty"
@@ -583,25 +606,26 @@ export function CalendarTab() {
           >
             Next up
           </span>
-          {nextUp.map((item) => (
-            <span
-              key={item.id}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }}
-            >
+          {nextUp.map((item) => {
+            const overdue = item.next_run_at
+              ? new Date(item.next_run_at).getTime() < Date.now()
+              : false
+            const accent = overdue ? 'hsl(45 80% 55%)' : 'hsl(var(--muted-foreground))'
+            return (
               <span
-                style={{
-                  width: 6,
-                  height: 6,
-                  borderRadius: 999,
-                  background: 'hsl(var(--muted-foreground))',
-                }}
-              />
-              <span style={{ fontWeight: 500 }}>{item.name}</span>
-              <span style={{ color: 'hsl(var(--muted-foreground))' }}>
-                {formatNextRun(item.next_run_at)}
+                key={item.id}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }}
+              >
+                <span
+                  style={{ width: 6, height: 6, borderRadius: 999, background: accent }}
+                />
+                <span style={{ fontWeight: 500 }}>{item.name}</span>
+                <span style={{ color: accent }}>
+                  {overdue ? 'overdue' : formatNextRun(item.next_run_at)}
+                </span>
               </span>
-            </span>
-          ))}
+            )
+          })}
         </div>
       )}
 
@@ -742,6 +766,8 @@ function MonthGrid({
   anchorMonth: number
   onEventClick: (e: CalEvent) => void
 }) {
+  const todayStart = new Date()
+  todayStart.setHours(0, 0, 0, 0)
   return (
     <div className="cc-cal-month">
       <div className="cc-cal-month-head">
@@ -757,10 +783,11 @@ function MonthGrid({
             (e) => e.dayKey === d.date.toDateString(),
           )
           const outside = d.month !== anchorMonth
+          const past = d.date.getTime() < todayStart.getTime()
           return (
             <div
               key={d.iso}
-              className={`cc-cal-month-cell${outside ? ' outside' : ''}${d.today ? ' today' : ''}`}
+              className={`cc-cal-month-cell${outside ? ' outside' : ''}${d.today ? ' today' : ''}${past ? ' past' : ''}`}
             >
               <div className="n">{d.today ? <span>{d.n}</span> : d.n}</div>
               <div className="evts">
@@ -771,7 +798,7 @@ function MonthGrid({
                       key={evt.id}
                       type="button"
                       className="cc-cal-month-evt"
-                      style={{ borderLeftColor: tone.bg }}
+                      style={{ borderLeftColor: tone.bg, opacity: past ? 0.5 : 1 }}
                       onClick={() => onEventClick(evt)}
                       title={evt.name}
                     >

@@ -85,7 +85,7 @@ export interface ScheduleRecurrence {
 export interface ScheduleItem {
   id: string
   name: string
-  type: 'routine' | 'recipe' | 'task'
+  type: 'routine' | 'recipe' | 'task' | 'mission'
   next_run_at: string | null
   frequency: string
   agent_name: string | null
@@ -190,6 +190,27 @@ export function useActivitySchedule(range: string = '7d') {
     refetchInterval: 60000,
     staleTime: 45000,
     keepPreviousData: true,
+  })
+}
+
+export interface SchedulerHealth {
+  healthy: boolean | null
+  last_fired_at: string | null
+}
+
+/**
+ * Advisory scheduler health for the calendar banner (PRD-162 S2). Separate from
+ * the schedule query and NON-BLOCKING — the calendar renders configured
+ * schedules regardless. `healthy: null` means "can't tell" → the banner stays
+ * quiet.
+ */
+export function useSchedulerHealth() {
+  return useQuery<SchedulerHealth>({
+    queryKey: ['activity', 'scheduler-health'],
+    queryFn: () =>
+      apiClient.request<SchedulerHealth>('/api/activity/scheduler-health'),
+    refetchInterval: 60000,
+    staleTime: 45000,
   })
 }
 
