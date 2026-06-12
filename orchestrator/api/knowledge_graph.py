@@ -9,7 +9,7 @@ query it through the ``platform_graph_*`` tools
 workspace-graph lifecycle: import a graphify graph.json, rebuild, and delete.
 """
 
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Query
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Query, Body
 import json
 import logging
 
@@ -244,3 +244,24 @@ async def search_graph_nodes(
     from modules.knowledge.graph_service import get_graph_service
     matches = await get_graph_service().search_nodes(graph, q, limit=limit)
     return {"success": True, "query": q, "match_count": len(matches), "matches": matches}
+
+
+@router.patch("/graph/community/{community_id}/label")
+async def set_community_label(
+    community_id: int,
+    payload: dict = Body(...),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """Rename a community / edit its summary (PRD-165 S3 — editable labels)."""
+    title = (payload.get("title") or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="title is required")
+    summary = payload.get("summary")
+
+    from modules.knowledge.graph_service import get_graph_service
+    ok = await get_graph_service().set_community_label(
+        str(ctx.workspace_id), community_id, title, summary,
+    )
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"Community {community_id} not found.")
+    return {"success": True, "community_id": community_id, "title": title}

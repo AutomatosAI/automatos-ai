@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
 import { useWorkspace } from '@/hooks/use-workspace'
 import { Input } from '@/components/ui/input'
@@ -11,7 +11,7 @@ import BusinessGraphVisualization from './BusinessGraphVisualization'
 import { GraphView, useGraphPrefs } from '../graph'
 import {
   Layers, Search, X, FileText, Loader2,
-  GitBranch, Crosshair, Route,
+  GitBranch, Crosshair, Route, Pencil, Check,
 } from 'lucide-react'
 
 /**
@@ -54,6 +54,7 @@ const EMPTY: SubgraphData = { nodes: [], links: [] }
 
 export function KnowledgeGraphExplorer() {
   const { workspaceId } = useWorkspace()
+  const queryClient = useQueryClient()
   const [prefs] = useGraphPrefs(workspaceId, 'knowledge')
 
   const [activeCommunity, setActiveCommunity] = useState<number | null>(null)
@@ -62,6 +63,8 @@ export function KnowledgeGraphExplorer() {
   const [loadingSub, setLoadingSub] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [pathStart, setPathStart] = useState<ExplorerNode | null>(null)
+  const [editingLabel, setEditingLabel] = useState(false)
+  const [labelDraft, setLabelDraft] = useState('')
 
   const [search, setSearch] = useState('')
   const [matches, setMatches] = useState<ExplorerNode[] | null>(null)
@@ -155,6 +158,25 @@ export function KnowledgeGraphExplorer() {
     }
     setSelectedNode(node)
   }, [pathStart, findPath])
+
+  // ── Editable cluster label (PRD-165 S3) ──
+  const activeCommunityTitle = useMemo(() => {
+    if (activeCommunity == null) return ''
+    const c = communities.find((x) => x.community_id === activeCommunity)
+    return c?.title || `Cluster ${activeCommunity}`
+  }, [activeCommunity, communities])
+
+  const saveLabel = useCallback(async () => {
+    if (activeCommunity == null || !labelDraft.trim()) { setEditingLabel(false); return }
+    try {
+      await apiClient.graphSetCommunityLabel(activeCommunity, labelDraft.trim())
+      queryClient.invalidateQueries({ queryKey: ['kg-communities', workspaceId] })
+    } catch (e: any) {
+      setError(e?.message || 'Rename failed')
+    } finally {
+      setEditingLabel(false)
+    }
+  }, [activeCommunity, labelDraft, queryClient, workspaceId])
 
   // ── Slots ──
 
@@ -272,6 +294,35 @@ export function KnowledgeGraphExplorer() {
       {error && <div className="text-xs text-destructive px-1">{error}</div>}
       {active.truncated && (
         <div className="text-[11px] text-warning px-1">Large cluster — showing the {active.nodes.length} most-connected nodes.</div>
+      )}
+      {activeCommunity != null && (
+        <div className="flex items-center gap-2 px-1">
+          {editingLabel ? (
+            <>
+              <Input
+                value={labelDraft}
+                onChange={(e) => setLabelDraft(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') void saveLabel(); if (e.key === 'Escape') setEditingLabel(false) }}
+                className="h-7 text-sm max-w-xs bg-black/30 border-white/10"
+                autoFocus
+              />
+              <Button size="sm" className="h-7 px-2" onClick={() => void saveLabel()}><Check className="w-3.5 h-3.5" /></Button>
+              <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => setEditingLabel(false)}><X className="w-3.5 h-3.5" /></Button>
+            </>
+          ) : (
+            <>
+              <span className="text-sm font-medium text-foreground">{activeCommunityTitle}</span>
+              <button
+                type="button"
+                onClick={() => { setLabelDraft(activeCommunityTitle); setEditingLabel(true) }}
+                className="text-muted-foreground hover:text-foreground"
+                title="Rename cluster"
+              >
+                <Pencil className="w-3.5 h-3.5" />
+              </button>
+            </>
+          )}
+        </div>
       )}
       <GraphView
         loading={loadingSub}

@@ -1639,6 +1639,15 @@ class ApiClient {
     return this.request(`/api/knowledge/graph/search?q=${encodeURIComponent(query)}&limit=${limit}`)
   }
 
+  /** Rename a community / edit its summary (PRD-165 S3 — editable labels). */
+  async graphSetCommunityLabel(communityId: number, title: string, summary?: string) {
+    return this.request(`/api/knowledge/graph/community/${communityId}/label`, {
+      method: 'PATCH',
+      body: JSON.stringify(summary !== undefined ? { title, summary } : { title }),
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+
   async importBusinessGraph(file: File, merge: boolean = false) {
     const formData = new FormData()
     formData.append('file', file)

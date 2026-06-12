@@ -252,8 +252,14 @@ class GraphifyService:
             None, partial(surprising_connections, graph, communities)
         )
 
+        # 5b. Build-time community reports (PRD-165 S3): cheap-LLM titles +
+        # summaries for the top-N communities, ranked by size. Degrades to
+        # ranks-only on any LLM failure — never fails the build.
+        from modules.knowledge.community_reports import generate_community_reports
+        community_reports = await generate_community_reports(graph, communities)
+
         # 6. Export artefacts
-        await self._export_graph(ws, graph, communities, top_gods)
+        await self._export_graph(ws, graph, communities, top_gods, community_reports)
 
         # 7. Build and save meta
         meta = self._build_meta(graph, communities, top_gods)
@@ -717,6 +723,41 @@ class GraphifyService:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, _search)
 
+    async def set_community_label(
+        self,
+        workspace_id: str,
+        community_id: int,
+        title: str,
+        summary: Optional[str] = None,
+    ) -> bool:
+        """Persist a user-edited community title/summary into communities.json
+        (PRD-165 S3 — labels are editable, and the ``edited`` flag stops the
+        next build's LLM titling from clobbering a hand-set label). Returns
+        False if the community or the communities file is missing."""
+        ws = DbWorkspaceClient(str(workspace_id))
+        result = await ws.read_file(_COMMUNITIES_JSON_PATH)
+        if not result.get("success") or not result.get("content"):
+            return False
+        try:
+            communities = json.loads(result["content"])
+        except (json.JSONDecodeError, TypeError):
+            return False
+
+        found = False
+        for c in communities:
+            if c.get("community_id") == community_id:
+                c["title"] = title.strip()[:80]
+                if summary is not None:
+                    c["summary"] = summary.strip()[:240]
+                c["edited"] = True
+                found = True
+                break
+        if not found:
+            return False
+
+        await self._write_json(ws, _COMMUNITIES_JSON_PATH, communities)
+        return True
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
@@ -960,6 +1001,7 @@ class GraphifyService:
         graph: nx.Graph,
         communities: Dict[int, List[str]],
         god_node_list: List[Any],
+        community_reports: Optional[Dict[int, Dict[str, Any]]] = None,
     ) -> None:
         """Export graph artefacts to workspace files."""
         loop = asyncio.get_event_loop()
@@ -976,7 +1018,7 @@ class GraphifyService:
         await self._write_json(ws, _GRAPH_JSON_PATH, graph_data)
 
         # communities.json
-        community_data = self._format_communities(communities)
+        community_data = self._format_communities(communities, community_reports)
         await self._write_json(ws, _COMMUNITIES_JSON_PATH, community_data)
 
         # graph.html — use graphify's to_html (writes to temp file, then upload)
@@ -1034,15 +1076,31 @@ class GraphifyService:
     @staticmethod
     def _format_communities(
         communities: Dict[int, List[str]],
+        reports: Optional[Dict[int, Dict[str, Any]]] = None,
     ) -> List[Dict[str, Any]]:
         """Format community data for export.
 
-        Takes the communities dict from ``cluster()`` (maps community_id → member list).
+        Takes the communities dict from ``cluster()`` (maps community_id → member
+        list) and merges in any PRD-165 S3 report (``title``/``summary``/``rank``).
         """
-        return [
-            {"community_id": cid, "member_count": len(members), "members": members}
-            for cid, members in sorted(communities.items())
-        ]
+        reports = reports or {}
+        out: List[Dict[str, Any]] = []
+        for cid, members in sorted(communities.items()):
+            entry: Dict[str, Any] = {
+                "community_id": cid,
+                "member_count": len(members),
+                "members": members,
+            }
+            report = reports.get(cid)
+            if report:
+                if report.get("title"):
+                    entry["title"] = report["title"]
+                if report.get("summary"):
+                    entry["summary"] = report["summary"]
+                if report.get("rank") is not None:
+                    entry["rank"] = report["rank"]
+            out.append(entry)
+        return out
 
     @staticmethod
     def _build_meta(

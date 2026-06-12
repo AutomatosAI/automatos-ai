@@ -327,11 +327,15 @@ async def handle_graph_communities(
                 "community": matched[0],
             }
 
-        # Return summary of all communities (exclude empty after filtering)
+        # Return summary of all communities (exclude empty after filtering).
+        # PRD-165 S3: carry the LLM title/summary so agents get named clusters,
+        # not bare ids.
         summary = [
             {
                 "community_id": c.get("community_id"),
                 "member_count": c.get("member_count", len(c.get("members", []))),
+                "title": c.get("title"),
+                "summary": c.get("summary"),
             }
             for c in communities
             if c.get("member_count", len(c.get("members", []))) > 0
