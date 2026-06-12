@@ -9,7 +9,7 @@ Command Centre page.
 
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
@@ -24,8 +24,39 @@ from core.models.core import (
     RecipeExecution,
     WorkflowTemplate,
 )
+from services.schedule_util import interval_to_cron, is_valid_cron, next_run
 
 logger = logging.getLogger(__name__)
+
+
+def _coerce_int(value: Any, *, default: int) -> int:
+    """Best-effort int from possibly-dirty JSON config."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _humanize_interval(minutes: int) -> str:
+    """Human label for a heartbeat interval ('Every 30m', 'Hourly', 'Daily')."""
+    if minutes < 60:
+        return f"Every {minutes}m"
+    if minutes % 1440 == 0:
+        days = minutes // 1440
+        return "Daily" if days == 1 else f"Every {days}d"
+    if minutes % 60 == 0:
+        hours = minutes // 60
+        return "Hourly" if hours == 1 else f"Every {hours}h"
+    return f"Every {minutes}m"
+
+
+def _as_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    """Coerce a DB datetime (naive or aware) to UTC-aware; None stays None."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 
 class ActivityService:
@@ -673,125 +704,160 @@ class ActivityService:
     # ── Schedule Endpoint ────────────────────────────────────────
 
     def get_schedule(self, *, range_days: int = 7) -> Dict[str, Any]:
-        """Return upcoming scheduled routines and recipes for the calendar widget."""
-        scheduled: List[Dict[str, Any]] = []
-        scheduler_active = False
+        """Upcoming scheduled work for the calendar — a STATELESS read of
+        configured schedules straight from the DB (PRD-162 WS-7).
 
-        # 1) Agent heartbeat routines (from APScheduler via heartbeat_service)
-        try:
-            from services.heartbeat_service import get_heartbeat_service
-            hb_svc = get_heartbeat_service()
-            hb_status = hb_svc.get_status()
-            if hb_status.get("active"):
-                scheduler_active = True
+        No APScheduler in-process state is consulted, so the response is
+        IDENTICAL on every uvicorn worker: the calendar can never return an
+        empty 200 just because this worker isn't the one hosting the scheduler.
+        Recurrence math (interval->cron, next_run) goes through the one shared
+        ``schedule_util`` so the calendar, the scheduler, and the
+        ``platform_get_schedule`` tool all agree.
+        """
+        now = datetime.now(timezone.utc)
+        horizon = now + timedelta(days=max(1, range_days))
 
-            # Fetch agent names for the jobs
-            agent_ids = []
-            for job in hb_status.get("jobs", []):
-                # Job IDs are like "agent_42_heartbeat" or "heartbeat_agent_42"
-                parts = job["id"].split("_")
-                for p in parts:
-                    if p.isdigit():
-                        agent_ids.append(int(p))
-                        break
+        # Each source is isolated: one failing/absent source (a bad cron, a
+        # missing optional table) must never blank the whole calendar (Q49).
+        items: List[Dict[str, Any]] = []
+        for source in (
+            self._heartbeat_items,
+            self._playbook_cron_items,
+            self._scheduled_task_items,
+        ):
+            try:
+                items.extend(source(now, horizon))
+            except Exception as e:  # noqa: BLE001 — resilience boundary
+                logger.error("schedule source %s failed: %s", source.__name__, e, exc_info=True)
+                self.db.rollback()
+        items.sort(key=lambda x: x.get("next_run_at") or "9999")
 
-            agents_by_id: Dict[int, Any] = {}
-            if agent_ids:
-                agents = (
-                    self.db.query(Agent)
-                    .filter(
-                        Agent.id.in_(agent_ids),
-                        Agent.workspace_id == self.workspace_id,
-                    )
-                    .all()
-                )
-                agents_by_id = {a.id: a for a in agents}
+        # Data is DB-authoritative and worker-invariant, so the listing is always
+        # "active". Whether the scheduler is actually firing is a separate,
+        # non-blocking health signal (PRD-162 S2 banner) and never gates render.
+        return {"scheduled": items, "scheduler_active": True}
 
-            for job in hb_status.get("jobs", []):
-                agent_id = None
-                parts = job["id"].split("_")
-                for p in parts:
-                    if p.isdigit():
-                        agent_id = int(p)
-                        break
+    def _heartbeat_items(
+        self, now: datetime, horizon: datetime
+    ) -> List[Dict[str, Any]]:
+        """Agent heartbeat routines — ONE query over workspace agents (no N+1)."""
+        agents = (
+            self.db.query(Agent.id, Agent.name, Agent.configuration)
+            .filter(Agent.workspace_id == self.workspace_id)
+            .all()
+        )
+        items: List[Dict[str, Any]] = []
+        for agent in agents:
+            cfg = agent.configuration if isinstance(agent.configuration, dict) else {}
+            hb = cfg.get("heartbeat")
+            if not isinstance(hb, dict) or hb.get("enabled") is False:
+                continue
+            interval = _coerce_int(hb.get("interval_minutes"), default=60)
+            tz = hb.get("timezone") or "UTC"
+            active_hours = hb.get("active_hours")
+            cron = interval_to_cron(interval)
+            nxt = next_run(cron, now=now, tz=tz, active_hours=active_hours)
+            if nxt is None or nxt > horizon:
+                continue
+            items.append({
+                "id": f"routine-{agent.id}",
+                "name": f"{agent.name} Routine",
+                "type": "routine",
+                "next_run_at": nxt.isoformat(),
+                "frequency": _humanize_interval(interval),
+                "agent_name": agent.name,
+                "agent_id": agent.id,
+                "recurrence": {
+                    "cron_expression": cron,
+                    "interval_minutes": interval,
+                    "timezone": tz,
+                    "active_hours": active_hours,
+                },
+            })
+        return items
 
-                agent = agents_by_id.get(agent_id) if agent_id else None
-                if not agent:
-                    continue  # Skip jobs not in this workspace
+    def _playbook_cron_items(
+        self, now: datetime, horizon: datetime
+    ) -> List[Dict[str, Any]]:
+        """Cron-scheduled playbooks — ONE query over workspace workflow templates."""
+        templates = (
+            self.db.query(
+                WorkflowTemplate.id,
+                WorkflowTemplate.name,
+                WorkflowTemplate.schedule_config,
+            )
+            .filter(WorkflowTemplate.workspace_id == self.workspace_id)
+            .all()
+        )
+        items: List[Dict[str, Any]] = []
+        for tpl in templates:
+            sc = tpl.schedule_config if isinstance(tpl.schedule_config, dict) else {}
+            if sc.get("type") != "cron":
+                continue
+            cron = sc.get("cron_expression")
+            if not is_valid_cron(cron):
+                continue
+            tz = sc.get("timezone") or "UTC"
+            active_hours = sc.get("active_hours")
+            nxt = next_run(cron, now=now, tz=tz, active_hours=active_hours)
+            if nxt is None or nxt > horizon:
+                continue
+            items.append({
+                "id": f"recipe-{tpl.id}",
+                "name": tpl.name,
+                "type": "recipe",
+                "next_run_at": nxt.isoformat(),
+                "frequency": cron,
+                "agent_name": None,
+                "agent_id": None,
+                "recurrence": {
+                    "cron_expression": cron,
+                    "interval_minutes": None,
+                    "timezone": tz,
+                    "active_hours": active_hours,
+                },
+            })
+        return items
 
-                hb_config = (agent.configuration or {}).get("heartbeat", {})
-                interval = hb_config.get("interval_minutes", 60)
-
-                scheduled.append({
-                    "id": f"routine-{agent_id}",
-                    "name": f"{agent.name} Routine",
-                    "type": "routine",
-                    "next_run_at": job.get("next_run_at"),
-                    "frequency": f"Every {interval}m" if interval < 60 else f"Every {interval // 60}h",
-                    "agent_name": agent.name,
-                    "agent_id": agent_id,
-                })
-        except Exception as e:
-            logger.error("Failed to fetch routine schedule: %s", e, exc_info=True)
-
-        # 2) Cron-scheduled playbooks (from playbook_scheduler)
-        try:
-            from services.playbook_scheduler import get_playbook_scheduler
-            sched = get_playbook_scheduler()
-            if sched:
-                sched_status = sched.get_status()
-                recipe_ids_from_jobs = []
-                for job in sched_status.get("jobs", []):
-                    # Job IDs like "recipe_cron_42"
-                    parts = job["id"].split("_")
-                    for p in parts:
-                        if p.isdigit():
-                            recipe_ids_from_jobs.append(int(p))
-                            break
-
-                recipes_by_id: Dict[int, WorkflowTemplate] = {}
-                if recipe_ids_from_jobs:
-                    recipes = (
-                        self.db.query(WorkflowTemplate)
-                        .filter(
-                            WorkflowTemplate.id.in_(recipe_ids_from_jobs),
-                            WorkflowTemplate.workspace_id == self.workspace_id,
-                        )
-                        .all()
-                    )
-                    recipes_by_id = {r.id: r for r in recipes}
-
-                for job in sched_status.get("jobs", []):
-                    recipe_id = None
-                    parts = job["id"].split("_")
-                    for p in parts:
-                        if p.isdigit():
-                            recipe_id = int(p)
-                            break
-
-                    recipe = recipes_by_id.get(recipe_id) if recipe_id else None
-                    if not recipe:
-                        continue
-
-                    sc = recipe.schedule_config or {}
-                    cron_expr = sc.get("cron_expression", "")
-
-                    scheduled.append({
-                        "id": f"recipe-{recipe_id}",
-                        "name": recipe.name,
-                        "type": "recipe",
-                        "next_run_at": job.get("next_run_at"),
-                        "frequency": cron_expr or "Scheduled",
-                        "agent_name": None,
-                        "agent_id": None,
-                    })
-        except Exception as e:
-            logger.error("Failed to fetch recipe schedule: %s", e, exc_info=True)
-
-        # Sort by next_run_at
-        scheduled.sort(key=lambda x: x.get("next_run_at") or "9999")
-
-        return {"scheduled": scheduled, "scheduler_active": scheduler_active}
+    def _scheduled_task_items(
+        self, now: datetime, horizon: datetime
+    ) -> List[Dict[str, Any]]:
+        """Agent-scheduled tasks (one-shot + recurring) — ONE query, status=active."""
+        rows = self.db.execute(
+            text(
+                """
+                SELECT t.id, t.task_type, t.description, t.schedule, t.next_run_at,
+                       ta.name AS target_name
+                FROM agent_scheduled_tasks t
+                LEFT JOIN agents ta ON ta.id = t.target_agent_id
+                WHERE t.workspace_id = :ws AND t.status = 'active'
+                """
+            ),
+            {"ws": self._ws_str},
+        ).fetchall()
+        items: List[Dict[str, Any]] = []
+        for row in rows:
+            cron = row.schedule if is_valid_cron(row.schedule) else None
+            nxt = next_run(cron, now=now) if cron else _as_utc(row.next_run_at)
+            if nxt is None or nxt > horizon:
+                continue
+            label = (row.description or row.task_type or "Scheduled task").strip()
+            items.append({
+                "id": f"task-{row.id}",
+                "name": label[:80],
+                "type": "task",
+                "next_run_at": nxt.isoformat(),
+                "frequency": cron or "One-off",
+                "agent_name": row.target_name,
+                "agent_id": None,
+                "recurrence": {
+                    "cron_expression": cron,
+                    "interval_minutes": None,
+                    "timezone": "UTC",
+                    "active_hours": None,
+                },
+            })
+        return items
 
     # ── Agent Reports Endpoint ─────────────────────────────────
 

@@ -331,35 +331,17 @@ class HeartbeatService:
     def _interval_to_cron_trigger(minutes: int) -> CronTrigger:
         """Convert an interval in minutes to a CronTrigger firing at fixed times.
 
-        Examples:
-            15    → ``0,15,30,45 * * * *``
-            30    → ``0,30 * * * *``
-            60    → ``0 * * * *``  (top of every hour)
-            120   → ``0 */2 * * *``  (every 2 hours)
-            480   → ``0 */8 * * *``  (every 8 hours)
-            1440  → ``0 9 * * *``   (daily at 9am)
-            10080 → ``0 9 * * 1``   (weekly, Monday 9am)
-        """
-        if minutes <= 0:
-            minutes = 60
+        The cron-field math is the single source of truth in
+        ``schedule_util.interval_to_cron`` (PRD-162) — the calendar and the
+        ``platform_get_schedule`` tool compute the same firing times from it.
+        This just builds the APScheduler trigger from that one cron string:
 
-        if minutes < 60:
-            # Sub-hour: distribute evenly within the hour
-            offsets = list(range(0, 60, minutes))
-            minute_field = ",".join(str(o) for o in offsets)
-            return CronTrigger(minute=minute_field)
-        elif minutes >= 10080:
-            # Weekly: Monday at 9am
-            return CronTrigger(minute="0", hour="9", day_of_week="mon")
-        elif minutes >= 1440:
-            # Daily: at 9am
-            return CronTrigger(minute="0", hour="9")
-        else:
-            # Hourly or multi-hour
-            hours = minutes // 60
-            if hours == 1:
-                return CronTrigger(minute="0")
-            return CronTrigger(minute="0", hour=f"*/{hours}")
+            15→``0,15,30,45 * * * *``  30→``0,30 * * * *``  60→``0 * * * *``
+            120→``0 */2 * * *``  1440→``0 9 * * *``  10080→``0 9 * * 1`` (Mon 9am)
+        """
+        from services.schedule_util import interval_to_cron
+
+        return CronTrigger.from_crontab(interval_to_cron(minutes))
 
     def schedule_orchestrator_heartbeat(
         self, workspace_id: str, hb_config: dict
