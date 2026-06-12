@@ -184,6 +184,12 @@ from modules.tools.discovery.handlers_missions import (
     create_mission,
     list_missions,
     get_mission,
+    approve_mission,
+    reject_mission,
+    pause_mission,
+    resume_mission,
+    cancel_mission,
+    replan_mission,
 )
 from modules.tools.discovery.handlers_governance import (
     list_blueprints,
@@ -406,6 +412,13 @@ class PlatformActionExecutor:
             "platform_create_mission": create_mission,
             "platform_list_missions": list_missions,
             "platform_get_mission": get_mission,
+            # PRD-163 S1: mission lifecycle control
+            "platform_approve_mission": approve_mission,
+            "platform_reject_mission": reject_mission,
+            "platform_pause_mission": pause_mission,
+            "platform_resume_mission": resume_mission,
+            "platform_cancel_mission": cancel_mission,
+            "platform_replan_mission": replan_mission,
             # Governance & Blueprints
             "platform_list_blueprints": list_blueprints,
             "platform_get_blueprint": get_blueprint,
@@ -815,6 +828,24 @@ class PlatformActionExecutor:
                         )
             except Exception as e:
                 logger.warning("[PRD-108] Failed to resolve field_id: %s", e)
+
+        # PRD-163 S1/Q56: attribute mission create + lifecycle to the chatting
+        # user. The chat path threads the driving user's clerk id via
+        # caller_context['user_id']; inject it as _created_by so the handler sets
+        # created_by / actor to the user, not the agent.
+        _MISSION_ATTRIBUTED = (
+            "platform_create_mission",
+            "platform_approve_mission",
+            "platform_reject_mission",
+            "platform_pause_mission",
+            "platform_resume_mission",
+            "platform_cancel_mission",
+            "platform_replan_mission",
+        )
+        if action_name in _MISSION_ATTRIBUTED:
+            _driver = (caller_context or {}).get("user_id")
+            if _driver and "_created_by" not in params:
+                params = {**params, "_created_by": str(_driver)}
 
         try:
             result = await handler(self.db, self.workspace_id, params)

@@ -110,3 +110,103 @@ def register_mission_actions(registry: ActionRegistry) -> None:
             "get mission details",
         ],
     ))
+
+    # PRD-163 S1: lifecycle control tools. These are how Auto drives a mission
+    # through its states from chat (approve/reject the plan, pause/resume/cancel
+    # a run, replan a failure). Each maps to an existing CoordinatorService method.
+    _MISSION_ID_PARAM = {
+        "mission_id": {"type": "string", "description": "The mission/run UUID."},
+    }
+
+    registry.register(ActionDefinition(
+        name="platform_approve_mission",
+        description=(
+            "Approve an awaiting-approval mission plan and start execution. Use when "
+            "the user approves the plan you proposed (or says 'go ahead', 'run it')."
+        ),
+        category="missions",
+        parameters={
+            "type": "object",
+            "properties": {
+                **_MISSION_ID_PARAM,
+                "modifications": {
+                    "type": "object",
+                    "description": "Optional approval-time plan edits (task_overrides, agent_overrides, notes).",
+                },
+            },
+            "required": ["mission_id"],
+        },
+        permission_level="write",
+        requires_confirmation=False,
+        tags=["missions", "write", "lifecycle", "approve"],
+        examples=["approve that mission", "go ahead and run the plan", "yes, start the mission"],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_reject_mission",
+        description="Reject an awaiting-approval mission plan (it transitions to failed). Use when the user declines the proposed plan.",
+        category="missions",
+        parameters={
+            "type": "object",
+            "properties": {
+                **_MISSION_ID_PARAM,
+                "reason": {"type": "string", "description": "Why the plan was rejected (returned to Auto's context)."},
+            },
+            "required": ["mission_id"],
+        },
+        permission_level="write",
+        requires_confirmation=False,
+        tags=["missions", "write", "lifecycle", "reject"],
+        examples=["reject that plan", "no, don't run that mission", "cancel the proposed plan"],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_pause_mission",
+        description="Pause a running mission. In-flight tasks finish; no new tasks dispatch until resumed.",
+        category="missions",
+        parameters={"type": "object", "properties": dict(_MISSION_ID_PARAM), "required": ["mission_id"]},
+        permission_level="write",
+        requires_confirmation=False,
+        tags=["missions", "write", "lifecycle", "pause"],
+        examples=["pause that mission", "hold the running mission"],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_resume_mission",
+        description="Resume a paused mission (it goes back to running).",
+        category="missions",
+        parameters={"type": "object", "properties": dict(_MISSION_ID_PARAM), "required": ["mission_id"]},
+        permission_level="write",
+        requires_confirmation=False,
+        tags=["missions", "write", "lifecycle", "resume"],
+        examples=["resume that mission", "continue the paused mission"],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_cancel_mission",
+        description="Cancel a mission. Pending/queued tasks are skipped; in-flight tasks finish. Terminal.",
+        category="missions",
+        parameters={"type": "object", "properties": dict(_MISSION_ID_PARAM), "required": ["mission_id"]},
+        permission_level="write",
+        requires_confirmation=False,
+        tags=["missions", "write", "lifecycle", "cancel"],
+        examples=["cancel that mission", "stop the mission"],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_replan_mission",
+        description="Replan a failed mission — regenerate replacement tasks for the failed subtree while keeping completed work.",
+        category="missions",
+        parameters={
+            "type": "object",
+            "properties": {
+                **_MISSION_ID_PARAM,
+                "notes": {"type": "string", "description": "Optional guidance for the replanner."},
+            },
+            "required": ["mission_id"],
+        },
+        permission_level="write",
+        requires_confirmation=False,
+        tags=["missions", "write", "lifecycle", "replan"],
+        examples=["replan that failed mission", "try the mission again with a different approach"],
+    ))
