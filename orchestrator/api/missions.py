@@ -1061,9 +1061,59 @@ async def get_mission_cost(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+class MissionFieldQueryRequest(BaseModel):
+    query: str = Field(..., min_length=1, max_length=2000, description="Trace query")
+    top_k: int = Field(0, ge=0, le=50, description="0 → config default")
+
+
+@router.post("/{mission_id}/field/query")
+async def query_mission_field(
+    mission_id: UUID,
+    body: MissionFieldQueryRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """PRD-166 S4: retrieval-trace inspector data source — run a query against
+    the mission's field and return which patterns *fired*, with their resonance
+    + similarity/strength breakdown, so the UI can show why each surfaced."""
+    run = _get_run_for_workspace(db, mission_id, ctx.workspace_id)
+    field_id = (run.config or {}).get("field_id")
+    if not field_id:
+        return {"field_id": None, "query": body.query, "results": []}
+
+    from modules.context.factory import get_shared_context
+
+    field = get_shared_context()
+    if not field:
+        raise HTTPException(status_code=503, detail="Field backend unavailable")
+    try:
+        hits = await field.query(
+            context_id=field_id, query=body.query, agent_id=0, top_k=body.top_k,
+        )
+    except Exception as exc:
+        logger.error("Field trace query failed for %s: %s", mission_id, exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Field query failed")
+
+    return {
+        "field_id": field_id,
+        "query": body.query,
+        "results": [{
+            "id": str(h["id"]),
+            "key": h["key"],
+            "value": str(h["value"])[:500],
+            "score": round(h["score"], 4),
+            "cosine_similarity": round(h.get("cosine_similarity", 0.0), 4),
+            "decayed_strength": round(h.get("decayed_strength", 0.0), 4),
+            "agent_id": h.get("agent_id", 0),
+            "mission_id": h.get("mission_id"),
+        } for h in hits],
+    }
+
+
 @router.get("/{mission_id}/field")
 async def get_mission_field(
     mission_id: UUID,
+    scope: str = "mission",
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -1119,12 +1169,16 @@ async def get_mission_field(
             except Exception:
                 pass
 
-        # Get patterns and stability from the inner (unwrapped) backend
+        # Get patterns and stability from the inner (unwrapped) backend.
+        # PRD-166 S1/S4: scope='workspace' shows the workspace-persistent field
+        # (every mission's patterns), 'mission' (default) shows just this run's.
         inner = field._inner
         patterns = []
         stability = {"stability": 0.0, "pattern_count": 0}
 
-        if hasattr(inner, "get_patterns"):
+        if scope == "workspace" and hasattr(inner, "get_workspace_patterns"):
+            patterns = await inner.get_workspace_patterns(str(run.workspace_id))
+        elif hasattr(inner, "get_patterns"):
             patterns = await inner.get_patterns(field_id)
         if hasattr(inner, "measure_stability"):
             stability = await inner.measure_stability(field_id)

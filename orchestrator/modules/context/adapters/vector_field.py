@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import math
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -41,6 +40,7 @@ from qdrant_client.models import (
 from config import config
 from core.llm.embedding_manager import EmbeddingManager
 from core.ports.context import SharedContextPort
+from modules.context import field_scoring
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +74,19 @@ class VectorFieldSharedContext(SharedContextPort):
         self._archival_threshold = config.FIELD_ARCHIVAL_THRESHOLD
         self._boundary_permeability = config.FIELD_BOUNDARY_PERMEABILITY
         self._dimension = config.FIELD_EMBEDDING_DIM
+        self._half_life_access_scale = config.FIELD_HALF_LIFE_ACCESS_SCALE
         self._bootstrap_done = False
+
+    def _scoring_params(self) -> field_scoring.ScoringParams:
+        """PRD-166 S2: the config-sourced curve shared by query, viz, archival,
+        and compaction (one honest definition, D11 config-driven)."""
+        return field_scoring.ScoringParams(
+            decay_rate=self._decay_rate,
+            reinforce_bonus=self._reinforce_bonus,
+            reinforce_cap=self._reinforce_cap,
+            archival_threshold=self._archival_threshold,
+            half_life_access_scale=self._half_life_access_scale,
+        )
 
     # ── Bootstrap ───────────────────────────────────────────────
 
@@ -107,6 +119,7 @@ class VectorFieldSharedContext(SharedContextPort):
         # Payload indexes — idempotent in Qdrant, safe to call repeatedly.
         for field_name, schema in [
             ("field_id", PayloadSchemaType.KEYWORD),
+            ("workspace_id", PayloadSchemaType.KEYWORD),  # PRD-166 S1: workspace-scoped recall
             ("content_hash", PayloadSchemaType.KEYWORD),
             ("agent_id", PayloadSchemaType.INTEGER),
             ("created_at", PayloadSchemaType.KEYWORD),
@@ -135,19 +148,31 @@ class VectorFieldSharedContext(SharedContextPort):
             must.extend(extra)
         return Filter(must=must)
 
+    @staticmethod
+    def _workspace_filter(workspace_id: str) -> Filter:
+        """PRD-166 S1: match every pattern accumulated in a workspace, across all
+        its missions' fields."""
+        return Filter(must=[
+            FieldCondition(key="workspace_id", match=MatchValue(value=workspace_id)),
+        ])
+
     # ── Create / Destroy ────────────────────────────────────────
 
     async def create_context(
         self,
         team_agent_ids: list[int],
         initial_data: Optional[dict[str, Any]] = None,
+        provenance: Optional[dict[str, Any]] = None,
     ) -> str:
         await self.ensure_shared_collection()
         field_id = str(uuid.uuid4())
 
         if initial_data:
             for key, value in initial_data.items():
-                await self.inject(field_id, key, str(value), agent_id=0, strength=1.0)
+                await self.inject(
+                    field_id, key, str(value), agent_id=0, strength=1.0,
+                    provenance=provenance,
+                )
 
         logger.info(
             "[Field] Created field %s (team=%s, seeded=%d)",
@@ -197,6 +222,7 @@ class VectorFieldSharedContext(SharedContextPort):
         value: str,
         agent_id: int,
         strength: float = 1.0,
+        provenance: Optional[dict[str, Any]] = None,
     ) -> None:
         await self.ensure_shared_collection()
 
@@ -214,6 +240,7 @@ class VectorFieldSharedContext(SharedContextPort):
         effective_strength = strength * self._boundary_permeability
         now = datetime.now(timezone.utc).isoformat()
         point_id = str(uuid.uuid4())
+        prov = provenance or {}
 
         await self._client.upsert(
             collection_name=SHARED_COLLECTION,
@@ -222,6 +249,11 @@ class VectorFieldSharedContext(SharedContextPort):
                 vector=embedding,
                 payload={
                     "field_id": context_id,
+                    # PRD-166 S1: provenance — survives the mission so the
+                    # workspace field keeps cross-mission lineage.
+                    "workspace_id": prov.get("workspace_id"),
+                    "mission_id": prov.get("mission_id"),
+                    "task_id": prov.get("task_id"),
                     "agent_id": agent_id,
                     "key": key,
                     "value": value,
@@ -229,6 +261,7 @@ class VectorFieldSharedContext(SharedContextPort):
                     "created_at": now,
                     "last_accessed": now,
                     "access_count": 0,
+                    "expired_at": None,  # set when the mission field is archived (S1)
                     "content_hash": content_hash,
                 },
             )],
@@ -242,66 +275,183 @@ class VectorFieldSharedContext(SharedContextPort):
         context_id: str,
         query: str,
         agent_id: int,
-        top_k: int = 10,
+        top_k: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Mission-scoped query: rank this field's patterns by three-factor
+        resonance (similarity × stability × recency)."""
+        return await self._scored_search(
+            self._field_filter(context_id), query, top_k, label=f"field={context_id}",
+        )
+
+    async def query_workspace(
+        self,
+        workspace_id: str,
+        query: str,
+        agent_id: int = 0,
+        top_k: int = 0,
+    ) -> list[dict[str, Any]]:
+        """PRD-166 S1: workspace-persistent recall — rank patterns accumulated
+        across every mission in the workspace (filter on ``workspace_id``, not a
+        single ``field_id``). Powers cross-mission learning."""
+        return await self._scored_search(
+            self._workspace_filter(workspace_id), query, top_k, label=f"ws={workspace_id}",
+        )
+
+    async def _scored_search(
+        self,
+        scroll_filter: Filter,
+        query: str,
+        top_k: int,
+        label: str,
     ) -> list[dict[str, Any]]:
         await self.ensure_shared_collection()
+        top_k = top_k or config.FIELD_QUERY_TOP_K
+        params = self._scoring_params()
 
         query_embedding = await self._embedder.generate_embedding(query)
 
-        # Over-fetch — decay filtering will reduce the set
+        # Over-fetch — decay/archival filtering will reduce the set.
         response = await self._client.query_points(
             collection_name=SHARED_COLLECTION,
             query=query_embedding,
-            query_filter=self._field_filter(context_id),
-            limit=top_k * 3,
+            query_filter=scroll_filter,
+            limit=top_k * config.FIELD_QUERY_OVER_FETCH,
         )
-        raw_results = response.points
 
         now = datetime.now(timezone.utc)
         scored: list[dict[str, Any]] = []
-
-        for hit in raw_results:
+        for hit in response.points:
             payload = hit.payload
-            last_accessed = datetime.fromisoformat(payload["last_accessed"])
-            age_hours = (now - last_accessed).total_seconds() / 3600
-
-            decayed_strength = self._compute_decayed_strength(
-                initial_strength=payload["strength"],
-                age_hours=age_hours,
-                access_count=payload["access_count"],
+            age_hours = (now - datetime.fromisoformat(payload["last_accessed"])).total_seconds() / 3600
+            ds = self._compute_decayed_strength(
+                payload["strength"], age_hours, payload["access_count"],
             )
-
-            if decayed_strength < self._archival_threshold:
+            if ds < self._archival_threshold:
                 continue
-
-            # Resonance = cosine² × decayed_strength
-            resonance = (hit.score ** 2) * decayed_strength
-
             scored.append({
                 "id": hit.id,
                 "key": payload["key"],
                 "value": payload["value"],
-                "score": resonance,
-                "agent_id": payload["agent_id"],
-                "decayed_strength": decayed_strength,
+                "score": field_scoring.resonance(
+                    hit.score, payload["strength"], age_hours, payload["access_count"], params,
+                ),
+                "agent_id": payload.get("agent_id", 0),
+                "mission_id": payload.get("mission_id"),
+                "decayed_strength": ds,
                 "cosine_similarity": hit.score,
             })
 
         scored.sort(key=lambda x: x["score"], reverse=True)
         top_results = scored[:top_k]
 
-        # Hebbian reinforcement — accessed patterns resist future decay
+        # Hebbian reinforcement — accessed patterns resist future decay.
         accessed_ids = [r["id"] for r in top_results]
         if accessed_ids:
             await self._reinforce_batch(accessed_ids)
 
         logger.info(
-            "[Field] Query field=%s agent=%s results=%d top_score=%.4f query=%s",
-            context_id, agent_id, len(top_results),
+            "[Field] Query %s results=%d top_score=%.4f query=%s",
+            label, len(top_results),
             top_results[0]["score"] if top_results else 0.0,
             query[:60],
         )
         return top_results
+
+    # ── Workspace lifecycle (PRD-166 S1) ────────────────────────
+
+    async def archive_into_workspace(self, field_id: str, workspace_id: str) -> None:
+        """Merge a terminal mission's field into the workspace-persistent field:
+        stamp ``workspace_id`` (so the patterns join cross-mission recall) and
+        ``expired_at`` (so mission-scoped views can soft-archive) on every point.
+        Cheap and in-place — the compaction job consolidates over time."""
+        now = datetime.now(timezone.utc).isoformat()
+        try:
+            await self._client.set_payload(
+                collection_name=SHARED_COLLECTION,
+                payload={"workspace_id": str(workspace_id), "expired_at": now},
+                points=self._field_filter(field_id),
+            )
+            logger.info("[Field] Archived field %s into workspace %s", field_id, workspace_id)
+        except Exception:
+            logger.warning(
+                "[Field] Failed to archive field %s into workspace %s",
+                field_id, workspace_id, exc_info=True,
+            )
+
+    async def compact(
+        self,
+        workspace_id: Optional[str] = None,
+        prune_threshold: Optional[float] = None,
+    ) -> int:
+        """Bound Qdrant: delete points whose decayed strength has fallen below the
+        hard prune floor (``FIELD_PRUNE_THRESHOLD`` — stricter than archival, so
+        archived-but-live patterns survive). Scoped to a workspace when given,
+        else the whole collection. Returns the number pruned. The prune decision
+        is the pure ``field_scoring.is_prunable`` (unit-tested)."""
+        threshold = config.FIELD_PRUNE_THRESHOLD if prune_threshold is None else prune_threshold
+        params = self._scoring_params()
+        scroll_filter = self._workspace_filter(str(workspace_id)) if workspace_id else None
+        now = datetime.now(timezone.utc)
+
+        to_delete: list[Any] = []
+        offset = None
+        scanned = 0
+        while scanned < config.FIELD_COMPACTION_MAX_SCAN:
+            points, offset = await self._client.scroll(
+                collection_name=SHARED_COLLECTION,
+                scroll_filter=scroll_filter,
+                limit=512,
+                offset=offset,
+                with_payload=True,
+                with_vectors=False,
+            )
+            if not points:
+                break
+            for p in points:
+                scanned += 1
+                payload = p.payload or {}
+                try:
+                    age_hours = (
+                        now - datetime.fromisoformat(payload["last_accessed"])
+                    ).total_seconds() / 3600
+                except (KeyError, ValueError, TypeError):
+                    continue
+                if field_scoring.is_prunable(
+                    payload.get("strength", 0.0), age_hours,
+                    payload.get("access_count", 0), params, threshold,
+                ):
+                    to_delete.append(p.id)
+            if offset is None:
+                break
+
+        if to_delete:
+            await self._client.delete(
+                collection_name=SHARED_COLLECTION,
+                points_selector=to_delete,
+            )
+        logger.info(
+            "[Field] Compaction pruned %d/%d scanned point(s) (ws=%s)",
+            len(to_delete), scanned, workspace_id,
+        )
+        return len(to_delete)
+
+    async def health(self) -> dict[str, Any]:
+        """PRD-166 S2: real backend health — pings Qdrant instead of reporting a
+        hardcoded ``'healthy'``. Reflects an actual outage so callers can tell a
+        live-but-empty field from a down backend."""
+        try:
+            await self._client.get_collections()
+            return {
+                "healthy": True,
+                "backend": "vector_field",
+                "collection": SHARED_COLLECTION,
+            }
+        except Exception as exc:
+            return {
+                "healthy": False,
+                "backend": "vector_field",
+                "error": f"{type(exc).__name__}: {exc}",
+            }
 
     # ── Stability measurement ───────────────────────────────────
 
@@ -354,19 +504,27 @@ class VectorFieldSharedContext(SharedContextPort):
     # ── Pattern listing (for field visualizer) ─────────────────
 
     async def get_patterns(self, context_id: str) -> list[dict[str, Any]]:
-        """Return all patterns in the field with computed decayed strength.
+        """Return all patterns in ONE mission field with decayed strength.
 
         Used by the field visualizer API to show the live state of the field.
         Does NOT trigger Hebbian reinforcement (read-only).
         """
+        return await self._list_patterns(self._field_filter(context_id), f"field={context_id}")
+
+    async def get_workspace_patterns(self, workspace_id: str) -> list[dict[str, Any]]:
+        """PRD-166 S1/S4: every pattern accumulated across a workspace's missions,
+        for the workspace-scoped Field view. Read-only."""
+        return await self._list_patterns(self._workspace_filter(workspace_id), f"ws={workspace_id}")
+
+    async def _list_patterns(self, scroll_filter: Filter, label: str) -> list[dict[str, Any]]:
         try:
             points, _ = await self._client.scroll(
                 collection_name=SHARED_COLLECTION,
-                scroll_filter=self._field_filter(context_id),
-                limit=10000,
+                scroll_filter=scroll_filter,
+                limit=config.FIELD_COMPACTION_MAX_SCAN,
             )
         except Exception:
-            logger.debug("[Field] get_patterns scroll failed for %s", context_id, exc_info=True)
+            logger.debug("[Field] get_patterns scroll failed for %s", label, exc_info=True)
             return []
 
         now = datetime.now(timezone.utc)
@@ -388,6 +546,9 @@ class VectorFieldSharedContext(SharedContextPort):
                 "created_at": payload["created_at"],
                 "last_accessed": payload["last_accessed"],
                 "is_archived": decayed < self._archival_threshold,
+                # PRD-166 S1: provenance + soft-archive for the viz / inspector.
+                "mission_id": payload.get("mission_id"),
+                "expired_at": payload.get("expired_at"),
             })
 
         # Sort by decayed strength descending (strongest patterns first)
@@ -402,17 +563,11 @@ class VectorFieldSharedContext(SharedContextPort):
         age_hours: float,
         access_count: int,
     ) -> float:
-        """S(t) = S₀ × e^(-λt) × access_boost
-
-        λ = 0.1 → half-life ≈ 6.93 hours
-        access_boost = 1 + (access_count × 0.05), capped at 2.0
-        """
-        decay = math.exp(-self._decay_rate * age_hours)
-        access_boost = min(
-            1.0 + (access_count * self._reinforce_bonus),
-            self._reinforce_cap,
+        """PRD-166 S2: stability × recency (adaptive half-life), delegated to the
+        pure ``field_scoring`` module so query/viz/archival/compaction agree."""
+        return field_scoring.decayed_strength(
+            initial_strength, age_hours, access_count, self._scoring_params(),
         )
-        return initial_strength * decay * access_boost
 
     async def _find_by_hash(self, context_id: str, content_hash: str):
         """Lookup an existing point in this field with the same content hash.

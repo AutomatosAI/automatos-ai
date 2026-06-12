@@ -1804,40 +1804,6 @@ class ApiClient {
     })
   }
 
-  // Enhanced Analytics Methods
-  // ===== FIELD THEORY ENDPOINTS (All Working ✅) =====
-  async getFieldTheoryHealth() {
-    return this.request('/api/field-theory/health')
-  }
-
-  async updateFieldContext(data: { session_id: string, context_data: any, field_type?: string }) {
-    return this.request('/api/field-theory/fields/update', {
-      method: 'POST',
-      body: JSON.stringify(data)
-    })
-  }
-
-  async propagateField(data: { source: string, targets?: string[], propagation_steps?: number }) {
-    return this.request('/api/field-theory/fields/propagate', {
-      method: 'POST',
-      body: JSON.stringify(data)
-    })
-  }
-
-  async modelFieldInteractions(data: { task_id: number, user_id: number, similarity_threshold?: number }) {
-    return this.request('/api/field-theory/fields/interactions', {
-      method: 'POST',
-      body: JSON.stringify(data)
-    })
-  }
-
-  async manageDynamicFields(data: { session_id: string, context?: any }) {
-    return this.request('/api/field-theory/fields/dynamic', {
-      method: 'POST',
-      body: JSON.stringify(data)
-    })
-  }
-
   // ===== MULTI-AGENT ENDPOINTS (Working ✅) =====
   async getMultiAgentHealth() {
     return this.request('/api/multi-agent/health')

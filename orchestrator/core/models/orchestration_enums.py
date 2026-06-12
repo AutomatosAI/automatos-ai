@@ -81,6 +81,7 @@ class EventType(str, Enum):
     RUN_BUDGET_WARNING = "run_budget_warning"
     RUN_BUDGET_EXCEEDED = "run_budget_exceeded"
     RUN_BUDGET_INCREASED = "run_budget_increased"
+    RUN_FIELD_CONTEXT_DROPPED = "run_field_context_dropped"  # PRD-166 S3: field digest dropped for budget
     RUN_COMPLETED = "run_completed"
     RUN_FAILED = "run_failed"
     RUN_CANCELLED = "run_cancelled"

@@ -124,9 +124,10 @@ class InstrumentedSharedContext(SharedContextPort):
         self,
         team_agent_ids: list[int],
         initial_data: Optional[dict[str, Any]] = None,
+        provenance: Optional[dict[str, Any]] = None,
     ) -> str:
         start = time.monotonic()
-        context_id = await self._inner.create_context(team_agent_ids, initial_data)
+        context_id = await self._inner.create_context(team_agent_ids, initial_data, provenance)
         elapsed_ms = (time.monotonic() - start) * 1000
 
         self._record(
@@ -147,9 +148,10 @@ class InstrumentedSharedContext(SharedContextPort):
         value: str,
         agent_id: int,
         strength: float = 1.0,
+        provenance: Optional[dict[str, Any]] = None,
     ) -> None:
         start = time.monotonic()
-        await self._inner.inject(context_id, key, value, agent_id, strength)
+        await self._inner.inject(context_id, key, value, agent_id, strength, provenance)
         elapsed_ms = (time.monotonic() - start) * 1000
 
         self._record(

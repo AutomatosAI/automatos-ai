@@ -506,6 +506,7 @@ class CoordinatorService:
         self._scheduler = None
         self._owns_scheduler: bool = False
         self._last_archive_at: Optional[datetime] = None
+        self._last_field_compaction_at: Optional[datetime] = None  # PRD-166 S1
         self._field = None  # Lazy-init via factory
 
     def _get_field(self):
@@ -544,10 +545,12 @@ class CoordinatorService:
             )
             team_ids = [a.id for a in agents]
 
-            # Seed the field with the mission goal
+            # Seed the field with the mission goal. PRD-166 S1: carry provenance
+            # so patterns keep workspace/mission lineage into the workspace field.
             field_id = await field.create_context(
                 team_agent_ids=team_ids,
                 initial_data={"mission_goal": run.goal},
+                provenance={"workspace_id": str(run.workspace_id), "mission_id": str(run.id)},
             )
 
             # Store field_id in run config (no migration needed — JSONB)
@@ -595,6 +598,11 @@ class CoordinatorService:
                 value=str(task.output)[:4000],  # Cap to prevent embedding blow-up
                 agent_id=agent_id,
                 strength=1.0,
+                provenance={
+                    "workspace_id": str(run.workspace_id),
+                    "mission_id": str(run.id),
+                    "task_id": str(task.id),
+                },
             )
             logger.info(
                 "[PRD-108] Injected output from task %s into field %s",
@@ -602,6 +610,70 @@ class CoordinatorService:
             )
         except Exception as e:
             logger.warning("[PRD-108] Failed to inject task output: %r", e, exc_info=True)
+
+    async def _attach_field_digest(
+        self,
+        db: Session,
+        run: OrchestrationRun,
+        task: OrchestrationTask,
+        field_id: str,
+        agent_id: int,
+    ) -> None:
+        """PRD-166 S3: pin a budgeted field digest into a task's dispatch prompt.
+
+        Queries the field for knowledge relevant to this task and stores a
+        budget-trimmed digest in ``task.input_context['field_digest']``. When the
+        mission is tight on budget (CRITICAL/EXCEEDED) the digest is DROPPED to
+        save tokens and a ``RUN_FIELD_CONTEXT_DROPPED`` warning is emitted — the
+        budget-gate checkpoint for field context.
+        """
+        field = self._get_field()
+        if not field:
+            return
+
+        # Budget-gate: drop the digest rather than spend tokens we don't have.
+        try:
+            from modules.coordination.dispatcher import BudgetStatus, MissionDispatcher
+            status = MissionDispatcher._get_budget_status(run)
+        except Exception:
+            status, BudgetStatus = None, None
+        if status is not None and status in (BudgetStatus.CRITICAL, BudgetStatus.EXCEEDED):
+            emit_event(
+                db=db,
+                run_id=run.id,
+                event_type=EventType.RUN_FIELD_CONTEXT_DROPPED,
+                actor_type=ActorType.COORDINATOR,
+                actor_id="coordinator",
+                task_id=task.id,
+                payload={"reason": "budget", "budget_status": status.value},
+            )
+            logger.info("[Field] Digest dropped for budget on task %s (%s)", task.id, status.value)
+            return
+
+        try:
+            from modules.context import field_scoring
+            query = f"{task.title or ''}\n{task.description or ''}".strip() or (run.goal or "")
+            results = await field.query(
+                context_id=field_id,
+                query=query,
+                agent_id=agent_id,
+                top_k=Config.FIELD_QUERY_TOP_K,
+            )
+        except Exception:
+            logger.warning("[Field] digest query failed for task %s", task.id, exc_info=True)
+            return
+
+        if not results:
+            return
+        rows = [{"key": r["key"], "value": r["value"]} for r in results]
+        kept, truncated = field_scoring.budget_results(rows, Config.FIELD_QUERY_TOKEN_BUDGET)
+        if not kept:
+            return
+        task.input_context = {
+            **(task.input_context or {}),
+            "field_digest": field_scoring.format_digest(kept, truncated=truncated),
+        }
+        logger.info("[Field] Pinned digest (%d patterns) into task %s", len(kept), task.id)
 
     async def _seed_field_with_documents(
         self,
@@ -636,6 +708,7 @@ class CoordinatorService:
                     ),
                     agent_id=0,
                     strength=1.2,  # Above default so reference material ranks higher
+                    provenance={"workspace_id": str(workspace_id)},
                 )
                 logger.info("[PRD-108] Seeded field %s with doc %s (%s)", field_id, doc_id, doc.filename)
             except Exception as e:
@@ -791,11 +864,23 @@ class CoordinatorService:
             .limit(50)
             .all()
         )
+        field = self._get_field()
+        field_inner = getattr(field, "_inner", field) if field else None
         for run in terminal_with_fields:
             cfg = run.config or {}
             field_id = cfg.get("field_id")
             if not field_id or cfg.get("field_archived"):
                 continue
+            # PRD-166 S1: merge the mission field into the workspace-persistent
+            # field — stamp workspace_id + expired_at on its points so they join
+            # cross-mission recall while the mission-scoped view soft-archives.
+            if field_inner is not None and hasattr(field_inner, "archive_into_workspace"):
+                try:
+                    await field_inner.archive_into_workspace(field_id, str(run.workspace_id))
+                except Exception:
+                    logger.warning(
+                        "[Field] archive_into_workspace failed for run %s", run.id, exc_info=True,
+                    )
             # Archive in place — data and field_id are retained so the
             # /field endpoint can still read this mission's field.
             run.config = {
@@ -1042,6 +1127,9 @@ class CoordinatorService:
                 # --- Save output docs for completed missions ---
                 await self._save_pending_output_documents(db)
                 db.commit()
+
+                # --- PRD-166 S1: field compaction (throttled to once per hour) ---
+                await self._maybe_compact_fields(summary)
 
                 # --- Archive phase (throttled to once per hour) ---
                 self._maybe_archive(db, summary)
@@ -1440,6 +1528,9 @@ class CoordinatorService:
                 **(task.input_context or {}),
                 "field_id": field_id,
             }
+            # PRD-166 S3: pin a budgeted field digest into the prompt so the agent
+            # starts with accumulated knowledge instead of having to query for it.
+            await self._attach_field_digest(db, run, task, field_id, agent_id)
 
         # PRD-127: Get attachment_ids for this task
         task_attachment_ids: List[str] = []
@@ -2941,6 +3032,32 @@ class CoordinatorService:
     # ------------------------------------------------------------------
     # Archival (PRD-82B US-009)
     # ------------------------------------------------------------------
+
+    async def _maybe_compact_fields(self, summary: Dict[str, Any]) -> None:
+        """PRD-166 S1: retention/compaction for field memory — prune dead patterns
+        so the shared Qdrant collection stays bounded as workspace fields compound
+        across missions. Throttled to once per hour (expensive scan); errors never
+        affect the rest of the tick. The prune decision is the unit-tested
+        ``field_scoring.is_prunable``."""
+        now = datetime.now(timezone.utc)
+        if (
+            self._last_field_compaction_at is not None
+            and (now - self._last_field_compaction_at).total_seconds() < 3600
+        ):
+            return
+        self._last_field_compaction_at = now
+
+        field = self._get_field()
+        inner = getattr(field, "_inner", field) if field else None
+        if inner is None or not hasattr(inner, "compact"):
+            return
+        try:
+            pruned = await inner.compact()
+            if pruned:
+                summary["field_pruned"] = pruned
+                logger.info("[Coordinator] Field compaction pruned %d pattern(s)", pruned)
+        except Exception:
+            logger.warning("[Coordinator] Field compaction failed", exc_info=True)
 
     def _maybe_archive(self, db: Session, summary: Dict[str, Any]) -> None:
         """

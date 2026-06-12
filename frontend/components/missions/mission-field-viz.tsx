@@ -6,8 +6,11 @@ import { cn } from '@/lib/utils'
 import type { FieldPattern } from '@/hooks/use-missions-api'
 import { patternsToFieldGraph, type FieldGraphNode } from './mission-field-viz-utils'
 import { FieldVizErrorBoundary } from './field-viz-error-boundary'
+import { GraphView } from '../graph'
+import { MissionFieldInspector } from './mission-field-inspector'
 
 interface MissionFieldVizProps {
+  missionId: string
   patterns: FieldPattern[]
   className?: string
 }
@@ -35,10 +38,7 @@ const ForceGraph2D = dynamic(() => import('react-force-graph-2d'), {
 
 const BACKGROUND = '#0a0a12'
 const LINK_COLOR = 'rgba(148, 163, 184, 0.25)'
-
-function nodeColor(node: FieldGraphNode): string {
-  return node.color
-}
+const FIRING_COLOR = '#fbbf24' // amber — a pattern that fired for the trace query
 
 function nodeLabel(node: FieldGraphNode): string {
   if (node.kind === 'pattern') {
@@ -47,9 +47,11 @@ function nodeLabel(node: FieldGraphNode): string {
   return node.label
 }
 
-export function MissionFieldViz({ patterns, className }: MissionFieldVizProps) {
+export function MissionFieldViz({ missionId, patterns, className }: MissionFieldVizProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ w: 800, h: 400 })
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [firingIds, setFiringIds] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -63,39 +65,36 @@ export function MissionFieldViz({ patterns, className }: MissionFieldVizProps) {
 
   const graphData = useMemo(() => patternsToFieldGraph(patterns), [patterns])
 
+  const selectedPattern = useMemo(() => {
+    if (!selectedId || !selectedId.startsWith('pattern:')) return null
+    const id = selectedId.slice('pattern:'.length)
+    return patterns.find((p) => p.id === id) ?? null
+  }, [selectedId, patterns])
+
   const common = {
     graphData,
     width: size.w,
     height: size.h,
     backgroundColor: BACKGROUND,
     nodeLabel,
-    nodeColor,
+    nodeColor: (n: FieldGraphNode) => (firingIds.has(n.id) ? FIRING_COLOR : n.color),
     nodeVal: (n: FieldGraphNode) => n.val,
     nodeOpacity: 0.9,
     linkColor: () => LINK_COLOR,
     linkWidth: 1,
     enableNodeDrag: false,
+    onNodeClick: (n: FieldGraphNode) => setSelectedId(n.id),
   }
 
-  return (
-    <div
-      ref={containerRef}
-      className={cn('w-full h-full min-h-[400px]', className)}
-      style={{ background: BACKGROUND }}
-    >
-      {graphData.nodes.length <= 1 ? (
-        <div className="w-full h-full flex items-center justify-center text-xs text-muted-foreground">
-          No field patterns yet.
-        </div>
-      ) : (
+  const renderer =
+    graphData.nodes.length <= 1 ? (
+      <div className="w-full h-full flex items-center justify-center text-xs text-muted-foreground">
+        No field patterns yet.
+      </div>
+    ) : (
+      <div ref={containerRef} className="w-full h-full min-h-[400px]" style={{ background: BACKGROUND }}>
         <FieldVizErrorBoundary
-          fallback={
-            <ForceGraph2D
-              {...common}
-              linkDirectionalParticles={1}
-              linkDirectionalParticleWidth={1.5}
-            />
-          }
+          fallback={<ForceGraph2D {...common} linkDirectionalParticles={1} linkDirectionalParticleWidth={1.5} />}
         >
           <ForceGraph3D
             {...common}
@@ -104,7 +103,24 @@ export function MissionFieldViz({ patterns, className }: MissionFieldVizProps) {
             linkDirectionalParticleWidth={1.5}
           />
         </FieldVizErrorBoundary>
-      )}
-    </div>
+      </div>
+    )
+
+  return (
+    <GraphView
+      className={cn('h-full', className)}
+      fillHeight
+      bareArea
+      sidePanel={
+        <MissionFieldInspector
+          missionId={missionId}
+          selected={selectedPattern}
+          onClearSelection={() => setSelectedId(null)}
+          onFiringChange={setFiringIds}
+        />
+      }
+    >
+      {renderer}
+    </GraphView>
   )
 }
