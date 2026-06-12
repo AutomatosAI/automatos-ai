@@ -183,43 +183,69 @@ class TestValidatorRunsBeforeExecute:
                 return segment
         raise AssertionError("query_database method not found in service.py")
 
+    @pytest.fixture(scope="class")
+    def guards_body(self, query_db_source: str) -> str:
+        """Body of ``_run_sql_with_guards`` — PRD-160 S2 relocated the
+        ``conn.execute`` here behind an EXPLAIN dry-run + statement timeout."""
+        tree = ast.parse(query_db_source)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == "_run_sql_with_guards":
+                segment = ast.get_source_segment(query_db_source, node)
+                assert segment is not None, "_run_sql_with_guards not extractable"
+                return segment
+        raise AssertionError("_run_sql_with_guards method not found in service.py")
+
     def test_validate_call_appears_in_query_database(self, query_db_body: str):
         assert "validator.validate_and_rewrite(" in query_db_body, (
             "query_database must call validator.validate_and_rewrite"
         )
 
-    def test_execute_call_appears_in_query_database(self, query_db_body: str):
-        assert "conn.execute(text(" in query_db_body or "conn.execute(\n" in query_db_body or "execute(text(validated_sql" in query_db_body, (
-            "query_database must execute the validated SQL through the connection"
+    def test_execute_seam_appears_in_query_database(self, query_db_body: str):
+        # PRD-160 S2: execution moved behind ``_run_sql_with_guards`` (timeout
+        # + EXPLAIN dry-run). query_database hands it the *validated* SQL.
+        assert "_run_sql_with_guards(" in query_db_body, (
+            "query_database must execute via _run_sql_with_guards"
         )
 
     def test_validate_appears_before_execute(self, query_db_body: str):
         idx_validate = query_db_body.find("validate_and_rewrite(")
-        idx_execute = query_db_body.find("conn.execute(")
+        idx_execute = query_db_body.find("_run_sql_with_guards(")
         assert idx_validate >= 0, "validate_and_rewrite call not found"
-        assert idx_execute >= 0, "conn.execute call not found"
+        assert idx_execute >= 0, "_run_sql_with_guards call not found"
         assert idx_validate < idx_execute, (
-            "validator MUST run before conn.execute — found validate at "
-            f"col {idx_validate}, execute at col {idx_execute}"
+            "validator MUST run before execution — found validate at "
+            f"col {idx_validate}, execute seam at col {idx_execute}"
         )
 
     def test_executor_uses_validated_sql_not_generated_sql(self, query_db_body: str):
-        # The exact line we pin: ``conn.execute(text(validated_sql))``.
-        # If a future refactor passes ``generated_sql`` (the raw LLM
-        # output) instead, this test fails — and the §H "no unvalidated
-        # query reaches the database" line is back.
+        # The execute seam must receive ``validated_sql`` — never the raw LLM
+        # ``generated_sql``. Passing generated_sql would re-open the §H "no
+        # unvalidated query reaches the database" hole.
         assert re.search(
-            r"conn\.execute\s*\(\s*text\s*\(\s*validated_sql\b",
+            r"_run_sql_with_guards\s*\(\s*source\s*,\s*credentials\s*,\s*validated_sql\b",
             query_db_body,
         ), (
-            "conn.execute must take text(validated_sql), never the raw "
+            "_run_sql_with_guards must take validated_sql, never the raw "
             "generated_sql — that would bypass the validator gate"
         )
-        # And the inverse: no execute on generated_sql in this method.
-        assert not re.search(
-            r"conn\.execute\s*\(\s*text\s*\(\s*generated_sql\b",
-            query_db_body,
-        ), "generated_sql must NEVER be passed to conn.execute"
+        assert "generated_sql)" not in query_db_body.replace("validated_sql", ""), (
+            "generated_sql must NEVER be handed to the execute seam"
+        )
+
+    def test_guards_explain_before_execute(self, guards_body: str):
+        # PRD-160 S2: the dry-run EXPLAIN must precede the real execution so
+        # bad SQL fails on the planner, cheaply, and feeds self-correction.
+        idx_explain = guards_body.find('EXPLAIN {sql}')
+        idx_execute = guards_body.find("conn.execute(text(sql))")
+        assert idx_explain >= 0, "EXPLAIN dry-run not found in _run_sql_with_guards"
+        assert idx_execute >= 0, "conn.execute(text(sql)) not found in _run_sql_with_guards"
+        assert idx_explain < idx_execute, "EXPLAIN must run before the real query"
+
+    def test_guards_apply_statement_timeout(self, guards_body: str):
+        # A runaway query must be bounded — the timeout SET precedes execution.
+        assert "_statement_timeout_sql(" in guards_body, (
+            "_run_sql_with_guards must apply a per-statement timeout"
+        )
 
     def test_validation_failure_returns_visible_error(self, query_db_body: str):
         # On SQLValidationError, the failure path appends to ``attempted_sqls``

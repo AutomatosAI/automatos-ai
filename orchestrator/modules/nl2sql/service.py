@@ -235,6 +235,134 @@ class DatabaseKnowledgeService:
 
         return result
     
+    # ------------------------------------------------------------------
+    # PRD-160 S2 — accuracy stack: execution guards + value sampling
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _quote_ident(dialect: str, ident: str) -> str:
+        if (dialect or "").lower().startswith("mysql"):
+            return "`" + str(ident).replace("`", "``") + "`"
+        return '"' + str(ident).replace('"', '""') + '"'
+
+    def _nl2sql_connection_string(self, credentials: Dict[str, Any], dialect: str) -> str:
+        """Build a SQLAlchemy URL for a knowledge source's database."""
+        host = credentials.get("host")
+        port = credentials.get("port")
+        database = credentials.get("database")
+        user = credentials.get("user") or credentials.get("username")
+        password = credentials.get("password")
+        d = (dialect or "").lower()
+        if d.startswith("postgres"):
+            return f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}"
+        if d.startswith("mysql"):
+            return f"mysql+pymysql://{user}:{password}@{host}:{port}/{database}"
+        raise ValueError(f"Unsupported dialect: {dialect}")
+
+    @staticmethod
+    def _statement_timeout_sql(dialect: str, seconds: int) -> Optional[str]:
+        ms = int(max(1, seconds) * 1000)
+        d = (dialect or "").lower()
+        if d.startswith("postgres"):
+            return f"SET statement_timeout = {ms}"
+        if d.startswith("mysql"):
+            return f"SET max_execution_time = {ms}"
+        return None
+
+    def _run_sql_with_guards(
+        self, source, credentials: Dict[str, Any], sql: str
+    ) -> Tuple[List[str], List[Dict[str, Any]]]:
+        """Execute a validated read-only query under a per-statement timeout,
+        after an EXPLAIN dry-run.
+
+        PRD-160 S2: the timeout bounds a runaway query; the EXPLAIN runs the
+        planner over the statement first, so malformed / bad-column SQL fails
+        cheaply and feeds the self-correction loop *before* a full table scan.
+        Raises on any failure (the caller's retry loop catches it).
+        """
+        conn_str = self._nl2sql_connection_string(credentials, source.dialect)
+        timeout_s = getattr(source, "query_timeout_seconds", None) or 30
+        engine = create_engine(conn_str, pool_pre_ping=True)
+        try:
+            with engine.connect() as conn:
+                timeout_sql = self._statement_timeout_sql(source.dialect, timeout_s)
+                if timeout_sql:
+                    conn.execute(text(timeout_sql))
+                conn.execute(text(f"EXPLAIN {sql}"))  # dry-run validation
+                result = conn.execute(text(sql))
+                columns = list(result.keys())
+                rows = [dict(zip(columns, row)) for row in result.fetchall()]
+                return columns, rows
+        finally:
+            engine.dispose()
+
+    def _augment_schema_with_samples(
+        self,
+        source,
+        credentials: Dict[str, Any],
+        schema_metadata: Dict[str, Any],
+        max_distinct: int = 12,
+        max_columns: int = 40,
+    ) -> None:
+        """Populate ``col['samples']`` for low-cardinality columns, in place.
+
+        PRD-160 S2: grounding generation in real categorical values (e.g.
+        status ∈ {active, churned, trial}) sharply cuts wrong-literal errors.
+        Only text/enum/bool columns are probed, and a value set is kept only
+        when small (≤ max_distinct) — high-cardinality columns (ids,
+        timestamps, free text) never reach the prompt. Best-effort: any
+        failure leaves the schema untouched. The generator already renders
+        ``col['samples']`` into the prompt (nl2sql_service._build_prompt).
+        """
+        tables = schema_metadata.get("tables") or []
+        if not tables:
+            return
+        try:
+            conn_str = self._nl2sql_connection_string(credentials, source.dialect)
+        except ValueError:
+            return
+        engine = create_engine(conn_str, pool_pre_ping=True)
+        sampled = 0
+        try:
+            with engine.connect() as conn:
+                to = self._statement_timeout_sql(source.dialect, 5)
+                if to:
+                    conn.execute(text(to))
+                for table in tables:
+                    tname = table.get("name")
+                    if not tname:
+                        continue
+                    for col in (table.get("columns") or []):
+                        if sampled >= max_columns:
+                            return
+                        cname = col.get("name")
+                        ctype = (col.get("type") or "").lower()
+                        if not cname or col.get("samples"):
+                            continue
+                        # Categorical-ish only: char/varchar/enum/bool. Skip
+                        # numeric ids, timestamps, blobs, and free-form text.
+                        if not any(t in ctype for t in ("char", "enum", "bool")):
+                            continue
+                        tq = self._quote_ident(source.dialect, tname)
+                        cq = self._quote_ident(source.dialect, cname)
+                        try:
+                            rows = conn.execute(
+                                text(
+                                    f"SELECT DISTINCT {cq} AS v FROM {tq} "
+                                    f"WHERE {cq} IS NOT NULL LIMIT :lim"
+                                ),
+                                {"lim": max_distinct + 1},
+                            ).fetchall()
+                            vals = [r[0] for r in rows]
+                            if 0 < len(vals) <= max_distinct:
+                                col["samples"] = [str(v) for v in vals]
+                                sampled += 1
+                        except Exception:
+                            continue
+        except Exception as e:  # noqa: BLE001 — sampling is best-effort
+            logger.debug(f"value sampling skipped: {e}")
+        finally:
+            engine.dispose()
+
     async def query_database(
         self,
         source_id: str,
@@ -341,6 +469,13 @@ class DatabaseKnowledgeService:
         except Exception as e:
             logger.warning(f"ContextService unavailable for NL2SQL, proceeding without: {e}")
 
+        # PRD-160 S2: ground generation in real low-cardinality column values
+        # (status ∈ {active, churned}, …) so the LLM emits correct literals.
+        try:
+            self._augment_schema_with_samples(source, credentials, schema_metadata)
+        except Exception as e:
+            logger.debug(f"value sampling skipped: {e}")
+
         # PRD-61 US-005: Error self-correction loop
         last_error = None
         attempted_sqls = []
@@ -404,26 +539,11 @@ class DatabaseKnowledgeService:
                     "corrections": attempted_sqls
                 }
 
-            # Step 6: Execute
+            # Step 6: Execute under PRD-160 S2 guards — per-statement timeout
+            # bounds runaway queries; EXPLAIN dry-run catches bad SQL cheaply
+            # and (on failure) feeds the self-correction loop below.
             try:
-                host = credentials.get("host")
-                port = credentials.get("port")
-                database = credentials.get("database")
-                user = credentials.get("user") or credentials.get("username")
-                password = credentials.get("password")
-
-                if source.dialect.lower().startswith('postgres'):
-                    conn_str = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}"
-                elif source.dialect.lower().startswith('mysql'):
-                    conn_str = f"mysql+pymysql://{user}:{password}@{host}:{port}/{database}"
-                else:
-                    raise ValueError(f"Unsupported dialect: {source.dialect}")
-
-                engine = create_engine(conn_str, pool_pre_ping=True)
-                with engine.connect() as conn:
-                    result = conn.execute(text(validated_sql))
-                    columns = list(result.keys())
-                    rows = [dict(zip(columns, row)) for row in result.fetchall()]
+                columns, rows = self._run_sql_with_guards(source, credentials, validated_sql)
 
                 execution_time = (datetime.utcnow() - start_time).total_seconds() * 1000
 
