@@ -93,11 +93,11 @@ def _seed_doc(db, workspace_id, team_access="{}", n_chunks=12):
         db.execute(
             text(
                 """
-                INSERT INTO document_chunks (document_id, chunk_index, content, workspace_id)
-                VALUES (:doc, :idx, :content, :ws)
+                INSERT INTO document_chunks (document_id, chunk_index, content)
+                VALUES (:doc, :idx, :content)
                 """
             ),
-            {"doc": doc_id, "idx": i, "content": f"paragraph {i} " * 200, "ws": workspace_id},
+            {"doc": doc_id, "idx": i, "content": f"paragraph {i} " * 200},
         )
     db.flush()
     return doc_id
@@ -161,11 +161,11 @@ async def test_grep_documents_matches_and_scopes(db_session, seed_workspace):
     db_session.execute(
         text(
             """
-            INSERT INTO document_chunks (document_id, chunk_index, content, workspace_id)
-            VALUES (:doc, 0, 'the error code is ERR_TIMEOUT here', :ws)
+            INSERT INTO document_chunks (document_id, chunk_index, content)
+            VALUES (:doc, 0, 'the error code is ERR_TIMEOUT here')
             """
         ),
-        {"doc": doc_id, "ws": ws},
+        {"doc": doc_id},
     )
     db_session.flush()
 

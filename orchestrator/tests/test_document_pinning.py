@@ -141,10 +141,10 @@ def test_pin_inject_and_unpin(db_session, seed_workspace):
     ).scalar()
     db_session.execute(
         text(
-            "INSERT INTO document_chunks (document_id, chunk_index, content, workspace_id) "
-            "VALUES (:doc, 0, 'PINNED-MARKER unique content', :ws)"
+            "INSERT INTO document_chunks (document_id, chunk_index, content) "
+            "VALUES (:doc, 0, 'PINNED-MARKER unique content')"
         ),
-        {"doc": doc_id, "ws": ws},
+        {"doc": doc_id},
     )
     db_session.flush()
 

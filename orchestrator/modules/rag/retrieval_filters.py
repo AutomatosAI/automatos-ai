@@ -128,7 +128,7 @@ def build_retrieval_filters(
 
 SCOPE_WHERE_TEAM = (
     "workspace_id = CAST(:workspace_id AS uuid) "
-    "AND (team_access = '{}' OR team_access && CAST(:team_terms AS text[]))"
+    "AND (team_access = '{}' OR CAST(team_access AS text[]) && CAST(:team_terms AS text[]))"
 )
 SCOPE_WHERE_WORKSPACE_ONLY = "workspace_id = CAST(:workspace_id AS uuid)"
 
