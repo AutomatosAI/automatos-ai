@@ -110,23 +110,23 @@ ON CONFLICT (workspace_id, normalized_name) DO NOTHING
 
 
 @pytest.mark.integration
-def test_backfill_collapses_mixed_case(db_session):
+def test_backfill_collapses_mixed_case(db_session, seed_workspace):
     from sqlalchemy import text
 
-    ws = str(uuid.uuid4())
+    ws = seed_workspace()  # FK parent for agents/documents/teams.workspace_id
     # Two agents 'Support'/'support' and a doc team 'Sales' → 2 teams.
     for team in ("Support", "support"):
         db_session.execute(
             text(
                 "INSERT INTO agents (name, agent_type, workspace_id, team, status, slug) "
-                "VALUES (:n, 'custom', :ws::uuid, :team, 'active', :slug)"
+                "VALUES (:n, 'custom', CAST(:ws AS uuid), :team, 'active', :slug)"
             ),
             {"n": f"a-{team}", "ws": ws, "team": team, "slug": f"a-{uuid.uuid4().hex[:8]}"},
         )
     db_session.execute(
         text(
             "INSERT INTO documents (filename, workspace_id, team_access, status, upload_date) "
-            "VALUES ('d.txt', :ws::uuid, ARRAY['Sales'], 'processed', NOW())"
+            "VALUES ('d.txt', CAST(:ws AS uuid), ARRAY['Sales'], 'processed', NOW())"
         ),
         {"ws": ws},
     )
@@ -136,7 +136,7 @@ def test_backfill_collapses_mixed_case(db_session):
     db_session.flush()
 
     rows = db_session.execute(
-        text("SELECT normalized_name FROM teams WHERE workspace_id = :ws::uuid ORDER BY normalized_name"),
+        text("SELECT normalized_name FROM teams WHERE workspace_id = CAST(:ws AS uuid) ORDER BY normalized_name"),
         {"ws": ws},
     ).fetchall()
     normalized = [r[0] for r in rows]
@@ -144,12 +144,13 @@ def test_backfill_collapses_mixed_case(db_session):
 
 
 @pytest.mark.integration
-def test_org_chart_teams_match_teams_api(db_session):
+def test_org_chart_teams_match_teams_api(db_session, seed_workspace):
     """org-chart's team list and list_teams() read the same table."""
     from sqlalchemy import text
     from core.team_access import list_teams, get_or_create_team
 
     ws = uuid.uuid4()
+    seed_workspace(ws)  # FK parent for teams.workspace_id
     get_or_create_team(db_session, ws, "Engineering")
     get_or_create_team(db_session, ws, "Support")
     db_session.flush()
