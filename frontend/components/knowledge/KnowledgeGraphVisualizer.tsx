@@ -119,9 +119,19 @@ const KnowledgeGraphVisualizer: React.FC = () => {
 
     const svg = d3.select(svgRef.current);
     svg.selectAll('*').remove(); // Clear previous graph
-    
-    // Force background color
-    svg.attr('style', 'background-color: #111827 !important;');
+
+    // PRD-169 S3: resolve theme tokens to concrete colors so the graph renders
+    // correctly in BOTH light and dark themes (previously hardcoded dark #111827
+    // + white text, which was invisible/wrong in the light theme).
+    const css = getComputedStyle(svgRef.current);
+    const token = (name: string) => `hsl(${css.getPropertyValue(name).trim()})`;
+    const surfaceColor = token('--card');
+    const fgColor = token('--foreground');
+    const edgeColor = token('--primary');
+    const haloColor = token('--background');
+    const mutedColor = token('--muted-foreground');
+
+    svg.attr('style', `background-color: ${surfaceColor};`);
 
     const width = svgRef.current.clientWidth;
     const height = svgRef.current.clientHeight;
@@ -141,7 +151,7 @@ const KnowledgeGraphVisualizer: React.FC = () => {
     svg.append('rect')
       .attr('width', width)
       .attr('height', height)
-      .attr('fill', '#111827')
+      .attr('fill', surfaceColor)
       .attr('opacity', 1);
 
     // Main group for zooming/panning
@@ -160,7 +170,7 @@ const KnowledgeGraphVisualizer: React.FC = () => {
       .attr('orient', 'auto')
       .append('path')
       .attr('d', 'M0,-5L10,0L0,5')
-      .attr('fill', '#8b5cf6');  // Purple arrows
+      .attr('fill', edgeColor);
 
     // Prepare node data with D3 force simulation types
     const nodes = data.nodes.map((n) => ({
@@ -193,7 +203,7 @@ const KnowledgeGraphVisualizer: React.FC = () => {
       .selectAll('line')
       .data(edges)
       .enter().append('line')
-      .attr('stroke', '#8b5cf6')  // Purple lines
+      .attr('stroke', edgeColor)
       .attr('stroke-width', (d: any) => 2 + d.strength * 2)
       .attr('stroke-opacity', 0.8)
       .attr('marker-end', 'url(#arrowhead)');
@@ -206,7 +216,7 @@ const KnowledgeGraphVisualizer: React.FC = () => {
       .data(edges)
       .enter().append('text')
       .attr('font-size', 12)
-      .attr('fill', '#ffffff')  // White text for visibility
+      .attr('fill', fgColor)
       .attr('text-anchor', 'middle')
       .text((d: any) => d.label);
 
@@ -218,8 +228,8 @@ const KnowledgeGraphVisualizer: React.FC = () => {
       .data(nodes)
       .enter().append('circle')
       .attr('r', (d: any) => 10 + (d.importance * 15))
-      .attr('fill', (d: any) => typeColors[d.type] || '#6b7280')
-      .attr('stroke', '#ffffff')  // White stroke for contrast
+      .attr('fill', (d: any) => typeColors[d.type] || mutedColor)
+      .attr('stroke', haloColor)
       .attr('stroke-width', 2)
       .attr('opacity', 0.9)
       .style('cursor', 'pointer')
@@ -237,7 +247,7 @@ const KnowledgeGraphVisualizer: React.FC = () => {
       .enter().append('text')
       .attr('font-size', 14)
       .attr('font-weight', 'bold')
-      .attr('fill', '#ffffff')  // White text for visibility
+      .attr('fill', fgColor)
       .attr('text-anchor', 'middle')
       .attr('dy', '0.35em')
       .text((d: any) => d.label)
@@ -457,7 +467,7 @@ const KnowledgeGraphVisualizer: React.FC = () => {
         <svg
           ref={svgRef}
           className="w-full h-full bg-background"
-          style={{ minHeight: '600px', backgroundColor: '#111827' }}
+          style={{ minHeight: '600px', backgroundColor: 'hsl(var(--card))' }}
         />
       </div>
 

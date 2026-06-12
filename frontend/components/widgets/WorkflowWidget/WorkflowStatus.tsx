@@ -81,7 +81,7 @@ function getStatusConfig(status: WorkflowStatusType) {
         icon: AlertCircle,
         label: 'Cancelled',
         variant: 'secondary' as const,
-        className: 'bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300',
+        className: 'bg-warning text-warning dark:bg-warning dark:text-warning',
       }
     default:
       return {

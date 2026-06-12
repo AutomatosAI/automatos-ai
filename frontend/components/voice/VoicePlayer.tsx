@@ -104,7 +104,7 @@ export function VoicePlayer({
       animate={{ opacity: 1, y: 0 }}
       className={[
         'flex items-center gap-2',
-        compact ? 'py-1' : 'py-2 px-3 rounded-xl bg-orange-500/5 border border-orange-500/15',
+        compact ? 'py-1' : 'py-2 px-3 rounded-xl bg-warning/5 border border-warning/15',
         className,
       ].join(' ')}
     >
@@ -115,10 +115,10 @@ export function VoicePlayer({
         size="sm"
         onClick={handlePlayPause}
         disabled={state === 'loading'}
-        className="h-7 w-7 p-0 flex-shrink-0 text-orange-400 hover:text-orange-300 hover:bg-orange-500/10"
+        className="h-7 w-7 p-0 flex-shrink-0 text-warning hover:text-warning hover:bg-warning/10"
       >
         {state === 'loading' ? (
-          <div className="w-3.5 h-3.5 rounded-full border-2 border-orange-400 border-t-transparent animate-spin" />
+          <div className="w-3.5 h-3.5 rounded-full border-2 border-warning border-t-transparent animate-spin" />
         ) : state === 'playing' ? (
           <Pause className="w-3.5 h-3.5 fill-current" />
         ) : (
@@ -128,17 +128,17 @@ export function VoicePlayer({
 
       {/* Progress bar */}
       <div
-        className="flex-1 h-1.5 rounded-full bg-orange-500/10 cursor-pointer relative group"
+        className="flex-1 h-1.5 rounded-full bg-warning/10 cursor-pointer relative group"
         onClick={handleSeek}
       >
         <div
-          className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-orange-500 to-red-500 transition-[width] duration-100"
+          className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-warning to-red-500 transition-[width] duration-100"
           style={{ width: `${Math.min(progress, 100)}%` }}
         />
         {/* Scrubber dot on hover */}
         {isActive && (
           <div
-            className="absolute top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-orange-400 shadow-[0_0_6px_rgba(249,115,22,0.4)] opacity-0 group-hover:opacity-100 transition-opacity"
+            className="absolute top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-warning shadow-[0_0_6px_rgba(249,115,22,0.4)] opacity-0 group-hover:opacity-100 transition-opacity"
             style={{ left: `calc(${Math.min(progress, 100)}% - 5px)` }}
           />
         )}
@@ -161,7 +161,7 @@ export function VoicePlayer({
 
       {/* Volume icon indicator */}
       {!compact && (
-        <Volume2 className="w-3.5 h-3.5 text-orange-400/50 flex-shrink-0" />
+        <Volume2 className="w-3.5 h-3.5 text-warning/50 flex-shrink-0" />
       )}
     </motion.div>
   )

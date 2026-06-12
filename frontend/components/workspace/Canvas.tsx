@@ -60,6 +60,22 @@ export function Canvas({ className, width = 1200, onClose }: CanvasProps) {
     }
   }, [effectiveActiveId, widgetIds, removeWidget, setActiveWidget])
 
+  // Keyboard navigation across the tab list (WAI-ARIA tabs, automatic activation)
+  const handleTabKeyDown = useCallback((e: React.KeyboardEvent) => {
+    const idx = widgetIds.indexOf(effectiveActiveId as string)
+    if (idx < 0) return
+    let nextIdx: number | null = null
+    if (e.key === 'ArrowRight') nextIdx = (idx + 1) % widgetIds.length
+    else if (e.key === 'ArrowLeft') nextIdx = (idx - 1 + widgetIds.length) % widgetIds.length
+    else if (e.key === 'Home') nextIdx = 0
+    else if (e.key === 'End') nextIdx = widgetIds.length - 1
+    if (nextIdx === null) return
+    e.preventDefault()
+    const nextId = widgetIds[nextIdx]
+    setActiveWidget(nextId)
+    requestAnimationFrame(() => document.getElementById(`canvas-tab-${nextId}`)?.focus())
+  }, [widgetIds, effectiveActiveId, setActiveWidget])
+
   // Empty state
   if (widgetIds.length === 0) {
     return (
@@ -94,7 +110,7 @@ export function Canvas({ className, width = 1200, onClose }: CanvasProps) {
       <div className="flex-shrink-0 border-b border-border bg-muted/30">
         <div className="flex items-center">
           <ScrollArea className="flex-1">
-            <div className="flex">
+            <div className="flex" role="tablist" aria-label="Open widgets" onKeyDown={handleTabKeyDown}>
             {widgetIds.map((id) => {
               const widget = widgets[id]
               if (!widget) return null
@@ -105,10 +121,16 @@ export function Canvas({ className, width = 1200, onClose }: CanvasProps) {
               return (
                 <div
                   key={id}
+                  role="tab"
+                  id={`canvas-tab-${id}`}
+                  aria-selected={isActive}
+                  aria-controls="canvas-tabpanel"
+                  tabIndex={isActive ? 0 : -1}
                   onClick={() => setActiveWidget(id)}
                   className={cn(
                     'group flex items-center gap-2 px-3 py-2 border-r border-border cursor-pointer',
                     'hover:bg-muted/50 transition-colors min-w-[120px] max-w-[200px]',
+                    'focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:ring-inset',
                     isActive
                       ? 'bg-background border-b-2 border-b-primary'
                       : 'bg-muted/20'
@@ -127,8 +149,9 @@ export function Canvas({ className, width = 1200, onClose }: CanvasProps) {
                   <Button
                     variant="ghost"
                     size="icon"
+                    aria-label={`Close ${widget.title}`}
                     className={cn(
-                      'h-5 w-5 p-0 opacity-0 group-hover:opacity-100 hover:bg-destructive/20',
+                      'h-5 w-5 p-0 opacity-60 hover:opacity-100 hover:bg-destructive/20',
                       'transition-opacity'
                     )}
                     onClick={(e) => handleCloseTab(e, id)}
@@ -161,7 +184,13 @@ export function Canvas({ className, width = 1200, onClose }: CanvasProps) {
       </div>
 
       {/* Active Widget Content - Full Size */}
-      <div className="flex-1 overflow-hidden">
+      <div
+        className="flex-1 overflow-hidden"
+        role="tabpanel"
+        id="canvas-tabpanel"
+        aria-labelledby={effectiveActiveId ? `canvas-tab-${effectiveActiveId}` : undefined}
+        tabIndex={0}
+      >
         {activeWidget ? (
           <div className="h-full">
             <WidgetWrapper

@@ -83,12 +83,12 @@ export function AgentConfiguration({
   const [skillsSaving, setSkillsSaving] = useState(false)
 
   // Fetch agent and configuration data
-  const { data: agent, isLoading: agentLoading } = useAgent(selectedAgentId)
-  const { data: agentConfig, isLoading: configLoading } = useAgentConfig(selectedAgentId)
+  const { data: agent, isLoading: agentLoading, refetch: refetchAgent } = useAgent(selectedAgentId)
+  const { data: agentConfig, isLoading: configLoading, refetch: refetchConfig } = useAgentConfig(selectedAgentId)
   const updateConfigMutation = useUpdateAgentConfig()
 
   // PRD-15: Model configuration hooks
-  const { data: agentModelConfig } = useAgentModelConfig(selectedAgentId ? Number(selectedAgentId) : null)
+  const { data: agentModelConfig, refetch: refetchModelConfig } = useAgentModelConfig(selectedAgentId ? Number(selectedAgentId) : null)
   const updateModelConfigMutation = useUpdateAgentModelConfig()
 
   // Tools API
@@ -349,9 +349,10 @@ export function AgentConfiguration({
       toast.success('Configuration saved!')
       setHasUnsavedChanges(false)
 
-      // Force refresh agent data
-      console.log('Reloading page to refresh agent data...')
-      setTimeout(() => window.location.reload(), 500)
+      // Refresh agent data from the server (replaces the old full-page reload)
+      refetchAgent()
+      refetchConfig()
+      refetchModelConfig()
     } catch (error: any) {
       toast.dismiss()
       toast.error(error?.message || 'Failed to save configuration')

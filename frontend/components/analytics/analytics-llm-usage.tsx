@@ -184,7 +184,7 @@ export function AnalyticsLLMUsage() {
         />
         <SummaryCard
           icon={Clock}
-          iconColor="text-orange-400"
+          iconColor="text-warning"
           label="Avg Latency"
           value={isLoading ? '...' : formatLatency(summary?.avg_latency_ms ?? 0)}
         />
