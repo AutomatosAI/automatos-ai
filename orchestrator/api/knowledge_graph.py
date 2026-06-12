@@ -85,7 +85,6 @@ class EntitySearchResult(BaseModel):
 async def list_entities(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
-    ctx: RequestContext = Depends(get_request_context_hybrid),
     entity_type: Optional[str] = None,
     limit: int = Query(50, le=200),
     offset: int = 0,
@@ -154,7 +153,6 @@ async def list_entities(
 async def search_entities(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
-    ctx: RequestContext = Depends(get_request_context_hybrid),
     query: str = Query(..., min_length=2),
     limit: int = Query(20, le=100)
 ):
