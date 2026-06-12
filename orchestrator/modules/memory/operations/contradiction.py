@@ -60,6 +60,26 @@ def subject_overlap(a: str, b: str) -> float:
     return len(ta & tb) / len(ta | tb)
 
 
+def _mutually_divergent(a_text: str, b_text: str) -> bool:
+    """True when each text asserts a meaningful token the other lacks.
+
+    This is what separates a *contradiction* (different value for a shared slot,
+    e.g. "deploy target is staging" vs "…production") from a *near-duplicate*
+    (one restates/elaborates the other — its tokens are a subset). Minimal-pair
+    contradictions are textually near-identical, so text similarity alone cannot
+    tell them apart; mutual divergence can.
+    """
+    sa, sb = _tokens(a_text), _tokens(b_text)
+    return bool(sa - sb) and bool(sb - sa)
+
+
+def _is_near_dup(a_text: str, b_text: str, threshold: float = DEFAULT_DUP_THRESHOLD) -> bool:
+    """Near-duplicate = highly similar AND not mutually divergent (a restatement,
+    not a conflicting value). Mutually-divergent pairs are contradictions and are
+    deliberately NOT merged — they go to the contradiction stage."""
+    return similarity(a_text, b_text) >= threshold and not _mutually_divergent(a_text, b_text)
+
+
 @dataclass
 class MergeGroup:
     canonical: Dict[str, Any]
@@ -83,12 +103,16 @@ class ConsolidationPlan:
 def group_near_duplicates(
     memories: List[Dict[str, Any]], threshold: float = DEFAULT_DUP_THRESHOLD
 ) -> List[List[Dict[str, Any]]]:
-    """Greedy single-link grouping of near-duplicate memories."""
+    """Greedy single-link grouping of near-duplicate memories.
+
+    Mutually-divergent pairs (contradictions) are never grouped here even when
+    textually similar — they are resolved in the contradiction stage instead.
+    """
     groups: List[List[Dict[str, Any]]] = []
     for m in memories:
         placed = False
         for g in groups:
-            if similarity(_text(m), _text(g[0])) >= threshold:
+            if _is_near_dup(_text(m), _text(g[0]), threshold):
                 g.append(m)
                 placed = True
                 break
@@ -105,16 +129,19 @@ def merge_group(group: List[Dict[str, Any]]) -> MergeGroup:
 
 
 def is_contradiction(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
-    """High subject overlap but NOT a near-duplicate → conflicting statements.
+    """Same subject + mutual divergence → conflicting statements.
 
-    Same topic (overlapping subject tokens) with materially different wording is
-    treated as a contradiction to resolve by recency+confidence, rather than two
-    coexisting truths.
+    The pair is about the same subject (token overlap ≥ floor) AND each asserts a
+    meaningful token the other lacks (a different value for a shared slot) — so
+    they are resolved by recency+confidence rather than left as two coexisting
+    truths. Text similarity is deliberately NOT used as the upper bound: a
+    minimal-pair contradiction ("…staging" vs "…production") is near-identical
+    textually yet still a contradiction.
     """
     ta, tb = _text(a), _text(b)
     if subject_overlap(ta, tb) < DEFAULT_SUBJECT_OVERLAP:
         return False
-    return similarity(ta, tb) < DEFAULT_DUP_THRESHOLD
+    return _mutually_divergent(ta, tb)
 
 
 def resolve_contradiction(a: Dict[str, Any], b: Dict[str, Any]) -> Supersession:
