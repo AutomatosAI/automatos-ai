@@ -26,7 +26,7 @@ import { StatsBar } from '@/components/shared/stats-bar'
 import { FilterTabs, TabsContent } from '@/components/shared/filter-tabs'
 import { ActivityFeed } from './activity-feed'
 import { CommandCenterHistory } from './command-center-history'
-import { ActivityCalendar } from './calendar'
+import { CalendarTab } from '@/components/command-center/calendar-tab'
 import { useActivityStats } from '@/hooks/use-activity-api'
 import {
   useActivationMetrics,
@@ -257,7 +257,7 @@ export function ActivityPage() {
 
           <TabsContent value="calendar">
             <div data-tour="activity-calendar">
-              <ActivityCalendar />
+              <CalendarTab />
             </div>
           </TabsContent>
 

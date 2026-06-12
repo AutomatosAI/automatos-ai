@@ -83,6 +83,24 @@ async def get_activity_schedule(
         raise HTTPException(status_code=500, detail="Failed to fetch schedule")
 
 
+@router.get("/scheduler-health")
+async def get_scheduler_health(
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """Advisory scheduler health for the calendar banner (PRD-162 S2).
+
+    Separate from /schedule and NON-BLOCKING: the calendar renders configured
+    schedules regardless (Q49). Returns ``healthy: null`` when it can't tell.
+    """
+    try:
+        svc = ActivityService(db, ctx.workspace_id)
+        return svc.get_scheduler_health()
+    except Exception as e:
+        logger.error("Scheduler health error: %s", e, exc_info=True)
+        return {"healthy": None, "last_fired_at": None}
+
+
 @router.get("/agent-reports")
 async def get_agent_reports(
     agent_ids: str = Query(

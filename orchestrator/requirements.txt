@@ -37,6 +37,7 @@ psutil==5.9.6
 
 # Scheduling (heartbeat service)
 apscheduler>=3.10
+croniter>=2.0  # PRD-162: stateless next_run math for the calendar/schedule truth
 
 # Network & async
 aiofiles==23.2.1
