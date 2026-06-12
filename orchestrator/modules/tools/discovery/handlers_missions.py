@@ -266,9 +266,7 @@ async def approve_mission(db: Session, workspace_id: UUID, params: Dict[str, Any
 
     actor_id = _actor(params)
     try:
-        updated = CoordinatorService().approve_plan(
-            db, run.id, actor_id, modifications=params.get("modifications"),
-        )
+        updated = CoordinatorService().approve_plan(db, run.id, actor_id)
         return _ok(updated, "approved → running")
     except ValueError as e:
         return {"success": False, "error": str(e)}
@@ -368,3 +366,25 @@ async def replan_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]
     except Exception as e:  # pragma: no cover - defensive
         logger.error("[Missions] replan failed: %s", e, exc_info=True)
         return {"success": False, "error": f"Failed to replan mission: {str(e)[:300]}"}
+
+
+async def update_mission_plan(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """PRD-163 S4/Q57: apply approval-time task/agent edits to an awaiting-approval
+    mission (e.g. reassign a task's agent) so they persist into execution."""
+    run, err = _resolve_run(db, workspace_id, params)
+    if err:
+        return err
+    task_edits = params.get("task_edits")
+    if not isinstance(task_edits, list) or not task_edits:
+        return {"success": False, "error": "task_edits must be a non-empty list"}
+    from services.coordinator_service import CoordinatorService
+
+    actor_id = _actor(params)
+    try:
+        updated = CoordinatorService().update_mission_plan(db, run.id, actor_id, task_edits)
+        return _ok(updated, "plan updated")
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+    except Exception as e:  # pragma: no cover - defensive
+        logger.error("[Missions] update_mission_plan failed: %s", e, exc_info=True)
+        return {"success": False, "error": f"Failed to update mission plan: {str(e)[:300]}"}

@@ -14,7 +14,7 @@ import { ClipboardCheck, Check, X, Clock } from 'lucide-react'
 import { WidgetBase } from '../WidgetBase'
 import { registerWidget } from '../registry'
 import { Button } from '@/components/ui/button'
-import { useApproveMission, useRejectMission } from '@/hooks/use-missions-api'
+import { useApproveMission, useRejectMission, useUpdateMissionPlan } from '@/hooks/use-missions-api'
 import type { WidgetBaseProps, MissionApprovalWidgetData, WidgetDefinition } from '../types'
 import { toast } from 'sonner'
 
@@ -49,10 +49,27 @@ export function MissionApprovalWidget({
 }: WidgetBaseProps<MissionApprovalWidgetData>) {
   const approve = useApproveMission()
   const reject = useRejectMission()
+  const updatePlan = useUpdateMissionPlan()
   const countdown = useCountdown(data.approval_deadline_at)
   const [done, setDone] = useState<'approved' | 'rejected' | null>(null)
 
-  const busy = approve.isLoading || reject.isLoading
+  const busy = approve.isLoading || reject.isLoading || updatePlan.isLoading
+
+  // PRD-163 S4/Q57: reassign a task's agent before approval. The edit PATCHes the
+  // plan so the change persists onto the task row the dispatcher will execute.
+  const commitRole = async (seq: number, value: string, original: string) => {
+    const next = value.trim()
+    if (!next || next === original.trim()) return
+    try {
+      await updatePlan.mutateAsync({
+        id: data.mission_id,
+        body: { task_edits: [{ sequence_number: seq, agent_role: next }] },
+      })
+      toast.success(`Task ${seq} reassigned to ${next}`)
+    } catch {
+      toast.error('Failed to update the plan')
+    }
+  }
 
   const handleApprove = async () => {
     try {
@@ -110,17 +127,28 @@ export function MissionApprovalWidget({
 
         {data.tasks?.length > 0 && (
           <ol className="space-y-1 max-h-48 overflow-y-auto">
-            {data.tasks.map((t, i) => (
-              <li key={i} className="flex items-start gap-2 text-sm">
-                <span className="text-xs text-muted-foreground mt-0.5 w-5 shrink-0">
-                  {t.sequence ?? i + 1}.
-                </span>
-                <span className="flex-1">{t.title}</span>
-                {t.agent_role && (
-                  <span className="text-[10px] text-muted-foreground shrink-0">{t.agent_role}</span>
-                )}
-              </li>
-            ))}
+            {data.tasks.map((t, i) => {
+              const seq = t.sequence ?? i + 1
+              const role = t.agent_role || ''
+              return (
+                <li key={i} className="flex items-center gap-2 text-sm">
+                  <span className="text-xs text-muted-foreground w-5 shrink-0">{seq}.</span>
+                  <span className="flex-1 truncate">{t.title}</span>
+                  <input
+                    type="text"
+                    aria-label={`Agent for task ${seq}`}
+                    defaultValue={role}
+                    disabled={busy || done !== null}
+                    placeholder="agent"
+                    onBlur={(e) => commitRole(seq, e.target.value, role)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                    }}
+                    className="w-24 shrink-0 rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground outline-none focus:border-primary focus:text-foreground disabled:opacity-50"
+                  />
+                </li>
+              )
+            })}
           </ol>
         )}
 

@@ -93,11 +93,7 @@ class MissionCreateRequest(BaseModel):
     )
 
 
-ALLOWED_MODIFICATION_KEYS = {"task_overrides", "notes", "agent_overrides"}
-
-
 class MissionApproveRequest(BaseModel):
-    modifications: Optional[Dict[str, Any]] = Field(None, description="Optional plan modifications")
     max_concurrent_override: Optional[int] = Field(
         None, ge=1, le=10, description="Override max_concurrent for this mission"
     )
@@ -108,18 +104,23 @@ class MissionApproveRequest(BaseModel):
         None, description="Skip task verification (for benchmarks/testing)",
     )
 
-    @validator("modifications")
-    def validate_modifications(cls, v):
-        if v is None:
-            return v
-        unknown = set(v.keys()) - ALLOWED_MODIFICATION_KEYS
-        if unknown:
-            raise ValueError(f"Unknown modification keys: {unknown}")
-        # Cap total serialised size to prevent memory abuse
-        import json
-        if len(json.dumps(v)) > 10_000:
-            raise ValueError("Modifications payload too large (max 10KB)")
-        return v
+
+# PRD-163 S4/Q57: approval-time plan editing. The old `modifications`-on-approve
+# stub never applied — edits now PATCH the plan (task rows) before approval.
+class MissionTaskEdit(BaseModel):
+    task_id: Optional[str] = Field(None, description="Task row UUID")
+    temp_id: Optional[str] = Field(None, description="Planner temp id")
+    sequence_number: Optional[int] = Field(None, ge=1, description="1-based task sequence")
+    agent_role: Optional[str] = Field(None, max_length=200)
+    title: Optional[str] = Field(None, max_length=500)
+    description: Optional[str] = Field(None, max_length=5000)
+
+
+class MissionPlanEditRequest(BaseModel):
+    task_edits: List[MissionTaskEdit] = Field(
+        ..., min_items=1, max_items=200,
+        description="Per-task field edits to apply before approval",
+    )
 
 
 class MissionRejectRequest(BaseModel):
@@ -1161,6 +1162,47 @@ async def get_mission_field(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+@router.patch("/{mission_id}/plan")
+async def update_mission_plan(
+    mission_id: UUID,
+    body: MissionPlanEditRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """PRD-163 S4/Q57: apply approval-time task/agent edits before approval.
+
+    Edits the OrchestrationTask rows the dispatcher will execute (so an edited
+    agent_role persists into execution) and mirrors them into the plan snapshot.
+    Valid only while the mission is awaiting approval.
+    """
+    try:
+        run = _get_run_for_workspace(db, mission_id, ctx.workspace_id)
+        if RunState(run.state) != RunState.AWAITING_APPROVAL:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Mission is in '{run.state}' state, expected 'awaiting_approval'",
+            )
+        task_edits = [e.dict(exclude_none=True) for e in body.task_edits]
+        coordinator = get_coordinator_service()
+        run = coordinator.update_mission_plan(
+            db=db,
+            run_id=run.id,
+            actor_id=ctx.user.id or "unknown",
+            task_edits=task_edits,
+        )
+        db.commit()
+        return _run_to_response(run)
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        db.rollback()
+        logger.error("Failed to edit mission plan %s: %s", mission_id, exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
 @router.post("/{mission_id}/approve")
 async def approve_plan(
     mission_id: UUID,
@@ -1191,7 +1233,6 @@ async def approve_plan(
             db=db,
             run_id=run.id,
             actor_id=ctx.user.id or "unknown",
-            modifications=body.modifications,
         )
         db.commit()
         return _run_to_response(run)

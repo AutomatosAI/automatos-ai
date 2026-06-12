@@ -69,6 +69,7 @@ class EventType(str, Enum):
     RUN_CREATED = "run_created"
     RUN_PLANNING_STARTED = "run_planning_started"
     RUN_PLAN_READY = "run_plan_ready"
+    RUN_PLAN_EDITED = "run_plan_edited"  # PRD-163 S4/Q57: approval-time task/agent edit (audit)
     RUN_APPROVED = "run_approved"
     RUN_AUTO_APPROVED = "run_auto_approved"  # PRD-163 S3: policy auto-approval (distinct audit)
     RUN_REJECTED = "run_rejected"

@@ -210,3 +210,46 @@ def register_mission_actions(registry: ActionRegistry) -> None:
         tags=["missions", "write", "lifecycle", "replan"],
         examples=["replan that failed mission", "try the mission again with a different approach"],
     ))
+
+    registry.register(ActionDefinition(
+        name="platform_update_mission_plan",
+        description=(
+            "Edit an awaiting-approval mission's plan before it runs — reassign a "
+            "task's agent or revise a task title/description. Use when the user "
+            "tweaks the proposed plan ('have the researcher do step 2 instead')."
+        ),
+        category="missions",
+        parameters={
+            "type": "object",
+            "properties": {
+                **_MISSION_ID_PARAM,
+                "task_edits": {
+                    "type": "array",
+                    "description": (
+                        "Per-task edits. Identify each task by task_id, temp_id, or "
+                        "sequence_number; set any of agent_role, title, description."
+                    ),
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "task_id": {"type": "string"},
+                            "temp_id": {"type": "string"},
+                            "sequence_number": {"type": "integer"},
+                            "agent_role": {"type": "string"},
+                            "title": {"type": "string"},
+                            "description": {"type": "string"},
+                        },
+                    },
+                },
+            },
+            "required": ["mission_id", "task_edits"],
+        },
+        permission_level="write",
+        requires_confirmation=False,
+        tags=["missions", "write", "lifecycle", "plan", "edit"],
+        examples=[
+            "have the researcher handle step 2 instead",
+            "reassign that first task to the writer agent",
+            "rename task 3 to 'draft the summary'",
+        ],
+    ))

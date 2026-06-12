@@ -92,6 +92,77 @@ _POWER_MODE_DEFAULTS: Dict[str, Dict[str, Any]] = {
 }
 
 
+# PRD-163 S4/Q57: approval-time plan editing — only these per-task fields are
+# editable from the approval card. Structural changes (add/remove tasks, rewire
+# dependencies) go through plan-import (Q54), not this field-PATCH path.
+_EDITABLE_TASK_FIELDS = ("agent_role", "title", "description")
+
+
+def apply_plan_task_edits(tasks: List[Any], plan: Optional[Dict[str, Any]],
+                          edits: List[Dict[str, Any]]) -> tuple:
+    """Apply per-task field edits to OrchestrationTask rows and mirror them into
+    the ``run.plan`` snapshot. Pure w.r.t. its arguments (no DB) so it is unit
+    testable: the caller supplies the loaded task rows + plan dict.
+
+    Each edit matches a task by (in priority order) ``task_id`` (str of the row
+    id), ``temp_id`` (resolved to a sequence via the plan snapshot), or
+    ``sequence_number``. Only ``_EDITABLE_TASK_FIELDS`` are honoured. Task rows
+    are mutated in place (the ORM idiom); a NEW plan dict is returned so the JSON
+    column's change is tracked. Returns ``(new_plan, fields_changed)``.
+    """
+    by_id = {str(getattr(t, "id", "")): t for t in tasks}
+    by_seq = {int(getattr(t, "sequence_number", -1)): t for t in tasks}
+
+    plan = plan or {}
+    plan_tasks = list(plan.get("tasks") or [])
+    # temp_id -> sequence_number, so a temp_id edit can find the row by sequence.
+    temp_to_seq = {
+        str(pt.get("temp_id")): pt.get("sequence_number")
+        for pt in plan_tasks if pt.get("temp_id") is not None
+    }
+
+    fields_changed = 0
+    edited_rows = set()
+    for edit in (edits or []):
+        if not isinstance(edit, dict):
+            continue
+        task = None
+        if edit.get("task_id") is not None:
+            task = by_id.get(str(edit["task_id"]))
+        if task is None and edit.get("temp_id") is not None:
+            seq = temp_to_seq.get(str(edit["temp_id"]))
+            if seq is not None:
+                task = by_seq.get(int(seq))
+        if task is None and edit.get("sequence_number") is not None:
+            try:
+                task = by_seq.get(int(edit["sequence_number"]))
+            except (ValueError, TypeError):
+                task = None
+        if task is None:
+            continue
+        for field in _EDITABLE_TASK_FIELDS:
+            if field in edit and edit[field] is not None:
+                new_val = edit[field]
+                if getattr(task, field, None) != new_val:
+                    setattr(task, field, new_val)
+                    fields_changed += 1
+        edited_rows.add(int(getattr(task, "sequence_number", -1)))
+
+    # Mirror the row state back into the plan snapshot (by sequence_number).
+    if edited_rows:
+        seq_to_row = {int(getattr(t, "sequence_number", -1)): t for t in tasks}
+        new_plan_tasks = []
+        for pt in plan_tasks:
+            seq = pt.get("sequence_number")
+            row = seq_to_row.get(int(seq)) if seq is not None else None
+            if row is not None and int(seq) in edited_rows:
+                pt = {**pt, **{f: getattr(row, f, pt.get(f)) for f in _EDITABLE_TASK_FIELDS}}
+            new_plan_tasks.append(pt)
+        plan = {**plan, "tasks": new_plan_tasks}
+
+    return plan, fields_changed
+
+
 def _get_power_mode_caps(power_mode: str, db: Session) -> Dict[str, Any]:
     """Resolve power-mode caps: ``system_settings('power_modes', <mode>)`` merged
     over ``_POWER_MODE_DEFAULTS``.
@@ -936,6 +1007,15 @@ class CoordinatorService:
                         db.rollback()
                         summary["errors"].append(str(run.id))
 
+                # --- PRD-163 S5: async planning — run deferred planners ---
+                try:
+                    planned = await self._sweep_async_planning(db)
+                    if planned:
+                        summary["async_planned"] = planned
+                except Exception:
+                    logger.warning("[Coordinator] async planning sweep failed", exc_info=True)
+                    db.rollback()
+
                 # --- PRD-163 S3: approval countdowns — auto-proceed expired plans ---
                 try:
                     n = self.check_approval_countdowns(db)
@@ -1684,6 +1764,31 @@ class CoordinatorService:
             actor_id="coordinator",
         )
 
+        # PRD-163 S5: async planning — return immediately in PLANNING; the
+        # coordinator tick sweep runs the planner and the plan lands via a
+        # mission_plan_ready notification. The default path stays synchronous
+        # (the in-chat approval card is emitted from the create tool result,
+        # which needs the plan inline).
+        if mission_config.get("async_planning"):
+            logger.info("Mission %s → async planning (deferred to coordinator tick)", run.id)
+            return run
+
+        return await self._run_planning(db, run)
+
+    async def _run_planning(self, db: Session, run: OrchestrationRun) -> OrchestrationRun:
+        """PRD-163 S5: the planning tail — load agents, decompose, persist, and
+        evaluate approval. Shared by synchronous ``create_mission`` and the async
+        planning tick sweep (``_sweep_async_planning``). On reaching
+        awaiting_approval it dispatches a ``mission_plan_ready`` notification to
+        the creating user (S1).
+
+        Raises PlanValidationError (after transitioning the run to FAILED) if the
+        planner cannot produce a valid plan.
+        """
+        workspace_id = run.workspace_id
+        goal = run.goal
+        mission_config = run.config or {}
+
         # Load roster agents
         agents: List[Agent] = (
             db.query(Agent)
@@ -1820,6 +1925,21 @@ class CoordinatorService:
                 actor_id="coordinator",
             )
             logger.info("Mission %s → awaiting_approval (%s)", run.id, decision.reason)
+            # PRD-163 S1/S5: tell the creating user the plan is ready for review.
+            # This is the "plan lands via notification" half of async planning and
+            # the mission_plan_ready notification S1 requires.
+            task_count = len((run.plan or {}).get("tasks", []))
+            await _dispatch_mission_event(
+                db=db,
+                run=run,
+                event_type="mission_plan_ready",
+                title=f"Mission plan ready: {(run.goal or 'Mission')[:120]}",
+                message=(
+                    f"{task_count} task(s) planned, est. ${decision.estimated_cost:.2f}. "
+                    f"Review and approve to start execution."
+                ),
+                status="action_required",
+            )
 
         return run
 
@@ -1874,6 +1994,38 @@ class CoordinatorService:
             proceeded += 1
             logger.info("Mission %s auto-proceeded (countdown elapsed)", run.id)
         return proceeded
+
+    async def _sweep_async_planning(self, db: Session) -> int:
+        """PRD-163 S5: run the planner for missions created with
+        ``config.async_planning`` that are parked in PLANNING with no plan yet.
+        ``create_mission`` returns those immediately; this sweep produces the
+        plan and (via ``_run_planning``) fires the mission_plan_ready
+        notification. Returns the number planned this tick.
+        """
+        candidates: List[OrchestrationRun] = (
+            db.query(OrchestrationRun)
+            .filter(OrchestrationRun.state == RunState.PLANNING.value)
+            .all()
+        )
+        planned = 0
+        for run in candidates:
+            cfg = run.config or {}
+            if not cfg.get("async_planning") or run.plan:
+                continue  # not an async-planning run, or already planned
+            try:
+                await self._run_planning(db, run)
+                db.commit()
+                planned += 1
+            except PlanValidationError:
+                # _run_planning already transitioned the run to FAILED in-session.
+                db.commit()
+                logger.warning("[Coordinator] async planning failed for run %s", run.id)
+            except Exception:
+                logger.error(
+                    "[Coordinator] async planning error for run %s", run.id, exc_info=True,
+                )
+                db.rollback()
+        return planned
 
     # ------------------------------------------------------------------
     # Lifecycle: approve_plan
@@ -2059,24 +2211,67 @@ class CoordinatorService:
         logger.info("Imported plan -> mission %s (%d tasks) awaiting_approval", run.id, len(planned_tasks))
         return run
 
+    def update_mission_plan(
+        self,
+        db: Session,
+        run_id: UUID,
+        actor_id: str,
+        task_edits: List[Dict[str, Any]],
+    ) -> OrchestrationRun:
+        """PRD-163 S4/Q57: apply approval-time task/agent edits to an
+        awaiting-approval mission so they persist into execution.
+
+        ``task_edits`` is a list of ``{task_id|temp_id|sequence_number,
+        agent_role?, title?, description?}``. Edits mutate the OrchestrationTask
+        rows the dispatcher will execute (so an edited ``agent_role`` actually
+        changes who runs the task) and are mirrored into ``run.plan``. Field
+        edits only — structural changes go through plan-import (Q54). Valid only
+        while the mission is awaiting approval.
+        """
+        run = self._get_run(db, run_id)
+        if run.state != RunState.AWAITING_APPROVAL.value:
+            raise ValueError(
+                f"Mission is in '{run.state}' state, expected 'awaiting_approval'"
+            )
+
+        tasks: List[OrchestrationTask] = (
+            db.query(OrchestrationTask)
+            .filter(OrchestrationTask.run_id == run.id)
+            .all()
+        )
+        new_plan, fields_changed = apply_plan_task_edits(tasks, run.plan, task_edits)
+        if fields_changed:
+            run.plan = new_plan  # reassign so the JSON column is marked dirty
+            emit_event(
+                db=db,
+                run_id=run.id,
+                event_type=EventType.RUN_PLAN_EDITED,
+                actor_type=ActorType.HUMAN,
+                actor_id=actor_id,
+                payload={"fields_changed": fields_changed,
+                         "edit_count": len(task_edits or [])},
+            )
+            logger.info(
+                "Mission %s plan edited by %s (%d field(s))",
+                run_id, actor_id, fields_changed,
+            )
+        return run
+
     def approve_plan(
         self,
         db: Session,
         run_id: UUID,
         actor_id: str,
-        modifications: Optional[Dict[str, Any]] = None,
     ) -> OrchestrationRun:
         """
         Approve a mission plan and start execution.
 
         Transitions: awaiting_approval → running.
         Queues initial tasks (those with no dependencies) as QUEUED.
+        Approval-time edits are applied beforehand via ``update_mission_plan``
+        (PRD-163 S4/Q57), so this executes the plan exactly as shown.
         """
         run = self._get_run(db, run_id)
-
-        if modifications:
-            # Apply plan modifications (e.g., reorder, remove tasks)
-            run.plan = {**(run.plan or {}), "modifications": modifications}
 
         transition_run(
             db=db,
@@ -2092,7 +2287,6 @@ class CoordinatorService:
             event_type=EventType.RUN_APPROVED,
             actor_type=ActorType.HUMAN,
             actor_id=actor_id,
-            payload={"modifications": modifications} if modifications else None,
         )
 
         self._queue_initial_tasks(db, run)

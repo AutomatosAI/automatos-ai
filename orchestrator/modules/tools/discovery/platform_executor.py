@@ -190,6 +190,7 @@ from modules.tools.discovery.handlers_missions import (
     resume_mission,
     cancel_mission,
     replan_mission,
+    update_mission_plan,
 )
 from modules.tools.discovery.handlers_governance import (
     list_blueprints,
@@ -419,6 +420,7 @@ class PlatformActionExecutor:
             "platform_resume_mission": resume_mission,
             "platform_cancel_mission": cancel_mission,
             "platform_replan_mission": replan_mission,
+            "platform_update_mission_plan": update_mission_plan,
             # Governance & Blueprints
             "platform_list_blueprints": list_blueprints,
             "platform_get_blueprint": get_blueprint,
@@ -841,6 +843,7 @@ class PlatformActionExecutor:
             "platform_resume_mission",
             "platform_cancel_mission",
             "platform_replan_mission",
+            "platform_update_mission_plan",
         )
         if action_name in _MISSION_ATTRIBUTED:
             _driver = (caller_context or {}).get("user_id")
