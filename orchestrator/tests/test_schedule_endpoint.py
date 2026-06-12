@@ -243,3 +243,23 @@ def test_get_schedule_disabled_heartbeat_excluded():
     out = _svc(db).get_schedule(range_days=7)
     ids = {i["id"] for i in out["scheduled"]}
     assert "routine-2" in ids and "routine-1" not in ids
+
+
+# ── S3: platform_get_schedule tool ─────────────────────────────────────────
+
+@_needs_croniter
+def test_platform_get_schedule_tool_returns_workspace_unified_feed():
+    """The tool returns the SAME DB-first feed the calendar shows, scoped to ws."""
+    import asyncio
+    from modules.tools.discovery.handlers_scheduling import get_schedule as schedule_tool
+
+    db = _FakeScheduleDB(
+        agents=[_heartbeat_agent(1, 60)],
+        templates=[_Row(id=10, name="Weekly", schedule_config={"type": "cron", "cron_expression": "0 9 * * 1"})],
+        tasks=[],
+    )
+    out = asyncio.run(schedule_tool(db, uuid4(), {}))
+    assert out["success"] is True
+    assert out["count"] == 2
+    assert {i["type"] for i in out["scheduled"]} == {"routine", "recipe"}
+    assert all("recurrence" in i for i in out["scheduled"])

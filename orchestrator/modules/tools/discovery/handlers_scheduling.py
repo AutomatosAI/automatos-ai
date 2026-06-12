@@ -86,6 +86,27 @@ async def cancel_scheduled_task(db: Session, workspace_id: UUID, params: Dict[st
     return await svc.update_task_status(task_id, "cancelled")
 
 
+async def get_schedule(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Return the workspace's unified schedule — the SAME DB-first truth the
+    calendar shows (PRD-162): heartbeat routines, cron-scheduled playbooks, and
+    agent-scheduled tasks, each with its next run time. Workspace-scoped."""
+    from services.activity_service import ActivityService
+
+    try:
+        range_days = int(params.get("range_days") or 30)
+    except (TypeError, ValueError):
+        range_days = 30
+
+    result = ActivityService(db, workspace_id).get_schedule(range_days=range_days)
+    items = result.get("scheduled", [])
+    return {
+        "success": True,
+        "count": len(items),
+        "scheduled": items,
+        "scheduler_active": result.get("scheduler_active", True),
+    }
+
+
 async def query_data(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Query a connected database using natural language."""
     from modules.nl2sql.service import DatabaseKnowledgeService

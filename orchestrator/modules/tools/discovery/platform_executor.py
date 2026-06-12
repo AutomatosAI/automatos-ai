@@ -132,6 +132,7 @@ from modules.tools.discovery.handlers_scheduling import (
     schedule_task,
     list_scheduled_tasks,
     cancel_scheduled_task,
+    get_schedule,
     query_data,
 )
 from modules.tools.discovery.handlers_reports import (
@@ -386,6 +387,7 @@ class PlatformActionExecutor:
             "platform_schedule_task": schedule_task,
             "platform_list_scheduled_tasks": list_scheduled_tasks,
             "platform_cancel_scheduled_task": cancel_scheduled_task,
+            "platform_get_schedule": get_schedule,
             # PRD-79: NL2SQL
             "platform_query_data": query_data,
             # PRD-77: Memory Browsing
