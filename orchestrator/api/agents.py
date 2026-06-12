@@ -728,7 +728,7 @@ async def execute_agent(agent_id: int, execution_data: dict = {}, ctx: RequestCo
         logger.error(f"Error executing agent: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.get("/{agent_id}", response_model=AgentResponse)
+@router.get("/{agent_id:int}", response_model=AgentResponse)
 async def get_agent(agent_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get a specific agent by ID with skills and tools"""
     try:

@@ -115,6 +115,7 @@ from api.analytics_charts import router as analytics_charts_router  # PRD-54: Pa
 from api.user_api_keys import router as user_api_keys_router  # PRD-54: BYOK API Keys
 from api.execution_history import router as execution_history_router  # Enhanced execution history
 from api.database_knowledge import router as database_knowledge_router  # PRD-21: Database Knowledge
+from api.rag_feedback import router as rag_feedback_router  # PRD-168 S2: RAG feedback (Q87)
 from api.database_analytics import router as database_analytics_router  # PRD-21: Real database analytics
 from api.document_generation import router as document_generation_router  # PRD-63: Document Generation
 from api.widget_workflows import router as widget_workflows_router  # US-014: Widget Workflow Control
@@ -932,6 +933,7 @@ app.include_router(chat_router)  # PRD-27: New streaming chat with SSE, history,
 # document_processing_router removed - api/documents.py handles all document processing
 app.include_router(agent_endpoints_router)
 app.include_router(database_knowledge_router)  # PRD-21: Database Knowledge
+app.include_router(rag_feedback_router)  # PRD-168 S2: RAG feedback (Q87)
 app.include_router(database_analytics_router)  # PRD-21: Database Analytics
 app.include_router(tasks_router)  # PRD-56: Workspace task management
 app.include_router(attachments_router)  # PRD-127: Ephemeral multimodal attachments
