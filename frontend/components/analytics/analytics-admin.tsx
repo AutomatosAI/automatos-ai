@@ -300,7 +300,7 @@ export function AnalyticsAdmin({ days }: Props) {
           { label: 'Total Revenue', value: formatCost(totalCost), sub: 'Platform cost this period', icon: DollarSign, iconBg: 'bg-emerald-500/10', iconColor: 'text-emerald-400', accent: 'border-l-emerald-500' },
           { label: 'MRR Projection', value: formatCost(projectedMrr), sub: `${formatCost(dailyAvg)}/day avg`, icon: TrendingUp, iconBg: 'bg-blue-500/10', iconColor: 'text-blue-400', accent: 'border-l-blue-500' },
           { label: 'Workspaces', value: dashboard?.overview?.total_workspaces || legacyData?.platformSummary?.totalWorkspaces || 0, sub: 'Active tenants', icon: Building, iconBg: 'bg-purple-500/10', iconColor: 'text-purple-400', accent: 'border-l-purple-500' },
-          { label: 'API Requests', value: formatNumber(dashboard?.overview?.total_requests || legacyData?.platformSummary?.totalApiCalls || 0), sub: 'This period', icon: Activity, iconBg: 'bg-orange-500/10', iconColor: 'text-orange-400', accent: 'border-l-orange-500' },
+          { label: 'API Requests', value: formatNumber(dashboard?.overview?.total_requests || legacyData?.platformSummary?.totalApiCalls || 0), sub: 'This period', icon: Activity, iconBg: 'bg-warning/10', iconColor: 'text-warning', accent: 'border-l-warning' },
           { label: 'Total Tokens', value: formatNumber(dashboard?.overview?.total_tokens || legacyData?.platformSummary?.totalTokens || 0), sub: 'Input + Output', icon: Zap, iconBg: 'bg-cyan-500/10', iconColor: 'text-cyan-400', accent: 'border-l-cyan-500' },
           { label: 'BYOK Savings', value: formatCost(dashboard?.byok_split?.byok_cost || 0), sub: 'User-provided keys', icon: Key, iconBg: 'bg-amber-500/10', iconColor: 'text-amber-400', accent: 'border-l-amber-500' },
         ].map((stat, index) => (
@@ -493,7 +493,7 @@ export function AnalyticsAdmin({ days }: Props) {
                     { label: 'Platform Revenue', value: formatCost(dashboard?.byok_split?.platform_cost || totalCost), color: 'text-emerald-400' },
                     { label: 'Avg per Workspace', value: allWorkspaces.length > 0 ? formatCost(totalCost / allWorkspaces.length) : '$0', color: 'text-blue-400' },
                     { label: 'Cost per Request', value: (dashboard?.overview?.total_requests || 0) > 0 ? formatCost(totalCost / (dashboard?.overview?.total_requests || 1)) : '$0', color: 'text-purple-400' },
-                    { label: 'Daily Run Rate', value: formatCost(dailyAvg), color: 'text-orange-400' },
+                    { label: 'Daily Run Rate', value: formatCost(dailyAvg), color: 'text-warning' },
                   ].map((item) => (
                     <div key={item.label} className="rounded-lg bg-secondary/20 border border-border/20 p-3">
                       <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">{item.label}</p>

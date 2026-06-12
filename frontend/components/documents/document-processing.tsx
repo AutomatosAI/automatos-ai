@@ -161,7 +161,7 @@ export function DocumentProcessing({ documents, onDocumentSelect }: DocumentProc
                 <p className="text-2xl font-bold">{processingStats.success_rate}%</p>
               </div>
               <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-                <BarChart3 className="w-5 h-5 text-orange-400" />
+                <BarChart3 className="w-5 h-5 text-warning" />
               </div>
             </div>
           </CardContent>
@@ -304,7 +304,7 @@ export function DocumentProcessing({ documents, onDocumentSelect }: DocumentProc
                             <span className="text-xs">Formulas: {doc.extracted_formulas || 0}</span>
                           </div>
                           <div className="flex items-center gap-2 p-2 rounded-lg bg-secondary/30">
-                            <Image className="w-4 h-4 text-orange-400" />
+                            <Image className="w-4 h-4 text-warning" />
                             <span className="text-xs">Images: {doc.extracted_images || 0}</span>
                           </div>
                         </div>

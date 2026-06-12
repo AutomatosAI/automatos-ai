@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Copy, ExternalLink } from 'lucide-react'
 import {
   Select,
   SelectContent,
@@ -121,6 +122,7 @@ export function DynamicCredentialForm({
   })
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [installUrl, setInstallUrl] = useState<string | null>(null)
 
   useEffect(() => {
     if (lockCredentialTypeId && lockedCredentialType) {
@@ -272,37 +274,17 @@ export function DynamicCredentialForm({
       switch (saved.connection_status) {
         case 'pending_oauth':
           if (saved.oauth_redirect_url) {
-            // Try popup first — but ALWAYS surface the URL on screen too. Popups
-            // get blocked silently in many browsers (especially after save flows
-            // not triggered by a direct click event), and merchants can't see
-            // why the install screen never appears. Showing the URL in a
-            // confirm() dialog lets them either keep the popup or click the
-            // URL directly. The URL also lands in clipboard via prompt() fallback.
-            const popup = window.open(
+            // Try the popup, but ALWAYS surface the URL inline too. Popups get
+            // blocked silently in many browsers (especially after save flows not
+            // triggered by a direct click), and merchants can't see why the
+            // install screen never appears. The inline panel (rendered below)
+            // shows the install URL with copy + open affordances either way.
+            window.open(
               saved.oauth_redirect_url,
               'shopify-oauth',
               'width=600,height=720,menubar=no,toolbar=no,location=no',
             )
-            const popupBlocked = !popup || popup.closed || typeof popup.closed === 'undefined'
-            if (popupBlocked) {
-              // Use prompt() so the URL is selectable/copyable in a single click.
-              window.prompt(
-                'Shopify install popup was blocked. Copy this URL and open it in a new tab to complete Shopify install:',
-                saved.oauth_redirect_url,
-              )
-            } else {
-              // Popup opened — confirm the merchant sees it and knows what to do.
-              const stayOpen = window.confirm(
-                'A Shopify install popup has opened — click "Install app" on that page to finish connecting.\n\n' +
-                  'If you do not see the popup, click OK to copy the install URL and open it manually.',
-              )
-              if (stayOpen) {
-                window.prompt(
-                  'Open this URL in a new tab to complete Shopify install:',
-                  saved.oauth_redirect_url,
-                )
-              }
-            }
+            setInstallUrl(saved.oauth_redirect_url)
           }
           break
         case 'unsupported':
@@ -487,6 +469,46 @@ export function DynamicCredentialForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
+      {/* Shopify (and other OAuth) install URL — non-blocking inline panel that
+          replaces the old confirm()/prompt() flow (PRD-169 S2). */}
+      {installUrl && (
+        <div className="space-y-3 p-4 rounded-lg border border-primary/30 bg-primary/5">
+          <div className="space-y-1">
+            <h3 className="font-semibold text-sm">Finish connecting</h3>
+            <p className="text-sm text-muted-foreground">
+              An install popup should have opened — click “Install app” there to finish. If you
+              don’t see it, open the install URL manually:
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Input
+              readOnly
+              value={installUrl}
+              onFocus={(e) => e.currentTarget.select()}
+              className="font-mono text-xs"
+              aria-label="Install URL"
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              onClick={() => { void navigator.clipboard?.writeText(installUrl) }}
+              aria-label="Copy install URL"
+            >
+              <Copy className="w-4 h-4" />
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => window.open(installUrl, '_blank', 'noopener,noreferrer')}
+            >
+              <ExternalLink className="w-4 h-4 mr-2" />
+              Open
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Credential Metadata */}
       {!metadataHidden && (
         <div className="space-y-4 p-4 bg-secondary/20 rounded-lg">

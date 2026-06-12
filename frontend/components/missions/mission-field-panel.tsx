@@ -25,7 +25,7 @@ const AGENT_COLORS = [
   'bg-warning/20 border-warning/40 text-warning',
   'bg-rose-500/20 border-rose-500/40 text-rose-400',
   'bg-cyan-500/20 border-cyan-500/40 text-cyan-400',
-  'bg-orange-500/20 border-orange-500/40 text-orange-400',
+  'bg-warning/20 border-warning/40 text-warning',
 ]
 
 const AGENT_DOT_COLORS = [
@@ -35,7 +35,7 @@ const AGENT_DOT_COLORS = [
   'bg-warning',
   'bg-rose-500',
   'bg-cyan-500',
-  'bg-orange-500',
+  'bg-warning',
 ]
 
 function getAgentColor(agentId: number, index: number) {
@@ -55,7 +55,7 @@ function StrengthBar({ strength, maxStrength }: { strength: number; maxStrength:
           'h-full rounded-full transition-all duration-300',
           strength > 0.7 ? 'bg-success' :
           strength > 0.3 ? 'bg-warning' :
-          strength > 0.05 ? 'bg-orange-500' :
+          strength > 0.05 ? 'bg-warning' :
           'bg-destructive/50'
         )}
         style={{ width: `${Math.max(pct, 2)}%` }}

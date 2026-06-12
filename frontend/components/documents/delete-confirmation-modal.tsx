@@ -138,7 +138,7 @@ export function DeleteConfirmationModal({
       case 'high':
         return 'bg-red-500/10 text-red-400 border-red-500/20'
       case 'medium':
-        return 'bg-orange-500/10 text-orange-400 border-orange-500/20'
+        return 'bg-warning/10 text-warning border-warning/20'
       case 'low':
         return 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20'
       default:
@@ -203,7 +203,7 @@ export function DeleteConfirmationModal({
             {loading && (
               <div className="flex items-center justify-center py-8">
                 <div className="text-center">
-                  <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-orange-400" />
+                  <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-warning" />
                   <p className="text-sm text-muted-foreground">Analyzing deletion impact...</p>
                 </div>
               </div>
@@ -213,14 +213,14 @@ export function DeleteConfirmationModal({
             {impact && !loading && (
               <div className="space-y-4">
                 <h4 className="font-semibold flex items-center space-x-2">
-                  <Database className="w-4 h-4 text-orange-400" />
+                  <Database className="w-4 h-4 text-warning" />
                   <span>Deletion Impact Analysis</span>
                 </h4>
 
                 {/* Impact Metrics */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   <div className="bg-secondary/30 rounded-lg p-3 text-center">
-                    <p className="text-2xl font-bold text-orange-400">{impact.vector_chunks}</p>
+                    <p className="text-2xl font-bold text-warning">{impact.vector_chunks}</p>
                     <p className="text-xs text-muted-foreground">Vector Chunks</p>
                   </div>
                   <div className="bg-secondary/30 rounded-lg p-3 text-center">
@@ -239,8 +239,8 @@ export function DeleteConfirmationModal({
 
                 {/* Affected Workflows */}
                 {impact.workflows_affected && impact.workflows_affected.length > 0 && (
-                  <div className="bg-orange-500/5 border border-orange-500/20 rounded-lg p-4">
-                    <h5 className="font-medium text-orange-400 mb-2">Affected Workflows</h5>
+                  <div className="bg-warning/5 border border-warning/20 rounded-lg p-4">
+                    <h5 className="font-medium text-warning mb-2">Affected Workflows</h5>
                     <div className="space-y-1">
                       {impact.workflows_affected.map((workflow, index) => (
                         <Badge key={index} variant="outline" className="mr-2 mb-1">

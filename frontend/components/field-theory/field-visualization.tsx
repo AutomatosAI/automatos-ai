@@ -271,7 +271,7 @@ export function FieldVisualization() {
                 <Grid3x3 className="w-5 h-5 mr-2" />
                 Field Visualization
               </span>
-              <Badge className={`${fieldType === 'scalar' ? 'bg-orange-500/10 text-orange-400' : 
+              <Badge className={`${fieldType === 'scalar' ? 'bg-warning/10 text-warning' : 
                                  fieldType === 'vector' ? 'bg-info/10 text-info' : 
                                  'bg-agent/10 text-agent'} border-current/20`}>
                 {fieldType}
@@ -394,7 +394,7 @@ export function FieldVisualization() {
         <Card className="glass-card">
           <CardContent className="p-6">
             <div className="flex items-center justify-between mb-4">
-              <Waves className="w-8 h-8 text-orange-400" />
+              <Waves className="w-8 h-8 text-warning" />
               <Badge variant="outline">Field Value</Badge>
             </div>
             <div className="space-y-1">

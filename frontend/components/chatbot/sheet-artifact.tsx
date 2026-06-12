@@ -87,14 +87,14 @@ export function SheetArtifact({ content, metadata }: SheetArtifactProps) {
     <div className="space-y-6">
       {/* Clarification flow */} 
       {status === 'needs_clarification' && clarifications && clarifications.length > 0 && (
-        <div className="rounded-xl border border-orange-500/30 bg-orange-500/10 p-4">
-          <div className="text-sm font-semibold text-orange-700 dark:text-orange-200">Clarification needed</div>
-          {infoMessage && <div className="mt-1 text-sm text-orange-100/80">{infoMessage}</div>}
+        <div className="rounded-xl border border-warning/30 bg-warning/10 p-4">
+          <div className="text-sm font-semibold text-warning dark:text-warning">Clarification needed</div>
+          {infoMessage && <div className="mt-1 text-sm text-warning/80">{infoMessage}</div>}
           <div className="mt-3 space-y-2">
             {clarifications.map((q, idx) => (
               <button
                 key={idx}
-                className="w-full rounded-xl border border-border/60 bg-card/50 px-3 py-2 text-left text-sm text-foreground hover:border-orange-400/40 hover:bg-orange-500/5 dark:border-gray-800/60 dark:bg-background/40 dark:text-gray-200"
+                className="w-full rounded-xl border border-border/60 bg-card/50 px-3 py-2 text-left text-sm text-foreground hover:border-warning/40 hover:bg-warning/5 dark:border-gray-800/60 dark:bg-background/40 dark:text-gray-200"
                 onClick={async () => {
                   if (!navigator.clipboard) {
                     toast.error('Clipboard API is not available')
@@ -113,7 +113,7 @@ export function SheetArtifact({ content, metadata }: SheetArtifactProps) {
               </button>
             ))}
           </div>
-          <div className="mt-3 text-xs text-orange-100/70">
+          <div className="mt-3 text-xs text-warning/70">
             Tip: answer these in chat (you can paste), then re-run the query.
           </div>
         </div>

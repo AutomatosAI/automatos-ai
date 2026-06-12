@@ -88,7 +88,7 @@ export function ModelSelector({ selectedModelId, onModelChange }: ModelSelectorP
                 <DropdownMenuItem
                   key={modelId}
                   onClick={() => onModelChange(modelId)}
-                  className="text-foreground hover:bg-orange-500/10 cursor-pointer rounded-lg py-2"
+                  className="text-foreground hover:bg-warning/10 cursor-pointer rounded-lg py-2"
                 >
                   <div className="flex items-start justify-between w-full">
                     <div className="flex-1 min-w-0">
@@ -100,7 +100,7 @@ export function ModelSelector({ selectedModelId, onModelChange }: ModelSelectorP
                       )}
                     </div>
                     {isSelected && (
-                      <Check className="w-4 h-4 text-orange-400 ml-2 flex-shrink-0" />
+                      <Check className="w-4 h-4 text-warning ml-2 flex-shrink-0" />
                     )}
                   </div>
                 </DropdownMenuItem>

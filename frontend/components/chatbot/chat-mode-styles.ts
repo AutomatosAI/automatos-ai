@@ -6,4 +6,4 @@ export const pillBase = [
   'shadow-[0_0_18px_rgba(249,115,22,0.10)]',
 ].join(' ')
 
-export const inactiveStyle = 'bg-black/10 text-foreground/90 hover:bg-orange-500/10'
+export const inactiveStyle = 'bg-black/10 text-foreground/90 hover:bg-warning/10'
