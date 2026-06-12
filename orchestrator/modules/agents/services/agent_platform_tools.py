@@ -222,11 +222,15 @@ class AgentPlatformTools:
                         },
                         "template_name": {
                             "type": "string",
-                            "description": "Template to use (e.g. 'Basic Report', 'Invoice'). Omit for auto-selection."
+                            "description": "Template to use (e.g. 'Basic Report', 'Invoice', 'Branded Letter'). Omit for auto-selection."
+                        },
+                        "template_id": {
+                            "type": "string",
+                            "description": "UUID of a specific template to fill (from platform_list_templates). Takes precedence over template_name."
                         },
                         "data": {
                             "type": "object",
-                            "description": "Data to populate the template — must match the template's expected schema"
+                            "description": "Data to populate the template. For block templates, supply the data.* fields the template references (see platform_get_template_schema)."
                         }
                     },
                     "required": ["title", "format", "data"]
@@ -719,17 +723,23 @@ class AgentPlatformTools:
                 fmt = parameters.get("format", "pdf")
                 data = parameters.get("data", {})
                 template_name = parameters.get("template_name")
+                template_id_raw = parameters.get("template_id")
+                has_template = bool(template_name or template_id_raw)
 
-                # Guard: reject empty data — LLM must provide actual content
-                if not data or (fmt == "pdf" and not data.get("sections") and not data.get("content")):
+                # Guard: reject empty data only on the NO-template fallback path, where
+                # the document is built purely from sections/content. A chosen template
+                # (block or legacy) defines its own structure and fills data.* fields, so
+                # it must not be blocked by the sections/content requirement (PRD-167 S6).
+                if not has_template and (
+                    not data or (fmt == "pdf" and not data.get("sections") and not data.get("content"))
+                ):
                     return ToolResultFormatter.standardize_result(
                         {
                             "success": False,
                             "error": (
-                                "Missing document content. The 'data' parameter must include "
-                                "'sections' (a list of {title, content} objects with substantial text) "
-                                "or 'content' (a string). Generate the actual text content first, "
-                                "then call this tool again with the content in the 'data' parameter."
+                                "Missing document content. Either pass a template_id/template_name, "
+                                "or include 'sections' (a list of {title, content} objects with "
+                                "substantial text) or 'content' (a string) in 'data'."
                             ),
                         },
                         tool_name,
@@ -739,6 +749,7 @@ class AgentPlatformTools:
 
                 # Resolve workspace_id from agent
                 workspace_id = None
+                agent_row = None
                 try:
                     from core.models import Agent as AgentModel
                     agent_row = self.db.query(AgentModel).filter(AgentModel.id == agent_id).first()
@@ -753,6 +764,18 @@ class AgentPlatformTools:
                         tool_name
                     )
 
+                # Resolve template_id (UUID) + the requesting user for {{user.*}} chips.
+                template_id = None
+                if template_id_raw:
+                    try:
+                        template_id = UUID(str(template_id_raw))
+                    except (ValueError, TypeError):
+                        return ToolResultFormatter.standardize_result(
+                            {"success": False, "error": f"Invalid template_id: {template_id_raw!r}"},
+                            tool_name,
+                        )
+                agent_user_id = getattr(agent_row, "user_id", None)
+
                 from modules.documents.generation_service import DocumentGenerationService
                 gen_service = DocumentGenerationService(self.db, workspace_id)
                 result = await gen_service.generate(
@@ -761,6 +784,19 @@ class AgentPlatformTools:
                     data=data,
                     workspace_id=workspace_id,
                     template_name=template_name,
+                    template_id=template_id,
+                    user_id=agent_user_id,
+                )
+
+                # PRD-167 S6: register the rendered document as a deliverable with
+                # source attribution (template_id + the producing agent).
+                gen_service.register_as_deliverable(
+                    result,
+                    title=title,
+                    source_type="agent_output",
+                    agent_id=agent_id,
+                    agent_name=getattr(agent_row, "name", None),
+                    template_id=template_id,
                 )
 
                 self.logger.info(f"  ✅ Document generated: {result.filename} ({result.size // 1024}KB)")

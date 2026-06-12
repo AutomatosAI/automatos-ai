@@ -1387,6 +1387,11 @@ class DocumentTemplate(Base):
     # Sample data for preview
     sample_data = Column(JSONB, default=dict, server_default='{}')
 
+    # PRD-167 S2: canonical block-tree body ({"version", "blocks": [...]}).
+    # When present, this is the source of truth and renders to PDF/DOCX via the block
+    # renderers; templates without blocks fall back to the legacy template_content path.
+    blocks = Column(JSONB, nullable=True)
+
     # Metadata
     category = Column(String(100), default='general', server_default='general')
     tags = Column(PG_ARRAY(String), default=list)

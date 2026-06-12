@@ -10,6 +10,74 @@ from sqlalchemy.orm import Session
 logger = logging.getLogger(__name__)
 
 
+async def list_templates(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """PRD-167 S6: list the workspace's document templates for an agent."""
+    from modules.documents.template_service import DocumentTemplateService
+
+    service = DocumentTemplateService(db)
+    templates = service.list_templates(
+        workspace_id, format=params.get("format"), category=params.get("category")
+    )
+    return {
+        "success": True,
+        "templates": [
+            {
+                "id": str(t.id),
+                "name": t.name,
+                "description": t.description,
+                "format": t.format,
+                "category": t.category,
+                "has_blocks": bool(t.blocks),
+            }
+            for t in templates
+        ],
+        "count": len(templates),
+    }
+
+
+async def get_template_schema(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """PRD-167 S6: describe the data a template needs (variable chips + data.* fields)."""
+    from modules.documents.blocks import collect_variable_paths, validate_blocks
+    from modules.documents.template_service import DocumentTemplateService
+    from modules.documents.variables import CATALOG_BY_PATH
+
+    template_id_raw = params.get("template_id")
+    if not template_id_raw:
+        return {"success": False, "error": "Missing required parameter: template_id"}
+    try:
+        template_id = UUID(str(template_id_raw))
+    except (ValueError, TypeError):
+        return {"success": False, "error": f"Invalid template_id: {template_id_raw!r}"}
+
+    service = DocumentTemplateService(db)
+    template = service.get_template(template_id, workspace_id)
+    if not template:
+        return {"success": False, "error": "Template not found"}
+
+    variables: List[Dict[str, Any]] = []
+    data_fields: List[str] = []
+    if template.blocks:
+        for path in sorted(collect_variable_paths(validate_blocks(template.blocks))):
+            if path.startswith("data."):
+                data_fields.append(path)
+            elif path in CATALOG_BY_PATH:
+                entry = CATALOG_BY_PATH[path]
+                variables.append({"path": path, "label": entry["label"], "category": entry["category"]})
+
+    return {
+        "success": True,
+        "id": str(template.id),
+        "name": template.name,
+        "format": template.format,
+        "description": template.description,
+        "uses_blocks": bool(template.blocks),
+        "variables": variables,           # auto-resolved chips (user/company/brand/date)
+        "data_fields": data_fields,       # data.* fields you must supply at generation
+        "data_schema": template.data_schema or {},  # legacy templates
+        "sample_data": template.sample_data or {},
+    }
+
+
 async def list_documents(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     from core.models import Document
 

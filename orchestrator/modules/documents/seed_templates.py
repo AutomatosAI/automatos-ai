@@ -9,6 +9,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from core.models.core import DocumentTemplate
+from modules.documents.block_starters import STARTER_BLOCK_TEMPLATES
 
 logger = logging.getLogger(__name__)
 
@@ -240,6 +241,34 @@ def seed_starter_templates(db: Session, workspace_id: UUID) -> int:
             template_content=template_content,
             data_schema=tmpl["data_schema"],
             sample_data=tmpl["sample_data"],
+            is_active=True,
+            version=1,
+            created_by="system",
+        )
+        db.add(record)
+        created += 1
+
+    # PRD-167 S2: block-native starters (copy-on-customise). These carry a `blocks`
+    # body and render through the canonical block path.
+    for tmpl in STARTER_BLOCK_TEMPLATES:
+        exists = (
+            db.query(DocumentTemplate)
+            .filter(
+                DocumentTemplate.workspace_id == workspace_id,
+                DocumentTemplate.name == tmpl["name"],
+            )
+            .first()
+        )
+        if exists:
+            continue
+        record = DocumentTemplate(
+            workspace_id=workspace_id,
+            name=tmpl["name"],
+            description=tmpl["description"],
+            format=tmpl["format"],
+            category=tmpl["category"],
+            blocks=tmpl["blocks"],
+            sample_data=tmpl.get("sample_data", {}),
             is_active=True,
             version=1,
             created_by="system",

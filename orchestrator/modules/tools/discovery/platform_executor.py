@@ -52,6 +52,8 @@ from modules.tools.discovery.handlers_documents import (
     upload_document,
     read_document,
     grep_documents,
+    list_templates,
+    get_template_schema,
 )
 from modules.tools.discovery.handlers_channels import (  # PRD-143 S10
     list_channels,
@@ -295,6 +297,8 @@ class PlatformActionExecutor:
             "platform_list_documents": list_documents,
             "platform_read_document": read_document,
             "platform_grep_documents": grep_documents,
+            "platform_list_templates": list_templates,
+            "platform_get_template_schema": get_template_schema,
             "platform_get_workspace_info": get_workspace_info,
             "platform_get_memory_stats": get_memory_stats,
             "platform_list_connected_apps": list_connected_apps,
