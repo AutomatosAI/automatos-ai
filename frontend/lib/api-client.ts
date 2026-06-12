@@ -1,12 +1,9 @@
 
 /**
- * API Client - Only calls endpoints that actually exist based on test results
- * Base URL: Configured via NEXT_PUBLIC_API_URL environment variable (set by Docker Compose or .env.local)
- * 
- * MOCK SYSTEM:
- * - Tries real API first, falls back to mock data on failure
- * - Can be controlled globally or per-endpoint
- * - Use window.automatos.mocks to control from console
+ * API Client — one transport (Clerk auth + workspace header + error handling)
+ * over the backend API. Real failures surface honestly: PRD-168 S3 removed the
+ * mock fallback/data system; dev uses the real PRD-153 local stack.
+ * Base URL: NEXT_PUBLIC_API_URL.
  */
 
 interface ApiResponse<T = any> {
@@ -76,50 +73,6 @@ export interface PrimitiveHealthMetric {
   generated_at: string
 }
 
-// Mock configuration interface
-interface MockConfig {
-  enabled: boolean
-  endpoints: {
-    [key: string]: boolean
-  }
-  logMockUsage: boolean
-}
-
-// ====================================================================
-// PAGE-LEVEL MOCK CONFIGURATION - SIMPLE ON/OFF SWITCH PER PAGE
-// ====================================================================
-// Set to 'false' to use REAL APIs, 'true' to use MOCK data
-// 
-// Usage: When calling API from a page, pass the page name
-// Example: apiClient.setCurrentPage('dashboard') 
-//
-const PAGE_MOCK_CONFIG: Record<string, boolean> = {
-  // Core Pages
-  'dashboard': false,        // ✅ Use real APIs - working endpoints
-  'agents': false,           // ✅ Use real APIs - working endpoints (FIXED: recursive call bug)
-  'workflows': false,        // ✅ Use real APIs - working endpoints
-  'activity': false,         // ✅ Use real APIs - PRD-72 Activity Command Centre
-  'documents': false,        // false = REAL APIs ✅ | true = MOCK data ❌
-  'analytics': false,        // ✅ Use real APIs - working endpoints
-  'context': false,          // ✅ Use real APIs - all context endpoints working
-  'memory': false,           // ✅ Use real APIs - all memory endpoints working
-  'field-theory': false,     // ✅ Use real APIs - all field theory endpoints working
-  'multi-agent': false,      // ✅ Use real APIs - coordination/reasoning working
-  'orchestrator': false,     // ✅ Use real APIs - task submission working
-
-  // Settings/Admin Pages
-  'settings': false,         // ✅ Use real APIs - credentials system ready
-  'tools': false,            // ✅ Use real APIs - tools endpoints working
-  'credentials': false,      // ✅ Use real APIs - credentials system ready
-  'marketplace': false,      // ✅ Use real APIs - marketplace/composio endpoints working
-  'assignments': false,      // ✅ Use real APIs - recommendations endpoint
-  'admin': false,            // ✅ Use real APIs - admin plugin management
-
-  // Testing/Development
-  'test': true,              // 🧪 Always use mocks for testing
-  'demo': true,              // 🧪 Always use mocks for demos
-}
-
 // ─── Admin workspace override ────────────────────────────────────────
 // Module-level override that takes priority over localStorage.
 // Set by AdminWorkspaceSwitcher; reset on unmount.
@@ -136,9 +89,6 @@ export function getAdminWorkspaceOverride(): string | null {
 class ApiClient {
   private baseUrl: string
   private defaultHeaders: Record<string, string>
-  private mockConfig: MockConfig
-  private mockData: Record<string, () => any>
-  private currentPage: string = '' // Track which page is making requests
   private getClerkToken: (() => Promise<string | null>) | null = null
 
   constructor() {
@@ -164,36 +114,6 @@ class ApiClient {
       'Content-Type': 'application/json',
     }
 
-    // Initialize mock config (dev only)
-    const isDev = process.env.NODE_ENV !== 'production'
-    this.mockConfig = isDev ? this.loadMockConfig() : { enabled: false, endpoints: {}, logMockUsage: false }
-    this.mockData = {}  // PRD-168 S3: mock data removed (dev uses the real local stack)
-
-    // Expose mock control to window for easy debugging (dev only)
-    if (isDev && typeof window !== 'undefined') {
-      (window as any).automatos = {
-        ...(window as any).automatos,
-        mocks: {
-          enable: () => this.enableMocks(),
-          disable: () => this.disableMocks(),
-          toggle: (endpoint?: string) => this.toggleMock(endpoint),
-          status: () => this.getMockStatus(),
-          config: () => this.mockConfig
-        }
-      }
-    }
-
-    if (isDev) {
-      console.log('🚀 API Client initialized')
-      console.log(`📍 Base URL: ${this.baseUrl || 'relative URLs (Next.js)'}`)
-      console.log(`📍 NEXT_PUBLIC_API_URL env: ${process.env.NEXT_PUBLIC_API_URL || 'NOT SET'}`)
-      console.log('🔐 Auth: Clerk JWT (workspace-aware)')
-      if (this.mockConfig.enabled) {
-        console.warn('⚠️  Mock mode is ENABLED - Disable for production!')
-      } else {
-        console.log('✅ Real API mode enabled')
-      }
-    }
   }
 
   /**
@@ -205,141 +125,12 @@ class ApiClient {
     if (process.env.NODE_ENV !== 'production') console.log('✅ Clerk token getter configured')
   }
 
-  // Load mock config from localStorage or use defaults
-  private loadMockConfig(): MockConfig {
-    if (typeof window === 'undefined') {
-      return { enabled: false, endpoints: {}, logMockUsage: true }
-    }
+  // PRD-168 S3: the mock config/control system is removed — dev uses the real
+  // PRD-153 local stack. request() no longer falls back to mock data.
 
-    const stored = localStorage.getItem('automatos-mock-config')
-    if (stored) {
-      try {
-        return JSON.parse(stored)
-      } catch (e) {
-        console.error('Failed to parse mock config:', e)
-      }
-    }
-
-    // Default config - mocks DISABLED for working APIs
-    return {
-      enabled: false, // Disabled by default - use real APIs
-      endpoints: {
-        // Only enable mocks for endpoints that consistently fail
-        '/api/insights/extract': false, // Requires auth - will work after backend restart
-        '/api/recommendations/generate': false, // Requires auth - will work after backend restart
-        '/api/learning/feedback': false, // Requires auth - will work after backend restart
-        '/api/knowledge/share': false, // Requires auth - will work after backend restart
-        '/api/system/performance-baseline': false, // Requires auth - will work after backend restart
-        '/api/documents/upload': false, // Schema needs fixing
-        '/api/multi-agent/behavior/learn': true, // 404 - not implemented
-        '/api/multi-agent/optimization/adaptive': true, // 404 - not implemented
-      },
-      logMockUsage: true // Enable logging to see what's being used
-    }
-  }
-
-  // Save mock config to localStorage
-  private saveMockConfig() {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('automatos-mock-config', JSON.stringify(this.mockConfig))
-    }
-  }
-
-  // Mock control methods
-  private enableMocks() {
-    this.mockConfig.enabled = true
-    this.saveMockConfig()
-    console.log('🎭 Mocks ENABLED globally')
-  }
-
-  private disableMocks() {
-    this.mockConfig.enabled = false
-    this.saveMockConfig()
-    console.log('🌐 Mocks DISABLED - Using real APIs only')
-  }
-
-  private toggleMock(endpoint?: string) {
-    if (!endpoint) {
-      this.mockConfig.enabled = !this.mockConfig.enabled
-      console.log(this.mockConfig.enabled ? '🎭 Mocks ENABLED' : '🌐 Mocks DISABLED')
-    } else {
-      const current = this.mockConfig.endpoints[endpoint] ?? true
-      this.mockConfig.endpoints[endpoint] = !current
-      console.log(`${endpoint}: ${!current ? '🎭 Mock' : '🌐 Real API'}`)
-    }
-    this.saveMockConfig()
-  }
-
-  private getMockStatus() {
-    return {
-      global: this.mockConfig.enabled,
-      endpoints: this.mockConfig.endpoints,
-      totalMocked: Object.values(this.mockConfig.endpoints).filter(v => v).length
-    }
-  }
-
-  // Check if mock should be used for endpoint
-  private shouldUseMock(endpoint: string): boolean {
-    // Never use mocks in production
-    if (process.env.NODE_ENV === 'production') return false
-
-    // 1. CHECK PAGE-LEVEL CONFIG FIRST (highest priority)
-    if (this.currentPage && this.currentPage in PAGE_MOCK_CONFIG) {
-      // Page config overrides everything - return it directly
-      // true = use mocks, false = use real APIs
-      const useMock = PAGE_MOCK_CONFIG[this.currentPage]
-      if (this.mockConfig.logMockUsage) {
-        console.log(`🔍 ${endpoint} → Page config: ${useMock ? '🔄 MOCK' : '🌐 REAL API'}`)
-      }
-      return useMock
-    }
-
-    // 2. Check if mocks are globally disabled
-    if (!this.mockConfig.enabled) return false
-
-    // 3. Check specific endpoint config
-    if (endpoint in this.mockConfig.endpoints) {
-      return this.mockConfig.endpoints[endpoint]
-    }
-
-    // 4. Default to true if mocks are globally enabled
-    return true
-  }
-
-  /**
-   * Set the current page/feature to control mock behavior per page
-   * @param pageName - Name of the page (e.g., 'dashboard', 'agents', 'workflows')
-   * 
-   * @example
-   * // In your page component:
-   * useEffect(() => {
-   *   apiClient.setCurrentPage('dashboard')
-   *   return () => apiClient.setCurrentPage('') // Clear on unmount
-   * }, [])
-   */
-  public setCurrentPage(pageName: string) {
-    this.currentPage = pageName.toLowerCase()
-    if (process.env.NODE_ENV !== 'production') {
-      const mockStatus = PAGE_MOCK_CONFIG[this.currentPage] ? 'MOCKS ON' : 'REAL APIs'
-      console.log(`📄 Page: ${pageName} → ${mockStatus}`)
-    }
-  }
-
-  /**
-   * Get the current page mock status
-   */
-  public getPageMockStatus(pageName?: string): boolean {
-    const page = pageName || this.currentPage
-    return PAGE_MOCK_CONFIG[page.toLowerCase()] ?? false
-  }
-
-  /**
-   * Override page mock setting temporarily (useful for testing)
-   */
-  public setPageMockOverride(pageName: string, useMocks: boolean) {
-    PAGE_MOCK_CONFIG[pageName.toLowerCase()] = useMocks
-    if (process.env.NODE_ENV !== 'production') console.log(`🔧 Mock override for ${pageName}: ${useMocks ? 'ENABLED' : 'DISABLED'}`)
-  }
+  // PRD-168 S3: mock control removed. setCurrentPage kept as a no-op so existing
+  // usePageAPI() callers don't break; it drives no behaviour now.
+  public setCurrentPage(_pageName: string) {}
 
 
 
