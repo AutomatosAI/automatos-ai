@@ -105,3 +105,30 @@ async def test_distill_failure_means_no_sse_signal(monkeypatch):
         assistant_response="a substantive reply",
     )
     assert mgr._last_l3_facts_stored == 0
+
+
+# --- PRD-159 S5: no 'both'-tier double-write -------------------------------
+
+def test_tier_classification_never_returns_both():
+    mgr = SmartMemoryManager()
+    samples = [
+        ("My name is Gerard", "Noted."),
+        ("I prefer concise blog posts", "Will do."),
+        ("Use the #ops slack channel", "OK."),          # '#' must NOT force agent/both
+        ("email me at x@y.com", "OK."),                  # '@' must NOT force agent/both
+        ("random chit chat", "sure"),
+    ]
+    for um, ar in samples:
+        assert mgr._classify_memory_tier(um, ar) in ("global", "agent")
+
+
+def test_default_tier_is_single_global():
+    mgr = SmartMemoryManager()
+    # Ordinary message → single workspace namespace, not a double-write.
+    assert mgr._classify_memory_tier("here is a durable fact", "ok") == "global"
+
+
+def test_explicit_agent_instruction_routes_to_agent():
+    mgr = SmartMemoryManager()
+    assert mgr._classify_memory_tier("always cc my manager", "ok") == "agent"
+    assert mgr._classify_memory_tier("for this agent, use formal tone", "ok") == "agent"

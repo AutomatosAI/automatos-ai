@@ -111,81 +111,33 @@ class SmartMemoryManager:
 
     def _classify_memory_tier(self, user_message: str, assistant_response: str) -> str:
         """
-        Classify where a memory should be stored.
+        Classify where a memory should be stored. Returns "global" or "agent".
 
-        Returns: "global", "agent", or "both"
+        PRD-159 S5: the "both"-tier double-write default is REMOVED. Every
+        exchange used to write to BOTH the workspace and agent namespaces,
+        doubling the Mem0 rows and the Explorer count for one memory. The default
+        is now a SINGLE workspace namespace ("global"); the agent namespace is
+        used only when the user gives an explicit agent-scoped instruction. The
+        fragile single-character keywords ('#'/'@') that misrouted ordinary
+        messages to the agent tier are gone.
 
-        Classification rules:
-        - Personal facts (name, location, job, general info) → global
-        - Tool/workflow-related (Slack, email patterns, contacts for tools) → agent
-        - Preferences → both (useful everywhere)
-
-        IMPORTANT: Only classify based on the USER message, not the assistant
-        response. The assistant mentioning "slack" or "github" in an explanation
-        shouldn't misclassify a personal question as agent-specific.
+        Only the USER message is classified — the assistant response contains
+        tool names in explanations that caused false positives.
         """
-        # Only use USER message for classification — assistant response
-        # contains tool names in explanations that cause false positives
         combined = user_message.lower()
 
-        # Tool/workflow-specific keywords → agent-specific memory
-        # These are things specific to how tools are used
-        tool_keywords = [
-            # Communication tools
-            "slack", "channel", "#", "dm", "message to",
-            "gmail", "email to", "send email", "cc", "bcc", "forward",
-            # Dev tools
-            "github", "repository", "repo", "branch", "pr", "pull request",
-            "jira", "ticket", "issue",
-            # Data tools
-            "database", "table", "query", "sql", "api", "endpoint",
-            # File tools
-            "spreadsheet", "document", "file", "folder", "drive", "upload",
-            # Workflow patterns
-            "when i ask", "for this agent", "in this context"
-        ]
-
-        # Personal/global keywords → global memory (who the user IS)
-        personal_keywords = [
-            "my name", "i am", "i'm", "call me",
-            "i work at", "i work for", "my job", "my role",
-            "i live", "from ireland", "from portugal", "i'm from",
-            "born", "age", "founder", "ceo", "coo", "manager",
-            "my company", "my team", "my organization"
-        ]
-
-        # Preference keywords → both tiers (useful everywhere)
-        preference_keywords = [
-            "prefer", "favorite", "like to", "don't like",
-            "usually", "my style", "i want", "i need"
-        ]
-
-        # Strong agent indicators (override others)
+        # Explicit agent-scoped instructions → store under the agent namespace.
+        # These are durable directions about how THIS agent should act, not
+        # passing mentions of a tool name.
         strong_agent_keywords = [
-            "always cc", "default channel", "send to", "post to",
-            "my slack", "my email", "contact", "@"
+            "always cc", "default channel", "for this agent", "in this context",
+            "when i ask you", "post to", "send to",
         ]
-
-        has_tool = any(kw in combined for kw in tool_keywords)
-        has_personal = any(kw in combined for kw in personal_keywords)
-        has_preference = any(kw in combined for kw in preference_keywords)
-        has_strong_agent = any(kw in combined for kw in strong_agent_keywords)
-
-        # Strong agent indicators take precedence
-        if has_strong_agent:
+        if any(kw in combined for kw in strong_agent_keywords):
             return "agent"
-        elif has_personal and has_tool:
-            return "both"  # Personal + tool context → store everywhere
-        elif has_preference and has_tool:
-            return "both"  # Tool preference → useful in both tiers
-        elif has_preference:
-            return "both"  # General preference → both
-        elif has_tool:
-            return "agent"  # Pure tool-specific
-        elif has_personal:
-            return "global"  # Pure personal fact
-        else:
-            return "both"  # Default to both — let Mem0 decide what's worth extracting
+
+        # Everything else → single workspace namespace. No double-write.
+        return "global"
 
     def _get_cache_key(self, workspace_id: str, agent_id: Optional[int], query: str) -> str:
         """Create cache key for memory lookups (includes agent for agent-specific cache)."""
