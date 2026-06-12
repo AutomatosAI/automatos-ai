@@ -135,13 +135,18 @@ class TestAccessTrackingOffloaded:
 
 @pytest.mark.integration
 @pytest.mark.benchmark
-def test_retrieval_p50_benchmark(benchmark):
+def test_retrieval_p50_benchmark(request):
     """p50 retrieval latency on a seeded corpus — needs the live stack + S3.
 
     Run with: pytest -m benchmark --benchmark-only (with DATABASE_URL + S3 set).
     The before/after p50 goes in the PR per the S4 acceptance.
+
+    Guard runs BEFORE the ``benchmark`` fixture is requested: importorskip can't
+    sit alongside a ``benchmark`` parameter (pytest resolves fixtures at setup,
+    so a missing pytest-benchmark errors before the body). Resolve it lazily.
     """
     pytest.importorskip("pytest_benchmark")
+    benchmark = request.getfixturevalue("benchmark")
     from modules.rag.service import get_rag_service
 
     rag = get_rag_service()
