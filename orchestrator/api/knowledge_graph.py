@@ -9,7 +9,7 @@ query it through the ``platform_graph_*`` tools
 workspace-graph lifecycle: import a graphify graph.json, rebuild, and delete.
 """
 
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Query
 import json
 import logging
 
@@ -116,3 +116,131 @@ async def trigger_graph_build(
         "message": f"Graph built — {meta.get('node_count', 0)} nodes, {meta.get('edge_count', 0)} edges",
         "meta": meta,
     }
+
+
+# ============================================================================
+# CLUSTER-FIRST DRILL-IN (PRD-165 S2)
+# Server-side subgraph queries so the browser never downloads the full
+# graph.json (Q28, LightRAG pattern): communities -> community subgraph ->
+# expand a node -> path between two nodes -> search-to-focus.
+# ============================================================================
+
+
+async def _load_ws_graph(ctx: RequestContext):
+    """Load the workspace knowledge graph or 404 if none is built."""
+    from modules.knowledge.graph_service import get_graph_service
+    graph = await get_graph_service().load_graph(str(ctx.workspace_id))
+    if graph is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No knowledge graph built for this workspace yet.",
+        )
+    return graph
+
+
+async def _read_communities(ctx: RequestContext) -> list:
+    """Read communities.json or 404."""
+    from core.graph_storage import DbWorkspaceClient
+    ws = DbWorkspaceClient(str(ctx.workspace_id))
+    result = await ws.read_file("graph/communities.json")
+    if not result.get("success") or not result.get("content"):
+        raise HTTPException(
+            status_code=404,
+            detail="No communities — build the knowledge graph first.",
+        )
+    try:
+        return json.loads(result["content"])
+    except (json.JSONDecodeError, TypeError):
+        raise HTTPException(status_code=500, detail="Corrupt communities data.")
+
+
+@router.get("/graph/communities")
+async def list_graph_communities(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """Community overview for cluster-first drill-in: id, size, and (once the
+    graph is enriched in PRD-165 S3) a title/summary per community. This is the
+    entry point — the client lists clusters first, then drills into one."""
+    communities = await _read_communities(ctx)
+    overview = [
+        {
+            "community_id": c.get("community_id"),
+            "member_count": c.get("member_count", len(c.get("members", []))),
+            "title": c.get("title"),
+            "summary": c.get("summary"),
+        }
+        for c in communities
+        if c.get("member_count", len(c.get("members", []))) > 0
+    ]
+    overview.sort(key=lambda c: c["member_count"], reverse=True)
+    return {"success": True, "community_count": len(overview), "communities": overview}
+
+
+@router.get("/graph/community/{community_id}")
+async def get_community_subgraph(
+    community_id: int,
+    max_nodes: int = Query(300, ge=1, le=2000),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """The induced subgraph for one community's members (nodes + internal
+    edges), capped server-side — the drill-in payload."""
+    communities = await _read_communities(ctx)
+    match = next(
+        (c for c in communities if c.get("community_id") == community_id), None
+    )
+    if match is None:
+        raise HTTPException(status_code=404, detail=f"Community {community_id} not found.")
+
+    graph = await _load_ws_graph(ctx)
+    from modules.knowledge.graph_service import get_graph_service
+    data = await get_graph_service().community_subgraph(
+        graph, match.get("members", []), max_nodes=max_nodes,
+    )
+    return {
+        "success": True,
+        "community_id": community_id,
+        "title": match.get("title"),
+        "summary": match.get("summary"),
+        **data,
+    }
+
+
+@router.get("/graph/node/{node_id}/neighbors")
+async def expand_node(
+    node_id: str,
+    max_nodes: int = Query(150, ge=1, le=1000),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """The node + its 1-hop neighbourhood ('expand from here')."""
+    graph = await _load_ws_graph(ctx)
+    from modules.knowledge.graph_service import get_graph_service
+    data = await get_graph_service().node_neighbors_subgraph(graph, node_id, max_nodes=max_nodes)
+    if data is None:
+        raise HTTPException(status_code=404, detail=f"Node '{node_id}' not found in the graph.")
+    return {"success": True, "node_id": node_id, **data}
+
+
+@router.get("/graph/path")
+async def graph_path(
+    source: str = Query(..., min_length=1),
+    target: str = Query(..., min_length=1),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """Shortest path between two node ids for the path-finding UI."""
+    graph = await _load_ws_graph(ctx)
+    from modules.knowledge.graph_service import get_graph_service
+    result = await get_graph_service().shortest_path(graph, source, target)
+    return {"success": bool(result.get("found")), **result}
+
+
+@router.get("/graph/search")
+async def search_graph_nodes(
+    q: str = Query(..., min_length=1),
+    limit: int = Query(25, ge=1, le=100),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """Label search for search-to-focus."""
+    graph = await _load_ws_graph(ctx)
+    from modules.knowledge.graph_service import get_graph_service
+    matches = await get_graph_service().search_nodes(graph, q, limit=limit)
+    return {"success": True, "query": q, "match_count": len(matches), "matches": matches}

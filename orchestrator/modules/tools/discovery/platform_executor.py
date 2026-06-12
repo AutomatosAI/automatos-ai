@@ -209,6 +209,7 @@ from modules.tools.discovery.handlers_graph import (
     handle_graph_communities,
     handle_graph_impact,
     handle_graph_stats,
+    handle_graph_path,
 )
 from modules.tools.discovery.handlers_analytics_enhanced import (
     get_success_rate,
@@ -486,6 +487,7 @@ class PlatformActionExecutor:
             "platform_graph_communities": handle_graph_communities,
             "platform_graph_impact": handle_graph_impact,
             "platform_graph_stats": handle_graph_stats,
+            "platform_graph_path": handle_graph_path,
         }
 
     def _workspace_has_admin_owner(self) -> bool:

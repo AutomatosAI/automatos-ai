@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button'
 import BusinessGraphVisualization, {
   type BusinessGraphHandle,
 } from './BusinessGraphVisualization'
+import { KnowledgeGraphExplorer } from './KnowledgeGraphExplorer'
 import { GraphView, GraphLegend, useGraphPrefs, colorForType, type LegendSection } from '../graph'
 import {
   Network, Loader2, Search, X, ChevronRight,
@@ -477,19 +478,14 @@ export function BusinessGraphPanel() {
 
   // ── Large-graph notice (browser viz disabled, agents still query) ──
 
+  // Large graphs (>50k) can't ship the full graph.json to the browser — drill
+  // in server-side, cluster-first, instead of the old dead "viz disabled"
+  // notice (PRD-165 S2 / Q28).
   if (!vizSafe && meta) {
     return (
       <div className="space-y-4">
         {statsBar}
-        <div className="glass-card bg-white/5 backdrop-blur-sm border border-white/10 rounded-lg p-6 text-center">
-          <Network className="w-8 h-8 mx-auto mb-2 text-success" />
-          <h3 className="text-base font-semibold mb-1">Knowledge Graph Active</h3>
-          <p className="text-sm text-muted-foreground">
-            {nodeCount.toLocaleString()} nodes · {edgeCount.toLocaleString()} edges · {communityCount} communities.
-            Browser visualization is disabled for graphs over 50,000 nodes.
-            Agents can query this graph via platform tools.
-          </p>
-        </div>
+        <KnowledgeGraphExplorer />
       </div>
     )
   }

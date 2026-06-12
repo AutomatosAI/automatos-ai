@@ -479,3 +479,64 @@ async def handle_graph_stats(
     except Exception as e:
         logger.error("handle_graph_stats failed: %s", e, exc_info=True)
         return {"success": False, "error": str(e)}
+
+
+# ------------------------------------------------------------------
+# 6. handle_graph_path (PRD-165 S2)
+# ------------------------------------------------------------------
+
+
+async def handle_graph_path(
+    db: Session, workspace_id: UUID, params: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Find the shortest path between two nodes in the knowledge graph.
+
+    Params:
+        source (str): Start node label or ID.
+        target (str): End node label or ID.
+    """
+    source_label = (params.get("source") or params.get("from") or "").strip()
+    target_label = (params.get("target") or params.get("to") or "").strip()
+    if not source_label or not target_label:
+        return {"success": False, "error": "source and target are required"}
+
+    try:
+        svc = _get_service()
+        graph = await svc.load_graph(str(workspace_id))
+        if graph is None:
+            return {
+                "success": False,
+                "error": "No knowledge graph built for this workspace yet.",
+            }
+
+        # PRD-124: filter graph to team-visible nodes
+        agent_team = _resolve_agent_team(db, params.get("_agent_id"))
+        graph = _get_filtered_graph(graph, agent_team)
+
+        source_id = _find_node_by_label(graph, source_label)
+        if source_id is None:
+            return {"success": False, "error": f"Node '{source_label}' not found in the graph."}
+        target_id = _find_node_by_label(graph, target_label)
+        if target_id is None:
+            return {"success": False, "error": f"Node '{target_label}' not found in the graph."}
+
+        result = await svc.shortest_path(graph, source_id, target_id)
+        if not result.get("found"):
+            return {"success": False, "error": result.get("error", "No path found.")}
+
+        # Compact, agent-friendly: the ordered label trail + the hop count,
+        # with the full node/edge payloads for any UI that wants to render it.
+        trail = [n.get("label", n.get("id")) for n in result.get("path", [])]
+        return {
+            "success": True,
+            "source": str(source_id),
+            "target": str(target_id),
+            "hops": result.get("length", max(0, len(trail) - 1)),
+            "path": trail,
+            "path_nodes": result.get("path", []),
+            "edges": result.get("links", []),
+        }
+
+    except Exception as e:
+        logger.error("handle_graph_path failed: %s", e, exc_info=True)
+        return {"success": False, "error": str(e)}
