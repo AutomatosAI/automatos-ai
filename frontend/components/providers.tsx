@@ -4,7 +4,6 @@
 import { ClerkProvider } from '@clerk/nextjs'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Suspense, useState } from 'react'
-import { MockProvider } from '../lib/mock-context'
 import { ThemeProvider } from './theme-provider'
 import { WorkspaceProvider } from './workspace-provider'
 import { ClerkApiClientProvider } from './clerk-api-client-provider'
@@ -81,15 +80,13 @@ export function Providers({ children }: { children: React.ReactNode }) {
           >
             <QueryClientProvider client={queryClient}>
               <WorkspaceProvider>
-                <MockProvider>
-                  <Suspense fallback={null}>
-                    <StudioThemeFlag />
-                  </Suspense>
-                  <FirstLoginGuard />
-                  {children}
-                  <GlobalSearch />
-                  <Toaster position="top-right" richColors closeButton />
-                </MockProvider>
+                <Suspense fallback={null}>
+                  <StudioThemeFlag />
+                </Suspense>
+                <FirstLoginGuard />
+                {children}
+                <GlobalSearch />
+                <Toaster position="top-right" richColors closeButton />
               </WorkspaceProvider>
             </QueryClientProvider>
           </ThemeProvider>

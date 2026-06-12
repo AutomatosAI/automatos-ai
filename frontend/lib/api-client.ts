@@ -128,11 +128,9 @@ class ApiClient {
   // PRD-168 S3: the mock config/control system is removed — dev uses the real
   // PRD-153 local stack. request() no longer falls back to mock data.
 
-  // PRD-168 S3: mock control removed. Kept as no-ops so existing page callers
-  // (apiClient.setCurrentPage(...)) don't break; they drive no behaviour now.
+  // PRD-168 S3: mock control removed. setCurrentPage kept as a no-op so existing
+  // usePageAPI() callers don't break; it drives no behaviour now.
   public setCurrentPage(_pageName: string) {}
-  public getPageMockStatus(_pageName?: string): boolean { return false }
-  public setPageMockOverride(_pageName: string, _useMocks: boolean) {}
 
 
 
