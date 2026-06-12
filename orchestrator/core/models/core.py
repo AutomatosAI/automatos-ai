@@ -169,6 +169,29 @@ class LLMUsage(Base):
     created_at = Column(DateTime, default=func.now())
 
 # Database Models
+class Team(Base):
+    """PRD-158 S1: a real (small) Teams entity per workspace.
+
+    ``normalized_name`` is the canonical (lowercased/trimmed) form from
+    ``core.team_access.normalize_team`` — unique per workspace, so 'Support' and
+    'support' are one team. ``name`` keeps a human display label. Documents stay
+    multi-team via ``documents.team_access``; agents are single-team via
+    ``agents.team`` (schema leaves room for multi-team later).
+    """
+    __tablename__ = 'teams'
+    __table_args__ = (
+        UniqueConstraint('workspace_id', 'normalized_name', name='uq_teams_workspace_normalized'),
+        Index('ix_teams_workspace', 'workspace_id'),
+        {'extend_existing': True},
+    )
+
+    id = Column(Integer, primary_key=True)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey('workspaces.id', ondelete='CASCADE'), nullable=False)
+    name = Column(String(100), nullable=False)
+    normalized_name = Column(String(100), nullable=False)
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+
+
 class Agent(Base):
     __tablename__ = 'agents'
     __table_args__ = (

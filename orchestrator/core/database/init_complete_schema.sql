@@ -1947,5 +1947,18 @@ CREATE INDEX IF NOT EXISTS ix_pinned_documents_chat ON pinned_documents(chat_id)
 CREATE INDEX IF NOT EXISTS ix_pinned_documents_workspace ON pinned_documents(workspace_id);
 
 -- ================================================================
+-- PRD-158 S1: Teams entity (one team per workspace+normalized_name)
+-- ================================================================
+CREATE TABLE IF NOT EXISTS teams (
+    id              SERIAL PRIMARY KEY,
+    workspace_id    UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    name            VARCHAR(100) NOT NULL,
+    normalized_name VARCHAR(100) NOT NULL,
+    created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_teams_workspace_normalized UNIQUE (workspace_id, normalized_name)
+);
+CREATE INDEX IF NOT EXISTS ix_teams_workspace ON teams(workspace_id);
+
+-- ================================================================
 -- SCHEMA INITIALIZATION COMPLETE
 -- ================================================================
