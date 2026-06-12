@@ -33,8 +33,13 @@ class DocumentTemplateService:
         category: str = "general",
         tags: list = None,
         created_by: str = None,
+        blocks: dict = None,
     ) -> DocumentTemplate:
-        """Create a new document template."""
+        """Create a new document template.
+
+        ``blocks`` (PRD-167 S2) is the canonical block-tree body; when present it is the
+        render source of truth.
+        """
         template = DocumentTemplate(
             workspace_id=workspace_id,
             name=name,
@@ -47,6 +52,7 @@ class DocumentTemplateService:
             category=category,
             tags=tags or [],
             created_by=created_by,
+            blocks=blocks,
         )
         self.db.add(template)
         self.db.commit()

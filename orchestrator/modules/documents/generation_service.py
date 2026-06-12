@@ -64,54 +64,28 @@ except ImportError:
 
 from config import config
 from core.models.core import DocumentTemplate
+from core.models.workspaces import Workspace
 from modules.documents.models import GeneratedDocument
 from modules.documents.template_service import DocumentTemplateService
+from modules.documents.brand_kit import get_brand_kit
+from modules.documents.blocks import (
+    blocks_from_legacy,
+    collect_variable_paths,
+    render_document_docx,
+    render_document_html,
+    validate_blocks,
+)
+from modules.documents.variables import VariableResolver
 
 logger = logging.getLogger(__name__)
 
 # Base directory for generated documents
 GENERATED_DIR = config.DOCUMENT_STORAGE_DIR
 
-# Inline fallback template used when no DB template is available
-_FALLBACK_PDF_TEMPLATE = """<!DOCTYPE html>
-<html>
-<head>
-<style>
-  @page { size: A4; margin: 2cm; }
-  body { font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; color: #1a1a2e; line-height: 1.6; }
-  .header { border-bottom: 3px solid #ff6b35; padding-bottom: 1rem; margin-bottom: 2rem; }
-  .header h1 { margin: 0 0 0.5rem 0; font-size: 28pt; color: #1a1a2e; }
-  .header .meta { color: #666; font-size: 10pt; }
-  h2 { color: #1a1a2e; border-bottom: 1px solid #eee; padding-bottom: 0.5rem; margin-top: 2rem; }
-  .metrics { display: flex; gap: 1rem; margin: 1.5rem 0; flex-wrap: wrap; }
-  .metric-card { flex: 1; min-width: 120px; background: #f8f9fa; border-radius: 8px; padding: 1rem; border-left: 4px solid #ff6b35; text-align: center; }
-  .metric-card .label { font-size: 9pt; color: #666; text-transform: uppercase; }
-  .metric-card .value { font-size: 20pt; font-weight: 700; color: #1a1a2e; }
-  .section-content { margin-bottom: 1.5rem; white-space: pre-wrap; }
-</style>
-</head>
-<body>
-  <div class="header">
-    <h1>{{ title | default('Report') }}</h1>
-    <div class="meta">Generated: {{ date | default('') }} | Author: {{ author | default('Automatos AI') }}</div>
-  </div>
-  {% if metrics %}
-  <div class="metrics">
-    {% for key, value in metrics.items() %}
-    <div class="metric-card"><div class="label">{{ key }}</div><div class="value">{{ value }}</div></div>
-    {% endfor %}
-  </div>
-  {% endif %}
-  {% if sections %}
-    {% for section in sections %}
-    <h2>{{ section.title }}</h2>
-    <div class="section-content">{{ section.content }}</div>
-    {% endfor %}
-  {% elif content %}
-    <div class="section-content">{{ content }}</div>
-  {% endif %}
-</body>
-</html>"""
+# PRD-167 S2/S4: the hardcoded `_FALLBACK_PDF_TEMPLATE` (with the `#ff6b35` Automatos
+# orange) is gone. When a template has no blocks and no template_content, the no-template
+# PDF path renders through the brand-aware block renderer via `blocks_from_legacy(data)`,
+# so branding comes from the workspace brand kit — never hardcoded.
 
 
 class DocumentGenerationService:
@@ -137,8 +111,13 @@ class DocumentGenerationService:
         workspace_id: UUID = None,
         template_name: str = None,
         template_id: UUID = None,
+        user_id: int = None,
     ) -> GeneratedDocument:
-        """Single entry point — resolve template then dispatch to format engine."""
+        """Single entry point — resolve template then dispatch to format engine.
+
+        ``user_id`` (optional) is the requesting user, used to resolve ``{{user.*}}``
+        variable chips in block templates (PRD-167 S3).
+        """
         ws = workspace_id or self.workspace_id
         if not ws:
             raise ValueError("workspace_id is required")
@@ -167,9 +146,9 @@ class DocumentGenerationService:
 
         # Generate the format-specific file
         if format == "pdf":
-            result = await self.generate_pdf(template, data, ws, title)
+            result = await self.generate_pdf(template, data, ws, title, user_id=user_id)
         elif format == "docx":
-            result = await self.generate_docx(template, data, ws, title)
+            result = await self.generate_docx(template, data, ws, title, user_id=user_id)
         elif format == "xlsx":
             result = await self.generate_xlsx(data, ws, title=title, template=template)
         else:
@@ -178,6 +157,70 @@ class DocumentGenerationService:
         # Attach markdown content for live widget display
         result.content = self._data_to_markdown(data, title)
         return result
+
+    # ------------------------------------------------------------------
+    # Block rendering helpers (PRD-167 S2/S3/S4)
+    # ------------------------------------------------------------------
+
+    def _brand_kit_for(self, workspace_id: UUID) -> dict:
+        ws = self.db.query(Workspace).filter(Workspace.id == workspace_id).first()
+        return get_brand_kit(getattr(ws, "settings", None))
+
+    def _render_block_html(self, block_doc, data, workspace_id, user_id, title):
+        """Resolve a block document's variables and render it to a full HTML page."""
+        paths = collect_variable_paths(block_doc)
+        resolver = VariableResolver(self.db)
+        resolved = resolver.resolve(workspace_id, user_id, paths, extra_data=data)
+        brand_kit = self._brand_kit_for(workspace_id)
+        rendered = render_document_html(block_doc, resolved.values, brand_kit, title=title)
+        if rendered.unresolved:
+            logger.warning(
+                "[DocGen] %d unresolved variable(s) in block render: %s",
+                len(rendered.unresolved), ", ".join(rendered.unresolved),
+            )
+        return rendered.html
+
+    def register_as_deliverable(
+        self,
+        result: GeneratedDocument,
+        *,
+        title: str,
+        source_type: str = "document",
+        source_id: str = None,
+        agent_id: int = None,
+        agent_name: str = None,
+        template_id: UUID = None,
+    ) -> Optional[dict]:
+        """Register a generated document as a workspace deliverable (PRD-167 S6).
+
+        Source attribution travels in ``extra`` (template_id) + ``source_type``. Called
+        only for real generations — previews never register. Best-effort: a registration
+        failure never fails the generation itself.
+        """
+        ws = self.workspace_id
+        if not ws:
+            return None
+        try:
+            from services.deliverable_service import DeliverableService
+
+            extra = {"template_id": str(template_id)} if template_id else None
+            return DeliverableService(self.db, ws).register(
+                file_path=f"generated/{result.filename}",
+                title=title or result.filename,
+                source_type=source_type,
+                source_id=source_id,
+                agent_id=agent_id,
+                agent_name=agent_name,
+                artifact_type="document",
+                storage_type="generated",
+                file_type=result.format,
+                file_size_bytes=result.size,
+                preview_url=result.download_url,
+                extra=extra,
+            )
+        except Exception:
+            logger.exception("[DocGen] deliverable registration failed (non-fatal)")
+            return None
 
     # ------------------------------------------------------------------
     # PDF Generation (Jinja2 + WeasyPrint)
@@ -189,8 +232,17 @@ class DocumentGenerationService:
         data: dict,
         workspace_id: UUID,
         title: str = "Document",
+        user_id: int = None,
     ) -> GeneratedDocument:
-        """Render Jinja2 HTML → PDF via WeasyPrint."""
+        """Render → PDF via WeasyPrint.
+
+        Three render paths, in order of preference (PRD-167 S2):
+          1. Block template (``template.blocks``) → block→HTML renderer (brand-aware,
+             variable chips resolved). The canonical path.
+          2. Legacy ``template_content`` (user-authored Jinja HTML) → sandboxed Jinja2.
+          3. No template → brand-aware block render of the legacy data shape
+             (``blocks_from_legacy``). Replaces the old hardcoded fallback template.
+        """
         try:
             from weasyprint import HTML
         except ImportError:
@@ -199,25 +251,31 @@ class DocumentGenerationService:
                 "Install with: pip install weasyprint>=62.0"
             )
 
-        if not template or not template.template_content:
-            logger.info("No template found — using inline fallback for PDF generation")
-            template_html = _FALLBACK_PDF_TEMPLATE
+        block_payload = getattr(template, "blocks", None) if template else None
+
+        if block_payload:
+            # Path 1: canonical block template.
+            block_doc = validate_blocks(block_payload)
+            rendered_html = self._render_block_html(block_doc, data, workspace_id, user_id, title)
+        elif template and template.template_content:
+            # Path 2: legacy user-authored Jinja HTML (kept until per-workspace
+            # templates are migrated to blocks — see PRD-167 sunset note).
+            if hasattr(template, "data_schema"):
+                self._validate_and_backfill(data, template.data_schema)
+            # PRD-167 S4: expose the brand kit to legacy templates as {{ brand.* }} so
+            # they pick up workspace palette instead of hardcoded Automatos colours.
+            render_ctx = {**data, "brand": self._brand_kit_for(workspace_id)}
+            try:
+                jinja_template = self._jinja_env.from_string(template.template_content)
+                rendered_html = jinja_template.render(**render_ctx)
+            except jinja2.TemplateError as e:
+                raise ValueError(f"Template rendering error: {e}")
+            rendered_html = self._embed_charts(rendered_html, data)
         else:
-            template_html = template.template_content
-
-        # Validate data against schema (skip if using fallback — no schema)
-        if template and hasattr(template, 'data_schema'):
-            self._validate_and_backfill(data, template.data_schema)
-
-        # Render Jinja2
-        try:
-            jinja_template = self._jinja_env.from_string(template_html)
-            rendered_html = jinja_template.render(**data)
-        except jinja2.TemplateError as e:
-            raise ValueError(f"Template rendering error: {e}")
-
-        # Embed charts
-        rendered_html = self._embed_charts(rendered_html, data)
+            # Path 3: no template — brand-aware block render of the legacy data shape.
+            logger.info("No template found — rendering data via brand-aware block fallback")
+            block_doc = blocks_from_legacy(data)
+            rendered_html = self._render_block_html(block_doc, data, workspace_id, user_id, title)
 
         # Generate PDF
         output_path = self._output_path(workspace_id, title, "pdf")
@@ -238,21 +296,49 @@ class DocumentGenerationService:
         data: dict,
         workspace_id: UUID,
         title: str = "Document",
+        user_id: int = None,
     ) -> GeneratedDocument:
-        """Render .docx template with Jinja2 tags using docxtpl."""
+        """Render → DOCX.
+
+        Block templates (PRD-167 S2, Q71) compile directly to a python-docx Document
+        from the same block tree — no uploaded ``.docx`` file required. Legacy templates
+        with an uploaded ``.docx`` still render via docxtpl.
+        """
+        output_path = self._output_path(workspace_id, title, "docx")
+
+        block_payload = getattr(template, "blocks", None) if template else None
+        if block_payload:
+            # Path 1: canonical block template → compiled DOCX (Q71).
+            block_doc = validate_blocks(block_payload)
+            paths = collect_variable_paths(block_doc)
+            resolved = VariableResolver(self.db).resolve(
+                workspace_id, user_id, paths, extra_data=data
+            )
+            brand_kit = self._brand_kit_for(workspace_id)
+            rendered = render_document_docx(block_doc, resolved.values, brand_kit)
+            if rendered.unresolved:
+                logger.warning(
+                    "[DocGen] %d unresolved variable(s) in DOCX render: %s",
+                    len(rendered.unresolved), ", ".join(rendered.unresolved),
+                )
+            rendered.document.save(output_path)
+            return self._build_result(output_path, "docx", title, workspace_id)
+
+        # Path 2: legacy uploaded .docx template via docxtpl.
         try:
             from docxtpl import DocxTemplate, InlineImage
             from docx.shared import Mm
         except ImportError:
             raise ImportError(
-                "docxtpl is required for DOCX generation. "
+                "docxtpl is required for legacy .docx template generation. "
                 "Install with: pip install docxtpl>=0.18.0"
             )
 
         if not template or not template.template_file_path:
             raise ValueError(
-                "DOCX generation requires a template with a .docx file. "
-                "Upload a template via /api/documents/templates/upload."
+                "DOCX generation requires either a block template or an uploaded .docx "
+                "file. Create a block template in the editor, or upload one via "
+                "/api/documents/templates/upload."
             )
 
         if not os.path.exists(template.template_file_path):
@@ -270,8 +356,6 @@ class DocumentGenerationService:
                 )
 
         doc.render(data)
-
-        output_path = self._output_path(workspace_id, title, "docx")
         doc.save(output_path)
 
         return self._build_result(output_path, "docx", title, workspace_id)
