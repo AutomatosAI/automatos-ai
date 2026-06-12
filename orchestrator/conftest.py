@@ -52,3 +52,30 @@ def db_session(test_engine) -> Generator[Session, None, None]:
     session.close()
     transaction.rollback()
     connection.close()
+
+
+@pytest.fixture
+def seed_workspace(db_session):
+    """Factory inserting a minimal ``workspaces`` row so FK-bound inserts
+    (documents, chats, …) satisfy ``*_workspace_id_fkey``.
+
+    Call ``seed_workspace()`` for a fresh id, or ``seed_workspace(ws_id)`` to back
+    a specific one; returns the id (str). Rolled back with ``db_session``.
+    """
+    import uuid as _uuid
+
+    from sqlalchemy import text as _t
+
+    def _seed(workspace_id=None, name="test-ws"):
+        ws_id = str(workspace_id or _uuid.uuid4())
+        db_session.execute(
+            _t(
+                "INSERT INTO workspaces (id, name) VALUES (CAST(:id AS uuid), :name) "
+                "ON CONFLICT (id) DO NOTHING"
+            ),
+            {"id": ws_id, "name": name},
+        )
+        db_session.flush()
+        return ws_id
+
+    return _seed

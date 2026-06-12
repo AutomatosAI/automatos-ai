@@ -109,7 +109,7 @@ class TestPinnedContextPure:
 # --------------------------------------------------------------------------- #
 
 @pytest.mark.integration
-def test_pin_inject_and_unpin(db_session):
+def test_pin_inject_and_unpin(db_session, seed_workspace):
     from sqlalchemy import text
     from modules.rag.pinned_context import (
         pin_document,
@@ -118,7 +118,7 @@ def test_pin_inject_and_unpin(db_session):
         build_pinned_system_message,
     )
 
-    ws = str(uuid.uuid4())
+    ws = seed_workspace()
     # a user + chat + document with chunks
     user_id = db_session.execute(
         text("INSERT INTO users (email, username) VALUES (:e, :u) RETURNING id"),
@@ -127,8 +127,8 @@ def test_pin_inject_and_unpin(db_session):
     chat_id = str(uuid.uuid4())
     db_session.execute(
         text(
-            "INSERT INTO chats (id, user_id, workspace_id, title) "
-            "VALUES (CAST(:id AS uuid), :uid, CAST(:ws AS uuid), 'pin-test')"
+            "INSERT INTO chats (id, user_id, workspace_id, title, visibility) "
+            "VALUES (CAST(:id AS uuid), :uid, CAST(:ws AS uuid), 'pin-test', 'private')"
         ),
         {"id": chat_id, "uid": user_id, "ws": ws},
     )

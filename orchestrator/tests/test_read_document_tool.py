@@ -105,10 +105,10 @@ def _seed_doc(db, workspace_id, team_access="{}", n_chunks=12):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_read_document_pages_past_first_chunk(db_session):
+async def test_read_document_pages_past_first_chunk(db_session, seed_workspace):
     from modules.tools.discovery.handlers_documents import read_document
 
-    ws = str(uuid.uuid4())
+    ws = seed_workspace()
     doc_id = _seed_doc(db_session, ws, n_chunks=12)
 
     page0 = await read_document(db_session, ws, {"document_id": doc_id, "page": 0})
@@ -124,10 +124,10 @@ async def test_read_document_pages_past_first_chunk(db_session):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_read_document_team_isolation(db_session, monkeypatch):
+async def test_read_document_team_isolation(db_session, seed_workspace, monkeypatch):
     import modules.tools.discovery.handlers_documents as h
 
-    ws = str(uuid.uuid4())
+    ws = seed_workspace()
     doc_id = _seed_doc(db_session, ws, team_access="{sales}", n_chunks=3)
 
     # A 'support' agent must not read a 'sales'-only document.
@@ -143,11 +143,11 @@ async def test_read_document_team_isolation(db_session, monkeypatch):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_grep_documents_matches_and_scopes(db_session):
+async def test_grep_documents_matches_and_scopes(db_session, seed_workspace):
     from modules.tools.discovery.handlers_documents import grep_documents
     from sqlalchemy import text
 
-    ws = str(uuid.uuid4())
+    ws = seed_workspace()
     doc_id = db_session.execute(
         text(
             """

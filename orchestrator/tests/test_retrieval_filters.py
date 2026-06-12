@@ -197,10 +197,10 @@ _MATRIX = [
 
 @pytest.mark.integration
 @pytest.mark.parametrize("agent_team,doc_team_access,expected_visible", _MATRIX)
-def test_tenancy_matrix(db_session, agent_team, doc_team_access, expected_visible):
+def test_tenancy_matrix(db_session, seed_workspace, agent_team, doc_team_access, expected_visible):
     from sqlalchemy import text
 
-    workspace_id = str(uuid.uuid4())
+    workspace_id = seed_workspace()
     # Seed one document with the matrix's team_access.
     doc_id = db_session.execute(
         text(
@@ -221,12 +221,12 @@ def test_tenancy_matrix(db_session, agent_team, doc_team_access, expected_visibl
 
 
 @pytest.mark.integration
-def test_tenancy_matrix_isolates_other_workspace(db_session):
+def test_tenancy_matrix_isolates_other_workspace(db_session, seed_workspace):
     """A document in another workspace is never visible, regardless of team."""
     from sqlalchemy import text
 
-    ws_a = str(uuid.uuid4())
-    ws_b = str(uuid.uuid4())
+    ws_a = seed_workspace()
+    ws_b = seed_workspace()
     doc_b = db_session.execute(
         text(
             """
