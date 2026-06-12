@@ -83,10 +83,12 @@ logger = logging.getLogger(__name__)
 # system_settings (category 'power_modes', key '<mode>'); see
 # _get_power_mode_caps(). Stored settings win; absent keys fall back here.
 # ---------------------------------------------------------------------------
+# PRD-163 S5: timeout scales with power mode — light work shouldn't hang for the
+# full window, and max-power deep work needs more than the 4-min default.
 _POWER_MODE_DEFAULTS: Dict[str, Dict[str, Any]] = {
-    "light":    {"max_tool_iterations": 5,  "force_llm_tier": "system_llm"},
-    "standard": {"max_tool_iterations": 10, "force_llm_tier": None},
-    "max":      {"max_tool_iterations": 50, "force_llm_tier": "orchestrator_llm"},
+    "light":    {"max_tool_iterations": 5,  "force_llm_tier": "system_llm", "timeout_seconds": 120},
+    "standard": {"max_tool_iterations": 10, "force_llm_tier": None, "timeout_seconds": 240},
+    "max":      {"max_tool_iterations": 50, "force_llm_tier": "orchestrator_llm", "timeout_seconds": 600},
 }
 
 
@@ -1490,6 +1492,8 @@ class CoordinatorService:
         """
         caps = mode_caps or _POWER_MODE_DEFAULTS["standard"]
         max_iters = caps["max_tool_iterations"]
+        # PRD-163 S5: per-power-mode timeout (falls back to the global default).
+        task_timeout = caps.get("timeout_seconds") or Config.COORDINATOR_TASK_EXECUTION_TIMEOUT
 
         # Pass runtime directly when we have it so the factory cache can't
         # swap in a stale cached runtime under us mid-flight.
@@ -1504,18 +1508,18 @@ class CoordinatorService:
                     max_tool_iterations=max_iters,
                     attachment_ids=attachment_ids,
                 ),
-                timeout=Config.COORDINATOR_TASK_EXECUTION_TIMEOUT,
+                timeout=task_timeout,
             )
         except asyncio.TimeoutError:
             logger.error(
                 "Task %s execution timed out after %ds (agent=%d)",
                 task.id,
-                Config.COORDINATOR_TASK_EXECUTION_TIMEOUT,
+                task_timeout,
                 agent_id,
             )
             result = {
                 "status": "error",
-                "error": f"Execution timed out after {Config.COORDINATOR_TASK_EXECUTION_TIMEOUT}s",
+                "error": f"Execution timed out after {task_timeout}s",
             }
         except Exception as exc:
             logger.error(

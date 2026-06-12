@@ -165,6 +165,7 @@ class TaskResponse(BaseModel):
     state: str
     state_type: str
     assigned_agent_id: Optional[int] = None
+    depends_on: List[str] = Field(default_factory=list)  # PRD-163 S5: real DAG edges
     attempt_number: int = 0
     tokens_used: int = 0
     estimated_tokens: int = 4000
@@ -343,8 +344,12 @@ def _run_to_response(run: OrchestrationRun) -> dict:
     }
 
 
-def _task_to_response(task: OrchestrationTask) -> dict:
-    """Convert an OrchestrationTask ORM object to a TaskResponse dict."""
+def _task_to_response(task: OrchestrationTask, depends_on: Optional[List[str]] = None) -> dict:
+    """Convert an OrchestrationTask ORM object to a TaskResponse dict.
+
+    ``depends_on`` (PRD-163 S5) carries the task's real dependency edges so the
+    DAG canvas can render them.
+    """
     return {
         "id": str(task.id),
         "title": task.title,
@@ -355,6 +360,7 @@ def _task_to_response(task: OrchestrationTask) -> dict:
         "state": task.state,
         "state_type": task.state_type,
         "assigned_agent_id": task.assigned_agent_id,
+        "depends_on": depends_on or [],
         "attempt_number": task.attempt_number or 0,
         "tokens_used": task.tokens_used or 0,
         "estimated_tokens": getattr(task, "estimated_tokens", None) or 4000,
@@ -958,8 +964,20 @@ async def get_mission(
             if e.event_type == "permission_denied"
         ]
 
+        # PRD-163 S5: real dependency edges for the DAG canvas.
+        _deps_map: Dict[str, List[str]] = {}
+        if tasks:
+            from core.models.orchestration import OrchestrationTaskDependency
+            _dep_rows = (
+                db.query(OrchestrationTaskDependency)
+                .filter(OrchestrationTaskDependency.task_id.in_([t.id for t in tasks]))
+                .all()
+            )
+            for d in _dep_rows:
+                _deps_map.setdefault(str(d.task_id), []).append(str(d.depends_on_task_id))
+
         result = _run_to_response(run)
-        result["tasks"] = [_task_to_response(t) for t in tasks]
+        result["tasks"] = [_task_to_response(t, _deps_map.get(str(t.id), [])) for t in tasks]
         result["recent_events"] = [_event_to_response(e) for e in events]
         result["permission_denials"] = permission_denials
         return result
