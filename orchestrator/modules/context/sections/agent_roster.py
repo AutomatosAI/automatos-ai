@@ -41,12 +41,23 @@ class AgentRosterSection(BaseSection):
     # ------------------------------------------------------------------
 
     def _build(self, ctx: SectionContext) -> str:
+        # Roster UNKNOWN (caller supplied nothing) → render nothing, so modes
+        # whose caller already presents a roster don't get a false "no agents"
+        # claim. An explicit empty list still renders the honest fallback.
+        if "roster_agents" not in ctx.kwargs:
+            return ""
+
         agents = ctx.kwargs.get("roster_agents")
         if not agents:
             return (
                 "## Agent Roster\n\n"
                 "No agents available in this workspace."
             )
+
+        # PRD-164 S1: optional {agent_id: avg verification score} map rendered
+        # as a per-agent performance line (sourced from the agent_matcher
+        # history map — no parallel performance computation).
+        performance = ctx.kwargs.get("agent_performance") or {}
 
         parts: list[str] = ["## Agent Roster", ""]
 
@@ -93,6 +104,12 @@ class AgentRosterSection(BaseSection):
             if tags_text:
                 details.append(f"- **Tags:** {tags_text}")
 
+            score = _performance_for(performance, agent_id)
+            if score is not None:
+                details.append(
+                    f"- **Recent performance:** {score:.2f} avg verification score (30d)"
+                )
+
             parts.extend(details)
             parts.append("")  # blank line between agents
 
@@ -100,6 +117,18 @@ class AgentRosterSection(BaseSection):
         if self.max_tokens:
             content = self.truncate(content, self.max_tokens)
         return content
+
+
+def _performance_for(performance: dict, agent_id: Any) -> Any:
+    """Look up an agent's performance score tolerating int/str key drift."""
+    if not performance:
+        return None
+    if agent_id in performance:
+        return performance[agent_id]
+    try:
+        return performance.get(int(agent_id))
+    except (TypeError, ValueError):
+        return None
 
 
 def _attr_or_key(obj: Any, key: str, default: Any = None) -> Any:

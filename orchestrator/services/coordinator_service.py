@@ -1913,6 +1913,7 @@ class CoordinatorService:
                 workspace_id=workspace_id,
                 agents=agents,
                 config=mission_config,
+                db=db,  # PRD-164 S1: enables the planning context pack
             )
         except PlanValidationError:
             transition_run(
@@ -2665,6 +2666,7 @@ class CoordinatorService:
                 failed_task_title=failed_task_title,
                 failed_task_reason=failed_task_reason,
                 user_notes=notes,
+                db=db,  # PRD-164 S1: enables the planning context pack
             )
         except PlanValidationError:
             # Replan failed — transition back to failed

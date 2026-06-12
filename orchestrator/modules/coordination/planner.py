@@ -114,6 +114,46 @@ async def _resolve_attachments_for_planning(
 
 
 # ---------------------------------------------------------------------------
+# Planning context pack (PRD-164 S1, Q61)
+# ---------------------------------------------------------------------------
+
+
+async def _build_planning_context(
+    goal: str,
+    workspace_id: UUID,
+    db: Any,
+) -> Optional[str]:
+    """Fetch the ONE platform planning pack for the decomposition prompt.
+
+    Q61: planners converge on ``ContextService.build_planning_context`` — RAG
+    on the goal (PRD-157 choke point), mission summaries + task failures
+    (PRD-159 recall), KG subgraph, token-budgeted. ``include_roster=False``
+    because the decomposition prompt already renders the capability roster.
+
+    Requires a DB session (the coordinator passes its own); without one the
+    planner runs context-free rather than half-assembling something here.
+    Never raises — planning proceeds without the pack on any failure.
+    """
+    if db is None:
+        return None
+    try:
+        from modules.context.service import ContextService
+
+        pack = await ContextService(db).build_planning_context(
+            goal=goal,
+            workspace_id=str(workspace_id),
+            include_roster=False,
+        )
+        return pack.content if not pack.is_empty else None
+    except Exception:
+        logger.warning(
+            "MissionPlanner: planning context pack unavailable — continuing without it",
+            exc_info=True,
+        )
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
@@ -316,6 +356,7 @@ class MissionPlanner:
         failed_task_reason: str,
         user_notes: Optional[str] = None,
         config: Optional[Dict[str, Any]] = None,
+        db: Any = None,
     ) -> DecompositionResult:
         """
         Replan a failed mission — generate replacement tasks for the failed
@@ -342,6 +383,9 @@ class MissionPlanner:
         agent_roster = _render_agent_roster(agents)
         last_errors: List[str] = []
 
+        # PRD-164 S1 (Q61): same one planning pack as decompose().
+        planning_context = await _build_planning_context(goal, workspace_id, db)
+
         for attempt in range(1, MAX_PLAN_RETRIES + 1):
             logger.info(
                 "MissionPlanner.replan: attempt %d/%d for goal='%s' workspace=%s",
@@ -359,6 +403,7 @@ class MissionPlanner:
                 failed_task_reason=failed_task_reason,
                 user_notes=user_notes,
                 validation_errors=last_errors if attempt > 1 else None,
+                planning_context=planning_context,
             )
 
             messages = [
@@ -445,6 +490,7 @@ class MissionPlanner:
         workspace_id: UUID,
         agents: Sequence[Agent],
         config: Optional[Dict[str, Any]] = None,
+        db: Any = None,
     ) -> DecompositionResult:
         """
         Decompose *goal* into a task DAG validated against available *agents*.
@@ -454,6 +500,8 @@ class MissionPlanner:
             workspace_id: Owning workspace UUID.
             agents: Available roster agents for this workspace.
             config: Optional overrides (unused in v1, reserved for 82B).
+            db: Optional DB session — enables the PRD-164 planning context
+                pack (RAG + mission memory + KG) in the decomposition prompt.
 
         Returns:
             DecompositionResult with tasks, dependencies, and token estimate.
@@ -551,6 +599,11 @@ class MissionPlanner:
         agent_roster = _render_agent_roster(agents)
         last_errors: List[str] = []
 
+        # PRD-164 S1 (Q61): the ONE planning context pack — RAG on the goal,
+        # prior mission summaries/failures, KG subgraph — built once, reused
+        # across retries.
+        planning_context = await _build_planning_context(goal, workspace_id, db)
+
         # PRD-127: Resolve attachment_ids for planner context
         attachment_contents: Optional[List[Dict[str, str]]] = None
         mission_attachment_ids: List[str] = (config or {}).get("attachment_ids", [])
@@ -584,6 +637,7 @@ class MissionPlanner:
                 attachment_contents=attachment_contents,
                 chat_context=chat_context,
                 power_mode=power_mode,
+                planning_context=planning_context,
             )
 
             messages = [
@@ -707,11 +761,17 @@ def _build_decomposition_prompt(
     attachment_contents: Optional[List[Dict[str, str]]] = None,
     chat_context: Optional[List[Dict[str, str]]] = None,
     power_mode: str = "standard",
+    planning_context: Optional[str] = None,
 ) -> str:
     """Build the user prompt for goal decomposition."""
     parts = [
         f"## Goal\n<user_goal>\n{goal}\n</user_goal>\n",
     ]
+
+    # PRD-164 S1: the platform planning pack (RAG + mission memory + KG),
+    # assembled by ContextService.build_planning_context — the one assembler.
+    if planning_context:
+        parts.append(f"{planning_context}\n")
 
     # PRD-125 Phase 1: Include recent chat context when mission is launched from chat
     if chat_context:
@@ -876,6 +936,7 @@ def _build_replan_prompt(
     failed_task_reason: str,
     user_notes: Optional[str] = None,
     validation_errors: Optional[List[str]] = None,
+    planning_context: Optional[str] = None,
 ) -> str:
     """Build the user prompt for replanning a failed mission."""
     completed_summary = ""
@@ -895,6 +956,10 @@ def _build_replan_prompt(
         f"## Completed Tasks (DO NOT REDO)\n{completed_summary}\n",
         f"## Failed Task\n- **Title**: {failed_task_title}\n- **Failure Reason**: {failed_task_reason}\n",
     ]
+
+    # PRD-164 S1: the platform planning pack — same assembler as decompose().
+    if planning_context:
+        parts.append(f"{planning_context}\n")
 
     if user_notes:
         parts.append(f"## User Guidance for Replan\n{user_notes}\n")

@@ -20,6 +20,7 @@ class ContextMode(str, Enum):
     ORCHESTRATOR_STAGE = "orchestrator_stage"
     NL2SQL = "nl2sql"
     COORDINATOR = "coordinator"
+    PLANNING = "planning"
 
 
 @dataclass(frozen=True)
@@ -130,5 +131,20 @@ MODE_CONFIGS: dict[ContextMode, ModeConfig] = {
         tool_loading="full",
         personality=False,
         max_tokens=131072,
+    ),
+    # personality=False: the planning pack (PRD-164 S1, Q61) is injected into
+    # ANOTHER prompt, never sent to an LLM on its own. One section list for
+    # every planner — MissionPlanner, board plan_task, AutoBrain — assembled
+    # exclusively by ContextService.build_planning_context (the one assembler).
+    # planning_history has priority 2 so recorded failures survive budget
+    # pressure (the learning demo).
+    ContextMode.PLANNING: ModeConfig(
+        sections=[
+            "planning_knowledge", "planning_history",
+            "business_graph", "agent_roster",
+        ],
+        tool_loading="none",
+        personality=False,
+        max_tokens=None,
     ),
 }
