@@ -289,6 +289,33 @@ class ReportService:
             # `deliverables`. The old double-write drifted — 29 reports ended up
             # orphaned from the shadow registry over time.
 
+            # PRD-164 S3 (Q58 flywheel): every submitted report becomes
+            # retrievable knowledge — RAG-ingested via the existing ingestion
+            # manager + a typed KG pending (agent-attributed extraction). The
+            # per-workspace opt-out is enforced inside ingest_agent_output;
+            # failure never breaks report creation.
+            try:
+                from services.knowledge_flywheel import ingest_agent_output
+
+                await ingest_agent_output(
+                    self.db,
+                    self.workspace_id,
+                    content=content,
+                    filename=file_path.rsplit("/", 1)[-1],
+                    source="report",
+                    source_id=report_id,
+                    title=title,
+                    description=f"Agent report ({report_type}): {title}"[:500],
+                    agent_name=agent_name,
+                    created_by=agent_name or "agent",
+                    extra_tags=[f"report:{report_id}"],
+                )
+            except Exception:
+                logger.error(
+                    "[ReportService] Flywheel ingest failed for report %s",
+                    report_id, exc_info=True,
+                )
+
             return {
                 "success": True,
                 "report_id": report_id,

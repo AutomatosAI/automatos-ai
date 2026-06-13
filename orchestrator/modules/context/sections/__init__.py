@@ -17,6 +17,8 @@ from modules.context.sections.identity import IdentitySection
 from modules.context.sections.memory import MemorySection
 from modules.context.sections.mission_context import MissionContextSection
 from modules.context.sections.onboarding import OnboardingSection
+from modules.context.sections.planning_history import PlanningHistorySection
+from modules.context.sections.planning_knowledge import PlanningKnowledgeSection
 from modules.context.sections.platform_actions import PlatformActionsSection
 from modules.context.sections.plugins import PluginsSection
 from modules.context.sections.playbook_context import PlaybookContextSection
@@ -34,6 +36,8 @@ SECTION_REGISTRY: dict[str, type[BaseSection]] = {
     "memory": MemorySection,
     "mission_context": MissionContextSection,
     "onboarding": OnboardingSection,
+    "planning_knowledge": PlanningKnowledgeSection,
+    "planning_history": PlanningHistorySection,
     "agent_roster": AgentRosterSection,
     "tools": ToolsSection,
     "task_context": TaskContextSection,
@@ -57,6 +61,8 @@ __all__ = [
     "MemorySection",
     "MissionContextSection",
     "OnboardingSection",
+    "PlanningHistorySection",
+    "PlanningKnowledgeSection",
     "PlatformActionsSection",
     "PluginsSection",
     "PlaybookContextSection",

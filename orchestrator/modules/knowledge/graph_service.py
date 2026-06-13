@@ -84,6 +84,61 @@ def _max_history_snapshots() -> int:
 _CACHE_MAX_SIZE = 20
 _DEBOUNCE_SECONDS = 60
 
+# PRD-164 S3 (Q58): agent-output pending types the incremental build
+# understands. mission_synthesis / generated_document pendings reference the
+# document the flywheel already ingested (extracted via the document path —
+# no second LLM pass); report pendings carry their text for the
+# agent-attributed report extractor.
+_AGENT_OUTPUT_DOC_TYPES = ("mission_synthesis", "generated_document")
+_AGENT_OUTPUT_TEXT_TYPES = ("report",)
+
+
+def partition_pending_sources(
+    pending: List[Dict[str, Any]],
+) -> tuple:
+    """Split debounced pending sources into (changed_doc_ids, text_sources).
+
+    Before PRD-164 the incremental build only honored ``type == 'document'``
+    and silently DROPPED the three agent-output source types (mission
+    syntheses, generated documents, submitted reports). Now:
+
+      * ``document``                                  → its ``id``
+      * ``mission_synthesis`` / ``generated_document`` → their ingested
+        ``document_id`` (falling back to ``id``)
+      * ``report``                                     → a text source for
+        :func:`graph_extraction.extract_from_report` (must carry ``text``)
+
+    Anything else (roster/db_schema/shopify pendings have their own full
+    rebuild paths) still falls through untouched.
+    """
+    changed_doc_ids: set = set()
+    text_sources: List[Dict[str, Any]] = []
+
+    for source in pending or []:
+        stype = source.get("type")
+        if stype == "document" and source.get("id"):
+            changed_doc_ids.add(source["id"])
+        elif stype in _AGENT_OUTPUT_DOC_TYPES:
+            doc_id = source.get("document_id") or source.get("id")
+            if doc_id:
+                changed_doc_ids.add(doc_id)
+        elif stype in _AGENT_OUTPUT_TEXT_TYPES:
+            text = (source.get("text") or "").strip()
+            if not text:
+                logger.debug(
+                    "partition_pending_sources: %s pending without text, skipping", stype
+                )
+                continue
+            text_sources.append({
+                "type": "report",
+                "id": source.get("id"),
+                "path": source.get("path") or f"report_{source.get('id')}",
+                "text": text,
+                "agent_name": source.get("agent_name") or "unknown",
+            })
+
+    return changed_doc_ids, text_sources
+
 
 # ---------------------------------------------------------------------------
 # Team scoping (PRD-124 integration)
@@ -881,6 +936,7 @@ class GraphifyService:
 
         Dispatches each source to the appropriate extractor:
           - ``document`` → LLM-based ``extract_from_document`` (parallel, max 5 concurrent)
+          - ``report``   → LLM-based ``extract_from_report`` (PRD-164 S3 — agent-attributed)
           - ``agents``   → deterministic ``map_agent_roster``
 
         Returns a list of extraction dicts (each with nodes/edges keys).
@@ -889,6 +945,7 @@ class GraphifyService:
         from modules.knowledge.graph_extraction import (
             _get_graph_extraction_model,
             extract_from_document,
+            extract_from_report,
             map_agent_roster,
         )
 
@@ -909,7 +966,7 @@ class GraphifyService:
                     )
                 except Exception:
                     logger.exception("_extract_all: agent roster mapping failed")
-            elif src_type == "document":
+            elif src_type in ("document", "report"):
                 doc_sources.append(source)
             else:
                 logger.warning("_extract_all: unknown source type '%s', skipping", src_type)
@@ -930,15 +987,26 @@ class GraphifyService:
         async def _extract_one(source: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             async with sem:
                 try:
-                    extraction = await extract_from_document(
-                        doc_text=source["text"],
-                        doc_path=source["path"],
-                        workspace_id=str(workspace_id),
-                        team_access=source.get("team_access"),
-                        llm=llm,
-                    )
+                    if source.get("type") == "report":
+                        # PRD-164 S3: agent-attributed report extraction —
+                        # the source type the incremental build used to drop.
+                        extraction = await extract_from_report(
+                            report_text=source["text"],
+                            report_path=source["path"],
+                            agent_name=source.get("agent_name") or "unknown",
+                            llm=llm,
+                        )
+                    else:
+                        extraction = await extract_from_document(
+                            doc_text=source["text"],
+                            doc_path=source["path"],
+                            workspace_id=str(workspace_id),
+                            team_access=source.get("team_access"),
+                            llm=llm,
+                        )
                     logger.debug(
-                        "_extract_all: doc '%s' → %d nodes, %d edges",
+                        "_extract_all: %s '%s' → %d nodes, %d edges",
+                        source.get("type", "document"),
                         source["path"],
                         len(extraction.get("nodes", [])),
                         len(extraction.get("edges", [])),
@@ -1333,21 +1401,23 @@ class GraphifyService:
         )
         ws = DbWorkspaceClient(str(workspace_id))
 
-        # Collect only the changed document IDs
-        changed_doc_ids = {
-            s.get("id") for s in pending
-            if s.get("type") == "document" and s.get("id")
-        }
+        # PRD-164 S3: documents (incl. flywheel-ingested mission syntheses and
+        # generated documents) resolve to doc IDs; report pendings carry their
+        # text and go straight to the report extractor — no longer dropped.
+        changed_doc_ids, text_sources = partition_pending_sources(pending)
 
-        if not changed_doc_ids:
-            logger.info("_incremental_build: no document IDs in pending, skipping")
+        if not changed_doc_ids and not text_sources:
+            logger.info("_incremental_build: no extractable sources in pending, skipping")
             return {"node_count": existing_graph.number_of_nodes(),
                     "edge_count": existing_graph.number_of_edges()}
 
         # Collect only those docs from DB
-        sources = await self._collect_sources(
-            workspace_id, doc_ids=changed_doc_ids
-        )
+        sources: List[Dict[str, Any]] = []
+        if changed_doc_ids:
+            sources = await self._collect_sources(
+                workspace_id, doc_ids=changed_doc_ids
+            )
+        sources.extend(text_sources)
         if not sources:
             logger.info("_incremental_build: changed docs not found in DB, skipping")
             return {"node_count": existing_graph.number_of_nodes(),

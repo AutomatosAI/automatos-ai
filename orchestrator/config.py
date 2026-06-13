@@ -612,6 +612,9 @@ class Config:
     COORDINATOR_ASSIGNED_STALL_THRESHOLD_SECONDS: int = int(os.getenv("COORDINATOR_ASSIGNED_STALL_THRESHOLD_SECONDS", "60"))
     COORDINATOR_RUNNING_STALL_THRESHOLD_SECONDS: int = int(os.getenv("COORDINATOR_RUNNING_STALL_THRESHOLD_SECONDS", "300"))
     COORDINATOR_MAX_TASK_RETRIES: int = int(os.getenv("COORDINATOR_MAX_TASK_RETRIES", "3"))
+    # PRD-164 S4: consecutive churn-without-progress joiner checks before a
+    # looping mission is auto-replanned (or halted once replans are exhausted).
+    COORDINATOR_STALL_LEDGER_LIMIT: int = int(os.getenv("COORDINATOR_STALL_LEDGER_LIMIT", "3"))
     COORDINATOR_MAX_VERIFICATION_RETRIES: int = int(os.getenv("COORDINATOR_MAX_VERIFICATION_RETRIES", "2"))
     COORDINATOR_VERIFICATION_PASS_THRESHOLD: float = float(os.getenv("COORDINATOR_VERIFICATION_PASS_THRESHOLD", "0.7"))
     COORDINATOR_VERIFICATION_FAIL_THRESHOLD: float = float(os.getenv("COORDINATOR_VERIFICATION_FAIL_THRESHOLD", "0.4"))
@@ -645,6 +648,11 @@ class Config:
     # History-based agent scoring (PRD-82B US-003)
     COORDINATOR_HISTORY_LOOKBACK_DAYS: int = int(os.getenv("COORDINATOR_HISTORY_LOOKBACK_DAYS", "30"))
     COORDINATOR_HISTORY_MIN_DATAPOINTS: int = int(os.getenv("COORDINATOR_HISTORY_MIN_DATAPOINTS", "3"))
+    # PRD-164 S2 (Q21): upper bound on the per-dispatch semantic-signal
+    # computation (task embedding + capability-card cosine + field query) so a
+    # hung embedding/Qdrant backend can never stall the dispatch tick — on
+    # timeout the matcher falls back to lexical-only scoring.
+    AGENT_MATCH_SIGNAL_TIMEOUT_SECONDS: float = float(os.getenv("AGENT_MATCH_SIGNAL_TIMEOUT_SECONDS", "10"))
     # Telemetry: cost estimation per 1K tokens (PRD-82B US-004)
     COORDINATOR_COST_PER_1K_TOKENS: float = float(os.getenv("COORDINATOR_COST_PER_1K_TOKENS", "0.003"))
     # Replanning limits (PRD-82B US-005)

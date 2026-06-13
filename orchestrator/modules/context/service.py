@@ -33,6 +33,12 @@ from modules.context.budget import (
 )
 from modules.context.estimator import TokenEstimator
 from modules.context.modes import MODE_CONFIGS, ContextMode, ModeConfig
+from modules.context.planning import (
+    PACK_HEADER,
+    PlanningContextPack,
+    apply_pack_budget,
+    trim_to_tokens,
+)
 from modules.context.result import ContextResult
 from modules.context.sections import SECTION_REGISTRY, SectionContext
 from modules.context.sections.conversation import ConversationSection
@@ -203,6 +209,160 @@ class ContextService:
             user_name=ctx.kwargs.get("_user_name"),
             preparation_time_ms=elapsed_ms,
         )
+
+    # ------------------------------------------------------------------
+    # Planning Context Pack (PRD-164 S1, Q61)
+    # ------------------------------------------------------------------
+
+    async def build_planning_context(
+        self,
+        *,
+        goal: str,
+        workspace_id: str,
+        agents: Optional[list] = None,
+        include_roster: bool = True,
+        max_tokens: Optional[int] = None,
+        team: Optional[str] = None,
+    ) -> PlanningContextPack:
+        """Assemble the ONE token-budgeted planning context pack (Q61).
+
+        Every planner on the platform — MissionPlanner, board ``plan_task``,
+        AutoBrain — consumes THIS pack; none assembles planning context on its
+        own. Sections come from ``MODE_CONFIGS[ContextMode.PLANNING]``:
+        RAG-on-goal (PRD-157 choke point), mission summaries + task failures
+        (PRD-159 recall), KG subgraph (PRD-165 graph service), and roster +
+        agent performance. The cap reuses the PRD-157 token budgeter.
+
+        ``include_roster=False`` is for callers whose prompt already presents
+        a roster surface (MissionPlanner) — same assembler, one section fewer.
+        Never raises: failures degrade to an empty pack.
+        """
+        start = time.perf_counter()
+        budget_tokens = max_tokens or DEFAULT_BUDGETS[
+            ContextMode.PLANNING
+        ].available_for_sections
+
+        try:
+            config = MODE_CONFIGS[ContextMode.PLANNING]
+
+            kwargs: dict[str, Any] = {"team": team}
+            if include_roster:
+                roster = agents if agents is not None else self._fetch_roster(workspace_id)
+                if roster is not None:
+                    kwargs["roster_agents"] = roster
+                    kwargs["agent_performance"] = self._fetch_agent_performance(roster)
+
+            ctx = SectionContext(
+                agent=None,
+                workspace_id=str(workspace_id),
+                db_session=self._db_session,
+                messages=None,
+                task_description=goal,
+                kwargs=kwargs,
+            )
+
+            sections = self._instantiate_sections(config)
+            rendered = await self._render_sections(sections, ctx)
+
+            # PRD-157 budgeter caps the pack (whole-section selection + hard
+            # cap), leaving headroom for the standing header + joins. Counting
+            # goes through core.context_guard.count_tokens — the same single
+            # definition of "how big is this" the budgeter uses.
+            from core.context_guard import count_tokens
+
+            header_tokens = count_tokens(PACK_HEADER)
+            section_budget = max(
+                0, budget_tokens - header_tokens - (len(rendered) + 1)
+            )
+            included, trimmed = apply_pack_budget(rendered, section_budget)
+
+            section_map = {s.name: s.content for s in included if s.content}
+            if not section_map:
+                return PlanningContextPack(token_budget=budget_tokens)
+
+            content = "\n\n".join([PACK_HEADER, *section_map.values()])
+            # Belt-and-braces: the budget is a hard guarantee (AC3) — joins
+            # and tokenizer boundary wobble must never push the pack over.
+            if count_tokens(content) > budget_tokens:
+                content = trim_to_tokens(content, budget_tokens)
+            token_estimate = count_tokens(content)
+
+            elapsed_ms = (time.perf_counter() - start) * 1000
+            logger.info(
+                "[ContextService] planning pack ws=%s sections=%s trimmed=%s "
+                "tokens=%d/%d prep_time=%.1fms",
+                workspace_id,
+                list(section_map.keys()),
+                trimmed,
+                token_estimate,
+                budget_tokens,
+                elapsed_ms,
+            )
+
+            return PlanningContextPack(
+                content=content,
+                sections=section_map,
+                token_estimate=token_estimate,
+                token_budget=budget_tokens,
+                sections_included=list(section_map.keys()),
+                sections_trimmed=trimmed,
+            )
+        except Exception:
+            logger.exception(
+                "[ContextService] build_planning_context failed — returning empty pack"
+            )
+            return PlanningContextPack(token_budget=budget_tokens)
+
+    def _fetch_roster(self, workspace_id: str) -> Optional[list]:
+        """Active workspace agents for the pack's roster section.
+
+        Returns None (roster unknown) when no DB session is available, so the
+        roster section renders nothing rather than claiming "no agents".
+        """
+        if self._db_session is None:
+            return None
+        try:
+            from core.models.core import Agent
+
+            return (
+                self._db_session.query(Agent)
+                .filter(
+                    Agent.workspace_id == workspace_id,
+                    Agent.status == "active",
+                )
+                .all()
+            )
+        except Exception:
+            logger.warning(
+                "[ContextService] roster fetch failed for planning pack",
+                exc_info=True,
+            )
+            return None
+
+    def _fetch_agent_performance(self, roster: list) -> dict:
+        """Recent verification performance per agent (agent_matcher history map).
+
+        Reuses ``_build_history_map`` — the platform's one performance scorer —
+        rather than a parallel computation. Empty on any failure.
+        """
+        if self._db_session is None or not roster:
+            return {}
+        try:
+            from modules.coordination.agent_matcher import _build_history_map
+
+            agent_ids = [
+                getattr(a, "id", None) for a in roster
+                if getattr(a, "id", None) is not None
+            ]
+            if not agent_ids:
+                return {}
+            return _build_history_map(self._db_session, agent_ids)
+        except Exception:
+            logger.warning(
+                "[ContextService] agent performance fetch failed for planning pack",
+                exc_info=True,
+            )
+            return {}
 
     # ------------------------------------------------------------------
     # Internal helpers

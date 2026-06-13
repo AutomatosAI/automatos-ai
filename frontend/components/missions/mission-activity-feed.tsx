@@ -47,6 +47,9 @@ const EVENT_CONFIG: Record<string, { icon: typeof Play; color: string; label: st
   task_stalled: { icon: AlertTriangle, color: 'text-[hsl(var(--warning))]', label: 'Task stalled' },
 
   stall_detected: { icon: AlertTriangle, color: 'text-[hsl(var(--warning))]', label: 'Stall detected' },
+  run_stall_ledger: { icon: AlertTriangle, color: 'text-[hsl(var(--warning))]', label: 'Stall ledger verdict' },
+  run_replanning: { icon: RefreshCw, color: 'text-[hsl(var(--warning))]', label: 'Replanning' },
+  run_replanned: { icon: RefreshCw, color: 'text-[hsl(var(--info))]', label: 'Mission replanned' },
   model_fallback: { icon: RefreshCw, color: 'text-[hsl(var(--info))]', label: 'Model fallback' },
 }
 

@@ -79,15 +79,11 @@ async def submit_report(db: Session, workspace_id: UUID, params: Dict[str, Any])
         requires_approval=bool(params.get("requires_approval", False)),
     )
 
-    # PRD-126: Trigger knowledge graph update on report submission
-    try:
-        from modules.knowledge.graph_service import get_graph_service
-        get_graph_service().schedule_incremental_update(
-            str(workspace_id),
-            [{"type": "report", "path": title, "id": result.get("report_id")}],
-        )
-    except Exception:
-        logger.debug("Graph update skipped — service not available")
+    # PRD-164 S3: the knowledge flywheel inside ReportService.create_report now
+    # owns BOTH the RAG ingest and the typed KG pending (with report text +
+    # agent attribution, honoring the Q58 per-workspace opt-out). The old
+    # direct schedule here sent a bare {"type": "report"} pending the
+    # incremental build dropped — deleted with the path that replaced it.
 
     return result
 

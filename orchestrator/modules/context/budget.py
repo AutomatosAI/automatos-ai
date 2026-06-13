@@ -199,4 +199,13 @@ DEFAULT_BUDGETS: dict[ContextMode, TokenBudget] = {
         reserved_for_response=4_096,
         reserved_for_messages=0,
     ),
+    # Planning pack (PRD-164 S1): the pack rides inside another prompt, so the
+    # whole budget is section space — no response/message reservations. Callers
+    # on hot paths (AutoBrain) pass a tighter max_tokens to
+    # build_planning_context.
+    ContextMode.PLANNING: TokenBudget(
+        total=12_000,
+        reserved_for_response=0,
+        reserved_for_messages=0,
+    ),
 }

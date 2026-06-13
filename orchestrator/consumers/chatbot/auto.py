@@ -34,6 +34,10 @@ from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
+# PRD-164 S1 (Q61): Tier-3 classification consumes the one planning context
+# pack under a tight budget — the chat hot path can't afford the full 12k.
+_PLANNING_PACK_TOKENS = 2000
+
 
 # ---------------------------------------------------------------------------
 # Complexity levels (Progressive Complexity Model PRD-68)
@@ -710,6 +714,37 @@ class AutoBrain:
     # Tier 3: LLM classification
     # ------------------------------------------------------------------
 
+    async def _planning_context_block(self, message: str) -> str:
+        """The ONE platform planning pack (PRD-164 S1, Q61) for Tier 3.
+
+        Same assembler as MissionPlanner and board plan_task —
+        ``ContextService.build_planning_context`` — under a tight budget so
+        the hot chat path stays lean. Empty string on any failure: the
+        classifier must never break because context assembly did.
+        """
+        try:
+            from modules.context.service import ContextService
+
+            pack = await ContextService(self._db).build_planning_context(
+                goal=message,
+                workspace_id=self._workspace_id,
+                max_tokens=_PLANNING_PACK_TOKENS,
+            )
+            if pack.is_empty:
+                return ""
+            return (
+                f"\n## Platform context (for routing)\n{pack.content}\n\n"
+                "Factor this in: prior mission failures suggest which requests "
+                "need careful multi-step handling, and the roster shows which "
+                "specializations actually exist to delegate to.\n"
+            )
+        except Exception:
+            logger.debug(
+                "[AutoBrain] planning context pack unavailable — classifying without it",
+                exc_info=True,
+            )
+            return ""
+
     async def _llm_classify(
         self, message: str, conversation_length: int
     ) -> ComplexityAssessment:
@@ -730,6 +765,9 @@ class AutoBrain:
         """
         logger.info("[AutoBrain] Tier 3 LLM classifying: '%s'", message[:80])
         t0 = time.monotonic()
+
+        # PRD-164 S1 (Q61): the one planning pack informs routing decisions.
+        platform_context = await self._planning_context_block(message)
 
         prompt = f"""You are a message complexity classifier for an AI platform.
 
@@ -770,7 +808,7 @@ Conversation turn: {conversation_length}
 
 **Default bias: atom.** Most messages are simpler than they look.
 **Multi-tool ≠ complex.** Using 2-3 tools in parallel is molecule, not organ. Organ requires different agents with different specializations working in phases.
-
+{platform_context}
 Return ONLY valid JSON:
 {{
   "complexity": "atom|molecule|cell|organ|organism",

@@ -144,6 +144,10 @@ from modules.tools.discovery.handlers_reports import (
     acknowledge_report,
     link_report_to_task,
 )
+from modules.tools.discovery.handlers_deliverables import (  # PRD-164 S3
+    list_deliverables as handle_list_deliverables,
+    get_deliverable as handle_get_deliverable,
+)
 from modules.tools.discovery.handlers_harness import (
     harness_status,
     harness_trigger,
@@ -393,6 +397,9 @@ class PlatformActionExecutor:
             "platform_submit_report": submit_report,
             "platform_get_latest_report": get_latest_report,
             "platform_browse_reports": browse_reports,
+            # PRD-164 S3: Deliverables (agent outputs) discovery
+            "platform_list_deliverables": handle_list_deliverables,
+            "platform_get_deliverable": handle_get_deliverable,
             # Wave 3 — operating-signal lifecycle
             "platform_acknowledge_report": acknowledge_report,
             "platform_link_report_to_task": link_report_to_task,

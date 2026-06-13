@@ -421,11 +421,17 @@ class DocumentManager:
         from config import config as app_config
         self.s3_bucket = s3_bucket or app_config.S3_DOCUMENTS_BUCKET
         self.s3_region = app_config.AWS_REGION or 'us-east-1'
+        # Bounded so a slow/unreachable/unconfigured S3 fails FAST (≤~5s) instead
+        # of hanging the whole process. A DocumentManager must never block document
+        # ops on S3 latency (PRD-164: this was a 90s faulthandler hang in CI when
+        # no creds were present). retries=0 so no-creds/endpoint errors surface now.
+        from botocore.config import Config as _BotoConfig
         self.s3_client = boto3.client(
             's3',
             region_name=self.s3_region,
             aws_access_key_id=app_config.AWS_ACCESS_KEY_ID,
-            aws_secret_access_key=app_config.AWS_SECRET_ACCESS_KEY
+            aws_secret_access_key=app_config.AWS_SECRET_ACCESS_KEY,
+            config=_BotoConfig(connect_timeout=3, read_timeout=5, retries={"max_attempts": 1}),
         )
 
         # Ensure S3 bucket exists (create if needed)
@@ -471,11 +477,15 @@ class DocumentManager:
                         )
                     logger.info(f"✅ Created S3 bucket '{self.s3_bucket}'")
                 except Exception as create_error:
-                    logger.error(f"❌ Failed to create S3 bucket: {create_error}")
-                    raise
+                    # S3 is optional infra — a failed create must NOT crash
+                    # DocumentManager construction. DB-backed ops (list/grep over
+                    # document_chunks) work without S3; an S3-backed op will surface
+                    # a precise error at its own call site if S3 is truly required.
+                    logger.warning(f"⚠️ Could not create S3 bucket '{self.s3_bucket}' (S3 unavailable — continuing): {create_error}")
             else:
-                logger.error(f"❌ S3 bucket check failed: {e}")
-                raise
+                # Missing creds / unreachable endpoint / permission error: degrade,
+                # never hang or crash. Same rationale as above.
+                logger.warning(f"⚠️ S3 bucket check skipped (S3 unavailable — continuing): {e}")
 
     def _extract_pdf_with_tables(self, file_path: str) -> tuple:
         """
@@ -597,7 +607,8 @@ class DocumentManager:
                     tags TEXT[] DEFAULT ARRAY[]::TEXT[],
                     description TEXT DEFAULT '',
                     file_hash VARCHAR(64) UNIQUE,
-                    workspace_id TEXT
+                    workspace_id TEXT,
+                    source_type VARCHAR(50)
                 );
             """)
             
@@ -685,10 +696,17 @@ class DocumentManager:
             logger.error(f"Failed to download from S3: {e}")
             raise
     
-    async def upload_document(self, file_path: str, filename: str = None, 
+    async def upload_document(self, file_path: str, filename: str = None,
                             tags: List[str] = None, description: str = "",
-                            created_by: str = "system") -> int:
-        """Upload and process a document"""
+                            created_by: str = "system",
+                            source_type: Optional[str] = None) -> int:
+        """Upload and process a document.
+
+        ``source_type`` (PRD-164 S3, Q58): provenance scope. ``None`` for a
+        regular upload; ``'agent_output'`` when the knowledge flywheel routes
+        an agent output (mission synthesis / generated document / report)
+        through this manager.
+        """
         self._ensure_database_initialized()
         try:
             if not os.path.exists(file_path):
@@ -743,14 +761,16 @@ class DocumentManager:
 
             cursor.execute("""
                 INSERT INTO documents (filename, file_type, file_size, upload_date, status,
-                                     metadata, created_by, tags, description, file_hash, workspace_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                     metadata, created_by, tags, description, file_hash, workspace_id,
+                                     source_type)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
             """, (
                 metadata.filename, metadata.file_type, metadata.file_size,
                 metadata.upload_date, DocumentStatus.PROCESSING.value,
                 json.dumps(metadata.to_dict()), metadata.created_by,
-                metadata.tags, metadata.description, file_hash, self.workspace_id
+                metadata.tags, metadata.description, file_hash, self.workspace_id,
+                source_type
             ))
 
             document_id = cursor.fetchone()[0]

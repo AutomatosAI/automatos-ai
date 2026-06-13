@@ -49,6 +49,29 @@ def _recent_chat_context(db: Session, workspace_id: UUID, chat_id: Any = None,
     return context
 
 
+def _plan_task_summary(plan_tasks: list) -> list:
+    """The tasks array of the create-mission tool result — the PRD-163 S4
+    approval card is built from it verbatim. PRD-164 S2: carries the agent
+    match preview (``match_agent``/``match_reason``, mirrored into the plan by
+    the coordinator) so the card can show WHO would run each task and WHY.
+    """
+    summary = []
+    for t in plan_tasks[:10]:
+        entry = {
+            "title": t.get("title", ""),
+            "agent_role": t.get("agent_role", ""),
+            "sequence": t.get("sequence_number", 0),
+        }
+        if t.get("match_agent"):
+            entry["match_agent"] = t["match_agent"]
+        if t.get("match_reason"):
+            entry["match_reason"] = t["match_reason"]
+        if t.get("match_is_override"):
+            entry["match_is_override"] = True
+        summary.append(entry)
+    return summary
+
+
 def _create_reply_message(run: Any, task_count: int) -> str:
     """Honest status line — a mission defaults to awaiting_approval, not running."""
     from core.models.orchestration_enums import RunState
@@ -102,13 +125,11 @@ async def create_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]
             config=config,
         )
 
-        # Summarize the plan for the caller
+        # Summarize the plan for the caller (PRD-164 S2: includes the agent
+        # match preview so the approval card can show reasons).
         plan = run.plan or {}
         tasks = plan.get("tasks", [])
-        task_summary = [
-            {"title": t.get("title", ""), "agent_role": t.get("agent_role", ""), "sequence": t.get("sequence_number", 0)}
-            for t in tasks[:10]
-        ]
+        task_summary = _plan_task_summary(tasks)
 
         return {
             "success": True,
@@ -186,12 +207,19 @@ async def get_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]) -
 
     task_details = []
     for t in tasks:
+        # PRD-164 S2: surface the persisted match reason (plan preview, then
+        # superseded by the dispatch decision) alongside each task. getattr —
+        # input_context may be absent (legacy rows / lighter task shapes) or NULL.
+        _ic = getattr(t, "input_context", None)
+        agent_match = (_ic.get("agent_match") if isinstance(_ic, dict) else None) or {}
         task_details.append({
             "id": t.id,
             "title": t.title,
             "state": t.state,
             "agent_role": t.agent_role,
             "sequence": t.sequence_number,
+            "match_agent": agent_match.get("agent_name"),
+            "match_reason": agent_match.get("reason"),
             "result_summary": str(t.output)[:500] if t.output else None,
             "error": t.failure_detail,
         })

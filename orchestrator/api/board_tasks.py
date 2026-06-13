@@ -976,6 +976,35 @@ def _launch_task_execution(
 
 # ── Planning mode ────────────────────────────────────────────────────
 
+# Tight pack budget for board planning: enough to ground questions in workspace
+# knowledge + prior failures without dominating a question-generation prompt.
+_BOARD_PLANNING_PACK_TOKENS = 4000
+
+
+async def _board_planning_context(db: Session, workspace_id, goal: str) -> str:
+    """The ONE platform planning pack (PRD-164 S1, Q61) for board planning.
+
+    Same assembler as MissionPlanner and AutoBrain —
+    ``ContextService.build_planning_context``. Empty string on any failure so
+    planning never breaks because context assembly did.
+    """
+    try:
+        from modules.context.service import ContextService
+
+        pack = await ContextService(db).build_planning_context(
+            goal=goal,
+            workspace_id=str(workspace_id),
+            max_tokens=_BOARD_PLANNING_PACK_TOKENS,
+        )
+        return pack.content if not pack.is_empty else ""
+    except Exception:
+        logger.warning(
+            "[BoardTasks] planning context pack unavailable — continuing without it",
+            exc_info=True,
+        )
+        return ""
+
+
 @router.post("/plan")
 async def plan_task(
     request: Request,
@@ -1017,12 +1046,24 @@ async def plan_task(
         "}"
     )
 
-    response = await llm.generate_response(
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": f"Plan this task: {raw_prompt}"},
-        ]
-    )
+    # PRD-164 S1 (Q61): ground the questions in what the platform knows —
+    # workspace knowledge, prior mission failures, roster.
+    messages = [{"role": "system", "content": system}]
+    planning_context = await _board_planning_context(db, ctx.workspace_id, raw_prompt)
+    if planning_context:
+        messages.append({
+            "role": "system",
+            "content": (
+                f"{planning_context}\n\n"
+                "Use this platform context: ground your questions in the "
+                "workspace's actual documents and agents, and if similar work "
+                "previously failed, ask questions that steer the task away "
+                "from the failed approach."
+            ),
+        })
+    messages.append({"role": "user", "content": f"Plan this task: {raw_prompt}"})
+
+    response = await llm.generate_response(messages=messages)
 
     # Extract text from response
     text = _extract_llm_text(response)

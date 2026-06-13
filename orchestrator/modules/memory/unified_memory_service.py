@@ -841,9 +841,14 @@ class UnifiedMemoryService:
         query: str,
         days: int,
         limit: int,
+        content_types: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Search memory_short_term by text (ILIKE) within a time window (synchronous).
+
+        ``content_types`` optionally restricts recall to typed records (e.g.
+        ``mission_summary`` / ``task_failure`` — the PRD-164 planning pack
+        recalls mission outcomes on this PRD-159 path).
         """
         from core.database.database import get_db_session
         from modules.memory.models import MemoryShortTerm
@@ -852,15 +857,18 @@ class UnifiedMemoryService:
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
         with get_db_session() as db:
-            q = (
-                db.query(MemoryShortTerm)
-                .filter(
-                    MemoryShortTerm.workspace_id == workspace_id,
-                    MemoryShortTerm.created_at >= cutoff,
-                    MemoryShortTerm.archived_at.is_(None),
-                    MemoryShortTerm.content.ilike(f"%{query}%"),
+            base = db.query(MemoryShortTerm).filter(
+                MemoryShortTerm.workspace_id == workspace_id,
+                MemoryShortTerm.created_at >= cutoff,
+                MemoryShortTerm.archived_at.is_(None),
+                MemoryShortTerm.content.ilike(f"%{query}%"),
+            )
+            if content_types:
+                base = base.filter(
+                    MemoryShortTerm.content_type.in_(list(content_types))
                 )
-                .order_by(MemoryShortTerm.created_at.desc())
+            q = (
+                base.order_by(MemoryShortTerm.created_at.desc())
                 .limit(limit)
                 .all()
             )
@@ -885,6 +893,7 @@ class UnifiedMemoryService:
         query: str,
         days: int = 7,
         limit: int = 20,
+        content_types: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Search L2 short-term memory by text and time range.
@@ -894,9 +903,12 @@ class UnifiedMemoryService:
 
         Args:
             workspace_id: Workspace scope.
-            query: Text to search for (case-insensitive substring match).
+            query: Text to search for (case-insensitive substring match;
+                empty string matches everything).
             days: Look-back window in days (default 7).
             limit: Maximum results (default 20).
+            content_types: Optional content_type whitelist (typed recall —
+                e.g. mission_summary/task_failure for the planning pack).
 
         Returns:
             List of memory item dicts.
@@ -910,6 +922,7 @@ class UnifiedMemoryService:
                 query,
                 days,
                 limit,
+                content_types,
             )
             logger.debug(
                 "[UnifiedMemoryService] search_short_term ws=%s query=%r days=%d → %d results",

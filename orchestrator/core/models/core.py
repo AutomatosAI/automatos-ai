@@ -601,6 +601,11 @@ class Document(Base):
     last_accessed = Column(DateTime, nullable=True)
     rag_query_count = Column(Integer, default=0)
 
+    # PRD-164 S3 (Q58): provenance scope. NULL = regular upload;
+    # 'agent_output' = flywheel-ingested agent output (mission synthesis,
+    # generated document, submitted report) — a filterable, team-like scope.
+    source_type = Column(String(50), nullable=True)
+
 class SystemConfiguration(Base):
     __tablename__ = 'system_configurations'
     
@@ -852,6 +857,8 @@ class DocumentResponse(BaseModel):
     created_by: Optional[str] = None
     last_accessed: Optional[datetime] = None
     rag_query_count: Optional[int] = 0
+    # PRD-164 S3 (Q58): 'agent_output' rows are the flywheel scope
+    source_type: Optional[str] = None
 
 class SystemConfigCreate(BaseModel):
     config_key: str

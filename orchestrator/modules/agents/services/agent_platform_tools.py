@@ -790,7 +790,7 @@ class AgentPlatformTools:
 
                 # PRD-167 S6: register the rendered document as a deliverable with
                 # source attribution (template_id + the producing agent).
-                gen_service.register_as_deliverable(
+                registration = gen_service.register_as_deliverable(
                     result,
                     title=title,
                     source_type="agent_output",
@@ -798,6 +798,33 @@ class AgentPlatformTools:
                     agent_name=getattr(agent_row, "name", None),
                     template_id=template_id,
                 )
+
+                # PRD-164 S3 (Q58 flywheel): the generated document's markdown
+                # becomes retrievable knowledge via the existing ingestion
+                # manager. Opt-out enforced inside ingest_agent_output;
+                # failure never fails the generation.
+                try:
+                    from services.knowledge_flywheel import ingest_agent_output
+
+                    _gen_source_id = (registration or {}).get("deliverable_id") or result.filename
+                    await ingest_agent_output(
+                        self.db,
+                        workspace_id,
+                        content=result.content or "",
+                        filename=f"{(result.filename or title).rsplit('.', 1)[0]}.md",
+                        source="generated_document",
+                        source_id=str(_gen_source_id),
+                        title=title,
+                        description=f"Generated document: {title}"[:500],
+                        agent_name=getattr(agent_row, "name", None),
+                        created_by=getattr(agent_row, "name", None) or "agent",
+                        extra_tags=[f"agent:{agent_id}"],
+                    )
+                except Exception:
+                    self.logger.warning(
+                        "Flywheel ingest failed for generated document '%s' (non-fatal)",
+                        title, exc_info=True,
+                    )
 
                 self.logger.info(f"  ✅ Document generated: {result.filename} ({result.size // 1024}KB)")
                 return ToolResultFormatter.standardize_result(
