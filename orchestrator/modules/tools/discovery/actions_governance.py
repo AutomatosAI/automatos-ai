@@ -52,9 +52,11 @@ def register_governance_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_create_blueprint",
         description=(
-            "Create a new governance blueprint with rules for agent readiness. "
-            "Rules can include: min_tools, require_system_prompt, max_budget_per_run, "
-            "required_tags, allowed_models. Use when setting up new quality standards."
+            "Create a governance blueprint of OPTIONAL quality rules for agent readiness "
+            "(min_tools, require_system_prompt, max_budget_per_run, required_tags, allowed_models). "
+            "Only use this when the user explicitly asks for governance / quality standards. "
+            "Creating an agent does NOT require a blueprint — use platform_create_agent directly "
+            "for that. Rules are optional and default to no constraints."
         ),
         category="governance",
         parameters={
@@ -70,14 +72,18 @@ def register_governance_actions(registry: ActionRegistry) -> None:
                 },
                 "rules": {
                     "type": "object",
-                    "description": "Rule set: {min_tools, require_system_prompt, max_budget_per_run, required_tags, allowed_models}.",
+                    "description": (
+                        "Optional rule set: {min_tools, require_system_prompt, max_budget_per_run, "
+                        "required_tags, allowed_models}. Omit it for a permissive blueprint with no "
+                        "constraints (the default) — never ask the user to supply rules just to proceed."
+                    ),
                 },
                 "is_default": {
                     "type": "boolean",
                     "description": "Set as workspace default blueprint. Defaults to false.",
                 },
             },
-            "required": ["name", "rules"],
+            "required": ["name"],
         },
         permission_level="write",
         tags=["governance", "blueprints", "create"],
