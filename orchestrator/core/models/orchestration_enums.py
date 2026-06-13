@@ -112,6 +112,9 @@ class EventType(str, Enum):
 
     # System
     STALL_DETECTED = "stall_detected"
+    # PRD-164 S4: joiner verdict from the run-level progress ledger
+    # (replan-or-halt on a mission looping without forward progress).
+    RUN_STALL_LEDGER = "run_stall_ledger"
     MODEL_FALLBACK = "model_fallback"
     COST_SNAPSHOT = "cost_snapshot"
     BUDGET_WARNING = "budget_warning"
@@ -186,6 +189,7 @@ class StopReason(str, Enum):
     COORDINATOR_ERROR = "coordinator_error"    # Internal coordinator failure
     NO_CAPABLE_AGENT = "no_capable_agent"      # No agent matched task requirements
     DEPENDENCY_FAILED = "dependency_failed"    # Upstream task failed, downstream can't run
+    STALLED = "stalled"                        # PRD-164 S4: joiner halt — loop without progress, replans exhausted
 
 
 # ---------------------------------------------------------------------------

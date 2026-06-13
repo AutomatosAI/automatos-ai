@@ -838,8 +838,12 @@ class MissionDispatcher:
         """
         Build the user prompt for execute_with_prompt() from task data.
 
-        Includes task title, description, any input context from
-        upstream task outputs or retry feedback.
+        Includes task title, description, and input context (the PRD-164 S4
+        dispatch digest, retry feedback, field instructions).
+
+        Upstream dependency outputs are NOT stuffed here (Q22): they arrive
+        as the token-budgeted ``field_digest`` block that _prepare_task pins
+        via _attach_field_digest, with platform_field_query for the rest.
 
         PRD-127: Attachments are no longer injected here — they're passed
         as attachment_ids to execute_with_prompt() → build_context().
@@ -849,7 +853,7 @@ class MissionDispatcher:
         if task.description:
             parts.append(f"\n{task.description}")
 
-        # Include input context (upstream outputs, retry feedback, etc.)
+        # Include input context (dispatch digest, retry feedback, etc.)
         if isinstance(task.input_context, dict):
             # Check if this is a revision retry (has previous output)
             previous_output = task.input_context.get("previous_output")
@@ -875,26 +879,8 @@ class MissionDispatcher:
                 parts.append(
                     f"\n## Your Previous Output (revise this)\n\n{previous_output}"
                 )
-                # Still include upstream outputs for reference if needed
-                upstream_outputs = task.input_context.get("upstream_outputs")
-                if upstream_outputs:
-                    parts.append("\n## Reference: Upstream Task Outputs")
-                    for output in upstream_outputs:
-                        parts.append(
-                            f"\n### {output.get('title', 'Previous Task')}\n"
-                            f"{output.get('output', '')}"
-                        )
             else:
                 # FIRST ATTEMPT: Standard prompt construction
-                upstream_outputs = task.input_context.get("upstream_outputs")
-                if upstream_outputs:
-                    parts.append("\n## Previous Task Outputs")
-                    for output in upstream_outputs:
-                        parts.append(
-                            f"\n### {output.get('title', 'Previous Task')}\n"
-                            f"{output.get('output', '')}"
-                        )
-
                 retry_feedback = task.input_context.get("retry_feedback")
                 if retry_feedback:
                     parts.append(

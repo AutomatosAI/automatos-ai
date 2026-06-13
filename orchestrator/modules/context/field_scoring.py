@@ -156,3 +156,33 @@ def format_digest(
     if truncated:
         lines.append("- _(more lower-ranked patterns omitted for budget)_")
     return "\n".join(lines)
+
+
+def merge_dispatch_rows(
+    upstream_rows: list,
+    field_rows: list,
+    *,
+    key_key: str = "key",
+) -> list:
+    """PRD-164 S4 (Q22): merge a task's immediate upstream-dependency outputs
+    ahead of semantic field hits for the dispatch digest. Deterministic — no
+    new ranking algorithm: dependency order first, then field rank order.
+
+    Field rows whose key matches an upstream row are dropped: a completed
+    task's output is injected into the field under the task title, so the
+    field would otherwise echo a staler copy of a row we already carry.
+    Pure; never mutates its inputs.
+    """
+    def _norm(row: dict) -> str:
+        return str(row.get(key_key, "")).strip().lower()
+
+    seen = set()
+    merged: list = []
+    for row in list(upstream_rows or []) + list(field_rows or []):
+        norm = _norm(row)
+        if norm and norm in seen:
+            continue
+        if norm:
+            seen.add(norm)
+        merged.append(row)
+    return merged

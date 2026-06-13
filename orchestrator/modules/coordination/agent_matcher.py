@@ -246,10 +246,13 @@ class AgentMatcher:
         agent_role: Optional[str] = spec.get("agent_role") or task.agent_role
         preferred_model: Optional[str] = spec.get("preferred_model")
 
-        # Determine if task has upstream context (later tasks need larger models)
+        # Determine if task carries upstream context (later tasks need larger
+        # models). PRD-164 S4 (Q22): dispatch context is the budgeted field
+        # digest pinned by _prepare_task — present on re-matches after a first
+        # dispatch, exactly when the raw stuffing used to be.
         has_upstream = bool(
             isinstance(task.input_context, dict)
-            and task.input_context.get("upstream_outputs")
+            and task.input_context.get("field_digest")
         )
 
         # Pre-fetch tool assignments for all candidate agents in one query
@@ -826,8 +829,8 @@ def _compute_model_fit(
     Score model suitability.
 
     When a preferred_model is specified, exact match = 1.0, else 0.3.
-    When no preference but task has upstream outputs, prefer agents
-    with large-context models (128k+).
+    When no preference but the task carries upstream dispatch context
+    (the Q22 field digest), prefer agents with large-context models (128k+).
     """
     agent_model = _get_agent_model(agent)
     agent_model_lower = agent_model.lower()
@@ -836,7 +839,7 @@ def _compute_model_fit(
         return 1.0 if preferred_model.lower() in agent_model_lower else 0.3
 
     if has_upstream:
-        # Prefer large-context models for tasks carrying upstream outputs
+        # Prefer large-context models for tasks carrying upstream context
         is_large = any(m in agent_model_lower for m in _LARGE_CONTEXT_MODELS)
         return 0.9 if is_large else 0.3
 

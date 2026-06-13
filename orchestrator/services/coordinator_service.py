@@ -43,11 +43,13 @@ from core.models.orchestration_enums import (
     EventType,
     FailureReasonCode,
     RunState,
+    StopReason,
     TaskState,
     TaskType,
     TERMINAL_RUN_STATES,
     DONE_TASK_STATES,
 )
+from modules.coordination import progress_ledger
 from modules.coordination.agent_matcher import AgentMatcher, build_match_annotation
 from modules.coordination.dispatcher import MissionDispatcher
 from modules.coordination.planner import (
@@ -97,6 +99,24 @@ _POWER_MODE_DEFAULTS: Dict[str, Dict[str, Any]] = {
 # editable from the approval card. Structural changes (add/remove tasks, rewire
 # dependencies) go through plan-import (Q54), not this field-PATCH path.
 _EDITABLE_TASK_FIELDS = ("agent_role", "title", "description")
+
+
+# ---------------------------------------------------------------------------
+# PRD-164 S4 (Q22): dispatch context goes through the field digest.
+# One value cap shared by field injection and the upstream digest rows, so a
+# row read straight from the DB is byte-identical to what the field would
+# echo back for the same task output (~1000 tokens at 4 chars/token).
+# ---------------------------------------------------------------------------
+FIELD_VALUE_CAP_CHARS = 4000
+
+_BASE64_IMAGE_RE = re.compile(r"data:image/[^;]+;base64,[A-Za-z0-9+/=]+")
+
+
+def _sanitize_for_field(raw: str) -> str:
+    """Strip inline base64 image blobs before a task output enters dispatch
+    context (field injection or upstream digest rows) — a single data-URI
+    would otherwise burn the whole row cap on undecodable noise."""
+    return _BASE64_IMAGE_RE.sub("[image — see generated-images API]", raw or "")
 
 
 def annotate_plan_with_matches(plan: Optional[Dict[str, Any]],
@@ -622,7 +642,9 @@ class CoordinatorService:
             await field.inject(
                 context_id=field_id,
                 key=task.title or f"task_{task.sequence_number}",
-                value=str(task.output)[:4000],  # Cap to prevent embedding blow-up
+                # Cap to prevent embedding blow-up; sanitized so a base64 blob
+                # can't burn the cap (same treatment as upstream digest rows).
+                value=_sanitize_for_field(str(task.output))[:FIELD_VALUE_CAP_CHARS],
                 agent_id=agent_id,
                 strength=1.0,
                 provenance={
@@ -643,20 +665,27 @@ class CoordinatorService:
         db: Session,
         run: OrchestrationRun,
         task: OrchestrationTask,
-        field_id: str,
+        field_id: Optional[str],
         agent_id: int,
+        upstream_rows: Optional[List[Dict[str, Any]]] = None,
     ) -> None:
-        """PRD-166 S3: pin a budgeted field digest into a task's dispatch prompt.
+        """PRD-166 S3 + PRD-164 S4 (Q22): pin THE budgeted dispatch digest into
+        a task's prompt — the single channel for upstream/accumulated context.
 
-        Queries the field for knowledge relevant to this task and stores a
-        budget-trimmed digest in ``task.input_context['field_digest']``. When the
-        mission is tight on budget (CRITICAL/EXCEEDED) the digest is DROPPED to
-        save tokens and a ``RUN_FIELD_CONTEXT_DROPPED`` warning is emitted — the
-        budget-gate checkpoint for field context.
+        Immediate upstream-dependency outputs (``upstream_rows``, collected by
+        ``_collect_upstream_digest_rows``) are merged AHEAD of semantic field
+        hits, deduped against the field's echo of the same outputs, and the
+        whole block is trimmed to ``Config.FIELD_QUERY_TOKEN_BUDGET`` — the
+        per-task budget that replaced the 8K-chars-per-upstream stuffing.
+        Anything the budget drops stays reachable via ``platform_field_query``.
+
+        When the mission is tight on budget (CRITICAL/EXCEEDED) the digest is
+        DROPPED to save tokens and a ``RUN_FIELD_CONTEXT_DROPPED`` warning is
+        emitted — the budget-gate checkpoint for dispatch context.
         """
-        field = self._get_field()
-        if not field:
-            return
+        from modules.context import field_scoring
+
+        upstream_rows = upstream_rows or []
 
         # Budget-gate: drop the digest rather than spend tokens we don't have.
         try:
@@ -677,30 +706,37 @@ class CoordinatorService:
             logger.info("[Field] Digest dropped for budget on task %s (%s)", task.id, status.value)
             return
 
-        try:
-            from modules.context import field_scoring
-            query = f"{task.title or ''}\n{task.description or ''}".strip() or (run.goal or "")
-            results = await field.query(
-                context_id=field_id,
-                query=query,
-                agent_id=agent_id,
-                top_k=Config.FIELD_QUERY_TOP_K,
-            )
-        except Exception:
-            logger.warning("[Field] digest query failed for task %s", task.id, exc_info=True)
-            return
+        # Semantic field hits — fail-open to upstream rows only, so a missing
+        # or unhealthy Qdrant degrades dispatch context, never breaks dispatch.
+        field_rows: List[Dict[str, Any]] = []
+        field = self._get_field()
+        if field and field_id:
+            try:
+                query = f"{task.title or ''}\n{task.description or ''}".strip() or (run.goal or "")
+                results = await field.query(
+                    context_id=field_id,
+                    query=query,
+                    agent_id=agent_id,
+                    top_k=Config.FIELD_QUERY_TOP_K,
+                )
+                field_rows = [{"key": r["key"], "value": r["value"]} for r in (results or [])]
+            except Exception:
+                logger.warning("[Field] digest query failed for task %s", task.id, exc_info=True)
 
-        if not results:
+        merged = field_scoring.merge_dispatch_rows(upstream_rows, field_rows)
+        if not merged:
             return
-        rows = [{"key": r["key"], "value": r["value"]} for r in results]
-        kept, truncated = field_scoring.budget_results(rows, Config.FIELD_QUERY_TOKEN_BUDGET)
+        kept, truncated = field_scoring.budget_results(merged, Config.FIELD_QUERY_TOKEN_BUDGET)
         if not kept:
             return
         task.input_context = {
             **(task.input_context or {}),
             "field_digest": field_scoring.format_digest(kept, truncated=truncated),
         }
-        logger.info("[Field] Pinned digest (%d patterns) into task %s", len(kept), task.id)
+        logger.info(
+            "[Field] Pinned dispatch digest (%d patterns, %d upstream) into task %s",
+            len(kept), len(upstream_rows), task.id,
+        )
 
     async def _seed_field_with_documents(
         self,
@@ -1421,6 +1457,19 @@ class CoordinatorService:
             await self._complete_verified_run(db, run)
             db.refresh(run)
 
+        # --- PRD-164 S4: joiner checkpoint (bounded replanning) ---
+        # After dispatch + reconcile, the progress ledger decides whether the
+        # run is looping without forward progress; the joiner replans within
+        # COORDINATOR_MAX_REPLANS or halts. Best-effort: a joiner error never
+        # breaks the tick.
+        if RunState(run.state) == RunState.RUNNING:
+            try:
+                await self._joiner_checkpoint(db, run)
+            except Exception:
+                logger.error(
+                    "Joiner checkpoint failed for run %s", run.id, exc_info=True,
+                )
+
         # PRD-142 W3-S11: missions primitive heartbeat at terminal boundary.
         # tick() only picks RunState.RUNNING runs, so a terminal state here is
         # always a fresh transition this tick — emit exactly once. COMPLETED →
@@ -1436,6 +1485,151 @@ class CoordinatorService:
                     f"stop_reason={run.stop_reason or 'unspecified'}"
                 ),
             )
+
+    # ------------------------------------------------------------------
+    # Joiner checkpoint — bounded replanning (PRD-164 S4)
+    # ------------------------------------------------------------------
+
+    async def _joiner_checkpoint(
+        self,
+        db: Session,
+        run: OrchestrationRun,
+    ) -> None:
+        """LLMCompiler-style joiner: after each tick, decide CONTINUE / REPLAN
+        / HALT from the run's progress ledger (Magentic-One stall counter).
+
+        Churn without forward progress for COORDINATOR_STALL_LEDGER_LIMIT
+        checks → REPLAN through the one existing ``replan_mission`` engine
+        while ``replan_count`` is under COORDINATOR_MAX_REPLANS, else HALT
+        (run FAILED, ``stop_reason='stalled'``). The ledger persists on
+        ``run.config['progress_ledger']`` and every verdict is emitted as a
+        ``run_stall_ledger`` event — the audit trail on the mission. No new
+        planner algorithm lives here (PRD-164 non-goal).
+        """
+        tasks = (
+            db.query(OrchestrationTask)
+            .filter(OrchestrationTask.run_id == run.id)
+            .all()
+        )
+        if not tasks:
+            return
+
+        snapshot = progress_ledger.snapshot_tasks(tasks)
+        previous = (run.config or {}).get("progress_ledger")
+        ledger, decision = progress_ledger.advance(
+            previous,
+            snapshot,
+            stall_limit=Config.COORDINATOR_STALL_LEDGER_LIMIT,
+            replan_count=run.replan_count or 0,
+            max_replans=Config.COORDINATOR_MAX_REPLANS,
+        )
+        if ledger is not previous:
+            # New dict on change only — idle ticks skip the JSONB write.
+            run.config = {**(run.config or {}), "progress_ledger": ledger}
+
+        if decision is progress_ledger.JoinerDecision.CONTINUE:
+            return
+
+        # Audit the verdict on the mission event stream.
+        emit_event(
+            db=db,
+            run_id=run.id,
+            event_type=EventType.RUN_STALL_LEDGER,
+            actor_type=ActorType.COORDINATOR,
+            actor_id="joiner",
+            payload={
+                "decision": decision.value,
+                "stall_streak": ledger.get("stall_streak"),
+                "stall_limit": Config.COORDINATOR_STALL_LEDGER_LIMIT,
+                "snapshot": snapshot,
+                "replan_count": run.replan_count or 0,
+                "max_replans": Config.COORDINATOR_MAX_REPLANS,
+            },
+        )
+        logger.warning(
+            "[Joiner] Mission %s verdict=%s (streak=%s, replans=%s/%s)",
+            run.id, decision.value, ledger.get("stall_streak"),
+            run.replan_count or 0, Config.COORDINATOR_MAX_REPLANS,
+        )
+
+        if decision is progress_ledger.JoinerDecision.REPLAN:
+            try:
+                await self.replan_mission(
+                    db,
+                    run.id,
+                    actor_id="joiner",
+                    notes=(
+                        "Automatic replan: the progress ledger detected "
+                        f"{ledger.get('stall_streak')} consecutive checks of "
+                        "churn without forward progress (tasks retrying "
+                        "without completing). Replace the looping approach."
+                    ),
+                    actor_type=ActorType.COORDINATOR,
+                    trigger="stall_ledger",
+                )
+            except PlanValidationError:
+                # replan_mission already failed the run + emitted the audit.
+                logger.warning(
+                    "[Joiner] Auto-replan validation failed for run %s",
+                    run.id, exc_info=True,
+                )
+                return
+            except Exception as exc:
+                # A hard replan failure may not strand the loop — halt.
+                logger.error(
+                    "[Joiner] Auto-replan errored for run %s — halting",
+                    run.id, exc_info=True,
+                )
+                await self._halt_stalled_run(
+                    db, run, ledger, detail=f"auto-replan errored: {exc}",
+                )
+                return
+            # Fresh plan gets a fresh window — rebaseline the ledger.
+            run.config = {
+                **(run.config or {}),
+                "progress_ledger": progress_ledger.reset_after_replan(ledger),
+            }
+            return
+
+        # HALT — replan budget exhausted.
+        await self._halt_stalled_run(
+            db, run, ledger, detail="replan budget exhausted",
+        )
+
+    async def _halt_stalled_run(
+        self,
+        db: Session,
+        run: OrchestrationRun,
+        ledger: Dict[str, Any],
+        *,
+        detail: str,
+    ) -> None:
+        """Joiner HALT: fail a looping mission with a named stop reason and
+        record the failure in mission memory for PRD-159 recall."""
+        reason = (
+            "Joiner halt: no forward progress across "
+            f"{ledger.get('stall_streak')} ledger checks; {detail}"
+        )
+        try:
+            transition_run(
+                db=db,
+                run=run,
+                new_state=RunState.FAILED,
+                actor_type=ActorType.COORDINATOR,
+                actor_id="joiner",
+                reason=reason,
+                stop_reason=StopReason.STALLED.value,
+                stop_detail=reason,
+            )
+        except (ConflictError, InvalidTransitionError):
+            logger.warning(
+                "[Joiner] Could not halt run %s (state=%s)",
+                run.id, run.state, exc_info=True,
+            )
+            return
+        await _store_mission_memory_safe(
+            db, run.id, outcome="failed", failure_reason=reason,
+        )
 
     # ------------------------------------------------------------------
     # Synthesis support (PRD-82C US-007)
@@ -1468,17 +1662,19 @@ class CoordinatorService:
             .all()
         )
 
-        # Sanitize and truncate — reuse same logic as _execute_task upstream
+        # Sanitize and truncate. Synthesis is the one consumer that still gets
+        # full upstream outputs — its whole job is merging them (min_length
+        # verification is 50% of the combined upstream), so the Q22 dispatch
+        # digest deliberately does NOT apply here.
         _PER_OUTPUT_LIMIT = 8000
         _TOTAL_BUDGET = 30_000
-        _BASE64_RE = re.compile(r"data:image/[^;]+;base64,[A-Za-z0-9+/=]+")
 
         results: List[Dict[str, Any]] = []
         accumulated = 0
         for dt in dep_tasks:
             raw_output = dt.output or ""
             # Strip base64 blobs
-            cleaned = _BASE64_RE.sub("[image removed]", raw_output)
+            cleaned = _sanitize_for_field(raw_output)
             # Per-output truncation
             remaining = _TOTAL_BUDGET - accumulated
             if remaining <= 0:
@@ -1494,6 +1690,44 @@ class CoordinatorService:
                 "output": truncated,
             })
         return results
+
+    @staticmethod
+    def _collect_upstream_digest_rows(
+        db: Session,
+        task: OrchestrationTask,
+    ) -> List[Dict[str, Any]]:
+        """PRD-164 S4 (Q22): a task's immediate upstream-dependency outputs as
+        field-shaped ``{key, value}`` rows for the dispatch digest.
+
+        Keyed by the upstream task title — the same key the output was injected
+        into the field under (``_inject_task_output_into_field``) — so the
+        digest merge dedupes the field's echo of the same content. Values are
+        sanitized and capped exactly like field injection; the per-task TOKEN
+        budget is applied later by ``_attach_field_digest``.
+        """
+        upstream_deps = (
+            db.query(OrchestrationTaskDependency)
+            .filter(OrchestrationTaskDependency.task_id == task.id)
+            .all()
+        )
+        if not upstream_deps:
+            return []
+
+        dep_task_ids = [d.depends_on_task_id for d in upstream_deps]
+        dep_tasks = (
+            db.query(OrchestrationTask)
+            .filter(OrchestrationTask.id.in_(dep_task_ids))
+            .order_by(OrchestrationTask.sequence_number)
+            .all()
+        )
+        return [
+            {
+                "key": dt.title or f"task_{dt.sequence_number}",
+                "value": _sanitize_for_field(str(dt.output))[:FIELD_VALUE_CAP_CHARS],
+            }
+            for dt in dep_tasks
+            if dt.output
+        ]
 
     @staticmethod
     def _build_synthesis_prompt(
@@ -1597,49 +1831,16 @@ class CoordinatorService:
             )
             return None
 
-        # Inject upstream task outputs into input_context so the agent
-        # can see what previous tasks produced (dependency chain context)
-        upstream_deps = (
-            db.query(OrchestrationTaskDependency)
-            .filter(OrchestrationTaskDependency.task_id == task.id)
-            .all()
+        # PRD-164 S4 (Q22): upstream task outputs reach the agent as the
+        # token-budgeted dispatch digest (PRD-166 field digest), NOT as raw
+        # 8K-chars-per-task stuffing. Synthesis tasks are the one exception —
+        # their job is merging full upstream content (_collect_upstream_outputs
+        # below), so they skip the digest rows.
+        is_synthesis = task.task_type == TaskType.SYNTHESIS.value
+        upstream_rows: List[Dict[str, Any]] = (
+            [] if is_synthesis
+            else self._collect_upstream_digest_rows(db, task)
         )
-        if upstream_deps:
-            dep_task_ids = [d.depends_on_task_id for d in upstream_deps]
-            dep_tasks = (
-                db.query(OrchestrationTask)
-                .filter(OrchestrationTask.id.in_(dep_task_ids))
-                .order_by(OrchestrationTask.sequence_number)
-                .all()
-            )
-            _MAX_UPSTREAM_CHARS = 8000  # per task — prevent context blow-up
-
-            def _sanitize_upstream(raw: str) -> str:
-                """Strip base64 images and truncate for downstream context."""
-                cleaned = re.sub(
-                    r"data:image/[^;]+;base64,[A-Za-z0-9+/=]+",
-                    "[image — see generated-images API]",
-                    raw,
-                )
-                if len(cleaned) > _MAX_UPSTREAM_CHARS:
-                    cleaned = cleaned[:_MAX_UPSTREAM_CHARS] + "\n\n... (truncated)"
-                return cleaned
-
-            upstream_outputs = [
-                {"title": dt.title, "output": _sanitize_upstream(dt.output)}
-                for dt in dep_tasks
-                if dt.output
-            ]
-            if upstream_outputs:
-                task.input_context = {
-                    **(task.input_context or {}),
-                    "upstream_outputs": upstream_outputs,
-                }
-                logger.info(
-                    "Injected %d upstream outputs into task %s",
-                    len(upstream_outputs),
-                    task.id,
-                )
 
         # PRD-108: Pass field_id so agent can query the shared field
         field_id = (run.config or {}).get("field_id")
@@ -1648,9 +1849,15 @@ class CoordinatorService:
                 **(task.input_context or {}),
                 "field_id": field_id,
             }
-            # PRD-166 S3: pin a budgeted field digest into the prompt so the agent
-            # starts with accumulated knowledge instead of having to query for it.
-            await self._attach_field_digest(db, run, task, field_id, agent_id)
+        # PRD-166 S3 + PRD-164 S4: pin the budgeted dispatch digest (immediate
+        # upstream outputs merged ahead of semantic field hits) into the prompt
+        # so the agent starts with accumulated knowledge instead of having to
+        # query for it. Runs even without a field backend — upstream rows
+        # still flow, under the same per-task budget.
+        if upstream_rows or field_id:
+            await self._attach_field_digest(
+                db, run, task, field_id, agent_id, upstream_rows=upstream_rows,
+            )
 
         # PRD-127: Get attachment_ids for this task
         task_attachment_ids: List[str] = []
@@ -1660,8 +1867,7 @@ class CoordinatorService:
             task_attachment_ids = (run.config or {}).get("attachment_ids", [])
 
         # Build the prompt — synthesis tasks use a specialised prompt
-        is_synthesis = task.task_type == TaskType.SYNTHESIS.value
-
+        # (is_synthesis resolved above, before the dispatch-digest step).
         ctx = task.input_context or {}
         previous_output = ctx.get("previous_output")
         verification_feedback = ctx.get("verification_feedback")
@@ -2757,17 +2963,21 @@ class CoordinatorService:
         run_id: UUID,
         actor_id: str,
         notes: Optional[str] = None,
+        *,
+        actor_type: ActorType = ActorType.HUMAN,
+        trigger: str = "human",
     ) -> OrchestrationRun:
         """
-        Replan a failed mission by generating replacement tasks for the failed
-        subtree while preserving completed/verified tasks.
+        Replan a mission by generating replacement tasks for the failed (or
+        looping) subtree while preserving completed/verified tasks.
 
         Flow:
-          1. Validate: must be in 'failed' state, replan_count < max
-          2. Transition failed → replanning
-          3. Gather completed task outputs + identify failed task
+          1. Validate: 'failed' state (humans) or RUNNING via the joiner's
+             stall-ledger trigger (PRD-164 S4); replan_count < max
+          2. Transition → replanning
+          3. Gather completed task outputs + identify the failed/looping task
           4. Call planner.replan() to generate replacement tasks
-          5. Mark old failed/pending tasks as skipped
+          5. Mark replaced tasks as skipped
           6. Insert new tasks + dependencies
           7. Transition replanning → running
           8. Queue initial new tasks
@@ -2775,8 +2985,13 @@ class CoordinatorService:
         Args:
             db: SQLAlchemy session (caller manages transaction).
             run_id: Mission run UUID.
-            actor_id: Clerk user ID requesting the replan.
-            notes: Optional user guidance for the replanner.
+            actor_id: Clerk user ID requesting the replan ('joiner' for the
+                coordinator's stall-ledger path).
+            notes: Optional guidance for the replanner.
+            actor_type: HUMAN for the API/tool path (default), COORDINATOR
+                when the PRD-164 S4 joiner replans automatically.
+            trigger: 'human' (default) or 'stall_ledger' — recorded on the
+                audit events; the stall trigger may replan a RUNNING mission.
 
         Returns:
             The updated OrchestrationRun.
@@ -2787,8 +3002,14 @@ class CoordinatorService:
         """
         run = self._get_run(db, run_id)
 
-        # Validate state
-        if RunState(run.state) != RunState.FAILED:
+        # Validate state. Humans replan FAILED missions; the joiner's
+        # stall-ledger trigger replans a RUNNING mission that is looping.
+        allowed_states = (
+            {RunState.FAILED, RunState.RUNNING}
+            if trigger == "stall_ledger"
+            else {RunState.FAILED}
+        )
+        if RunState(run.state) not in allowed_states:
             raise ValueError(
                 f"Mission must be in 'failed' state to replan, "
                 f"currently in '{run.state}'"
@@ -2803,14 +3024,17 @@ class CoordinatorService:
                 f"maximum is {max_replans}"
             )
 
-        # Transition failed → replanning
+        # Transition failed/running → replanning
         transition_run(
             db=db,
             run=run,
             new_state=RunState.REPLANNING,
-            actor_type=ActorType.HUMAN,
+            actor_type=actor_type,
             actor_id=actor_id,
-            reason=f"Replan requested (attempt {current_replans + 1}/{max_replans})",
+            reason=(
+                f"Replan requested via {trigger} "
+                f"(attempt {current_replans + 1}/{max_replans})"
+            ),
         )
 
         # Gather completed task outputs
@@ -2839,6 +3063,22 @@ class CoordinatorService:
                     task.failure_detail
                     or task.failure_reason_code
                     or "Unknown failure"
+                )
+
+        # PRD-164 S4: a stall-ledger replan usually has no FAILED task — the
+        # problem is a LOOP. Point the planner at the churning task instead.
+        if failed_task_title == "Unknown" and trigger == "stall_ledger":
+            looping = [
+                t for t in all_tasks
+                if TaskState(t.state) not in DONE_TASK_STATES
+            ]
+            if looping:
+                loop_task = max(looping, key=lambda t: (t.attempt_number or 0))
+                failed_task_title = loop_task.title
+                failed_task_reason = (
+                    f"Looping without forward progress: stuck in "
+                    f"'{loop_task.state}' after {loop_task.attempt_number or 0} "
+                    f"attempts (progress-ledger stall)"
                 )
 
         # Load roster agents
@@ -2883,10 +3123,23 @@ class CoordinatorService:
             )
             raise
 
-        # Mark old failed and pending/queued tasks as skipped
+        # Mark replaced tasks as skipped. The human path (FAILED mission)
+        # replaces failed + not-yet-started tasks; the stall-ledger path also
+        # skips the mid-flight states — they ARE the loop being replaced, and
+        # leaving them live would run the old plan alongside the new one.
+        replaceable = {TaskState.FAILED, TaskState.PENDING, TaskState.QUEUED}
+        if trigger == "stall_ledger":
+            replaceable |= {
+                TaskState.ASSIGNED,
+                TaskState.RUNNING,
+                TaskState.COMPLETED,
+                TaskState.VERIFYING,
+                TaskState.STALLED,
+                TaskState.RETRYING,
+            }
         for task in all_tasks:
             task_state = TaskState(task.state)
-            if task_state in (TaskState.FAILED, TaskState.PENDING, TaskState.QUEUED):
+            if task_state in replaceable:
                 task.failure_reason_code = "replaced_by_replan"
                 task.failure_detail = f"Replaced during replan #{current_replans + 1}"
                 try:
@@ -3014,13 +3267,14 @@ class CoordinatorService:
             db=db,
             run_id=run.id,
             event_type=EventType.RUN_REPLANNED,
-            actor_type=ActorType.HUMAN,
+            actor_type=actor_type,
             actor_id=actor_id,
             payload={
                 "replan_number": current_replans + 1,
                 "new_task_count": len(decomposition.tasks),
                 "token_estimate": decomposition.token_estimate,
                 "user_notes": notes,
+                "trigger": trigger,
             },
         )
 
