@@ -286,6 +286,13 @@ class MissionDispatcher:
                 )
 
         # --- Agent matching ---
+        # PRD-164 S2 (Q21): blend in capability-card similarity + live field
+        # signal — one embedding call per dispatch, fail-open to lexical-only.
+        semantic_signals = AgentMatcher.compute_semantic_signals_sync(
+            task=task,
+            agents=agents,
+            workspace_id=run.workspace_id,
+        )
         match_result: Optional[MatchResult] = AgentMatcher.match(
             db=db,
             task=task,
@@ -298,6 +305,7 @@ class MissionDispatcher:
                     else []
                 ),
             },
+            semantic=semantic_signals,
         )
 
         if match_result is None:
@@ -371,6 +379,21 @@ class MissionDispatcher:
                 skipped_reason="claim_failed",
             )
 
+        # PRD-164 S2: persist the dispatch decision + reason on the task row
+        # (supersedes the plan-time preview) so the approval card / mission
+        # views can show WHY this agent ran the task.
+        task.input_context = {
+            **(task.input_context if isinstance(task.input_context, dict) else {}),
+            "agent_match": {
+                "agent_id": match_result.agent_id,
+                "agent_name": match_result.agent_name,
+                "score": match_result.total_score,
+                "reason": match_result.reason,
+                "is_override": match_result.is_override,
+                "decided_at": "dispatch",
+            },
+        }
+
         # --- Emit TASK_ASSIGNED event ---
         emit_event(
             db=db,
@@ -383,6 +406,8 @@ class MissionDispatcher:
                 "agent_id": match_result.agent_id,
                 "agent_name": match_result.agent_name,
                 "match_score": match_result.total_score,
+                "match_reason": match_result.reason,
+                "match_is_override": match_result.is_override,
             },
         )
 

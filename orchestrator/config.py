@@ -645,6 +645,11 @@ class Config:
     # History-based agent scoring (PRD-82B US-003)
     COORDINATOR_HISTORY_LOOKBACK_DAYS: int = int(os.getenv("COORDINATOR_HISTORY_LOOKBACK_DAYS", "30"))
     COORDINATOR_HISTORY_MIN_DATAPOINTS: int = int(os.getenv("COORDINATOR_HISTORY_MIN_DATAPOINTS", "3"))
+    # PRD-164 S2 (Q21): upper bound on the per-dispatch semantic-signal
+    # computation (task embedding + capability-card cosine + field query) so a
+    # hung embedding/Qdrant backend can never stall the dispatch tick — on
+    # timeout the matcher falls back to lexical-only scoring.
+    AGENT_MATCH_SIGNAL_TIMEOUT_SECONDS: float = float(os.getenv("AGENT_MATCH_SIGNAL_TIMEOUT_SECONDS", "10"))
     # Telemetry: cost estimation per 1K tokens (PRD-82B US-004)
     COORDINATOR_COST_PER_1K_TOKENS: float = float(os.getenv("COORDINATOR_COST_PER_1K_TOKENS", "0.003"))
     # Replanning limits (PRD-82B US-005)

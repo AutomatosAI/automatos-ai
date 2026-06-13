@@ -36,6 +36,10 @@ export interface MissionApprovalTask {
   title: string
   agent_role?: string
   sequence?: number
+  /** PRD-164 S2: agent-match preview — who would run this task and why */
+  match_agent?: string
+  match_reason?: string
+  match_is_override?: boolean
 }
 
 export interface MissionApprovalWidgetData {

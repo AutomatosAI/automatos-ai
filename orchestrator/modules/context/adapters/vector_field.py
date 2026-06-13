@@ -289,12 +289,17 @@ class VectorFieldSharedContext(SharedContextPort):
         query: str,
         agent_id: int = 0,
         top_k: int = 0,
+        query_vector: Optional[list[float]] = None,
     ) -> list[dict[str, Any]]:
         """PRD-166 S1: workspace-persistent recall — rank patterns accumulated
         across every mission in the workspace (filter on ``workspace_id``, not a
-        single ``field_id``). Powers cross-mission learning."""
+        single ``field_id``). Powers cross-mission learning.
+
+        PRD-164 S2 (Q21): pass ``query_vector`` to reuse an embedding the caller
+        already computed (keeps agent dispatch at one embedding call)."""
         return await self._scored_search(
-            self._workspace_filter(workspace_id), query, top_k, label=f"ws={workspace_id}",
+            self._workspace_filter(workspace_id), query, top_k,
+            label=f"ws={workspace_id}", query_vector=query_vector,
         )
 
     async def _scored_search(
@@ -303,12 +308,16 @@ class VectorFieldSharedContext(SharedContextPort):
         query: str,
         top_k: int,
         label: str,
+        query_vector: Optional[list[float]] = None,
     ) -> list[dict[str, Any]]:
         await self.ensure_shared_collection()
         top_k = top_k or config.FIELD_QUERY_TOP_K
         params = self._scoring_params()
 
-        query_embedding = await self._embedder.generate_embedding(query)
+        query_embedding = (
+            query_vector if query_vector is not None
+            else await self._embedder.generate_embedding(query)
+        )
 
         # Over-fetch — decay/archival filtering will reduce the set.
         response = await self._client.query_points(

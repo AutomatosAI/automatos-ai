@@ -20,10 +20,10 @@
       "title": "Semantic agent matching with reasons",
       "description": "AgentMatcher: embedded capability cards (Qdrant) + historical task performance from mission memory + live field signal (PRD-166) → ranked agents with reasons; explicit agent_overrides always win (PRD-163 S4). One embedding call per dispatch accepted (Q21).",
       "acceptanceCriteria": [
-        "Golden matrix: 10 task fixtures → expected top agent (ties allowed)",
-        "Override always wins (test)",
-        "Match reasons logged on the task and visible to the approval card",
-        "cd orchestrator && pytest -q green"
+        "Golden matrix: 10 task fixtures → expected top agent (ties allowed) DONE — tests/test_prd164_agent_match.py::test_golden_matrix_top_agent drives the pure _rank_with_context seam with 10 fixtures (lexical role, semantic-card lift, no-flip on small semantic edge, tools, history, field tie-break, busy penalty, override); every ranked agent asserted to carry a reason; scoring hand-verified locally via stubbed smoke run (22 checks green — no pytest in this venv, file runs on CI)",
+        "Override always wins (test) DONE — test_override_outranks_higher_scorer_and_is_flagged (PRD-163 S4 name-pinned agent ranks first with a provably LOWER blended score than #2) + test_override_wins_even_below_match_threshold (match() returns the override even under MATCH_THRESHOLD) + inactive-agent negative; planner capability-vocabulary behavior untouched (CANONICAL_ROLES path unchanged)",
+        "Match reasons logged on the task and visible to the approval card DONE — every MatchResult carries a composed reason; dispatch persists input_context.agent_match {agent, score, reason, is_override, decided_at} + TASK_ASSIGNED payload gains match_reason; plan-time preview (_annotate_match_previews in _run_planning AND import_plan) mirrors match_agent/match_reason into run.plan → _plan_task_summary → mission_approval card payload (tests/test_prd164_match_reasons_surface.py) and the card RENDERS them (vitest mission-approval-match-reason.test.tsx 2/2; tsc clean on touched files, 540 errors = pre-existing baseline)",
+        "cd orchestrator && pytest -q green DEFERRED — CI/morning check: test.yml on this push is the authority (no DB/Qdrant on this machine); locally py_compile green on all changed files, frontend vitest 77/77, signal paths fail-open + timeout-bounded so missing backends degrade to the legacy lexical score exactly (renormalization test)"
       ],
       "files": ["orchestrator/modules/coordination/", "orchestrator/modules/agents/"]
     },

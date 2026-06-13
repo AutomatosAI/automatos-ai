@@ -48,6 +48,7 @@ from core.models.orchestration_enums import (
     TERMINAL_RUN_STATES,
     DONE_TASK_STATES,
 )
+from modules.coordination.agent_matcher import AgentMatcher, build_match_annotation
 from modules.coordination.dispatcher import MissionDispatcher
 from modules.coordination.planner import (
     DecompositionResult,
@@ -96,6 +97,32 @@ _POWER_MODE_DEFAULTS: Dict[str, Dict[str, Any]] = {
 # editable from the approval card. Structural changes (add/remove tasks, rewire
 # dependencies) go through plan-import (Q54), not this field-PATCH path.
 _EDITABLE_TASK_FIELDS = ("agent_role", "title", "description")
+
+
+def annotate_plan_with_matches(plan: Optional[Dict[str, Any]],
+                               match_by_seq: Dict[int, Dict[str, Any]]) -> Dict[str, Any]:
+    """PRD-164 S2: mirror per-task agent-match previews into the ``run.plan``
+    snapshot (keyed by ``sequence_number``) so the approval card — which is
+    built from the plan tasks — can show WHO would run each task and WHY.
+
+    Pure and immutable: returns a NEW plan dict (the JSON column needs the
+    reassignment to track the change); the input plan is never mutated.
+    """
+    plan = plan or {}
+    new_tasks: List[Dict[str, Any]] = []
+    for pt in (plan.get("tasks") or []):
+        seq = pt.get("sequence_number")
+        match = match_by_seq.get(int(seq)) if seq is not None else None
+        if match:
+            pt = {
+                **pt,
+                "match_agent": match.get("agent_name"),
+                "match_agent_id": match.get("agent_id"),
+                "match_reason": match.get("reason"),
+                "match_is_override": bool(match.get("is_override", False)),
+            }
+        new_tasks.append(pt)
+    return {**plan, "tasks": new_tasks}
 
 
 def apply_plan_task_edits(tasks: List[Any], plan: Optional[Dict[str, Any]],
@@ -1936,6 +1963,26 @@ class CoordinatorService:
         # with import_plan so an imported plan persists the exact given DAG).
         temp_id_to_task = self._persist_decomposition(db, run, decomposition)
 
+        # PRD-164 S2: agent-match preview — rank candidates per task (Q21
+        # blend, one embedding call per task) and persist the reasons on the
+        # task rows + plan snapshot so the approval card can show them.
+        planned_tasks = list(temp_id_to_task.values())
+        try:
+            signals_by_task = await asyncio.wait_for(
+                AgentMatcher.compute_signals_for_tasks(
+                    planned_tasks, agents, run.workspace_id,
+                ),
+                timeout=Config.AGENT_MATCH_SIGNAL_TIMEOUT_SECONDS
+                * max(1, len(planned_tasks)),
+            )
+        except Exception:
+            logger.warning(
+                "Semantic match signals unavailable for run %s (lexical preview)",
+                run.id, exc_info=True,
+            )
+            signals_by_task = {}
+        self._annotate_match_previews(db, run, agents, planned_tasks, signals_by_task)
+
         # Create board tasks for kanban visibility
         try:
             create_mission_board_task(db, run)
@@ -2207,6 +2254,47 @@ class CoordinatorService:
         db.flush()
         return temp_id_to_task
 
+    def _annotate_match_previews(
+        self,
+        db: Session,
+        run: OrchestrationRun,
+        agents: List[Agent],
+        tasks: List[OrchestrationTask],
+        signals_by_task: Optional[Dict[Any, Any]] = None,
+    ) -> None:
+        """PRD-164 S2: rank candidate agents per planned task and persist the
+        match preview — ``input_context['agent_match']`` on each task row and
+        ``match_agent``/``match_reason`` mirrored into the plan snapshot (the
+        approval card's source). Explicit agent overrides (PRD-163 S4) rank
+        first by construction. Best-effort: a failure here never blocks
+        mission creation — the dispatcher re-matches authoritatively anyway.
+        """
+        try:
+            match_by_seq: Dict[int, Dict[str, Any]] = {}
+            for task in tasks:
+                input_context = task.input_context if isinstance(task.input_context, dict) else {}
+                spec = {
+                    "agent_role": task.agent_role,
+                    "required_tools": input_context.get("required_tools", []),
+                }
+                ranked = AgentMatcher.rank(
+                    db=db, task=task, agents=agents, task_spec=spec,
+                    semantic=(signals_by_task or {}).get(task.id),
+                )
+                if not ranked:
+                    continue
+                annotation = {**build_match_annotation(ranked), "decided_at": "plan"}
+                task.input_context = {**input_context, "agent_match": annotation}
+                match_by_seq[int(task.sequence_number)] = annotation
+
+            if match_by_seq:
+                run.plan = annotate_plan_with_matches(run.plan, match_by_seq)
+        except Exception:
+            logger.warning(
+                "Match preview annotation failed for run %s (non-fatal)",
+                run.id, exc_info=True,
+            )
+
     def import_plan(
         self,
         db: Session,
@@ -2289,7 +2377,23 @@ class CoordinatorService:
             actor_type=ActorType.COORDINATOR, actor_id="coordinator",
         )
 
-        self._persist_decomposition(db, run, decomposition)
+        temp_id_to_task = self._persist_decomposition(db, run, decomposition)
+
+        # PRD-164 S2: imported plans get the lexical match preview too (this
+        # path is sync, so no semantic signals — the dispatcher blends them at
+        # dispatch). An imported agent_role naming a roster agent is an
+        # explicit override and is flagged as such on the preview.
+        roster = (
+            db.query(Agent)
+            .filter(and_(
+                Agent.workspace_id == workspace_id,
+                Agent.status == "active",
+            ))
+            .all()
+        )
+        self._annotate_match_previews(
+            db, run, roster, list(temp_id_to_task.values()), None,
+        )
 
         emit_event(
             db=db, run_id=run.id, event_type=EventType.RUN_PLAN_READY,
