@@ -41,6 +41,23 @@ os.environ.setdefault("POSTGRES_PORT", "59432")
 os.environ.setdefault("POSTGRES_DB", "test")
 
 
+# AC1/AC3 below drive a REAL ingestion round-trip (object store + embeddings +
+# vector retrieval). The standard CI test net provisions Postgres ONLY — no
+# S3/vector services — so without credentials the S3 client blocks and the test
+# hangs to the 90s faulthandler kill instead of running. Gate them to a
+# full-services run (real creds / the live env). The flywheel WIRING (opt-out,
+# tagging, KG-pending partition, deliverable-tool reachability) is fully covered
+# by the pure/unit tests above; this only defers the real S3+vector round-trip,
+# matching pytest.ini's "integration: needs services; run explicitly" posture.
+_requires_object_store = pytest.mark.skipif(
+    not os.environ.get("AWS_ACCESS_KEY_ID"),
+    reason=(
+        "flywheel e2e needs a real object store + embeddings; the Postgres-only "
+        "CI net has none. Runs in full-services CI / locally with AWS creds."
+    ),
+)
+
+
 # Lean-venv shim: importing modules.tools.* runs modules/tools/__init__, which
 # pulls modules.rag's ingestion chain (camelot at module top). Stub the missing
 # *leaf* only when truly absent — never the modules.rag package.
@@ -443,6 +460,7 @@ def _manager_boundary_patches():
     ], graph_singleton
 
 
+@_requires_object_store
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_ac1_completed_mission_synthesis_retrievable_next_turn(
@@ -545,6 +563,7 @@ async def test_ac1_completed_mission_synthesis_retrievable_next_turn(
         _cleanup_workspace(test_engine, ws_id)
 
 
+@_requires_object_store
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_ac3_opted_out_workspace_ingests_nothing(db_session, test_engine):
