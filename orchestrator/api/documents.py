@@ -550,7 +550,11 @@ async def list_documents(
     file_type: Optional[str] = None,
     search: Optional[str] = None,
     team: Optional[str] = Query(None, description="PRD-158: team scope; normalized server-side"),
-    source_type: Optional[str] = Query(None, description="PRD-164: provenance scope, e.g. 'agent_output' for flywheel-ingested agent outputs"),
+    # PRD-164: provenance scope, e.g. 'agent_output' for flywheel-ingested agent
+    # outputs. Plain `= None` (like status/file_type/search) so direct-call
+    # callers/tests that omit it get None, not a truthy Query() sentinel that
+    # would make `if source_type:` fire and filter on a Query object.
+    source_type: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
     """List documents with filtering and pagination"""

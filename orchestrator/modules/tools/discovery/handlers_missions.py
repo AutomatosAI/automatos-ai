@@ -208,11 +208,10 @@ async def get_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]) -
     task_details = []
     for t in tasks:
         # PRD-164 S2: surface the persisted match reason (plan preview, then
-        # superseded by the dispatch decision) alongside each task.
-        agent_match = (
-            t.input_context.get("agent_match")
-            if isinstance(t.input_context, dict) else None
-        ) or {}
+        # superseded by the dispatch decision) alongside each task. getattr —
+        # input_context may be absent (legacy rows / lighter task shapes) or NULL.
+        _ic = getattr(t, "input_context", None)
+        agent_match = (_ic.get("agent_match") if isinstance(_ic, dict) else None) or {}
         task_details.append({
             "id": t.id,
             "title": t.title,

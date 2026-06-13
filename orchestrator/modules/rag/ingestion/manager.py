@@ -421,11 +421,17 @@ class DocumentManager:
         from config import config as app_config
         self.s3_bucket = s3_bucket or app_config.S3_DOCUMENTS_BUCKET
         self.s3_region = app_config.AWS_REGION or 'us-east-1'
+        # Bounded so a slow/unreachable/unconfigured S3 fails FAST (≤~5s) instead
+        # of hanging the whole process. A DocumentManager must never block document
+        # ops on S3 latency (PRD-164: this was a 90s faulthandler hang in CI when
+        # no creds were present). retries=0 so no-creds/endpoint errors surface now.
+        from botocore.config import Config as _BotoConfig
         self.s3_client = boto3.client(
             's3',
             region_name=self.s3_region,
             aws_access_key_id=app_config.AWS_ACCESS_KEY_ID,
-            aws_secret_access_key=app_config.AWS_SECRET_ACCESS_KEY
+            aws_secret_access_key=app_config.AWS_SECRET_ACCESS_KEY,
+            config=_BotoConfig(connect_timeout=3, read_timeout=5, retries={"max_attempts": 1}),
         )
 
         # Ensure S3 bucket exists (create if needed)
@@ -471,11 +477,15 @@ class DocumentManager:
                         )
                     logger.info(f"✅ Created S3 bucket '{self.s3_bucket}'")
                 except Exception as create_error:
-                    logger.error(f"❌ Failed to create S3 bucket: {create_error}")
-                    raise
+                    # S3 is optional infra — a failed create must NOT crash
+                    # DocumentManager construction. DB-backed ops (list/grep over
+                    # document_chunks) work without S3; an S3-backed op will surface
+                    # a precise error at its own call site if S3 is truly required.
+                    logger.warning(f"⚠️ Could not create S3 bucket '{self.s3_bucket}' (S3 unavailable — continuing): {create_error}")
             else:
-                logger.error(f"❌ S3 bucket check failed: {e}")
-                raise
+                # Missing creds / unreachable endpoint / permission error: degrade,
+                # never hang or crash. Same rationale as above.
+                logger.warning(f"⚠️ S3 bucket check skipped (S3 unavailable — continuing): {e}")
 
     def _extract_pdf_with_tables(self, file_path: str) -> tuple:
         """
