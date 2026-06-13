@@ -78,7 +78,13 @@ def _apply_frontmatter(skill, content: str, params: Dict[str, Any]) -> None:
     yaml_data = yaml_data or {}
 
     skill.description = params.get("description") or yaml_data.get("description") or skill.description
-    skill.category = params.get("category") or yaml_data.get("category") or skill.category
+    # category must never be NULL: the prod `skills.category` column is NOT NULL
+    # (the model says nullable=True, but prod schema drifted), and an agent that
+    # omits category with no frontmatter would otherwise dead-end the INSERT.
+    # A skill should be categorised anyway — fall back to 'general'.
+    skill.category = (
+        params.get("category") or yaml_data.get("category") or skill.category or "general"
+    )
 
     incoming_tags = params.get("tags")
     if incoming_tags is None:
