@@ -312,6 +312,7 @@ class DeliverableService:
         artifact_type: Optional[str] = None,
         source_type: Optional[str] = None,
         source_type_exclude: Optional[str] = None,
+        source_id: Optional[str] = None,
         agent_id: Optional[int] = None,
         date_from: Optional[str] = None,
         date_to: Optional[str] = None,
@@ -324,6 +325,10 @@ class DeliverableService:
         ``source_type_exclude`` is a comma-separated list of source_types to
         exclude (e.g. ``"heartbeat"``). Used by the redesigned Deliverables
         feed to keep agent self-status noise out of the main grid.
+
+        ``source_id`` (PRD-164 S3) scopes to one originating mission/task/
+        heartbeat — the mission-page Deliverables tab and the
+        platform_list_deliverables tool filter on it.
         """
         limit = max(1, min(int(limit or 24), 100))
         offset = max(0, int(offset or 0))
@@ -344,6 +349,9 @@ class DeliverableService:
                 conditions.append(f"o.source_type NOT IN ({placeholders})")
                 for i, s in enumerate(excluded):
                     params[f"excl_src_{i}"] = s
+        if source_id:
+            conditions.append("o.source_id = :source_id")
+            params["source_id"] = str(source_id)
         if agent_id is not None:
             conditions.append("o.agent_id = :agent_id")
             params["agent_id"] = agent_id

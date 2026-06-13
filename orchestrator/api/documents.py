@@ -550,6 +550,7 @@ async def list_documents(
     file_type: Optional[str] = None,
     search: Optional[str] = None,
     team: Optional[str] = Query(None, description="PRD-158: team scope; normalized server-side"),
+    source_type: Optional[str] = Query(None, description="PRD-164: provenance scope, e.g. 'agent_output' for flywheel-ingested agent outputs"),
     db: Session = Depends(get_db)
 ):
     """List documents with filtering and pagination"""
@@ -561,6 +562,9 @@ async def list_documents(
             query = query.filter(Document.status == status)
         if file_type:
             query = query.filter(Document.file_type == file_type)
+        if source_type:
+            # PRD-164 S3 (Q58): agent outputs are a filterable team-like scope
+            query = query.filter(Document.source_type == source_type)
         if search:
             query = query.filter(
                 or_(
@@ -602,6 +606,7 @@ async def list_documents(
                 created_by=doc.created_by,
                 last_accessed=doc.last_accessed,
                 rag_query_count=doc.rag_query_count or 0,
+                source_type=doc.source_type,
             ) for doc in documents
         ]
         
@@ -693,7 +698,21 @@ async def document_team_counts(
         text("SELECT COUNT(*) FROM documents WHERE workspace_id = CAST(:ws AS uuid)"),
         {"ws": str(ctx.workspace_id)},
     ).scalar()
-    return {"counts": counts, "untagged": int(untagged or 0), "total": int(total or 0)}
+    # PRD-164 S3 (Q58): agent outputs surface as a team-like scope in the
+    # knowledge filter tree — same response, one extra count.
+    agent_outputs = db.execute(
+        text(
+            "SELECT COUNT(*) FROM documents "
+            "WHERE workspace_id = CAST(:ws AS uuid) AND source_type = 'agent_output'"
+        ),
+        {"ws": str(ctx.workspace_id)},
+    ).scalar()
+    return {
+        "counts": counts,
+        "untagged": int(untagged or 0),
+        "total": int(total or 0),
+        "agent_outputs": int(agent_outputs or 0),
+    }
 
 
 @router.get("/{document_id}", response_model=DocumentResponse)
@@ -720,7 +739,8 @@ async def get_document(
             description=document.description,
             upload_date=document.upload_date,
             processed_date=document.processed_date,
-            created_by=document.created_by
+            created_by=document.created_by,
+            source_type=document.source_type,
         )
         
     except HTTPException:

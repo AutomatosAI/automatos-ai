@@ -746,15 +746,32 @@ class CoordinatorService:
         db: Session,
         run: OrchestrationRun,
     ) -> Optional[int]:
-        """On mission completion, save assembled task outputs as a document for future intelligence.
+        """On mission completion, route the assembled synthesis through the
+        knowledge flywheel (PRD-164 S3, Q58) so it is retrievable via RAG and
+        the Knowledge Graph next turn. ``source_type='agent_output'``.
 
-        For app_builder missions, also downloads the zip bundle from the workspace
-        and saves it as a separate downloadable document.
+        Honors the per-workspace opt-out: an opted-out workspace ingests
+        NOTHING (the run is marked so the sweep doesn't retry forever).
+
+        For app_builder missions, also downloads the zip bundle from the
+        workspace and saves it as a separate downloadable document. Can also
+        emit a rendered document deliverable via the PRD-167 template path
+        when ``run.config['emit_document']`` is set.
         """
-        from api.documents import get_document_manager
-        from pathlib import Path
+        from services.knowledge_flywheel import flywheel_enabled, ingest_agent_output
 
         try:
+            if not flywheel_enabled(db, run.workspace_id):
+                # Q58 opt-out: ingest nothing; mark so the tick sweep moves on.
+                run.config = {**(run.config or {}), "output_ingest": "skipped_opt_out"}
+                db.flush()
+                logger.info(
+                    "[Mission] Workspace %s opted out of the knowledge flywheel — "
+                    "skipping output ingest for mission %s",
+                    run.workspace_id, run.id,
+                )
+                return None
+
             tasks = (
                 db.query(OrchestrationTask)
                 .filter(
@@ -776,34 +793,34 @@ class CoordinatorService:
                 parts.append("")
             content = "\n".join(parts)
 
-            # Write to temp file
-            output_dir = Path("/tmp/automatos_mission_outputs")
-            output_dir.mkdir(exist_ok=True)
             slug = re.sub(r"[^a-z0-9]+", "-", run.goal[:60].lower()).strip("-")
-            temp_path = output_dir / f"mission_{run.id}_{slug}.md"
-            temp_path.write_text(content, encoding="utf-8")
 
-            doc_manager = get_document_manager(str(run.workspace_id))
-            document_id = None
-
-            try:
-                document_id = await doc_manager.upload_document(
-                    file_path=str(temp_path),
-                    filename=f"mission-output-{slug}.md",
-                    tags=["mission-output", f"mission:{run.id}"],
-                    description=f"Output from completed mission: {run.goal[:200]}",
-                    created_by="coordinator",
-                )
+            document_id = await ingest_agent_output(
+                db,
+                run.workspace_id,
+                content=content,
+                filename=f"mission-output-{slug}.md",
+                source="mission_synthesis",
+                source_id=str(run.id),
+                title=f"Mission output: {run.goal[:120]}",
+                description=f"Output from completed mission: {run.goal[:200]}",
+                created_by="coordinator",
+                extra_tags=["mission-output", f"mission:{run.id}"],
+            )
+            if document_id is not None:
                 run.config = {**(run.config or {}), "output_document_id": document_id}
                 db.flush()
                 logger.info("[Mission] Saved output document %s for mission %s", document_id, run.id)
-            finally:
-                if temp_path.exists():
-                    temp_path.unlink()
+
+            # --- PRD-167 wiring: emit a rendered document deliverable -------
+            await self._emit_mission_document(db, run, content)
 
             # --- App builder: also save the zip bundle ---
             template_used = (run.config or {}).get("template_used")
             if template_used == "app_builder":
+                from api.documents import get_document_manager
+
+                doc_manager = get_document_manager(str(run.workspace_id))
                 zip_doc_id = await self._save_app_bundle_zip(db, run, slug, doc_manager)
                 if zip_doc_id:
                     run.config = {**(run.config or {}), "app_bundle_document_id": zip_doc_id}
@@ -812,6 +829,79 @@ class CoordinatorService:
             return document_id
         except Exception as e:
             logger.warning("[Mission] Failed to save output document for %s: %s", run.id, e, exc_info=True)
+            return None
+
+    async def _emit_mission_document(
+        self,
+        db: Session,
+        run: OrchestrationRun,
+        content: str,
+    ) -> Optional[str]:
+        """PRD-164 S3: mission completion can emit ``generate_document`` via the
+        PRD-167 template path (merged — wired directly, no feature flag).
+
+        Driven by ``run.config['emit_document']``::
+
+            {"format": "pdf"|"docx"|"xlsx", "title": "...",
+             "template_id": "<uuid>" | "template_name": "..."}
+
+        The rendered file is registered as a mission deliverable (it shows in
+        the mission Deliverables tab). The synthesis markdown is already
+        flywheel-ingested by the caller, so the render is NOT re-ingested —
+        no duplicate knowledge. Fail-soft: a render failure never fails the
+        mission output flow. Idempotent via config['emitted_deliverable_id'].
+        """
+        spec = (run.config or {}).get("emit_document")
+        if not spec or not isinstance(spec, dict):
+            return None
+        if (run.config or {}).get("emitted_deliverable_id"):
+            return None
+
+        try:
+            from uuid import UUID as _UUID
+
+            from modules.documents.generation_service import DocumentGenerationService
+
+            fmt = str(spec.get("format") or "pdf").lower()
+            title = spec.get("title") or f"Mission report: {run.goal[:120]}"
+            template_id = None
+            if spec.get("template_id"):
+                template_id = _UUID(str(spec["template_id"]))
+
+            gen_service = DocumentGenerationService(db, run.workspace_id)
+            result = await gen_service.generate(
+                title=title,
+                format=fmt,
+                data={"content": content},
+                workspace_id=run.workspace_id,
+                template_name=spec.get("template_name"),
+                template_id=template_id,
+            )
+            registration = gen_service.register_as_deliverable(
+                result,
+                title=title,
+                source_type="mission",
+                source_id=str(run.id),
+                agent_name="coordinator",
+                template_id=template_id,
+            )
+            deliverable_id = (registration or {}).get("deliverable_id")
+            run.config = {
+                **(run.config or {}),
+                "emitted_document": result.filename,
+                "emitted_deliverable_id": deliverable_id or result.filename,
+            }
+            db.flush()
+            logger.info(
+                "[Mission] Emitted %s document '%s' for mission %s (deliverable %s)",
+                fmt, result.filename, run.id, deliverable_id,
+            )
+            return deliverable_id
+        except Exception:
+            logger.warning(
+                "[Mission] emit_document failed for mission %s (non-fatal)",
+                run.id, exc_info=True,
+            )
             return None
 
     async def _save_app_bundle_zip(
@@ -1018,7 +1108,10 @@ class CoordinatorService:
             .all()
         )
         for run in completed_without_output:
-            if (run.config or {}).get("output_document_id"):
+            cfg = run.config or {}
+            # output_document_id == saved; output_ingest marker == workspace
+            # opted out of the flywheel (Q58) — don't retry every tick.
+            if cfg.get("output_document_id") or cfg.get("output_ingest"):
                 continue
             await self._save_mission_output_as_document(db, run)
 

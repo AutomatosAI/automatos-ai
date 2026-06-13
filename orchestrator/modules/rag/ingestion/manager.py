@@ -597,7 +597,8 @@ class DocumentManager:
                     tags TEXT[] DEFAULT ARRAY[]::TEXT[],
                     description TEXT DEFAULT '',
                     file_hash VARCHAR(64) UNIQUE,
-                    workspace_id TEXT
+                    workspace_id TEXT,
+                    source_type VARCHAR(50)
                 );
             """)
             
@@ -685,10 +686,17 @@ class DocumentManager:
             logger.error(f"Failed to download from S3: {e}")
             raise
     
-    async def upload_document(self, file_path: str, filename: str = None, 
+    async def upload_document(self, file_path: str, filename: str = None,
                             tags: List[str] = None, description: str = "",
-                            created_by: str = "system") -> int:
-        """Upload and process a document"""
+                            created_by: str = "system",
+                            source_type: Optional[str] = None) -> int:
+        """Upload and process a document.
+
+        ``source_type`` (PRD-164 S3, Q58): provenance scope. ``None`` for a
+        regular upload; ``'agent_output'`` when the knowledge flywheel routes
+        an agent output (mission synthesis / generated document / report)
+        through this manager.
+        """
         self._ensure_database_initialized()
         try:
             if not os.path.exists(file_path):
@@ -743,14 +751,16 @@ class DocumentManager:
 
             cursor.execute("""
                 INSERT INTO documents (filename, file_type, file_size, upload_date, status,
-                                     metadata, created_by, tags, description, file_hash, workspace_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                     metadata, created_by, tags, description, file_hash, workspace_id,
+                                     source_type)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
             """, (
                 metadata.filename, metadata.file_type, metadata.file_size,
                 metadata.upload_date, DocumentStatus.PROCESSING.value,
                 json.dumps(metadata.to_dict()), metadata.created_by,
-                metadata.tags, metadata.description, file_hash, self.workspace_id
+                metadata.tags, metadata.description, file_hash, self.workspace_id,
+                source_type
             ))
 
             document_id = cursor.fetchone()[0]

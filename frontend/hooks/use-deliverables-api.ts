@@ -106,6 +106,8 @@ export interface FilterState {
   artifact_type: string | null
   source_type: string | null
   source_type_exclude: string[] | null
+  /** PRD-164: scope to one originating mission/task/heartbeat id */
+  source_id: string | null
   agent_id: number | null
   date_range: DateRange
   search: string
@@ -115,6 +117,7 @@ export const DEFAULT_FILTERS: FilterState = {
   artifact_type: null,
   source_type: null,
   source_type_exclude: null,
+  source_id: null,
   agent_id: null,
   date_range: 'all',
   search: '',
@@ -161,6 +164,7 @@ function buildListQuery(filters: FilterState, offset: number): string {
   if (filters.source_type_exclude && filters.source_type_exclude.length > 0) {
     params.set('source_type_exclude', filters.source_type_exclude.join(','))
   }
+  if (filters.source_id) params.set('source_id', filters.source_id)
   if (filters.agent_id !== null) params.set('agent_id', String(filters.agent_id))
   if (filters.search.trim()) params.set('search', filters.search.trim())
   const dateFrom = dateRangeToFrom(filters.date_range)

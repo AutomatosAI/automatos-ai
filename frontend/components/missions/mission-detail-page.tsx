@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Pause, Play, X, Eye, Target, Check, XCircle, Save, RefreshCw, RotateCcw } from 'lucide-react'
+import { ArrowLeft, Pause, Play, X, Eye, Target, Check, XCircle, Save, RefreshCw, RotateCcw, Package } from 'lucide-react'
 import Link from 'next/link'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -32,6 +32,7 @@ import { MissionActivityFeed } from './mission-activity-feed'
 import { TaskInspector } from './task-inspector'
 import { MissionResultsPanel } from './mission-results-panel'
 import { MissionFieldPanel } from './mission-field-panel'
+import { MissionDeliverablesPanel } from './mission-deliverables-panel'
 import { useMission, usePauseMission, useResumeMission, useCancelMission, useApproveMission, useRejectMission, useSaveAsRoutine, useReplanMission, useRerunMission } from '@/hooks/use-missions-api'
 import { useMissionStore } from '@/stores/mission-store'
 import { computeMissionStats, TERMINAL_RUN_STATES } from '@/types/missions'
@@ -64,7 +65,7 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
   const replanMutation = useReplanMission()
   const rerunMutation = useRerunMission()
 
-  const [rightTab, setRightTab] = useState<'activity' | 'field'>('activity')
+  const [rightTab, setRightTab] = useState<'activity' | 'field' | 'deliverables'>('activity')
   const [showRejectInput, setShowRejectInput] = useState(false)
   const [rejectFeedback, setRejectFeedback] = useState('')
   const [showReplan, setShowReplan] = useState(false)
@@ -561,6 +562,18 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
                     Results
                   </button>
                   <button
+                    onClick={() => setRightTab('deliverables')}
+                    className={cn(
+                      'px-2.5 py-1 text-xs font-medium rounded-md transition-colors flex items-center gap-1',
+                      rightTab === 'deliverables'
+                        ? 'bg-muted text-foreground'
+                        : 'text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    <Package className="w-3 h-3" />
+                    Deliverables
+                  </button>
+                  <button
                     onClick={() => setRightTab('field')}
                     className={cn(
                       'px-2.5 py-1 text-xs font-medium rounded-md transition-colors flex items-center gap-1',
@@ -575,6 +588,8 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
                 </div>
                 {rightTab === 'field' ? (
                   <MissionFieldPanel missionId={missionId} className="flex-1 min-h-0 overflow-y-auto" />
+                ) : rightTab === 'deliverables' ? (
+                  <MissionDeliverablesPanel missionId={missionId} className="flex-1 min-h-0 overflow-y-auto" />
                 ) : (
                   <MissionResultsPanel
                     mission={mission}
@@ -597,6 +612,18 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
                     Activity
                   </button>
                   <button
+                    onClick={() => setRightTab('deliverables')}
+                    className={cn(
+                      'px-2.5 py-1 text-xs font-medium rounded-md transition-colors flex items-center gap-1',
+                      rightTab === 'deliverables'
+                        ? 'bg-muted text-foreground'
+                        : 'text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    <Package className="w-3 h-3" />
+                    Deliverables
+                  </button>
+                  <button
                     onClick={() => setRightTab('field')}
                     className={cn(
                       'px-2.5 py-1 text-xs font-medium rounded-md transition-colors flex items-center gap-1',
@@ -611,6 +638,8 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
                 </div>
                 {rightTab === 'field' ? (
                   <MissionFieldPanel missionId={missionId} className="flex-1 min-h-0 overflow-y-auto" />
+                ) : rightTab === 'deliverables' ? (
+                  <MissionDeliverablesPanel missionId={missionId} className="flex-1 min-h-0 overflow-y-auto" />
                 ) : (
                   <MissionActivityFeed
                     events={mission.recent_events}
