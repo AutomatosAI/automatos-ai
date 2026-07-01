@@ -469,7 +469,8 @@ class WorkspaceWorker:
         bind_host = os.environ.get("WORKER_BIND_HOST", "0.0.0.0")
 
         # Sensitive paths that must never be exposed via file browsing
-        _SENSITIVE_NAMES = {".ssh", ".gitconfig", ".aws", ".gcp", ".workspace_meta.json"}
+        # (.canvas holds SDK session state + transcripts — PRD-170 S1)
+        _SENSITIVE_NAMES = {".ssh", ".gitconfig", ".aws", ".gcp", ".workspace_meta.json", ".canvas"}
 
         def _is_sensitive(name: str) -> bool:
             """Check if a file/dir name is sensitive and should be hidden."""
@@ -909,6 +910,55 @@ class WorkspaceWorker:
                 },
             )
 
+        # ── Canvas SDK session endpoints (PRD-170 S1) ────────────────────
+        # One headless Claude Agent SDK session per workspace; state +
+        # transcript on the volume (canvas_session_service.py).
+
+        async def canvas_session_start_handler(request):
+            """POST /workspaces/{workspace_id}/canvas/session — start/resume."""
+            from canvas_session_service import get_canvas_manager
+
+            workspace_id = request.match_info["workspace_id"]
+            manager = get_canvas_manager(volume_path)
+            result = await manager.start_session(workspace_id)
+            if not result.get("success"):
+                status = 409 if result.get("conflict") else 500
+                return web.json_response(
+                    {"error": result.get("error", "Canvas session error")},
+                    status=status,
+                )
+            return web.json_response(result)
+
+        async def canvas_session_status_handler(request):
+            """GET /workspaces/{workspace_id}/canvas/session — status."""
+            from canvas_session_service import get_canvas_manager
+
+            workspace_id = request.match_info["workspace_id"]
+            manager = get_canvas_manager(volume_path)
+            result = await manager.get_status(workspace_id)
+            if not result.get("success"):
+                status = 404 if result.get("not_found") else 500
+                return web.json_response(
+                    {"error": result.get("error", "Canvas session error")},
+                    status=status,
+                )
+            return web.json_response(result)
+
+        async def canvas_session_stop_handler(request):
+            """DELETE /workspaces/{workspace_id}/canvas/session — stop."""
+            from canvas_session_service import get_canvas_manager
+
+            workspace_id = request.match_info["workspace_id"]
+            manager = get_canvas_manager(volume_path)
+            result = await manager.stop_session(workspace_id)
+            if not result.get("success"):
+                status = 404 if result.get("not_found") else 500
+                return web.json_response(
+                    {"error": result.get("error", "Canvas session error")},
+                    status=status,
+                )
+            return web.json_response(result)
+
         app.router.add_get("/health", health_handler)
         app.router.add_get("/workspaces/{workspace_id}/files", list_files_handler)
         app.router.add_get("/workspaces/{workspace_id}/files/content", file_content_handler)
@@ -918,6 +968,9 @@ class WorkspaceWorker:
         app.router.add_get("/workspaces/{workspace_id}/files/download", download_file_handler)
         app.router.add_post("/workspaces/{workspace_id}/git", git_handler)
         app.router.add_post("/workspaces/{workspace_id}/html-to-png", html_to_png_handler)
+        app.router.add_post("/workspaces/{workspace_id}/canvas/session", canvas_session_start_handler)
+        app.router.add_get("/workspaces/{workspace_id}/canvas/session", canvas_session_status_handler)
+        app.router.add_delete("/workspaces/{workspace_id}/canvas/session", canvas_session_stop_handler)
 
         runner = web.AppRunner(app)
         await runner.setup()

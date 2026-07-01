@@ -211,6 +211,50 @@ class WorkspaceClient:
         except (httpx.ConnectError, httpx.TimeoutException) as err:
             return _connection_error("html_to_png", err)
 
+    # ── Canvas SDK session (PRD-170 S1) ───────────────────────────
+
+    async def canvas_session_start(self) -> Dict[str, Any]:
+        """Start (or resume) the workspace's headless SDK canvas session."""
+        client = _get_client()
+        url = _worker_url(self.workspace_id, "/canvas/session")
+        try:
+            resp = await client.post(url)
+            if resp.status_code != 200:
+                return {"success": False, "error": _parse_error(resp), "status_code": resp.status_code}
+            data = resp.json()
+            data.setdefault("success", True)
+            return data
+        except (httpx.ConnectError, httpx.TimeoutException) as err:
+            return _connection_error("canvas_session_start", err)
+
+    async def canvas_session_status(self) -> Dict[str, Any]:
+        """Get the workspace's canvas session status (live or volume state)."""
+        client = _get_client()
+        url = _worker_url(self.workspace_id, "/canvas/session")
+        try:
+            resp = await client.get(url)
+            if resp.status_code != 200:
+                return {"success": False, "error": _parse_error(resp), "status_code": resp.status_code}
+            data = resp.json()
+            data.setdefault("success", True)
+            return data
+        except (httpx.ConnectError, httpx.TimeoutException) as err:
+            return _connection_error("canvas_session_status", err)
+
+    async def canvas_session_stop(self) -> Dict[str, Any]:
+        """Stop the workspace's canvas session."""
+        client = _get_client()
+        url = _worker_url(self.workspace_id, "/canvas/session")
+        try:
+            resp = await client.delete(url)
+            if resp.status_code != 200:
+                return {"success": False, "error": _parse_error(resp), "status_code": resp.status_code}
+            data = resp.json()
+            data.setdefault("success", True)
+            return data
+        except (httpx.ConnectError, httpx.TimeoutException) as err:
+            return _connection_error("canvas_session_stop", err)
+
     # ── Git ────────────────────────────────────────────────────────
 
     async def git(

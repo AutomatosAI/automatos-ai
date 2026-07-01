@@ -6,9 +6,12 @@ PRD-66: Code Viewer Widget + Interactive Terminal
 Proxies file-browsing and command execution requests to the workspace
 worker's HTTP server, which has the persistent volume mounted.
 
-  GET  /api/workspaces/{workspace_id}/files          — directory listing
-  GET  /api/workspaces/{workspace_id}/files/content   — file content
-  POST /api/workspaces/{workspace_id}/exec            — run command
+  GET    /api/workspaces/{workspace_id}/files            — directory listing
+  GET    /api/workspaces/{workspace_id}/files/content    — file content
+  POST   /api/workspaces/{workspace_id}/exec             — run command
+  POST   /api/workspaces/{workspace_id}/canvas/sessions  — start/resume SDK session (PRD-170 S1)
+  GET    /api/workspaces/{workspace_id}/canvas/sessions  — session status
+  DELETE /api/workspaces/{workspace_id}/canvas/sessions  — stop session
 """
 
 import logging
@@ -173,6 +176,72 @@ async def exec_command(
         cwd=body.cwd,
         timeout=body.timeout,
     )
+
+    if result.get("success") is False:
+        status = result.get("status_code", 503)
+        raise HTTPException(status_code=status, detail=result["error"])
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Canvas SDK session proxy (PRD-170 S1)
+# ---------------------------------------------------------------------------
+# One active headless Claude Agent SDK session per workspace, running in the
+# worker container (services/workspace-worker/canvas_session_service.py).
+# State + transcript persist on the worker volume; the session is confined to
+# its workspace mount server-side. These routes only proxy + enforce tenancy.
+
+
+@router.post("/canvas/sessions")
+async def start_canvas_session(
+    workspace_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """Start (or resume from volume state) the workspace's canvas session."""
+    if str(ctx.workspace_id) != workspace_id:
+        raise HTTPException(status_code=403, detail="Workspace access denied")
+
+    client = WorkspaceClient(workspace_id)
+    result = await client.canvas_session_start()
+
+    if result.get("success") is False:
+        status = result.get("status_code", 503)
+        raise HTTPException(status_code=status, detail=result["error"])
+
+    return result
+
+
+@router.get("/canvas/sessions")
+async def get_canvas_session_status(
+    workspace_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """Return the status of the workspace's canvas session."""
+    if str(ctx.workspace_id) != workspace_id:
+        raise HTTPException(status_code=403, detail="Workspace access denied")
+
+    client = WorkspaceClient(workspace_id)
+    result = await client.canvas_session_status()
+
+    if result.get("success") is False:
+        status = result.get("status_code", 503)
+        raise HTTPException(status_code=status, detail=result["error"])
+
+    return result
+
+
+@router.delete("/canvas/sessions")
+async def stop_canvas_session(
+    workspace_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """Stop the workspace's canvas session."""
+    if str(ctx.workspace_id) != workspace_id:
+        raise HTTPException(status_code=403, detail="Workspace access denied")
+
+    client = WorkspaceClient(workspace_id)
+    result = await client.canvas_session_stop()
 
     if result.get("success") is False:
         status = result.get("status_code", 503)
