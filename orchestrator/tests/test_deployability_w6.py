@@ -14,7 +14,10 @@ plus that the config S3 seam MinIO uses is present.
 
 from __future__ import annotations
 
+import importlib
+import os
 import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -24,6 +27,29 @@ _ORCH_ROOT = Path(__file__).resolve().parent.parent
 _REPO_ROOT = _ORCH_ROOT.parent
 _COMPOSE = _REPO_ROOT / "docker-compose.yml"
 _ENTRYPOINT = _REPO_ROOT / "docker-entrypoint.sh"
+
+
+@pytest.fixture(autouse=True)
+def _restore_config_module():
+    """Contain the config-reload blast radius (mirrors test_config_env_centralization).
+
+    The F089 tests below ``importlib.reload(config)`` with S3_ENDPOINT_URL set /
+    unset. Without a restore, the mutated config singleton + swept env bleed into
+    downstream suites co-run after this file (test_harness_commands,
+    test_prd143_concierge_journey). Snapshot os.environ and the config module
+    reference at setup; restore both at teardown so nothing leaks past this file.
+    """
+    env_snapshot = dict(os.environ)
+    saved = sys.modules.get("config")
+    try:
+        yield
+    finally:
+        os.environ.clear()
+        os.environ.update(env_snapshot)
+        if saved is not None:
+            sys.modules["config"] = saved
+        else:
+            sys.modules.pop("config", None)
 
 
 def _load_compose() -> dict:
