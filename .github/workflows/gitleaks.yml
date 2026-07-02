@@ -1,0 +1,52 @@
+name: gitleaks
+
+# PRD-173 (F012 + F092, W3 slice) — secret-scanning lane.
+#
+# Scans the FULL git history for committed secrets on every PR to main (and on
+# push to main). fetch-depth: 0 pulls the entire history so the scan covers
+# every commit — which is what makes it (a) the enforcement that keeps the next
+# F012-class artifact out at the PR, and (b) the verification gate for the F012
+# history purge: once tests/e2e/.auth/user.json is purged, this job goes and
+# stays green. It runs on top of GitHub-native secret scanning (defence in
+# depth + history coverage), it does not replace it.
+#
+# License note: gitleaks-action needs GITLEAKS_LICENSE only for repos owned by
+# an ORGANISATION account. This repo is a personal account, so no license is
+# required. If it ever moves under an org, uncomment the GITLEAKS_LICENSE env
+# line below and add the secret.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  # gitleaks-action posts a summary comment on PRs.
+  pull-requests: write
+
+jobs:
+  scan:
+    name: Scan history for secrets
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          # Full history — the scan must see every commit, not just the tip.
+          fetch-depth: 0
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}  # org accounts only
