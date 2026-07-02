@@ -1,5 +1,5 @@
 {
-  "route_count": 742,
+  "route_count": 764,
   "routes": [
     {
       "method": "GET",
@@ -28,6 +28,10 @@
     {
       "method": "GET",
       "path": "/api/activity/schedule"
+    },
+    {
+      "method": "GET",
+      "path": "/api/activity/scheduler-health"
     },
     {
       "method": "GET",
@@ -194,11 +198,11 @@
       "path": "/api/agents/types"
     },
     {
-      "method": "DELETE",
-      "path": "/api/agents/{agent_id}"
+      "method": "GET",
+      "path": "/api/agents/{agent_id:int}"
     },
     {
-      "method": "GET",
+      "method": "DELETE",
       "path": "/api/agents/{agent_id}"
     },
     {
@@ -216,10 +220,6 @@
     {
       "method": "POST",
       "path": "/api/agents/{agent_id}/execute"
-    },
-    {
-      "method": "POST",
-      "path": "/api/agents/{agent_id}/learn"
     },
     {
       "method": "GET",
@@ -743,6 +743,10 @@
     },
     {
       "method": "POST",
+      "path": "/api/code-graph/webhook/github"
+    },
+    {
+      "method": "POST",
       "path": "/api/composio/agents/{agent_id}/apps/{app_name}/disable-all"
     },
     {
@@ -978,6 +982,14 @@
       "path": "/api/documents/analytics/usage"
     },
     {
+      "method": "GET",
+      "path": "/api/documents/brand-kit"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/documents/brand-kit"
+    },
+    {
       "method": "POST",
       "path": "/api/documents/bulk-team-access"
     },
@@ -999,6 +1011,14 @@
     },
     {
       "method": "GET",
+      "path": "/api/documents/pins"
+    },
+    {
+      "method": "POST",
+      "path": "/api/documents/preview-blocks"
+    },
+    {
+      "method": "GET",
       "path": "/api/documents/queue/status"
     },
     {
@@ -1016,6 +1036,10 @@
     {
       "method": "POST",
       "path": "/api/documents/search"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/team-counts"
     },
     {
       "method": "GET",
@@ -1050,6 +1074,10 @@
       "path": "/api/documents/upload"
     },
     {
+      "method": "GET",
+      "path": "/api/documents/variables"
+    },
+    {
       "method": "DELETE",
       "path": "/api/documents/{document_id}"
     },
@@ -1068,6 +1096,14 @@
     {
       "method": "GET",
       "path": "/api/documents/{document_id}/download"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/documents/{document_id}/pin"
+    },
+    {
+      "method": "POST",
+      "path": "/api/documents/{document_id}/pin"
     },
     {
       "method": "POST",
@@ -1214,30 +1250,6 @@
       "path": "/api/keys/{key_id}/test"
     },
     {
-      "method": "GET",
-      "path": "/api/knowledge/entities"
-    },
-    {
-      "method": "POST",
-      "path": "/api/knowledge/entities/find-connection"
-    },
-    {
-      "method": "GET",
-      "path": "/api/knowledge/entities/search"
-    },
-    {
-      "method": "GET",
-      "path": "/api/knowledge/entities/{entity_id}"
-    },
-    {
-      "method": "GET",
-      "path": "/api/knowledge/entities/{entity_id}/documents"
-    },
-    {
-      "method": "GET",
-      "path": "/api/knowledge/entities/{entity_id}/graph"
-    },
-    {
       "method": "DELETE",
       "path": "/api/knowledge/graph"
     },
@@ -1246,8 +1258,32 @@
       "path": "/api/knowledge/graph/build"
     },
     {
+      "method": "GET",
+      "path": "/api/knowledge/graph/communities"
+    },
+    {
+      "method": "GET",
+      "path": "/api/knowledge/graph/community/{community_id}"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/knowledge/graph/community/{community_id}/label"
+    },
+    {
       "method": "POST",
       "path": "/api/knowledge/graph/import"
+    },
+    {
+      "method": "GET",
+      "path": "/api/knowledge/graph/node/{node_id}/neighbors"
+    },
+    {
+      "method": "GET",
+      "path": "/api/knowledge/graph/path"
+    },
+    {
+      "method": "GET",
+      "path": "/api/knowledge/graph/search"
     },
     {
       "method": "POST",
@@ -1280,6 +1316,10 @@
     {
       "method": "GET",
       "path": "/api/knowledge/sources/database/templates/list"
+    },
+    {
+      "method": "POST",
+      "path": "/api/knowledge/sources/database/templates/{template_id}/execute"
     },
     {
       "method": "DELETE",
@@ -1354,16 +1394,8 @@
       "path": "/api/knowledge/sources/database/{source_id}/semantic"
     },
     {
-      "method": "POST",
-      "path": "/api/knowledge/sources/database/{source_id}/template/execute"
-    },
-    {
       "method": "GET",
       "path": "/api/knowledge/stats"
-    },
-    {
-      "method": "GET",
-      "path": "/api/knowledge/stats/entities"
     },
     {
       "method": "GET",
@@ -1539,11 +1571,23 @@
     },
     {
       "method": "GET",
+      "path": "/api/missions/approval-policy"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/missions/approval-policy"
+    },
+    {
+      "method": "GET",
       "path": "/api/missions/archive"
     },
     {
       "method": "GET",
       "path": "/api/missions/archive/{archive_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/missions/import-plan"
     },
     {
       "method": "GET",
@@ -1587,7 +1631,15 @@
     },
     {
       "method": "POST",
+      "path": "/api/missions/{mission_id}/field/query"
+    },
+    {
+      "method": "POST",
       "path": "/api/missions/{mission_id}/pause"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/missions/{mission_id}/plan"
     },
     {
       "method": "POST",
@@ -1600,10 +1652,6 @@
     {
       "method": "POST",
       "path": "/api/missions/{mission_id}/resume"
-    },
-    {
-      "method": "POST",
-      "path": "/api/missions/{mission_id}/review"
     },
     {
       "method": "POST",
@@ -1752,6 +1800,18 @@
     {
       "method": "POST",
       "path": "/api/query/platform-help"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rag/feedback"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rag/feedback/recent"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rag/feedback/stats"
     },
     {
       "method": "POST",
@@ -2051,6 +2111,14 @@
     },
     {
       "method": "GET",
+      "path": "/api/teams"
+    },
+    {
+      "method": "POST",
+      "path": "/api/teams"
+    },
+    {
+      "method": "GET",
       "path": "/api/templates/"
     },
     {
@@ -2306,6 +2374,10 @@
       "path": "/api/v1/tasks/plan/refine"
     },
     {
+      "method": "GET",
+      "path": "/api/v1/tasks/stream"
+    },
+    {
       "method": "DELETE",
       "path": "/api/v1/tasks/{task_id}"
     },
@@ -2324,6 +2396,10 @@
     {
       "method": "POST",
       "path": "/api/v1/tasks/{task_id}/reject"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/tasks/{task_id}/run-now"
     },
     {
       "method": "PATCH",
@@ -2784,6 +2860,18 @@
     {
       "method": "PUT",
       "path": "/api/workspaces/current/orchestrator"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/workspaces/{workspace_id}/canvas/sessions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspaces/{workspace_id}/canvas/sessions"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspaces/{workspace_id}/canvas/sessions"
     },
     {
       "method": "POST",
