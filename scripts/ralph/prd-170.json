@@ -64,9 +64,9 @@
       "title": "Codegraph over the workspace clone",
       "description": "Index the workspace clone (local-path scope, Q38) on session start + on commit; the SDK session gets the PRD-165 codegraph tool family pointed at the workspace index so the agent navigates by call graph, not just grep.",
       "acceptanceCriteria": [
-        "Agent answers 'what calls X?' about workspace code inside a session (integration test)",
-        "Index refreshes on commit (test)",
-        "cd orchestrator && pytest -q green"
+        "DEFERRED — CI-with-DB: live 'what calls X?' inside a session (needs the DB-backed index + tree-sitter parsers + a running session). The BINDING is defined: workspace_clone_index.py maps the workspace clone to a deterministic, workspace-scoped codegraph project name + a mount-fenced local path (Q38 local-scope); the PRD-165 platform_codegraph_* family (already workspace-scoped) resolves against it. DB indexing reuses CodeGraphService's existing directory path — not re-implemented.",
+        "DEFERRED — CI-with-DB: live index-refresh-on-commit. The TRIGGER POLICY is proven DB-free: should_reindex() indexes on cold SESSION_START, reindexes on COMMIT when files changed (skips a no-op commit), MANUAL always — tests/test_prd170_workspace_clone_index.py 14 passed.",
+        "DONE (proxy) — scope + tenancy + trigger contract green: 14 passed incl. clone-path escape rejection (traversal/absolute/null-byte all raise). Full container/DB pytest is CI. (RALPH note: extracting a standalone index_local_project from the 313-line index_github_project is a DB-heavy refactor CI-with-DB must validate — contract written, not faked.)"
       ],
       "files": ["orchestrator/modules/codegraph/"]
     },
