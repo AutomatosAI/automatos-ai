@@ -49,15 +49,27 @@ def _round_signature(tool_calls: List["ToolCall"]) -> str:
 
 
 def _record_stuck_learning(workspace_id: Any, signature: str) -> None:
-    """PRD-161 S4: write a task_learning memory when PRD-159's sink exists,
-    otherwise log. The import fails cleanly until PRD-159 lands."""
+    """PRD-161 S4 / PRD-171 §9.5-1: persist a stuck-loop as a ``tool_outcome``
+    failure memory via PRD-159's real sink (``tool_outcome_capture``). A stuck
+    loop is a repeated dead-end tool call, so it maps onto the outcome-capture
+    failure path: fire-and-forget, deduped by content-hash, never raises into
+    the loop. Falls back to a log line if capture is unavailable."""
     try:
-        from modules.memory.task_learning import record_task_learning  # type: ignore
+        from modules.memory.tool_outcome_capture import capture_tool_outcome
 
-        record_task_learning(workspace_id=workspace_id, kind="stuck_loop", detail=signature)
+        capture_tool_outcome(
+            tool_name="tool_loop.stuck",
+            parameters={"action": "stuck_loop", "app_name": "platform"},
+            result={
+                "success": False,
+                "error": f"stuck loop: identical tool call(s) repeated — {signature}",
+            },
+            workspace_id=workspace_id,
+            agent_id=None,
+        )
     except Exception:
         logger.info(
-            "[tool-loop] stuck-loop learning (no PRD-159 sink yet): ws=%s sig=%s",
+            "[tool-loop] stuck-loop learning (capture unavailable): ws=%s sig=%s",
             workspace_id, signature,
         )
 
