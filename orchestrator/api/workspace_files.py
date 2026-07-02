@@ -12,13 +12,16 @@ worker's HTTP server, which has the persistent volume mounted.
   POST   /api/workspaces/{workspace_id}/canvas/sessions  — start/resume SDK session (PRD-170 S1)
   GET    /api/workspaces/{workspace_id}/canvas/sessions  — session status
   DELETE /api/workspaces/{workspace_id}/canvas/sessions  — stop session
+  GET    /api/workspaces/{workspace_id}/canvas/events    — SSE event stream (PRD-170 S3)
 """
 
+import asyncio
+import json
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
@@ -26,6 +29,11 @@ from core.graph_storage import DbWorkspaceClient
 from core.workspace_client import WorkspaceClient
 
 logger = logging.getLogger(__name__)
+
+# PRD-170 S3: the worker publishes canvas session events to this per-workspace
+# Redis channel (mirror of services/workspace-worker/main.py CANVAS_EVENTS_CHANNEL);
+# the SSE proxy below subscribes and re-emits them to the browser.
+_CANVAS_EVENTS_CHANNEL = "workspace:ws:{workspace_id}:canvas:events"
 
 router = APIRouter(
     prefix="/api/workspaces/{workspace_id}",
@@ -248,3 +256,71 @@ async def stop_canvas_session(
         raise HTTPException(status_code=status, detail=result["error"])
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# GET /api/workspaces/{workspace_id}/canvas/events — SSE stream (PRD-170 S3)
+# ---------------------------------------------------------------------------
+# Subscribes to the worker's per-workspace canvas Redis channel and re-emits
+# each versioned canvas event to the browser as Server-Sent Events. The session
+# panel renders streaming turns; the file tree live-refreshes on file.edit
+# events. Tenancy is enforced here (RequestContext) exactly like the file/exec
+# routes — the browser never touches Redis directly.
+async def _canvas_event_stream(workspace_id: str, request: Request):
+    from core.redis.client import get_redis_client
+
+    redis_client = get_redis_client()
+    if redis_client is None:
+        # Redis is an optional service; without it there is no live stream.
+        yield 'event: error\ndata: {"error": "event stream unavailable"}\n\n'
+        return
+
+    channel = _CANVAS_EVENTS_CHANNEL.format(workspace_id=workspace_id)
+    redis_async, pubsub = await redis_client.get_async_pubsub(channel)
+    try:
+        # Opening comment flushes headers so the client's EventSource opens.
+        yield ": canvas stream open\n\n"
+        while True:
+            if await request.is_disconnected():
+                break
+            message = await pubsub.get_message(
+                ignore_subscribe_messages=True, timeout=1.0
+            )
+            if message is None:
+                # Heartbeat comment keeps the connection warm through proxies.
+                yield ": ping\n\n"
+                continue
+            payload = message.get("data")
+            if not isinstance(payload, str):
+                continue
+            # payload is already a JSON canvas-event envelope from the worker.
+            yield f"data: {payload}\n\n"
+    except asyncio.CancelledError:
+        raise
+    finally:
+        try:
+            await pubsub.unsubscribe(channel)
+            await pubsub.aclose()
+            await redis_async.aclose()
+        except Exception as exc:  # noqa: BLE001 — teardown must not raise
+            logger.warning("Canvas SSE teardown error: %s", exc)
+
+
+@router.get("/canvas/events")
+async def stream_canvas_events(
+    workspace_id: str,
+    request: Request,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """Server-Sent Events stream of the workspace's canvas session events."""
+    if str(ctx.workspace_id) != workspace_id:
+        raise HTTPException(status_code=403, detail="Workspace access denied")
+
+    return StreamingResponse(
+        _canvas_event_stream(workspace_id, request),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # disable nginx buffering for SSE
+        },
+    )

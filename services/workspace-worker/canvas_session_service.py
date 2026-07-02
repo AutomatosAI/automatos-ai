@@ -42,9 +42,15 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Optional
 
 from canvas_confinement import evaluate_tool_confinement
+from canvas_events import serialize_sdk_message, session_status_event
 from workspace_manager import WorkspaceManager
 
 logger = logging.getLogger("workspace-worker.canvas")
+
+# An event sink forwards canvas wire events (from canvas_events) to the platform
+# — in production a Redis publisher; in tests an injected list-appender. Sink
+# failures are logged and swallowed: a dropped UI event must never kill the pump.
+EventSink = Callable[[Dict[str, Any]], Awaitable[None]]
 
 STATE_DIR_NAME = ".canvas"
 STATE_FILE_NAME = "session.json"
@@ -140,11 +146,24 @@ class CanvasSessionManager:
         volume_path: str,
         sdk_client_factory: Optional[Callable[[Dict[str, Any]], Any]] = None,
         init_timeout: float = 10.0,
+        event_sink: Optional[EventSink] = None,
     ) -> None:
         self.volume_path = volume_path
         self._factory = sdk_client_factory or _default_sdk_client_factory
         self._init_timeout = init_timeout
+        # No sink -> events are simply not bridged (still fully functional as a
+        # session manager); the worker injects a Redis publisher in production.
+        self._event_sink = event_sink
         self._live: Dict[str, _LiveSession] = {}
+
+    async def _emit(self, event: Dict[str, Any]) -> None:
+        """Forward one canvas event to the sink; never let it break the pump."""
+        if self._event_sink is None:
+            return
+        try:
+            await self._event_sink(event)
+        except Exception as exc:  # noqa: BLE001 — a dropped UI event is not fatal
+            logger.warning("Canvas event sink failed: %s", exc)
 
     # ── Lifecycle ────────────────────────────────────────────────────
 
@@ -212,6 +231,7 @@ class CanvasSessionManager:
         state.status = STATUS_RUNNING
         state.updated_at = _utcnow()
         self._persist(root, state)
+        await self._emit(session_status_event(workspace_id, STATUS_RUNNING))
 
         live = _LiveSession(client=client, state=state)
         self._live[workspace_id] = live
@@ -298,10 +318,8 @@ class CanvasSessionManager:
     async def _pump(
         self, workspace_id: str, root: Path, live: _LiveSession
     ) -> None:
-        """Consume SDK messages: capture+persist the session id; track exit.
-
-        (S3 extends this to bridge events to the platform SSE channel.)
-        """
+        """Consume SDK messages: capture+persist the session id; bridge each
+        message to the platform as canvas events (S3); track exit."""
         try:
             async for message in live.client.receive_messages():
                 sdk_id = _extract_init_session_id(message)
@@ -311,6 +329,9 @@ class CanvasSessionManager:
                         live.state.updated_at = _utcnow()
                         self._persist(root, live.state)
                     live.init_seen.set()
+                # S3: bridge every SDK message to versioned canvas events.
+                for event in serialize_sdk_message(workspace_id, message):
+                    await self._emit(event)
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 — session death is a state, not a crash
@@ -319,6 +340,9 @@ class CanvasSessionManager:
                 live.state.last_error = str(exc)
                 live.state.updated_at = _utcnow()
                 self._persist(root, live.state)
+                await self._emit(
+                    session_status_event(workspace_id, STATUS_FAILED, error=str(exc))
+                )
                 logger.error(
                     "Canvas session pump failed for %s: %s", workspace_id[:8], exc
                 )
@@ -327,6 +351,7 @@ class CanvasSessionManager:
                 live.state.status = STATUS_STOPPED
                 live.state.updated_at = _utcnow()
                 self._persist(root, live.state)
+                await self._emit(session_status_event(workspace_id, STATUS_STOPPED))
                 logger.info(
                     "Canvas session process ended for %s", workspace_id[:8]
                 )
@@ -371,10 +396,16 @@ class CanvasSessionManager:
 _manager: Optional[CanvasSessionManager] = None
 
 
-def get_canvas_manager(volume_path: str) -> CanvasSessionManager:
+def get_canvas_manager(
+    volume_path: str, event_sink: Optional[EventSink] = None
+) -> CanvasSessionManager:
     """Singleton manager for the worker process (mirrors the orchestrator's
-    ``core.workspace_client._get_client`` idiom)."""
+    ``core.workspace_client._get_client`` idiom).
+
+    ``event_sink`` is bound on FIRST construction (the worker passes a Redis
+    publisher); later calls return the existing manager unchanged.
+    """
     global _manager
     if _manager is None:
-        _manager = CanvasSessionManager(volume_path)
+        _manager = CanvasSessionManager(volume_path, event_sink=event_sink)
     return _manager

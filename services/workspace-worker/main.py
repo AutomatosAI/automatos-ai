@@ -50,6 +50,9 @@ QUEUE_NAMES = [
 TASK_STATUS_KEY = "workspace:task:{task_id}:status"
 TASK_RESULT_KEY = "workspace:task:{task_id}:result"
 TASK_EVENTS_CHANNEL = "workspace:task:{task_id}:events"
+# PRD-170 S3: canvas session events publish to a per-workspace channel; the
+# platform proxy subscribes and re-emits them over the existing SSE surface.
+CANVAS_EVENTS_CHANNEL = "workspace:ws:{workspace_id}:canvas:events"
 WS_ACTIVE_TASKS_KEY = "workspace:ws:{workspace_id}:active_tasks"
 
 RESULT_TTL_SECONDS = 3600
@@ -910,16 +913,29 @@ class WorkspaceWorker:
                 },
             )
 
-        # ── Canvas SDK session endpoints (PRD-170 S1) ────────────────────
+        # ── Canvas SDK session endpoints (PRD-170 S1/S3) ─────────────────
         # One headless Claude Agent SDK session per workspace; state +
-        # transcript on the volume (canvas_session_service.py).
+        # transcript on the volume (canvas_session_service.py). S3: the pump
+        # bridges SDK messages to a per-workspace Redis channel that the
+        # platform proxy re-emits over SSE.
+        worker_self = self
+
+        async def _canvas_event_sink(event: dict) -> None:
+            """Publish one canvas event to its per-workspace Redis channel."""
+            redis = getattr(worker_self, "_redis", None)
+            if redis is None:
+                return
+            channel = CANVAS_EVENTS_CHANNEL.format(
+                workspace_id=event.get("workspace_id", "")
+            )
+            await redis.publish(channel, json.dumps(event))
 
         async def canvas_session_start_handler(request):
             """POST /workspaces/{workspace_id}/canvas/session — start/resume."""
             from canvas_session_service import get_canvas_manager
 
             workspace_id = request.match_info["workspace_id"]
-            manager = get_canvas_manager(volume_path)
+            manager = get_canvas_manager(volume_path, event_sink=_canvas_event_sink)
             result = await manager.start_session(workspace_id)
             if not result.get("success"):
                 status = 409 if result.get("conflict") else 500
@@ -934,7 +950,7 @@ class WorkspaceWorker:
             from canvas_session_service import get_canvas_manager
 
             workspace_id = request.match_info["workspace_id"]
-            manager = get_canvas_manager(volume_path)
+            manager = get_canvas_manager(volume_path, event_sink=_canvas_event_sink)
             result = await manager.get_status(workspace_id)
             if not result.get("success"):
                 status = 404 if result.get("not_found") else 500
@@ -949,7 +965,7 @@ class WorkspaceWorker:
             from canvas_session_service import get_canvas_manager
 
             workspace_id = request.match_info["workspace_id"]
-            manager = get_canvas_manager(volume_path)
+            manager = get_canvas_manager(volume_path, event_sink=_canvas_event_sink)
             result = await manager.stop_session(workspace_id)
             if not result.get("success"):
                 status = 404 if result.get("not_found") else 500

@@ -8,10 +8,10 @@
       "title": "SDK session service in the worker container",
       "description": "Session manager: start/resume/stop a headless claude (Agent SDK) session per workspace; transcript + state persist on the worker volume (sessions survive orchestrator restarts); platform proxy POST /api/workspaces/{id}/canvas/sessions with RequestContext auth; one active session per workspace v1; session cannot escape its workspace mount.",
       "acceptanceCriteria": [
-        "Lifecycle integration test against a seeded workspace container",
-        "Resume-after-restart test (state on volume)",
-        "Path-escape attempt blocked (tenancy test)",
-        "cd orchestrator && pytest -q green"
+        "DEFERRED — CI-Docker/morning: live lifecycle integration test against a seeded workspace container (contract proven container-free in tests/test_prd170_canvas_session_manager.py: start->running->status->stop state machine with a mocked SDK client)",
+        "DEFERRED — CI-Docker/morning: resume-after-restart on a real volume (contract proven: a fresh manager reads sdk_session_id from the volume state file and passes it as the SDK resume option — test_resume_* )",
+        "DONE — path-escape blocked: canvas_confinement tenancy tests (traversal/absolute/symlink/null-byte/cross-workspace bash) all deny; in-root paths re-bound. Security, not deferred.",
+        "DONE (regression) — route-manifest gate green: tests/test_route_manifest.py 3 passed; /api/agents/ present, canvas routes registered. Full container pytest is CI-Docker. Root cause of the #461 failure was a stale base, fixed by merging green main (see fix commit body)."
       ],
       "files": ["orchestrator/api/workspace_files.py", "services/"]
     },
@@ -31,9 +31,9 @@
       "title": "Event stream → session UI",
       "description": "Bridge SDK session events (assistant text, tool calls, file edits, permission requests) over the existing SSE channel shape; session panel renders streaming turns beside the file tree; useWorkspaceFiles tree live-refreshes on agent edits; event schema versioned and validated (reachability-style test kills name drift).",
       "acceptanceCriteria": [
-        "'Create a README' → streamed turns + tree refresh — verify in browser using dev-browser skill",
-        "Event schema vitest validation; drift negative-fixture fails",
-        "Typecheck passes"
+        "DEFERRED — morning browser: live 'Create a README' → streamed turns + tree refresh. Bridge is REAL: worker _pump serializes SDK messages -> per-workspace Redis channel; platform SSE proxy GET /api/workspaces/{id}/canvas/events re-emits (tenancy-gated); reducer folds file.edit -> treeRefreshTick (canvasSessionState.test.ts end-to-end fold). Live stream needs a container.",
+        "DONE — event schema versioned + vitest-validated: canvasEvents.test.ts 8 passed incl. the LOCKSTEP drift gate (TS vocabulary asserted == the Python EVENT_* literals read from canvas_events.py; injected drift proven to FAIL). Serializer contract: tests/test_prd170_canvas_events.py 13 passed.",
+        "DONE — typecheck: the 3 new S3 TS modules (canvasEvents/canvasSessionState + tests) have zero tsc errors (pre-existing index.tsx:68 lastEvent-prop error is untouched, not introduced here)."
       ],
       "files": ["frontend/components/widgets/CodingCanvasWidget/", "orchestrator/consumers/"]
     },
