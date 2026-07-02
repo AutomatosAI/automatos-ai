@@ -328,8 +328,10 @@ class RAGService:
         if self.config.enable_reranking:
             candidates = await self._rerank_candidates(query, candidates)
 
-        # Parent-child context expansion
-        candidates = await self._expand_to_parent_context(candidates, self.config.expansion_window)
+        # Parent-child context expansion (PRD-172 F005: scoped to workspace).
+        candidates = await self._expand_to_parent_context(
+            candidates, self.config.expansion_window, workspace_id=workspace_id
+        )
 
         # Use existing ContextOptimizer if available
         if self._context_optimizer:
@@ -820,10 +822,15 @@ class RAGService:
 
             logger.info(f"🔎 S3 Vectors search: workspace={effective_workspace_id}, min_similarity={min_similarity}, limit={limit}")
 
+            # PRD-172 F005: pass an explicit workspace_id filter so the backend
+            # drops any hit not scoped to this workspace (defence-in-depth over
+            # the per-workspace bucket; a shared/mis-templated bucket no longer
+            # leaks cross-workspace chunks into LLM context).
             results = vector_store.search(
                 query_embedding=query_embedding.tolist() if hasattr(query_embedding, 'tolist') else list(query_embedding),
                 limit=limit,
                 min_score=min_similarity,
+                filters={"workspace_id": str(effective_workspace_id)},
             )
 
             candidates = []
@@ -871,14 +878,22 @@ class RAGService:
     async def _expand_to_parent_context(
         self,
         candidates: List[Dict],
-        expand_window: int = 1
+        expand_window: int = 1,
+        workspace_id: str = None,
     ) -> List[Dict]:
         """
         For each retrieved chunk, fetch surrounding chunks from the same document.
         Uses chunk_index from metadata to find neighbors.
+
+        PRD-172 F005: ``workspace_id`` scopes the document_chunks hydration to
+        the caller's workspace. Previously this joined document_chunks by
+        (document_id, chunk_index) alone with NO workspace predicate, so on a
+        shared store it could hydrate another tenant's chunk text into context.
         """
         if not candidates or not self.config.parent_child_expansion:
             return candidates
+
+        effective_workspace_id = workspace_id or self._workspace_id
 
         window = expand_window or self.config.expansion_window
 
@@ -924,13 +939,22 @@ class RAGService:
                 chunk_idxs = [p[1] for p in pairs]
                 # ONE round-trip: join the requested (doc_id, chunk_index) keys
                 # against document_chunks via unnest of two parallel arrays.
+                # PRD-172 F005: additionally join documents and pin
+                # documents.workspace_id so a chunk is hydrated ONLY when its
+                # parent document belongs to this workspace. When workspace_id
+                # is unavailable ($3 IS NULL) the predicate is a no-op (only
+                # reachable for a non-multi-tenant / self._workspace_id-less
+                # caller), preserving prior behaviour without widening a
+                # tenant's scope.
                 rows = await conn.fetch("""
                     SELECT dc.document_id, dc.chunk_index, dc.content
                     FROM document_chunks dc
                     JOIN unnest($1::int[], $2::int[]) AS k(document_id, chunk_index)
                       ON dc.document_id = k.document_id
                      AND dc.chunk_index = k.chunk_index
-                """, doc_ids, chunk_idxs)
+                    JOIN documents d ON d.id = dc.document_id
+                    WHERE ($3::uuid IS NULL OR d.workspace_id = $3::uuid)
+                """, doc_ids, chunk_idxs, str(effective_workspace_id) if effective_workspace_id else None)
             finally:
                 await conn.close()
 
@@ -1037,19 +1061,28 @@ class RAGService:
     # Stats & Analytics Methods (for api/context.py)
     # =========================================================================
     
-    def get_retrieval_stats(self, db) -> Dict[str, Any]:
-        """Get retrieval statistics from database"""
+    def get_retrieval_stats(self, db, workspace_id=None) -> Dict[str, Any]:
+        """Get retrieval statistics from database.
+
+        PRD-172 F045: ``workspace_id`` scopes the document counts to the caller's
+        workspace. Previously the ``documents`` COUNT(*) was unscoped, so every
+        caller saw a platform-wide total (cross-tenant count). When
+        ``workspace_id`` is None the caller is an unfiltered admin aggregate.
+        """
         try:
             from sqlalchemy import text
-            
-            # Count total RAG queries from documents table
-            result = db.execute(text("""
+
+            # Count total RAG queries from documents table, scoped to workspace.
+            ws = str(workspace_id) if workspace_id is not None else None
+            where = "WHERE workspace_id = :workspace_id" if ws else ""
+            result = db.execute(text(f"""
                 SELECT
                     COUNT(*) as total_docs,
                     SUM(chunk_count) as total_chunks,
                     COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_docs
                 FROM documents
-            """)).fetchone()
+                {where}
+            """), ({"workspace_id": ws} if ws else {})).fetchone()
 
             total_docs = result.total_docs or 0
             total_chunks = result.total_chunks or 0

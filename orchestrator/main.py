@@ -171,6 +171,12 @@ async def _boot_phase_1_core():
     from core.database.database import create_tables, get_db_session, engine
     from core.database.boot_lock import boot_leader_lock
 
+    # PRD-172 F004/F005: fail-closed on tenant-isolation secrets BEFORE any
+    # traffic is served. Raises RuntimeError (aborting boot) if the Shopify
+    # internal key is unset or the S3 Vectors bucket lacks the {workspace_id}
+    # placeholder — a loud boot failure beats a silent cross-tenant leak.
+    config.validate_security()
+
     # DDL — safe for all workers (idempotent, fast no-op when tables exist)
     create_tables()
 

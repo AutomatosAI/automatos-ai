@@ -890,6 +890,56 @@ class Config:
     VOICE_MAX_AUDIO_SIZE_MB: int = int(os.getenv("VOICE_MAX_AUDIO_SIZE_MB", "25"))
     AUTO_VOICE_PROVIDER: str = os.getenv("AUTO_VOICE_PROVIDER", "chatterbox")
 
+    def validate_security(self) -> None:
+        """PRD-172: fail-closed validation of tenant-isolation secrets.
+
+        Called from the hard-fail boot phase (``main._boot_phase_1_core``) so a
+        misconfigured multi-tenant secret turns a silent cross-tenant leak into a
+        loud boot failure rather than shipping fail-open.
+
+        Raises ``RuntimeError`` (which aborts boot) when:
+
+        - F004: ``SHOPIFY_INTERNAL_API_KEY`` is unset while the Shopify
+          provisioning surface is reachable — an empty key previously made
+          ``_verify_internal_key`` accept any ``Authorization`` header.
+        - F005: S3 Vectors is enabled but ``S3_VECTORS_BUCKET`` does not embed
+          the ``{workspace_id}`` placeholder — a shared bucket with no
+          placeholder is a cross-tenant leak by construction, since every
+          workspace would resolve to the same physical bucket.
+        """
+        errors: list[str] = []
+
+        # F004 — Shopify provisioning must not be fail-open.
+        if not (self.SHOPIFY_INTERNAL_API_KEY or "").strip():
+            errors.append(
+                "SHOPIFY_INTERNAL_API_KEY is unset — the Shopify provisioning "
+                "surface (/api/shopify/provision|connect|deactivate) would accept "
+                "any Authorization header (fail-open). Set SHOPIFY_INTERNAL_API_KEY."
+            )
+
+        # F005 — a shared S3 Vectors bucket with no per-workspace placeholder
+        # leaks chunks across tenants. Only assert when the feature is enabled.
+        if self.S3_VECTORS_ENABLED:
+            bucket = (self.S3_VECTORS_BUCKET or "").strip()
+            if not bucket:
+                errors.append(
+                    "S3_VECTORS_ENABLED=true but S3_VECTORS_BUCKET is unset."
+                )
+            elif "{workspace_id}" not in bucket:
+                errors.append(
+                    "S3_VECTORS_ENABLED=true but S3_VECTORS_BUCKET "
+                    f"({bucket!r}) does not contain the '{{workspace_id}}' "
+                    "placeholder — every workspace would share one bucket "
+                    "(cross-tenant vector leak). Use e.g. "
+                    "'automatos-vectors-{workspace_id}'."
+                )
+
+        if errors:
+            raise RuntimeError(
+                "Tenant-isolation security config invalid (PRD-172):\n  - "
+                + "\n  - ".join(errors)
+            )
+
     def validate(self) -> bool:
         """
         Validate required configuration

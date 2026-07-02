@@ -269,13 +269,14 @@ async def connected(
                     # background task so we don't block this listing endpoint.
                     if (conn.get("app_name") or "").upper() == "SHOPIFY":
                         try:
-                            from api.shopify import start_product_sync
+                            # PRD-172 F003: call the impl directly with the
+                            # already-trusted ctx.workspace_id — the HTTP route's
+                            # auth wrapper is for external callers, not this
+                            # in-process auto-trigger.
+                            from api.shopify import _product_sync_impl
                             import asyncio as _asyncio
                             _asyncio.create_task(
-                                start_product_sync(
-                                    workspace_id=str(ctx.workspace_id),
-                                    db=db,
-                                )
+                                _product_sync_impl(str(ctx.workspace_id), db)
                             )
                             logger.info(
                                 "[PRD-009] Auto-fired Shopify product sync for workspace %s",

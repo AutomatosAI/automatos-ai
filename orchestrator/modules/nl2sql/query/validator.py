@@ -35,9 +35,74 @@ _FORBIDDEN_NODES = (
 # Roots that are read-only result expressions.
 _READ_ONLY_ROOTS = (exp.Select, exp.Union, exp.Intersect, exp.Except)
 
+# PRD-172 F019: side-effecting / dangerous SQL functions that MUST NOT appear
+# inside a nominally read-only SELECT. The DML/DDL node walk above cannot see
+# these — they are function calls, not statement nodes — so a payload like
+# ``SELECT query_to_xml('UPDATE users SET is_admin=true', true, true, '')`` (or
+# ``dblink_exec``, ``lo_export``, ``pg_read_file`` …) previously passed the
+# SELECT-only check and still mutated data / touched the filesystem / opened a
+# network connection. Names are matched case-insensitively against every
+# function node in the parsed tree (see ``_forbidden_function_in``). Postgres is
+# the primary target (it is what the platform runs) but common cross-engine
+# offenders are included for defence-in-depth.
+_FORBIDDEN_FUNCTIONS = frozenset({
+    # Postgres: run arbitrary SQL (incl. writes) from inside a SELECT.
+    "query_to_xml", "query_to_xmlschema", "query_to_xml_and_xmlschema",
+    "table_to_xml", "cursor_to_xml",
+    # Postgres dblink: execute statements on another (or the same) DB.
+    "dblink", "dblink_exec", "dblink_open", "dblink_send_query", "dblink_connect",
+    # Server-side filesystem / large objects.
+    "pg_read_file", "pg_read_binary_file", "pg_ls_dir", "pg_stat_file",
+    "lo_import", "lo_export", "lo_put", "lo_get",
+    # Availability / side-effect timing.
+    "pg_sleep", "pg_sleep_for", "pg_sleep_until",
+    # Config / session mutation and privilege probing.
+    "set_config", "pg_reload_conf", "pg_rotate_logfile",
+    "pg_terminate_backend", "pg_cancel_backend",
+    # Advisory locks hold server-side state.
+    "pg_advisory_lock", "pg_advisory_unlock", "pg_advisory_xact_lock",
+    # Generic cross-engine offenders.
+    "copy", "system", "load_file", "sys_exec", "sys_eval", "xp_cmdshell",
+})
+
 
 class SQLValidationError(Exception):
     pass
+
+
+def _function_names(node: "exp.Expression") -> Set[str]:
+    """Return the lower-cased name(s) a function-call node is known by.
+
+    PRD-172 F019. sqlglot models a call two ways:
+      * ``exp.Anonymous`` — an unknown/user function; its ``.name`` (or the
+        ``this`` token) is the identifier as written (e.g. ``query_to_xml``).
+      * ``exp.Func`` subclasses — recognised builtins; ``sql_names()`` yields the
+        canonical spelling(s) and ``.name`` is often empty. Some Postgres funcs
+        (e.g. ``pg_sleep``) parse as ``exp.Anonymous``, others as typed nodes,
+        so we check both spellings.
+    """
+    names: Set[str] = set()
+    raw_name = getattr(node, "name", None)
+    if raw_name:
+        names.add(str(raw_name).lower())
+    try:
+        if isinstance(node, exp.Func):
+            for n in node.sql_names():  # class-level canonical names
+                if n:
+                    names.add(str(n).lower())
+    except Exception:  # noqa: BLE001 — never let name extraction break validation
+        pass
+    return names
+
+
+def _forbidden_function_in(tree: "exp.Expression") -> Optional[str]:
+    """Return the first denylisted function name found anywhere in *tree*, else None."""
+    for node in tree.walk():
+        if isinstance(node, (exp.Func, exp.Anonymous)):
+            hit = _FORBIDDEN_FUNCTIONS & _function_names(node)
+            if hit:
+                return sorted(hit)[0]
+    return None
 
 
 class SQLValidator:
@@ -212,6 +277,17 @@ class SQLValidator:
         for node in tree.walk():
             if isinstance(node, _FORBIDDEN_NODES):
                 raise SQLValidationError("Only SELECT statements are allowed")
+
+        # PRD-172 F019: a SELECT can still mutate via a side-effecting function
+        # (e.g. ``SELECT query_to_xml('UPDATE …', …)`` / ``dblink_exec`` /
+        # ``lo_export``). The DML-node walk above cannot see those — they are
+        # function calls, not statement nodes — so reject any denylisted
+        # function found anywhere in the tree.
+        forbidden_fn = _forbidden_function_in(tree)
+        if forbidden_fn is not None:
+            raise SQLValidationError(
+                f"Side-effecting function not allowed: {forbidden_fn}"
+            )
 
         if schema_metadata:
             self._check_tables(tree, schema_metadata)

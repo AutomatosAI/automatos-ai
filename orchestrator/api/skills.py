@@ -136,6 +136,52 @@ def _assert_admin(ctx: RequestContext) -> None:
             raise HTTPException(status_code=403, detail="Admin access required")
 
 
+# ---------------------------------------------------------------------------
+# PRD-172 F002: tenant isolation for skills + agent-skill attach.
+#
+# A Skill with workspace_id IS NULL is a global/marketplace skill (readable by
+# every workspace, deletable only by super-admin). A Skill with a UUID belongs
+# to exactly one workspace. Agents are always workspace-scoped (non-nullable).
+# These helpers replace the previous "ctx is accepted but never used" pattern.
+# ---------------------------------------------------------------------------
+
+def _is_super_admin(ctx: RequestContext) -> bool:
+    """True for cross-workspace admins (mirrors core.auth.super_admin semantics).
+
+    An admin operating with the ``__all__`` sentinel (``admin_all_workspaces``)
+    or literally ``system_role == 'super_admin'`` may reach any workspace's
+    skills. Fail-closed: anything else is workspace-scoped.
+    """
+    if getattr(ctx, "admin_all_workspaces", False):
+        return True
+    return getattr(getattr(ctx, "user", None), "system_role", None) == "super_admin"
+
+
+def _skill_visible_to(skill: "Skill", ctx: RequestContext) -> bool:
+    """True if the caller may read/attach *skill*.
+
+    Global skills (``workspace_id IS NULL``) are visible to all workspaces;
+    workspace-owned skills only to their owning workspace (or a super-admin).
+    """
+    if _is_super_admin(ctx):
+        return True
+    if skill.workspace_id is None:
+        return True
+    return skill.workspace_id == ctx.workspace_id
+
+
+def _assert_agent_in_workspace(agent: "Agent", ctx: RequestContext) -> None:
+    """Raise 404 if *agent* is not owned by the caller's workspace.
+
+    404 (not 403) so the endpoint does not confirm the existence of another
+    workspace's agent — it looks identical to "no such agent".
+    """
+    if _is_super_admin(ctx):
+        return
+    if agent.workspace_id != ctx.workspace_id:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+
 # ----------------------------------------------------------------------------
 # PRD-22: Local skill recommendation helper
 # ----------------------------------------------------------------------------
@@ -561,10 +607,12 @@ async def get_skill_details(
     """
     try:
         skill = db.query(Skill).filter(Skill.id == skill_id).first()
-        
-        if not skill:
+
+        # PRD-172 F002: workspace-owned skills are invisible to other workspaces.
+        # 404 (not 403) so the endpoint doesn't confirm another tenant's skill exists.
+        if not skill or not _skill_visible_to(skill, ctx):
             raise HTTPException(status_code=404, detail="Skill not found")
-        
+
         return EnhancedSkillResponse(
             id=skill.id,
             name=skill.name,
@@ -619,10 +667,11 @@ async def get_skill_content(
     """
     try:
         skill = db.query(Skill).filter(Skill.id == skill_id).first()
-        
-        if not skill:
+
+        # PRD-172 F002: don't serve another workspace's private SKILL.md content.
+        if not skill or not _skill_visible_to(skill, ctx):
             raise HTTPException(status_code=404, detail="Skill not found")
-        
+
         skill_loader = get_skill_loader(db)
         content = ""
         estimated_tokens = 0
@@ -742,17 +791,31 @@ async def deactivate_skill(
     """
     try:
         skill = db.query(Skill).filter(Skill.id == skill_id).first()
-        
+
         if not skill:
             raise HTTPException(status_code=404, detail="Skill not found")
-        
+
+        # PRD-172 F002: a global builtin-core skill (workspace_id IS NULL) is
+        # shared by every tenant — deactivating it lobotomises every workspace's
+        # Auto. Only a super-admin may delete a global skill. A workspace-scoped
+        # caller may delete ONLY a skill its own workspace owns; another
+        # workspace's private skill is 404 (existence not confirmed).
+        if not _is_super_admin(ctx):
+            if skill.workspace_id is None:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Global skills can only be deleted by a super-admin",
+                )
+            if skill.workspace_id != ctx.workspace_id:
+                raise HTTPException(status_code=404, detail="Skill not found")
+
         skill.is_active = False
-        
+
         # Remove from all agent assignments
         db.query(agent_skills).filter(agent_skills.c.skill_id == skill_id).delete()
-        
+
         db.commit()
-        
+
         return {"message": "Skill deactivated successfully"}
         
     except HTTPException:
@@ -784,6 +847,9 @@ async def get_agent_skills(
 
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
+
+        # PRD-172 F002: don't expose another workspace's agent-skill roster.
+        _assert_agent_in_workspace(agent, ctx)
 
         TOKEN_WARNING_THRESHOLD = 15_000
 
@@ -854,19 +920,35 @@ async def assign_skills_to_agent(
     """
     try:
         agent = db.query(Agent).filter(Agent.id == agent_id).first()
-        
+
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
-        
-        # Verify skills exist
-        skills = db.query(Skill).filter(
+
+        # PRD-172 F002: the caller may only attach skills to an agent its own
+        # workspace owns — otherwise a workspace could graft its skills onto
+        # another tenant's agent.
+        _assert_agent_in_workspace(agent, ctx)
+
+        # Verify skills exist. PRD-172 F002: only global skills (workspace_id
+        # IS NULL) or skills owned by the caller's workspace are attachable —
+        # never another workspace's private SKILL.md (prompt-injection /
+        # exfiltration vector). Super-admins may attach any skill.
+        skill_query = db.query(Skill).filter(
             Skill.id.in_(skill_ids),
             Skill.is_active == True
-        ).all()
-        
+        )
+        if not _is_super_admin(ctx):
+            skill_query = skill_query.filter(
+                or_(
+                    Skill.workspace_id.is_(None),
+                    Skill.workspace_id == ctx.workspace_id,
+                )
+            )
+        skills = skill_query.all()
+
         if len(skills) != len(skill_ids):
             raise HTTPException(status_code=400, detail="One or more skills not found or inactive")
-        
+
         # Assign skills
         if replace:
             agent.skills = skills
@@ -925,7 +1007,10 @@ async def remove_skills_from_agent(
         
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
-        
+
+        # PRD-172 F002: only mutate skills on an agent the caller's workspace owns.
+        _assert_agent_in_workspace(agent, ctx)
+
         # Remove skills
         agent.skills = [s for s in agent.skills if s.id not in skill_ids]
         

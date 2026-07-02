@@ -13,6 +13,7 @@ Automatos app from the Shopify App Store:
 
 from __future__ import annotations
 
+import hmac
 import logging
 from typing import Any, Dict, List, Optional
 from uuid import UUID, uuid4
@@ -22,6 +23,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from core.auth.dependencies import RequestContext
+from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db
 from core.models.core import Agent, Skill
 from core.models.workspaces import Workspace
@@ -31,9 +34,6 @@ from config import config
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/shopify", tags=["Shopify Integration"])
-
-# Internal API key for Shopify app → Automatos server calls
-SHOPIFY_INTERNAL_KEY = config.SHOPIFY_INTERNAL_API_KEY if hasattr(config, "SHOPIFY_INTERNAL_API_KEY") else None
 
 
 # ── At-rest secret encryption (F058) ─────────────────────────────────
@@ -62,13 +62,46 @@ def _decrypt_secret(ciphertext: str) -> str:
 
 # ── Auth helper ──────────────────────────────────────────────────────
 
+def _resolve_sync_workspace(ctx: RequestContext, requested: Optional[str]) -> str:
+    """PRD-172 F003: resolve the workspace a Shopify sync route may act on.
+
+    The sync routes previously trusted a caller-supplied ``workspace_id`` query
+    param and ran with only ``db=Depends(get_db)`` — a guessed UUID triggered
+    costly Composio bulk-ops and overwrote another tenant's knowledge graph via
+    ``import_graph(merge=False)``. Now every sync route carries the shared
+    workspace-scoped auth dependency and derives its target from ``ctx``:
+
+    - A cross-workspace admin (``admin_all_workspaces``) may target any explicit
+      ``requested`` workspace (ops/backfill), else its own.
+    - Every other caller is pinned to ``ctx.workspace_id``; a mismatched
+      ``requested`` param is rejected 403 rather than silently honoured.
+    """
+    if getattr(ctx, "admin_all_workspaces", False):
+        return str(requested) if requested else str(ctx.workspace_id)
+    if requested and str(requested) != str(ctx.workspace_id):
+        raise HTTPException(
+            status_code=403,
+            detail="workspace_id does not match the authenticated workspace",
+        )
+    return str(ctx.workspace_id)
+
+
 def _verify_internal_key(authorization: str = Header(...)) -> None:
-    """Verify the internal API key from the Shopify app server."""
-    if not SHOPIFY_INTERNAL_KEY:
-        # No key configured — accept all (dev mode)
-        return
-    token = authorization.replace("Bearer ", "")
-    if token != SHOPIFY_INTERNAL_KEY:
+    """Verify the internal API key from the Shopify app server.
+
+    PRD-172 F004: fail-closed. There is NO "no key configured → accept all"
+    branch — an unset key is caught at boot by ``config.validate_security()``,
+    so by the time a request lands the key is guaranteed present and this only
+    ever compares against a real secret. A falsy configured key can no longer
+    wave through an arbitrary ``Authorization: Bearer x``.
+    """
+    expected = (config.SHOPIFY_INTERNAL_API_KEY or "").strip()
+    if not expected:
+        # Defence in depth: boot should already have failed. Refuse rather than
+        # fall open if this is somehow reached (e.g. key blanked at runtime).
+        raise HTTPException(status_code=503, detail="Shopify provisioning not configured")
+    token = authorization.replace("Bearer ", "").strip()
+    if not hmac.compare_digest(token, expected):
         raise HTTPException(status_code=401, detail="Invalid internal API key")
 
 
@@ -612,8 +645,22 @@ class SyncStartResponse(BaseModel):
 @router.post("/sync/products/start", response_model=SyncStartResponse)
 async def start_product_sync(
     workspace_id: Optional[str] = None,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
+    """HTTP entrypoint for the Shopify catalog sync (PRD-172 F003 authed).
+
+    The workspace-scoped auth dependency proves the tenant; the effective
+    workspace is derived from ``ctx`` (never a guessed query param). The heavy
+    lifting lives in ``_product_sync_impl`` so the internal auto-trigger
+    (``api/tools.py`` on SHOPIFY going active) can call it directly with an
+    already-trusted workspace_id.
+    """
+    effective_ws = _resolve_sync_workspace(ctx, workspace_id)
+    return await _product_sync_impl(effective_ws, db)
+
+
+async def _product_sync_impl(workspace_id: str, db: Session) -> "SyncStartResponse":
     """
     Run a full Shopify catalog sync → knowledge graph for a workspace.
 
@@ -623,8 +670,8 @@ async def start_product_sync(
       - modules.knowledge.graph_service.GraphifyService.import_graph
       - core.composio.entity_manager.EntityManager
 
-    Called manually (admin) or auto-triggered when a workspace's SHOPIFY
-    Composio connection flips pending → active (see consumer of this).
+    Callers MUST pass an already-authorised ``workspace_id`` (the HTTP route
+    resolves it from ``ctx``; the internal auto-trigger passes ``ctx.workspace_id``).
     """
     import time
     import httpx
@@ -764,12 +811,16 @@ async def start_product_sync(
 @router.get("/sync/status")
 async def get_product_sync_status(
     workspace_id: Optional[str] = None,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
-    """Return the current product_sync state stored on the workspace."""
-    if not workspace_id:
-        raise HTTPException(status_code=400, detail="workspace_id required")
-    workspace = db.query(Workspace).get(workspace_id)
+    """Return the current product_sync state stored on the workspace.
+
+    PRD-172 F003: scoped to the authenticated workspace — a guessed UUID can no
+    longer read another tenant's sync state.
+    """
+    effective_ws = _resolve_sync_workspace(ctx, workspace_id)
+    workspace = db.query(Workspace).get(effective_ws)
     if not workspace:
         raise HTTPException(status_code=404, detail="Workspace not found")
     return (workspace.settings or {}).get("product_sync") or {"status": "never_synced"}
@@ -832,13 +883,26 @@ async def start_orders_sync(
     workspace_id: Optional[str] = None,
     days: int = 90,
     min_support: int = 2,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
+    """HTTP entrypoint for the Shopify orders sync (PRD-172 F003 authed).
+
+    Proves the tenant via the shared auth dependency and derives the workspace
+    from ``ctx`` before running the (costly, graph-mutating) sync.
+    """
+    effective_ws = _resolve_sync_workspace(ctx, workspace_id)
+    return await _orders_sync_impl(effective_ws, days, min_support, db)
+
+
+async def _orders_sync_impl(
+    workspace_id: str, days: int, min_support: int, db: Session
+) -> "OrdersSyncResponse":
     """
     Run a Shopify orders sync → FBT edges merged into the workspace graph.
 
     Args:
-        workspace_id: target workspace.
+        workspace_id: target workspace (already authorised by the caller).
         days: time window for orders (default 90). Older orders less
               relevant for current customer co-purchase patterns.
         min_support: minimum number of orders a (Product A, Product B) pair
@@ -1016,12 +1080,15 @@ async def start_orders_sync(
 @router.get("/sync/orders/status")
 async def get_orders_sync_status(
     workspace_id: Optional[str] = None,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
-    """Return the current orders_sync state stored on the workspace."""
-    if not workspace_id:
-        raise HTTPException(status_code=400, detail="workspace_id required")
-    workspace = db.query(Workspace).get(workspace_id)
+    """Return the current orders_sync state stored on the workspace.
+
+    PRD-172 F003: scoped to the authenticated workspace.
+    """
+    effective_ws = _resolve_sync_workspace(ctx, workspace_id)
+    workspace = db.query(Workspace).get(effective_ws)
     if not workspace:
         raise HTTPException(status_code=404, detail="Workspace not found")
     return (workspace.settings or {}).get("orders_sync") or {"status": "never_synced"}

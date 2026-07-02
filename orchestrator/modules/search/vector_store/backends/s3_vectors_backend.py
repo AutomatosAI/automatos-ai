@@ -43,6 +43,16 @@ class S3VectorsBackend:
         bucket_template = config.S3_VECTORS_BUCKET
         if not bucket_template:
             raise ValueError("S3_VECTORS_BUCKET not configured in .env")
+        # PRD-172 F005: a bucket template with NO {workspace_id} placeholder
+        # means every workspace resolves to the same physical bucket — a
+        # cross-tenant vector leak by construction. Boot already asserts this
+        # (config.validate_security), but fail-closed here too so a backend can
+        # never be instantiated against a shared bucket.
+        if "{workspace_id}" not in bucket_template:
+            raise ValueError(
+                "S3_VECTORS_BUCKET must contain the '{workspace_id}' placeholder "
+                f"for per-workspace isolation (got {bucket_template!r})."
+            )
         self.bucket_name = bucket_template.replace("{workspace_id}", self.workspace_id)
 
         # Get index configuration from config
@@ -131,8 +141,32 @@ class S3VectorsBackend:
         Search vectors by cosine similarity.
 
         Returns list of dicts with keys: key, score, metadata.
+
+        PRD-172 F005: the ``filters`` param is now enforced. Isolation on S3
+        Vectors previously rested entirely on a per-workspace bucket name; if a
+        deploy ever pointed multiple workspaces at one bucket (no
+        ``{workspace_id}`` placeholder), search leaked cross-workspace chunk
+        text into LLM context. We ALWAYS post-filter on the backend's own
+        ``workspace_id`` and, when a ``workspace_id`` filter is supplied, on that
+        too — dropping any hit whose metadata ``workspace_id`` does not match.
         """
         self._ensure_setup()
+
+        # Fail-closed workspace scope: the backend is bound to exactly one
+        # workspace at construction; every hit must carry that workspace_id.
+        # An explicit filters['workspace_id'] must agree with it.
+        required_ws = str(self.workspace_id)
+        if filters:
+            filter_ws = filters.get("workspace_id")
+            if filter_ws is not None and str(filter_ws) != required_ws:
+                # A caller asked to search a different workspace through a
+                # workspace-bound backend — refuse rather than silently widen.
+                logger.warning(
+                    "S3 Vectors search: filter workspace_id=%s != backend "
+                    "workspace_id=%s — returning no results",
+                    filter_ws, required_ws,
+                )
+                return []
 
         try:
             response = self.client.query_vectors(
@@ -153,6 +187,14 @@ class S3VectorsBackend:
                     continue
 
                 metadata = match.get("metadata", {})
+                # PRD-172 F005: drop any hit not scoped to this workspace. On a
+                # correctly-templated per-workspace bucket every hit already
+                # matches; on a mis-configured shared bucket this is the last
+                # line of defence against a cross-tenant chunk leak.
+                hit_ws = metadata.get("workspace_id")
+                if hit_ws is not None and str(hit_ws) != required_ws:
+                    continue
+
                 results.append({
                     "key": match.get("key", ""),
                     "score": similarity,

@@ -64,6 +64,22 @@ def get_memory_manager() -> AdvancedMemoryManager:
         )
     return memory_manager
 
+
+def _scoped_session(ctx: RequestContext, session_id: Optional[str]) -> Optional[str]:
+    """PRD-172 F039: namespace a caller-supplied session_id by workspace.
+
+    The AdvancedMemoryManager is a single process-global store shared by every
+    tenant, keyed on ``{session_id}_{timestamp}``. Passing the raw session_id
+    through lets workspace A read/write workspace B's memory simply by reusing a
+    session_id string. Prefixing every session_id that crosses into the store
+    with ``{workspace_id}::`` gives each workspace its own key space — A's
+    "abc" and B's "abc" become distinct keys — without changing the shared
+    store's internals. ``None`` (consolidate-all) is preserved as-is.
+    """
+    if session_id is None:
+        return None
+    return f"{ctx.workspace_id}::{session_id}"
+
 # Memory Storage Endpoints
 
 @router.post("/store", response_model=Dict[str, Any])
@@ -79,15 +95,17 @@ async def store_memory(
     try:
         manager = get_memory_manager()
         
+        # PRD-172 F039: namespace the session by workspace so tenant A cannot
+        # write into tenant B's memory by reusing a session_id.
         memory_id = await manager.store_memory(
-            session_id=memory_data.session_id,
+            session_id=_scoped_session(ctx, memory_data.session_id),
             content=memory_data.content,
             memory_type=MemoryType(memory_data.memory_type),
             importance=memory_data.importance,
             tags=memory_data.tags,
             auto_augment=auto_augment
         )
-        
+
         return {
             "memory_id": memory_id,
             "session_id": memory_data.session_id,
