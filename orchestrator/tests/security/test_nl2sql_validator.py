@@ -249,3 +249,71 @@ class TestStatementStructure:
     def test_rejects_non_select(self, validator):
         with pytest.raises(SQLValidationError, match="SELECT"):
             validator.validate_and_rewrite("SHOW TABLES")
+
+
+# ============================================================================
+# PRD-172 F019 — side-effecting functions inside a nominal SELECT
+# ============================================================================
+
+class TestSideEffectingFunctionsF019:
+    """The SELECT-only validator must reject side-effecting SQL functions.
+
+    Before PRD-172 the AST walk only looked for DML/DDL *statement* nodes, so a
+    payload that wraps a mutation in a function call
+    (``SELECT query_to_xml('UPDATE …', …)``) had a SELECT root, no INTO, and no
+    Insert/Update/Delete node — it passed and still mutated. These tests pin the
+    function denylist. The exact same schema_metadata allowlist is provided so
+    the rejection is on the FUNCTION, not on an unlisted table.
+    """
+
+    _META = {"tables": [{"name": "users", "columns": [{"name": "id"}, {"name": "email"}]}]}
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            # The canonical review payload: a write smuggled through query_to_xml.
+            "SELECT query_to_xml('UPDATE users SET email=''x''', true, true, '')",
+            # dblink executes arbitrary statements on a (possibly the same) DB.
+            "SELECT dblink_exec('DELETE FROM users')",
+            "SELECT * FROM users WHERE id IN (SELECT dblink('host=x', 'DROP TABLE users'))",
+            # Server-side filesystem read/write.
+            "SELECT pg_read_file('/etc/passwd')",
+            "SELECT lo_export(1234, '/tmp/x')",
+            # Availability / timing side effect.
+            "SELECT pg_sleep(10)",
+            # Session/config mutation.
+            "SELECT set_config('search_path', 'evil', false)",
+            # Hidden deep in the tree: inside a CTE.
+            "WITH t AS (SELECT query_to_xml('UPDATE users SET id=1', true, true, '')) "
+            "SELECT * FROM t",
+            # Hidden in a UNION branch.
+            "SELECT id FROM users UNION SELECT pg_sleep(5)",
+        ],
+    )
+    def test_rejects_side_effecting_functions(self, validator, sql):
+        with pytest.raises(SQLValidationError, match="Side-effecting function not allowed"):
+            validator.validate_and_rewrite(sql, schema_metadata=self._META)
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            # Legitimate read-only scalar/aggregate functions must still pass.
+            "SELECT upper(email) FROM users",
+            "SELECT count(*) FROM users",
+            "SELECT id, lower(email) AS e FROM users WHERE email LIKE '%@x.com'",
+            "SELECT coalesce(email, 'none') FROM users",
+        ],
+    )
+    def test_allows_safe_read_only_functions(self, validator, sql):
+        safe_sql, _ = validator.validate_and_rewrite(sql, schema_metadata=self._META)
+        assert "SELECT" in safe_sql.upper()
+        # LIMIT is injected by the validator — proves it reached the rewrite path
+        # (i.e. it did NOT reject the query).
+        assert "LIMIT" in safe_sql.upper()
+
+    def test_denylist_is_case_insensitive(self, validator):
+        with pytest.raises(SQLValidationError, match="Side-effecting function not allowed"):
+            validator.validate_and_rewrite(
+                "SELECT QUERY_TO_XML('UPDATE users SET id=1', true, true, '')",
+                schema_metadata=self._META,
+            )

@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel
 
 from config import config
+from core.auth.super_admin import require_super_admin
 
 logger = logging.getLogger(__name__)
 
@@ -208,13 +209,16 @@ def create_alerts_router(get_db_dependency) -> APIRouter:
             "errors": errors,
         }
 
-    @router.get("/alerts")
+    @router.get("/alerts", dependencies=[Depends(require_super_admin)])
     async def list_alerts(
         status: Optional[str] = None,
         severity: Optional[str] = None,
         limit: int = 50,
         db=Depends(get_db_dependency),
     ):
+        # PRD-172 F007: the alert read surface is the obs tier (PRD-143) —
+        # super-admin only. The ALERT_INGEST_TOKEN bearer check stays on the
+        # ingest POST above (AlertManager is machine-to-machine, no user session).
         from sqlalchemy import text
         conditions = []
         params = {"limit": limit}

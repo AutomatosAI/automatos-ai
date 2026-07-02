@@ -53,7 +53,10 @@ class ContextAddRequest(BaseModel):
 router = APIRouter(prefix="/api/context", tags=["Context Engineering"])
 
 @router.post("/add")
-async def add_to_context(request: ContextAddRequest):
+async def add_to_context(
+    request: ContextAddRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
     """
     Add database query results to context system.
     Makes query results available for AI agent context and future retrieval.
@@ -83,14 +86,17 @@ async def add_to_context(request: ContextAddRequest):
 
 @router.get("/stats")
 async def get_context_stats(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     rag_service: RAGService = Depends(get_rag_service),
     db: Session = Depends(get_db)
 ):
-    """Get real-time context engineering statistics"""
+    """Get real-time context engineering statistics (workspace-scoped)"""
     try:
-        # Get retrieval stats from RAG service (now reads from database)
-        retrieval_stats = rag_service.get_retrieval_stats(db)
-        
+        # PRD-172 F045: scope the document counts to the caller's workspace.
+        # admin_all_workspaces → None → unfiltered admin aggregate.
+        ws = None if getattr(ctx, "admin_all_workspaces", False) else ctx.workspace_id
+        retrieval_stats = rag_service.get_retrieval_stats(db, workspace_id=ws)
+
         return {
             "contextQueries": retrieval_stats['total_queries'],
             "retrievalSuccess": retrieval_stats['success_rate'],
@@ -107,6 +113,7 @@ async def get_context_stats(
 @router.get("/performance")
 async def get_rag_performance_data(
     time_range: str = Query("24h", regex="^(1h|24h|7d|30d)$", description="Time range: 1h, 24h, 7d, or 30d"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     rag_service: RAGService = Depends(get_rag_service),
     db: Session = Depends(get_db)
 ):
@@ -121,6 +128,7 @@ async def get_rag_performance_data(
 
 @router.get("/sources")
 async def get_context_sources(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     rag_service: RAGService = Depends(get_rag_service),
     db: Session = Depends(get_db)
 ):
@@ -135,6 +143,7 @@ async def get_context_sources(
 @router.get("/queries/recent")
 async def get_recent_queries(
     limit: int = Query(default=10, ge=1, le=50),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     rag_service: RAGService = Depends(get_rag_service),
     db: Session = Depends(get_db)
 ):
@@ -148,6 +157,7 @@ async def get_recent_queries(
 
 @router.get("/patterns")
 async def get_context_patterns(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     rag_service: RAGService = Depends(get_rag_service),
     db: Session = Depends(get_db)
 ):
@@ -163,6 +173,7 @@ async def get_context_patterns(
 async def test_rag_configuration(
     config_id: int,
     query: str = Query(..., description="Test query for RAG system"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     rag_service: RAGService = Depends(get_rag_service),
     db: Session = Depends(get_db)
 ):
@@ -183,12 +194,14 @@ async def test_rag_configuration(
 
 @router.get("/system/health")
 async def get_context_system_health(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     rag_service: RAGService = Depends(get_rag_service),
     db: Session = Depends(get_db)
 ):
-    """Get context engineering system health"""
+    """Get context engineering system health (workspace-scoped)"""
     try:
-        stats = rag_service.get_retrieval_stats(db)
+        ws = None if getattr(ctx, "admin_all_workspaces", False) else ctx.workspace_id
+        stats = rag_service.get_retrieval_stats(db, workspace_id=ws)
         
         return {
             "status": "healthy" if stats['system_status'] == 'operational' else "degraded",
@@ -214,6 +227,7 @@ async def get_context_system_health(
 @router.post("/initialize")
 async def initialize_context_system(
     database_url: Optional[str] = None,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     rag_service: RAGService = Depends(get_rag_service)
 ):
     """Initialize or reinitialize the context engineering system"""

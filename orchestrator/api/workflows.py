@@ -1045,130 +1045,17 @@ async def execute_workflow_advanced(
         logger.error(f"Error executing workflow {workflow_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-# Additional endpoints for user journey tests
-@router.post("/{workflow_id}/execute")
-async def execute_workflow(
-    workflow_id: int,
-    execution_data: Dict[str, Any],
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db)
-):
-    """Execute workflow (simplified version for journey tests)"""
-    try:
-        # Validate workflow exists with proper loading
-        workflow = db.query(Workflow).options(
-            joinedload(Workflow.agents)
-        ).filter(Workflow.id == workflow_id).first()
-
-        if not workflow:
-            raise HTTPException(status_code=404, detail="Workflow not found")
-
-        if not workflow.id:
-            raise HTTPException(status_code=400, detail="Invalid workflow data")
-
-        # Get agent with skills loaded
-        agent = db.query(Agent).options(
-            joinedload(Agent.skills)
-        ).filter(Agent.status == 'active').first()
-
-        if not agent:
-            raise HTTPException(status_code=400, detail="No active agents available")
-
-        if not agent.id:
-            logger.error(f"❌ Agent object missing ID: {agent}")
-            raise HTTPException(status_code=500, detail="Agent data corruption - missing ID")
-
-        # Validate input_data
-        input_data = execution_data.get('input_data')
-        if not input_data:
-            logger.warning("⚠️  No input_data provided, using empty dict")
-            input_data = {}
-
-        if not isinstance(input_data, dict):
-            raise HTTPException(
-                status_code=400,
-                detail=f"input_data must be a dictionary, got {type(input_data).__name__}"
-            )
-
-        logger.info(f"🚀 Creating execution for workflow {workflow_id} with agent {agent.id}")
-        logger.info(f"   Agent skills: {len(agent.skills) if agent.skills else 0}")
-
-        # Create execution record
-        execution = WorkflowExecution(
-            workflow_id=workflow_id,
-            agent_id=agent.id,
-            workspace_id=ctx.workspace_id,
-            input_data=input_data,
-            status=ExecutionStatus.PENDING.value
-        )
-        
-        db.add(execution)
-        db.commit()
-        db.refresh(execution)
-        
-        # PRD-56: Dispatch through TaskRunner abstraction
-        runner = get_task_runner()
-
-        if runner.backend_name == "queued":
-            # Phase 2: Enqueue to workspace worker
-            task = AgentTask(
-                task_type=TaskType.WORKFLOW_SUBTASK,
-                workspace_id=ctx.workspace_id,
-                agent_id=agent.id,
-                prompt=json.dumps(input_data),
-                context={
-                    "execution_id": execution.id,
-                    "workflow_id": workflow_id,
-                    "options": execution_data.get('options', {}),
-                },
-                priority=TaskPriority.NORMAL,
-                timeout_seconds=600,
-            )
-            handle = await runner.submit_task(task)
-            logger.info(f"Workflow {workflow_id} execution {execution.id} queued (task={handle.task_id[:8]})")
-        else:
-            # Phase 1 / Local: Run in-process (existing behavior), guarded so a
-            # GC'd loop can't silently cancel it and an uncaught crash is recorded.
-            launch_guarded(
-                execute_workflow_with_progress(
-                    execution.id,
-                    execution_data.get('options', {})
-                ),
-                subsystem="workflow",
-                operation="execute",
-                workspace_id=ctx.workspace_id,
-                extra={"execution_id": execution.id, "workflow_id": workflow_id},
-            )
-
-        logger.info(f"Workflow {workflow_id} execution {execution.id} started")
-        
-        return {
-            "id": execution.id,
-            "execution_id": execution.id,
-            "workflow_id": workflow_id,
-            "status": "started",
-            "message": "Workflow execution started"
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error executing workflow {workflow_id}: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-@router.post("/execute")
-async def execute_workflow_general(execution_data: Dict[str, Any], ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
-    """General workflow execution endpoint"""
-    try:
-        workflow_id = execution_data.get('workflow_id')
-        if not workflow_id:
-            raise HTTPException(status_code=400, detail="workflow_id required")
-
-        return await execute_workflow(workflow_id, execution_data, ctx, db)
-        
-    except Exception as e:
-        logger.error(f"Error in general workflow execution: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+# PRD-172 F006: the legacy PRD-125 workflow-execute surface was DELETED here.
+#
+# `POST /{workflow_id}/execute` (execute_workflow), `POST /execute`
+# (execute_workflow_general) and `POST /executions/` (create_execution) formed
+# a cross-tenant existence oracle: they fetched the Workflow with NO workspace
+# filter and selected "the first active agent from ANY workspace", then handed
+# off to `execute_workflow_with_progress` — a disabled no-op stub (PRD-125).
+# Both surviving callers (github_webhooks, create_execution) already passed a
+# broken argument list, so nothing functional was lost. Missions are the
+# canonical execution path (CLAUDE.md §5/§10). The workspace-scoped
+# `POST /{workflow_id}/execute-advanced` (execute_workflow_advanced) remains.
 
 @router.get("/executions/")
 async def list_executions(
@@ -1213,15 +1100,9 @@ async def list_executions(
         logger.error(f"Error listing executions: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/executions/")
-async def create_execution(execution_data: Dict[str, Any], db: Session = Depends(get_db)):
-    """Create workflow execution"""
-    try:
-        workflow_id = execution_data.get('workflow_id')
-        return await execute_workflow(workflow_id, execution_data, db)
-    except Exception as e:
-        logger.error(f"Error creating execution: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+# PRD-172 F006: `POST /executions/` (create_execution) deleted — it delegated
+# to the removed legacy execute_workflow with a broken argument list (see the
+# deletion note above). Executions are created inside execute_workflow_advanced.
 
 @router.get("/executions/{execution_id}")
 async def get_execution_status(execution_id: int, db: Session = Depends(get_db)):
