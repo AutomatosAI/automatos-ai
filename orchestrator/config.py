@@ -437,8 +437,10 @@ class Config:
     OPENROUTER_SITE_URL: str = os.getenv("OPENROUTER_SITE_URL", "https://automatos.app")
     COHERE_RERANK_URL: str = os.getenv("COHERE_RERANK_URL", "https://api.cohere.com/v2/rerank")
     RAILWAY_GQL_URL: str = os.getenv("RAILWAY_GQL_URL", "https://backboard.railway.app/graphql/v2")
-    INTERNAL_API_HOSTNAME: str = os.getenv("INTERNAL_API_HOSTNAME", "automatos-ai.railway.internal")
-    INTERNAL_FRONTEND_HOSTNAME: str = os.getenv("INTERNAL_FRONTEND_HOSTNAME", "automatos-ai-frontend.railway.internal")
+    # PRD-176 F068: local-safe defaults. SaaS supplies the railway.internal host
+    # via env; a fresh local clone must not dial Railway topology by default.
+    INTERNAL_API_HOSTNAME: str = os.getenv("INTERNAL_API_HOSTNAME", "localhost")
+    INTERNAL_FRONTEND_HOSTNAME: str = os.getenv("INTERNAL_FRONTEND_HOSTNAME", "localhost")
     COMPOSIO_API_KEY: str = os.getenv("COMPOSIO_API_KEY") or os.getenv("COMPOSIO_KEY")
     # v3.1 default: tool endpoints automatically serve the latest toolkit version
     # (no `toolkit_versions=latest` param required). Only tool endpoints differ
@@ -536,8 +538,9 @@ class Config:
     # =============================================================================
     # MONITORING (PRD-73)
     # =============================================================================
-    LOKI_URL: str = os.getenv("LOKI_URL", "http://loki.railway.internal:3100")
-    PROMETHEUS_URL: str = os.getenv("PROMETHEUS_URL", "http://prometheus.railway.internal:9090")
+    # PRD-176 F068: local-safe defaults (SaaS sets the railway host via env).
+    LOKI_URL: str = os.getenv("LOKI_URL", "http://localhost:3100")
+    PROMETHEUS_URL: str = os.getenv("PROMETHEUS_URL", "http://localhost:9090")
     GRAFANA_URL: str = os.getenv("GRAFANA_URL", "")
     GRAFANA_SERVICE_ACCOUNT_TOKEN: str = os.getenv("GRAFANA_SERVICE_ACCOUNT_TOKEN", "")
     GRAFANA_LOKI_DATASOURCE_UID: str = os.getenv("GRAFANA_LOKI_DATASOURCE_UID", "loki")
@@ -546,12 +549,15 @@ class Config:
     # OBSERVABILITY — log relay, Prometheus metrics, Loki query API, alerts
     # (PRD-142 W3-S5 / G7 — centralized so monitoring modules stop reading env directly)
     # =============================================================================
-    # Log relay client (core/monitoring/automatos_logging.py)
+    # Log relay client (core/monitoring/automatos_logging.py).
+    # PRD-176 F068: local-safe default host + OFF by default. SaaS points this at
+    # log-relay.railway.internal and sets LOG_RELAY_ENABLED=true via env; a fresh
+    # local clone must not try to push logs to Railway topology.
     LOG_RELAY_URL: str = os.getenv(
         "LOG_RELAY_URL",
-        "http://log-relay.railway.internal:8080/push",
+        "http://localhost:8080/push",
     )
-    LOG_RELAY_ENABLED: bool = os.getenv("LOG_RELAY_ENABLED", "true").lower() == "true"
+    LOG_RELAY_ENABLED: bool = os.getenv("LOG_RELAY_ENABLED", "false").lower() == "true"
     LOG_RELAY_BATCH_SIZE: int = int(os.getenv("LOG_RELAY_BATCH_SIZE", "50"))
     LOG_RELAY_FLUSH_INTERVAL: float = float(os.getenv("LOG_RELAY_FLUSH_INTERVAL", "2.0"))
     # SERVICE_NAME has two distinct historical defaults — preserve both exactly.
@@ -567,7 +573,8 @@ class Config:
     METRICS_ENVIRONMENT: str = os.getenv("ENVIRONMENT", "unknown")
     # Loki query proxy (core/monitoring/automatos_logs_api.py) — separate from the
     # PRD-73 LOKI_URL above because the existing module reads LOKI_QUERY_URL.
-    LOKI_QUERY_URL: str = os.getenv("LOKI_QUERY_URL", "http://loki.railway.internal:3100")
+    # PRD-176 F068: local-safe default (SaaS sets the railway host via env).
+    LOKI_QUERY_URL: str = os.getenv("LOKI_QUERY_URL", "http://localhost:3100")
     # Shared by automatos_logs_api + automatos_alerts for HMAC verification.
     ALERT_INGEST_TOKEN: str = os.getenv("ALERT_INGEST_TOKEN", "")
 
@@ -745,6 +752,11 @@ class Config:
     AWS_REGION: str = os.getenv("AWS_REGION", "us-east-1")
     AWS_ACCESS_KEY_ID: str = os.getenv("AWS_ACCESS_KEY_ID")
     AWS_SECRET_ACCESS_KEY: str = os.getenv("AWS_SECRET_ACCESS_KEY")
+    # PRD-176 F089: S3 endpoint override for a local S3-compatible object store
+    # (MinIO). Empty by default so prod/boto talks to real AWS S3; local compose
+    # sets it to the MinIO endpoint so the knowledge flywheel persists outputs
+    # instead of fail-softing to None on ephemeral disk.
+    S3_ENDPOINT_URL: str = os.getenv("S3_ENDPOINT_URL", "")
 
     # S3 Vectors Configuration
     S3_VECTORS_ENABLED: bool = os.getenv("S3_VECTORS_ENABLED", "false").lower() == "true"
@@ -760,7 +772,8 @@ class Config:
     # PRD-58: FutureAGI Integration (Prompt Scoring & Optimization)
     # =============================================================================
     FUTUREAGI_API_KEY: str = os.getenv("FUTUREAGI_API_KEY")
-    AGENT_OPT_WORKER_URL: str = os.getenv("AGENT_OPT_WORKER_URL", "http://agent-opt-worker.railway.internal:8080")
+    # PRD-176 F068: local-safe default (SaaS sets the railway worker host via env).
+    AGENT_OPT_WORKER_URL: str = os.getenv("AGENT_OPT_WORKER_URL", "http://localhost:8080")
 
     # =============================================================================
     # JIRA BUG REPORTS (Pilot Helper Widget)
@@ -783,7 +796,8 @@ class Config:
     # =============================================================================
     RECIPE_SCRATCHPAD_TTL: int = int(os.getenv("RECIPE_SCRATCHPAD_TTL", "3600"))
     RECIPE_LOG_S3_BUCKET: str = os.getenv("RECIPE_LOG_S3_BUCKET", "automatos-ai")
-    MEM0_API_URL: str = os.getenv("MEM0_API_URL", "http://automatos-mem0-server.railway.internal")
+    # PRD-176 F068: local-safe default (SaaS sets the railway mem0 host via env).
+    MEM0_API_URL: str = os.getenv("MEM0_API_URL", "http://localhost:8888")
     MEM0_API_KEY: str = os.getenv("MEM0_API_KEY")
     # Read path (search/get_all) blocks TTFT — keep short.
     MEM0_TIMEOUT_SECONDS: float = float(os.getenv("MEM0_TIMEOUT_SECONDS", "3.0"))
@@ -914,7 +928,8 @@ class Config:
     # =============================================================================
     # VOICE SERVICE (PRD-74)
     # =============================================================================
-    VOICE_SERVICE_URL: str = os.getenv("VOICE_SERVICE_URL", "http://voice-service.railway.internal:8300")
+    # PRD-176 F068: local-safe default (SaaS sets the railway voice host via env).
+    VOICE_SERVICE_URL: str = os.getenv("VOICE_SERVICE_URL", "http://localhost:8300")
     VOICE_SERVICE_TIMEOUT: int = int(os.getenv("VOICE_SERVICE_TIMEOUT", "90"))
     VOICE_STT_MODEL: str = os.getenv("VOICE_STT_MODEL", "Systran/faster-whisper-large-v3")
     VOICE_TTS_MODEL: str = os.getenv("VOICE_TTS_MODEL", "kokoro")
