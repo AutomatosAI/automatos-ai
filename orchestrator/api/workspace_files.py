@@ -368,7 +368,11 @@ async def commit_canvas_session(
 
     token = await resolve_github_token()  # may be None; push then relies on ambient auth
 
-    steps = plan_commit_push(session_id, body.message, remote=body.remote)
+    try:
+        steps = plan_commit_push(session_id, body.message, remote=body.remote)
+    except ValueError as exc:
+        # Invalid remote (allowlist rejects shell metacharacters) → 400, not 500.
+        raise HTTPException(status_code=400, detail=str(exc))
     results = []
     for step in steps:
         result = await client.git(step.operation, cwd=body.cwd, args=step.args)

