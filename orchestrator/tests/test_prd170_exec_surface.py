@@ -80,12 +80,41 @@ def test_exec_route_served_exactly_once():
         r for r in data["routes"]
         if r["path"] == _EXEC_PATH and r["method"] == "POST"
     ]
-    # Diagnostic on a degraded manifest: surface the route count, a path sample,
-    # and the subprocess stderr so a CI-only degradation is debuggable from logs.
-    assert len(post_exec) == 1, (
-        f"POST {_EXEC_PATH} must be served exactly once, got {len(post_exec)}.\n"
-        f"route_count={data.get('route_count')} "
-        f"api_paths_sample="
-        f"{sorted({r['path'] for r in data['routes'] if r['path'].startswith('/api/')})[:15]}\n"
-        f"STDERR:\n{proc.stderr[-4000:]}"
-    )
+    # Diagnostic on a degraded manifest (CI-only, not locally reproducible): a
+    # route_count of ~11 means EVERY app.include_router registered an empty
+    # router. This probe reports, in a fresh interpreter, whether the agents
+    # router itself is empty (an import problem) vs. whether include failed
+    # (an app-wiring problem) — so the CI log pinpoints the layer.
+    if len(post_exec) != 1:
+        probe = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "from api.agents import router as r; "
+                "import main; "
+                "print('AGENTS_ROUTER_ROUTES', len(list(r.routes))); "
+                "print('APP_TOTAL_ROUTES', len(list(main.app.routes)))",
+            ],
+            cwd=str(ORCH_ROOT),
+            env=dict(
+                os.environ,
+                POSTGRES_PORT="59432",
+                DATABASE_URL="postgresql://test:test@127.0.0.1:59432/test",
+            ),
+            capture_output=True,
+            text=True,
+            timeout=240,
+        )
+        probe_out = "\n".join(
+            ln for ln in probe.stdout.splitlines()
+            if "ROUTER_ROUTES" in ln or "TOTAL_ROUTES" in ln
+        )
+        raise AssertionError(
+            f"POST {_EXEC_PATH} must be served exactly once, got {len(post_exec)}.\n"
+            f"route_count={data.get('route_count')} "
+            f"api_paths_sample="
+            f"{sorted({r['path'] for r in data['routes'] if r['path'].startswith('/api/')})[:15]}\n"
+            f"PROBE(fresh interp):\n{probe_out}\n"
+            f"PROBE_STDERR:\n{probe.stderr[-2500:]}\n"
+            f"DUMP_STDERR:\n{proc.stderr[-2000:]}"
+        )
