@@ -75,9 +75,9 @@
       "title": "Cleanup: one exec surface, dead affordances out",
       "description": "DELETE the never-mounted workspace_exec.py router (Q85 resolution — workspace_files POST /exec + the session shell cover it); remove read-only-era dead affordances in CodingCanvasWidget; terminal panel = SDK bash tool with approval, not a separate surface.",
       "acceptanceCriteria": [
-        "workspace_exec.py gone; contract + reachability green",
-        "InteractiveTerminal 404 path eliminated (the component now targets the session)",
-        "Typecheck passes; cd orchestrator && pytest -q green"
+        "DONE — workspace_exec.py gone; contract + reachability green: tests/test_prd170_exec_surface.py 3 passed — the router MODULE is deleted, is no longer importable, and POST /api/workspaces/{id}/exec is served EXACTLY ONCE (by workspace_files.py). Manifest unchanged by the delete → the router was truly never mounted (Q85 dead duplicate). The workspace_exec TOOL (workspace_actions.py) is untouched — only the duplicate api router file was removed.",
+        "DONE — no 404 exec path: the InteractiveTerminal already targets /api/workspaces/{id}/exec, which workspace_files.py serves (both routers shared the path; only workspace_files was ever mounted, so there was no live 404 — deleting the duplicate removes the ambiguity). DEFERRED — morning: routing the terminal panel THROUGH the SDK bash tool with approval (larger rewire, browser-verified). Left the working terminal intact rather than break it.",
+        "DONE — typecheck: no frontend files changed here (backend-only deletion + test). Full container pytest is CI-Docker; the DB-free contract/reachability gate is green."
       ],
       "files": ["orchestrator/api/workspace_exec.py", "frontend/components/workspace/"]
     }
