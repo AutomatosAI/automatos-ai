@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import ast
 import importlib
+import os
 import sys
 from pathlib import Path
 
@@ -63,11 +64,30 @@ _SWEPT_ENV_VARS = (
 
 @pytest.fixture(autouse=True)
 def _restore_config_module():
-    """Contain the reload blast radius (PRD-142 W2-S/WS-F)."""
+    """Contain the reload blast radius (PRD-142 W2-S/WS-F).
+
+    ``_reload_config`` mutates the shared ``config`` module (``importlib.reload``
+    rebuilds its ``Config`` class + singleton). Downstream suites co-run after
+    this file — which sorts first — must not inherit a test's env-derived config
+    state (the leak that broke test_harness_commands / test_prd143_concierge).
+
+    Restore the exact pre-test ``config`` module object into ``sys.modules`` so
+    the class identity the rest of the session already bound (via
+    ``from config import config`` / ``type(config.config)``) is the one that
+    survives. Do NOT reload here: a reload would swap ``Config`` for a fresh
+    class object, desyncing downstream fixtures that patch ``type(config.config)``
+    class-level properties (e.g. CHATBOT_MAX_TOOL_ITERATIONS). Also snapshot and
+    restore ``os.environ`` so the swept vars / neutralized ``load_dotenv`` the
+    reload helper set cannot bleed past this file, independent of monkeypatch
+    teardown ordering.
+    """
+    env_snapshot = dict(os.environ)
     saved = sys.modules.get("config")
     try:
         yield
     finally:
+        os.environ.clear()
+        os.environ.update(env_snapshot)
         if saved is not None:
             sys.modules["config"] = saved
         else:
