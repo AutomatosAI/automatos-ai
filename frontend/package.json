@@ -125,7 +125,7 @@
     "tailwind-scrollbar-hide": "1.1.7",
     "three": "^0.183.2",
     "use-local-storage-state": "19.1.0",
-    "vaul": "0.8.0",
+    "vaul": "1.1.2",
     "xlsx": "^0.18.5",
     "zod": "^3.25.0",
     "zustand": "4.4.1"
