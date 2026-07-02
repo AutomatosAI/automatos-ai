@@ -546,6 +546,38 @@ class PlatformActionExecutor:
             )
             return False
 
+    def _agent_inherits_admin(self) -> bool:
+        """Whether an agent (no caller identity) may act as admin here.
+
+        PRD-174 F014: closes the ``admin_only`` no-op. Historically a missing
+        caller_context fell back to "does the workspace have *an* admin member"
+        (true for every workspace) — so ``admin_only`` never actually gated an
+        agent. Under the policy plane this fallback is opt-in: it applies only
+        when the workspace's explicit, default-OFF ``agents_inherit_admin``
+        policy is set (and there really is an admin/owner to inherit from).
+
+        Plane OFF ⇒ historical behaviour (always fall back to the owner check)
+        so the rollout is byte-for-byte reversible.
+        """
+        try:
+            from modules.policy import policy_plane_enabled
+
+            if policy_plane_enabled():
+                from modules.policy.policy_document import load_policy_document
+
+                doc = load_policy_document(self.db, self.workspace_id)
+                if not doc.agents_inherit_admin:
+                    return False  # explicit default-off policy → agent is NOT admin
+                return self._workspace_has_admin_owner()
+        except Exception:
+            logger.warning(
+                "[PlatformExecutor] agents_inherit_admin policy read failed for %s "
+                "— falling back to legacy owner check", self.workspace_id,
+                exc_info=True,
+            )
+        # Plane OFF (or read failure): historical always-fallback behaviour.
+        return self._workspace_has_admin_owner()
+
     def _full_autonomy(self) -> bool:
         """True when this workspace is dialled to full autonomy.
 
@@ -639,10 +671,13 @@ class PlatformActionExecutor:
                         or caller_context.get("system_role") == "admin"
                     )
                 else:
-                    # No caller_context (heartbeat, agent factory, etc.) —
-                    # resolve from workspace owner's role.  Agents inherit
-                    # admin privileges from their workspace owner.
-                    is_admin = self._workspace_has_admin_owner()
+                    # No caller_context (heartbeat, agent factory, etc.).
+                    # PRD-174 F014: the "agents inherit admin from the workspace
+                    # owner" fallback is no longer implicit — under the policy
+                    # plane it applies ONLY when the explicit, default-OFF
+                    # ``agents_inherit_admin`` workspace policy is set. Plane OFF
+                    # keeps the historical always-fallback behaviour.
+                    is_admin = self._agent_inherits_admin()
                 if not is_admin:
                     logger.warning(
                         "[PlatformExecutor] Admin-only action '%s' denied — "

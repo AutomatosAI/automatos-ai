@@ -198,6 +198,74 @@ class UnifiedToolExecutor:
         return self._tool_registry
 
     # ------------------------------------------------------------------
+    # Policy plane chokepoint (PRD-174 W4)
+    # ------------------------------------------------------------------
+
+    def _policy_gate_check(
+        self,
+        tool_name: str,
+        parameters: Dict[str, Any],
+        *,
+        agent_id: int,
+        workspace_id: Optional[UUID],
+        caller_context: Optional[Dict[str, Any]],
+        trace: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Evaluate one tool call through the unified PolicyGate.
+
+        Returns ``None`` when execution may proceed (plane OFF, or an ``allow``
+        verdict). Returns an errors-as-data result dict when the plane BLOCKS the
+        call (deny/ask) — the caller returns it directly, so the tool never runs.
+
+        Never raises: a fault in the plane must not wedge tool execution, so any
+        error here is logged and treated as "proceed" (the downstream per-tool
+        gates in ``platform_executor`` remain in force for platform actions).
+        """
+        try:
+            from modules.policy import policy_plane_enabled
+
+            if not policy_plane_enabled():
+                return None  # flag OFF — byte-for-byte the legacy per-router gates
+
+            from modules.policy import PolicyGate, ToolCall, Decision
+            from modules.policy.errors import verdict_to_result
+
+            # Resolve the effective action for the meta-dispatcher: platform_execute
+            # nests the real action under "action" (params may be flat or wrapped).
+            effective_name = tool_name
+            effective_params = parameters if isinstance(parameters, dict) else {}
+            if tool_name == "platform_execute" and isinstance(parameters, dict):
+                action_name = (parameters.get("action") or "").strip()
+                if action_name:
+                    effective_name = action_name
+                    effective_params = parameters.get("params") or {
+                        k: v for k, v in parameters.items() if k not in ("action", "params")
+                    }
+
+            verdict = PolicyGate(self.db).check(
+                ToolCall(
+                    tool_name=effective_name,
+                    parameters=effective_params,
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    caller_context=caller_context,
+                )
+            )
+            if verdict.decision is Decision.ALLOW:
+                return None
+            logger.info(
+                "[tool-trace %s] policy plane %s '%s': %s",
+                trace, verdict.decision.value, effective_name, verdict.reason,
+            )
+            return verdict_to_result(verdict, tool_name)
+        except Exception:
+            logger.warning(
+                "[tool-trace %s] policy gate errored for '%s' — proceeding "
+                "(downstream gates still apply)", trace, tool_name, exc_info=True,
+            )
+            return None
+
+    # ------------------------------------------------------------------
     # Main dispatch
     # ------------------------------------------------------------------
 
@@ -238,6 +306,20 @@ class UnifiedToolExecutor:
                 f"workspace={workspace_id}"
             )
             logger.info(f"[tool-trace {trace}] Parameters keys={list(parameters.keys()) if isinstance(parameters, dict) else type(parameters).__name__}")
+
+            # PRD-174 W4 — the single policy chokepoint. When the plane is ON,
+            # EVERY tool call (platform, workspace, Composio, registry) is
+            # evaluated by one typed gate HERE, so Composio/workspace/registry
+            # stop routing around the platform gate stack (F085/F060). A deny/ask
+            # returns errors-as-data the model can read and never executes.
+            # Flag OFF ⇒ this block is a no-op and behaviour is byte-for-byte the
+            # per-router gates below.
+            _policy_block = self._policy_gate_check(
+                tool_name, parameters, agent_id=agent_id,
+                workspace_id=workspace_id, caller_context=caller_context, trace=trace,
+            )
+            if _policy_block is not None:
+                return _policy_block
 
             # PRD-64: Single dispatcher for platform actions
             if tool_name == "platform_execute":

@@ -54,7 +54,9 @@ def _require_user_db_id(db: Session, ctx: RequestContext):
 
 
 def _is_admin(ctx: RequestContext) -> bool:
-    return getattr(ctx.user, "system_role", "user") == "admin"
+    # PRD-174 F043: shared admin check — super_admin ⊇ admin when the plane is on.
+    from core.auth.roles import caller_is_admin
+    return caller_is_admin(ctx.user)
 
 
 def _assert_admin(ctx: RequestContext) -> None:

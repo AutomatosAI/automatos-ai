@@ -632,6 +632,14 @@ class Config:
     # priority and escalated for human approval (when self-management is on).
     HARNESS_HIGH_PRIORITY_RISK: int = int(os.getenv("HARNESS_HIGH_PRIORITY_RISK", "4"))
 
+    # PRD-174 Wave 4 — Unified Policy Plane. THE master flag for the policy
+    # plane: one typed gate (`modules/policy.PolicyGate`) evaluated in one place
+    # (`UnifiedToolExecutor.execute_tool`) for every tool call on every surface,
+    # plus the `on_pre_tool` budget/approval seam. HIGHEST-RISK wave — touches
+    # every execution path — so it ships default OFF. Flag OFF ⇒ byte-for-byte
+    # today's per-router gates (nothing new enters the path). Flag ON ⇒ the plane.
+    POLICY_PLANE_ENABLED: bool = os.getenv("AUTOMATOS_POLICY_PLANE", "false").lower() in ("true", "1", "yes")
+
     # =============================================================================
     # PRD-130 — Business Intake Wizard (PoC)
     # =============================================================================

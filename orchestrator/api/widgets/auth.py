@@ -236,8 +236,27 @@ def require_permission(permission: str) -> Callable:
     async def _check(
         auth: WidgetAuthContext = Depends(widget_auth),
     ) -> WidgetAuthContext:
-        # An empty permissions list means unrestricted (all permissions).
-        if auth.permissions and permission not in auth.permissions:
+        # PRD-174 F042 — one empty-permission semantic. Historically the widget
+        # plane treated an empty permission list as "unrestricted" (a god-key),
+        # while the board plane treats empty as "grants nothing". When the policy
+        # plane is ON we unify on the board plane's least-privilege rule (empty =
+        # deny) via the shared helper; OFF keeps the historical behaviour so the
+        # large population of already-issued keys is not broken mid-rollout.
+        try:
+            from modules.policy import policy_plane_enabled
+            from modules.policy.roles import has_permission as _has_perm
+
+            _plane_on = policy_plane_enabled()
+        except Exception:
+            _plane_on = False
+
+        if _plane_on:
+            allowed = _has_perm(auth.permissions, permission)  # empty = deny
+        else:
+            # Legacy: empty list = unrestricted; a non-empty list must contain it.
+            allowed = (not auth.permissions) or (permission in auth.permissions)
+
+        if not allowed:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Missing required permission: {permission}",

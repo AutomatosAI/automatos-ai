@@ -702,7 +702,14 @@ class LLMManager:
     _cost_logger = logging.getLogger("llm.cost_audit")
 
     # Approximate $/1K-token rates for common models (input, output).
-    # Used ONLY for logging estimates — not billing.  Keep sorted.
+    # Used ONLY for this class's audit-LOG estimate — never billing. The
+    # authoritative, model-aware dollars are already written by
+    # ``UsageTracker.track`` from the ``llm_models`` DB registry (below), and
+    # PRD-174 F059's *enforcement* fix — the budget/approval primitive — prices
+    # off that same registry via ``modules.policy.pricing``. We deliberately do
+    # NOT open a DB session here: ``_estimate_cost`` runs on every LLM call, so a
+    # per-call price query would add a round-trip + pool checkout to the hottest
+    # path in the system just for a log line. Keep the log estimate in-memory.
     _MODEL_COST_MAP: Dict[str, tuple] = {
         "claude-3-opus":       (0.015, 0.075),
         "claude-3.5-sonnet":   (0.003, 0.015),
@@ -720,7 +727,7 @@ class LLMManager:
     }
 
     def _estimate_cost(self, input_tokens: int, output_tokens: int) -> float:
-        """Rough USD cost estimate for logging. Not for billing."""
+        """Rough USD cost estimate for logging. Not for billing (see F059 note above)."""
         model = (self.config.model or "").lower()
         for key, (inp_rate, out_rate) in self._MODEL_COST_MAP.items():
             if key in model:
