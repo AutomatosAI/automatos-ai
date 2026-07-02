@@ -726,7 +726,7 @@ class ToolRouter:
                 else error
             )
             logger.warning(f"[tool-trace {trace_id}] {tool_name} failed: {error}")
-            return {
+            envelope = {
                 "success": False,
                 "frontend_data": {},
                 "llm_context": f"Tool {tool_name} failed: {llm_error}",
@@ -734,6 +734,12 @@ class ToolRouter:
                 "fatal_error": fatal_error,
                 "error_type": error_type,
             }
+            # PRD-174 §4.2 — errors-as-data: give the model a stable
+            # {code, message_for_model, remediation, retryable} block so it can
+            # adapt (escalate / approve / drop a field) instead of seeing an
+            # opaque failure. A policy deny already carries policy_error; this
+            # backfills everything else. Additive + flag-gated (OFF = unchanged).
+            return self._maybe_add_error_envelope(envelope, result)
 
         except Exception as e:
             error_msg = str(e)
@@ -746,7 +752,7 @@ class ToolRouter:
             logger.error(f"[tool-trace {trace_id}] {tool_name} exception: {error_msg}")
             # PRD-141 US-019: a thrown tool is a failure outcome too.
             self._record_tool_signal(tool_name, False, agent_id, workspace_id, caller_context)
-            return {
+            envelope = {
                 "success": False,
                 "frontend_data": {},
                 "llm_context": f"Tool {tool_name} error: {llm_error}",
@@ -754,6 +760,36 @@ class ToolRouter:
                 "fatal_error": fatal_error,
                 "error_type": "dependency_missing" if fatal_error else None,
             }
+            # PRD-174 §4.2 — errors-as-data (see above); backfill on the thrown path too.
+            return self._maybe_add_error_envelope(envelope, {"success": False, "error": error_msg})
+
+    @staticmethod
+    def _maybe_add_error_envelope(
+        envelope: Dict[str, Any], raw_result: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Backfill the errors-as-data ``policy_error`` block when the plane is on.
+
+        Additive: the returned dict keeps every existing key; it only adds
+        ``policy_error`` (a ``{code, message_for_model, remediation, retryable}``
+        payload derived from the failing result). Flag OFF ⇒ returned unchanged,
+        so today's callers see byte-for-byte the same shape. Never raises.
+        """
+        try:
+            from modules.policy import policy_plane_enabled
+
+            if not policy_plane_enabled():
+                return envelope
+            from modules.policy.errors import ensure_error_envelope
+
+            # Preserve a policy_error the raw result already carries (a gate deny).
+            source = dict(raw_result) if isinstance(raw_result, dict) else {}
+            source.setdefault("success", False)
+            enriched = ensure_error_envelope(source)
+            if "policy_error" in enriched:
+                envelope["policy_error"] = enriched["policy_error"]
+        except Exception:
+            logger.debug("[tool_router] error-envelope backfill skipped", exc_info=True)
+        return envelope
 
     @staticmethod
     def _record_tool_signal(

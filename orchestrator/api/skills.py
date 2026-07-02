@@ -522,7 +522,9 @@ async def list_skills(
         # Marketplace endpoint: only surface system-owned skills (workspace_id IS NULL).
         # Workspace-owned skills (forks, custom) are listed via /workspaces/{id}/skills,
         # which already shadows marketplace originals when a fork exists. Admins see all.
-        is_admin = getattr(ctx.user, "system_role", "user") == "admin"
+        # PRD-174 F043: shared admin check — super_admin ⊇ admin when the plane is on.
+        from core.auth.roles import caller_is_admin
+        is_admin = caller_is_admin(ctx.user)
         query = db.query(Skill).filter(Skill.is_active == True)
         if not is_admin:
             query = query.filter(Skill.workspace_id.is_(None))

@@ -29,7 +29,9 @@ logger = logging.getLogger(__name__)
 
 def _is_admin(ctx: RequestContext) -> bool:
     """Check if current user has admin role."""
-    return getattr(ctx.user, "system_role", "user") == "admin"
+    # PRD-174 F043: shared admin check — super_admin ⊇ admin when the plane is on.
+    from core.auth.roles import caller_is_admin
+    return caller_is_admin(ctx.user)
 
 router = APIRouter(prefix="/api/marketplace/plugins", tags=["Marketplace Plugins"])
 

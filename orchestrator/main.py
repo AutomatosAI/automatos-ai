@@ -766,9 +766,15 @@ app.add_middleware(WidgetCORSMiddleware)
 app.add_middleware(WidgetRateLimitMiddleware)
 
 # Rate limiting (US-017)
+# PRD-174 F040 — the limiter was constructed but SlowAPIMiddleware was never
+# registered, so the default_limits never applied to any route: a placebo, and
+# the stack's only fail-OPEN gate. Fix: register the middleware AND fail closed —
+# swallow_errors=False means a limiter that can't evaluate (storage error) raises
+# instead of waving the request through. A gate that can't decide must deny.
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 def _get_real_client_ip(request) -> str:
     """Extract real client IP, respecting X-Forwarded-For behind reverse proxy."""
@@ -777,9 +783,24 @@ def _get_real_client_ip(request) -> str:
         return forwarded.split(",")[0].strip()
     return get_remote_address(request)
 
-limiter = Limiter(key_func=_get_real_client_ip, default_limits=["60/minute"])
+# F040 fix is gated on the policy-plane flag so flag-OFF is byte-for-byte today's
+# behaviour (limiter constructed but inert). swallow_errors follows the flag:
+# fail-CLOSED only when the plane is on, else the historical fail-open default.
+from config import config as _app_config
+_policy_plane_on = bool(getattr(_app_config, "POLICY_PLANE_ENABLED", False))
+
+limiter = Limiter(
+    key_func=_get_real_client_ip,
+    default_limits=["60/minute"],
+    swallow_errors=not _policy_plane_on,  # F040: fail CLOSED when the plane is on
+)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+# F040: actually enforce the limits — without this middleware the limiter above
+# is inert on every route. Registered ONLY under the policy-plane flag; OFF keeps
+# today's (placebo) behaviour so the rollout stays byte-for-byte reversible.
+if _policy_plane_on:
+    app.add_middleware(SlowAPIMiddleware)
 
 # Request body size limit middleware (10MB default, 50MB for uploads)
 MAX_BODY_SIZE = 10 * 1024 * 1024  # 10MB
