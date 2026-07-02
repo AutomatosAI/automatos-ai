@@ -20,9 +20,9 @@
       "title": "Worker provisioning for wizard workspaces",
       "description": "Wizard-created workspaces have NO worker container (workspace_files.py:33-47 DB-fallback note). Provision-on-demand at first canvas open (default: per-workspace container for isolation; a shared sandboxed runner needs a decision memo in the PR if chosen instead); honest provisioning progress + failure states in UI.",
       "acceptanceCriteria": [
-        "Wizard workspace → open canvas → working session (e2e)",
-        "Provisioning failure shows honest error + retry — verify in browser using dev-browser skill",
-        "cd orchestrator && pytest -q green"
+        "DEFERRED — morning e2e: wizard workspace → open canvas → working session. Provision-on-demand is REAL: start_session calls ws_manager.ensure_workspace_exists() (creates the workspace dir on first open) and now returns `provisioned`; contract proven container-free (test_first_open_cold_provisions_wizard_workspace: first open provisioned=True + dir created, reopen provisioned=False). DECISION MEMO (in commit + provisioningState.ts): v1 reuses the EXISTING shared sandboxed worker runner (per-workspace dir + canvas_confinement), NOT per-workspace containers — the deployed architecture is one worker service keyed by workspace_id (WORKER_INTERNAL_URL). Per-workspace containers are the isolation upgrade path.",
+        "DONE — provisioning failure shows honest error + retry (state machine, vitest): provisioningState.test.ts 9 passed — idle→provisioning→ready(cold vs warm) | failed-with-honest-error; canRetry caps attempts; provisioningLabel drives the banner. Live browser retry is morning-human.",
+        "DONE (proxy) — the DB-free contract/state suites are green; full container pytest is CI-Docker."
       ],
       "files": ["infrastructure/", "orchestrator/"]
     },

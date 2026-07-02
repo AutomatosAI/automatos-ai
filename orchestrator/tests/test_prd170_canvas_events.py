@@ -290,3 +290,38 @@ def test_sink_failure_does_not_break_pump(tmp_path):
         assert stopped["success"] is True
 
     asyncio.run(scenario())
+
+
+# ---------------------------------------------------------------------------
+# S2 — provision-on-demand: a wizard workspace (no dir yet) is cold-provisioned
+# on first canvas open; the start result reports it.
+# ---------------------------------------------------------------------------
+def test_first_open_cold_provisions_wizard_workspace(tmp_path):
+    async def scenario():
+        def factory(option_kwargs):
+            return _BridgeSDKClient(option_kwargs, "sdk-prov-1")
+
+        mgr = css.CanvasSessionManager(
+            str(tmp_path), sdk_client_factory=factory, init_timeout=2.0
+        )
+        # No directory exists for this workspace yet (wizard workspace).
+        assert not (tmp_path / "ws-wizard").exists()
+
+        started = await mgr.start_session("ws-wizard")
+        assert started["success"] is True
+        # First open created the workspace dir → provisioned True.
+        assert started["provisioned"] is True
+        assert (tmp_path / "ws-wizard").is_dir()
+
+        await mgr.stop_session("ws-wizard")
+
+        # A subsequent open of an existing workspace is NOT a cold provision.
+        mgr2 = css.CanvasSessionManager(
+            str(tmp_path), sdk_client_factory=factory, init_timeout=2.0
+        )
+        reopened = await mgr2.start_session("ws-wizard")
+        assert reopened["success"] is True
+        assert reopened["provisioned"] is False
+        await mgr2.stop_session("ws-wizard")
+
+    asyncio.run(scenario())

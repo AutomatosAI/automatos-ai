@@ -184,8 +184,12 @@ class CanvasSessionManager:
                 ),
             }
 
+        # PRD-170 S2: provision-on-demand. Wizard-created workspaces have no
+        # directory on the (shared) worker volume yet; ensure_workspace_exists
+        # creates it. `provisioned` is True when this call is what created it —
+        # surfaced so the UI can show honest cold-provision progress.
         ws_manager = WorkspaceManager(workspace_id, self.volume_path)
-        ws_manager.ensure_workspace_exists()
+        provisioned = ws_manager.ensure_workspace_exists()
         root = ws_manager.root.resolve()
 
         prior = self._load_state(root)
@@ -254,6 +258,7 @@ class CanvasSessionManager:
         return {
             "success": True,
             "resumed": bool(resume_id),
+            "provisioned": bool(provisioned),
             "session": live.state.to_dict(),
         }
 
