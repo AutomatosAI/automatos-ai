@@ -40,7 +40,7 @@ jobs:
 
     steps:
       - name: Checkout (full history)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           # Full history — the scan must see every commit, not just the tip.
           fetch-depth: 0

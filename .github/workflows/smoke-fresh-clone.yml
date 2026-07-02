@@ -42,7 +42,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # Local-only secrets — throwaway values for an ephemeral stack. No external
       # SaaS credential (Clerk / AWS / LLM) is provided, on purpose: that is the
