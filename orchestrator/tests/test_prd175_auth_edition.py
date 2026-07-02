@@ -40,6 +40,55 @@ os.environ.setdefault("POSTGRES_DB", "test")
 LOCAL_WS = UUID("00000000-0000-0000-0000-0000000000aa")
 
 
+@pytest.fixture(autouse=True)
+def _contain_reload_blast_radius():
+    """Snapshot + restore the *attributes* of the two modules these tests reload.
+
+    This file deliberately reloads ``config`` (``_fresh_config`` — to re-run the
+    class-body edition resolution under a mutated env) and ``core.auth.hybrid``
+    (the local-session test — to re-bind its module-level ``from config import
+    config``).
+
+    CRITICAL: ``importlib.reload`` re-executes the module body into the SAME
+    module object (``sys.modules[name]`` identity is preserved) but REPLACES every
+    attribute — it mints a brand-new ``config.config`` singleton and a brand-new
+    ``hybrid.get_request_context_hybrid`` function object. So snapshotting
+    ``sys.modules[name]`` is a no-op; the leak is at the attribute level.
+
+    Left un-restored, that leaks two ways into sibling test files:
+
+    * ``config``: later ``from config import config`` (e.g. ``tool_router``'s lazy
+      read) binds this reloaded singleton with env defaults, silently defeating
+      ``test_tool_router_semantic``'s ``_FAKE_CONFIG`` (SEMANTIC_TOOL_ROUTING back
+      to its ``true`` default → ``assert True is False``).
+    * ``core.auth.hybrid``: the endpoint suites override ``get_request_context_hybrid``
+      via ``app.dependency_overrides``. FastAPI keys that override by function
+      identity. After a reload, the routers still hold the ORIGINAL function
+      (captured at their import) while the test imports the NEW one, so the
+      override silently misses and the request falls through to the real
+      anonymous resolver ("Workspace not resolved").
+
+    Snapshot each module's ``__dict__`` before the test and restore it verbatim
+    after (put original attributes back, drop any the reload added), so the reload
+    can never escape this module. Mirrors ``test_config.py``'s
+    ``_restore_config_module`` intent, corrected to operate at attribute level and
+    extended to ``core.auth.hybrid``.
+    """
+    import config as _config_mod
+    import core.auth.hybrid as _hybrid_mod
+
+    snapshots = {
+        _config_mod: dict(_config_mod.__dict__),
+        _hybrid_mod: dict(_hybrid_mod.__dict__),
+    }
+    try:
+        yield
+    finally:
+        for mod, saved_dict in snapshots.items():
+            mod.__dict__.clear()
+            mod.__dict__.update(saved_dict)
+
+
 def _fresh_config(**env):
     """Reimport config.py under a controlled environment and return its singleton.
 
