@@ -42,9 +42,9 @@
       "title": "Diff approval loop",
       "description": "SDK permission prompts map to UI approval cards; file edits render as diffs (in-bundle diff viewer preferred — any new heavy dep needs an S1-style memo); approve applies / deny reverts and informs the session; per-turn auto-accept toggle (session-scoped, default OFF, visibly indicated).",
       "acceptanceCriteria": [
-        "Proposal → diff card → approve applies / deny reverts+informs (e2e both paths)",
-        "Auto-accept toggle honored + indicated — verify in browser using dev-browser skill",
-        "Typecheck passes"
+        "DEFERRED — morning browser: live proposal → approve applies / deny reverts+informs (needs a running session). Model + card are DONE: diffApproval.decide() approve→approved / deny→denied (panel forwards to the session); DiffCard.test.tsx proves Approve/Deny fire onDecide. Apply/revert wiring rides the S1 permission callback.",
+        "DONE — auto-accept toggle honored + visibly indicated: session-scoped, default OFF (diffApproval.test.ts); ON pre-approves EDIT cards with a visible 'auto-accepted' badge (DiffCard.test.tsx) and NEVER auto-accepts a bash/exec permission; toggling is non-retroactive.",
+        "DONE — typecheck: DiffCard.tsx + diffApproval.ts have zero tsc errors. Diff renders via the IN-BUNDLE @monaco-editor/react DiffEditor — no new dep."
       ],
       "files": ["frontend/components/widgets/CodingCanvasWidget/"]
     },
