@@ -64,6 +64,10 @@ jobs:
       POSTGRES_PORT: "5432"
       POSTGRES_DB: test_db
       ENVIRONMENT: development
+      # PRD-175: run the suite in the local edition so the anonymous dev-fallback
+      # is on (REQUIRE_AUTH=false). Without it, saas-default requires Clerk creds
+      # and every unauthenticated endpoint test 401s.
+      AUTH_EDITION: local
 
     defaults:
       run:
@@ -128,6 +132,10 @@ jobs:
       POSTGRES_PORT: "5432"
       POSTGRES_DB: test_db
       ENVIRONMENT: development
+      # PRD-175: run the suite in the local edition so the anonymous dev-fallback
+      # is on (REQUIRE_AUTH=false). Without it, saas-default requires Clerk creds
+      # and every unauthenticated endpoint test 401s.
+      AUTH_EDITION: local
 
     defaults:
       run:
