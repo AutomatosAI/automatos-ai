@@ -80,7 +80,12 @@ def test_exec_route_served_exactly_once():
         r for r in data["routes"]
         if r["path"] == _EXEC_PATH and r["method"] == "POST"
     ]
+    # Diagnostic on a degraded manifest: surface the route count, a path sample,
+    # and the subprocess stderr so a CI-only degradation is debuggable from logs.
     assert len(post_exec) == 1, (
-        f"POST {_EXEC_PATH} must be served exactly once, got {len(post_exec)}: "
-        f"{post_exec}"
+        f"POST {_EXEC_PATH} must be served exactly once, got {len(post_exec)}.\n"
+        f"route_count={data.get('route_count')} "
+        f"api_paths_sample="
+        f"{sorted({r['path'] for r in data['routes'] if r['path'].startswith('/api/')})[:15]}\n"
+        f"STDERR:\n{proc.stderr[-4000:]}"
     )
