@@ -1,5 +1,5 @@
 # Core FastAPI dependencies
-fastapi>=0.115.0,<0.116.0
+fastapi>=0.139.0,<0.140.0
 # Pin the FastAPI/Starlette pair. Starlette >=0.42 changed Router internals so
 # FastAPI's include_router silently no-ops, dropping every mounted router on a
 # cold boot (route_manifest / cold-boot API collapse). Unpinned before, a fresh
