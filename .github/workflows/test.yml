@@ -64,6 +64,16 @@ jobs:
       POSTGRES_PORT: "5432"
       POSTGRES_DB: test_db
       ENVIRONMENT: development
+      # PRD-175: run the suite in the local edition so the anonymous dev-fallback
+      # is on (REQUIRE_AUTH=false). Without it, saas-default requires Clerk creds
+      # and every unauthenticated endpoint test 401s.
+      AUTH_EDITION: local
+      # AUTH_EDITION=local's boot guard (config.validate_auth_edition) requires
+      # DEFAULT_WORKSPACE_ID — the single local workspace the anonymous session
+      # resolves to. init_test_db.py seeds a workspaces row with this exact id so
+      # the anonymous-fallback resolution finds a real workspace. Fixed throwaway
+      # UUID for the ephemeral CI DB.
+      DEFAULT_WORKSPACE_ID: "00000000-0000-0000-0000-0000000000c1"
 
     defaults:
       run:
@@ -128,6 +138,15 @@ jobs:
       POSTGRES_PORT: "5432"
       POSTGRES_DB: test_db
       ENVIRONMENT: development
+      # PRD-175: run the suite in the local edition so the anonymous dev-fallback
+      # is on (REQUIRE_AUTH=false). Without it, saas-default requires Clerk creds
+      # and every unauthenticated endpoint test 401s.
+      AUTH_EDITION: local
+      # AUTH_EDITION=local's boot guard requires DEFAULT_WORKSPACE_ID; set it so
+      # any config.validate_auth_edition() reached during the eval passes. The
+      # eval is SQLite-only and never resolves this workspace, but the flag must
+      # be internally consistent with AUTH_EDITION=local (mirrors the test job).
+      DEFAULT_WORKSPACE_ID: "00000000-0000-0000-0000-0000000000c1"
 
     defaults:
       run:
@@ -163,3 +182,103 @@ jobs:
             --timeout-method=thread \
             -p no:cacheprovider \
             -v
+
+  # PRD-176 F010 — the reliability bar: Alembic replays from zero to exactly
+  # ONE head. NON-REQUIRED (same posture as the test net) until the Step-2
+  # single-baseline squash lands.
+  #
+  # Two gates, deliberately separated by the review §7 two-step:
+  #   1. single-head invariant — asserts `alembic heads` returns exactly one
+  #      revision. Step 1 (the prd176_merge_heads merge revision) delivers this
+  #      NOW, so this step is the permanent regression guard against a new
+  #      divergent head. It needs no database.
+  #   2. from-zero replay — stands up an EMPTY pgvector database and runs
+  #      `alembic upgrade heads`. This is the Step-2 gate: it goes green once the
+  #      single-baseline squash reconciles the tables that today are ALTER-ed but
+  #      never CREATE-d. Runs with continue-on-error until then so the job
+  #      reports the real state without falsely blocking; flip to a hard failure
+  #      (drop continue-on-error) the moment Step 2 merges.
+  alembic-from-zero:
+    name: Alembic from-zero — exactly one head (non-required)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      # pgvector, not stock postgres — the schema declares vector columns, so a
+      # from-zero replay needs the extension available.
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: alembic_zero_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test -d alembic_zero_db"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://test:test@127.0.0.1:5432/alembic_zero_db
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: alembic_zero_db
+      ENVIRONMENT: development
+
+    defaults:
+      run:
+        working-directory: orchestrator
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: orchestrator/requirements.txt
+
+      - name: Install system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 \
+            libcairo2 libffi-dev libmagic1 ghostscript
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # Gate 1 — the single-head invariant (Step 1, green now, no DB needed).
+      - name: Assert exactly one Alembic head
+        run: |
+          HEADS="$(alembic heads 2>/dev/null | grep -c '(head)')"
+          echo "alembic head count: ${HEADS}"
+          alembic heads
+          if [ "${HEADS}" -ne 1 ]; then
+            echo "::error::Expected exactly one Alembic head, found ${HEADS}. A new divergent head was introduced — add a merge revision."
+            exit 1
+          fi
+
+      # Enable pgvector so the from-zero replay's vector columns resolve.
+      - name: Enable pgvector extension
+        env:
+          PGPASSWORD: test
+        run: |
+          psql -h 127.0.0.1 -U test -d alembic_zero_db -c "CREATE EXTENSION IF NOT EXISTS vector;"
+
+      # Gate 2 — from-zero replay (Step-2 gate). Non-blocking until the
+      # single-baseline squash lands; drop continue-on-error when it does.
+      - name: Replay all migrations from an empty database
+        continue-on-error: true
+        run: |
+          echo "Replaying alembic upgrade heads against an empty pgvector DB..."
+          alembic upgrade heads
+          echo "From-zero replay succeeded — Step 2 baseline is in place. Remove continue-on-error on this step."

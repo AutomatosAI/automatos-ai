@@ -46,6 +46,29 @@ def init_db():
             )
         """))
 
+    # PRD-175: seed the single local workspace that the AUTH_EDITION=local
+    # anonymous session resolves to. The CI test job runs the suite under
+    # AUTH_EDITION=local + DEFAULT_WORKSPACE_ID (config.py:422); the endpoint
+    # tests that fall through to the anonymous dev-fallback
+    # (core/auth/hybrid.py) resolve to config.DEFAULT_WORKSPACE_ID and then
+    # assert the workspace exists. Read the id from the canonical config (no
+    # os.getenv here — CLAUDE.md §4) and seed it idempotently so the row is
+    # present whatever DEFAULT_WORKSPACE_ID the environment sets.
+    from config import config as _app_config
+
+    _default_ws_id = (_app_config.DEFAULT_WORKSPACE_ID or "").strip()
+    if _default_ws_id:
+        with engine.begin() as conn:
+            conn.execute(
+                _raw_sql(
+                    "INSERT INTO workspaces (id, name, slug, is_personal, is_active) "
+                    "VALUES (:id, 'Local Workspace', 'local', TRUE, TRUE) "
+                    "ON CONFLICT (id) DO NOTHING"
+                ),
+                {"id": _default_ws_id},
+            )
+        print(f"   ✅ seeded local workspace {_default_ws_id}")
+
     print("✅ Database initialized successfully!")
     print(f"   Tables created: {len(Base.metadata.tables)}")
 
