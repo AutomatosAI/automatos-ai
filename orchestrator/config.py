@@ -146,8 +146,32 @@ class Config:
     # API SECURITY
     # =============================================================================
     ORCHESTRATOR_API_KEY: str = os.getenv("ORCHESTRATOR_API_KEY") or os.getenv("AUTOMATOS_API_KEY") or os.getenv("API_KEY")
-    REQUIRE_AUTH: bool = os.getenv("REQUIRE_AUTH", "true").strip().lower() in ("true", "1", "yes")
+
+    # PRD-175 (F008) — the open-core edition flag. One core, two editions, one seam.
+    #   saas  → Clerk is the identity boundary (the running product; the default).
+    #   local → a single auto-authenticated local user in a single local workspace;
+    #           no login, no external SaaS, no Clerk env (git clone && docker up).
+    # An unknown value falls back to `saas` so a typo never silently un-guards auth.
+    # This is the ONE flag the frontend mount-gate and the backend local-session
+    # posture both read (mirrored to the client as NEXT_PUBLIC_AUTH_EDITION).
+    _AUTH_EDITION_RAW = (os.getenv("AUTH_EDITION", "saas") or "saas").strip().lower()
+    AUTH_EDITION: str = _AUTH_EDITION_RAW if _AUTH_EDITION_RAW in ("local", "saas") else "saas"
+
+    # The `local` edition *implies* the no-login posture: REQUIRE_AUTH is forced
+    # false so operators set ONE flag, not three that can silently contradict
+    # (PRD §4.1/§4.3). In `saas`, REQUIRE_AUTH stays secure-by-default from env.
+    REQUIRE_AUTH: bool = (
+        False if AUTH_EDITION == "local"
+        else os.getenv("REQUIRE_AUTH", "true").strip().lower() in ("true", "1", "yes")
+    )
     AUTH_DEBUG: bool = os.getenv("AUTH_DEBUG", "").strip().lower() in ("1", "true", "yes", "on")
+
+    # PRD-175 (F075) — the platform-staff email domain used by the Clerk
+    # defence-in-depth admin gate (core/auth/clerk.py). Configuration, not a
+    # baked-in literal, so a self-hosted/SaaS operator sets their own staff domain.
+    PLATFORM_STAFF_EMAIL_DOMAIN: str = (
+        os.getenv("PLATFORM_STAFF_EMAIL_DOMAIN", "automatos.app") or "automatos.app"
+    ).strip().lstrip("@").lower()
     
     # =============================================================================
     # CORS (Frontend origins)
@@ -376,7 +400,16 @@ class Config:
     @property
     def IS_DEVELOPMENT(self) -> bool:
         return self.ENVIRONMENT.lower() == "development"
-    
+
+    # PRD-175 (F008) — edition helpers (read the one AUTH_EDITION flag).
+    @property
+    def IS_LOCAL_EDITION(self) -> bool:
+        return self.AUTH_EDITION == "local"
+
+    @property
+    def IS_SAAS_EDITION(self) -> bool:
+        return self.AUTH_EDITION == "saas"
+
     NEXT_PUBLIC_API_URL: str = os.getenv("NEXT_PUBLIC_API_URL")
     
     # =============================================================================
@@ -954,6 +987,51 @@ class Config:
                 "Tenant-isolation security config invalid (PRD-172):\n  - "
                 + "\n  - ".join(errors)
             )
+
+        # PRD-175 (F008) — the edition boot guard runs in the same hard-fail phase
+        # so a saas deploy that lost its Clerk env aborts boot rather than silently
+        # downgrading to the anonymous local identity and serving tenant data.
+        self.validate_auth_edition()
+
+    def validate_auth_edition(self) -> None:
+        """PRD-175 (F008): fail-closed boot guard for the open-core edition flag.
+
+        Keeps the two editions from silently blending into the accidental
+        "auth-not-configured" fallthrough that made local undeployable:
+
+        - ``saas``  requires the Clerk env (``CLERK_JWKS_URL`` +
+          ``CLERK_SECRET_KEY``). A saas boot with no Clerk is a misconfiguration,
+          not a silent anonymous downgrade (the one real danger, review §5.3) —
+          it must be a loud boot failure.
+        - ``local`` requires a ``DEFAULT_WORKSPACE_ID`` — the single local
+          workspace the auto-authenticated local session resolves to (W6 seeds it).
+          It requires NO Clerk env.
+
+        Raises ``RuntimeError`` (aborting boot) on a contradiction.
+        """
+        errors: list[str] = []
+
+        if self.AUTH_EDITION == "saas":
+            if not (self.CLERK_JWKS_URL or "").strip():
+                errors.append("CLERK_JWKS_URL is unset")
+            if not (self.CLERK_SECRET_KEY or "").strip():
+                errors.append("CLERK_SECRET_KEY is unset")
+            if errors:
+                raise RuntimeError(
+                    "AUTH_EDITION=saas requires Clerk to be configured, but "
+                    + " and ".join(errors)
+                    + ". A saas boot with no Clerk must fail fast, not fall through "
+                    "to the anonymous local identity (which would serve tenant data "
+                    "unauthenticated). Set the Clerk env, or set AUTH_EDITION=local "
+                    "for a no-login local instance."
+                )
+        elif self.AUTH_EDITION == "local":
+            if not (self.DEFAULT_WORKSPACE_ID or "").strip():
+                raise RuntimeError(
+                    "AUTH_EDITION=local requires DEFAULT_WORKSPACE_ID (the single "
+                    "local workspace the auto-authenticated local session resolves "
+                    "to). Set DEFAULT_WORKSPACE_ID to the seeded local workspace."
+                )
 
     def validate(self) -> bool:
         """
