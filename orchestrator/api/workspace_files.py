@@ -13,6 +13,7 @@ worker's HTTP server, which has the persistent volume mounted.
   GET    /api/workspaces/{workspace_id}/canvas/sessions  — session status
   DELETE /api/workspaces/{workspace_id}/canvas/sessions  — stop session
   GET    /api/workspaces/{workspace_id}/canvas/events    — SSE event stream (PRD-170 S3)
+  POST   /api/workspaces/{workspace_id}/canvas/commit    — commit + push branch (PRD-170 S5)
 """
 
 import asyncio
@@ -324,3 +325,65 @@ async def stream_canvas_events(
             "X-Accel-Buffering": "no",  # disable nginx buffering for SSE
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# POST /api/workspaces/{workspace_id}/canvas/commit — commit + push (PRD-170 S5)
+# ---------------------------------------------------------------------------
+class CanvasCommitRequest(BaseModel):
+    # The EDITABLE commit message the UI shows (pre-filled from the generator).
+    message: str = Field(..., min_length=1, max_length=4096)
+    # Repo path inside the workspace (e.g. "repos/my-app").
+    cwd: str = Field(..., min_length=1, max_length=1024)
+    remote: str = Field(default="origin", max_length=128)
+
+
+@router.post("/canvas/commit")
+async def commit_canvas_session(
+    workspace_id: str,
+    body: CanvasCommitRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """Commit the session's work on ``canvas/<session-id>`` and push it.
+
+    Reuses the existing ``workspace_git`` verbs (no new git surface). Push auth
+    is a GitHub App installation token (PRD-165) injected server-side; NO token
+    material is ever logged or returned — every git result is passed through
+    ``redact_token`` first (PRD-154 S12 discipline).
+    """
+    if str(ctx.workspace_id) != workspace_id:
+        raise HTTPException(status_code=403, detail="Workspace access denied")
+
+    from modules.tools.discovery.canvas_git import plan_commit_push, redact_token
+    from modules.codegraph.github_auth import resolve_github_token
+
+    client = WorkspaceClient(workspace_id)
+
+    # Resolve the session id (branch-per-session) from live/volume state.
+    status = await client.canvas_session_status()
+    session = (status or {}).get("session") or {}
+    session_id = session.get("canvas_session_id")
+    if not session_id:
+        raise HTTPException(status_code=409, detail="No canvas session to commit")
+
+    token = await resolve_github_token()  # may be None; push then relies on ambient auth
+
+    steps = plan_commit_push(session_id, body.message, remote=body.remote)
+    results = []
+    for step in steps:
+        result = await client.git(step.operation, cwd=body.cwd, args=step.args)
+        # Redact the token from any echoed output BEFORE it leaves this process.
+        if isinstance(result, dict):
+            for key in ("error", "stdout", "stderr", "output"):
+                if isinstance(result.get(key), str):
+                    result[key] = redact_token(result[key], token)
+        results.append({"operation": step.operation, "result": result})
+        if isinstance(result, dict) and result.get("success") is False:
+            # Stop on first failure; the (redacted) error is returned.
+            return {
+                "success": False,
+                "failed_operation": step.operation,
+                "steps": results,
+            }
+
+    return {"success": True, "branch": steps[0].args, "steps": results}

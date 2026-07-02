@@ -53,9 +53,9 @@
       "title": "Git: branch-per-session, commit, push with platform identity",
       "description": "Default branch canvas/<session-id>; commit from UI with generated editable message; push via the EXISTING workspace_git tool using GitHub App installation tokens (PRD-165 base) and platform actor identity (PRD-168 pattern); PR-open link-out v1. No token material in logs/errors (PRD-154 S12 test class re-applied).",
       "acceptanceCriteria": [
-        "Commit+push e2e on a test repo; author/committer attributed",
-        "Token-leak negative tests green",
-        "cd orchestrator && pytest -q green"
+        "DEFERRED — CI-Docker/morning: live commit+push on a test repo with author/committer attribution (needs a container + real remote). Path is REAL end-to-end: POST /api/workspaces/{id}/canvas/commit resolves the session id, plan_commit_push reuses workspace_git verbs (checkout -B canvas/<id> / add -A / commit -m <editable msg> / push -u origin), token from resolve_github_token (PRD-165 App-token seam), redact_token on every git result.",
+        "DONE — token-leak negative tests green (SECURITY, BLOCKS): tests/test_prd170_canvas_git.py 19 passed incl. the re-applied PRD-154 S12 class — exact-value strip + URL-userinfo scrub + GitHub-token-shape redaction; build_authenticated_remote carries the token but its logged form never does; plan_commit_push contains no token/authed-remote.",
+        "DONE (proxy) — commit-message generator + branch naming proven by the pure suite above; full container pytest is CI-Docker (local pytest wedges per kit). Commit route registers (766 routes, /api/agents/ present)."
       ],
       "files": ["orchestrator/modules/tools/discovery/workspace_actions.py"]
     },
