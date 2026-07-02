@@ -36,6 +36,30 @@ router = APIRouter(prefix="/api/shopify", tags=["Shopify Integration"])
 SHOPIFY_INTERNAL_KEY = config.SHOPIFY_INTERNAL_API_KEY if hasattr(config, "SHOPIFY_INTERNAL_API_KEY") else None
 
 
+# ── At-rest secret encryption (F058) ─────────────────────────────────
+#
+# The Shopify Admin access token is a 147-scope full-write credential. It is
+# encrypted at rest through the platform's canonical Fernet path
+# (``core.credentials.encryption`` — the same mechanism used for stored n8n
+# credentials and LLM API keys) before being written to
+# ``workspace.settings.shopify_access_token``, and decrypted at the point of
+# use. The key comes from ``config.CREDENTIAL_ENCRYPTION_KEY``; no key material
+# lives in this module.
+
+def _encrypt_secret(plaintext: str) -> str:
+    """Encrypt a secret for at-rest storage via the canonical Fernet service."""
+    from core.credentials.encryption import get_encryption_service
+
+    return get_encryption_service().encrypt(plaintext)
+
+
+def _decrypt_secret(ciphertext: str) -> str:
+    """Decrypt an at-rest secret written by :func:`_encrypt_secret`."""
+    from core.credentials.encryption import get_encryption_service
+
+    return get_encryption_service().decrypt(ciphertext)
+
+
 # ── Auth helper ──────────────────────────────────────────────────────
 
 def _verify_internal_key(authorization: str = Header(...)) -> None:
@@ -356,8 +380,11 @@ async def connect_shopify_store(
     """
     Store the Shopify access token for a workspace.
 
-    Saved in workspace.settings.shopify_access_token (encrypted at rest
-    via database-level encryption). Used by Composio for API calls.
+    The 147-scope Admin access token is encrypted at rest before storage
+    (application-level Fernet encryption via ``core.credentials.encryption``,
+    keyed by ``CREDENTIAL_ENCRYPTION_KEY``) and saved as ciphertext in
+    ``workspace.settings.shopify_access_token``. Read it back through
+    :func:`_decrypt_secret`. Used by Composio for API calls.
     """
     workspace = db.query(Workspace).get(request.workspace_id)
     if not workspace:
@@ -365,7 +392,8 @@ async def connect_shopify_store(
 
     settings = dict(workspace.settings or {})
     settings["shopify_domain"] = request.shop_domain
-    settings["shopify_access_token"] = request.access_token
+    # Encrypt at rest — never persist the raw Admin token (F058).
+    settings["shopify_access_token"] = _encrypt_secret(request.access_token)
     workspace.settings = settings
 
     from sqlalchemy.orm.attributes import flag_modified

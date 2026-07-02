@@ -1,0 +1,50 @@
+# PRD-173 (F092, W3 slice) — dependency audit lane.
+#
+# Opens automated dependency-update PRs across the repo's three ecosystems.
+# These PRs are the "dependency audit" half of the F092 bar; each is triaged
+# as it arrives (not part of the W3 diff). Weekly cadence with a small open-PR
+# cap keeps the queue reviewable rather than a flood.
+
+version: 2
+updates:
+  # Python — the orchestrator backend.
+  - package-ecosystem: "pip"
+    directory: "/orchestrator"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:00"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - "dependencies"
+      - "python"
+
+  # JavaScript/TypeScript — the frontend (package.json + package-lock.json).
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:00"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - "dependencies"
+      - "javascript"
+
+  # GitHub Actions — keep the CI action versions patched.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:00"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(ci)"
+    labels:
+      - "dependencies"
+      - "github-actions"
