@@ -35,6 +35,14 @@ VALID_STATUSES = {"inbox", "assigned", "in_progress", "review", "blocked", "done
 VALID_PRIORITIES = {"urgent", "high", "medium", "low"}
 VALID_REVIEW_MODES = {"human", "llm", "auto"}
 
+# PRD-171 F025: source_types the board must NOT self-execute on drag/PATCH.
+# 'recipe' runs through the recipe executor; 'orchestration'/'orchestration_task'
+# are mission mirrors the mission engine already owns (orchestration_board_bridge)
+# — firing a board execution on them double-runs work the mission drives.
+_NON_EXECUTABLE_SOURCE_TYPES = frozenset(
+    {"recipe", "orchestration", "orchestration_task"}
+)
+
 # Priority → SLA deadline hours
 _PRIORITY_SLA_HOURS: dict[str, int] = {
     "urgent": 4,
@@ -547,11 +555,13 @@ async def update_task(
         task.planning_data = body["planning_data"]
 
     # Check if we need to trigger execution
+    # PRD-171 F025: only user-owned board tasks self-execute on a status flip.
+    # Recipe + mission-mirror rows are driven by their own engines.
     trigger_execution = (
         "status" in body
         and body["status"] == "in_progress"
         and task.assigned_agent_id
-        and task.source_type != 'recipe'  # Recipe executor handles its own execution
+        and task.source_type not in _NON_EXECUTABLE_SOURCE_TYPES
     )
 
     # PRD-128: dispatch task_complete on terminal transition
@@ -857,8 +867,14 @@ async def update_task_status(
     db.commit()
     db.refresh(task)
 
-    # Fire-and-forget: trigger agent execution when moved to in_progress
-    if new_status == "in_progress" and task.assigned_agent_id and task.source_type != 'recipe':
+    # Fire-and-forget: trigger agent execution when moved to in_progress.
+    # PRD-171 F025: exclude recipe + mission-mirror rows — dragging a mission
+    # mirror to in_progress must not re-run work the mission engine owns.
+    if (
+        new_status == "in_progress"
+        and task.assigned_agent_id
+        and task.source_type not in _NON_EXECUTABLE_SOURCE_TYPES
+    ):
         _launch_task_execution(
             task_id=task.id,
             agent_id=task.assigned_agent_id,
@@ -873,6 +889,44 @@ async def update_task_status(
 
 # ── Immediate execution (fire-and-forget) ────────────────────────────
 
+async def _lease_heartbeat(task_id: int) -> None:
+    """PRD-171 F024: keep a long-running task's dispatch lease alive.
+
+    Runs concurrently with the execution and renews ``lease_until`` every half
+    the lease window on its OWN short-lived session, so a legitimately long run
+    (> ``BOARD_DISPATCH_LEASE_SECONDS``) is never swept back to ``assigned`` and
+    re-claimed. Cancelled the moment the run finishes; if the process crashes the
+    heartbeat dies with it, the lease truly lapses, and the sweeper requeues the
+    dead run — exactly the intended behaviour. Best-effort throughout: a failed
+    renewal is logged and retried, never propagated into the run.
+    """
+    from core.database.database import SessionLocal
+    from services.board_dispatcher import renew_lease
+
+    lease_seconds = config.BOARD_DISPATCH_LEASE_SECONDS
+    # Renew well within the window so a slow tick never lets the lease lapse.
+    interval = max(1.0, lease_seconds / 2)
+    try:
+        while True:
+            await asyncio.sleep(interval)
+            hb = SessionLocal()
+            try:
+                if not renew_lease(hb, task_id, lease_seconds=lease_seconds):
+                    # Row is no longer in_progress (finished/failed/requeued) —
+                    # nothing more to renew.
+                    break
+            except Exception:
+                logger.warning(
+                    "[BoardTasks] lease heartbeat failed for task %d", task_id,
+                    exc_info=True,
+                )
+                hb.rollback()
+            finally:
+                hb.close()
+    except asyncio.CancelledError:
+        raise
+
+
 def _launch_task_execution(
     task_id: int,
     agent_id: int,
@@ -886,6 +940,8 @@ def _launch_task_execution(
     async def _run():
         from core.database.database import SessionLocal
         db = SessionLocal()
+        # PRD-171 F024: heartbeat the dispatch lease for the life of the run.
+        heartbeat = asyncio.ensure_future(_lease_heartbeat(task_id))
         try:
             from modules.agents.factory.agent_factory import AgentFactory
 
@@ -902,6 +958,12 @@ def _launch_task_execution(
                 attachment_ids=attachment_ids,  # PRD-127
             )
 
+            # PRD-171 F023: the executor reports its true terminal status. A
+            # run that failed (e.g. the loop raised) returns {"status":"error"}
+            # — closing that as 'done' masks the failure. Fail honestly, exactly
+            # as the crash-handler below and the mission path already do.
+            exec_status = (exec_result or {}).get("status")
+
             # Extract response text
             llm_text = (
                 exec_result.get("result")
@@ -913,16 +975,31 @@ def _launch_task_execution(
 
             task = db.query(BoardTask).get(task_id)
             if task and task.status == "in_progress":
-                task.result = str(llm_text) if llm_text else None
-                task.status = "done" if review_mode == "auto" else "review"
-                task.completed_at = datetime.now(timezone.utc)
-                # PRD-128: dispatch task_complete only on terminal 'done'
-                if task.status == "done":
-                    await _dispatch_task_complete(db, workspace_id, task)
-                # Persist a report row for every completed task so it surfaces
-                # in Reports / Deliverables / Activity Feed (mirrors heartbeats).
-                await _auto_create_task_report(db, workspace_id, task, exec_result)
-                db.commit()
+                if exec_status == "error":
+                    task.status = "failed"
+                    task.error_message = str(
+                        exec_result.get("error") or "Agent execution failed"
+                    )[:500]
+                    task.completed_at = datetime.now(timezone.utc)
+                    db.commit()
+                    await _dispatch_task_failed(db, workspace_id, task)
+                    # Surface failures the same way successes are surfaced.
+                    await _auto_create_task_report(
+                        db, workspace_id, task,
+                        {"result": "", "tokens_used": 0},
+                    )
+                    db.commit()
+                else:
+                    task.result = str(llm_text) if llm_text else None
+                    task.status = "done" if review_mode == "auto" else "review"
+                    task.completed_at = datetime.now(timezone.utc)
+                    # PRD-128: dispatch task_complete only on terminal 'done'
+                    if task.status == "done":
+                        await _dispatch_task_complete(db, workspace_id, task)
+                    # Persist a report row for every completed task so it surfaces
+                    # in Reports / Deliverables / Activity Feed (mirrors heartbeats).
+                    await _auto_create_task_report(db, workspace_id, task, exec_result)
+                    db.commit()
 
             logger.info(
                 "[BoardTasks] Agent %d completed task %d → %s",
@@ -959,6 +1036,14 @@ def _launch_task_execution(
             except Exception:
                 db.rollback()
         finally:
+            # PRD-171 F024: stop heartbeating the moment the run ends — the task
+            # has reached its terminal state, so the lease should now be allowed
+            # to lapse for any genuinely-abandoned row.
+            heartbeat.cancel()
+            try:
+                await heartbeat
+            except (asyncio.CancelledError, Exception):
+                pass
             db.close()
 
     # Guarded launch: a strong ref prevents GC-cancellation mid-run and an

@@ -1067,7 +1067,7 @@ class AgentFactory:
                         llm_callback=_agent_llm_cb,
                         tool_callback=_agent_tool_cb,
                         max_iterations=max_tool_iterations,
-                        content_truncate_chars=0,  # agent path historically did not truncate
+                        content_truncate_tokens=0,  # agent path historically did not truncate
                     )
                     loop_result = await loop_executor.run(
                         initial_response=response,

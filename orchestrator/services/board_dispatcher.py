@@ -235,6 +235,45 @@ def requeue_expired_leases(db: Session, *, max_attempts: int) -> dict:
     return result
 
 
+def renew_lease(db: Session, task_id: int, *, lease_seconds: int) -> bool:
+    """PRD-171 F024: extend a still-running task's lease (a live heartbeat).
+
+    The lease (``BOARD_DISPATCH_LEASE_SECONDS``, default 600s) is the crash
+    deadline: ``requeue_expired_leases`` presumes any ``in_progress`` row past it
+    is abandoned and requeues it for another claim. A *legitimately* long run
+    (an agent working > 600s) would be swept back to ``assigned`` and re-claimed
+    — double execution, breaking exactly-once under lease expiry. The running
+    worker therefore heartbeats: while its execution is alive it pushes
+    ``lease_until`` forward, so the sweep only ever catches a genuinely dead run
+    (the process is gone, so nothing renews and the lease truly lapses).
+
+    Renews ONLY while ``status = 'in_progress'`` — a task that already reached a
+    terminal state is left untouched (never resurrects a finished/failed row).
+    Returns ``True`` if a row was renewed. Best-effort: the caller must not fail
+    the run because a heartbeat write failed.
+    """
+    now = datetime.now(timezone.utc)
+    new_lease = now + timedelta(seconds=lease_seconds)
+    rows = db.execute(
+        text(
+            """
+            UPDATE board_tasks
+               SET lease_until = :new_lease,
+                   updated_at  = :now
+             WHERE id = :task_id
+               AND status = 'in_progress'
+         RETURNING id
+            """
+        ),
+        {"new_lease": new_lease, "now": now, "task_id": task_id},
+    ).fetchall()
+    db.commit()
+    renewed = bool(rows)
+    if renewed:
+        logger.debug("[dispatch] renewed lease for task %s → %s", task_id, new_lease)
+    return renewed
+
+
 def scan_sla_breaches(db: Session) -> List[dict]:
     """Flag tasks past their SLA deadline that haven't reached a terminal state.
 
