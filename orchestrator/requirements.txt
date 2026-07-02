@@ -91,7 +91,7 @@ nltk>=3.9.3
 networkx==3.1
 
 # RAG chunking (only text-splitters + core are actually imported)
-langchain-text-splitters==1.0.0
+langchain-text-splitters==1.1.2
 langchain-core>=1.0.2,<2.0.0
 
 # CodeGraph dependencies (PRD-11 + PRD-62)
