@@ -1,4 +1,4 @@
 pytest==8.3.4
 pytest-json-report==1.5.0
 httpx==0.27.2
-python-dotenv==1.0.1
+python-dotenv==1.2.2
