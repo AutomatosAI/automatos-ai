@@ -57,7 +57,7 @@ tenacity==8.2.3
 cachetools>=5.3.0
 
 # Development/Testing
-pytest==7.4.3
+pytest==9.0.3
 pytest-asyncio==0.21.1
 pytest-timeout==2.3.1  # per-test timeout net for CI (PRD-142 W2-S3); kills hangs fast
 black==23.11.0
