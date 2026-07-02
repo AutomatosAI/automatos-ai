@@ -197,13 +197,17 @@ class ClerkAuth:
         
         # Defence-in-depth: Clerk publicMetadata is the source of truth, but a
         # tenant user with stray admin metadata must NEVER be promoted to
-        # platform admin. Require an Automatos-staff email domain on top.
-        is_automatos_staff = bool(email) and email.lower().endswith("@automatos.app")
-        if system_role == "admin" and not is_automatos_staff:
+        # platform admin. Require the configured platform-staff email domain on
+        # top. PRD-175 (F075): the domain is configuration (PLATFORM_STAFF_EMAIL_DOMAIN),
+        # not a baked-in literal, so a self-hosted/SaaS operator sets their own.
+        staff_domain = config.PLATFORM_STAFF_EMAIL_DOMAIN
+        is_platform_staff = bool(email) and email.lower().endswith("@" + staff_domain)
+        if system_role == "admin" and not is_platform_staff:
             logger.warning(
-                "Refusing platform-admin role for non-Automatos email %s — "
-                "Clerk publicMetadata says admin but email domain is not @automatos.app",
+                "Refusing platform-admin role for %s — Clerk publicMetadata says "
+                "admin but email domain is not @%s",
                 email,
+                staff_domain,
             )
             system_role = "user"
             role = system_role

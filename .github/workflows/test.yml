@@ -64,6 +64,16 @@ jobs:
       POSTGRES_PORT: "5432"
       POSTGRES_DB: test_db
       ENVIRONMENT: development
+      # PRD-175: run the suite in the local edition so the anonymous dev-fallback
+      # is on (REQUIRE_AUTH=false). Without it, saas-default requires Clerk creds
+      # and every unauthenticated endpoint test 401s.
+      AUTH_EDITION: local
+      # AUTH_EDITION=local's boot guard (config.validate_auth_edition) requires
+      # DEFAULT_WORKSPACE_ID — the single local workspace the anonymous session
+      # resolves to. init_test_db.py seeds a workspaces row with this exact id so
+      # the anonymous-fallback resolution finds a real workspace. Fixed throwaway
+      # UUID for the ephemeral CI DB.
+      DEFAULT_WORKSPACE_ID: "00000000-0000-0000-0000-0000000000c1"
 
     defaults:
       run:
@@ -128,6 +138,15 @@ jobs:
       POSTGRES_PORT: "5432"
       POSTGRES_DB: test_db
       ENVIRONMENT: development
+      # PRD-175: run the suite in the local edition so the anonymous dev-fallback
+      # is on (REQUIRE_AUTH=false). Without it, saas-default requires Clerk creds
+      # and every unauthenticated endpoint test 401s.
+      AUTH_EDITION: local
+      # AUTH_EDITION=local's boot guard requires DEFAULT_WORKSPACE_ID; set it so
+      # any config.validate_auth_edition() reached during the eval passes. The
+      # eval is SQLite-only and never resolves this workspace, but the flag must
+      # be internally consistent with AUTH_EDITION=local (mirrors the test job).
+      DEFAULT_WORKSPACE_ID: "00000000-0000-0000-0000-0000000000c1"
 
     defaults:
       run:
