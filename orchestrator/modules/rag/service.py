@@ -808,7 +808,7 @@ class RAGService:
             logger.error("Embedding manager not initialized — cannot search")
             return []
 
-        effective_workspace_id = workspace_id or self._workspace_id
+        effective_workspace_id = workspace_id or getattr(self, "_workspace_id", None)
         if not effective_workspace_id:
             logger.error("No workspace_id available — cannot search S3 Vectors")
             return []
@@ -893,7 +893,7 @@ class RAGService:
         if not candidates or not self.config.parent_child_expansion:
             return candidates
 
-        effective_workspace_id = workspace_id or self._workspace_id
+        effective_workspace_id = workspace_id or getattr(self, "_workspace_id", None)
 
         window = expand_window or self.config.expansion_window
 
