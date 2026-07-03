@@ -507,8 +507,9 @@ class Config:
     BOARD_DISPATCH_AGENT_SLOTS: int = int(os.getenv("BOARD_DISPATCH_AGENT_SLOTS", "2"))
     # S5: done tasks older than this drop off the active board (retained in DB).
     BOARD_ARCHIVE_DONE_DAYS: int = int(os.getenv("BOARD_ARCHIVE_DONE_DAYS", "30"))
-    # S5: SSE board-event ping cadence (server tells clients to refetch).
-    BOARD_SSE_PING_SECONDS: float = float(os.getenv("BOARD_SSE_PING_SECONDS", "10"))
+    # PRD-180 S1: board SSE is now LISTEN/NOTIFY-driven; this is only the
+    # connection-liveness heartbeat cadence (a ':hb' comment), not a refresh tick.
+    BOARD_SSE_HEARTBEAT_SECONDS: float = float(os.getenv("BOARD_SSE_HEARTBEAT_SECONDS", "20"))
 
     WORKER_INTERNAL_URL: str = os.getenv("WORKER_INTERNAL_URL", "http://localhost:8081")
     WORKER_INTERNAL_TOKEN: str = os.getenv("WORKER_INTERNAL_TOKEN", "")
@@ -577,6 +578,9 @@ class Config:
     LOKI_QUERY_URL: str = os.getenv("LOKI_QUERY_URL", "http://localhost:3100")
     # Shared by automatos_logs_api + automatos_alerts for HMAC verification.
     ALERT_INGEST_TOKEN: str = os.getenv("ALERT_INGEST_TOKEN", "")
+    # PRD-180 S5: default measurement window (seconds) for the tracked SLOs
+    # (tool-call success rate, board dispatch p95). Overridable per-request.
+    SLO_DEFAULT_WINDOW_SECONDS: int = int(os.getenv("SLO_DEFAULT_WINDOW_SECONDS", "86400"))
 
     # =============================================================================
     # CHANNELS — public-facing host used to build inbound webhook URLs

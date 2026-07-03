@@ -30,6 +30,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from core.models.core import BoardTask
+from services.board_events import notify_board_event
 
 logger = logging.getLogger(__name__)
 
@@ -169,6 +170,13 @@ def claim_tasks(
         .order_by(BoardTask.lease_until.asc())
         .all()
     )
+    # PRD-180 S1 (F090): a claim flips assigned → in_progress; push that to the
+    # Command Centre so the human watches the card start, not on a poll tick.
+    for t in claimed:
+        notify_board_event(
+            db, workspace_id=t.workspace_id, task_id=t.id, status="in_progress",
+            event="task_claimed",
+        )
     logger.info("[dispatch] worker=%s claimed %d task(s): %s", worker_id, len(ids), ids)
     return claimed
 
@@ -227,12 +235,38 @@ def requeue_expired_leases(db: Session, *, max_attempts: int) -> dict:
 
     result = {"requeued": [r[0] for r in requeued], "failed": [r[0] for r in failed]}
     if result["requeued"] or result["failed"]:
+        # PRD-180 S1 (F090): a crashed task returning to the queue or dying is a
+        # real state change the human should see immediately, not on a poll tick.
+        _notify_swept(db, result["requeued"], "assigned", "task_requeued")
+        _notify_swept(db, result["failed"], "failed", "task_failed")
         logger.info(
             "[dispatch] sweeper requeued=%s failed=%s",
             result["requeued"],
             result["failed"],
         )
     return result
+
+
+def _notify_swept(db: Session, task_ids: List[int], status: str, event: str) -> None:
+    """Fire a board-event NOTIFY for each swept task, looking up its workspace.
+
+    Best-effort: the sweeper's correctness never depends on the UI ping, so a
+    failed lookup/notify is logged and skipped rather than raised.
+    """
+    if not task_ids:
+        return
+    try:
+        rows = db.execute(
+            text("SELECT id, workspace_id FROM board_tasks WHERE id = ANY(:ids)"),
+            {"ids": task_ids},
+        ).fetchall()
+        for task_id, workspace_id in rows:
+            notify_board_event(
+                db, workspace_id=workspace_id, task_id=task_id, status=status,
+                event=event,
+            )
+    except Exception:  # noqa: BLE001 — UI ping is best-effort, never breaks the sweep
+        logger.debug("[dispatch] sweep notify failed for %s", task_ids, exc_info=True)
 
 
 def renew_lease(db: Session, task_id: int, *, lease_seconds: int) -> bool:

@@ -27,6 +27,7 @@ from core.models import Agent
 from core.utils.exception_telemetry import record_error
 from core.utils.background_tasks import launch_guarded
 from services.board_dispatcher import notify_task_available
+from services.board_events import board_event_stream, notify_board_event
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/tasks", tags=["board-tasks"])
@@ -350,6 +351,12 @@ async def create_task(
     db.commit()
     db.refresh(task)
 
+    # PRD-180 S1 (F090): push the new card to subscribed Command Centres.
+    notify_board_event(
+        db, workspace_id=ctx.workspace_id, task_id=task.id, status=task.status,
+        event="task_created",
+    )
+
     # PRD-161: assignment = immediate dispatch via the board loop (Q39/Q40).
     # A created-as-assigned task notifies the claimant; the dispatch loop claims
     # it (FOR UPDATE SKIP LOCKED) and runs it — no inline launch, no heartbeat wait.
@@ -426,27 +433,21 @@ async def list_tasks(
 async def stream_board_events(
     ctx: RequestContext = Depends(require_task_context(TASKS_READ)),
 ):
-    """SSE board events (read-only; PRD-09 ``TASKS_READ`` narrow dep).
+    """Real-time board SSE via Postgres ``LISTEN/NOTIFY`` (PRD-180 S1, F090).
 
-    A server-push refresh signal: emits ``board_changed`` on connect and every
-    ``BOARD_SSE_PING_SECONDS`` so clients refetch without tight polling. Rides the
-    existing read-only ``TASKS_READ`` scope — the shared hybrid auth is untouched
-    and no write scope is introduced (Q42).
+    Replaces the old timed ping: the stream ``LISTEN``s the ``board_events``
+    channel and forwards each board-task mutation (insert / status change /
+    claim / requeue) to this client sub-second, scoped to the caller's
+    workspace. A heartbeat comment keeps the connection alive but does not drive
+    refreshes — real NOTIFY events do. Rides the read-only ``TASKS_READ`` scope
+    (Q42): the shared hybrid auth is untouched and no write scope is introduced.
     """
     workspace_id = str(ctx.workspace_id)
 
-    async def event_generator():
-        payload = json.dumps({"workspace_id": workspace_id})
-        yield f"event: board_changed\ndata: {payload}\n\n"
-        try:
-            while True:
-                await asyncio.sleep(config.BOARD_SSE_PING_SECONDS)
-                yield f"event: board_changed\ndata: {payload}\n\n"
-        except asyncio.CancelledError:
-            return
-
     return StreamingResponse(
-        event_generator(),
+        board_event_stream(
+            workspace_id, heartbeat_seconds=config.BOARD_SSE_HEARTBEAT_SECONDS
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -570,6 +571,12 @@ async def update_task(
 
     db.commit()
     db.refresh(task)
+
+    # PRD-180 S1 (F090): push the mutation to subscribed Command Centres.
+    notify_board_event(
+        db, workspace_id=ctx.workspace_id, task_id=task.id, status=task.status,
+        event="task_updated",
+    )
 
     if trigger_execution:
         _launch_task_execution(
@@ -866,6 +873,12 @@ async def update_task_status(
 
     db.commit()
     db.refresh(task)
+
+    # PRD-180 S1 (F090): push the drag-and-drop status change to Command Centres.
+    notify_board_event(
+        db, workspace_id=ctx.workspace_id, task_id=task.id, status=task.status,
+        event="status_changed",
+    )
 
     # Fire-and-forget: trigger agent execution when moved to in_progress.
     # PRD-171 F025: exclude recipe + mission-mirror rows — dragging a mission
