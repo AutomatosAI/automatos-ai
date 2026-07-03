@@ -690,7 +690,9 @@ class ToolRouter:
 
             # PRD-141 US-019: fold this outcome into the routing graph via the
             # batched recorder (non-blocking enqueue; no DB / no task per call).
-            self._record_tool_signal(tool_name, success, agent_id, workspace_id, caller_context)
+            self._record_tool_signal(
+                tool_name, success, agent_id, workspace_id, caller_context, tool_args
+            )
 
             if success:
                 frontend_data = self.formatter.format_for_frontend(result, tool_name)
@@ -751,7 +753,9 @@ class ToolRouter:
             )
             logger.error(f"[tool-trace {trace_id}] {tool_name} exception: {error_msg}")
             # PRD-141 US-019: a thrown tool is a failure outcome too.
-            self._record_tool_signal(tool_name, False, agent_id, workspace_id, caller_context)
+            self._record_tool_signal(
+                tool_name, False, agent_id, workspace_id, caller_context, tool_args
+            )
             envelope = {
                 "success": False,
                 "frontend_data": {},
@@ -798,11 +802,20 @@ class ToolRouter:
         agent_id: Optional[int],
         workspace_id: Optional[UUID],
         caller_context: Optional[Dict[str, Any]],
+        parameters: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Enqueue a routing-graph signal. Best-effort: never raises into the
         tool hot path. ``prior_action`` (the previous tool in the turn) is read
-        from caller_context when the caller threads it through."""
+        from caller_context when the caller threads it through.
+
+        PRD-177 S1 (F016): the batched recorder learns the RESOLVED composio
+        action (SLACK_SEND_MESSAGE), not the collapsed ``composio_execute`` node
+        — same resolution as the ToolExecutionLog path, so both learning paths
+        agree on per-action nodes."""
         try:
+            from modules.tools.execution.telemetry import resolve_action_name
+
+            action_name = resolve_action_name(tool_name, parameters or {})
             prior_action = (
                 caller_context.get("prior_action")
                 if isinstance(caller_context, dict)
@@ -810,7 +823,7 @@ class ToolRouter:
             )
             get_tool_signal_recorder().record(
                 ToolSignal(
-                    action_name=tool_name,
+                    action_name=action_name,
                     success=bool(success),
                     agent_id=agent_id,
                     workspace_id=str(workspace_id) if workspace_id else None,
