@@ -536,10 +536,36 @@ class ToolResultFormatter:
         }
     
     @staticmethod
+    def _mission_oversight(risk_class: Optional[str]) -> Dict[str, Any]:
+        """PRD-181 S5: resolve the AI-Act oversight tier + rationale for a mission
+        approval card. A mission awaiting approval is human-in-the-loop by
+        definition, so an absent/monitor-only risk signal is floored to the
+        dominant 'ask' class (external side-effect) — the card must never imply
+        'no human oversight' on a plan a human is being asked to approve.
+        """
+        try:
+            from modules.policy.ai_act import OversightTier, oversight_for_risk
+            from modules.policy.policy_document import RISK_EXTERNAL
+
+            mapping = oversight_for_risk(risk_class)
+            if mapping.tier != OversightTier.HUMAN_IN_THE_LOOP:
+                mapping = oversight_for_risk(RISK_EXTERNAL)
+            return mapping.to_dict()
+        except Exception:
+            # Fail-safe: still describe human oversight even if the module import
+            # hiccups — never emit a card that implies no oversight.
+            return {
+                "risk_class": risk_class or "unknown",
+                "tier": "human_in_the_loop",
+                "rationale": "This plan requires human approval before it runs.",
+                "requires_approval": True,
+            }
+
+    @staticmethod
     def format_for_frontend(result: Dict[str, Any], tool_name: str) -> Dict[str, Any]:
         """
         Format tool result specifically for frontend artifact viewer.
-        
+
         Returns structure expected by frontend components.
         """
         standardized = ToolResultFormatter.standardize_result(result, tool_name)
@@ -746,12 +772,23 @@ class ToolResultFormatter:
             # an in-chat approval card. (raw_result fallback covers wrapped results.)
             mres = result if result.get("mission_id") else (result.get("raw_result") or {})
             if mres.get("awaiting_approval") and mres.get("mission_id"):
+                # PRD-181 S5 (EU-AI-Act Art.14): the card carries the autonomy risk
+                # tier + the oversight rationale so a human approver sees the risk
+                # classification and WHY they are in the loop. A mission that
+                # reached AWAITING_APPROVAL is human-in-the-loop by definition, so
+                # an absent/low risk signal is floored to the dominant "ask" class.
+                oversight = ToolResultFormatter._mission_oversight(mres.get("risk_class"))
                 frontend_data["mission_approval"] = {
                     "mission_id": str(mres.get("mission_id")),
                     "goal": mres.get("goal", ""),
                     "state": mres.get("state"),
                     "task_count": mres.get("task_count", 0),
                     "tasks": mres.get("tasks", []),
+                    # S5 — AI-Act oversight fields.
+                    "risk_class": oversight["risk_class"],
+                    "risk_tier": oversight["tier"],
+                    "oversight_rationale": oversight["rationale"],
+                    "requires_approval": True,
                 }
 
         return frontend_data
