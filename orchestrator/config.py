@@ -921,7 +921,17 @@ class Config:
             return str(val).lower() == "true" if val else False
         except Exception:
             return os.getenv("RAG_RERANK_ENABLED", "false").lower() == "true"
-    
+
+    # PRD-179 S4 (F070): rag_feedback feeds retrieval ranking. A document that
+    # accrued negative feedback (thumbs_down, or a rating at/below the floor) has
+    # its retrieval score multiplied by this factor on the live hot path — a doc
+    # marked unhelpful de-ranks and can fall out of the top-K. 1.0 disables it.
+    RAG_FEEDBACK_PENALTY_FACTOR: float = float(os.getenv("RAG_FEEDBACK_PENALTY_FACTOR", "0.5"))
+    # A rating at/below this counts as negative (thumbs_down is always negative).
+    RAG_FEEDBACK_NEGATIVE_RATING_MAX: int = int(os.getenv("RAG_FEEDBACK_NEGATIVE_RATING_MAX", "2"))
+    # Only feedback from the last N days shapes ranking (stale opinions decay out).
+    RAG_FEEDBACK_LOOKBACK_DAYS: int = int(os.getenv("RAG_FEEDBACK_LOOKBACK_DAYS", "90"))
+
     # =============================================================================
     # LLM ANALYTICS (PRD-54: Model Tiers & Cost Optimization)
     # =============================================================================
