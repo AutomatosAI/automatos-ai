@@ -159,9 +159,9 @@ export function useCanvasSession(
       // decision is what actually applies/reverts in the session.
       dispatch({ kind: 'resolve', requestId, decision })
       try {
-        await apiClient.request(`/api/workspaces/${workspaceId}/canvas/decision`, {
-          method: 'POST',
-          body: { request_id: requestId, approved: decision === 'approve' },
+        await apiClient.post(`/api/workspaces/${workspaceId}/canvas/decision`, {
+          request_id: requestId,
+          approved: decision === 'approve',
         })
       } catch {
         // A failed decision leaves the session paused; the pending card returning
@@ -179,10 +179,7 @@ export function useCanvasSession(
       // server-side gate.
       dispatch({ kind: 'autoAccept', enabled })
       try {
-        await apiClient.request(`/api/workspaces/${workspaceId}/canvas/auto-accept`, {
-          method: 'POST',
-          body: { enabled },
-        })
+        await apiClient.post(`/api/workspaces/${workspaceId}/canvas/auto-accept`, { enabled })
       } catch {
         // Revert the optimistic toggle if the server rejected it.
         dispatch({ kind: 'autoAccept', enabled: !enabled })

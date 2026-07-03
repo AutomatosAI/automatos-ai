@@ -11,7 +11,7 @@
  */
 
 import { useCallback, useState } from 'react'
-import { GitCommitHorizontal, Loader2, UploadCloud } from 'lucide-react'
+import { GitCommit, Loader2, UploadCloud } from 'lucide-react'
 
 import { apiClient } from '@/lib/api-client'
 import { Button } from '@/components/ui/button'
@@ -68,9 +68,9 @@ export function CanvasCommitControl({ workspaceId, changeSignal }: CanvasCommitC
     setBusy('commit')
     setError(null)
     try {
-      const res = await apiClient.request<CommitResult>(
+      const res = await apiClient.post<CommitResult>(
         `/api/workspaces/${workspaceId}/canvas/commit`,
-        { method: 'POST', body: { message: message.trim(), cwd: repoPath.trim() } }
+        { message: message.trim(), cwd: repoPath.trim() }
       )
       if (res.success) {
         setPushed(res.branch ?? 'branch pushed')
@@ -88,7 +88,7 @@ export function CanvasCommitControl({ workspaceId, changeSignal }: CanvasCommitC
   return (
     <div className="space-y-2 border-t border-border p-3" data-testid="canvas-commit">
       <div className="flex items-center gap-2">
-        <GitCommitHorizontal className="h-4 w-4 text-muted-foreground" />
+        <GitCommit className="h-4 w-4 text-muted-foreground" />
         <span className="text-xs font-medium">Commit &amp; push</span>
       </div>
 
