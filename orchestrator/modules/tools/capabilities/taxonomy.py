@@ -12,7 +12,7 @@ Design Principles:
 - Separate: Capabilities are semantic affordances, NOT risk levels
 """
 
-from typing import Dict, Set, List
+from typing import Dict, List, Optional, Set
 
 
 # =============================================================================
@@ -256,6 +256,15 @@ DESTRUCTIVE_CAPABILITIES: Set[str] = {
     "user.manage",
 }
 
+# Canonical destructive-intent keywords (PRD-177 S3). A user intent containing
+# any of these reads as destructive — used by the fail-closed gate to decide
+# whether an UNCLASSIFIED action (empty metadata) may run. Single source of
+# truth; previously duplicated across models.py and action_capability_filter.py.
+DESTRUCTIVE_INTENT_KEYWORDS: Set[str] = {
+    "delete", "remove", "archive", "revoke", "destroy",
+    "drop", "purge", "wipe", "erase",
+}
+
 REQUIRES_CONFIRMATION: Set[str] = {
     # All destructive capabilities require confirmation
     *DESTRUCTIVE_CAPABILITIES,
@@ -415,6 +424,19 @@ def get_capabilities_for_intent(intent: str) -> List[str]:
 def is_destructive_capability(capability: str) -> bool:
     """Check if a capability is considered destructive."""
     return capability in DESTRUCTIVE_CAPABILITIES
+
+
+def intent_is_destructive(intent: Optional[str]) -> bool:
+    """Return True when the user's intent text reads as destructive (PRD-177 S3).
+
+    Used by the fail-closed gate to decide whether an unclassified action (empty
+    metadata) is safe to permit on a cold start. Single source of truth for the
+    destructive-keyword heuristic.
+    """
+    if not intent:
+        return False
+    intent_lower = intent.lower()
+    return any(kw in intent_lower for kw in DESTRUCTIVE_INTENT_KEYWORDS)
 
 
 def requires_confirmation_capability(capability: str) -> bool:

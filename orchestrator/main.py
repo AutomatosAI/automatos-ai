@@ -400,6 +400,17 @@ async def _boot_phase_2_extensions(app_instance: "FastAPI") -> "DeferredInitResu
                 except Exception as _eb_err:
                     logger.warning("Could not start EdgeBuilderScheduler: %s", _eb_err)
 
+                # PRD-177 S3 (F018): daily Composio action-metadata sync — keeps
+                # the classification table (which backs the fail-closed
+                # destructive gate) fresh, on the same scheduler as the recompute.
+                if config.COMPOSIO_SYNC_ENABLED:
+                    try:
+                        from services.composio_sync_scheduler import get_composio_sync_scheduler
+                        await get_composio_sync_scheduler().start(scheduler=shared_sched)
+                        logger.info("ComposioSyncScheduler started on unified scheduler")
+                    except Exception as _cs_err:
+                        logger.warning("Could not start ComposioSyncScheduler: %s", _cs_err)
+
                 # PRD-77: Load agent-scheduled tasks into APScheduler
                 try:
                     from services.scheduled_task_service import ScheduledTaskService

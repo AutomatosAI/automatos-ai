@@ -952,6 +952,31 @@ async def get_filtered_composio_actions(
             session_used.close()
 
 
+def _destructive_fail_closed(intent: Optional[str], allow_destructive: bool) -> bool:
+    """Should an UNVERIFIABLE action be denied? (PRD-177 S3 / F018)
+
+    True when the fail-closed flag is on, the caller has not explicitly
+    authorized destructive actions, and the intent text reads as destructive.
+    In that case an action we cannot classify (filter unavailable / errored /
+    unsynced) must fail CLOSED rather than fail open.
+    """
+    if allow_destructive:
+        return False
+    try:
+        from config import config
+
+        if not bool(getattr(config, "COMPOSIO_DESTRUCTIVE_FAIL_CLOSED", True)):
+            return False
+    except Exception:
+        pass  # default to fail-closed behavior if config can't be read
+    try:
+        from modules.tools.capabilities.taxonomy import intent_is_destructive
+
+        return intent_is_destructive(intent)
+    except Exception:
+        return False
+
+
 def validate_action_for_intent(
     action_id: str,
     intent: str,
@@ -975,9 +1000,18 @@ def validate_action_for_intent(
         (eligible, reason) tuple
     """
     if not CAPABILITY_FILTER_AVAILABLE:
-        # Fail open if capability filter not available
-        logger.warning("Capability filter not available, allowing action")
-        return True, "Capability filter not available (fail open)"
+        # PRD-177 S3 (F018): cannot classify — fail CLOSED for destructive intent.
+        if _destructive_fail_closed(intent, allow_destructive):
+            logger.warning(
+                "Capability filter unavailable and intent reads destructive — "
+                "failing CLOSED (confirmation required)"
+            )
+            return False, (
+                "Cannot verify this action (capability filter unavailable) and "
+                "the request looks destructive — confirmation required."
+            )
+        logger.warning("Capability filter not available, allowing non-destructive action")
+        return True, "Capability filter not available (non-destructive, allowing)"
 
     session_used = db_session or SessionLocal()
 
@@ -999,14 +1033,24 @@ def validate_action_for_intent(
         return eligible, reason
 
     except Exception as e:
-        # Log at debug level if it's a missing table error (expected during development)
+        # PRD-177 S3 (F018): a validation error means we cannot classify — fail
+        # CLOSED for destructive intent rather than silently permitting damage.
         error_str = str(e)
         if "does not exist" in error_str or "UndefinedTable" in error_str:
             logger.debug(f"Action validation skipped (table not created): {e}")
         else:
-            logger.warning(f"Action validation error (fail open): {e}")
-        # Fail open on errors to avoid blocking legitimate actions
-        return True, "Validation skipped (fail open)"
+            logger.warning(f"Action validation error: {e}")
+        if _destructive_fail_closed(intent, allow_destructive):
+            logger.warning(
+                "Action validation errored and intent reads destructive — "
+                "failing CLOSED (confirmation required)"
+            )
+            return False, (
+                "Could not verify this action and the request looks destructive "
+                "— confirmation required before running."
+            )
+        # Non-destructive intent: allow so a transient error doesn't block work.
+        return True, "Validation skipped (non-destructive, allowing)"
     finally:
         if db_session is None:
             session_used.close()
