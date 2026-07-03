@@ -527,6 +527,52 @@ async def sync_shop_data(
 # POST /api/shopify/events
 # ===================================================================
 
+# Catalog-mutation webhook topics that must refresh the commerce graph.
+# This is the set the Shopify Remix app (Part B) registers and POSTs to
+# ``/events``. A catalog change re-runs the full catalog sync (products →
+# variants → collections → vendors) — the ONLY path that rebuilds the
+# commerce graph, since ``map_shopify_catalog`` produces those nodes and
+# ``partition_pending_sources`` (document-only) never can.
+CATALOG_EVENTS = frozenset({
+    "products/create", "products/update", "products/delete",
+    "inventory_levels/update",
+    "collections/create", "collections/update", "collections/delete",
+})
+
+
+async def _sync_catalog_for_workspace(workspace_id: str, event: str) -> None:
+    """Re-sync the Shopify catalog → commerce graph for a workspace.
+
+    Runs on its own DB session (``SessionLocal``) so it is safe to fire as a
+    detached background task from the request handler — the request-scoped
+    session is torn down when ``/events`` returns and must never be used here
+    (this is the F033 teardown class of bug, avoided by construction).
+
+    F032: the old handler called ``GraphifyService.schedule_incremental_update``
+    with a Shopify-shaped pending dict that ``partition_pending_sources`` drops,
+    so the commerce graph never changed. The catalog graph is built by
+    ``_product_sync_impl`` (``map_shopify_catalog`` → ``import_graph``); a
+    catalog webhook must therefore trigger a catalog re-sync, not a document
+    re-extraction.
+    """
+    from core.database.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        await _product_sync_impl(workspace_id, db)
+        logger.info(
+            "[PRD-183 S1] Catalog graph re-synced for workspace=%s reason=%s",
+            workspace_id, event,
+        )
+    except Exception as e:  # noqa: BLE001 — a webhook must never raise back
+        logger.warning(
+            "[PRD-183 S1] Catalog re-sync failed for workspace=%s reason=%s: %s",
+            workspace_id, event, e,
+        )
+    finally:
+        db.close()
+
+
 @router.post("/events")
 async def forward_event(
     request: EventRequest,
@@ -535,28 +581,20 @@ async def forward_event(
 ):
     """
     Forward Shopify webhook events for agent context enrichment.
-    Currently logs events; future: queue for agent processing.
+
+    Catalog-mutation events (products/*, collections/*, inventory_levels/update)
+    trigger an incremental commerce-graph refresh (PRD-009 sub-60s freshness,
+    F032). The heavy re-sync runs as a detached background task with its own
+    session, so the webhook returns immediately.
     """
     logger.info(
         "Shopify event received: shop=%s event=%s",
         request.shop, request.event,
     )
 
-    # PRD-009 Layer 2 — incremental graph updates on catalog mutations.
-    # We treat product/collection/inventory events as triggers to re-sync
-    # ONLY the touched entities. For the POC we use a coarse signal: any
-    # catalog-shaped event schedules an incremental rebuild via the existing
-    # GraphifyService.schedule_incremental_update mechanism. Fine-grained
-    # per-product re-embed is a follow-up — graph diff machinery in
-    # graph_service already deduplicates so this is safe.
-    CATALOG_EVENTS = {
-        "products/create", "products/update", "products/delete",
-        "inventory_levels/update",
-        "collections/create", "collections/update", "collections/delete",
-    }
     if request.event in CATALOG_EVENTS:
-        # Resolve workspace by shop domain (already an indexed lookup pattern
-        # used by /sync and /deactivate above).
+        # Resolve workspace by shop domain (the indexed lookup pattern used by
+        # /sync and /deactivate above).
         ws = (
             db.query(Workspace)
             .filter(
@@ -566,25 +604,15 @@ async def forward_event(
             .first()
         )
         if ws:
-            try:
-                from modules.knowledge.graph_service import GraphifyService
-                gs = GraphifyService()
-                gs.schedule_incremental_update(
-                    workspace_id=str(ws.id),
-                    changed_sources=[{
-                        "source": "shopify",
-                        "event": request.event,
-                        "shop": request.shop,
-                    }],
-                )
-                logger.info(
-                    "[PRD-009] Scheduled incremental graph update for workspace=%s reason=%s",
-                    ws.id, request.event,
-                )
-            except Exception as e:
-                logger.warning(
-                    "[PRD-009] Could not schedule incremental update: %s", e
-                )
+            import asyncio as _asyncio
+
+            _asyncio.create_task(
+                _sync_catalog_for_workspace(str(ws.id), request.event)
+            )
+            logger.info(
+                "[PRD-183 S1] Scheduled catalog re-sync for workspace=%s reason=%s",
+                ws.id, request.event,
+            )
 
     return {"status": "received", "event": request.event}
 
