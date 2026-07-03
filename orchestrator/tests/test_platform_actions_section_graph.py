@@ -136,8 +136,13 @@ class _FakeGraphRouter:
         self.next_result: List[Tuple[str, float, List[str]]] = []
         self.exception: Optional[Exception] = None
 
-    async def rank_chains(self, query, agent_id=None, top_k=15, exclude_admin=True, exclude_promoted=True):
-        self.calls.append({"query": query, "agent_id": agent_id, "top_k": top_k})
+    async def rank_chains(self, query, *, workspace_id, agent_id=None, top_k=15, exclude_admin=True, exclude_promoted=True):
+        # PRD-177 S5: workspace_id is now a required keyword — the section must
+        # thread the tenant's workspace so the per-tenant graph is read.
+        self.calls.append({
+            "query": query, "workspace_id": workspace_id,
+            "agent_id": agent_id, "top_k": top_k,
+        })
         if self.exception:
             raise self.exception
         return list(self.next_result)
@@ -324,6 +329,9 @@ def test_graph_path_passes_agent_id_from_context():
     _run(section.render(_ctx(query="list agents", agent_id=42)))
 
     assert _fake_graph_router.calls[0]["agent_id"] == 42
+    # PRD-177 S5: the section threads ctx.workspace_id so the per-tenant graph
+    # is read for THIS workspace, not globally.
+    assert _fake_graph_router.calls[0]["workspace_id"] == "ws-1"
 
 
 def test_graph_path_no_agent_id_passes_none():

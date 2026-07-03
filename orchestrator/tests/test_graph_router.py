@@ -97,6 +97,7 @@ class _StubAffinity:
 
     action_name = _Col("action_name")
     agent_id = _Col("agent_id")
+    workspace_id = _Col("workspace_id")
     affinity_type = _Col("affinity_type")
 
     def __init__(self, **kw):
@@ -335,7 +336,7 @@ def _rank(router, edges=None, affinities=None, agent_id=None,
 
     try:
         return _run(router.rank_chains(
-            query="test query", agent_id=agent_id, top_k=top_k,
+            query="test query", workspace_id=None, agent_id=agent_id, top_k=top_k,
         ))
     finally:
         GraphRouter._min_confidence = orig_min
@@ -590,7 +591,7 @@ class TestDBErrorFallback:
 
         _gr_mod.get_db_session = exploding_db
 
-        result = _run(router.rank_chains(query="test", top_k=15))
+        result = _run(router.rank_chains(query="test", workspace_id=None, top_k=15))
 
         assert len(result) == 2
         for _, _, actions in result:
