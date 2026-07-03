@@ -421,6 +421,10 @@ class DocumentManager:
         from config import config as app_config
         self.s3_bucket = s3_bucket or app_config.S3_DOCUMENTS_BUCKET
         self.s3_region = app_config.AWS_REGION or 'us-east-1'
+        # PRD-176 F089: honor S3_ENDPOINT_URL so a local MinIO (S3-compatible)
+        # object store is used when set. None => boto default (real AWS S3), so
+        # prod is unchanged. MinIO needs path-style addressing.
+        s3_endpoint = app_config.S3_ENDPOINT_URL or None
         # Bounded so a slow/unreachable/unconfigured S3 fails FAST (≤~5s) instead
         # of hanging the whole process. A DocumentManager must never block document
         # ops on S3 latency (PRD-164: this was a 90s faulthandler hang in CI when
@@ -429,9 +433,15 @@ class DocumentManager:
         self.s3_client = boto3.client(
             's3',
             region_name=self.s3_region,
+            endpoint_url=s3_endpoint,
             aws_access_key_id=app_config.AWS_ACCESS_KEY_ID,
             aws_secret_access_key=app_config.AWS_SECRET_ACCESS_KEY,
-            config=_BotoConfig(connect_timeout=3, read_timeout=5, retries={"max_attempts": 1}),
+            config=_BotoConfig(
+                connect_timeout=3,
+                read_timeout=5,
+                retries={"max_attempts": 1},
+                s3={"addressing_style": "path"} if s3_endpoint else {},
+            ),
         )
 
         # Ensure S3 bucket exists (create if needed)

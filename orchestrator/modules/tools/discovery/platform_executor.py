@@ -546,6 +546,38 @@ class PlatformActionExecutor:
             )
             return False
 
+    def _agent_inherits_admin(self) -> bool:
+        """Whether an agent (no caller identity) may act as admin here.
+
+        PRD-174 F014: closes the ``admin_only`` no-op. Historically a missing
+        caller_context fell back to "does the workspace have *an* admin member"
+        (true for every workspace) — so ``admin_only`` never actually gated an
+        agent. Under the policy plane this fallback is opt-in: it applies only
+        when the workspace's explicit, default-OFF ``agents_inherit_admin``
+        policy is set (and there really is an admin/owner to inherit from).
+
+        Plane OFF ⇒ historical behaviour (always fall back to the owner check)
+        so the rollout is byte-for-byte reversible.
+        """
+        try:
+            from modules.policy import policy_plane_enabled
+
+            if policy_plane_enabled():
+                from modules.policy.policy_document import load_policy_document
+
+                doc = load_policy_document(self.db, self.workspace_id)
+                if not doc.agents_inherit_admin:
+                    return False  # explicit default-off policy → agent is NOT admin
+                return self._workspace_has_admin_owner()
+        except Exception:
+            logger.warning(
+                "[PlatformExecutor] agents_inherit_admin policy read failed for %s "
+                "— falling back to legacy owner check", self.workspace_id,
+                exc_info=True,
+            )
+        # Plane OFF (or read failure): historical always-fallback behaviour.
+        return self._workspace_has_admin_owner()
+
     def _full_autonomy(self) -> bool:
         """True when this workspace is dialled to full autonomy.
 
@@ -639,10 +671,13 @@ class PlatformActionExecutor:
                         or caller_context.get("system_role") == "admin"
                     )
                 else:
-                    # No caller_context (heartbeat, agent factory, etc.) —
-                    # resolve from workspace owner's role.  Agents inherit
-                    # admin privileges from their workspace owner.
-                    is_admin = self._workspace_has_admin_owner()
+                    # No caller_context (heartbeat, agent factory, etc.).
+                    # PRD-174 F014: the "agents inherit admin from the workspace
+                    # owner" fallback is no longer implicit — under the policy
+                    # plane it applies ONLY when the explicit, default-OFF
+                    # ``agents_inherit_admin`` workspace policy is set. Plane OFF
+                    # keeps the historical always-fallback behaviour.
+                    is_admin = self._agent_inherits_admin()
                 if not is_admin:
                     logger.warning(
                         "[PlatformExecutor] Admin-only action '%s' denied — "
@@ -838,28 +873,21 @@ class PlatformActionExecutor:
                 except Exception as e:
                     logger.debug("[PRD-124] Failed to resolve _agent_id for graph tool: %s", e)
 
-        # PRD-108: Auto-inject field_id for field tools from active mission
+        # PRD-108 / PRD-178 S1 (F020): Auto-inject field_id for field tools from
+        # the CALLING task's run — threaded down via caller_context["field_context"]
+        # by the agent runtime. The previous `.first()`-on-any-running-run lookup
+        # bound an arbitrary concurrent mission's field (F020) and let a running
+        # mission shadow workspace recall (F021); it is deleted, not shimmed.
+        # No threaded context ⇒ no injection (an explicit field_id still wins) —
+        # an ambient guess is exactly the bug we are removing.
         if action_name.startswith("platform_field_") and "field_id" not in params:
-            try:
-                from core.models.orchestration import OrchestrationRun
-                active_run = (
-                    self.db.query(OrchestrationRun)
-                    .filter(
-                        OrchestrationRun.workspace_id == self.workspace_id,
-                        OrchestrationRun.state == "running",
-                    )
-                    .first()
+            field_id = ((caller_context or {}).get("field_context") or {}).get("field_id")
+            if field_id:
+                params = {**params, "field_id": field_id}
+                logger.info(
+                    "[PRD-178 S1] Bound field_id %s to calling task for %s",
+                    field_id, action_name,
                 )
-                if active_run:
-                    field_id = (active_run.config or {}).get("field_id")
-                    if field_id:
-                        params = {**params, "field_id": field_id}
-                        logger.info(
-                            "[PRD-108] Auto-injected field_id %s for %s",
-                            field_id, action_name,
-                        )
-            except Exception as e:
-                logger.warning("[PRD-108] Failed to resolve field_id: %s", e)
 
         # PRD-163 S1/Q56: attribute mission create + lifecycle to the chatting
         # user. The chat path threads the driving user's clerk id via

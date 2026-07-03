@@ -137,7 +137,14 @@ class PlatformActionsSection(BaseSection):
         agent_id = ctx.kwargs.get("agent_id") if ctx.kwargs else None
         router = get_graph_router()
         top_k = self._top_k()
-        chains = await router.rank_chains(query, agent_id=agent_id, top_k=top_k)
+        # PRD-177 S5: per-tenant graph — scope reads to this workspace. The
+        # learned edges are the tenant's own; never read another workspace's.
+        chains = await router.rank_chains(
+            query,
+            workspace_id=ctx.workspace_id,
+            agent_id=agent_id,
+            top_k=top_k,
+        )
 
         if not chains:
             return None

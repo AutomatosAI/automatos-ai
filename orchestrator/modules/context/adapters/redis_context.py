@@ -136,7 +136,11 @@ class RedisSharedContext(SharedContextPort):
         query: str,
         agent_id: int,
         top_k: int = 10,
+        record_access: bool = True,
     ) -> list[dict[str, Any]]:
+        # PRD-178 S2: ``record_access`` is part of the port contract. The Redis
+        # baseline reads via lrange and never reinforces, so it is already
+        # read-only — the flag is accepted for interface parity, no-op here.
         r = await _get_async_redis()
         try:
             raw_patterns = await r.lrange(_patterns_key(context_id), 0, -1)

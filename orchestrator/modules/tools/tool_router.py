@@ -690,7 +690,9 @@ class ToolRouter:
 
             # PRD-141 US-019: fold this outcome into the routing graph via the
             # batched recorder (non-blocking enqueue; no DB / no task per call).
-            self._record_tool_signal(tool_name, success, agent_id, workspace_id, caller_context)
+            self._record_tool_signal(
+                tool_name, success, agent_id, workspace_id, caller_context, tool_args
+            )
 
             if success:
                 frontend_data = self.formatter.format_for_frontend(result, tool_name)
@@ -726,7 +728,7 @@ class ToolRouter:
                 else error
             )
             logger.warning(f"[tool-trace {trace_id}] {tool_name} failed: {error}")
-            return {
+            envelope = {
                 "success": False,
                 "frontend_data": {},
                 "llm_context": f"Tool {tool_name} failed: {llm_error}",
@@ -734,6 +736,12 @@ class ToolRouter:
                 "fatal_error": fatal_error,
                 "error_type": error_type,
             }
+            # PRD-174 §4.2 — errors-as-data: give the model a stable
+            # {code, message_for_model, remediation, retryable} block so it can
+            # adapt (escalate / approve / drop a field) instead of seeing an
+            # opaque failure. A policy deny already carries policy_error; this
+            # backfills everything else. Additive + flag-gated (OFF = unchanged).
+            return self._maybe_add_error_envelope(envelope, result)
 
         except Exception as e:
             error_msg = str(e)
@@ -745,8 +753,10 @@ class ToolRouter:
             )
             logger.error(f"[tool-trace {trace_id}] {tool_name} exception: {error_msg}")
             # PRD-141 US-019: a thrown tool is a failure outcome too.
-            self._record_tool_signal(tool_name, False, agent_id, workspace_id, caller_context)
-            return {
+            self._record_tool_signal(
+                tool_name, False, agent_id, workspace_id, caller_context, tool_args
+            )
+            envelope = {
                 "success": False,
                 "frontend_data": {},
                 "llm_context": f"Tool {tool_name} error: {llm_error}",
@@ -754,6 +764,36 @@ class ToolRouter:
                 "fatal_error": fatal_error,
                 "error_type": "dependency_missing" if fatal_error else None,
             }
+            # PRD-174 §4.2 — errors-as-data (see above); backfill on the thrown path too.
+            return self._maybe_add_error_envelope(envelope, {"success": False, "error": error_msg})
+
+    @staticmethod
+    def _maybe_add_error_envelope(
+        envelope: Dict[str, Any], raw_result: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Backfill the errors-as-data ``policy_error`` block when the plane is on.
+
+        Additive: the returned dict keeps every existing key; it only adds
+        ``policy_error`` (a ``{code, message_for_model, remediation, retryable}``
+        payload derived from the failing result). Flag OFF ⇒ returned unchanged,
+        so today's callers see byte-for-byte the same shape. Never raises.
+        """
+        try:
+            from modules.policy import policy_plane_enabled
+
+            if not policy_plane_enabled():
+                return envelope
+            from modules.policy.errors import ensure_error_envelope
+
+            # Preserve a policy_error the raw result already carries (a gate deny).
+            source = dict(raw_result) if isinstance(raw_result, dict) else {}
+            source.setdefault("success", False)
+            enriched = ensure_error_envelope(source)
+            if "policy_error" in enriched:
+                envelope["policy_error"] = enriched["policy_error"]
+        except Exception:
+            logger.debug("[tool_router] error-envelope backfill skipped", exc_info=True)
+        return envelope
 
     @staticmethod
     def _record_tool_signal(
@@ -762,11 +802,20 @@ class ToolRouter:
         agent_id: Optional[int],
         workspace_id: Optional[UUID],
         caller_context: Optional[Dict[str, Any]],
+        parameters: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Enqueue a routing-graph signal. Best-effort: never raises into the
         tool hot path. ``prior_action`` (the previous tool in the turn) is read
-        from caller_context when the caller threads it through."""
+        from caller_context when the caller threads it through.
+
+        PRD-177 S1 (F016): the batched recorder learns the RESOLVED composio
+        action (SLACK_SEND_MESSAGE), not the collapsed ``composio_execute`` node
+        — same resolution as the ToolExecutionLog path, so both learning paths
+        agree on per-action nodes."""
         try:
+            from modules.tools.execution.telemetry import resolve_action_name
+
+            action_name = resolve_action_name(tool_name, parameters or {})
             prior_action = (
                 caller_context.get("prior_action")
                 if isinstance(caller_context, dict)
@@ -774,7 +823,7 @@ class ToolRouter:
             )
             get_tool_signal_recorder().record(
                 ToolSignal(
-                    action_name=tool_name,
+                    action_name=action_name,
                     success=bool(success),
                     agent_id=agent_id,
                     workspace_id=str(workspace_id) if workspace_id else None,
@@ -903,6 +952,31 @@ async def get_filtered_composio_actions(
             session_used.close()
 
 
+def _destructive_fail_closed(intent: Optional[str], allow_destructive: bool) -> bool:
+    """Should an UNVERIFIABLE action be denied? (PRD-177 S3 / F018)
+
+    True when the fail-closed flag is on, the caller has not explicitly
+    authorized destructive actions, and the intent text reads as destructive.
+    In that case an action we cannot classify (filter unavailable / errored /
+    unsynced) must fail CLOSED rather than fail open.
+    """
+    if allow_destructive:
+        return False
+    try:
+        from config import config
+
+        if not bool(getattr(config, "COMPOSIO_DESTRUCTIVE_FAIL_CLOSED", True)):
+            return False
+    except Exception:
+        pass  # default to fail-closed behavior if config can't be read
+    try:
+        from modules.tools.capabilities.taxonomy import intent_is_destructive
+
+        return intent_is_destructive(intent)
+    except Exception:
+        return False
+
+
 def validate_action_for_intent(
     action_id: str,
     intent: str,
@@ -926,9 +1000,18 @@ def validate_action_for_intent(
         (eligible, reason) tuple
     """
     if not CAPABILITY_FILTER_AVAILABLE:
-        # Fail open if capability filter not available
-        logger.warning("Capability filter not available, allowing action")
-        return True, "Capability filter not available (fail open)"
+        # PRD-177 S3 (F018): cannot classify — fail CLOSED for destructive intent.
+        if _destructive_fail_closed(intent, allow_destructive):
+            logger.warning(
+                "Capability filter unavailable and intent reads destructive — "
+                "failing CLOSED (confirmation required)"
+            )
+            return False, (
+                "Cannot verify this action (capability filter unavailable) and "
+                "the request looks destructive — confirmation required."
+            )
+        logger.warning("Capability filter not available, allowing non-destructive action")
+        return True, "Capability filter not available (non-destructive, allowing)"
 
     session_used = db_session or SessionLocal()
 
@@ -950,14 +1033,24 @@ def validate_action_for_intent(
         return eligible, reason
 
     except Exception as e:
-        # Log at debug level if it's a missing table error (expected during development)
+        # PRD-177 S3 (F018): a validation error means we cannot classify — fail
+        # CLOSED for destructive intent rather than silently permitting damage.
         error_str = str(e)
         if "does not exist" in error_str or "UndefinedTable" in error_str:
             logger.debug(f"Action validation skipped (table not created): {e}")
         else:
-            logger.warning(f"Action validation error (fail open): {e}")
-        # Fail open on errors to avoid blocking legitimate actions
-        return True, "Validation skipped (fail open)"
+            logger.warning(f"Action validation error: {e}")
+        if _destructive_fail_closed(intent, allow_destructive):
+            logger.warning(
+                "Action validation errored and intent reads destructive — "
+                "failing CLOSED (confirmation required)"
+            )
+            return False, (
+                "Could not verify this action and the request looks destructive "
+                "— confirmation required before running."
+            )
+        # Non-destructive intent: allow so a transient error doesn't block work.
+        return True, "Validation skipped (non-destructive, allowing)"
     finally:
         if db_session is None:
             session_used.close()

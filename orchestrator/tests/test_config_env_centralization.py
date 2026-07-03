@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import ast
 import importlib
+import os
 import sys
 from pathlib import Path
 
@@ -48,16 +49,45 @@ _SWEPT_ENV_VARS = (
     "ALERT_INGEST_TOKEN",
     "WIZARD_SKIP_GRAPHIFY",
     "PUBLIC_API_HOST",
+    # PRD-176 F068 — the nine railway.internal defaults + log-relay toggle that
+    # W6 makes local-safe. Swept so a Railway env value can't mask the new
+    # localhost/off defaults these tests assert.
+    "LOKI_URL",
+    "PROMETHEUS_URL",
+    "INTERNAL_API_HOSTNAME",
+    "INTERNAL_FRONTEND_HOSTNAME",
+    "AGENT_OPT_WORKER_URL",
+    "MEM0_API_URL",
+    "VOICE_SERVICE_URL",
 )
 
 
 @pytest.fixture(autouse=True)
 def _restore_config_module():
-    """Contain the reload blast radius (PRD-142 W2-S/WS-F)."""
+    """Contain the reload blast radius (PRD-142 W2-S/WS-F).
+
+    ``_reload_config`` mutates the shared ``config`` module (``importlib.reload``
+    rebuilds its ``Config`` class + singleton). Downstream suites co-run after
+    this file — which sorts first — must not inherit a test's env-derived config
+    state (the leak that broke test_harness_commands / test_prd143_concierge).
+
+    Restore the exact pre-test ``config`` module object into ``sys.modules`` so
+    the class identity the rest of the session already bound (via
+    ``from config import config`` / ``type(config.config)``) is the one that
+    survives. Do NOT reload here: a reload would swap ``Config`` for a fresh
+    class object, desyncing downstream fixtures that patch ``type(config.config)``
+    class-level properties (e.g. CHATBOT_MAX_TOOL_ITERATIONS). Also snapshot and
+    restore ``os.environ`` so the swept vars / neutralized ``load_dotenv`` the
+    reload helper set cannot bleed past this file, independent of monkeypatch
+    teardown ordering.
+    """
+    env_snapshot = dict(os.environ)
     saved = sys.modules.get("config")
     try:
         yield
     finally:
+        os.environ.clear()
+        os.environ.update(env_snapshot)
         if saved is not None:
             sys.modules["config"] = saved
         else:
@@ -160,10 +190,12 @@ def test_swept_module_imports_config(relpath):
 # ---------------------------------------------------------------------------
 
 
-def test_log_relay_url_default(monkeypatch):
+def test_log_relay_url_default_local_safe(monkeypatch):
+    """PRD-176 F068: default log-relay target is local-safe, not railway.internal."""
     cfg = _reload_config(monkeypatch, {})
     assert hasattr(cfg.config, "LOG_RELAY_URL")
-    assert cfg.config.LOG_RELAY_URL == "http://log-relay.railway.internal:8080/push"
+    assert "railway.internal" not in cfg.config.LOG_RELAY_URL
+    assert cfg.config.LOG_RELAY_URL == "http://localhost:8080/push"
 
 
 def test_log_relay_url_override(monkeypatch):
@@ -171,14 +203,24 @@ def test_log_relay_url_override(monkeypatch):
     assert cfg.config.LOG_RELAY_URL == "http://custom:9090/push"
 
 
-def test_log_relay_enabled_default_true(monkeypatch):
+def test_log_relay_url_override_to_railway(monkeypatch):
+    """SaaS still points log relay at the railway host via env."""
+    cfg = _reload_config(
+        monkeypatch,
+        {"LOG_RELAY_URL": "http://log-relay.railway.internal:8080/push"},
+    )
+    assert cfg.config.LOG_RELAY_URL == "http://log-relay.railway.internal:8080/push"
+
+
+def test_log_relay_enabled_default_false(monkeypatch):
+    """PRD-176 F068: log relay is OFF by default (local); SaaS opts in via env."""
     cfg = _reload_config(monkeypatch, {})
-    assert cfg.config.LOG_RELAY_ENABLED is True
-
-
-def test_log_relay_enabled_off_when_false(monkeypatch):
-    cfg = _reload_config(monkeypatch, {"LOG_RELAY_ENABLED": "false"})
     assert cfg.config.LOG_RELAY_ENABLED is False
+
+
+def test_log_relay_enabled_on_when_true(monkeypatch):
+    cfg = _reload_config(monkeypatch, {"LOG_RELAY_ENABLED": "true"})
+    assert cfg.config.LOG_RELAY_ENABLED is True
 
 
 def test_log_relay_service_name_default_unknown(monkeypatch):
@@ -256,9 +298,11 @@ def test_metrics_environment_from_env(monkeypatch):
     assert cfg.config.METRICS_ENVIRONMENT == "production"
 
 
-def test_loki_query_url_default(monkeypatch):
+def test_loki_query_url_default_local_safe(monkeypatch):
+    """PRD-176 F068: default resolves local-safe, not railway.internal."""
     cfg = _reload_config(monkeypatch, {})
-    assert cfg.config.LOKI_QUERY_URL == "http://loki.railway.internal:3100"
+    assert "railway.internal" not in cfg.config.LOKI_QUERY_URL
+    assert cfg.config.LOKI_QUERY_URL == "http://localhost:3100"
 
 
 def test_loki_query_url_override(monkeypatch):
@@ -302,6 +346,63 @@ def test_public_api_host_strips_trailing_slash(monkeypatch):
     """channels.py rstrip('/') behaviour is preserved by the config accessor."""
     cfg = _reload_config(monkeypatch, {"PUBLIC_API_HOST": "api.staging.automatos.app/"})
     assert cfg.config.PUBLIC_API_HOST == "api.staging.automatos.app"
+
+
+# ---------------------------------------------------------------------------
+# 2b. PRD-176 F068 — the nine railway.internal defaults are local-safe
+# ---------------------------------------------------------------------------
+
+# Every config attribute that carried a ``*.railway.internal`` default at
+# 37fdecc4e. With no env override, none may dial a railway host by default
+# (roadmap deployability bar: a fresh clone reaches nothing SaaS-topology).
+_RAILWAY_DEFAULT_ATTRS = (
+    "INTERNAL_API_HOSTNAME",
+    "INTERNAL_FRONTEND_HOSTNAME",
+    "LOKI_URL",
+    "PROMETHEUS_URL",
+    "LOG_RELAY_URL",
+    "LOKI_QUERY_URL",
+    "AGENT_OPT_WORKER_URL",
+    "MEM0_API_URL",
+    "VOICE_SERVICE_URL",
+)
+
+
+def test_no_railway_internal_in_any_default(monkeypatch):
+    """PRD-176 F068: with no env, no config default contains 'railway.internal'."""
+    cfg = _reload_config(monkeypatch, {})
+    offenders = {
+        attr: getattr(cfg.config, attr)
+        for attr in _RAILWAY_DEFAULT_ATTRS
+        if "railway.internal" in (getattr(cfg.config, attr) or "")
+    }
+    assert offenders == {}, f"railway.internal leaked into local defaults: {offenders}"
+
+
+@pytest.mark.parametrize("attr", _RAILWAY_DEFAULT_ATTRS)
+def test_railway_default_is_localhost(monkeypatch, attr):
+    """Each former railway.internal default now resolves to a localhost value."""
+    cfg = _reload_config(monkeypatch, {})
+    value = getattr(cfg.config, attr) or ""
+    assert "localhost" in value, f"{attr} default is not local-safe: {value!r}"
+
+
+@pytest.mark.parametrize(
+    "attr,env_name,saas_value",
+    [
+        ("INTERNAL_API_HOSTNAME", "INTERNAL_API_HOSTNAME", "automatos-ai.railway.internal"),
+        ("INTERNAL_FRONTEND_HOSTNAME", "INTERNAL_FRONTEND_HOSTNAME", "automatos-ai-frontend.railway.internal"),
+        ("LOKI_URL", "LOKI_URL", "http://loki.railway.internal:3100"),
+        ("PROMETHEUS_URL", "PROMETHEUS_URL", "http://prometheus.railway.internal:9090"),
+        ("AGENT_OPT_WORKER_URL", "AGENT_OPT_WORKER_URL", "http://agent-opt-worker.railway.internal:8080"),
+        ("MEM0_API_URL", "MEM0_API_URL", "http://automatos-mem0-server.railway.internal"),
+        ("VOICE_SERVICE_URL", "VOICE_SERVICE_URL", "http://voice-service.railway.internal:8300"),
+    ],
+)
+def test_railway_host_still_settable_via_env(monkeypatch, attr, env_name, saas_value):
+    """SaaS supplies the real Railway host via env — only the default moved."""
+    cfg = _reload_config(monkeypatch, {env_name: saas_value})
+    assert getattr(cfg.config, attr) == saas_value
 
 
 # ---------------------------------------------------------------------------

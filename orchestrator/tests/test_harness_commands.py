@@ -48,6 +48,15 @@ def _install_fake_apscheduler():
 _install_fake_apscheduler()
 
 from config import config
+
+# config caches POSTGRES_* at import; a sibling conftest may have imported it
+# with no env set (local dev), and /approve now routes through the policy plane
+# (core.services), whose package __init__ builds the DB URL at import. Backfill
+# the cached attrs so that import does not refuse on missing creds. No-op on CI.
+for _k in ("POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_DB"):
+    if not getattr(config, _k, None):
+        setattr(config, _k, os.environ[_k])
+
 import api.harness_commands as hc
 
 _WS_ID = "00000000-0000-0000-0000-000000000001"

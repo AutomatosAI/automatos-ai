@@ -7,11 +7,13 @@ import { Suspense, useState } from 'react'
 import { ThemeProvider } from './theme-provider'
 import { WorkspaceProvider } from './workspace-provider'
 import { ClerkApiClientProvider } from './clerk-api-client-provider'
+import { LocalAuthProvider } from './local-auth-provider'
 import { RoleProvider } from '../contexts/role-context'
 import { FirstLoginGuard } from './onboarding/first-login-guard'
 import { Toaster } from './ui/sonner'
 import { GlobalSearch } from './shared/global-search'
 import { useStudioThemeFlag } from '../hooks/use-studio-theme'
+import { isSaaS } from '@/lib/auth-edition'
 
 // Inline child so we can read useSearchParams (needs a Suspense boundary in Next).
 function StudioThemeFlag() {
@@ -19,16 +21,15 @@ function StudioThemeFlag() {
   return null
 }
 
-export function Providers({ children }: { children: React.ReactNode }) {
-  const [queryClient] = useState(() => new QueryClient({
-    defaultOptions: {
-      queries: {
-        staleTime: 60 * 1000, // 1 minute
-        retry: 1,
-      },
-    },
-  }))
-
+// PRD-175 (F008): the auth boundary is edition-conditional and is the ONLY thing
+// that differs between editions — everything below it (RoleProvider, ThemeProvider,
+// WorkspaceProvider, children) is identical. In `saas` the boundary is Clerk +
+// ClerkApiClientProvider (the real token getter); in `local` it is LocalAuthProvider
+// (a no-op token getter over the same seam), and NO Clerk symbol executes.
+function AuthBoundary({ children }: { children: React.ReactNode }) {
+  if (!isSaaS) {
+    return <LocalAuthProvider>{children}</LocalAuthProvider>
+  }
   return (
     <ClerkProvider
       signInFallbackRedirectUrl="/"
@@ -68,30 +69,45 @@ export function Providers({ children }: { children: React.ReactNode }) {
         },
       }}
     >
-      <ClerkApiClientProvider>
-        <RoleProvider>
-          <ThemeProvider
-            attribute="class"
-            defaultTheme="system"
-            enableSystem
-            themes={['light', 'dark', 'matte', 'studio']}
-            storageKey="automatos-theme"
-            disableTransitionOnChange
-          >
-            <QueryClientProvider client={queryClient}>
-              <WorkspaceProvider>
-                <Suspense fallback={null}>
-                  <StudioThemeFlag />
-                </Suspense>
-                <FirstLoginGuard />
-                {children}
-                <GlobalSearch />
-                <Toaster position="top-right" richColors closeButton />
-              </WorkspaceProvider>
-            </QueryClientProvider>
-          </ThemeProvider>
-        </RoleProvider>
-      </ClerkApiClientProvider>
+      <ClerkApiClientProvider>{children}</ClerkApiClientProvider>
     </ClerkProvider>
+  )
+}
+
+export function Providers({ children }: { children: React.ReactNode }) {
+  const [queryClient] = useState(() => new QueryClient({
+    defaultOptions: {
+      queries: {
+        staleTime: 60 * 1000, // 1 minute
+        retry: 1,
+      },
+    },
+  }))
+
+  return (
+    <AuthBoundary>
+      <RoleProvider>
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="system"
+          enableSystem
+          themes={['light', 'dark', 'matte', 'studio']}
+          storageKey="automatos-theme"
+          disableTransitionOnChange
+        >
+          <QueryClientProvider client={queryClient}>
+            <WorkspaceProvider>
+              <Suspense fallback={null}>
+                <StudioThemeFlag />
+              </Suspense>
+              <FirstLoginGuard />
+              {children}
+              <GlobalSearch />
+              <Toaster position="top-right" richColors closeButton />
+            </WorkspaceProvider>
+          </QueryClientProvider>
+        </ThemeProvider>
+      </RoleProvider>
+    </AuthBoundary>
   )
 }

@@ -1131,15 +1131,8 @@
   .studio .sh-side .sh-footer {
     margin-top: auto; padding-top: 10px; border-top: 1px solid hsl(var(--border));
   }
-  .studio .sh-side .sh-mini-stats {
-    font-family: var(--font-geist-mono, monospace); font-size: 9.5px;
-    color: hsl(var(--muted-foreground)); padding: 8px 8px 0;
-    display: grid; gap: 3px;
-  }
-  .studio .sh-side .sh-mini-stats .sh-row {
-    display: flex; justify-content: space-between;
-  }
-  .studio .sh-side .sh-mini-stats .sh-row .sh-ok { color: hsl(82 50% 22%); }
+  /* PRD-180 S2 (F038): .sh-mini-stats rules removed with the fabricated
+     sidebar stats block they styled (now dead). */
 
   /* ── Studio brand wordmark ─────────────────────────────────────── */
   .studio .sh-brand {

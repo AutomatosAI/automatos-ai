@@ -119,7 +119,6 @@ export default function ChatPage() {
       key={`${currentChatId || 'new'}-${chatInstance}`}
       id={currentChatId}
       initialMessages={currentMessages}
-      initialChatModel="gpt-4"
       initialVisibilityType={selectedChat?.visibility || 'private'}
       isReadonly={false}
       autoResume={false}

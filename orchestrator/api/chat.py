@@ -55,8 +55,9 @@ class ChatRequest(BaseModel):
     message: ChatMessageRequest
     # Compatibility with AI SDK "messages" payloads
     messages: Optional[List[ChatMessageRequest]] = None
-    # PRD-136: no hardcoded default — None means "resolve via Auto tier".
-    selectedChatModel: Optional[str] = None
+    # PRD-180 S3 (F035): the per-message model selector was a placebo — nothing
+    # ever read the chosen model. Field removed; the model resolves via the Auto
+    # tier / the selected agent's own config, never a client-picked override.
     selectedVisibilityType: Optional[str] = "private"
     context: Optional[dict] = None
     # PRD: Unified Agent-Chat System
@@ -268,7 +269,7 @@ async def stream_chat(
                 break
     
     # DEBUG: Log incoming request
-    logger.info(f"Chat request - agentId: {request.agentId}, model: {request.selectedChatModel}")
+    logger.info(f"Chat request - agentId: {request.agentId}")
 
     # --- PRD-50: Universal Router Integration ---
     # Extract message text for the ingestor

@@ -68,7 +68,6 @@ export function ChatPageContent() {
                         key={currentChatId}
                         id={currentChatId}
                         initialMessages={currentMessages}
-                        initialChatModel="gpt-4"
                         initialVisibilityType={selectedChat?.visibility || 'private'}
                         isReadonly={false}
                         autoResume={false}

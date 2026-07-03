@@ -32,7 +32,7 @@ services:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./orchestrator/database/init_complete_schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./orchestrator/core/database/init_complete_schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
       interval: 10s
@@ -73,6 +73,56 @@ services:
       - automatos
 
   # ===========================================================================
+  # MinIO — local S3-compatible object store (PRD-176 F089)
+  # ===========================================================================
+  # Gives the knowledge flywheel a durable local object store so generated
+  # outputs persist instead of fail-softing to None on ephemeral disk. The
+  # backend talks to it through the existing S3 seam via S3_ENDPOINT_URL.
+  # Prod is unchanged (real AWS S3, S3_ENDPOINT_URL unset).
+  # ===========================================================================
+  minio:
+    image: minio/minio:latest
+    container_name: automatos_minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - automatos
+
+  # One-shot: create the documents bucket the flywheel writes to, then exit.
+  minio-init:
+    image: minio/mc:latest
+    container_name: automatos_minio_init
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      S3_DOCUMENTS_BUCKET: ${S3_DOCUMENTS_BUCKET:-automatos-ai}
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD} &&
+      mc mb --ignore-existing local/$${S3_DOCUMENTS_BUCKET} &&
+      echo 'MinIO bucket ready: '$${S3_DOCUMENTS_BUCKET}
+      "
+    networks:
+      - automatos
+
+  # ===========================================================================
   # Backend API (FastAPI)
   # ===========================================================================
   backend:
@@ -86,6 +136,8 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      minio:
         condition: service_healthy
     environment:
       # Database
@@ -104,7 +156,16 @@ services:
       # LLM API Keys (optional)
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      
+
+      # Object storage — local MinIO via the S3 seam (PRD-176 F089).
+      # S3_ENDPOINT_URL points boto at MinIO; the AWS_* creds are the MinIO
+      # root creds. Prod leaves S3_ENDPOINT_URL unset and uses real AWS S3.
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-http://minio:9000}
+      S3_DOCUMENTS_BUCKET: ${S3_DOCUMENTS_BUCKET:-automatos-ai}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-${MINIO_ROOT_USER:-minioadmin}}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-${MINIO_ROOT_PASSWORD:-minioadmin}}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+
       # Document Generation (PRD-63)
       GOTENBERG_URL: http://gotenberg:3000
 
@@ -262,6 +323,9 @@ volumes:
   redis_data:
     driver: local
     name: automatos_redis_data
+  minio_data:
+    driver: local
+    name: automatos_minio_data
   backend_logs:
     driver: local
     name: automatos_backend_logs

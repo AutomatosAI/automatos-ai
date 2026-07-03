@@ -204,6 +204,7 @@ class ToolsSection(BaseSection):
                     conversation_context=conversation_context,
                     tool_hints=tool_hints,
                     agent_id=agent_id,
+                    workspace_id=workspace_id,
                 )
 
                 if not result.should_include_tools:

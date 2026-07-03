@@ -27,6 +27,7 @@ from core.models import Agent
 from core.utils.exception_telemetry import record_error
 from core.utils.background_tasks import launch_guarded
 from services.board_dispatcher import notify_task_available
+from services.board_events import board_event_stream, notify_board_event
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/tasks", tags=["board-tasks"])
@@ -350,6 +351,12 @@ async def create_task(
     db.commit()
     db.refresh(task)
 
+    # PRD-180 S1 (F090): push the new card to subscribed Command Centres.
+    notify_board_event(
+        db, workspace_id=ctx.workspace_id, task_id=task.id, status=task.status,
+        event="task_created",
+    )
+
     # PRD-161: assignment = immediate dispatch via the board loop (Q39/Q40).
     # A created-as-assigned task notifies the claimant; the dispatch loop claims
     # it (FOR UPDATE SKIP LOCKED) and runs it — no inline launch, no heartbeat wait.
@@ -426,27 +433,21 @@ async def list_tasks(
 async def stream_board_events(
     ctx: RequestContext = Depends(require_task_context(TASKS_READ)),
 ):
-    """SSE board events (read-only; PRD-09 ``TASKS_READ`` narrow dep).
+    """Real-time board SSE via Postgres ``LISTEN/NOTIFY`` (PRD-180 S1, F090).
 
-    A server-push refresh signal: emits ``board_changed`` on connect and every
-    ``BOARD_SSE_PING_SECONDS`` so clients refetch without tight polling. Rides the
-    existing read-only ``TASKS_READ`` scope — the shared hybrid auth is untouched
-    and no write scope is introduced (Q42).
+    Replaces the old timed ping: the stream ``LISTEN``s the ``board_events``
+    channel and forwards each board-task mutation (insert / status change /
+    claim / requeue) to this client sub-second, scoped to the caller's
+    workspace. A heartbeat comment keeps the connection alive but does not drive
+    refreshes — real NOTIFY events do. Rides the read-only ``TASKS_READ`` scope
+    (Q42): the shared hybrid auth is untouched and no write scope is introduced.
     """
     workspace_id = str(ctx.workspace_id)
 
-    async def event_generator():
-        payload = json.dumps({"workspace_id": workspace_id})
-        yield f"event: board_changed\ndata: {payload}\n\n"
-        try:
-            while True:
-                await asyncio.sleep(config.BOARD_SSE_PING_SECONDS)
-                yield f"event: board_changed\ndata: {payload}\n\n"
-        except asyncio.CancelledError:
-            return
-
     return StreamingResponse(
-        event_generator(),
+        board_event_stream(
+            workspace_id, heartbeat_seconds=config.BOARD_SSE_HEARTBEAT_SECONDS
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -570,6 +571,12 @@ async def update_task(
 
     db.commit()
     db.refresh(task)
+
+    # PRD-180 S1 (F090): push the mutation to subscribed Command Centres.
+    notify_board_event(
+        db, workspace_id=ctx.workspace_id, task_id=task.id, status=task.status,
+        event="task_updated",
+    )
 
     if trigger_execution:
         _launch_task_execution(
@@ -867,6 +874,12 @@ async def update_task_status(
     db.commit()
     db.refresh(task)
 
+    # PRD-180 S1 (F090): push the drag-and-drop status change to Command Centres.
+    notify_board_event(
+        db, workspace_id=ctx.workspace_id, task_id=task.id, status=task.status,
+        event="status_changed",
+    )
+
     # Fire-and-forget: trigger agent execution when moved to in_progress.
     # PRD-171 F025: exclude recipe + mission-mirror rows — dragging a mission
     # mirror to in_progress must not re-run work the mission engine owns.
@@ -927,6 +940,60 @@ async def _lease_heartbeat(task_id: int) -> None:
         raise
 
 
+def _board_task_blocked_pending_approval(
+    db, task_id: int, agent_id: int, workspace_id: str
+) -> bool:
+    """PRD-181 S2: return True if the board task must wait for human approval.
+
+    - An active (granted, unexpired) grant for this task ⇒ proceed (False).
+    - Otherwise evaluate the workspace approval policy. If it asks, block the
+      task (status → ``blocked``, ``blocked_reason`` referencing the grant) and
+      return True so the caller does NOT execute it.
+
+    Fail-open on any error: approval is a governance gate, not a correctness
+    gate — a policy-read fault must not wedge board execution (the per-tool
+    PolicyGate still applies to every tool the task's agent invokes).
+    """
+    try:
+        from core.services.approval_grants import find_active_grant
+        from core.models.approval_grants import SUBJECT_BOARD_TASK
+        from services.board_approval import evaluate_board_task_approval
+
+        # Already authorised? Proceed.
+        if find_active_grant(
+            db, workspace_id, subject_type=SUBJECT_BOARD_TASK, subject_id=str(task_id)
+        ) is not None:
+            return False
+
+        outcome = evaluate_board_task_approval(
+            db, workspace_id=workspace_id, task_id=task_id, agent_id=agent_id,
+        )
+        if not outcome.requires_approval:
+            return False
+
+        # Block the task until a human grants the pending grant.
+        task = db.query(BoardTask).get(task_id)
+        if task is not None and task.status == "in_progress":
+            task.status = "blocked"
+            task.blocked_at = datetime.now(timezone.utc)
+            grant_id = getattr(outcome.grant, "id", None)
+            task.blocked_reason = (
+                f"Awaiting human approval (grant #{grant_id}): {outcome.reason}"
+            )
+            db.commit()
+            logger.info(
+                "[BoardTasks] task %s blocked pending approval grant #%s",
+                task_id, grant_id,
+            )
+        return True
+    except Exception:
+        logger.warning(
+            "[BoardTasks] approval gate errored for task %s — proceeding "
+            "(per-tool PolicyGate still applies)", task_id, exc_info=True,
+        )
+        return False
+
+
 def _launch_task_execution(
     task_id: int,
     agent_id: int,
@@ -943,6 +1010,17 @@ def _launch_task_execution(
         # PRD-171 F024: heartbeat the dispatch lease for the life of the run.
         heartbeat = asyncio.ensure_future(_lease_heartbeat(task_id))
         try:
+            # PRD-181 S2 (F060): board-task approval gate. Before an autonomous
+            # board task executes, run it through the SAME approval primitive
+            # missions use. If the workspace policy asks (always_ask / over the
+            # dollar ceiling), a durable, revocable, expiring approval-grant is
+            # created and the task is BLOCKED until a human grants it — not run,
+            # not auto-allowed. On grant, the grant API re-queues the task.
+            if _board_task_blocked_pending_approval(db, task_id, agent_id, workspace_id):
+                heartbeat.cancel()
+                db.close()
+                return
+
             from modules.agents.factory.agent_factory import AgentFactory
 
             factory = AgentFactory(db_session=db)

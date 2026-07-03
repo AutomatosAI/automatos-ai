@@ -10,13 +10,31 @@
  */
 
 import { useState, useEffect } from 'react'
-import { ClipboardCheck, Check, X, Clock } from 'lucide-react'
+import { ClipboardCheck, Check, X, Clock, ShieldAlert } from 'lucide-react'
 import { WidgetBase } from '../WidgetBase'
 import { registerWidget } from '../registry'
 import { Button } from '@/components/ui/button'
 import { useApproveMission, useRejectMission, useUpdateMissionPlan } from '@/hooks/use-missions-api'
 import type { WidgetBaseProps, MissionApprovalWidgetData, WidgetDefinition } from '../types'
 import { toast } from 'sonner'
+
+/**
+ * PRD-181 S5 (EU-AI-Act Art.14): human-readable label for an autonomy oversight
+ * tier, shown on the approval card so a human approver sees the risk
+ * classification. Exported for tests.
+ */
+export function oversightTierLabel(tier?: string): string {
+  switch (tier) {
+    case 'monitor':
+      return 'Monitored'
+    case 'human_on_the_loop':
+      return 'Human on the loop'
+    case 'human_in_the_loop':
+      return 'Human approval required'
+    default:
+      return 'Human approval required'
+  }
+}
 
 function useCountdown(deadlineIso?: string): number | null {
   const [secsLeft, setSecsLeft] = useState<number | null>(null)
@@ -124,6 +142,29 @@ export function MissionApprovalWidget({
             )}
           </p>
         </div>
+
+        {/* PRD-181 S5 (EU-AI-Act Art.14): risk tier + oversight rationale so the
+            approver sees the risk classification and why a human is in the loop. */}
+        {(data.risk_tier || data.oversight_rationale) && (
+          <div
+            className="flex items-start gap-2 rounded border border-amber-300 bg-amber-50 px-2 py-1.5 dark:border-amber-800 dark:bg-amber-950/40"
+            role="note"
+            aria-label="Human oversight"
+          >
+            <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
+            <div className="min-w-0">
+              <p className="text-[11px] font-medium text-amber-800 dark:text-amber-300">
+                {oversightTierLabel(data.risk_tier)}
+                {data.risk_class ? ` · ${data.risk_class.replace(/_/g, ' ')}` : ''}
+              </p>
+              {data.oversight_rationale && (
+                <p className="mt-0.5 text-[10px] text-amber-700 dark:text-amber-400">
+                  {data.oversight_rationale}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
 
         {data.tasks?.length > 0 && (
           <ol className="space-y-1 max-h-48 overflow-y-auto">

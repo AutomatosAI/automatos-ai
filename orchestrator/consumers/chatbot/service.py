@@ -33,6 +33,7 @@ from modules.tools.execution.tool_loop import (
     ToolLoopExecutor,
     ToolPostResult,
 )
+from modules.tools.execution.telemetry import resolve_action_name
 
 from core.models import Chat, Message, Vote, Workspace
 from core.services.image_store import get_image_store
@@ -91,6 +92,47 @@ def _extract_query_from_args(tool_name: str, tool_args: Dict[str, Any]) -> Optio
         if key in tool_args and isinstance(tool_args[key], str):
             return tool_args[key]
     return None
+
+
+def build_tool_caller_context(
+    *,
+    user_query: Optional[str],
+    conversation_id: Optional[str],
+    turn_id: Optional[str],
+    driving_clerk: Optional[str],
+    prior_action: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    """Build the caller_context threaded into every chat tool execution (PRD-177 S2 / F017).
+
+    Before this, the chat tool-callback threaded only ``{user_id}`` — so
+    ``user_query`` and the conversation/turn grouping never reached the edge
+    builder, and ``succeeds_for_intent`` intent affinities never materialized
+    from real traffic. This populates the fields telemetry.py already consumes:
+
+    * ``user_query``       — clusters intent (drives succeeds/fails_for_intent).
+    * ``conversation_id``  — groups a conversation's tool calls (router_decision).
+    * ``turn_id``          — groups ONE user turn's sequential calls; the edge
+      builder prefers turn_id for used_after pairing, so per-turn ordering is
+      exact rather than time-bucketed.
+    * ``user_id``          — the driving clerk (unchanged from before F017).
+    * ``prior_action``     — the previous tool this turn, for the signal recorder.
+
+    Empty fields are omitted (not written as None) to keep the telemetry row
+    clean. Returns ``None`` when there is genuinely nothing to record, matching
+    the previous ``{...} if _driving_clerk else None`` contract.
+    """
+    ctx: Dict[str, Any] = {}
+    if user_query:
+        ctx["user_query"] = user_query
+    if conversation_id:
+        ctx["conversation_id"] = conversation_id
+    if turn_id:
+        ctx["turn_id"] = turn_id
+    if driving_clerk:
+        ctx["user_id"] = driving_clerk
+    if prior_action:
+        ctx["prior_action"] = prior_action
+    return ctx or None
 
 
 class ToolExecutionTracker:
@@ -606,29 +648,6 @@ class StreamingChatService:
             if m.get("role") == "user":
                 return m.get("content") or ""
         return ""
-
-    def _parse_model_selection(self, selected_model: Optional[str]) -> tuple:
-        """Parse model string to get provider and model."""
-        if not selected_model:
-            return None, None
-
-        model = selected_model
-        model_lower = selected_model.lower()
-
-        if model_lower.startswith('gpt-') or model_lower.startswith('o1') or model_lower.startswith('o3') or model_lower.startswith('o4'):
-            provider = 'openai'
-        elif model_lower.startswith('claude') or 'anthropic' in model_lower:
-            provider = 'anthropic'
-        elif model_lower.startswith('grok') or 'xai' in model_lower:
-            provider = 'grok'
-        elif model_lower.startswith('gemini') or 'google' in model_lower:
-            provider = 'google'
-        elif '/' in selected_model:
-            provider = 'openrouter'
-        else:
-            provider = None
-
-        return provider, model
 
     async def _load_agent_context(self, agent_runtime) -> dict:
         """
@@ -1219,6 +1238,7 @@ class StreamingChatService:
         use_tools: Optional[List[Dict[str, Any]]],
         composio_result: Any = None,
         user_id: Optional[int] = None,
+        conversation_id: Optional[str] = None,
     ) -> AsyncGenerator[Any, None]:
         """Drive :class:`ToolLoopExecutor` from the chat surface.
 
@@ -1253,6 +1273,13 @@ class StreamingChatService:
                 _driving_clerk = _row[0] if _row else None
             except Exception:
                 _driving_clerk = None
+
+        # PRD-177 S2 (F017): one turn_id per user turn (this stream invocation).
+        # All sequential tool calls in this turn share it, so the edge builder
+        # pairs used_after edges by exact turn order (it prefers turn_id over the
+        # conversation grouping). conversation_id groups the whole conversation.
+        _turn_id: str = uuid.uuid4().hex
+        _prior_action: Optional[str] = None
         cumulative_attempts: Dict[str, int] = {}
         followup_messages: List[Dict[str, Any]] = []
 
@@ -1289,7 +1316,7 @@ class StreamingChatService:
                     ))
 
         async def _tool_callback(name: str, args: Dict[str, Any], call_id: str, ws_id) -> Dict[str, Any]:
-            nonlocal last_tool_name, empty_streak
+            nonlocal last_tool_name, empty_streak, _prior_action
 
             # Direct Composio per-action shortcut (preserved from legacy loop).
             is_composio_action = (
@@ -1308,14 +1335,25 @@ class StreamingChatService:
                 return {"success": True, "llm_context": llm_context, "raw_result": {}}
 
             user_text = self._extract_user_text(llm_messages)
+            # PRD-177 S2 (F017): thread user_query + conversation/turn ids so the
+            # edge builder can cluster intent and pair per-turn used_after edges.
             result = await self.tool_router.execute_and_format(
                 tool_name=name,
                 tool_args=args,
                 agent_id=agent_runtime.agent_id if hasattr(agent_runtime, "agent_id") else 1,
                 workspace_id=ws_id,
                 original_intent=user_text,
-                caller_context={"user_id": _driving_clerk} if _driving_clerk else None,
+                caller_context=build_tool_caller_context(
+                    user_query=user_text,
+                    conversation_id=conversation_id,
+                    turn_id=_turn_id,
+                    driving_clerk=_driving_clerk,
+                    prior_action=_prior_action,
+                ),
             )
+            # Record this call as the prior_action for the NEXT tool in the turn
+            # (resolved to the per-action name so composio chains pair correctly).
+            _prior_action = resolve_action_name(name, args if isinstance(args, dict) else {})
 
             # Search-spiral detection (chat-only signal).
             empty_streak = self._track_search_spiral(
@@ -2074,6 +2112,7 @@ class StreamingChatService:
                     response, llm_messages, agent_runtime, tool_data, use_tools,
                     composio_result=_composio_result,
                     user_id=user_id,
+                    conversation_id=chat_id,
                 ):
                     if isinstance(chunk, dict) and chunk.get('_final_response'):
                         final_response = chunk['_final_response']

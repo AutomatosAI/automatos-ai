@@ -64,6 +64,16 @@ jobs:
       POSTGRES_PORT: "5432"
       POSTGRES_DB: test_db
       ENVIRONMENT: development
+      # PRD-175: run the suite in the local edition so the anonymous dev-fallback
+      # is on (REQUIRE_AUTH=false). Without it, saas-default requires Clerk creds
+      # and every unauthenticated endpoint test 401s.
+      AUTH_EDITION: local
+      # AUTH_EDITION=local's boot guard (config.validate_auth_edition) requires
+      # DEFAULT_WORKSPACE_ID — the single local workspace the anonymous session
+      # resolves to. init_test_db.py seeds a workspaces row with this exact id so
+      # the anonymous-fallback resolution finds a real workspace. Fixed throwaway
+      # UUID for the ephemeral CI DB.
+      DEFAULT_WORKSPACE_ID: "00000000-0000-0000-0000-0000000000c1"
 
     defaults:
       run:
@@ -99,14 +109,38 @@ jobs:
       - name: Initialise test database schema
         run: python scripts/init_test_db.py
 
-      - name: Run test net
+      # The required gate stays pinned to `tests` explicitly. PRD-182 W12-S2
+      # widened pytest.ini `testpaths` (so `--collect-only` shows the module
+      # trees), but the green gate must keep running exactly what it ran before
+      # — the mock/unit suite — so the passing set is unchanged. The orphaned
+      # trees run in the separate `orchestrator-module-tests` job below.
+      #
+      # PRD-182 W12-S4 (F092): coverage is MEASURED here, on the suite that
+      # actually runs, via pytest-cov + .coveragerc, and written to coverage.xml.
+      # Collecting coverage cannot change a test's pass/fail, so it is safe to add
+      # to the required job.
+      - name: Run test net (with coverage)
         run: |
-          pytest \
+          pytest tests \
             --timeout=60 \
             --timeout-method=thread \
             -o faulthandler_timeout=90 \
             -p no:cacheprovider \
+            --cov \
+            --cov-config=.coveragerc \
+            --cov-report=xml \
+            --cov-report=term-missing:skip-covered \
             -v
+
+      # The ratchet. CI is ephemeral, so the floor only ENFORCES once it is
+      # committed: while .coverage-baseline holds the SEED token this step prints
+      # the MEASURED percentage and passes (so "CI reports a coverage number" is
+      # true from day one). To ARM the ratchet, read the number this step prints,
+      # then commit it into orchestrator/.coverage-baseline (replacing SEED) —
+      # from then on a drop below it fails the build. Ratchet the committed number
+      # up toward the 80% doctrine as coverage improves.
+      - name: Coverage ratchet (measured baseline)
+        run: python scripts/check_coverage_baseline.py
 
   # PRD-160 S5 — NL2SQL regression eval. NON-REQUIRED (same posture as the test
   # net). Self-contained: it seeds an in-memory SQLite DB, so it needs no
@@ -128,6 +162,15 @@ jobs:
       POSTGRES_PORT: "5432"
       POSTGRES_DB: test_db
       ENVIRONMENT: development
+      # PRD-175: run the suite in the local edition so the anonymous dev-fallback
+      # is on (REQUIRE_AUTH=false). Without it, saas-default requires Clerk creds
+      # and every unauthenticated endpoint test 401s.
+      AUTH_EDITION: local
+      # AUTH_EDITION=local's boot guard requires DEFAULT_WORKSPACE_ID; set it so
+      # any config.validate_auth_edition() reached during the eval passes. The
+      # eval is SQLite-only and never resolves this workspace, but the flag must
+      # be internally consistent with AUTH_EDITION=local (mirrors the test job).
+      DEFAULT_WORKSPACE_ID: "00000000-0000-0000-0000-0000000000c1"
 
     defaults:
       run:
@@ -161,5 +204,297 @@ jobs:
           pytest tests/nl2sql_eval \
             --timeout=120 \
             --timeout-method=thread \
+            -p no:cacheprovider \
+            -v
+
+  # PRD-177 S6 — operating-graph uplift eval. NON-REQUIRED (same posture as the
+  # test net). The moat business gate: measures learned-edge tool-selection
+  # accuracy vs BM25 + embedding baselines, PER TENANT, and prints the uplift.
+  # Pure Python stdlib + the bundled eval_set fixture — no Postgres, no LLM, no
+  # embedding provider. A sub-threshold number is a valid, honest outcome and
+  # NEVER fails the job (the number is the deliverable); TOOL_ROUTING_GRAPH is
+  # only flipped on once this clears the gate against PRODUCTION per-tenant
+  # telemetry, not the bundled fixture.
+  operating-graph-uplift-eval:
+    name: Operating-graph uplift eval (non-required)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      # Dummy values keep any import-time config resolution from failing; the
+      # eval itself reads only the jsonl fixture and stdlib.
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: test_db
+      ENVIRONMENT: development
+
+    defaults:
+      run:
+        working-directory: orchestrator
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run the uplift harness self-tests
+        run: |
+          python -m pip install --upgrade pip pytest
+          pytest tests/test_prd177_uplift_eval.py -q -p no:cacheprovider
+
+      - name: Emit the per-tenant uplift number (informational)
+        run: |
+          python -m evals.operating_graph_uplift --json
+
+  # PRD-176 F010 — the reliability bar: Alembic replays from zero to exactly
+  # ONE head. NON-REQUIRED (same posture as the test net) until the Step-2
+  # single-baseline squash lands.
+  #
+  # Two gates, deliberately separated by the review §7 two-step:
+  #   1. single-head invariant — asserts `alembic heads` returns exactly one
+  #      revision. Step 1 (the prd176_merge_heads merge revision) delivers this
+  #      NOW, so this step is the permanent regression guard against a new
+  #      divergent head. It needs no database.
+  #   2. from-zero replay — stands up an EMPTY pgvector database and runs
+  #      `alembic upgrade heads`. This is the Step-2 gate: it goes green once the
+  #      single-baseline squash reconciles the tables that today are ALTER-ed but
+  #      never CREATE-d. Runs with continue-on-error until then so the job
+  #      reports the real state without falsely blocking; flip to a hard failure
+  #      (drop continue-on-error) the moment Step 2 merges.
+  alembic-from-zero:
+    name: Alembic from-zero — exactly one head (non-required)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      # pgvector, not stock postgres — the schema declares vector columns, so a
+      # from-zero replay needs the extension available.
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: alembic_zero_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test -d alembic_zero_db"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://test:test@127.0.0.1:5432/alembic_zero_db
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: alembic_zero_db
+      ENVIRONMENT: development
+
+    defaults:
+      run:
+        working-directory: orchestrator
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: orchestrator/requirements.txt
+
+      - name: Install system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 \
+            libcairo2 libffi-dev libmagic1 ghostscript
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # Gate 1 — the single-head invariant (Step 1, green now, no DB needed).
+      - name: Assert exactly one Alembic head
+        run: |
+          HEADS="$(alembic heads 2>/dev/null | grep -c '(head)')"
+          echo "alembic head count: ${HEADS}"
+          alembic heads
+          if [ "${HEADS}" -ne 1 ]; then
+            echo "::error::Expected exactly one Alembic head, found ${HEADS}. A new divergent head was introduced — add a merge revision."
+            exit 1
+          fi
+
+      # Enable pgvector so the from-zero replay's vector columns resolve.
+      - name: Enable pgvector extension
+        env:
+          PGPASSWORD: test
+        run: |
+          psql -h 127.0.0.1 -U test -d alembic_zero_db -c "CREATE EXTENSION IF NOT EXISTS vector;"
+
+      # Gate 2 — from-zero replay (Step-2 gate). Non-blocking until the
+      # single-baseline squash lands; drop continue-on-error when it does.
+      - name: Replay all migrations from an empty database
+        continue-on-error: true
+        run: |
+          echo "Replaying alembic upgrade heads against an empty pgvector DB..."
+          alembic upgrade heads
+          echo "From-zero replay succeeded — Step 2 baseline is in place. Remove continue-on-error on this step."
+
+  # PRD-182 W12-S1 (F034) + S3 (F044) — the frontend CI lane. 148k lines of TS
+  # were entirely ungated: `next.config.js` sets `ignoreBuildErrors:true` /
+  # `ignoreDuringBuilds:true`, so `next build` never type-checks or lints, and
+  # no job ran vitest. This lane closes that, BASELINED so it does not block on
+  # the ~hundreds of pre-existing errors:
+  #   * vitest  — HARD gate (the suite is green today: 17 files / 90 tests).
+  #   * tsc     — baselined gate: fails only if the error count REGRESSES above
+  #               .tsc-baseline.json (measured floor). `ignoreBuildErrors` stays
+  #               true for deploy; this is the separate enforcement lane.
+  #   * eslint  — reports (non-blocking): 208 pre-existing problems surface in
+  #               the log without failing the lane.
+  #   * route-contract (S3) — HARD gate on a NEW frontend call to a backend path
+  #               absent from route-manifest.json (35 pre-existing drifts are
+  #               baselined in scripts/route-contract-baseline.json).
+  #
+  # NON-REQUIRED at introduction (the workflow's established posture); flip to a
+  # required check in branch protection once it has run green — that flip is the
+  # repo admin's call (see S5 / F057 in the PRD).
+  #
+  # Install uses `npm install`, not `npm ci`: the committed package-lock.json is
+  # out of sync with package.json today (missing entries), which makes `npm ci`
+  # fail on install. `npm install` reconciles the lockfile so the lane can run.
+  frontend-ci:
+    name: Frontend CI (tsc baselined, vitest, eslint, route-contract) (non-required)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      # HARD gate — the real enforcement win. Must stay green.
+      - name: Vitest
+        run: npm run test
+
+      # Baselined gate — fails only on a regression above the recorded floor.
+      - name: TypeScript (tsc --noEmit, baselined)
+        run: node scripts/tsc-baseline-check.js
+
+      # Report-only — surfaces the pre-existing lint problems without blocking.
+      - name: ESLint (report only)
+        continue-on-error: true
+        run: npx eslint . --ext .ts,.tsx
+
+      # HARD gate — fails on a NEW frontend call to a non-existent backend path.
+      - name: Frontend route-contract (consumes route-manifest.json)
+        run: node scripts/check-route-contract.js
+
+  # PRD-182 W12-S2 (F056) — the two orphaned backend test trees. The required
+  # `orchestrator-tests` job only ever ran `tests/`; `modules/*/tests` (81 fns)
+  # and `integrations/*/tests` (34 fns) were never collected. This job runs them
+  # against the same Postgres service the required job uses. Some module tests
+  # need services this job does not stand up (Redis, pgvector, the benchmark
+  # stack), so it is introduced NON-REQUIRED — the workflow's standard posture —
+  # and reports the true state; flip it required once green. `--collect-only`
+  # (via the widened pytest.ini testpaths) now shows these trees regardless.
+  orchestrator-module-tests:
+    name: Orchestrator module + integration tests (F056) (non-required)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test -d test_db"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://test:test@127.0.0.1:5432/test_db
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: test_db
+      ENVIRONMENT: development
+      AUTH_EDITION: local
+      DEFAULT_WORKSPACE_ID: "00000000-0000-0000-0000-0000000000c1"
+
+    defaults:
+      run:
+        working-directory: orchestrator
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: orchestrator/requirements.txt
+
+      - name: Install system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 \
+            libcairo2 libffi-dev libmagic1 ghostscript
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Initialise test database schema
+        run: python scripts/init_test_db.py
+
+      # Prove the trees are now collected (S2 acceptance) — visible in the log
+      # even if a later runtime failure occurs.
+      - name: Collect the previously-orphaned trees
+        run: |
+          pytest modules integrations \
+            --collect-only -q -p no:cacheprovider | tail -40
+
+      - name: Run module + integration tests
+        run: |
+          pytest modules integrations \
+            --timeout=120 \
+            --timeout-method=thread \
+            -o faulthandler_timeout=150 \
             -p no:cacheprovider \
             -v

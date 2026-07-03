@@ -1,0 +1,5 @@
+{
+  "_comment": "PRD-182 S1 (F034) tsc error baseline. MEASURED floor of pre-existing TypeScript errors under a strict tsconfig. CI runs `tsc --noEmit` and fails only when the count EXCEEDS maxErrors (a regression). Ratchet this number DOWN as errors are fixed; never raise it to silence a regression. Regenerate with: node scripts/tsc-baseline-check.js --update",
+  "maxErrors": 554,
+  "measuredOn": "node v18.17.0 (CI runs node 20; fewer-errors always passes)"
+}

@@ -7,8 +7,15 @@ const nextConfig = {
   // SECURITY: Disable X-Powered-By header to reduce information leakage (OWASP A05:2021)
   poweredByHeader: false,
   typescript: {
-    // TODO: Set to false once ~400 TS errors are resolved (separate PR)
-    // Security audit 2026-02-04: 798 lines of TS errors found across dozens of components
+    // Kept true on PURPOSE: flipping to false would break `next build` (deploy)
+    // on the ~hundreds of pre-existing TS errors. PRD-182 W12-S1 (F034) adds the
+    // enforcement lane separately — the `frontend-ci` job in
+    // .github/workflows/test.yml runs `tsc --noEmit` via
+    // scripts/tsc-baseline-check.js and fails only when the error count REGRESSES
+    // above frontend/.tsc-baseline.json (measured floor: 554). Type errors are
+    // gated in CI without blocking the build. Ratchet the baseline down as errors
+    // are fixed; never re-raise it. (Prior note: security audit 2026-02-04 found
+    // 798 lines of TS errors across dozens of components.)
     ignoreBuildErrors: true
   },
   eslint: {
@@ -16,6 +23,7 @@ const nextConfig = {
     // build` previously skipped linting). The new no-restricted-syntax rule
     // banning raw fetch('/api…') fires on pre-existing call sites; lint runs in
     // CI / `next lint`, not as a deploy gate — same posture as ignoreBuildErrors.
+    // PRD-182 W12-S1 also runs eslint report-only in the frontend-ci job.
     ignoreDuringBuilds: true
   },
   typedRoutes: true,

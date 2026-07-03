@@ -17,6 +17,33 @@ from sqlalchemy.orm import Session
 logger = logging.getLogger(__name__)
 
 
+def resolve_action_name(tool_name: str, parameters: Dict[str, Any]) -> str:
+    """Resolve the effective action name for telemetry (PRD-177 S1 / F016).
+
+    The composio meta-tool is always dispatched as ``composio_execute`` with the
+    real action carried in ``parameters['action']`` (or ``'action_name'``). Left
+    unresolved, every one of the 856-app surface's actions collapses to a single
+    ``composio_execute`` node and the routing graph never learns per-action
+    co-occurrence or success. This resolves the real action (e.g.
+    ``SLACK_SEND_MESSAGE``), normalized to the canonical uppercase form used by
+    the executor, so the graph learns the true node.
+
+    Privacy: only the ``action`` *identifier* is read — never secret param
+    *values* (the keys-only posture in write_telemetry is unchanged).
+
+    Non-composio tools (``platform_*``, ``workspace_*``, per-action composio
+    tools whose own name IS the action) pass through unchanged.
+    """
+    if tool_name != "composio_execute":
+        return tool_name
+    if not isinstance(parameters, dict):
+        return tool_name
+    raw_action = parameters.get("action") or parameters.get("action_name")
+    if not raw_action:
+        return tool_name  # malformed call — keep the meta-tool name, never crash
+    return str(raw_action).upper().strip()
+
+
 async def write_telemetry(
     db: Session,
     *,
@@ -38,15 +65,18 @@ async def write_telemetry(
 
         ctx = caller_context or {}
 
-        # Determine app_name from tool_name prefix
-        if tool_name.startswith("platform_"):
+        # PRD-177 S1 (F016): resolve the real composio action so it is not
+        # collapsed to a single ``composio_execute`` node in the routing graph.
+        action_name = resolve_action_name(tool_name, parameters)
+
+        # Determine app_name from the RESOLVED action's prefix (e.g. the resolved
+        # SLACK_SEND_MESSAGE yields app SLACK, not COMPOSIO).
+        if action_name.startswith("platform_"):
             app_name = "PLATFORM"
-        elif tool_name.startswith("workspace_"):
+        elif action_name.startswith("workspace_"):
             app_name = "WORKSPACE"
-        elif tool_name.startswith("composio_") or tool_name.startswith("COMPOSIO_"):
-            app_name = tool_name.split("_")[0].upper()
         else:
-            app_name = tool_name.split("_")[0].upper() if "_" in tool_name else tool_name.upper()
+            app_name = action_name.split("_")[0].upper() if "_" in action_name else action_name.upper()
 
         # Resolve agent_id: use None for non-agent calls (never write 0 with FK)
         resolved_agent_id = agent_id if agent_id and agent_id > 0 else None
@@ -56,7 +86,7 @@ async def write_telemetry(
         log_entry = ToolExecutionLog(
             agent_id=resolved_agent_id,
             app_name=app_name[:100],
-            action_name=tool_name[:255],
+            action_name=action_name[:255],
             workspace_id=workspace_id,
             user_id=ctx.get("user_id"),
             input_parameters={"keys": list(parameters.keys())} if isinstance(parameters, dict) else {},

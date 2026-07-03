@@ -460,19 +460,26 @@ class MissionDispatcher:
     def _get_budget_status(run: OrchestrationRun) -> BudgetStatus:
         """Budget health as a fraction of the DOLLAR ceiling consumed (PRD-163 S5:
         $ ceilings replace the token-estimate pause). HEALTHY when no ceiling is
-        set (unlimited)."""
-        ceiling = MissionDispatcher._budget_ceiling_usd(run)
-        if ceiling <= 0:
-            return BudgetStatus.HEALTHY
+        set (unlimited).
 
-        pct = (MissionDispatcher._cost_used_usd(run) / ceiling) * 100
-        if pct > 100:
-            return BudgetStatus.EXCEEDED
-        if pct >= 80:
-            return BudgetStatus.CRITICAL
-        if pct >= 50:
-            return BudgetStatus.WARNING
-        return BudgetStatus.HEALTHY
+        PRD-181 S2: the band arithmetic is delegated to the shared
+        ``services.budget_ceiling`` helper so missions, board tasks, and playbook
+        runs all read the SAME ceiling definition (F060 — no parallel plane). The
+        OrchestrationRun-specific ceiling/used accessors stay here.
+        """
+        from services.budget_ceiling import BudgetBand, budget_status
+
+        band = budget_status(
+            ceiling_usd=MissionDispatcher._budget_ceiling_usd(run),
+            used_usd=MissionDispatcher._cost_used_usd(run),
+        )
+        # Map the shared band onto the mission's BudgetStatus enum (same tiers).
+        return {
+            BudgetBand.HEALTHY: BudgetStatus.HEALTHY,
+            BudgetBand.WARNING: BudgetStatus.WARNING,
+            BudgetBand.CRITICAL: BudgetStatus.CRITICAL,
+            BudgetBand.EXCEEDED: BudgetStatus.EXCEEDED,
+        }[band]
 
     @staticmethod
     def _pre_dispatch_budget_check(

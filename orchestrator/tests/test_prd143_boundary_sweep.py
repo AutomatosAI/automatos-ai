@@ -451,7 +451,7 @@ def test_absent_from_graph_ranking(su_action):
 
     with patch.object(GraphRouter, "_get_cache", return_value=None), \
             patch("core.database.database.get_db_session", _fake_db_ctx):
-        chains = asyncio.run(router.rank_chains("set things up", agent_id=None, top_k=10))
+        chains = asyncio.run(router.rank_chains("set things up", workspace_id=None, agent_id=None, top_k=10))
 
     assert chains, "rank_chains returned nothing — fixture broken"
     chain_actions = {name for _, _, chain in chains for name in chain}

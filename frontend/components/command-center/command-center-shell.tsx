@@ -20,6 +20,7 @@ import { RotateCw } from 'lucide-react'
 
 import { useActivityStats, useActivityFeed } from '@/hooks/use-activity-api'
 import { useBoardTasks } from '@/hooks/use-board-tasks'
+import { useBoardEventStream } from '@/hooks/use-board-event-stream'
 import { useActivitySchedule } from '@/hooks/use-activity-api'
 import { useDecisionsNeeded } from '@/hooks/use-kpi-api'
 
@@ -67,6 +68,11 @@ export function CommandCenterShell() {
   const { data: schedule } = useActivitySchedule('7d')
   const { data: feed } = useActivityFeed({ limit: 200 })
   const { data: decisions } = useDecisionsNeeded(10)
+
+  // PRD-180 S1 (F090): real-time board push. Subscribes to the LISTEN/NOTIFY
+  // SSE and invalidates the board cache on each pushed event — this is what
+  // makes "Streaming live" honest (the board no longer polls on an interval).
+  useBoardEventStream(true)
 
   const dateline = useMemo(todayDateline, [])
 

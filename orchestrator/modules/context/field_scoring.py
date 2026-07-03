@@ -109,6 +109,45 @@ def is_prunable(
     return decayed_strength(strength, age_hours, access_count, params) < prune_threshold
 
 
+def is_tainted(provenance, untrusted_sources) -> bool:
+    """PRD-178 S4 taint gate (top-risk #4 — promotion is the memory-poisoning
+    surface): a field pattern is *tainted* when its provenance carries untrusted
+    external content and must NEVER be promoted to durable memory.
+
+    Tainted when the provenance names a source in ``untrusted_sources``
+    (inbound email/web/webhook/…), or carries an explicit ``untrusted``/
+    ``tainted`` truthy flag. Pure — provenance dict + source set in, bool out.
+    Absent/empty provenance is treated as clean (internal agent/user origin)."""
+    if not provenance:
+        return False
+    if provenance.get("untrusted") or provenance.get("tainted"):
+        return True
+    source = provenance.get("source") or provenance.get("source_type")
+    if source and str(source).strip().lower() in untrusted_sources:
+        return True
+    return False
+
+
+def is_promotable(
+    decayed_strength: float,
+    access_count: int,
+    provenance,
+    *,
+    min_strength: float,
+    min_access_count: int,
+    untrusted_sources,
+) -> bool:
+    """PRD-178 S4: a field pattern promotes to durable memory only when it is
+    strong AND reused AND clean. The taint gate is checked FIRST and is
+    absolute — a tainted trajectory never promotes regardless of strength."""
+    if is_tainted(provenance, untrusted_sources):
+        return False
+    return (
+        decayed_strength >= min_strength
+        and max(0, access_count) >= min_access_count
+    )
+
+
 def estimate_tokens(text: str) -> int:
     """Cheap token estimate (~4 chars/token) for budgeting a result block."""
     return (len(text or "") + 3) // 4

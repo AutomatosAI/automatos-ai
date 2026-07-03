@@ -392,6 +392,17 @@ async def _boot_phase_2_extensions(app_instance: "FastAPI") -> "DeferredInitResu
                     except Exception as _mj_err:
                         logger.warning("Could not start MemoryJobScheduler: %s", _mj_err)
 
+                # PRD-178 S4: field → durable promotion (the moat arm) — distill
+                # strong, untainted field patterns into durable mem0 memory
+                # before compaction hard-deletes them. Taint-gated.
+                if config.FIELD_PROMOTION_ENABLED:
+                    try:
+                        from jobs.promote_field_memory import get_field_promotion_scheduler
+                        await get_field_promotion_scheduler().start(scheduler=shared_sched)
+                        logger.info("FieldPromotionJobScheduler started on unified scheduler")
+                    except Exception as _fp_err:
+                        logger.warning("Could not start FieldPromotionJobScheduler: %s", _fp_err)
+
                 # PRD-139: Nightly edge builder (populates graph regardless of flag)
                 try:
                     from services.edge_builder_scheduler import get_edge_builder_scheduler
@@ -399,6 +410,17 @@ async def _boot_phase_2_extensions(app_instance: "FastAPI") -> "DeferredInitResu
                     logger.info("EdgeBuilderScheduler started on unified scheduler")
                 except Exception as _eb_err:
                     logger.warning("Could not start EdgeBuilderScheduler: %s", _eb_err)
+
+                # PRD-177 S3 (F018): daily Composio action-metadata sync — keeps
+                # the classification table (which backs the fail-closed
+                # destructive gate) fresh, on the same scheduler as the recompute.
+                if config.COMPOSIO_SYNC_ENABLED:
+                    try:
+                        from services.composio_sync_scheduler import get_composio_sync_scheduler
+                        await get_composio_sync_scheduler().start(scheduler=shared_sched)
+                        logger.info("ComposioSyncScheduler started on unified scheduler")
+                    except Exception as _cs_err:
+                        logger.warning("Could not start ComposioSyncScheduler: %s", _cs_err)
 
                 # PRD-77: Load agent-scheduled tasks into APScheduler
                 try:
@@ -487,6 +509,19 @@ async def lifespan(app: FastAPI):
         await run_stage(report, BootstrapStage.SEMANTIC_EMBEDDINGS, _seed_semantic_embeddings)
 
         logger.info("Phase 1 complete: core ready")
+
+        # ── PRD-181 S1: attach the audit handler to the policy bus ──
+        # The bus becomes the single write point for the per-tenant Art.12
+        # record of every tool call + policy verdict. Only meaningful when the
+        # plane is on; idempotent and never fatal (a registration failure must
+        # not stop the server booting).
+        try:
+            from modules.policy import policy_plane_enabled, register_audit_handler
+
+            if policy_plane_enabled():
+                register_audit_handler()
+        except Exception as _audit_reg_err:  # noqa: BLE001
+            logger.warning("Policy audit handler registration failed: %s", _audit_reg_err)
 
         # NOTE: Redis client uses lazy initialization via get_redis_client()
         logger.info("Redis client will lazy-initialize on first use")
@@ -766,9 +801,15 @@ app.add_middleware(WidgetCORSMiddleware)
 app.add_middleware(WidgetRateLimitMiddleware)
 
 # Rate limiting (US-017)
+# PRD-174 F040 — the limiter was constructed but SlowAPIMiddleware was never
+# registered, so the default_limits never applied to any route: a placebo, and
+# the stack's only fail-OPEN gate. Fix: register the middleware AND fail closed —
+# swallow_errors=False means a limiter that can't evaluate (storage error) raises
+# instead of waving the request through. A gate that can't decide must deny.
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 def _get_real_client_ip(request) -> str:
     """Extract real client IP, respecting X-Forwarded-For behind reverse proxy."""
@@ -777,9 +818,24 @@ def _get_real_client_ip(request) -> str:
         return forwarded.split(",")[0].strip()
     return get_remote_address(request)
 
-limiter = Limiter(key_func=_get_real_client_ip, default_limits=["60/minute"])
+# F040 fix is gated on the policy-plane flag so flag-OFF is byte-for-byte today's
+# behaviour (limiter constructed but inert). swallow_errors follows the flag:
+# fail-CLOSED only when the plane is on, else the historical fail-open default.
+from config import config as _app_config
+_policy_plane_on = bool(getattr(_app_config, "POLICY_PLANE_ENABLED", False))
+
+limiter = Limiter(
+    key_func=_get_real_client_ip,
+    default_limits=["60/minute"],
+    swallow_errors=not _policy_plane_on,  # F040: fail CLOSED when the plane is on
+)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+# F040: actually enforce the limits — without this middleware the limiter above
+# is inert on every route. Registered ONLY under the policy-plane flag; OFF keeps
+# today's (placebo) behaviour so the rollout stays byte-for-byte reversible.
+if _policy_plane_on:
+    app.add_middleware(SlowAPIMiddleware)
 
 # Request body size limit middleware (10MB default, 50MB for uploads)
 MAX_BODY_SIZE = 10 * 1024 * 1024  # 10MB

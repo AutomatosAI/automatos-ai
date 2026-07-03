@@ -146,8 +146,32 @@ class Config:
     # API SECURITY
     # =============================================================================
     ORCHESTRATOR_API_KEY: str = os.getenv("ORCHESTRATOR_API_KEY") or os.getenv("AUTOMATOS_API_KEY") or os.getenv("API_KEY")
-    REQUIRE_AUTH: bool = os.getenv("REQUIRE_AUTH", "true").strip().lower() in ("true", "1", "yes")
+
+    # PRD-175 (F008) — the open-core edition flag. One core, two editions, one seam.
+    #   saas  → Clerk is the identity boundary (the running product; the default).
+    #   local → a single auto-authenticated local user in a single local workspace;
+    #           no login, no external SaaS, no Clerk env (git clone && docker up).
+    # An unknown value falls back to `saas` so a typo never silently un-guards auth.
+    # This is the ONE flag the frontend mount-gate and the backend local-session
+    # posture both read (mirrored to the client as NEXT_PUBLIC_AUTH_EDITION).
+    _AUTH_EDITION_RAW = (os.getenv("AUTH_EDITION", "saas") or "saas").strip().lower()
+    AUTH_EDITION: str = _AUTH_EDITION_RAW if _AUTH_EDITION_RAW in ("local", "saas") else "saas"
+
+    # The `local` edition *implies* the no-login posture: REQUIRE_AUTH is forced
+    # false so operators set ONE flag, not three that can silently contradict
+    # (PRD §4.1/§4.3). In `saas`, REQUIRE_AUTH stays secure-by-default from env.
+    REQUIRE_AUTH: bool = (
+        False if AUTH_EDITION == "local"
+        else os.getenv("REQUIRE_AUTH", "true").strip().lower() in ("true", "1", "yes")
+    )
     AUTH_DEBUG: bool = os.getenv("AUTH_DEBUG", "").strip().lower() in ("1", "true", "yes", "on")
+
+    # PRD-175 (F075) — the platform-staff email domain used by the Clerk
+    # defence-in-depth admin gate (core/auth/clerk.py). Configuration, not a
+    # baked-in literal, so a self-hosted/SaaS operator sets their own staff domain.
+    PLATFORM_STAFF_EMAIL_DOMAIN: str = (
+        os.getenv("PLATFORM_STAFF_EMAIL_DOMAIN", "automatos.app") or "automatos.app"
+    ).strip().lstrip("@").lower()
     
     # =============================================================================
     # CORS (Frontend origins)
@@ -376,7 +400,16 @@ class Config:
     @property
     def IS_DEVELOPMENT(self) -> bool:
         return self.ENVIRONMENT.lower() == "development"
-    
+
+    # PRD-175 (F008) — edition helpers (read the one AUTH_EDITION flag).
+    @property
+    def IS_LOCAL_EDITION(self) -> bool:
+        return self.AUTH_EDITION == "local"
+
+    @property
+    def IS_SAAS_EDITION(self) -> bool:
+        return self.AUTH_EDITION == "saas"
+
     NEXT_PUBLIC_API_URL: str = os.getenv("NEXT_PUBLIC_API_URL")
     
     # =============================================================================
@@ -404,8 +437,10 @@ class Config:
     OPENROUTER_SITE_URL: str = os.getenv("OPENROUTER_SITE_URL", "https://automatos.app")
     COHERE_RERANK_URL: str = os.getenv("COHERE_RERANK_URL", "https://api.cohere.com/v2/rerank")
     RAILWAY_GQL_URL: str = os.getenv("RAILWAY_GQL_URL", "https://backboard.railway.app/graphql/v2")
-    INTERNAL_API_HOSTNAME: str = os.getenv("INTERNAL_API_HOSTNAME", "automatos-ai.railway.internal")
-    INTERNAL_FRONTEND_HOSTNAME: str = os.getenv("INTERNAL_FRONTEND_HOSTNAME", "automatos-ai-frontend.railway.internal")
+    # PRD-176 F068: local-safe defaults. SaaS supplies the railway.internal host
+    # via env; a fresh local clone must not dial Railway topology by default.
+    INTERNAL_API_HOSTNAME: str = os.getenv("INTERNAL_API_HOSTNAME", "localhost")
+    INTERNAL_FRONTEND_HOSTNAME: str = os.getenv("INTERNAL_FRONTEND_HOSTNAME", "localhost")
     COMPOSIO_API_KEY: str = os.getenv("COMPOSIO_API_KEY") or os.getenv("COMPOSIO_KEY")
     # v3.1 default: tool endpoints automatically serve the latest toolkit version
     # (no `toolkit_versions=latest` param required). Only tool endpoints differ
@@ -472,8 +507,9 @@ class Config:
     BOARD_DISPATCH_AGENT_SLOTS: int = int(os.getenv("BOARD_DISPATCH_AGENT_SLOTS", "2"))
     # S5: done tasks older than this drop off the active board (retained in DB).
     BOARD_ARCHIVE_DONE_DAYS: int = int(os.getenv("BOARD_ARCHIVE_DONE_DAYS", "30"))
-    # S5: SSE board-event ping cadence (server tells clients to refetch).
-    BOARD_SSE_PING_SECONDS: float = float(os.getenv("BOARD_SSE_PING_SECONDS", "10"))
+    # PRD-180 S1: board SSE is now LISTEN/NOTIFY-driven; this is only the
+    # connection-liveness heartbeat cadence (a ':hb' comment), not a refresh tick.
+    BOARD_SSE_HEARTBEAT_SECONDS: float = float(os.getenv("BOARD_SSE_HEARTBEAT_SECONDS", "20"))
 
     WORKER_INTERNAL_URL: str = os.getenv("WORKER_INTERNAL_URL", "http://localhost:8081")
     WORKER_INTERNAL_TOKEN: str = os.getenv("WORKER_INTERNAL_TOKEN", "")
@@ -503,8 +539,9 @@ class Config:
     # =============================================================================
     # MONITORING (PRD-73)
     # =============================================================================
-    LOKI_URL: str = os.getenv("LOKI_URL", "http://loki.railway.internal:3100")
-    PROMETHEUS_URL: str = os.getenv("PROMETHEUS_URL", "http://prometheus.railway.internal:9090")
+    # PRD-176 F068: local-safe defaults (SaaS sets the railway host via env).
+    LOKI_URL: str = os.getenv("LOKI_URL", "http://localhost:3100")
+    PROMETHEUS_URL: str = os.getenv("PROMETHEUS_URL", "http://localhost:9090")
     GRAFANA_URL: str = os.getenv("GRAFANA_URL", "")
     GRAFANA_SERVICE_ACCOUNT_TOKEN: str = os.getenv("GRAFANA_SERVICE_ACCOUNT_TOKEN", "")
     GRAFANA_LOKI_DATASOURCE_UID: str = os.getenv("GRAFANA_LOKI_DATASOURCE_UID", "loki")
@@ -513,12 +550,15 @@ class Config:
     # OBSERVABILITY — log relay, Prometheus metrics, Loki query API, alerts
     # (PRD-142 W3-S5 / G7 — centralized so monitoring modules stop reading env directly)
     # =============================================================================
-    # Log relay client (core/monitoring/automatos_logging.py)
+    # Log relay client (core/monitoring/automatos_logging.py).
+    # PRD-176 F068: local-safe default host + OFF by default. SaaS points this at
+    # log-relay.railway.internal and sets LOG_RELAY_ENABLED=true via env; a fresh
+    # local clone must not try to push logs to Railway topology.
     LOG_RELAY_URL: str = os.getenv(
         "LOG_RELAY_URL",
-        "http://log-relay.railway.internal:8080/push",
+        "http://localhost:8080/push",
     )
-    LOG_RELAY_ENABLED: bool = os.getenv("LOG_RELAY_ENABLED", "true").lower() == "true"
+    LOG_RELAY_ENABLED: bool = os.getenv("LOG_RELAY_ENABLED", "false").lower() == "true"
     LOG_RELAY_BATCH_SIZE: int = int(os.getenv("LOG_RELAY_BATCH_SIZE", "50"))
     LOG_RELAY_FLUSH_INTERVAL: float = float(os.getenv("LOG_RELAY_FLUSH_INTERVAL", "2.0"))
     # SERVICE_NAME has two distinct historical defaults — preserve both exactly.
@@ -534,9 +574,13 @@ class Config:
     METRICS_ENVIRONMENT: str = os.getenv("ENVIRONMENT", "unknown")
     # Loki query proxy (core/monitoring/automatos_logs_api.py) — separate from the
     # PRD-73 LOKI_URL above because the existing module reads LOKI_QUERY_URL.
-    LOKI_QUERY_URL: str = os.getenv("LOKI_QUERY_URL", "http://loki.railway.internal:3100")
+    # PRD-176 F068: local-safe default (SaaS sets the railway host via env).
+    LOKI_QUERY_URL: str = os.getenv("LOKI_QUERY_URL", "http://localhost:3100")
     # Shared by automatos_logs_api + automatos_alerts for HMAC verification.
     ALERT_INGEST_TOKEN: str = os.getenv("ALERT_INGEST_TOKEN", "")
+    # PRD-180 S5: default measurement window (seconds) for the tracked SLOs
+    # (tool-call success rate, board dispatch p95). Overridable per-request.
+    SLO_DEFAULT_WINDOW_SECONDS: int = int(os.getenv("SLO_DEFAULT_WINDOW_SECONDS", "86400"))
 
     # =============================================================================
     # CHANNELS — public-facing host used to build inbound webhook URLs
@@ -591,6 +635,26 @@ class Config:
     # Escalation threshold: prescriptions at or above this risk are flagged high
     # priority and escalated for human approval (when self-management is on).
     HARNESS_HIGH_PRIORITY_RISK: int = int(os.getenv("HARNESS_HIGH_PRIORITY_RISK", "4"))
+
+    # PRD-174 Wave 4 — Unified Policy Plane. THE master flag for the policy
+    # plane: one typed gate (`modules/policy.PolicyGate`) evaluated in one place
+    # (`UnifiedToolExecutor.execute_tool`) for every tool call on every surface,
+    # plus the `on_pre_tool` budget/approval seam. HIGHEST-RISK wave — touches
+    # every execution path — so it ships default OFF. Flag OFF ⇒ byte-for-byte
+    # today's per-router gates (nothing new enters the path). Flag ON ⇒ the plane.
+    POLICY_PLANE_ENABLED: bool = os.getenv("AUTOMATOS_POLICY_PLANE", "false").lower() in ("true", "1", "yes")
+
+    # =============================================================================
+    # PRD-181 W11 — Governance & Compliance staging
+    # =============================================================================
+    # EU-AI-Act Art.14 human-oversight tiers (S6 scaffold). The tier *mapping*
+    # from risk class → oversight lives in modules/policy/ai_act.py (pure); this
+    # constant is the canonical ordered vocabulary so config/UI reference the same
+    # strings. Do NOT branch autonomy on these — the policy plane's risk routing
+    # is authoritative; these describe the oversight posture for the approval card.
+    EU_AI_ACT_OVERSIGHT_TIERS: tuple = ("monitor", "human_on_the_loop", "human_in_the_loop")
+    # Default TTL (seconds) for a durable approval grant awaiting a human (S2).
+    APPROVAL_GRANT_TTL_SECONDS: int = int(os.getenv("APPROVAL_GRANT_TTL_SECONDS", str(24 * 3600)))
 
     # =============================================================================
     # PRD-130 — Business Intake Wizard (PoC)
@@ -695,6 +759,15 @@ class Config:
     TOOL_ROUTING_GRAPH_AGENT_SAMPLE_FLOOR: int = int(os.getenv("TOOL_ROUTING_GRAPH_AGENT_SAMPLE_FLOOR", "50"))
     EDGE_BUILDER_HOUR_UTC: int = int(os.getenv("EDGE_BUILDER_HOUR_UTC", "3"))
     EDGE_BUILDER_WINDOW_DAYS: int = int(os.getenv("EDGE_BUILDER_WINDOW_DAYS", "30"))
+    # PRD-177 S3 (F018): Composio action-metadata sync scheduler + fail-CLOSED
+    # destructive gate. When the metadata table is empty (sync not yet run), a
+    # destructive intent is DENIED rather than silently permitted; clearly
+    # non-destructive intents still pass so a cold start is not bricked. The sync
+    # job refreshes classifications daily on the same scheduler as the nightly
+    # edge recompute.
+    COMPOSIO_DESTRUCTIVE_FAIL_CLOSED: bool = os.getenv("COMPOSIO_DESTRUCTIVE_FAIL_CLOSED", "true").lower() == "true"
+    COMPOSIO_SYNC_ENABLED: bool = os.getenv("COMPOSIO_SYNC_ENABLED", "true").lower() == "true"
+    COMPOSIO_SYNC_HOUR_UTC: int = int(os.getenv("COMPOSIO_SYNC_HOUR_UTC", "4"))
     # PRD-141 US-019: batched incremental tool-execution signal recorder.
     # Opt-in (default off). Drains an in-process queue with ONE DB session per
     # flush — never a DB session or task per tool call.
@@ -712,6 +785,11 @@ class Config:
     AWS_REGION: str = os.getenv("AWS_REGION", "us-east-1")
     AWS_ACCESS_KEY_ID: str = os.getenv("AWS_ACCESS_KEY_ID")
     AWS_SECRET_ACCESS_KEY: str = os.getenv("AWS_SECRET_ACCESS_KEY")
+    # PRD-176 F089: S3 endpoint override for a local S3-compatible object store
+    # (MinIO). Empty by default so prod/boto talks to real AWS S3; local compose
+    # sets it to the MinIO endpoint so the knowledge flywheel persists outputs
+    # instead of fail-softing to None on ephemeral disk.
+    S3_ENDPOINT_URL: str = os.getenv("S3_ENDPOINT_URL", "")
 
     # S3 Vectors Configuration
     S3_VECTORS_ENABLED: bool = os.getenv("S3_VECTORS_ENABLED", "false").lower() == "true"
@@ -727,7 +805,8 @@ class Config:
     # PRD-58: FutureAGI Integration (Prompt Scoring & Optimization)
     # =============================================================================
     FUTUREAGI_API_KEY: str = os.getenv("FUTUREAGI_API_KEY")
-    AGENT_OPT_WORKER_URL: str = os.getenv("AGENT_OPT_WORKER_URL", "http://agent-opt-worker.railway.internal:8080")
+    # PRD-176 F068: local-safe default (SaaS sets the railway worker host via env).
+    AGENT_OPT_WORKER_URL: str = os.getenv("AGENT_OPT_WORKER_URL", "http://localhost:8080")
 
     # =============================================================================
     # JIRA BUG REPORTS (Pilot Helper Widget)
@@ -750,7 +829,8 @@ class Config:
     # =============================================================================
     RECIPE_SCRATCHPAD_TTL: int = int(os.getenv("RECIPE_SCRATCHPAD_TTL", "3600"))
     RECIPE_LOG_S3_BUCKET: str = os.getenv("RECIPE_LOG_S3_BUCKET", "automatos-ai")
-    MEM0_API_URL: str = os.getenv("MEM0_API_URL", "http://automatos-mem0-server.railway.internal")
+    # PRD-176 F068: local-safe default (SaaS sets the railway mem0 host via env).
+    MEM0_API_URL: str = os.getenv("MEM0_API_URL", "http://localhost:8888")
     MEM0_API_KEY: str = os.getenv("MEM0_API_KEY")
     # Read path (search/get_all) blocks TTFT — keep short.
     MEM0_TIMEOUT_SECONDS: float = float(os.getenv("MEM0_TIMEOUT_SECONDS", "3.0"))
@@ -797,6 +877,31 @@ class Config:
     FIELD_PRUNE_THRESHOLD: float = float(os.getenv("FIELD_PRUNE_THRESHOLD", "0.01"))
     FIELD_COMPACTION_MAX_SCAN: int = int(os.getenv("FIELD_COMPACTION_MAX_SCAN", "10000"))
     SHARED_CONTEXT_BACKEND: str = os.getenv("SHARED_CONTEXT_BACKEND", "vector_field")  # "vector_field" or "redis"
+    # PRD-179 S2 (F049): how many completed missions the synthesis-flywheel ingest
+    # sweep processes per coordinator tick. The sweep now orders newest-first and
+    # excludes already-ingested / previously-failed runs SQL-side, so raising this
+    # drains a backlog faster without ever re-touching a done run.
+    FLYWHEEL_INGEST_BATCH: int = int(os.getenv("FLYWHEEL_INGEST_BATCH", "3"))
+
+    # PRD-178 S4 — Field → durable (mem0 L3) promotion, the moat arm.
+    # Strong, frequently-recalled field patterns are distilled into durable
+    # memory BEFORE compaction hard-deletes them (else the field never becomes
+    # durable). Thresholds are config, not hardcoded (D11).
+    FIELD_PROMOTION_ENABLED: bool = os.getenv("FIELD_PROMOTION_ENABLED", "true").lower() in ("true", "1", "yes")
+    # Minimum DECAYED strength for a pattern to be promotion-eligible.
+    FIELD_PROMOTION_MIN_STRENGTH: float = float(os.getenv("FIELD_PROMOTION_MIN_STRENGTH", "0.5"))
+    # Minimum access_count (reuse across tasks/missions) to promote.
+    FIELD_PROMOTION_MIN_ACCESS_COUNT: int = int(os.getenv("FIELD_PROMOTION_MIN_ACCESS_COUNT", "3"))
+    # Max points scanned per workspace per promotion run (bounds the scroll).
+    FIELD_PROMOTION_MAX_SCAN: int = int(os.getenv("FIELD_PROMOTION_MAX_SCAN", "10000"))
+    # Daily promotion job hour (UTC).
+    FIELD_PROMOTION_HOUR_UTC: int = int(os.getenv("FIELD_PROMOTION_HOUR_UTC", "4"))
+    # TAINT GATE (top-risk #4 — promotion is the memory-poisoning surface): a
+    # pattern whose provenance names an untrusted external source is NEVER
+    # promoted to durable memory. Comma-separated source tags treated as tainted.
+    FIELD_PROMOTION_UNTRUSTED_SOURCES: str = os.getenv(
+        "FIELD_PROMOTION_UNTRUSTED_SOURCES", "email,web,inbound,external,webhook,channel"
+    )
 
     # =============================================================================
     # EMBEDDINGS
@@ -861,7 +966,17 @@ class Config:
             return str(val).lower() == "true" if val else False
         except Exception:
             return os.getenv("RAG_RERANK_ENABLED", "false").lower() == "true"
-    
+
+    # PRD-179 S4 (F070): rag_feedback feeds retrieval ranking. A document that
+    # accrued negative feedback (thumbs_down, or a rating at/below the floor) has
+    # its retrieval score multiplied by this factor on the live hot path — a doc
+    # marked unhelpful de-ranks and can fall out of the top-K. 1.0 disables it.
+    RAG_FEEDBACK_PENALTY_FACTOR: float = float(os.getenv("RAG_FEEDBACK_PENALTY_FACTOR", "0.5"))
+    # A rating at/below this counts as negative (thumbs_down is always negative).
+    RAG_FEEDBACK_NEGATIVE_RATING_MAX: int = int(os.getenv("RAG_FEEDBACK_NEGATIVE_RATING_MAX", "2"))
+    # Only feedback from the last N days shapes ranking (stale opinions decay out).
+    RAG_FEEDBACK_LOOKBACK_DAYS: int = int(os.getenv("RAG_FEEDBACK_LOOKBACK_DAYS", "90"))
+
     # =============================================================================
     # LLM ANALYTICS (PRD-54: Model Tiers & Cost Optimization)
     # =============================================================================
@@ -881,7 +996,8 @@ class Config:
     # =============================================================================
     # VOICE SERVICE (PRD-74)
     # =============================================================================
-    VOICE_SERVICE_URL: str = os.getenv("VOICE_SERVICE_URL", "http://voice-service.railway.internal:8300")
+    # PRD-176 F068: local-safe default (SaaS sets the railway voice host via env).
+    VOICE_SERVICE_URL: str = os.getenv("VOICE_SERVICE_URL", "http://localhost:8300")
     VOICE_SERVICE_TIMEOUT: int = int(os.getenv("VOICE_SERVICE_TIMEOUT", "90"))
     VOICE_STT_MODEL: str = os.getenv("VOICE_STT_MODEL", "Systran/faster-whisper-large-v3")
     VOICE_TTS_MODEL: str = os.getenv("VOICE_TTS_MODEL", "kokoro")
@@ -939,6 +1055,51 @@ class Config:
                 "Tenant-isolation security config invalid (PRD-172):\n  - "
                 + "\n  - ".join(errors)
             )
+
+        # PRD-175 (F008) — the edition boot guard runs in the same hard-fail phase
+        # so a saas deploy that lost its Clerk env aborts boot rather than silently
+        # downgrading to the anonymous local identity and serving tenant data.
+        self.validate_auth_edition()
+
+    def validate_auth_edition(self) -> None:
+        """PRD-175 (F008): fail-closed boot guard for the open-core edition flag.
+
+        Keeps the two editions from silently blending into the accidental
+        "auth-not-configured" fallthrough that made local undeployable:
+
+        - ``saas``  requires the Clerk env (``CLERK_JWKS_URL`` +
+          ``CLERK_SECRET_KEY``). A saas boot with no Clerk is a misconfiguration,
+          not a silent anonymous downgrade (the one real danger, review §5.3) —
+          it must be a loud boot failure.
+        - ``local`` requires a ``DEFAULT_WORKSPACE_ID`` — the single local
+          workspace the auto-authenticated local session resolves to (W6 seeds it).
+          It requires NO Clerk env.
+
+        Raises ``RuntimeError`` (aborting boot) on a contradiction.
+        """
+        errors: list[str] = []
+
+        if self.AUTH_EDITION == "saas":
+            if not (self.CLERK_JWKS_URL or "").strip():
+                errors.append("CLERK_JWKS_URL is unset")
+            if not (self.CLERK_SECRET_KEY or "").strip():
+                errors.append("CLERK_SECRET_KEY is unset")
+            if errors:
+                raise RuntimeError(
+                    "AUTH_EDITION=saas requires Clerk to be configured, but "
+                    + " and ".join(errors)
+                    + ". A saas boot with no Clerk must fail fast, not fall through "
+                    "to the anonymous local identity (which would serve tenant data "
+                    "unauthenticated). Set the Clerk env, or set AUTH_EDITION=local "
+                    "for a no-login local instance."
+                )
+        elif self.AUTH_EDITION == "local":
+            if not (self.DEFAULT_WORKSPACE_ID or "").strip():
+                raise RuntimeError(
+                    "AUTH_EDITION=local requires DEFAULT_WORKSPACE_ID (the single "
+                    "local workspace the auto-authenticated local session resolves "
+                    "to). Set DEFAULT_WORKSPACE_ID to the seeded local workspace."
+                )
 
     def validate(self) -> bool:
         """

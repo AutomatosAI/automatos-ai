@@ -102,6 +102,32 @@ class ToolPostResult:
 
 
 @dataclass
+class PreToolResult:
+    """Return type of the PRD-174 ``on_pre_tool`` seam (fires beside dedup).
+
+    - ``block``: when True the tool is NOT executed; ``block_content`` is
+      surfaced to the LLM as the tool result (errors-as-data — a policy deny/ask
+      the model can read and adapt to). Mirrors the plane's deny/ask verdict at
+      the loop level.
+    - ``updated_input``: an optional replacement args dict the plane wants used
+      instead of the model's (e.g. an injected id). ``None`` = unchanged.
+
+    The default (returning ``None`` from the hook, or leaving ``on_pre_tool``
+    unset) is "no opinion" — the loop behaves byte-for-byte as before.
+    """
+
+    block: bool = False
+    block_content: Optional[str] = None
+    updated_input: Optional[Dict[str, Any]] = None
+
+
+# on_pre_tool hook: (name, args, workspace_id) -> Optional[PreToolResult]
+PreToolHook = Callable[
+    [str, Dict[str, Any], Optional[Any]], Awaitable[Optional[PreToolResult]]
+]
+
+
+@dataclass
 class ToolLoopResult:
     """The return value of :meth:`ToolLoopExecutor.run`.
 
@@ -192,6 +218,7 @@ class ToolLoopExecutor:
         on_round_end: Optional[
             Callable[[RoundState], Awaitable[Optional[ToolPostResult]]]
         ] = None,
+        on_pre_tool: Optional[PreToolHook] = None,
     ) -> ToolLoopResult:
         """Run the tool loop. Returns the final LLM response + iteration count.
 
@@ -250,6 +277,7 @@ class ToolLoopExecutor:
                 iteration=iteration,
                 on_event=on_event,
                 on_tool_result=on_tool_result,
+                on_pre_tool=on_pre_tool,
             )
             if forced is not None:
                 # Caller asked us to short-circuit — return the synthesized response.
@@ -324,6 +352,7 @@ class ToolLoopExecutor:
         on_tool_result: Optional[
             Callable[[str, Dict[str, Any], Any], Awaitable[Optional[ToolPostResult]]]
         ],
+        on_pre_tool: Optional[PreToolHook] = None,
     ) -> Tuple[List[Message], Optional[LLMResponse], RoundState]:
         """Execute a single round of tool calls.
 
@@ -363,6 +392,31 @@ class ToolLoopExecutor:
                     "reason": reason,
                 })
                 continue
+
+            # PRD-174 W4 — on_pre_tool policy seam (beside dedup). The natural
+            # attach point for blueprint / approval / budget policy: a deny/ask
+            # verdict blocks the call and surfaces its reason to the LLM as the
+            # tool result (errors-as-data); an updated_input rewrites the args.
+            # Unset hook (or a None return) is no-op — byte-for-byte the old loop.
+            if on_pre_tool is not None:
+                pre = await on_pre_tool(name, args, workspace_id)
+                if pre is not None:
+                    if pre.block:
+                        block_msg = pre.block_content or f"Blocked by policy: {name}"
+                        logger.info("[tool-loop] pre-tool block %s: %s", name, block_msg)
+                        tool_results.append(_tool_msg(call_id, name, block_msg))
+                        state.had_skips = True
+                        await _emit(on_event, {
+                            "type": "tool-end",
+                            "tool_call_id": call_id,
+                            "tool_name": name,
+                            "success": False,
+                            "blocked": True,
+                            "reason": block_msg,
+                        })
+                        continue
+                    if pre.updated_input is not None:
+                        args = pre.updated_input
 
             self.tracker.record_execution(name, args)
             attempts[name] = attempts.get(name, 0) + 1

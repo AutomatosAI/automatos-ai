@@ -865,6 +865,20 @@ class CoordinatorService:
             return document_id
         except Exception as e:
             logger.warning("[Mission] Failed to save output document for %s: %s", run.id, e, exc_info=True)
+            # PRD-179 S2 (F049): stamp a failure marker so the flywheel sweep's
+            # SQL-side exclusion drops this run next tick instead of re-selecting
+            # it forever. Without it, one poison run silently starves the backlog.
+            try:
+                run.config = {
+                    **(run.config or {}),
+                    "output_ingest_failed": datetime.now(timezone.utc).isoformat(),
+                }
+                db.flush()
+            except Exception:
+                logger.debug(
+                    "[Mission] Could not persist ingest-failure marker for run %s",
+                    run.id, exc_info=True,
+                )
             return None
 
     async def _emit_mission_document(
@@ -1134,21 +1148,35 @@ class CoordinatorService:
             logger.debug("[Coordinator] legacy-collection sweep skipped", exc_info=True)
 
     async def _save_pending_output_documents(self, db: Session) -> None:
-        """Save output documents for completed missions that don't have one yet."""
-        completed_without_output = (
+        """Route completed missions that have not been ingested through the
+        synthesis flywheel (PRD-179 S2, F049).
+
+        The exclusion of already-handled runs is done SQL-side, not by pulling a
+        batch and filtering in Python: a run is a candidate only when it carries
+        NONE of the three terminal markers — ``output_document_id`` (ingested),
+        ``output_ingest`` (opted out / skipped), ``output_ingest_failed``
+        (previous ingest errored). Ordering is ``created_at DESC`` so the newest
+        completed missions ingest first. Together these stop the pre-fix
+        starvation where an unordered ``LIMIT 3`` kept re-selecting the same
+        already-done rows once more than three accumulated.
+        """
+        candidates = (
             db.query(OrchestrationRun)
             .filter(
                 OrchestrationRun.state == RunState.COMPLETED.value,
+                # SQL-side already-ingested / failure exclusion (JSONB ->> IS NULL).
+                OrchestrationRun.config["output_document_id"].astext.is_(None),
+                OrchestrationRun.config["output_ingest"].astext.is_(None),
+                OrchestrationRun.config["output_ingest_failed"].astext.is_(None),
             )
-            .limit(3)
+            .order_by(OrchestrationRun.created_at.desc())
+            .limit(Config.FLYWHEEL_INGEST_BATCH)
             .all()
         )
-        for run in completed_without_output:
-            cfg = run.config or {}
-            # output_document_id == saved; output_ingest marker == workspace
-            # opted out of the flywheel (Q58) — don't retry every tick.
-            if cfg.get("output_document_id") or cfg.get("output_ingest"):
-                continue
+        for run in candidates:
+            # _save_mission_output_as_document owns its own failure handling and
+            # stamps the output_ingest_failed marker on error (so a poison run
+            # drops out of the candidate set). The sweep stays a thin driver.
             await self._save_mission_output_as_document(db, run)
 
     # ------------------------------------------------------------------
@@ -1284,8 +1312,8 @@ class CoordinatorService:
                 await self._save_pending_output_documents(db)
                 db.commit()
 
-                # --- PRD-166 S1: field compaction (throttled to once per hour) ---
-                await self._maybe_compact_fields(summary)
+                # --- PRD-166 S1 / PRD-178 S3: field compaction (throttled hourly) ---
+                await self._maybe_compact_fields(db, summary)
 
                 # --- Archive phase (throttled to once per hour) ---
                 self._maybe_archive(db, summary)
@@ -1426,7 +1454,8 @@ class CoordinatorService:
                     self._run_agent_io(p["factory"], p["agent_id"], p["prompt"],
                                        p["task"], p["attachment_ids"],
                                        mode_caps=p["mode_caps"],
-                                       agent_runtime=p.get("agent_runtime"))
+                                       agent_runtime=p.get("agent_runtime"),
+                                       field_context=p.get("field_context"))
                     for p in prepared
                 ]
                 results = await asyncio.gather(*agent_coros, return_exceptions=True)
@@ -1969,6 +1998,14 @@ class CoordinatorService:
             # Caps resolved here (serial DB path) so the concurrent I/O phase
             # never touches the DB — see _get_power_mode_caps / _run_agent_io.
             "mode_caps": mode_caps,
+            # PRD-178 S1 (F020): bind the agent's field tools to THIS task's run,
+            # resolved on the serial DB path. Threaded into execute_with_prompt →
+            # the tool loop → PlatformActionExecutor so field_id no longer comes
+            # from a `.first()` guess over concurrent running missions.
+            "field_context": {
+                "field_id": field_id,
+                "mission_id": str(run.id),
+            } if field_id else None,
         }
 
     async def _run_agent_io(
@@ -1980,6 +2017,7 @@ class CoordinatorService:
         attachment_ids: List[str],
         mode_caps: Optional[Dict[str, Any]] = None,
         agent_runtime: Optional[Any] = None,
+        field_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Execute agent I/O — safe to run concurrently via asyncio.gather().
 
@@ -2004,6 +2042,8 @@ class CoordinatorService:
                     max_retries=0,
                     max_tool_iterations=max_iters,
                     attachment_ids=attachment_ids,
+                    # PRD-178 S1 (F020): bind field tools to THIS task's run.
+                    context=field_context,
                 ),
                 timeout=task_timeout,
             )
@@ -3486,12 +3526,19 @@ class CoordinatorService:
     # Archival (PRD-82B US-009)
     # ------------------------------------------------------------------
 
-    async def _maybe_compact_fields(self, summary: Dict[str, Any]) -> None:
-        """PRD-166 S1: retention/compaction for field memory — prune dead patterns
-        so the shared Qdrant collection stays bounded as workspace fields compound
-        across missions. Throttled to once per hour (expensive scan); errors never
-        affect the rest of the tick. The prune decision is the unit-tested
-        ``field_scoring.is_prunable``."""
+    async def _maybe_compact_fields(self, db: Session, summary: Dict[str, Any]) -> None:
+        """PRD-166 S1 / PRD-178 S3 (F063): retention/compaction for field memory —
+        prune dead patterns so the shared Qdrant collection stays bounded as
+        workspace fields compound across missions. Throttled to once per hour;
+        errors never affect the rest of the tick. The prune decision is the
+        unit-tested ``field_scoring.is_prunable``.
+
+        F063 fix: the sweep is **workspace-scoped** (each workspace's points are
+        compacted under its own filter, never a full unscoped re-scan) and
+        **resumable** — the Qdrant scroll cursor is persisted per workspace so
+        the next run continues where this one stopped instead of re-scanning
+        compacted entries. ``next_offset=None`` from a completed pass clears the
+        cursor so the following run starts fresh."""
         now = datetime.now(timezone.utc)
         if (
             self._last_field_compaction_at is not None
@@ -3504,13 +3551,43 @@ class CoordinatorService:
         inner = getattr(field, "_inner", field) if field else None
         if inner is None or not hasattr(inner, "compact"):
             return
+
+        from modules.context.compaction_cursor import (
+            load_compaction_cursor,
+            save_compaction_cursor,
+        )
+
+        # Workspaces that have accumulated field data — scope compaction to each.
         try:
-            pruned = await inner.compact()
-            if pruned:
-                summary["field_pruned"] = pruned
-                logger.info("[Coordinator] Field compaction pruned %d pattern(s)", pruned)
+            workspace_ids = [
+                str(row[0]) for row in db.execute(
+                    text(
+                        "SELECT DISTINCT workspace_id FROM orchestration_runs "
+                        "WHERE config->>'field_id' IS NOT NULL"
+                    )
+                ).fetchall()
+                if row[0] is not None
+            ]
         except Exception:
-            logger.warning("[Coordinator] Field compaction failed", exc_info=True)
+            logger.warning("[Coordinator] Field compaction workspace scan failed", exc_info=True)
+            return
+
+        total_pruned = 0
+        for ws_id in workspace_ids:
+            try:
+                cursor = load_compaction_cursor(db, ws_id)
+                result = await inner.compact(workspace_id=ws_id, resume_offset=cursor)
+                save_compaction_cursor(db, ws_id, result.next_offset)
+                db.commit()
+                total_pruned += result.pruned
+            except Exception:
+                db.rollback()
+                logger.warning(
+                    "[Coordinator] Field compaction failed for ws=%s", ws_id, exc_info=True,
+                )
+        if total_pruned:
+            summary["field_pruned"] = total_pruned
+            logger.info("[Coordinator] Field compaction pruned %d pattern(s)", total_pruned)
 
     def _maybe_archive(self, db: Session, summary: Dict[str, Any]) -> None:
         """

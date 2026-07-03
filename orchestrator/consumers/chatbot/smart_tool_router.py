@@ -153,6 +153,7 @@ class SmartToolRouter:
         conversation_context: Optional[List[Dict]] = None,
         tool_hints: Optional[List[str]] = None,
         agent_id: Optional[int] = None,
+        workspace_id: Optional[str] = None,
     ) -> ToolRoutingResult:
         """
         Route a query to appropriate tools.
@@ -163,6 +164,8 @@ class SmartToolRouter:
             conversation_context: Recent conversation history
             tool_hints: PRD-68 hint keywords from AutoBrain (e.g. ["email", "github"])
             agent_id: Owning agent — scopes GraphRouter's per-agent edges/affinities
+            workspace_id: Owning workspace — scopes GraphRouter's per-tenant
+                edges/affinities (PRD-177 S5). Threaded to ``rank_chains``.
 
         Returns:
             ToolRoutingResult with filtered tools and guidance
@@ -223,7 +226,7 @@ class SmartToolRouter:
                 from modules.tools.discovery.graph_router import get_graph_router
 
                 chains = await get_graph_router().rank_chains(
-                    query=query, agent_id=agent_id, top_k=30,
+                    query=query, workspace_id=workspace_id, agent_id=agent_id, top_k=30,
                 )
                 if chains:
                     keep = {name for _, _, chain in chains for name in chain}

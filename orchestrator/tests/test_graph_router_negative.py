@@ -202,7 +202,7 @@ def test_query_affinities_splits_positive_and_negative():
         _aff("bad", "fails_for_intent", weight=1.0, confidence=0.5),
     ]
     positive, negative = GraphRouter._query_affinities(
-        _FakeAffinityDB(rows), ["good", "pref", "bad"], None
+        _FakeAffinityDB(rows), ["good", "pref", "bad"], None, None
     )
 
     assert positive["good"] == pytest.approx(0.8)
@@ -218,17 +218,17 @@ def test_negative_affinity_penalizes_score(router, monkeypatch):
     """A fails_for_intent action subtracts its penalty from the chain score."""
     monkeypatch.setattr(
         router, "_query_edges",
-        lambda db, names, conf, aid: [
+        lambda db, names, conf, aid, ws: [
             {"from_action": "bad_tool", "to_action": "next", "confidence": 1.0,
              "weight": 1.0, "agent_id": None},
         ],
     )
     monkeypatch.setattr(
         router, "_query_affinities",
-        lambda db, names, aid: ({}, {"bad_tool": 0.5}),
+        lambda db, names, aid, ws: ({}, {"bad_tool": 0.5}),
     )
 
-    chains = router._expand_with_graph([("bad_tool", 0.8)], agent_id=None)
+    chains = router._expand_with_graph([("bad_tool", 0.8)], agent_id=None, workspace_id=None)
 
     expanded = [c for c in chains if c[2] == ["bad_tool", "next"]]
     assert len(expanded) == 1
@@ -242,7 +242,7 @@ def test_negative_signals_reduce_ranking(router, monkeypatch):
     """Of two equal-cosine chains, the one whose action fails ranks lower."""
     monkeypatch.setattr(
         router, "_query_edges",
-        lambda db, names, conf, aid: [
+        lambda db, names, conf, aid, ws: [
             {"from_action": "tool_a", "to_action": "x", "confidence": 1.0,
              "weight": 1.0, "agent_id": None},
             {"from_action": "tool_b", "to_action": "y", "confidence": 1.0,
@@ -251,10 +251,10 @@ def test_negative_signals_reduce_ranking(router, monkeypatch):
     )
     monkeypatch.setattr(
         router, "_query_affinities",
-        lambda db, names, aid: ({}, {"tool_b": 0.5}),
+        lambda db, names, aid, ws: ({}, {"tool_b": 0.5}),
     )
 
-    chains = router._expand_with_graph([("tool_a", 0.9), ("tool_b", 0.9)], agent_id=None)
+    chains = router._expand_with_graph([("tool_a", 0.9), ("tool_b", 0.9)], agent_id=None, workspace_id=None)
 
     score = {c[0]: c[1] for c in chains if len(c[2]) == 2}
     assert score["tool_a"] == pytest.approx(0.9)   # no penalty
@@ -266,17 +266,17 @@ def test_positive_boost_still_applies(router, monkeypatch):
     """The refactor preserves positive boosts (regression guard)."""
     monkeypatch.setattr(
         router, "_query_edges",
-        lambda db, names, conf, aid: [
+        lambda db, names, conf, aid, ws: [
             {"from_action": "tool_a", "to_action": "x", "confidence": 1.0,
              "weight": 1.0, "agent_id": None},
         ],
     )
     monkeypatch.setattr(
         router, "_query_affinities",
-        lambda db, names, aid: ({"tool_a": 0.3}, {}),
+        lambda db, names, aid, ws: ({"tool_a": 0.3}, {}),
     )
 
-    chains = router._expand_with_graph([("tool_a", 0.5)], agent_id=None)
+    chains = router._expand_with_graph([("tool_a", 0.5)], agent_id=None, workspace_id=None)
 
     expanded = [c for c in chains if c[2] == ["tool_a", "x"]]
     # 0.5 * 1.0 + 0.3 - 0 = 0.8
@@ -298,7 +298,7 @@ def test_failed_after_edge_not_expanded():
     ]
     fake_db = _FakeEdgeDB(rows)
 
-    edges = GraphRouter._query_edges(fake_db, ["good"], 0.6, None)
+    edges = GraphRouter._query_edges(fake_db, ["good"], 0.6, None, None)
 
     to_actions = {e["to_action"] for e in edges}
     assert "next" in to_actions       # used_after IS followed

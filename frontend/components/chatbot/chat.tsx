@@ -3,7 +3,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ArrowDown, Target, X } from 'lucide-react'
-import { LLM_DEFAULTS } from '@/lib/llm-defaults'
 import { Button } from '@/components/ui/button'
 import { useChat } from '@/lib/chat/hooks'
 import { Message } from './message'
@@ -47,7 +46,6 @@ import { CreateMissionModal } from '@/components/missions/create-mission-modal'
 export interface ChatProps {
   id: string
   initialMessages?: ChatMessage[]
-  initialChatModel?: string
   initialVisibilityType?: VisibilityType
   isReadonly?: boolean
   autoResume?: boolean
@@ -57,7 +55,6 @@ export interface ChatProps {
 export function Chat({
   id,
   initialMessages = [],
-  initialChatModel = LLM_DEFAULTS.model_id,
   initialVisibilityType = 'private',
   isReadonly = false,
   autoResume = false,
@@ -65,7 +62,6 @@ export function Chat({
 }: ChatProps) {
   const [selectedArtifact, setSelectedArtifact] = useState<Artifact | null>(null)
   const [isArtifactViewerVisible, setIsArtifactViewerVisible] = useState(false)
-  const [currentModelId, setCurrentModelId] = useState(initialChatModel)
 
   // Widget Architecture (PRD-38.1) - workspace store
   const widgetIds = useWorkspaceStore((s) => s.widgetIds)
@@ -188,7 +184,9 @@ export function Chat({
   const { messages, setMessages, sendMessage, status, stop, reload } = useChat({
     id: activeChatId,
     initialMessages,
-    selectedModelId: currentModelId,
+    // PRD-180 S3 (F035): no client model override. The model is no longer a
+    // user-facing control (the backend ignored the selection), so routing is by
+    // agent; with no agent the model resolves via the Auto tier server-side.
     selectedAgentId,
     missionMode: isMissionMode,
     planMode: isPlanMode,
@@ -954,8 +952,6 @@ export function Chat({
                         status={status}
                         stop={stop}
                         sendMessage={handleSendMessage}
-                        selectedModelId={currentModelId}
-                        onModelChange={setCurrentModelId}
                         selectedAgentId={selectedAgentId}
                         onAgentChange={handleAgentChange}
                         selectedVisibilityType={visibilityType}
@@ -1054,8 +1050,6 @@ export function Chat({
                           status={status}
                           stop={stop}
                           sendMessage={handleSendMessage}
-                          selectedModelId={currentModelId}
-                          onModelChange={setCurrentModelId}
                           selectedAgentId={selectedAgentId}
                           onAgentChange={handleAgentChange}
                           selectedVisibilityType={visibilityType}
@@ -1144,8 +1138,6 @@ export function Chat({
                   stop={stop}
                   sendMessage={handleSendMessage}
                   setMessages={setMessages}
-                  selectedModelId={currentModelId}
-                  onModelChange={setCurrentModelId}
                   selectedAgentId={selectedAgentId}
                   onAgentChange={handleAgentChange}
                   selectedVisibilityType={visibilityType}
@@ -1307,8 +1299,6 @@ export function Chat({
                   stop={stop}
                   sendMessage={handleSendMessage}
                   setMessages={setMessages}
-                  selectedModelId={currentModelId}
-                  onModelChange={setCurrentModelId}
                   selectedAgentId={selectedAgentId}
                   onAgentChange={handleAgentChange}
                   selectedVisibilityType={visibilityType}

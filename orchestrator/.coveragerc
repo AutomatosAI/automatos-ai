@@ -1,0 +1,49 @@
+# PRD-182 W12-S4 (F092) - coverage measurement config for the orchestrator.
+#
+# The 80% doctrine had zero tooling behind it (no pytest-cov, no .coveragerc, no
+# vitest coverage) - the OS review calls the doctrine "fiction". This file makes
+# it MEASURED. It scopes coverage to the application source that the required
+# gate's suite actually exercises, so the reported number is honest rather than
+# diluted by files no test touches. The ratchet (scripts/check_coverage_baseline.py)
+# fail-closes only BELOW the measured floor - it does not assert an aspirational
+# 80% the suite cannot meet today.
+
+[run]
+# rootdir is orchestrator/, so these are the app's top-level source packages.
+source =
+    api
+    channels
+    consumers
+    core
+    integrations
+    jobs
+    modules
+    services
+branch = True
+# Stable, machine-independent paths in the XML/report (CI vs local).
+relative_files = True
+omit =
+    */tests/*
+    */test_*
+    */__pycache__/*
+    */migrations/*
+    */alembic/*
+    */evals/*
+    */scripts/*
+    */conftest.py
+
+[report]
+# Do not fail here on missing coverage - the ratchet script owns the pass/fail
+# decision against the recorded floor. This just shapes the printed report.
+show_missing = False
+skip_covered = False
+precision = 2
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    raise NotImplementedError
+    if TYPE_CHECKING:
+    if __name__ == .__main__.:
+
+[xml]
+output = coverage.xml
