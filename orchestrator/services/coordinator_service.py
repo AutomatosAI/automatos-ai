@@ -1284,8 +1284,8 @@ class CoordinatorService:
                 await self._save_pending_output_documents(db)
                 db.commit()
 
-                # --- PRD-166 S1: field compaction (throttled to once per hour) ---
-                await self._maybe_compact_fields(summary)
+                # --- PRD-166 S1 / PRD-178 S3: field compaction (throttled hourly) ---
+                await self._maybe_compact_fields(db, summary)
 
                 # --- Archive phase (throttled to once per hour) ---
                 self._maybe_archive(db, summary)
@@ -3498,12 +3498,19 @@ class CoordinatorService:
     # Archival (PRD-82B US-009)
     # ------------------------------------------------------------------
 
-    async def _maybe_compact_fields(self, summary: Dict[str, Any]) -> None:
-        """PRD-166 S1: retention/compaction for field memory — prune dead patterns
-        so the shared Qdrant collection stays bounded as workspace fields compound
-        across missions. Throttled to once per hour (expensive scan); errors never
-        affect the rest of the tick. The prune decision is the unit-tested
-        ``field_scoring.is_prunable``."""
+    async def _maybe_compact_fields(self, db: Session, summary: Dict[str, Any]) -> None:
+        """PRD-166 S1 / PRD-178 S3 (F063): retention/compaction for field memory —
+        prune dead patterns so the shared Qdrant collection stays bounded as
+        workspace fields compound across missions. Throttled to once per hour;
+        errors never affect the rest of the tick. The prune decision is the
+        unit-tested ``field_scoring.is_prunable``.
+
+        F063 fix: the sweep is **workspace-scoped** (each workspace's points are
+        compacted under its own filter, never a full unscoped re-scan) and
+        **resumable** — the Qdrant scroll cursor is persisted per workspace so
+        the next run continues where this one stopped instead of re-scanning
+        compacted entries. ``next_offset=None`` from a completed pass clears the
+        cursor so the following run starts fresh."""
         now = datetime.now(timezone.utc)
         if (
             self._last_field_compaction_at is not None
@@ -3516,13 +3523,43 @@ class CoordinatorService:
         inner = getattr(field, "_inner", field) if field else None
         if inner is None or not hasattr(inner, "compact"):
             return
+
+        from modules.context.compaction_cursor import (
+            load_compaction_cursor,
+            save_compaction_cursor,
+        )
+
+        # Workspaces that have accumulated field data — scope compaction to each.
         try:
-            pruned = await inner.compact()
-            if pruned:
-                summary["field_pruned"] = pruned
-                logger.info("[Coordinator] Field compaction pruned %d pattern(s)", pruned)
+            workspace_ids = [
+                str(row[0]) for row in db.execute(
+                    text(
+                        "SELECT DISTINCT workspace_id FROM orchestration_runs "
+                        "WHERE config->>'field_id' IS NOT NULL"
+                    )
+                ).fetchall()
+                if row[0] is not None
+            ]
         except Exception:
-            logger.warning("[Coordinator] Field compaction failed", exc_info=True)
+            logger.warning("[Coordinator] Field compaction workspace scan failed", exc_info=True)
+            return
+
+        total_pruned = 0
+        for ws_id in workspace_ids:
+            try:
+                cursor = load_compaction_cursor(db, ws_id)
+                result = await inner.compact(workspace_id=ws_id, resume_offset=cursor)
+                save_compaction_cursor(db, ws_id, result.next_offset)
+                db.commit()
+                total_pruned += result.pruned
+            except Exception:
+                db.rollback()
+                logger.warning(
+                    "[Coordinator] Field compaction failed for ws=%s", ws_id, exc_info=True,
+                )
+        if total_pruned:
+            summary["field_pruned"] = total_pruned
+            logger.info("[Coordinator] Field compaction pruned %d pattern(s)", total_pruned)
 
     def _maybe_archive(self, db: Session, summary: Dict[str, Any]) -> None:
         """

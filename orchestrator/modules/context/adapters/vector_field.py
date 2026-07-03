@@ -21,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -47,6 +48,21 @@ logger = logging.getLogger(__name__)
 # Single shared collection for all field memory. Per-mission isolation
 # is enforced via the ``field_id`` payload filter.
 SHARED_COLLECTION = "field_memory"
+
+
+@dataclass(frozen=True)
+class CompactionResult:
+    """PRD-178 S3 (F063): outcome of one bounded compaction pass.
+
+    ``next_offset`` is the opaque Qdrant scroll cursor to resume from on the
+    next run; ``None`` means the sweep reached the end of the (scoped)
+    collection, so the next run starts a fresh full pass. The caller persists
+    ``next_offset`` (see ``modules.context.compaction_cursor``) — the adapter
+    stays DB-free."""
+
+    pruned: int
+    next_offset: Optional[Any]
+    scanned: int
 
 
 class VectorFieldSharedContext(SharedContextPort):
@@ -401,21 +417,34 @@ class VectorFieldSharedContext(SharedContextPort):
         self,
         workspace_id: Optional[str] = None,
         prune_threshold: Optional[float] = None,
-    ) -> int:
+        resume_offset: Optional[Any] = None,
+        max_scan: Optional[int] = None,
+    ) -> CompactionResult:
         """Bound Qdrant: delete points whose decayed strength has fallen below the
         hard prune floor (``FIELD_PRUNE_THRESHOLD`` — stricter than archival, so
-        archived-but-live patterns survive). Scoped to a workspace when given,
-        else the whole collection. Returns the number pruned. The prune decision
-        is the pure ``field_scoring.is_prunable`` (unit-tested)."""
+        archived-but-live patterns survive). The prune decision is the pure
+        ``field_scoring.is_prunable`` (unit-tested).
+
+        PRD-178 S3 (F063):
+          * **Workspace scope** — when ``workspace_id`` is given the scroll is
+            filtered to that workspace, so another workspace's points are never
+            scanned. (Unscoped only for an explicit whole-collection sweep.)
+          * **Resume cursor** — start scanning from ``resume_offset`` (the
+            opaque Qdrant scroll cursor persisted by the previous run) instead
+            of restarting at the top every time. Returns ``CompactionResult``
+            whose ``next_offset`` the caller persists; ``None`` means a full
+            pass completed and the next run starts fresh.
+        """
         threshold = config.FIELD_PRUNE_THRESHOLD if prune_threshold is None else prune_threshold
+        scan_budget = config.FIELD_COMPACTION_MAX_SCAN if max_scan is None else max_scan
         params = self._scoring_params()
         scroll_filter = self._workspace_filter(str(workspace_id)) if workspace_id else None
         now = datetime.now(timezone.utc)
 
         to_delete: list[Any] = []
-        offset = None
+        offset = resume_offset
         scanned = 0
-        while scanned < config.FIELD_COMPACTION_MAX_SCAN:
+        while scanned < scan_budget:
             points, offset = await self._client.scroll(
                 collection_name=SHARED_COLLECTION,
                 scroll_filter=scroll_filter,
@@ -425,6 +454,7 @@ class VectorFieldSharedContext(SharedContextPort):
                 with_vectors=False,
             )
             if not points:
+                offset = None  # end of collection — next run starts fresh
                 break
             for p in points:
                 scanned += 1
@@ -449,10 +479,12 @@ class VectorFieldSharedContext(SharedContextPort):
                 points_selector=to_delete,
             )
         logger.info(
-            "[Field] Compaction pruned %d/%d scanned point(s) (ws=%s)",
-            len(to_delete), scanned, workspace_id,
+            "[Field] Compaction pruned %d/%d scanned point(s) (ws=%s, resume=%s)",
+            len(to_delete), scanned, workspace_id, offset is not None,
         )
-        return len(to_delete)
+        return CompactionResult(
+            pruned=len(to_delete), next_offset=offset, scanned=scanned,
+        )
 
     async def health(self) -> dict[str, Any]:
         """PRD-166 S2: real backend health — pings Qdrant instead of reporting a
