@@ -15,6 +15,10 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && npm install -g pnpm \
     && rm -rf /var/lib/apt/lists/*
 
+# Claude Code CLI — required by claude-agent-sdk for headless canvas
+# sessions (PRD-170 S1). The SDK spawns this binary per workspace session.
+RUN npm install -g @anthropic-ai/claude-code
+
 # Python dev/test tools (pre-installed so agents can use immediately)
 RUN pip install --no-cache-dir \
     pytest pytest-cov pytest-asyncio \
