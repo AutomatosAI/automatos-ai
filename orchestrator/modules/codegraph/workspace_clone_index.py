@@ -15,10 +15,26 @@ This module holds the pure, DB-free glue that defines that binding:
   * ``IndexTrigger`` + ``should_reindex`` — the "on session start + on commit"
     trigger policy.
 
-The DB-backed indexing itself (walk → parse → store) reuses the existing
-``CodeGraphService`` directory-indexing path; wiring that against a live index +
-proving "what calls X?" and reindex-on-commit is DB/CI integration, DEFERRED with
-this contract written (the kit forbids faking a DB-backed green). Pure stdlib.
+The DB-backed indexing itself (walk → parse → store) and the session getting
+codegraph tools are NOT wired here — and doing so needs two pieces of net-new
+infrastructure this pure module deliberately does not invent (a scope decision
+for the PRD owner, per CLAUDE.md §12, not a silent defer):
+
+  1. A LOCAL-DIRECTORY index entrypoint on ``CodeGraphService``. Its only public
+     indexer is ``index_github_project`` — it CLONES from a GitHub URL to a temp
+     dir. Indexing an already-present workspace clone needs a new public method
+     (its internal ``_discover_code_files`` directory walk exists; the public
+     seam does not) OR a workspace→repo-URL resolution to reuse the URL path.
+  2. An MCP bridge so the HEADLESS ``claude`` CLI session (worker container) can
+     CALL codegraph. The ``platform_codegraph_*`` family runs in the platform's
+     OWN agent loop (``agent_platform_tools``); the CLI session cannot reach it.
+     "the agent navigates by call-graph" needs an SDK MCP server exposing
+     codegraph to the session — no MCP surface exists in the codebase yet.
+
+What IS landed + tested here is the pure, security-critical glue that BINDS the
+PRD-165 codegraph family to the local clone once that infrastructure exists: the
+deterministic project name, the tenancy-fenced clone path, and the on-start +
+on-commit reindex trigger policy. Pure stdlib.
 """
 
 from __future__ import annotations
