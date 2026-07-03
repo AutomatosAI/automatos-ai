@@ -23,6 +23,12 @@ tool loop and unit tests can import it without the heavy ``modules.tools`` init.
 """
 from __future__ import annotations
 
+from modules.policy.ai_act import (
+    OversightMapping,
+    OversightTier,
+    classify_risk_tier,
+    oversight_for_risk,
+)
 from modules.policy.audit_handler import (
     audit_policy_verdict,
     make_audit_handler,
@@ -75,6 +81,11 @@ __all__ = [
     "audit_policy_verdict",
     "make_audit_handler",
     "register_audit_handler",
+    # EU-AI-Act Art.14 oversight tiers (S6 scaffold — read by the S5 card)
+    "OversightMapping",
+    "OversightTier",
+    "classify_risk_tier",
+    "oversight_for_risk",
     # budget
     "BudgetDecision",
     "BudgetExceeded",

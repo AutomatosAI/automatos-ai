@@ -641,6 +641,18 @@ class Config:
     POLICY_PLANE_ENABLED: bool = os.getenv("AUTOMATOS_POLICY_PLANE", "false").lower() in ("true", "1", "yes")
 
     # =============================================================================
+    # PRD-181 W11 — Governance & Compliance staging
+    # =============================================================================
+    # EU-AI-Act Art.14 human-oversight tiers (S6 scaffold). The tier *mapping*
+    # from risk class → oversight lives in modules/policy/ai_act.py (pure); this
+    # constant is the canonical ordered vocabulary so config/UI reference the same
+    # strings. Do NOT branch autonomy on these — the policy plane's risk routing
+    # is authoritative; these describe the oversight posture for the approval card.
+    EU_AI_ACT_OVERSIGHT_TIERS: tuple = ("monitor", "human_on_the_loop", "human_in_the_loop")
+    # Default TTL (seconds) for a durable approval grant awaiting a human (S2).
+    APPROVAL_GRANT_TTL_SECONDS: int = int(os.getenv("APPROVAL_GRANT_TTL_SECONDS", str(24 * 3600)))
+
+    # =============================================================================
     # PRD-130 — Business Intake Wizard (PoC)
     # =============================================================================
     FIRECRAWL_API_KEY: str = os.getenv("FIRECRAWL_API_KEY")

@@ -22,8 +22,18 @@ from core.models.approval_grants import ApprovalGrant, GrantStatus
 logger = logging.getLogger(__name__)
 
 # Default grant TTL — a pending approval that no human touches lapses so it can't
-# authorise indefinitely once granted. Tunable per call.
-DEFAULT_TTL_SECONDS = 24 * 3600
+# authorise indefinitely once granted. Sourced from config (no hardcoded values);
+# falls back to 24h if config is unavailable (e.g. stdlib-only test import).
+def _default_ttl_seconds() -> int:
+    try:
+        from config import config
+
+        return int(config.APPROVAL_GRANT_TTL_SECONDS)
+    except Exception:
+        return 24 * 3600
+
+
+DEFAULT_TTL_SECONDS = _default_ttl_seconds()
 
 
 def _now(now: Optional[datetime] = None) -> datetime:
