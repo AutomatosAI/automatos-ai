@@ -4,6 +4,10 @@
 # Claude Code agent worktrees (per-project, not for VCS)
 .claude/worktrees/
 
+# Ralph overnight-run scratch — local-only, never tracked (repeated merge landmine)
+scripts/ralph/
+.claude/ralph-loop.local.md
+
 # Node.js
 node_modules/
 .next/
