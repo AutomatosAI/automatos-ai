@@ -248,7 +248,13 @@ jobs:
           python -m pip install --upgrade pip pytest
           pytest tests/test_prd177_uplift_eval.py -q -p no:cacheprovider
 
+      # A sub-threshold uplift is a BUSINESS signal, not a CI failure — the
+      # number is the deliverable. The harness already exits 0 on a low uplift
+      # (evals/operating_graph_uplift.main returns 0 always); continue-on-error
+      # is belt-and-braces so this informational emit can never redden the job.
+      # The self-tests step above stays the real gate.
       - name: Emit the per-tenant uplift number (informational)
+        continue-on-error: true
         run: |
           python -m evals.operating_graph_uplift --json
 

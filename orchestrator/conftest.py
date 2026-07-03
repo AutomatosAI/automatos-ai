@@ -10,13 +10,21 @@ Credentials are resolved through the central config resolver
 (``get_database_url``), never a literal in source. In CI the Postgres service
 env vars drive it; for local runs the developer's ``DATABASE_URL`` /
 ``POSTGRES_*`` environment applies.
+
+SQLAlchemy is imported lazily inside the DB fixtures (not at module level) so
+that a pure-stdlib test tree — e.g. the operating-graph uplift self-tests, whose
+CI job installs only pytest — can be COLLECTED without SQLAlchemy present. Only
+tests that actually request ``test_engine`` / ``db_session`` pull it in.
 """
 
-from typing import Generator
+from typing import TYPE_CHECKING, Generator
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
+
+if TYPE_CHECKING:  # for type checkers only; never imported at runtime collection
+    from sqlalchemy.orm import Session
+else:  # runtime: keep the annotation valid without importing sqlalchemy at import time
+    Session = "Session"
 
 
 @pytest.fixture(scope="session")
@@ -32,15 +40,19 @@ def test_db_url() -> str:
 @pytest.fixture(scope="session")
 def test_engine(test_db_url):
     """Session-scoped SQLAlchemy engine bound to the test database."""
+    from sqlalchemy import create_engine
+
     engine = create_engine(test_db_url)
     yield engine
     engine.dispose()
 
 
 @pytest.fixture(scope="function")
-def db_session(test_engine) -> Generator[Session, None, None]:
+def db_session(test_engine) -> Generator["Session", None, None]:
     """Transactional session: each test runs inside a transaction that is rolled
     back on teardown, so tests never mutate the database for one another."""
+    from sqlalchemy.orm import sessionmaker
+
     connection = test_engine.connect()
     transaction = connection.begin()
 
