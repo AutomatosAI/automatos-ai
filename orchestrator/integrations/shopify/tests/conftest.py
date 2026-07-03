@@ -40,6 +40,21 @@ _THIS_DIR = Path(__file__).resolve().parent
 _FIXTURES_DIR = _THIS_DIR / "fixtures"
 
 
+def _node_link_graph_nx31(data: dict) -> nx.Graph:
+    """Rehydrate node_link_data under the pinned ``networkx==3.1``.
+
+    The snapshot stores edges under an ``"edges"`` key (the NetworkX >=3.2
+    default). On 3.1, ``node_link_graph`` accepts no ``edges=`` kwarg and
+    reads the ``"links"`` key, so normalise ``edges`` -> ``links`` first —
+    exactly as the production loader does in
+    ``modules.knowledge.graph_service._normalize_node_link_data`` — then call
+    ``node_link_graph(data)`` with no kwarg.
+    """
+    if "links" not in data and "edges" in data:
+        data["links"] = data.pop("edges")
+    return json_graph.node_link_graph(data)
+
+
 @pytest.fixture(scope="session")
 def fixtures_dir() -> Path:
     return _FIXTURES_DIR
@@ -50,10 +65,11 @@ def inbuild_graph() -> nx.Graph:
     """Rehydrate the US-004 synthetic INBUILD-flavoured graph.
 
     Stored as NetworkX ``node_link_data`` JSON for git-diff readability;
-    round-trips identically through ``json_graph.node_link_graph``.
+    round-trips identically through ``json_graph.node_link_graph`` (see
+    ``_node_link_graph_nx31`` for the networkx==3.1 edges->links handling).
     """
     data = json.loads((_FIXTURES_DIR / "inbuild_graph_snapshot.json").read_text())
-    return json_graph.node_link_graph(data, edges="edges")
+    return _node_link_graph_nx31(data)
 
 
 @pytest.fixture(scope="session")

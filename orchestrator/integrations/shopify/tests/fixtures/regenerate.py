@@ -368,8 +368,10 @@ def main() -> None:
     cart_opener_path = FIXTURES_DIR / "expected_cart_idle_opener.txt"
 
     # node_link_data round-trips cleanly via json_graph.node_link_graph.
-    # edges="edges" silences the NetworkX 3.4 deprecation warning.
-    graph_data = json_graph.node_link_data(graph, edges="edges")
+    # networkx==3.1 (the pinned version) takes no ``edges=`` kwarg and emits
+    # edges under the ``"links"`` key; the test loader
+    # (conftest._node_link_graph_nx31) reads both "links" and "edges".
+    graph_data = json_graph.node_link_data(graph)
     graph_path.write_text(json.dumps(graph_data, indent=2, sort_keys=True))
     product_ctx_path.write_text(json.dumps(PRODUCT_PAGE_CONTEXT, indent=2, sort_keys=True))
     cart_ctx_path.write_text(json.dumps(CART_IDLE_CONTEXT, indent=2, sort_keys=True))
