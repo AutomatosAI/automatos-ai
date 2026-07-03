@@ -121,10 +121,31 @@ class _FakeSession:
         pass
 
 
+def _purge_stub_modules() -> None:
+    """Drop origin-less stub modules a sibling test left in sys.modules, so the
+    CoordinatorService import resolves against real packages. Runs at FIXTURE
+    time (not just collection) because sibling tests pollute sys.modules after
+    this module is collected — notably the harness suite installs a bare
+    ``apscheduler`` fake (no ``.triggers`` submodule) that the coordinator import
+    chain (heartbeat_service) needs the REAL package for."""
+    import sys
+
+    def _is_stub(name: str, mod: object) -> bool:
+        prefixed = (
+            name in ("modules", "consumers", "apscheduler")
+            or name.startswith(("modules.", "consumers.", "apscheduler."))
+        )
+        return prefixed and getattr(mod, "__spec__", None) is None
+
+    for name in [n for n, m in list(sys.modules.items()) if _is_stub(n, m)]:
+        sys.modules.pop(name, None)
+
+
 @pytest.fixture
 def coordinator():
     """A CoordinatorService with the actual sweep, but the per-run ingest call
     stubbed so we assert *which* runs the sweep selected, not the ingest guts."""
+    _purge_stub_modules()
     from services.coordinator_service import CoordinatorService
 
     svc = CoordinatorService()
