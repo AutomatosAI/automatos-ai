@@ -1,0 +1,7 @@
+# PRD-182 W12-S4 (F092) coverage floor (percent).
+# SEED: the first CI run of the coverage lane measures the real baseline on the
+# code that actually runs and records it here (replacing this token). From then
+# on the ratchet fails only when measured coverage drops below the recorded
+# number. Ratchet it UP toward the 80% doctrine as coverage improves; never lower
+# it to hide a regression. To force a fresh measure, restore this SEED token.
+SEED
