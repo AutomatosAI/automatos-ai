@@ -865,6 +865,20 @@ class CoordinatorService:
             return document_id
         except Exception as e:
             logger.warning("[Mission] Failed to save output document for %s: %s", run.id, e, exc_info=True)
+            # PRD-179 S2 (F049): stamp a failure marker so the flywheel sweep's
+            # SQL-side exclusion drops this run next tick instead of re-selecting
+            # it forever. Without it, one poison run silently starves the backlog.
+            try:
+                run.config = {
+                    **(run.config or {}),
+                    "output_ingest_failed": datetime.now(timezone.utc).isoformat(),
+                }
+                db.flush()
+            except Exception:
+                logger.debug(
+                    "[Mission] Could not persist ingest-failure marker for run %s",
+                    run.id, exc_info=True,
+                )
             return None
 
     async def _emit_mission_document(
@@ -1134,21 +1148,35 @@ class CoordinatorService:
             logger.debug("[Coordinator] legacy-collection sweep skipped", exc_info=True)
 
     async def _save_pending_output_documents(self, db: Session) -> None:
-        """Save output documents for completed missions that don't have one yet."""
-        completed_without_output = (
+        """Route completed missions that have not been ingested through the
+        synthesis flywheel (PRD-179 S2, F049).
+
+        The exclusion of already-handled runs is done SQL-side, not by pulling a
+        batch and filtering in Python: a run is a candidate only when it carries
+        NONE of the three terminal markers — ``output_document_id`` (ingested),
+        ``output_ingest`` (opted out / skipped), ``output_ingest_failed``
+        (previous ingest errored). Ordering is ``created_at DESC`` so the newest
+        completed missions ingest first. Together these stop the pre-fix
+        starvation where an unordered ``LIMIT 3`` kept re-selecting the same
+        already-done rows once more than three accumulated.
+        """
+        candidates = (
             db.query(OrchestrationRun)
             .filter(
                 OrchestrationRun.state == RunState.COMPLETED.value,
+                # SQL-side already-ingested / failure exclusion (JSONB ->> IS NULL).
+                OrchestrationRun.config["output_document_id"].astext.is_(None),
+                OrchestrationRun.config["output_ingest"].astext.is_(None),
+                OrchestrationRun.config["output_ingest_failed"].astext.is_(None),
             )
-            .limit(3)
+            .order_by(OrchestrationRun.created_at.desc())
+            .limit(Config.FLYWHEEL_INGEST_BATCH)
             .all()
         )
-        for run in completed_without_output:
-            cfg = run.config or {}
-            # output_document_id == saved; output_ingest marker == workspace
-            # opted out of the flywheel (Q58) — don't retry every tick.
-            if cfg.get("output_document_id") or cfg.get("output_ingest"):
-                continue
+        for run in candidates:
+            # _save_mission_output_as_document owns its own failure handling and
+            # stamps the output_ingest_failed marker on error (so a poison run
+            # drops out of the candidate set). The sweep stays a thin driver.
             await self._save_mission_output_as_document(db, run)
 
     # ------------------------------------------------------------------

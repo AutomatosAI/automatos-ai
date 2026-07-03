@@ -852,6 +852,11 @@ class Config:
     FIELD_PRUNE_THRESHOLD: float = float(os.getenv("FIELD_PRUNE_THRESHOLD", "0.01"))
     FIELD_COMPACTION_MAX_SCAN: int = int(os.getenv("FIELD_COMPACTION_MAX_SCAN", "10000"))
     SHARED_CONTEXT_BACKEND: str = os.getenv("SHARED_CONTEXT_BACKEND", "vector_field")  # "vector_field" or "redis"
+    # PRD-179 S2 (F049): how many completed missions the synthesis-flywheel ingest
+    # sweep processes per coordinator tick. The sweep now orders newest-first and
+    # excludes already-ingested / previously-failed runs SQL-side, so raising this
+    # drains a backlog faster without ever re-touching a done run.
+    FLYWHEEL_INGEST_BATCH: int = int(os.getenv("FLYWHEEL_INGEST_BATCH", "3"))
 
     # =============================================================================
     # EMBEDDINGS
