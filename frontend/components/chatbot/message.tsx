@@ -256,7 +256,12 @@ export function Message({
     return null
   }
 
-  const formatToolName = (toolName: string): string => {
+  // PRD-180 S4 (F037): resolve a human label for a tool chip. For
+  // ``composio_execute`` we surface the real external-app action where the
+  // executor logged it (input.action / tool_slug / app), so a running Gmail or
+  // Slack action reads e.g. "Composio · GMAIL_SEND_EMAIL" instead of being
+  // invisible. Falls back to a plain "Composio" when no action is resolvable.
+  const formatToolLabel = (tc: { toolName: string; input?: any }): string => {
     const toolLabels: Record<string, string> = {
       'composio_execute': 'Composio',
       'search_knowledge': 'Searching docs',
@@ -267,7 +272,13 @@ export function Message({
       'search_memories': 'Searching memory',
       'execute_command': 'Running command',
     }
-    return toolLabels[toolName] || toolName.replace(/_/g, ' ')
+    const base = toolLabels[tc.toolName] || tc.toolName.replace(/_/g, ' ')
+    if (tc.toolName === 'composio_execute') {
+      const action =
+        tc.input?.action || tc.input?.tool_slug || tc.input?.app || tc.input?.action_name
+      if (action && typeof action === 'string') return `${base} · ${action}`
+    }
+    return base
   }
 
   const renderToolCalls = () => {
@@ -275,9 +286,10 @@ export function Message({
     const toolCalls = message.toolCalls || []
     if (toolCalls.length === 0) return null
 
-    const filteredToolCalls = toolCalls.filter(tc => tc.toolName !== 'composio_execute')
-    const runningTools = filteredToolCalls.filter(tc => tc.state === 'running')
-    const errorTools = filteredToolCalls.filter(tc => tc.state === 'error')
+    // PRD-180 S4 (F037): no longer filter out ``composio_execute`` — every
+    // external-app action must be visible while it runs and when it errors.
+    const runningTools = toolCalls.filter(tc => tc.state === 'running')
+    const errorTools = toolCalls.filter(tc => tc.state === 'error')
 
     if (runningTools.length === 0 && errorTools.length === 0) return null
 
@@ -288,7 +300,7 @@ export function Message({
             <Loader2 className="w-3 h-3 animate-spin text-[hsl(var(--info))]" />
             <span>
               {runningTools.length === 1
-                ? formatToolName(runningTools[0].toolName)
+                ? formatToolLabel(runningTools[0])
                 : `Working (${runningTools.length} tools)`}
             </span>
           </div>
@@ -300,7 +312,7 @@ export function Message({
             title={tc.error || 'Tool failed'}
           >
             <XCircle className="w-3 h-3" />
-            <span>{formatToolName(tc.toolName)} failed</span>
+            <span>{formatToolLabel(tc)} failed</span>
           </div>
         ))}
       </div>
