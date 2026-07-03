@@ -2,14 +2,12 @@
 
 import { useState, useCallback, useRef } from 'react'
 import { useAuth } from '@clerk/nextjs'
-import { LLM_DEFAULTS } from '@/lib/llm-defaults'
 import type { ChatMessage, AppUsage, ToolCall, RoutingInfo } from '@/types'
 import { toast } from 'sonner'
 
 export function useChat({
   id,
   initialMessages = [],
-  selectedModelId = LLM_DEFAULTS.model_id,
   selectedAgentId,
   missionMode = false,
   planMode = false,
@@ -19,7 +17,6 @@ export function useChat({
 }: {
   id: string
   initialMessages?: ChatMessage[]
-  selectedModelId?: string
   selectedAgentId?: number | null
   missionMode?: boolean
   planMode?: boolean
@@ -113,8 +110,11 @@ export function useChat({
               role: 'user',
               parts: outgoingParts,
             },
-            // PRD: Unified Agent-Chat System - Send agentId if selected
-            ...(selectedAgentId ? { agentId: selectedAgentId } : { selectedChatModel: selectedModelId }),
+            // PRD: Unified Agent-Chat System — send agentId when one is selected.
+            // PRD-180 S3 (F035): the no-agent branch no longer sends a client
+            // model override (the backend never read it). With no agent, the
+            // model resolves via the Auto tier server-side.
+            ...(selectedAgentId ? { agentId: selectedAgentId } : {}),
             selectedVisibilityType: 'private',
             // PRD-82A: Mission mode — conversational mission planning
             ...(missionMode ? { missionMode: true } : {}),
@@ -377,7 +377,7 @@ export function useChat({
         setIsLoading(false)
       }
     },
-    [chatId, isLoading, selectedModelId, onData, onChatIdUpdate, onRoutingDecision]
+    [chatId, isLoading, selectedAgentId, missionMode, planMode, onData, onChatIdUpdate, onRoutingDecision]
   )
 
   return {

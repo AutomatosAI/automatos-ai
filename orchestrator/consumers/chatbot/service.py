@@ -649,29 +649,6 @@ class StreamingChatService:
                 return m.get("content") or ""
         return ""
 
-    def _parse_model_selection(self, selected_model: Optional[str]) -> tuple:
-        """Parse model string to get provider and model."""
-        if not selected_model:
-            return None, None
-
-        model = selected_model
-        model_lower = selected_model.lower()
-
-        if model_lower.startswith('gpt-') or model_lower.startswith('o1') or model_lower.startswith('o3') or model_lower.startswith('o4'):
-            provider = 'openai'
-        elif model_lower.startswith('claude') or 'anthropic' in model_lower:
-            provider = 'anthropic'
-        elif model_lower.startswith('grok') or 'xai' in model_lower:
-            provider = 'grok'
-        elif model_lower.startswith('gemini') or 'google' in model_lower:
-            provider = 'google'
-        elif '/' in selected_model:
-            provider = 'openrouter'
-        else:
-            provider = None
-
-        return provider, model
-
     async def _load_agent_context(self, agent_runtime) -> dict:
         """
         Load agent-specific context: persona, description for chatbot identity injection.
