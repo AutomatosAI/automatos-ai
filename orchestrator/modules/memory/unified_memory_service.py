@@ -489,6 +489,114 @@ class UnifiedMemoryService:
             return False
 
     # ------------------------------------------------------------------
+    # GDPR erasure / export (PRD-181 S3/S4)
+    # ------------------------------------------------------------------
+
+    async def _workspace_namespaces(self, workspace_id: str, db: Any = None) -> List[str]:
+        """Every mem0 ``user_id`` a workspace's durable memories live under.
+
+        mem0 exposes no wildcard/prefix delete, so erasure must enumerate the
+        concrete namespaces: the workspace-wide bucket, plus one per agent and
+        per recipe in the workspace. Agent/recipe ids are read from the DB when a
+        session is supplied; without one, only the workspace-wide namespace is
+        covered (reported as a partial by the caller).
+        """
+        ns = self.namespace(workspace_id)
+        namespaces = [ns.workspace()]
+        if db is None:
+            return namespaces
+        try:
+            from sqlalchemy import text as _text
+
+            agent_ids = [
+                r[0] for r in db.execute(
+                    _text("SELECT id FROM agents WHERE workspace_id::text = :ws"),
+                    {"ws": str(workspace_id)},
+                ).fetchall()
+            ]
+            for aid in agent_ids:
+                namespaces.append(ns.agent(int(aid)))
+            recipe_ids = [
+                r[0] for r in db.execute(
+                    _text(
+                        "SELECT id FROM workflow_templates WHERE workspace_id::text = :ws"
+                    ),
+                    {"ws": str(workspace_id)},
+                ).fetchall()
+            ]
+            for rid in recipe_ids:
+                namespaces.append(ns.recipe(rid))
+        except Exception:
+            logger.warning(
+                "[UnifiedMemoryService] namespace enumeration partial for ws=%s",
+                workspace_id, exc_info=True,
+            )
+        return namespaces
+
+    async def erase_workspace_memories(self, workspace_id: str, db: Any = None) -> int:
+        """GDPR erasure — delete every durable (L3/mem0) memory for a workspace.
+
+        Iterates each namespace (mem0 has no wildcard delete), fetching ids then
+        bulk-deleting. Returns the total number of memories deleted.
+        """
+        if not self.is_enabled():
+            return 0
+        total = 0
+        for user_id in await self._workspace_namespaces(workspace_id, db):
+            try:
+                memories = await self._mem0.get_all(
+                    user_id=user_id, limit=10000, workspace_id=str(workspace_id)
+                )
+                ids = [m.get("id") for m in memories if isinstance(m, dict) and m.get("id")]
+                if ids and await self._mem0.delete(
+                    memory_ids=ids, user_id=user_id, workspace_id=str(workspace_id)
+                ):
+                    total += len(ids)
+            except Exception:
+                logger.warning(
+                    "[UnifiedMemoryService] mem0 erase failed for user_id=%s",
+                    user_id, exc_info=True,
+                )
+        logger.warning("[UnifiedMemoryService] GDPR erased %d durable memories for ws=%s", total, workspace_id)
+        return total
+
+    async def erase_subject_memories(self, workspace_id: str, subject_id: str, db: Any = None) -> int:
+        """GDPR subject-level erasure for durable memories.
+
+        # GDPR-GAP: mem0 memories are namespaced by workspace / agent / recipe
+        # (MemoryNamespace) and carry no data-subject tag in their metadata, so a
+        # single human's durable memories cannot be filtered from a shared
+        # workspace/agent namespace. Until a subject tag is written into mem0
+        # metadata, subject-level erasure here is not possible without erasing the
+        # whole namespace. Returns 0; the gap is surfaced by the GDPR service.
+        logger.warning(
+            "[UnifiedMemoryService] GDPR subject erase requested subject=%s ws=%s "
+            "but mem0 has no data-subject tag (GDPR-GAP) — 0 memories erased",
+            subject_id, workspace_id,
+        )
+        return 0
+
+    async def export_workspace_memories(self, workspace_id: str, db: Any = None) -> List[Dict[str, Any]]:
+        """GDPR export — every durable memory for a workspace as plain dicts."""
+        if not self.is_enabled():
+            return []
+        out: List[Dict[str, Any]] = []
+        for user_id in await self._workspace_namespaces(workspace_id, db):
+            try:
+                memories = await self._mem0.get_all(
+                    user_id=user_id, limit=10000, workspace_id=str(workspace_id)
+                )
+                for m in memories:
+                    if isinstance(m, dict):
+                        out.append({"namespace": user_id, **m})
+            except Exception:
+                logger.warning(
+                    "[UnifiedMemoryService] mem0 export failed for user_id=%s",
+                    user_id, exc_info=True,
+                )
+        return out
+
+    # ------------------------------------------------------------------
     # L3: Scoped storage (for consumers with custom namespaces)
     # ------------------------------------------------------------------
 
