@@ -82,6 +82,15 @@ def test_board_task_failure_emits_board_error(monkeypatch):
         MagicMock(side_effect=RuntimeError("agent unavailable")),
     )
 
+    # PRD-181 S2 (F060) added an approval gate as the first statement inside
+    # _run(). This white-box test mocks _run's collaborators to isolate the
+    # terminal-failure telemetry path; neutralise the gate so it proceeds (its
+    # real default with no always-ask policy). Without this, the mocked policy
+    # read looks truthy and the task blocks before it can reach the failure.
+    monkeypatch.setattr(
+        bt_mod, "_board_task_blocked_pending_approval", lambda *a, **k: False
+    )
+
     ws = str(uuid4())
     bt_mod._launch_task_execution(
         task_id=123,
@@ -125,6 +134,12 @@ def test_board_task_success_does_not_emit(monkeypatch):
     factory = MagicMock()
     factory.execute_with_prompt = AsyncMock(return_value={"result": "all good"})
     monkeypatch.setattr(factory_mod, "AgentFactory", lambda **kw: factory)
+
+    # PRD-181 S2: isolate the success path — neutralise the approval gate so the
+    # task runs (rather than blocking), proving a clean run emits no error.
+    monkeypatch.setattr(
+        bt_mod, "_board_task_blocked_pending_approval", lambda *a, **k: False
+    )
 
     bt_mod._launch_task_execution(
         task_id=123,
