@@ -227,3 +227,118 @@ async def codegraph_search(
     except Exception as e:
         logger.error("codegraph_search failed: %s", e, exc_info=True)
         return {"success": False, "error": str(e)}
+
+
+# ------------------------------------------------------------------
+# 7. index (write) — onboard/refresh a repo (PRD-183 S4, F087)
+# ------------------------------------------------------------------
+
+
+async def _github_token() -> Optional[str]:
+    """Resolve a GitHub token the same way the HTTP index route does."""
+    try:
+        from modules.codegraph.github_auth import resolve_github_token
+        return await resolve_github_token()
+    except Exception:
+        logger.debug("codegraph: github token resolution failed; proceeding unauthenticated")
+        return None
+
+
+async def codegraph_index(
+    db: Session, workspace_id: UUID, params: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Index (or refresh) a GitHub repo into the code graph for this workspace.
+
+    The agent-side write tool for F087: "index this repo and tell me what calls
+    X" is now possible end-to-end. Runs the clone → parse → embed pipeline for
+    the executor's workspace and returns the resulting symbol counts.
+    """
+    project = (params.get("project") or params.get("project_name") or "").strip()
+    github_url = (params.get("github_url") or params.get("source_url") or "").strip()
+    if not project or not github_url:
+        return {"success": False, "error": "project and github_url are required"}
+
+    branch = (params.get("branch") or "main").strip() or "main"
+    try:
+        service = _service(db)
+        result = await service.index_github_project(
+            project_name=project,
+            github_url=github_url,
+            branch=branch,
+            auth_token=await _github_token(),
+            exclude_patterns=params.get("exclude_patterns"),
+            workspace_id=str(workspace_id),
+        )
+        return {"success": True, **(result if isinstance(result, dict) else {})}
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+    except Exception as e:
+        logger.error("codegraph_index failed: %s", e, exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
+# ------------------------------------------------------------------
+# 8. reindex (write) — re-index an existing project by name
+# ------------------------------------------------------------------
+
+
+async def codegraph_reindex(
+    db: Session, workspace_id: UUID, params: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Re-index an already-onboarded project (refresh a stale graph)."""
+    project = (params.get("project") or "").strip()
+    if not project:
+        return {"success": False, "error": "project is required"}
+
+    try:
+        service = _service(db)
+        proj = _resolve_project(service, project, str(workspace_id))
+        if proj is None:
+            return {"success": False, "error": f"Project '{project}' not found"}
+        if proj.get("source_type") != "github" or not proj.get("source_url"):
+            return {"success": False, "error": "reindex only supported for GitHub projects"}
+
+        result = await service.index_github_project(
+            project_name=proj["name"],
+            github_url=proj["source_url"],
+            branch=proj.get("branch") or "main",
+            auth_token=await _github_token(),
+            workspace_id=str(workspace_id),
+        )
+        return {"success": True, **(result if isinstance(result, dict) else {})}
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+    except Exception as e:
+        logger.error("codegraph_reindex failed: %s", e, exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
+# ------------------------------------------------------------------
+# 9. set_auto_reindex (write) — enable push-driven reindex (PRD-183 S4, F022)
+# ------------------------------------------------------------------
+
+
+async def codegraph_set_auto_reindex(
+    db: Session, workspace_id: UUID, params: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Turn push-driven auto-reindex on/off for a project.
+
+    Flips the flag the GitHub webhook reads, so a pushed commit reindexes the
+    repo. Without this the webhook could never match a project (F022).
+    """
+    project = (params.get("project") or "").strip()
+    if not project:
+        return {"success": False, "error": "project is required"}
+    enabled = params.get("enabled")
+    if enabled is None:
+        return {"success": False, "error": "enabled (true/false) is required"}
+
+    try:
+        service = _service(db)
+        proj = _resolve_project(service, project, str(workspace_id))
+        if proj is None:
+            return {"success": False, "error": f"Project '{project}' not found"}
+        return service.set_auto_reindex(proj["id"], bool(enabled), workspace_id=str(workspace_id))
+    except Exception as e:
+        logger.error("codegraph_set_auto_reindex failed: %s", e, exc_info=True)
+        return {"success": False, "error": str(e)}

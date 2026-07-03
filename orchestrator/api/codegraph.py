@@ -507,6 +507,32 @@ async def reindex_project(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+class AutoReindexRequest(BaseModel):
+    """Toggle push-driven auto-reindex for a project (PRD-183 S4, F022)."""
+    enabled: bool
+
+
+@router.patch("/projects/{project_id}/auto-reindex")
+async def set_project_auto_reindex(
+    project_id: int,
+    request: AutoReindexRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    service: CodeGraphService = Depends(get_codegraph_service),
+):
+    """Enable/disable push-driven auto-reindex for a project (PRD-183 S4, F022).
+
+    The GitHub push webhook only reindexes projects whose ``auto_reindex`` is
+    on. This is the setter that flag never had — without it the webhook could
+    never match a project. Workspace-scoped: only the owning tenant can flip it.
+    """
+    result = service.set_auto_reindex(
+        project_id, request.enabled, workspace_id=str(ctx.workspace_id)
+    )
+    if not result.get("success"):
+        raise HTTPException(status_code=404, detail=result.get("error", "Project not found"))
+    return result
+
+
 @router.get("/health")
 async def health_check():
     """Health check endpoint"""

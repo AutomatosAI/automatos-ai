@@ -156,3 +156,82 @@ def register_codegraph_actions(registry: ActionRegistry) -> None:
             "what are the main modules in this codebase?",
         ],
     ))
+
+    # ------------------------------------------------------------------
+    # PRD-183 S4 — write tools (index / reindex / auto-reindex setter)
+    # ------------------------------------------------------------------
+
+    registry.register(ActionDefinition(
+        name="platform_codegraph_index",
+        description=(
+            "Index (or refresh) a GitHub repository into the code graph so agents "
+            "can search it and trace calls. Use to onboard a new codebase before "
+            "the read tools can answer 'what calls X?' for it."
+        ),
+        category="codegraph",
+        parameters={
+            "type": "object",
+            "properties": {
+                "project": {"type": "string", "description": "Name to give the indexed project."},
+                "github_url": {"type": "string", "description": "Repository URL, e.g. https://github.com/org/repo."},
+                "branch": {"type": "string", "description": "Branch to index (default 'main')."},
+                "exclude_patterns": {"type": "array", "items": {"type": "string"}, "description": "Optional path fragments to skip (e.g. ['tests', 'docs'])."},
+            },
+            "required": ["project", "github_url"],
+        },
+        permission_level="write",
+        promoted=True,
+        tags=["codegraph", "code", "index", "onboard", "repo"],
+        examples=[
+            "index the automatos-ai repo",
+            "add this github repo to the code graph",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_codegraph_reindex",
+        description=(
+            "Re-index an already-onboarded project to refresh a stale code graph "
+            "after code changes. Answers 'the graph is out of date, re-index it'."
+        ),
+        category="codegraph",
+        parameters={
+            "type": "object",
+            "properties": {
+                "project": {"type": "string", "description": "Existing indexed project name."},
+            },
+            "required": ["project"],
+        },
+        permission_level="write",
+        promoted=True,
+        tags=["codegraph", "code", "reindex", "refresh"],
+        examples=[
+            "reindex the orchestrator repo",
+            "refresh the code graph for automatos-ai",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_codegraph_set_auto_reindex",
+        description=(
+            "Turn push-driven auto-reindex on or off for a project. When on, a "
+            "GitHub push webhook reindexes the repo automatically so the code "
+            "graph stays fresh. Use to enable hands-off freshness for a repo."
+        ),
+        category="codegraph",
+        parameters={
+            "type": "object",
+            "properties": {
+                "project": {"type": "string", "description": "Existing indexed project name."},
+                "enabled": {"type": "boolean", "description": "True to auto-reindex on push, False to disable."},
+            },
+            "required": ["project", "enabled"],
+        },
+        permission_level="write",
+        promoted=True,
+        tags=["codegraph", "code", "auto-reindex", "webhook", "freshness"],
+        examples=[
+            "enable auto-reindex for the orchestrator repo on every push",
+            "stop auto-reindexing the automatos-ai repo",
+        ],
+    ))

@@ -226,6 +226,9 @@ from modules.tools.discovery.handlers_codegraph import (
     codegraph_call_graph,
     codegraph_dependencies,
     codegraph_architecture,
+    codegraph_index,          # PRD-183 S4 (F087)
+    codegraph_reindex,        # PRD-183 S4 (F087)
+    codegraph_set_auto_reindex,  # PRD-183 S4 (F022)
 )
 from modules.tools.discovery.handlers_analytics_enhanced import (
     get_success_rate,
@@ -517,6 +520,10 @@ class PlatformActionExecutor:
             "platform_codegraph_call_graph": codegraph_call_graph,
             "platform_codegraph_dependencies": codegraph_dependencies,
             "platform_codegraph_architecture": codegraph_architecture,
+            # PRD-183 S4: codegraph write tools (index / reindex / auto-reindex)
+            "platform_codegraph_index": codegraph_index,
+            "platform_codegraph_reindex": codegraph_reindex,
+            "platform_codegraph_set_auto_reindex": codegraph_set_auto_reindex,
         }
 
     def _workspace_has_admin_owner(self) -> bool:
