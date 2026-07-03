@@ -18,7 +18,12 @@ from __future__ import annotations
 from integrations import PLUGIN_REGISTRY
 
 from . import widget_proactive
+from . import provision  # PRD-183 S5: registers the Shopify VerticalProvisioner
 
 PLUGIN_REGISTRY["shopify"] = widget_proactive
 
-__all__ = ["widget_proactive"]
+# Register the provisioner + graph-source mappers into the generic
+# provisioning plane (PROVISIONER_REGISTRY / GRAPH_SOURCE_MAPPERS).
+provision.register()
+
+__all__ = ["widget_proactive", "provision"]

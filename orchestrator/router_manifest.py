@@ -50,6 +50,7 @@ class RouterMountError(RuntimeError):
 # interact with the catch-all ordering of the plain core routers in main.py.
 MANIFEST_ROUTERS: tuple[RouterSpec, ...] = (
     RouterSpec("api.shopify"),
+    RouterSpec("api.verticals"),  # PRD-183 S5: generic vertical provisioning (F076)
     RouterSpec("api.sites"),
     RouterSpec("api.composio", optional=True),
     RouterSpec("api.cloud_documents", optional=True),

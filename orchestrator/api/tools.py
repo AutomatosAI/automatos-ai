@@ -31,6 +31,41 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/tools", tags=["Tools"])
 
+# Bound at module level (not inside the endpoint) so the auto-sync helper below
+# is unit-patchable and its dependency is explicit.
+from api.shopify import _product_sync_impl  # noqa: E402
+
+
+def _fire_shopify_autosync(workspace_id: str) -> None:
+    """Kick off the first-connect Shopify catalog → graph sync (F033-safe).
+
+    When SHOPIFY first goes active we sync the catalog into the knowledge
+    graph. This runs as a detached background task, so it MUST own its DB
+    session: the request-scoped ``Depends(get_db)`` session is torn down the
+    moment the listing endpoint returns, and the previous code passed *that*
+    session into the task — it died mid-flight (F033). The task opens its own
+    ``SessionLocal`` and closes it when done.
+    """
+    from core.database.database import SessionLocal
+    import asyncio as _asyncio
+
+    async def _run() -> None:
+        db = SessionLocal()
+        try:
+            await _product_sync_impl(str(workspace_id), db)
+            logger.info(
+                "[PRD-183 S2] Auto-sync complete for workspace %s", workspace_id,
+            )
+        except Exception as e:  # noqa: BLE001 — background task must not raise
+            logger.warning(
+                "[PRD-183 S2] Auto-sync failed for workspace %s: %s",
+                workspace_id, e,
+            )
+        finally:
+            db.close()
+
+    _asyncio.create_task(_run())
+
 
 def _assert_workspace_admin(ctx: RequestContext, db: Session = None) -> None:
     """Raise 403 unless the user has admin or owner role.
@@ -265,19 +300,12 @@ async def connected(
                     conn["connection_id"] = composio_status.get("id")
                     logger.info(f"[CONNECTED_APPS] Synced {conn.get('app_name')} from pending → active")
                     # PRD-009 Layer 2 — when SHOPIFY first goes active, kick
-                    # off the catalog → knowledge graph sync. Fire-and-forget
-                    # background task so we don't block this listing endpoint.
+                    # off the catalog → knowledge graph sync. Detached task with
+                    # its OWN session (F033): never the request-scoped `db`,
+                    # which is torn down when this listing endpoint returns.
                     if (conn.get("app_name") or "").upper() == "SHOPIFY":
                         try:
-                            # PRD-172 F003: call the impl directly with the
-                            # already-trusted ctx.workspace_id — the HTTP route's
-                            # auth wrapper is for external callers, not this
-                            # in-process auto-trigger.
-                            from api.shopify import _product_sync_impl
-                            import asyncio as _asyncio
-                            _asyncio.create_task(
-                                _product_sync_impl(str(ctx.workspace_id), db)
-                            )
+                            _fire_shopify_autosync(str(ctx.workspace_id))
                             logger.info(
                                 "[PRD-009] Auto-fired Shopify product sync for workspace %s",
                                 ctx.workspace_id,

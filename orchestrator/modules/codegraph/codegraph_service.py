@@ -1474,6 +1474,33 @@ class CodeGraphService:
         
         return projects
     
+    def set_auto_reindex(
+        self, project_id: int, enabled: bool, workspace_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Turn a project's push-driven auto-reindex on or off (PRD-183 S4, F022).
+
+        The GitHub push webhook (``api/codegraph.py`` ``/webhook/github``) only
+        reindexes projects whose ``auto_reindex`` is True, but nothing could
+        ever set that flag — so the webhook was dead. This is the missing
+        setter. The UPDATE is guarded by BOTH the project id and the workspace
+        id, so an agent can never flip another tenant's project.
+        """
+        result = self.db.execute(
+            text(
+                "UPDATE codegraph_projects "
+                "SET auto_reindex = :val, updated_at = NOW() "
+                "WHERE id = :id AND workspace_id = :ws"
+            ),
+            {"val": bool(enabled), "id": project_id, "ws": workspace_id},
+        )
+        self.db.commit()
+        if getattr(result, "rowcount", 0) == 0:
+            return {
+                "success": False,
+                "error": f"Project {project_id} not found in this workspace",
+            }
+        return {"success": True, "project_id": project_id, "auto_reindex": bool(enabled)}
+
     def delete_project(self, project_id: int, workspace_id: Optional[str] = None) -> Dict[str, Any]:
         """Delete a project and all associated data"""
         
