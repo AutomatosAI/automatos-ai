@@ -15,6 +15,7 @@ worker's HTTP server, which has the persistent volume mounted.
   GET    /api/workspaces/{workspace_id}/canvas/events    — SSE event stream (PRD-170 S3)
   POST   /api/workspaces/{workspace_id}/canvas/decision  — approve/deny an edit (PRD-170 S4)
   POST   /api/workspaces/{workspace_id}/canvas/auto-accept — toggle auto-accept (PRD-170 S4)
+  GET    /api/workspaces/{workspace_id}/canvas/commit-preview — editable message (PRD-170 S5)
   POST   /api/workspaces/{workspace_id}/canvas/commit    — commit + push branch (PRD-170 S5)
 """
 
@@ -399,6 +400,62 @@ class CanvasCommitRequest(BaseModel):
     remote: str = Field(default="origin", max_length=128)
 
 
+def _parse_porcelain_paths(stdout: str) -> list[str]:
+    """Extract changed paths from ``git status --porcelain`` output.
+
+    Each line is ``XY <path>`` (or ``XY <old> -> <new>`` for a rename); we take
+    the (new) path. Pure so the commit-preview is testable without a container.
+    """
+    paths: list[str] = []
+    for line in (stdout or "").splitlines():
+        rest = line[3:] if len(line) > 3 else line.strip()
+        if " -> " in rest:
+            rest = rest.split(" -> ", 1)[1]
+        rest = rest.strip().strip('"')
+        if rest:
+            paths.append(rest)
+    return paths
+
+
+@router.get("/canvas/commit-preview")
+async def preview_canvas_commit(
+    workspace_id: str,
+    cwd: str = Query(..., min_length=1, max_length=1024),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """Return an EDITABLE generated commit message + the changed paths (S5).
+
+    The UI pre-fills the message and the user may rewrite it before committing.
+    Deterministic (no LLM) via the tested ``generate_commit_message``.
+    """
+    if str(ctx.workspace_id) != workspace_id:
+        raise HTTPException(status_code=403, detail="Workspace access denied")
+
+    from modules.tools.discovery.canvas_git import (
+        CommitContext,
+        canvas_branch_name,
+        generate_commit_message,
+    )
+
+    client = WorkspaceClient(workspace_id)
+    status = await client.canvas_session_status()
+    session = (status or {}).get("session") or {}
+    session_id = session.get("canvas_session_id") or "session"
+    branch = canvas_branch_name(session_id)
+
+    git_status = await client.git("status", cwd=cwd, args="--porcelain")
+    changed = _parse_porcelain_paths(git_status.get("stdout", "")) if isinstance(git_status, dict) else []
+    message = generate_commit_message(CommitContext(changed_paths=changed, branch=branch))
+
+    return {
+        "success": True,
+        "branch": branch,
+        "changed_paths": changed,
+        "message": message,
+        "has_changes": bool(changed),
+    }
+
+
 @router.post("/canvas/commit")
 async def commit_canvas_session(
     workspace_id: str,
@@ -415,7 +472,11 @@ async def commit_canvas_session(
     if str(ctx.workspace_id) != workspace_id:
         raise HTTPException(status_code=403, detail="Workspace access denied")
 
-    from modules.tools.discovery.canvas_git import plan_commit_push, redact_token
+    from modules.tools.discovery.canvas_git import (
+        canvas_branch_name,
+        plan_commit_push,
+        redact_token,
+    )
     from modules.codegraph.github_auth import resolve_github_token
 
     client = WorkspaceClient(workspace_id)
@@ -426,6 +487,8 @@ async def commit_canvas_session(
     session_id = session.get("canvas_session_id")
     if not session_id:
         raise HTTPException(status_code=409, detail="No canvas session to commit")
+
+    branch = canvas_branch_name(session_id)
 
     token = await resolve_github_token()  # may be None; push then relies on ambient auth
 
@@ -451,4 +514,4 @@ async def commit_canvas_session(
                 "steps": results,
             }
 
-    return {"success": True, "branch": steps[0].args, "steps": results}
+    return {"success": True, "branch": branch, "steps": results}
