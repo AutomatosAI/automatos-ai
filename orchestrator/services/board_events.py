@@ -111,8 +111,18 @@ class _SSEListener(threading.Thread):
                 exc_info=True,
             )
         finally:
+            # Return the connection to the pool CLEAN. This connection was put in
+            # ``autocommit=True`` for LISTEN; SQLAlchemy's reset-on-return rolls
+            # back but does NOT clear psycopg2 ``autocommit``, so a leaked
+            # autocommit connection would silently auto-commit the next
+            # ``SessionLocal()`` caller's statements — a transactional-integrity
+            # bug (and the cause of the W2-S5 idle-in-transaction regression).
             try:
                 if self._raw is not None:
+                    try:
+                        self._raw.connection.autocommit = False
+                    except Exception:  # noqa: BLE001
+                        pass
                     self._raw.close()
             except Exception:  # noqa: BLE001
                 pass

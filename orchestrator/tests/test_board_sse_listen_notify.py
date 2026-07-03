@@ -101,6 +101,15 @@ def test_notify_board_event_reaches_a_raw_listener(new_session, engine):
         assert data["status"] == "in_progress"
         assert data["event"] == "task_claimed"
     finally:
+        # Reset autocommit before returning the pooled connection — otherwise it
+        # goes back to the pool ``autocommit=True`` and poisons the next
+        # ``SessionLocal()`` (SQLAlchemy's reset-on-return does not clear psycopg2
+        # autocommit). Mirrors the production fix in ``board_events`` and stops
+        # this test from tripping the W2-S5 idle-in-transaction regression.
+        try:
+            raw.connection.autocommit = False
+        except Exception:
+            pass
         raw.close()
 
 
