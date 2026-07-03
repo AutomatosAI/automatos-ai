@@ -52,7 +52,9 @@ export function useBoardTasks(filters?: BoardFilters) {
       const tasks = (response.tasks ?? []).map((t: any) => mapTaskToBoardTask(t))
       return { tasks, total: response.total ?? tasks.length }
     },
-    refetchInterval: 60000,
+    // PRD-180 S1 (F090): no interval poll — the board LISTEN/NOTIFY SSE
+    // (useBoardEventStream) invalidates this query on real pushed events, so
+    // the board refetches the moment state changes, not on a 60s tick.
     staleTime: 30000,
   })
 
