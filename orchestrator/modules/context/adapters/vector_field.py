@@ -276,11 +276,17 @@ class VectorFieldSharedContext(SharedContextPort):
         query: str,
         agent_id: int,
         top_k: int = 0,
+        record_access: bool = True,
     ) -> list[dict[str, Any]]:
         """Mission-scoped query: rank this field's patterns by three-factor
-        resonance (similarity × stability × recency)."""
+        resonance (similarity × stability × recency).
+
+        PRD-178 S2 (F062): ``record_access=False`` skips Hebbian reinforcement so
+        the retrieval-trace inspector can observe the field WITHOUT mutating the
+        access_count/last_accessed/strength it reports on."""
         return await self._scored_search(
             self._field_filter(context_id), query, top_k, label=f"field={context_id}",
+            record_access=record_access,
         )
 
     async def query_workspace(
@@ -309,6 +315,7 @@ class VectorFieldSharedContext(SharedContextPort):
         top_k: int,
         label: str,
         query_vector: Optional[list[float]] = None,
+        record_access: bool = True,
     ) -> list[dict[str, Any]]:
         await self.ensure_shared_collection()
         top_k = top_k or config.FIELD_QUERY_TOP_K
@@ -354,9 +361,12 @@ class VectorFieldSharedContext(SharedContextPort):
         top_results = scored[:top_k]
 
         # Hebbian reinforcement — accessed patterns resist future decay.
-        accessed_ids = [r["id"] for r in top_results]
-        if accessed_ids:
-            await self._reinforce_batch(accessed_ids)
+        # PRD-178 S2 (F062): the trace inspector passes record_access=False so
+        # observing the field never writes access patterns back into it.
+        if record_access:
+            accessed_ids = [r["id"] for r in top_results]
+            if accessed_ids:
+                await self._reinforce_batch(accessed_ids)
 
         logger.info(
             "[Field] Query %s results=%d top_score=%.4f query=%s",
