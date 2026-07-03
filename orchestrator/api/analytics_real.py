@@ -118,6 +118,31 @@ async def get_agent_success_rate(ctx: RequestContext = Depends(get_request_conte
         logger.error(f"Error calculating success rate: {e}")
         return {"value": 0, "trend": 0, "total_executions": 0, "successful_executions": 0, "error": str(e)}
 
+
+@router.get("/slos")
+async def get_slos(
+    window: str = "24h",
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """PRD-180 S5 (Observability) — the three tracked SLOs for this workspace.
+
+    Reuses ``services.slo_metrics`` (no parallel metrics stack): tool-call success
+    rate, board-dispatch p95 latency, and board-event freshness — each with its
+    target, comparator, sample size, and a pass/fail. Router is super-admin-locked
+    (observability tier). Honest by construction: an SLI with no data reports a
+    ``null`` value, never a fabricated number.
+    """
+    from services.slo_metrics import compute_slos
+
+    try:
+        window_seconds = int(_parse_window(window).total_seconds())
+        return compute_slos(db, workspace_id=ctx.workspace_id, window_seconds=window_seconds)
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Error computing SLOs: {e}")
+        raise HTTPException(status_code=500, detail="Failed to compute SLOs")
+
+
 def _parse_window(window: str) -> timedelta:
     """Parse a window string like '24h' or '7d' into a timedelta.
 
