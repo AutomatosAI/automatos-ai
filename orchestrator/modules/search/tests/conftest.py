@@ -162,3 +162,70 @@ def cleanup_vector_store():
     """Clean up test vector store after tests"""
     yield
     # Cleanup logic here if needed
+
+
+# ---------------------------------------------------------------------------
+# test_math_foundations.py — broken against a non-existent core.math API (F056)
+# ---------------------------------------------------------------------------
+#
+# These tests were authored against a math API that this codebase never
+# shipped and had NEVER run before F056 (W12-S2) widened testpaths and first
+# collected this orphaned tree. They call methods that do not exist on the real
+# core.math classes, e.g.:
+#
+#   test calls                         real core.math API
+#   InformationTheory.entropy(probs)   InformationTheory.calculate_entropy(text)
+#   InformationTheory.kl_divergence()  (no such method)
+#   InformationTheory.mutual_information()  calculate_mutual_information(t1, t2)
+#   VectorOperations.euclidean_distance()   DistanceMetrics.euclidean_distance()
+#   VectorOperations.dot_product()     (no such method)
+#   VectorOperations.normalize()       VectorOperations.normalize_vector()
+#   OptimizationAlgorithms.knapsack()  gradient_descent / simulated_annealing
+#   DistanceMetrics.hamming_distance() (no such method)
+#   DistanceMetrics.jaccard_similarity() (no such method)
+#
+# They fail with AttributeError, not because of any missing service — the real
+# classes work (the four tests that hit real methods, cosine_similarity* and
+# manhattan_distance, pass and KEEP RUNNING). This is a genuine test/impl drift
+# that needs a rewrite-to-the-real-API decision (whose expected values? which
+# algorithms are actually wanted?) — an authorship call, not a CI fix. Per the
+# repo's "surface, don't paper over" rule it is skipped with this honest reason
+# and flagged for a human decision, never silently deleted, xfailed, or rewritten
+# to invented expectations.
+_BROKEN_FICTIONAL_API_TESTS = frozenset({
+    # TestInformationTheory
+    "test_entropy_uniform_distribution",
+    "test_entropy_certain_distribution",
+    "test_entropy_skewed_distribution",
+    "test_kl_divergence_identical",
+    "test_kl_divergence_different",
+    "test_mutual_information_independent",
+    "test_mutual_information_identical",
+    # TestVectorOperations
+    "test_euclidean_distance_identical",
+    "test_euclidean_distance_known",
+    "test_dot_product",
+    "test_normalize_vector",
+    # TestOptimizationAlgorithms
+    "test_knapsack_simple",
+    "test_knapsack_all_fit",
+    "test_knapsack_none_fit",
+    "test_knapsack_with_max_items",
+    # TestDistanceMetrics
+    "test_hamming_distance",
+    "test_jaccard_similarity",
+})
+
+
+def pytest_collection_modifyitems(config, items):
+    """Skip the test_math_foundations.py tests written against a non-existent
+    core.math API (see the note above). Leaves the real-API tests running."""
+    skip_marker = pytest.mark.skip(
+        reason="test written against a non-existent core.math API (AttributeError, "
+        "not a missing service); orphaned tree first collected by F056 — needs a "
+        "rewrite-to-real-API decision, see modules/search/tests/conftest.py"
+    )
+    for item in items:
+        node = item.nodeid.replace("\\", "/")
+        if "modules/search/tests/test_math_foundations.py" in node and item.name in _BROKEN_FICTIONAL_API_TESTS:
+            item.add_marker(skip_marker)
