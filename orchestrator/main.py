@@ -510,6 +510,19 @@ async def lifespan(app: FastAPI):
 
         logger.info("Phase 1 complete: core ready")
 
+        # ── PRD-181 S1: attach the audit handler to the policy bus ──
+        # The bus becomes the single write point for the per-tenant Art.12
+        # record of every tool call + policy verdict. Only meaningful when the
+        # plane is on; idempotent and never fatal (a registration failure must
+        # not stop the server booting).
+        try:
+            from modules.policy import policy_plane_enabled, register_audit_handler
+
+            if policy_plane_enabled():
+                register_audit_handler()
+        except Exception as _audit_reg_err:  # noqa: BLE001
+            logger.warning("Policy audit handler registration failed: %s", _audit_reg_err)
+
         # NOTE: Redis client uses lazy initialization via get_redis_client()
         logger.info("Redis client will lazy-initialize on first use")
 
