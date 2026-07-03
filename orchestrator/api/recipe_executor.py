@@ -996,6 +996,23 @@ async def _mark_execution_cancelled(execution_id: str, db_url: Optional[str]) ->
         )
 
 
+def _tokens_to_usd(tokens: int, app_config) -> float:
+    """Price tokens with the same rate the mission dollar-ceiling uses (PRD-163 S5)
+    so a playbook's $ budget is denominated identically to a mission's."""
+    return (max(0, int(tokens or 0)) / 1000.0) * float(app_config.COORDINATOR_COST_PER_1K_TOKENS)
+
+
+def _playbook_cost_ceiling_usd(exec_config: dict, app_config) -> float:
+    """The playbook run's DOLLAR ceiling: an explicit ``execution_config`` value,
+    else 0 (unlimited). Mirrors the mission ``config['cost_ceiling']`` convention."""
+    ceiling = (exec_config or {}).get("cost_ceiling")
+    if ceiling is None:
+        ceiling = (exec_config or {}).get("cost_ceiling_usd")
+    if isinstance(ceiling, (int, float)) and ceiling > 0:
+        return float(ceiling)
+    return 0.0
+
+
 async def _execute_recipe_inner(
     recipe_execution_id: str,
     recipe_id: int,
@@ -1162,6 +1179,33 @@ async def _execute_recipe_inner(
                 _persist_step_results(db, execution, step_results)
                 await _fail_execution(db, recipe_execution_id, msg, step_results=step_results)
                 return
+
+            # PRD-181 S2 (F060): playbook DOLLAR-CEILING admission gate — the same
+            # $ ceiling missions enforce, generalised via services.budget_ceiling.
+            # A ceiling of 0/absent means unlimited. A next step that would push
+            # cumulative spend over the ceiling stops the run here (fail honestly),
+            # exactly like the mission dispatcher's 'block' rule.
+            ceiling_usd = _playbook_cost_ceiling_usd(exec_config, app_config)
+            if ceiling_usd > 0:
+                used_usd = _tokens_to_usd(
+                    sum(s.get("tokens_used", 0) for s in step_results), app_config
+                )
+                from services.budget_ceiling import playbook_can_afford
+
+                # Estimate this step at the average per-step spend so far (or a
+                # single step's floor when nothing has run yet).
+                per_step_est = (used_usd / max(1, idx)) if idx > 0 else 0.0
+                if not playbook_can_afford(
+                    ceiling_usd=ceiling_usd, used_usd=used_usd, next_step_usd=per_step_est
+                ):
+                    msg = (
+                        f"Playbook budget ceiling ${ceiling_usd:.2f} reached "
+                        f"(${used_usd:.4f} spent) before step {idx + 1}"
+                    )
+                    logger.warning(f"[recipe_direct] {msg}")
+                    _persist_step_results(db, execution, step_results)
+                    await _fail_execution(db, recipe_execution_id, msg, step_results=step_results)
+                    return
 
             step_id = step.get('step_id', f'step-{idx + 1}')
             step_order = step.get('order', idx + 1)

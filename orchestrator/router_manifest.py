@@ -73,6 +73,9 @@ MANIFEST_ROUTERS: tuple[RouterSpec, ...] = (
     RouterSpec("api.missions", attr="agent_telemetry_router"),
     RouterSpec("api.assignments"),
     RouterSpec("api.scheduled_tasks"),
+    # PRD-181 W11 governance + compliance surfaces.
+    RouterSpec("api.approval_grants"),  # S2 — grant / revoke approvals (F060)
+    RouterSpec("api.gdpr"),             # S3/S4 — GDPR export + erasure cascade
 )
 
 

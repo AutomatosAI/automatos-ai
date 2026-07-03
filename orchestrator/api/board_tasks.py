@@ -927,6 +927,60 @@ async def _lease_heartbeat(task_id: int) -> None:
         raise
 
 
+def _board_task_blocked_pending_approval(
+    db, task_id: int, agent_id: int, workspace_id: str
+) -> bool:
+    """PRD-181 S2: return True if the board task must wait for human approval.
+
+    - An active (granted, unexpired) grant for this task ⇒ proceed (False).
+    - Otherwise evaluate the workspace approval policy. If it asks, block the
+      task (status → ``blocked``, ``blocked_reason`` referencing the grant) and
+      return True so the caller does NOT execute it.
+
+    Fail-open on any error: approval is a governance gate, not a correctness
+    gate — a policy-read fault must not wedge board execution (the per-tool
+    PolicyGate still applies to every tool the task's agent invokes).
+    """
+    try:
+        from core.services.approval_grants import find_active_grant
+        from core.models.approval_grants import SUBJECT_BOARD_TASK
+        from services.board_approval import evaluate_board_task_approval
+
+        # Already authorised? Proceed.
+        if find_active_grant(
+            db, workspace_id, subject_type=SUBJECT_BOARD_TASK, subject_id=str(task_id)
+        ) is not None:
+            return False
+
+        outcome = evaluate_board_task_approval(
+            db, workspace_id=workspace_id, task_id=task_id, agent_id=agent_id,
+        )
+        if not outcome.requires_approval:
+            return False
+
+        # Block the task until a human grants the pending grant.
+        task = db.query(BoardTask).get(task_id)
+        if task is not None and task.status == "in_progress":
+            task.status = "blocked"
+            task.blocked_at = datetime.now(timezone.utc)
+            grant_id = getattr(outcome.grant, "id", None)
+            task.blocked_reason = (
+                f"Awaiting human approval (grant #{grant_id}): {outcome.reason}"
+            )
+            db.commit()
+            logger.info(
+                "[BoardTasks] task %s blocked pending approval grant #%s",
+                task_id, grant_id,
+            )
+        return True
+    except Exception:
+        logger.warning(
+            "[BoardTasks] approval gate errored for task %s — proceeding "
+            "(per-tool PolicyGate still applies)", task_id, exc_info=True,
+        )
+        return False
+
+
 def _launch_task_execution(
     task_id: int,
     agent_id: int,
@@ -943,6 +997,17 @@ def _launch_task_execution(
         # PRD-171 F024: heartbeat the dispatch lease for the life of the run.
         heartbeat = asyncio.ensure_future(_lease_heartbeat(task_id))
         try:
+            # PRD-181 S2 (F060): board-task approval gate. Before an autonomous
+            # board task executes, run it through the SAME approval primitive
+            # missions use. If the workspace policy asks (always_ask / over the
+            # dollar ceiling), a durable, revocable, expiring approval-grant is
+            # created and the task is BLOCKED until a human grants it — not run,
+            # not auto-allowed. On grant, the grant API re-queues the task.
+            if _board_task_blocked_pending_approval(db, task_id, agent_id, workspace_id):
+                heartbeat.cancel()
+                db.close()
+                return
+
             from modules.agents.factory.agent_factory import AgentFactory
 
             factory = AgentFactory(db_session=db)
