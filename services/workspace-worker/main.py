@@ -975,6 +975,65 @@ class WorkspaceWorker:
                 )
             return web.json_response(result)
 
+        async def canvas_decision_handler(request):
+            """POST /workspaces/{workspace_id}/canvas/session/decision — S4.
+
+            Resolve a pending approval so the awaiting can_use_tool callback
+            proceeds. Body: {"request_id": "...", "approved": true|false}.
+            """
+            from canvas_session_service import get_canvas_manager
+
+            workspace_id = request.match_info["workspace_id"]
+            try:
+                body = await request.json()
+            except Exception:
+                return web.json_response({"error": "Invalid JSON body"}, status=400)
+
+            request_id = (body.get("request_id") or "").strip()
+            approved = body.get("approved")
+            if not request_id:
+                return web.json_response({"error": "request_id is required"}, status=400)
+            if not isinstance(approved, bool):
+                return web.json_response({"error": "approved must be a boolean"}, status=400)
+
+            manager = get_canvas_manager(volume_path, event_sink=_canvas_event_sink)
+            result = await manager.decide(workspace_id, request_id, approved)
+            if not result.get("success"):
+                status = 404 if result.get("not_found") else 500
+                return web.json_response(
+                    {"error": result.get("error", "Canvas decision error")},
+                    status=status,
+                )
+            return web.json_response(result)
+
+        async def canvas_auto_accept_handler(request):
+            """POST /workspaces/{workspace_id}/canvas/session/auto-accept — S4.
+
+            Toggle session-scoped auto-accept for FILE EDITS (never bash).
+            Body: {"enabled": true|false}.
+            """
+            from canvas_session_service import get_canvas_manager
+
+            workspace_id = request.match_info["workspace_id"]
+            try:
+                body = await request.json()
+            except Exception:
+                return web.json_response({"error": "Invalid JSON body"}, status=400)
+
+            enabled = body.get("enabled")
+            if not isinstance(enabled, bool):
+                return web.json_response({"error": "enabled must be a boolean"}, status=400)
+
+            manager = get_canvas_manager(volume_path, event_sink=_canvas_event_sink)
+            result = await manager.set_auto_accept(workspace_id, enabled)
+            if not result.get("success"):
+                status = 404 if result.get("not_found") else 500
+                return web.json_response(
+                    {"error": result.get("error", "Canvas auto-accept error")},
+                    status=status,
+                )
+            return web.json_response(result)
+
         app.router.add_get("/health", health_handler)
         app.router.add_get("/workspaces/{workspace_id}/files", list_files_handler)
         app.router.add_get("/workspaces/{workspace_id}/files/content", file_content_handler)
@@ -987,6 +1046,8 @@ class WorkspaceWorker:
         app.router.add_post("/workspaces/{workspace_id}/canvas/session", canvas_session_start_handler)
         app.router.add_get("/workspaces/{workspace_id}/canvas/session", canvas_session_status_handler)
         app.router.add_delete("/workspaces/{workspace_id}/canvas/session", canvas_session_stop_handler)
+        app.router.add_post("/workspaces/{workspace_id}/canvas/session/decision", canvas_decision_handler)
+        app.router.add_post("/workspaces/{workspace_id}/canvas/session/auto-accept", canvas_auto_accept_handler)
 
         runner = web.AppRunner(app)
         await runner.setup()

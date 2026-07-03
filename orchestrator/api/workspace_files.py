@@ -13,6 +13,8 @@ worker's HTTP server, which has the persistent volume mounted.
   GET    /api/workspaces/{workspace_id}/canvas/sessions  — session status
   DELETE /api/workspaces/{workspace_id}/canvas/sessions  — stop session
   GET    /api/workspaces/{workspace_id}/canvas/events    — SSE event stream (PRD-170 S3)
+  POST   /api/workspaces/{workspace_id}/canvas/decision  — approve/deny an edit (PRD-170 S4)
+  POST   /api/workspaces/{workspace_id}/canvas/auto-accept — toggle auto-accept (PRD-170 S4)
   POST   /api/workspaces/{workspace_id}/canvas/commit    — commit + push branch (PRD-170 S5)
 """
 
@@ -251,6 +253,65 @@ async def stop_canvas_session(
 
     client = WorkspaceClient(workspace_id)
     result = await client.canvas_session_stop()
+
+    if result.get("success") is False:
+        status = result.get("status_code", 503)
+        raise HTTPException(status_code=status, detail=result["error"])
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Canvas approval loop (PRD-170 S4) — nothing mutating applies without approval
+# ---------------------------------------------------------------------------
+# A mutating tool call (file edit / bash) pauses the SDK session and surfaces a
+# permission.request event over the SSE stream; the UI renders an approval card
+# and POSTs the decision here. Approve → the session applies the edit; deny →
+# the session is told (PermissionResultDeny message) and reverts. Auto-accept is
+# a session-scoped toggle for FILE EDITS only (never bash). Tenancy enforced.
+
+
+class CanvasDecisionRequest(BaseModel):
+    request_id: str = Field(..., min_length=1, max_length=128)
+    approved: bool
+
+
+class CanvasAutoAcceptRequest(BaseModel):
+    enabled: bool
+
+
+@router.post("/canvas/decision")
+async def decide_canvas_permission(
+    workspace_id: str,
+    body: CanvasDecisionRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """Approve or deny a pending canvas permission request (S4)."""
+    if str(ctx.workspace_id) != workspace_id:
+        raise HTTPException(status_code=403, detail="Workspace access denied")
+
+    client = WorkspaceClient(workspace_id)
+    result = await client.canvas_session_decide(body.request_id, body.approved)
+
+    if result.get("success") is False:
+        status = result.get("status_code", 503)
+        raise HTTPException(status_code=status, detail=result["error"])
+
+    return result
+
+
+@router.post("/canvas/auto-accept")
+async def set_canvas_auto_accept(
+    workspace_id: str,
+    body: CanvasAutoAcceptRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """Toggle session-scoped auto-accept for file edits (S4)."""
+    if str(ctx.workspace_id) != workspace_id:
+        raise HTTPException(status_code=403, detail="Workspace access denied")
+
+    client = WorkspaceClient(workspace_id)
+    result = await client.canvas_session_auto_accept(body.enabled)
 
     if result.get("success") is False:
         status = result.get("status_code", 503)

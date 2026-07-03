@@ -209,10 +209,17 @@ def permission_request_event(
     tool_name: str,
     path: Optional[str] = None,
     request_id: Optional[str] = None,
+    extra: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """A tool-permission prompt surfaced as an approval card (S4 consumes it)."""
-    return _envelope(
-        workspace_id,
-        EVENT_PERMISSION_REQUEST,
-        {"tool_name": tool_name, "path": path, "request_id": request_id},
-    )
+    """A tool-permission prompt surfaced as an approval card (S4 consumes it).
+
+    ``extra`` carries the non-secret render payload the DiffCard needs — for a
+    file edit, ``old_content``/``new_content``; for a bash tool, ``command``. It
+    is merged into ``data`` (the base fields win on key collision). NEVER pass
+    secrets here: only agent-supplied file text / the command it wants to run.
+    """
+    data: Dict[str, Any] = {"tool_name": tool_name, "path": path, "request_id": request_id}
+    if extra:
+        for key, value in extra.items():
+            data.setdefault(key, value)
+    return _envelope(workspace_id, EVENT_PERMISSION_REQUEST, data)

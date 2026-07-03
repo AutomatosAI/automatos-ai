@@ -41,8 +41,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Optional
 
+from canvas_approvals import (
+    PendingApprovals,
+    build_permission_payload,
+    new_request_id,
+    requires_approval,
+)
 from canvas_confinement import evaluate_tool_confinement
-from canvas_events import serialize_sdk_message, session_status_event
+from canvas_events import (
+    permission_request_event,
+    serialize_sdk_message,
+    session_status_event,
+)
 from workspace_manager import WorkspaceManager
 
 logger = logging.getLogger("workspace-worker.canvas")
@@ -93,6 +103,11 @@ class _LiveSession:
     pump_task: Optional[asyncio.Task] = None
     init_seen: asyncio.Event = field(default_factory=asyncio.Event)
     stopping: bool = False
+    # S4: the approval loop. ``approvals`` bridges an awaiting can_use_tool
+    # callback to the human decision; ``auto_accept_edits`` is the session-scoped
+    # (default OFF) per-turn auto-accept for FILE EDITS only — never for bash.
+    approvals: PendingApprovals = field(default_factory=PendingApprovals)
+    auto_accept_edits: bool = False
 
 
 def _extract_init_session_id(message: Any) -> Optional[str]:
@@ -115,27 +130,8 @@ def _default_sdk_client_factory(option_kwargs: Dict[str, Any]) -> Any:
     return ClaudeSDKClient(options=ClaudeAgentOptions(**option_kwargs))
 
 
-def _make_confinement_callback(root: Path) -> Callable[..., Awaitable[Any]]:
-    """SDK ``can_use_tool`` callback enforcing workspace-mount confinement."""
-
-    async def can_use_tool(
-        tool_name: str, tool_input: Dict[str, Any], context: Any
-    ) -> Any:
-        from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
-
-        verdict = evaluate_tool_confinement(tool_name, tool_input, root)
-        if not verdict.allowed:
-            logger.warning(
-                "Canvas confinement denied tool %s: %s", tool_name, verdict.reason
-            )
-            return PermissionResultDeny(
-                message=verdict.reason or "Denied: path outside the workspace mount"
-            )
-        if verdict.updated_input is not None:
-            return PermissionResultAllow(updated_input=verdict.updated_input)
-        return PermissionResultAllow()
-
-    return can_use_tool
+DENY_OUT_OF_MOUNT = "Denied: path outside the workspace mount"
+DENY_BY_USER = "Denied by the user in the Code Canvas approval card."
 
 
 class CanvasSessionManager:
@@ -164,6 +160,129 @@ class CanvasSessionManager:
             await self._event_sink(event)
         except Exception as exc:  # noqa: BLE001 — a dropped UI event is not fatal
             logger.warning("Canvas event sink failed: %s", exc)
+
+    # ── Approval gate (S4): nothing mutating applies without approval ──
+
+    def _make_tool_gate(
+        self, workspace_id: str, root: Path
+    ) -> Callable[..., Awaitable[Any]]:
+        """SDK ``can_use_tool`` callback: confinement (hard) THEN human approval.
+
+        Order is deliberate: the tenancy gate runs first and denies an escape
+        outright (no human can approve a cross-mount write). A confined *mutating*
+        tool then pauses — a ``permission.request`` event goes to the UI and the
+        callback AWAITS the human decision (the SDK imposes no callback timeout;
+        the worker's decision endpoint resolves it). Approve → allow (with the
+        re-bound input); deny → ``PermissionResultDeny`` whose message is fed back
+        to the model. Read-only tools (Read/Glob/Grep) and auto-accepted edits are
+        allowed without a prompt.
+        """
+
+        async def can_use_tool(
+            tool_name: str, tool_input: Dict[str, Any], context: Any
+        ) -> Any:
+            from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
+
+            # Gate 1 — tenancy confinement (hard; not human-overridable).
+            verdict = evaluate_tool_confinement(tool_name, tool_input, root)
+            if not verdict.allowed:
+                logger.warning(
+                    "Canvas confinement denied tool %s: %s",
+                    tool_name,
+                    verdict.reason,
+                )
+                return PermissionResultDeny(
+                    message=verdict.reason or DENY_OUT_OF_MOUNT
+                )
+
+            effective_input = (
+                verdict.updated_input
+                if verdict.updated_input is not None
+                else tool_input
+            )
+
+            live = self._live.get(workspace_id)
+            auto = bool(live.auto_accept_edits) if live is not None else False
+
+            # Gate 2 — human approval for mutating tools.
+            if live is not None and requires_approval(tool_name, auto):
+                approved = await self._await_decision(
+                    live, workspace_id, tool_name, effective_input, root
+                )
+                if not approved:
+                    return PermissionResultDeny(message=DENY_BY_USER)
+
+            if verdict.updated_input is not None:
+                return PermissionResultAllow(updated_input=verdict.updated_input)
+            return PermissionResultAllow()
+
+        return can_use_tool
+
+    async def _await_decision(
+        self,
+        live: _LiveSession,
+        workspace_id: str,
+        tool_name: str,
+        tool_input: Dict[str, Any],
+        root: Path,
+    ) -> bool:
+        """Surface a permission request to the UI and block for the decision.
+
+        One versioned ``permission.request`` event carries everything the DiffCard
+        needs (tool, path, and the old/new content or command). The callback then
+        blocks on the request's future until the decision endpoint resolves it.
+        """
+        request_id = new_request_id()
+        future = await live.approvals.register(request_id, tool_name)
+        payload = build_permission_payload(tool_name, tool_input, request_id, root=root)
+        await self._emit(
+            permission_request_event(
+                workspace_id,
+                tool_name,
+                path=payload.get("path"),
+                request_id=request_id,
+                extra=payload,
+            )
+        )
+        try:
+            return await future
+        except asyncio.CancelledError:
+            # Session tearing down mid-decision → treat as a deny (safe default).
+            return False
+
+    async def decide(
+        self, workspace_id: str, request_id: str, approved: bool
+    ) -> Dict[str, Any]:
+        """Resolve a pending approval (the worker decision endpoint calls this)."""
+        live = self._live.get(workspace_id)
+        if live is None:
+            return {
+                "success": False,
+                "not_found": True,
+                "error": f"No live canvas session for workspace {workspace_id}",
+            }
+        found = await live.approvals.resolve(request_id, approved)
+        if not found:
+            return {
+                "success": False,
+                "not_found": True,
+                "error": f"No pending approval {request_id}",
+            }
+        return {"success": True, "request_id": request_id, "approved": approved}
+
+    async def set_auto_accept(
+        self, workspace_id: str, enabled: bool
+    ) -> Dict[str, Any]:
+        """Toggle session-scoped auto-accept for FILE EDITS (never bash)."""
+        live = self._live.get(workspace_id)
+        if live is None:
+            return {
+                "success": False,
+                "not_found": True,
+                "error": f"No live canvas session for workspace {workspace_id}",
+            }
+        live.auto_accept_edits = bool(enabled)
+        return {"success": True, "auto_accept_edits": live.auto_accept_edits}
 
     # ── Lifecycle ────────────────────────────────────────────────────
 
@@ -207,6 +326,13 @@ class CanvasSessionManager:
         )
         self._persist(root, state)
 
+        # Build the live handle FIRST (holds the approval registry + auto-accept
+        # flag) and register it, so the can_use_tool callback — which closes over
+        # (workspace_id, root) and looks the handle up at call time — can reach
+        # the session's approval loop the moment the SDK starts issuing tool calls.
+        live = _LiveSession(client=None, state=state)
+        self._live[workspace_id] = live
+
         option_kwargs: Dict[str, Any] = {
             "cwd": str(root),
             # Transcript + CLI state on the persistent volume -> survives restarts.
@@ -214,7 +340,7 @@ class CanvasSessionManager:
                 "CLAUDE_CONFIG_DIR": str(root / STATE_DIR_NAME / CLAUDE_CONFIG_DIR_NAME)
             },
             "permission_mode": "default",
-            "can_use_tool": _make_confinement_callback(root),
+            "can_use_tool": self._make_tool_gate(workspace_id, root),
         }
         if resume_id:
             option_kwargs["resume"] = resume_id
@@ -223,6 +349,7 @@ class CanvasSessionManager:
             client = self._factory(option_kwargs)
             await client.connect()
         except Exception as exc:  # noqa: BLE001 — surfaced to the caller
+            self._live.pop(workspace_id, None)
             state.status = STATUS_FAILED
             state.last_error = str(exc)
             state.updated_at = _utcnow()
@@ -232,13 +359,12 @@ class CanvasSessionManager:
             )
             return {"success": False, "error": f"Failed to start canvas session: {exc}"}
 
+        live.client = client
         state.status = STATUS_RUNNING
         state.updated_at = _utcnow()
         self._persist(root, state)
         await self._emit(session_status_event(workspace_id, STATUS_RUNNING))
 
-        live = _LiveSession(client=client, state=state)
-        self._live[workspace_id] = live
         live.pump_task = asyncio.create_task(
             self._pump(workspace_id, root, live),
             name=f"canvas-pump-{workspace_id[:8]}",
@@ -298,6 +424,9 @@ class CanvasSessionManager:
             return {"success": True, "live": False, "session": state.to_dict()}
 
         live.stopping = True
+        # Fail every outstanding approval so no can_use_tool callback is left
+        # awaiting a decision that can never come (mutating tools then deny).
+        await live.approvals.fail_all()
         try:
             await live.client.disconnect()
         except Exception as exc:  # noqa: BLE001 — stop must not fail on teardown
@@ -362,6 +491,9 @@ class CanvasSessionManager:
                 )
         finally:
             live.init_seen.set()  # never leave start_session waiting
+            # Session ended (clean or crashed) — release any awaiting approval so
+            # its can_use_tool callback unblocks (as a deny) instead of hanging.
+            await live.approvals.fail_all()
             if self._live.get(workspace_id) is live:
                 self._live.pop(workspace_id, None)
 
