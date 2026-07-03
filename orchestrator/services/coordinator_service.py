@@ -1426,7 +1426,8 @@ class CoordinatorService:
                     self._run_agent_io(p["factory"], p["agent_id"], p["prompt"],
                                        p["task"], p["attachment_ids"],
                                        mode_caps=p["mode_caps"],
-                                       agent_runtime=p.get("agent_runtime"))
+                                       agent_runtime=p.get("agent_runtime"),
+                                       field_context=p.get("field_context"))
                     for p in prepared
                 ]
                 results = await asyncio.gather(*agent_coros, return_exceptions=True)
@@ -1969,6 +1970,14 @@ class CoordinatorService:
             # Caps resolved here (serial DB path) so the concurrent I/O phase
             # never touches the DB — see _get_power_mode_caps / _run_agent_io.
             "mode_caps": mode_caps,
+            # PRD-178 S1 (F020): bind the agent's field tools to THIS task's run,
+            # resolved on the serial DB path. Threaded into execute_with_prompt →
+            # the tool loop → PlatformActionExecutor so field_id no longer comes
+            # from a `.first()` guess over concurrent running missions.
+            "field_context": {
+                "field_id": field_id,
+                "mission_id": str(run.id),
+            } if field_id else None,
         }
 
     async def _run_agent_io(
@@ -1980,6 +1989,7 @@ class CoordinatorService:
         attachment_ids: List[str],
         mode_caps: Optional[Dict[str, Any]] = None,
         agent_runtime: Optional[Any] = None,
+        field_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Execute agent I/O — safe to run concurrently via asyncio.gather().
 
@@ -2004,6 +2014,8 @@ class CoordinatorService:
                     max_retries=0,
                     max_tool_iterations=max_iters,
                     attachment_ids=attachment_ids,
+                    # PRD-178 S1 (F020): bind field tools to THIS task's run.
+                    context=field_context,
                 ),
                 timeout=task_timeout,
             )

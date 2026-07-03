@@ -873,28 +873,21 @@ class PlatformActionExecutor:
                 except Exception as e:
                     logger.debug("[PRD-124] Failed to resolve _agent_id for graph tool: %s", e)
 
-        # PRD-108: Auto-inject field_id for field tools from active mission
+        # PRD-108 / PRD-178 S1 (F020): Auto-inject field_id for field tools from
+        # the CALLING task's run — threaded down via caller_context["field_context"]
+        # by the agent runtime. The previous `.first()`-on-any-running-run lookup
+        # bound an arbitrary concurrent mission's field (F020) and let a running
+        # mission shadow workspace recall (F021); it is deleted, not shimmed.
+        # No threaded context ⇒ no injection (an explicit field_id still wins) —
+        # an ambient guess is exactly the bug we are removing.
         if action_name.startswith("platform_field_") and "field_id" not in params:
-            try:
-                from core.models.orchestration import OrchestrationRun
-                active_run = (
-                    self.db.query(OrchestrationRun)
-                    .filter(
-                        OrchestrationRun.workspace_id == self.workspace_id,
-                        OrchestrationRun.state == "running",
-                    )
-                    .first()
+            field_id = ((caller_context or {}).get("field_context") or {}).get("field_id")
+            if field_id:
+                params = {**params, "field_id": field_id}
+                logger.info(
+                    "[PRD-178 S1] Bound field_id %s to calling task for %s",
+                    field_id, action_name,
                 )
-                if active_run:
-                    field_id = (active_run.config or {}).get("field_id")
-                    if field_id:
-                        params = {**params, "field_id": field_id}
-                        logger.info(
-                            "[PRD-108] Auto-injected field_id %s for %s",
-                            field_id, action_name,
-                        )
-            except Exception as e:
-                logger.warning("[PRD-108] Failed to resolve field_id: %s", e)
 
         # PRD-163 S1/Q56: attribute mission create + lifecycle to the chatting
         # user. The chat path threads the driving user's clerk id via
