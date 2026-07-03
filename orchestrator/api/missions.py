@@ -1087,8 +1087,11 @@ async def query_mission_field(
     if not field:
         raise HTTPException(status_code=503, detail="Field backend unavailable")
     try:
+        # PRD-178 S2 (F062): read-only trace — the inspector must observe the
+        # field without reinforcing (mutating) the patterns it reports on.
         hits = await field.query(
             context_id=field_id, query=body.query, agent_id=0, top_k=body.top_k,
+            record_access=False,
         )
     except Exception as exc:
         logger.error("Field trace query failed for %s: %s", mission_id, exc, exc_info=True)

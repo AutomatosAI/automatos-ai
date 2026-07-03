@@ -59,8 +59,13 @@ class SharedContextPort(ABC):
         query: str,
         agent_id: int,
         top_k: int = 10,
+        record_access: bool = True,
     ) -> list[dict[str, Any]]:
-        """Query for relevant patterns. Returns ranked results."""
+        """Query for relevant patterns. Returns ranked results.
+
+        ``record_access=False`` (PRD-178 S2) reads without reinforcing, for the
+        retrieval-trace inspector — observing the field must not mutate it.
+        """
         ...
 
     @abstractmethod

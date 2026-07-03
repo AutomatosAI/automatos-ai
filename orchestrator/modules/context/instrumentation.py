@@ -171,9 +171,12 @@ class InstrumentedSharedContext(SharedContextPort):
         query: str,
         agent_id: int,
         top_k: int = 10,
+        record_access: bool = True,
     ) -> list[dict[str, Any]]:
         start = time.monotonic()
-        results = await self._inner.query(context_id, query, agent_id, top_k)
+        results = await self._inner.query(
+            context_id, query, agent_id, top_k, record_access=record_access,
+        )
         elapsed_ms = (time.monotonic() - start) * 1000
 
         top_score = results[0].get("score") if results else None
@@ -181,7 +184,9 @@ class InstrumentedSharedContext(SharedContextPort):
         self._record(
             FieldMetricEvent(
                 timestamp=datetime.now(timezone.utc).isoformat(),
-                operation="query",
+                # PRD-178 S2: distinguish a read-only trace from a live query in
+                # telemetry (a trace neither reinforces nor should skew query KPIs).
+                operation="query" if record_access else "trace",
                 context_id=context_id,
                 agent_id=agent_id,
                 latency_ms=elapsed_ms,

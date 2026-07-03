@@ -724,7 +724,7 @@ class TestWiringCoordinatorTick:
 
         async def _io_side_effect(factory, agent_id, prompt, task,
                                   attachment_ids, *, mode_caps=None,
-                                  agent_runtime=None):
+                                  agent_runtime=None, field_context=None):
             call_count["n"] += 1
             if task.id == task_1.id:
                 raise RuntimeError("LLM timeout")

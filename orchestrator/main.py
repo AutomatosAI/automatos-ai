@@ -392,6 +392,17 @@ async def _boot_phase_2_extensions(app_instance: "FastAPI") -> "DeferredInitResu
                     except Exception as _mj_err:
                         logger.warning("Could not start MemoryJobScheduler: %s", _mj_err)
 
+                # PRD-178 S4: field → durable promotion (the moat arm) — distill
+                # strong, untainted field patterns into durable mem0 memory
+                # before compaction hard-deletes them. Taint-gated.
+                if config.FIELD_PROMOTION_ENABLED:
+                    try:
+                        from jobs.promote_field_memory import get_field_promotion_scheduler
+                        await get_field_promotion_scheduler().start(scheduler=shared_sched)
+                        logger.info("FieldPromotionJobScheduler started on unified scheduler")
+                    except Exception as _fp_err:
+                        logger.warning("Could not start FieldPromotionJobScheduler: %s", _fp_err)
+
                 # PRD-139: Nightly edge builder (populates graph regardless of flag)
                 try:
                     from services.edge_builder_scheduler import get_edge_builder_scheduler

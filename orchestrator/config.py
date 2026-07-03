@@ -862,6 +862,26 @@ class Config:
     FIELD_COMPACTION_MAX_SCAN: int = int(os.getenv("FIELD_COMPACTION_MAX_SCAN", "10000"))
     SHARED_CONTEXT_BACKEND: str = os.getenv("SHARED_CONTEXT_BACKEND", "vector_field")  # "vector_field" or "redis"
 
+    # PRD-178 S4 — Field → durable (mem0 L3) promotion, the moat arm.
+    # Strong, frequently-recalled field patterns are distilled into durable
+    # memory BEFORE compaction hard-deletes them (else the field never becomes
+    # durable). Thresholds are config, not hardcoded (D11).
+    FIELD_PROMOTION_ENABLED: bool = os.getenv("FIELD_PROMOTION_ENABLED", "true").lower() in ("true", "1", "yes")
+    # Minimum DECAYED strength for a pattern to be promotion-eligible.
+    FIELD_PROMOTION_MIN_STRENGTH: float = float(os.getenv("FIELD_PROMOTION_MIN_STRENGTH", "0.5"))
+    # Minimum access_count (reuse across tasks/missions) to promote.
+    FIELD_PROMOTION_MIN_ACCESS_COUNT: int = int(os.getenv("FIELD_PROMOTION_MIN_ACCESS_COUNT", "3"))
+    # Max points scanned per workspace per promotion run (bounds the scroll).
+    FIELD_PROMOTION_MAX_SCAN: int = int(os.getenv("FIELD_PROMOTION_MAX_SCAN", "10000"))
+    # Daily promotion job hour (UTC).
+    FIELD_PROMOTION_HOUR_UTC: int = int(os.getenv("FIELD_PROMOTION_HOUR_UTC", "4"))
+    # TAINT GATE (top-risk #4 — promotion is the memory-poisoning surface): a
+    # pattern whose provenance names an untrusted external source is NEVER
+    # promoted to durable memory. Comma-separated source tags treated as tainted.
+    FIELD_PROMOTION_UNTRUSTED_SOURCES: str = os.getenv(
+        "FIELD_PROMOTION_UNTRUSTED_SOURCES", "email,web,inbound,external,webhook,channel"
+    )
+
     # =============================================================================
     # EMBEDDINGS
     # =============================================================================

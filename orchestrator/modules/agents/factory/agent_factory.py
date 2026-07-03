@@ -1035,6 +1035,14 @@ class AgentFactory:
                     async def _agent_llm_cb(msgs, tls):
                         return await agent_runtime.llm_manager.generate_response(msgs, tools=tls)
 
+                    # PRD-178 S1 (F020): thread the calling task's field context
+                    # so PlatformActionExecutor binds field tools to THIS run's
+                    # field_id — never a `.first()` guess over concurrent missions.
+                    _field_caller_context = (
+                        {"field_context": context}
+                        if context and context.get("field_id") else None
+                    )
+
                     async def _agent_tool_cb(name, args, call_id, ws_id):
                         # SLACK empty-params guard.
                         if not args and "SLACK" in name:
@@ -1050,6 +1058,7 @@ class AgentFactory:
                                 parameters=args,
                                 agent_id=agent_runtime.agent_id,
                                 workspace_id=ws_id,
+                                caller_context=_field_caller_context,
                             )
                             return {
                                 "success": True,
