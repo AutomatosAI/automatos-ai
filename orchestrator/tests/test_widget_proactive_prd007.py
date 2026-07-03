@@ -33,7 +33,7 @@ if str(ORCH_ROOT) not in sys.path:
 # ---------------------------------------------------------------------------
 
 def test_default_widget_proactive_shape():
-    from api.shopify import DEFAULT_WIDGET_PROACTIVE_CONFIG as cfg
+    from integrations.shopify.provision import DEFAULT_WIDGET_PROACTIVE_CONFIG as cfg
 
     # Locked-defaults contract per PRD-007 v0.2 — keep the schema explicit
     # so accidental drift breaks this test, not production widgets.
@@ -53,7 +53,7 @@ def test_default_config_is_copyable():
     """Each new workspace must get its own dict — not the shared module-level
     object — so per-merchant edits don't bleed across tenants.
     """
-    from api.shopify import DEFAULT_WIDGET_PROACTIVE_CONFIG
+    from integrations.shopify.provision import DEFAULT_WIDGET_PROACTIVE_CONFIG
 
     a = dict(DEFAULT_WIDGET_PROACTIVE_CONFIG)
     b = dict(DEFAULT_WIDGET_PROACTIVE_CONFIG)

@@ -15,20 +15,16 @@ from __future__ import annotations
 
 import hmac
 import logging
-from typing import Any, Dict, List, Optional
-from uuid import UUID, uuid4
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Header
 from pydantic import BaseModel, Field
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db
-from core.models.core import Agent, Skill
 from core.models.workspaces import Workspace
-from core.services.api_key_service import ApiKeyService
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -105,28 +101,6 @@ def _verify_internal_key(authorization: str = Header(...)) -> None:
         raise HTTPException(status_code=401, detail="Invalid internal API key")
 
 
-def _build_allowed_domains(shop: str, metadata: Dict[str, Any]) -> List[str]:
-    """Origins permitted to use the minted widget key.
-
-    Always allows the shop's ``*.myshopify.com`` domains. When the shop has a
-    custom primary domain (e.g. ``www.inbuilduk.com``) the storefront serves
-    the widget from there, so the browser ``Origin`` is the custom domain —
-    not ``*.myshopify.com``. Allow that host plus its apex and sibling
-    subdomains, otherwise the blog/chat widgets 403 on custom-domain stores.
-    """
-    domains = [f"https://{shop}", f"https://*.{shop}", "https://*.myshopify.com"]
-
-    primary = metadata.get("domain")
-    if primary:
-        host = primary.split("://", 1)[-1].strip("/").split("/", 1)[0]
-        if host and "myshopify.com" not in host:
-            apex = host[4:] if host.startswith("www.") else host
-            domains += [f"https://{host}", f"https://{apex}", f"https://*.{apex}"]
-
-    seen: set[str] = set()
-    return [d for d in domains if not (d in seen or seen.add(d))]
-
-
 # ── Pydantic models ─────────────────────────────────────────────────
 
 class ProvisionRequest(BaseModel):
@@ -167,43 +141,6 @@ class SyncRequest(BaseModel):
     data: Any = None
 
 
-# ── Shopify marketplace agent slugs ─────────────────────────────────
-
-SHOPIFY_AGENT_SLUGS = [
-    "shopify-ops",
-    "shopify-support",
-    "shopify-product-expert",
-    "shopify-merchandiser",
-    "shopify-review-analyst",
-    "shopify-gift-concierge",
-    "shopify-seo-content",
-    "shopify-business-analyst",
-    "shopify-inventory-watchdog",
-]
-
-
-# PRD-007: default proactive widget config seeded into workspace.settings
-# at provision time. Merchant flips `enabled: true` from the dashboard
-# (or via PATCH /api/workspaces/:id/settings) to activate.
-DEFAULT_WIDGET_PROACTIVE_CONFIG: dict = {
-    "enabled": False,
-    "page_types": ["product"],
-    "triggers": [
-        {"type": "time_on_page", "seconds": 20},
-    ],
-    # product_session keys the frequency-cap slot by product handle, so the
-    # opener fires once PER product per session rather than once for the whole
-    # session across every product page (the old "session" behaviour).
-    "frequency_cap": {"scope": "product_session", "max_pops": 1},
-    "greeting_source": "agent_with_canned_fallback",
-    "canned_fallback": "Need a hand finding the right product?",
-    "agent_timeout_ms": 1500,
-    "popup_style": "corner_bubble",
-    "respect_consent": True,
-    "dismissal_persistence": "session",
-}
-
-
 # ===================================================================
 # POST /api/shopify/provision
 # ===================================================================
@@ -217,187 +154,29 @@ async def provision_workspace(
     """
     Provision an Automatos workspace for a Shopify store.
 
-    Idempotent: if a workspace with this external_id already exists, returns it
-    without re-seeding agents. The API key is re-generated on re-provision.
-
-    Flow:
-    1. Find or create workspace
-    2. Clone marketplace agents into workspace
-    3. Create a public API key for widget usage
-    4. Return workspace + key
+    Thin compat wrapper over the generic vertical-provision flow (PRD-183 S5):
+    the Shopify lifecycle KNOBS (roster, widget defaults, key permissions, site
+    type, allowed origins) live in ``integrations/shopify/provision.py`` behind
+    the ``VerticalProvisioner`` interface. New callers should target
+    ``POST /api/verticals/shopify/provision`` directly.
     """
-    shop = request.external_id
-    is_new = False
+    from integrations.provisioning import provision_vertical
 
-    # 1. Find existing workspace by shop domain in settings
-    workspace = (
-        db.query(Workspace)
-        .filter(
-            Workspace.settings["shopify_domain"].astext == shop,
-            Workspace.is_active.is_(True),
-        )
-        .first()
-    )
-
-    if not workspace:
-        # Create new workspace
-        workspace_id = uuid4()
-        workspace = Workspace(
-            id=workspace_id,
-            name=request.name,
-            slug=shop.replace(".myshopify.com", ""),
-            plan="starter",
-            is_personal=False,
-            is_active=True,
-            webhook_key=uuid4().hex,
-            settings={
-                "source": request.source,
-                "shopify_domain": shop,
-                "shopify_metadata": request.metadata,
-                "widget_proactive": dict(DEFAULT_WIDGET_PROACTIVE_CONFIG),
-            },
-        )
-        db.add(workspace)
-        db.flush()
-        is_new = True
-        logger.info("Created workspace %s for shop %s", workspace.id, shop)
-
-    # 2. Clone marketplace agents (only if new or no agents exist)
-    existing_agent_count = (
-        db.query(Agent)
-        .filter(
-            Agent.workspace_id == workspace.id,
-            Agent.owner_type == "workspace",
-        )
-        .count()
-    )
-
-    agents_installed = 0
-    if existing_agent_count == 0:
-        agents_installed = _seed_shopify_agents(db, workspace.id)
-
-    # 3. Create public API key for widget usage
-    key_result = ApiKeyService.create_api_key(
+    result = provision_vertical(
         db=db,
-        workspace_id=workspace.id,
-        name=f"Shopify Widget Key ({shop})",
-        key_type="public",
-        permissions=["chat", "documents:read", "agents:read", "agents:execute"],
-        allowed_domains=_build_allowed_domains(shop, request.metadata),
+        vertical="shopify",
+        external_id=request.external_id,
+        name=request.name,
+        metadata=request.metadata,
     )
-
-    db.commit()
-
-    logger.info(
-        "Provisioned workspace %s for %s: %d agents, key=%s",
-        workspace.id, shop, agents_installed, key_result["key_prefix"],
-    )
-
     return ProvisionResponse(
-        id=str(workspace.id),
-        public_id=str(workspace.id),
-        name=workspace.name,
-        api_key=key_result["key"],
-        agents_installed=agents_installed,
-        is_new=is_new,
+        id=result["id"],
+        public_id=result["public_id"],
+        name=result["name"],
+        api_key=result["api_key"],
+        agents_installed=result["agents_installed"],
+        is_new=result["is_new"],
     )
-
-
-def _seed_shopify_agents(db: Session, workspace_id: UUID) -> int:
-    """Clone Shopify marketplace agents into a workspace."""
-    marketplace_agents = (
-        db.query(Agent)
-        .filter(
-            Agent.owner_type == "marketplace",
-            Agent.is_approved.is_(True),
-            Agent.slug.in_(SHOPIFY_AGENT_SLUGS),
-        )
-        .all()
-    )
-
-    cloned_count = 0
-    ops_manager_clone_id = None
-
-    for marketplace_agent in marketplace_agents:
-        # Check if already cloned (idempotent)
-        existing = (
-            db.query(Agent)
-            .filter(
-                Agent.workspace_id == workspace_id,
-                Agent.cloned_from_id == marketplace_agent.id,
-            )
-            .first()
-        )
-        if existing:
-            if marketplace_agent.slug == "shopify-ops":
-                ops_manager_clone_id = existing.id
-            continue
-
-        cloned = Agent(
-            name=marketplace_agent.name,
-            slug=marketplace_agent.slug,
-            description=marketplace_agent.description,
-            agent_type=marketplace_agent.agent_type,
-            status=marketplace_agent.status,
-            configuration=marketplace_agent.configuration,
-            model_config=marketplace_agent.model_config,
-            tags=marketplace_agent.tags,
-            marketplace_category=marketplace_agent.marketplace_category,
-            marketplace_icon=marketplace_agent.marketplace_icon,
-            team=marketplace_agent.team,
-            job_title=marketplace_agent.job_title,
-            custom_persona_prompt=marketplace_agent.custom_persona_prompt,
-            use_custom_persona=marketplace_agent.use_custom_persona,
-            # Ownership
-            owner_type="workspace",
-            owner_id=str(workspace_id),
-            workspace_id=workspace_id,
-            cloned_from_id=marketplace_agent.id,
-            original_creator_id=marketplace_agent.original_creator_id,
-            is_approved=True,
-            version=marketplace_agent.version,
-        )
-        db.add(cloned)
-        db.flush()
-
-        # Copy skills
-        if marketplace_agent.skills:
-            cloned.skills = list(marketplace_agent.skills)
-
-        # Copy tool assignments
-        tool_rows = db.execute(
-            text("SELECT tool_id, enabled FROM agent_tool_assignments WHERE agent_id = :aid"),
-            {"aid": marketplace_agent.id},
-        ).fetchall()
-        for tool_id, enabled in tool_rows:
-            db.execute(
-                text(
-                    "INSERT INTO agent_tool_assignments (agent_id, tool_id, enabled, created_at, updated_at) "
-                    "VALUES (:aid, :tid, :en, NOW(), NOW())"
-                ),
-                {"aid": cloned.id, "tid": tool_id, "en": enabled},
-            )
-
-        # Increment marketplace install count
-        marketplace_agent.install_count = (marketplace_agent.install_count or 0) + 1
-
-        if marketplace_agent.slug == "shopify-ops":
-            ops_manager_clone_id = cloned.id
-
-        cloned_count += 1
-
-    # Wire reports_to for widget agents → ops manager
-    if ops_manager_clone_id:
-        db.query(Agent).filter(
-            Agent.workspace_id == workspace_id,
-            Agent.slug.in_(SHOPIFY_AGENT_SLUGS),
-            Agent.slug != "shopify-ops",
-        ).update(
-            {"reports_to_id": ops_manager_clone_id},
-            synchronize_session="fetch",
-        )
-
-    return cloned_count
 
 
 # ===================================================================
@@ -706,8 +485,15 @@ async def _product_sync_impl(workspace_id: str, db: Session) -> "SyncStartRespon
 
     from core.composio.client import get_composio_client
     from core.composio.entity_manager import EntityManager
-    from modules.knowledge.graph_extraction import map_shopify_catalog
+    from integrations.provisioning import get_graph_source_mapper
     from modules.knowledge.graph_service import GraphifyService
+
+    # PRD-183 S5: resolve the catalog→graph mapper through the vertical registry
+    # (generic "graph source"), not a hardcoded import — a second vertical
+    # registers its own mapper and syncs through the same path.
+    map_shopify_catalog = get_graph_source_mapper("shopify", "catalog")
+    if map_shopify_catalog is None:
+        raise HTTPException(status_code=500, detail="No catalog graph-source mapper registered for shopify")
 
     if not workspace_id:
         raise HTTPException(status_code=400, detail="workspace_id required")
@@ -942,8 +728,13 @@ async def _orders_sync_impl(
 
     from core.composio.client import get_composio_client
     from core.composio.entity_manager import EntityManager
-    from modules.knowledge.graph_extraction import map_shopify_orders
+    from integrations.provisioning import get_graph_source_mapper
     from modules.knowledge.graph_service import GraphifyService
+
+    # PRD-183 S5: orders→graph mapper via the vertical registry (generic).
+    map_shopify_orders = get_graph_source_mapper("shopify", "orders")
+    if map_shopify_orders is None:
+        raise HTTPException(status_code=500, detail="No orders graph-source mapper registered for shopify")
 
     if not workspace_id:
         raise HTTPException(status_code=400, detail="workspace_id required")

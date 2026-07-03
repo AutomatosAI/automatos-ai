@@ -10,8 +10,15 @@ from types import SimpleNamespace
 
 import pytest
 
-from api.shopify import _build_allowed_domains
+# PRD-183 S5: the allowed-origins rule moved from api.shopify._build_allowed_domains
+# onto the Shopify VerticalProvisioner (integrations/shopify/provision.py).
+import integrations.shopify  # noqa: F401 — self-registers the provisioner
+from integrations.provisioning import PROVISIONER_REGISTRY
 from core.services.api_key_service import ApiKeyService
+
+
+def _build_allowed_domains(shop, metadata):
+    return PROVISIONER_REGISTRY["shopify"].allowed_domains(shop, metadata)
 
 
 def _key(domains):
