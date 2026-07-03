@@ -33,6 +33,7 @@ from .actions_governance import register_governance_actions
 from .actions_harness import register_harness_actions
 from .actions_graph import register_graph_actions
 from .actions_codegraph import register_codegraph_actions  # PRD-165 S4
+from .actions_shopify import register_shopify_actions  # PRD-183 S3 (F088)
 from .actions_auto_reporting import register_auto_reporting_actions
 from .actions_notifications import register_notifications_actions
 from .actions_routing import register_routing_actions  # PRD-142 Wave 4 (W4-S6)
@@ -69,6 +70,7 @@ def register_all_actions(registry: ActionRegistry) -> None:
     register_harness_actions(registry)
     register_graph_actions(registry)
     register_codegraph_actions(registry)  # PRD-165 S4: codegraph as an agent capability
+    register_shopify_actions(registry)  # PRD-183 S3 (F088): Shopify sync + freshness tools
     register_auto_reporting_actions(registry)
     register_notifications_actions(registry)
     register_routing_actions(registry)  # PRD-142 Wave 4 (W4-S6): routing-rule tool
