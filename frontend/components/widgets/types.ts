@@ -51,6 +51,12 @@ export interface MissionApprovalWidgetData {
   cost_estimate_usd?: number
   cost_ceiling_usd?: number
   approval_deadline_at?: string
+  // PRD-181 S5 (EU-AI-Act Art.14): the autonomy risk tier + why a human is in
+  // the loop, shown on the card so the approver sees the risk classification.
+  risk_tier?: 'monitor' | 'human_on_the_loop' | 'human_in_the_loop'
+  risk_class?: string
+  oversight_rationale?: string
+  requires_approval?: boolean
 }
 
 /**

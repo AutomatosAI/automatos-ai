@@ -209,6 +209,86 @@ class VectorFieldSharedContext(SharedContextPort):
         except Exception:
             logger.warning("[Field] Failed to destroy field %s", context_id, exc_info=True)
 
+    # ── GDPR erasure / export (PRD-181 S3/S4) ───────────────────────
+
+    async def erase_workspace(self, workspace_id: str) -> int:
+        """GDPR erasure — delete every field-memory point for a workspace.
+
+        Reuses the ``workspace_id`` payload index (PRD-166 S1). Returns the count
+        of points that existed before deletion (best-effort; Qdrant's delete is
+        filter-based and does not report a count, so we scroll-count first).
+        """
+        await self.ensure_shared_collection()
+        count = await self._count_by_filter(self._workspace_filter(str(workspace_id)))
+        await self._client.delete(
+            collection_name=SHARED_COLLECTION,
+            points_selector=FilterSelector(filter=self._workspace_filter(str(workspace_id))),
+        )
+        logger.warning("[Field] GDPR erased %d field-memory point(s) for workspace %s", count, workspace_id)
+        return count
+
+    async def erase_subject(self, workspace_id: str, subject_id: str) -> int:
+        """GDPR subject-level erasure for field memory (see GDPR-GAP note below)."""
+        # GDPR-GAP: field-memory points carry `workspace_id` / `mission_id` /
+        # `task_id` / `agent_id` provenance (PRD-166 S1 / W8) but NO
+        # data-subject tag - there is no `subject_id` on the payload to filter a
+        # single human's patterns from a shared workspace field. Until a
+        # data-subject tag is added at write time, subject-level erasure here is
+        # not possible without over-deleting the whole workspace. This method
+        # returns 0 and the gap is surfaced by the GDPR service so the caller
+        # never believes a subject was erased from field memory when it was not.
+        logger.warning(
+            "[Field] GDPR subject erase requested for subject=%s ws=%s but field "
+            "memory has no data-subject tag (GDPR-GAP) — 0 points erased",
+            subject_id, workspace_id,
+        )
+        return 0
+
+    async def export_workspace(self, workspace_id: str, limit: int = 10000) -> list[dict[str, Any]]:
+        """GDPR export — return every field-memory pattern for a workspace as
+        plain dicts (key/value/strength/provenance), portable JSON."""
+        await self.ensure_shared_collection()
+        out: list[dict[str, Any]] = []
+        next_offset: Any = None
+        scanned = 0
+        while scanned < limit:
+            points, next_offset = await self._client.scroll(
+                collection_name=SHARED_COLLECTION,
+                scroll_filter=self._workspace_filter(str(workspace_id)),
+                limit=min(256, limit - scanned),
+                offset=next_offset,
+                with_payload=True,
+                with_vectors=False,
+            )
+            if not points:
+                break
+            for p in points:
+                pl = p.payload or {}
+                out.append({
+                    "key": pl.get("key"),
+                    "value": pl.get("value"),
+                    "strength": pl.get("strength"),
+                    "agent_id": pl.get("agent_id"),
+                    "mission_id": pl.get("mission_id"),
+                    "task_id": pl.get("task_id"),
+                    "created_at": pl.get("created_at"),
+                })
+                scanned += 1
+            if next_offset is None:
+                break
+        return out
+
+    async def _count_by_filter(self, flt) -> int:
+        """Best-effort count of points matching a filter (for erasure reporting)."""
+        try:
+            res = await self._client.count(
+                collection_name=SHARED_COLLECTION, count_filter=flt, exact=True,
+            )
+            return int(getattr(res, "count", 0) or 0)
+        except Exception:
+            logger.debug("[Field] count_by_filter failed", exc_info=True)
+            return 0
+
     async def context_exists(self, context_id: str) -> bool:
         """A field 'exists' if at least one point references it.
 

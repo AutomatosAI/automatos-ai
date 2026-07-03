@@ -251,6 +251,20 @@ class UnifiedToolExecutor:
                     caller_context=caller_context,
                 )
             )
+
+            # PRD-181 S1 (Art.12): fire the policy bus for EVERY verdict — allow,
+            # ask, and deny — so the attached audit handler records every tool
+            # call + policy decision per tenant. The bus is the single audit
+            # write point (bus.py:18); this is the only place it is fired. A
+            # handler fault is swallowed inside the bus, so audit never wedges
+            # or slows the call. The risk tier is recomputed (pure, cheap) so the
+            # audit row and the S5 approval card both carry it.
+            self._fire_policy_bus(
+                effective_name, effective_params, verdict,
+                agent_id=agent_id, workspace_id=workspace_id,
+                caller_context=caller_context, trace=trace,
+            )
+
             if verdict.decision is Decision.ALLOW:
                 return None
             logger.info(
@@ -263,6 +277,70 @@ class UnifiedToolExecutor:
                 "[tool-trace %s] policy gate errored for '%s' — proceeding "
                 "(downstream gates still apply)", trace, tool_name, exc_info=True,
             )
+            return None
+
+    def _fire_policy_bus(
+        self,
+        effective_name: str,
+        effective_params: Dict[str, Any],
+        verdict: Any,
+        *,
+        agent_id: int,
+        workspace_id: Optional[UUID],
+        caller_context: Optional[Dict[str, Any]],
+        trace: str,
+    ) -> None:
+        """Fire ``PRE_TOOL_USE`` on the policy bus with the verdict (PRD-181 S1).
+
+        The attached audit handler reads ``ctx.data['verdict']`` and writes the
+        per-tenant Art.12 record. Never raises: audit is a side-effect of the
+        chokepoint, so a bus/handler fault must not block or slow the call.
+        """
+        try:
+            from modules.policy import (
+                Event,
+                EventContext,
+                classify_action,
+                get_policy_bus,
+            )
+
+            # Recompute the risk tier (pure) so the audit row + S5 card carry it.
+            risk = None
+            try:
+                action_def = self._policy_action_def(effective_name)
+                permission_level = getattr(action_def, "permission_level", None)
+                is_composio = (effective_name or "").startswith("composio_")
+                risk = classify_action(
+                    effective_name, permission_level=permission_level, is_composio=is_composio
+                )
+            except Exception:
+                risk = None
+
+            ctx = EventContext(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                tool_name=effective_name,
+                tool_input=effective_params,
+                caller_context=caller_context,
+            )
+            ctx.data["verdict"] = verdict
+            ctx.data["risk"] = risk
+            ctx.data["trace_id"] = trace
+            get_policy_bus().fire(Event.PRE_TOOL_USE, ctx)
+        except Exception:
+            logger.warning(
+                "[tool-trace %s] policy bus fire failed for '%s' — verdict "
+                "still enforced, audit skipped for this call", trace, effective_name,
+                exc_info=True,
+            )
+
+    def _policy_action_def(self, tool_name: str) -> Any:
+        """Resolve the ActionDefinition for a tool (or None). Lazy + fail-open."""
+        try:
+            from modules.tools.discovery import get_action_registry
+
+            return get_action_registry().get(tool_name)
+        except Exception:
             return None
 
     # ------------------------------------------------------------------
