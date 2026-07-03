@@ -743,6 +743,15 @@ class Config:
     TOOL_ROUTING_GRAPH_AGENT_SAMPLE_FLOOR: int = int(os.getenv("TOOL_ROUTING_GRAPH_AGENT_SAMPLE_FLOOR", "50"))
     EDGE_BUILDER_HOUR_UTC: int = int(os.getenv("EDGE_BUILDER_HOUR_UTC", "3"))
     EDGE_BUILDER_WINDOW_DAYS: int = int(os.getenv("EDGE_BUILDER_WINDOW_DAYS", "30"))
+    # PRD-177 S3 (F018): Composio action-metadata sync scheduler + fail-CLOSED
+    # destructive gate. When the metadata table is empty (sync not yet run), a
+    # destructive intent is DENIED rather than silently permitted; clearly
+    # non-destructive intents still pass so a cold start is not bricked. The sync
+    # job refreshes classifications daily on the same scheduler as the nightly
+    # edge recompute.
+    COMPOSIO_DESTRUCTIVE_FAIL_CLOSED: bool = os.getenv("COMPOSIO_DESTRUCTIVE_FAIL_CLOSED", "true").lower() == "true"
+    COMPOSIO_SYNC_ENABLED: bool = os.getenv("COMPOSIO_SYNC_ENABLED", "true").lower() == "true"
+    COMPOSIO_SYNC_HOUR_UTC: int = int(os.getenv("COMPOSIO_SYNC_HOUR_UTC", "4"))
     # PRD-141 US-019: batched incremental tool-execution signal recorder.
     # Opt-in (default off). Drains an in-process queue with ONE DB session per
     # flush — never a DB session or task per tool call.

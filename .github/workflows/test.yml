@@ -183,6 +183,51 @@ jobs:
             -p no:cacheprovider \
             -v
 
+  # PRD-177 S6 — operating-graph uplift eval. NON-REQUIRED (same posture as the
+  # test net). The moat business gate: measures learned-edge tool-selection
+  # accuracy vs BM25 + embedding baselines, PER TENANT, and prints the uplift.
+  # Pure Python stdlib + the bundled eval_set fixture — no Postgres, no LLM, no
+  # embedding provider. A sub-threshold number is a valid, honest outcome and
+  # NEVER fails the job (the number is the deliverable); TOOL_ROUTING_GRAPH is
+  # only flipped on once this clears the gate against PRODUCTION per-tenant
+  # telemetry, not the bundled fixture.
+  operating-graph-uplift-eval:
+    name: Operating-graph uplift eval (non-required)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      # Dummy values keep any import-time config resolution from failing; the
+      # eval itself reads only the jsonl fixture and stdlib.
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: test_db
+      ENVIRONMENT: development
+
+    defaults:
+      run:
+        working-directory: orchestrator
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run the uplift harness self-tests
+        run: |
+          python -m pip install --upgrade pip pytest
+          pytest tests/test_prd177_uplift_eval.py -q -p no:cacheprovider
+
+      - name: Emit the per-tenant uplift number (informational)
+        run: |
+          python -m evals.operating_graph_uplift --json
+
   # PRD-176 F010 — the reliability bar: Alembic replays from zero to exactly
   # ONE head. NON-REQUIRED (same posture as the test net) until the Step-2
   # single-baseline squash lands.

@@ -445,7 +445,11 @@ def test_seeded_graph_routes_common_intent(fake_env, monkeypatch):
     router = _router_over_store(
         monkeypatch, store, {QUERY_AGENTS: [("platform_list_agents", 0.8)]}
     )
-    chains = asyncio.run(router.rank_chains(QUERY_AGENTS, agent_id=None, top_k=10))
+    # PRD-177 S5: the platform_list_agents→platform_get_agent edge was seeded in
+    # WS_A; scope the read to WS_A to observe the tenant's own learned chain.
+    chains = asyncio.run(
+        router.rank_chains(QUERY_AGENTS, workspace_id=str(WS_A), agent_id=None, top_k=10)
+    )
 
     assert chains, "seeded graph must return ranked tools"
     chain_actions = [c[2] for c in chains]
@@ -464,7 +468,11 @@ def test_unseeded_intent_falls_back_to_semantic(fake_env, monkeypatch):
     router = _router_over_store(
         monkeypatch, store, {QUERY_UNSEEDED: [("workspace_zip_files", 0.7)]}
     )
-    chains = asyncio.run(router.rank_chains(QUERY_UNSEEDED, agent_id=None, top_k=10))
+    # Unseeded intent — no edges in any workspace; scope to WS_A to prove the
+    # tenant-scoped read still falls back to the bare semantic-index floor.
+    chains = asyncio.run(
+        router.rank_chains(QUERY_UNSEEDED, workspace_id=str(WS_A), agent_id=None, top_k=10)
+    )
 
     assert chains == [("workspace_zip_files", 0.7, ["workspace_zip_files"])]
 
@@ -563,7 +571,9 @@ def test_meta_edge_routes_zero_telemetry_sibling(fake_env, monkeypatch):
     router = _router_over_store(
         monkeypatch, store, {query: [("platform_list_members", 0.8)]}
     )
-    chains = asyncio.run(router.rank_chains(query, agent_id=None, top_k=10))
+    # meta_sibling cold-start edges are global (workspace_id IS NULL); read the
+    # unscoped graph with workspace_id=None (PRD-177 S5).
+    chains = asyncio.run(router.rank_chains(query, workspace_id=None, agent_id=None, top_k=10))
     chain_actions = [c[2] for c in chains]
 
     # the zero-telemetry sibling is now reachable through the metadata edge
@@ -589,7 +599,9 @@ def test_real_used_after_outranks_meta(fake_env, monkeypatch):
     router = _router_over_store(
         monkeypatch, store, {query: [("platform_list_members", 0.8)]}
     )
-    chains = asyncio.run(router.rank_chains(query, agent_id=None, top_k=10))
+    # Both the used_after and meta_sibling edges here are global (workspace_id
+    # IS NULL); read the unscoped graph with workspace_id=None (PRD-177 S5).
+    chains = asyncio.run(router.rank_chains(query, workspace_id=None, agent_id=None, top_k=10))
     actions = [c[2] for c in chains]
 
     real_chain = ["platform_list_members", "platform_set_member_role"]

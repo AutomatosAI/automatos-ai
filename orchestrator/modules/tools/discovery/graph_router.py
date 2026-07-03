@@ -65,11 +65,20 @@ class GraphRouter:
         agent_id: Optional[int],
         top_k: int,
         include_super_admin: bool = False,
+        workspace_id: Optional[str] = None,
     ) -> str:
         # PRD-143: the su flag is part of the key — a super-admin result
         # cached under an operator key (or vice versa) would cross the tier.
+        # PRD-177 S5: workspace_id is part of the key — a per-tenant graph result
+        # cached under one workspace must never be served to another (moat leak).
         raw = json.dumps(
-            {"q": query, "a": agent_id, "k": top_k, "su": include_super_admin},
+            {
+                "q": query,
+                "a": agent_id,
+                "k": top_k,
+                "su": include_super_admin,
+                "ws": str(workspace_id) if workspace_id else None,
+            },
             sort_keys=True,
         )
         h = hashlib.sha256(raw.encode()).hexdigest()[:16]
@@ -116,6 +125,8 @@ class GraphRouter:
     async def rank_chains(
         self,
         query: str,
+        *,
+        workspace_id: Optional[str],
         agent_id: Optional[int] = None,
         top_k: int = 15,
         exclude_admin: bool = True,
@@ -124,6 +135,14 @@ class GraphRouter:
     ) -> List[Tuple[str, float, List[str]]]:
         """Rank tool chains by combining embedding similarity with graph edges.
 
+        PRD-177 S5: ``workspace_id`` is a REQUIRED keyword. The learned operating
+        graph is per-tenant (owner decision) — edge/affinity reads are filtered
+        to this workspace, and there is no unfiltered global-read fallback that
+        would bleed one tenant's edges into another's routing. Pass the caller's
+        workspace id, or ``None`` explicitly for a genuinely unscoped read (the
+        offline eval harness); the keyword is required so no caller can silently
+        reintroduce a global read.
+
         PRD-143: fail-closed — super_admin_only actions are excluded from
         entry nodes AND from edge-expansion targets unless
         include_super_admin=True is passed explicitly.
@@ -131,7 +150,7 @@ class GraphRouter:
         Returns:
             List of (primary_action, score, chain_actions) sorted descending by score.
         """
-        cache_key = self._cache_key(query, agent_id, top_k, include_super_admin)
+        cache_key = self._cache_key(query, agent_id, top_k, include_super_admin, workspace_id)
         cached = self._read_cache(cache_key)
         if cached is not None:
             return cached
@@ -147,9 +166,9 @@ class GraphRouter:
         if not entry_nodes:
             return []
 
-        # Step 2: expand through graph edges + affinities
+        # Step 2: expand through graph edges + affinities (workspace-scoped)
         try:
-            chains = self._expand_with_graph(entry_nodes, agent_id)
+            chains = self._expand_with_graph(entry_nodes, agent_id, workspace_id)
         except Exception as e:
             logger.warning("GraphRouter: graph expansion failed, falling back to embedding-only: %s", e)
             chains = self._to_single_chains(entry_nodes)
@@ -178,8 +197,13 @@ class GraphRouter:
         self,
         entry_nodes: List[Tuple[str, float]],
         agent_id: Optional[int],
+        workspace_id: Optional[str],
     ) -> List[Tuple[str, float, List[str]]]:
-        """Query edge + affinity tables and build scored chains."""
+        """Query edge + affinity tables and build scored chains.
+
+        PRD-177 S5: all edge/affinity reads are scoped to ``workspace_id`` — the
+        learned graph is per-tenant.
+        """
         from core.database.database import get_db_session
 
         min_conf = self._min_confidence()
@@ -200,19 +224,21 @@ class GraphRouter:
                 agent_sample_count = self._agent_total_samples(db, agent_id)
                 use_agent_scope = agent_sample_count >= sample_floor
 
-            # Batch-query edges for all entry nodes
+            # Batch-query edges for all entry nodes (workspace-scoped)
             edges = self._query_edges(
                 db, entry_action_names, min_conf,
                 agent_id if use_agent_scope else None,
+                workspace_id,
             )
 
-            # Batch-query affinities for entry + expansion targets
+            # Batch-query affinities for entry + expansion targets (workspace-scoped)
             all_action_names = set(entry_action_names)
             for edge in edges:
                 all_action_names.add(edge["to_action"])
             positive_boosts, negative_penalties = self._query_affinities(
                 db, list(all_action_names),
                 agent_id if use_agent_scope else None,
+                workspace_id,
             )
 
         # Build chains from edges (depth 1 only -- _MAX_DEPTH = 2 means
@@ -263,8 +289,15 @@ class GraphRouter:
         from_actions: List[str],
         min_confidence: float,
         agent_id: Optional[int],
+        workspace_id: Optional[str],
     ) -> List[dict]:
-        """Query tool_routing_edges for used_after edges from entry nodes."""
+        """Query tool_routing_edges for used_after edges from entry nodes.
+
+        PRD-177 S5: filtered to ``workspace_id``. The learned graph is per-tenant,
+        so a read for workspace A returns ONLY workspace A's edges (or the
+        genuinely unscoped ``workspace_id IS NULL`` rows when the caller passes
+        None). There is no cross-tenant global-read fallback.
+        """
         from sqlalchemy import and_, or_
         from core.models.tool_routing import ToolRoutingEdge
 
@@ -279,6 +312,12 @@ class GraphRouter:
             # real usage (higher Wilson confidence) outranks metadata edges.
             ToolRoutingEdge.edge_type.in_(("used_after", "meta_sibling")),
             ToolRoutingEdge.confidence >= min_confidence,
+            # Per-tenant isolation (moat): scope to this workspace exactly. A
+            # None workspace_id reads only the unscoped rows (IS NULL — e.g. the
+            # global meta_sibling cold-start seeds), never a tenant's rows.
+            ToolRoutingEdge.workspace_id == workspace_id
+            if workspace_id is not None
+            else ToolRoutingEdge.workspace_id.is_(None),
         ]
 
         if agent_id is not None:
@@ -317,6 +356,7 @@ class GraphRouter:
         db,
         action_names: List[str],
         agent_id: Optional[int],
+        workspace_id: Optional[str],
     ) -> Tuple[dict, dict]:
         """Query tool_routing_affinities, returning (positive_boosts, negative_penalties).
 
@@ -328,6 +368,10 @@ class GraphRouter:
           += weight*confidence.
         * ``fails_for_intent`` -> negative_penalties[action] += weight*confidence,
           recorded as a POSITIVE magnitude (the caller subtracts it).
+
+        PRD-177 S5: filtered to ``workspace_id`` — affinities are per-tenant, so a
+        succeeds/fails-for-intent signal learned in one workspace never boosts or
+        penalizes another's routing.
         """
         from sqlalchemy import and_, or_
         from core.models.tool_routing import ToolRoutingAffinity
@@ -337,6 +381,11 @@ class GraphRouter:
 
         filters = [
             ToolRoutingAffinity.action_name.in_(action_names),
+            # Per-tenant isolation (moat): scope to this workspace exactly.
+            # None reads only the unscoped rows (IS NULL), never a tenant's.
+            ToolRoutingAffinity.workspace_id == workspace_id
+            if workspace_id is not None
+            else ToolRoutingAffinity.workspace_id.is_(None),
         ]
 
         if agent_id is not None:
