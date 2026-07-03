@@ -561,8 +561,7 @@ class UnifiedMemoryService:
         return total
 
     async def erase_subject_memories(self, workspace_id: str, subject_id: str, db: Any = None) -> int:
-        """GDPR subject-level erasure for durable memories.
-
+        """GDPR subject-level erasure for durable memories (see GDPR-GAP below)."""
         # GDPR-GAP: mem0 memories are namespaced by workspace / agent / recipe
         # (MemoryNamespace) and carry no data-subject tag in their metadata, so a
         # single human's durable memories cannot be filtered from a shared

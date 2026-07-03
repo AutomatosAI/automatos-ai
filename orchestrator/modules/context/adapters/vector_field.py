@@ -228,12 +228,11 @@ class VectorFieldSharedContext(SharedContextPort):
         return count
 
     async def erase_subject(self, workspace_id: str, subject_id: str) -> int:
-        """GDPR subject-level erasure for field memory.
-
-        # GDPR-GAP: field-memory points carry ``workspace_id`` / ``mission_id`` /
-        # ``task_id`` / ``agent_id`` provenance (PRD-166 S1 / W8) but **no
-        # data-subject tag** — there is no ``subject_id`` on the payload to
-        # filter a single human's patterns from a shared workspace field. Until a
+        """GDPR subject-level erasure for field memory (see GDPR-GAP note below)."""
+        # GDPR-GAP: field-memory points carry `workspace_id` / `mission_id` /
+        # `task_id` / `agent_id` provenance (PRD-166 S1 / W8) but NO
+        # data-subject tag - there is no `subject_id` on the payload to filter a
+        # single human's patterns from a shared workspace field. Until a
         # data-subject tag is added at write time, subject-level erasure here is
         # not possible without over-deleting the whole workspace. This method
         # returns 0 and the gap is surfaced by the GDPR service so the caller
