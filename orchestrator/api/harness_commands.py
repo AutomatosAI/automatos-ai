@@ -181,11 +181,12 @@ async def handle_harness_command(
         }
 
     if cmd == "approve":
-        return await _approve(svc, executor, workspace_id, task, rx_id, caller_identity)
+        return await _approve(db, svc, executor, workspace_id, task, rx_id, caller_identity)
     return await _reject(db, workspace_id, task, rx_id, caller_identity)
 
 
 async def _approve(
+    db,
     svc,
     executor: Any,
     workspace_id: UUID,
@@ -193,7 +194,19 @@ async def _approve(
     rx_id: str,
     caller_identity: Optional[Dict[str, Any]],
 ) -> Dict[str, Any]:
-    """Apply an approved prescription now and record it in the US-021 ledger."""
+    """Actuate an approved prescription as a GOVERNED ACTIVATION (PRD-179 S3,
+    F048) and record it in the US-021 ledger.
+
+    The actuation is routed through the Wave-4 policy plane's ask verdict
+    (``core.services.approval_policy.evaluate_approval``) — the same verdict every
+    other governed action passes through — rather than a dark direct apply. The
+    admin's explicit /approve is the per-request override the plane already
+    models, but the plane can still deny (fail-safe). Only when the verdict
+    approves does the prescription actuate; the board task is then marked done
+    with the actuation result written to it (status=done, result != null).
+    """
+    from core.services.approval_policy import evaluate_approval
+
     task_id = str(task.get("id"))
     user_id = _caller_user_id(caller_identity)
 
@@ -217,6 +230,24 @@ async def _approve(
             "message": f"Could not resolve the target for {rx_id}; nothing applied",
         }
 
+    # GOVERNED ACTIVATION: route through the policy plane's ask verdict before
+    # actuating. A self-management change makes no LLM spend, so the estimated
+    # cost is $0; the admin approve is the explicit per-request override. The
+    # plane can still refuse (e.g. a locked-down workspace policy), in which case
+    # the prescription does NOT actuate.
+    decision = evaluate_approval(
+        db, workspace_id, 0.0, override_auto_approve=True
+    )
+    if not decision.auto_approve:
+        logger.info(
+            "[HARNESS] Policy plane declined actuation of rx=%s in workspace=%s: %s",
+            rx_id, workspace_id, decision.reason,
+        )
+        return {
+            "success": False,
+            "message": f"Policy plane declined {rx_id}: {decision.reason}",
+        }
+
     current_before = svc._snapshot_current_value(rx)
     apply_result = await svc._auto_apply_prescription(executor, rx)
     if not apply_result.get("success"):
@@ -225,12 +256,13 @@ async def _approve(
             "message": f"Failed to apply {rx_id}: {apply_result.get('error', 'unknown')}",
         }
 
-    # Apply succeeded — only now mark the board task done (so a failed apply
-    # never leaves a task falsely completed). 'done' is a valid action status,
-    # so this also sets completed_at via the handler.
+    # Apply succeeded — mark the board task done WITH the actuation result, so a
+    # completed governed action never leaves a null result (and a failed apply
+    # above never marks the task done). status='done' also sets completed_at.
     await executor.execute(
         "platform_update_task_status", {"task_id": task.get("id"), "status": "done"}
     )
+    _record_board_task_result(db, workspace_id, task.get("id"), apply_result, decision)
 
     entry = {
         "task_id": task_id,
@@ -243,12 +275,13 @@ async def _approve(
         "applied_at": datetime.now(timezone.utc).isoformat(),
         "approved_via": "command",
         "approved_by": user_id,
+        "policy_verdict": decision.reason,
     }
     applied_ids.add(task_id)
     svc._write_applied_tasks(workspace_id, ledger, applied_ids, [entry])
 
     logger.info(
-        "[HARNESS] APPROVED rx=%s (%s for %s) in workspace=%s by user=%s",
+        "[HARNESS] APPROVED rx=%s (%s for %s) in workspace=%s by user=%s via policy plane",
         rx_id, rx.get("change_type"), rx.get("target_name"), workspace_id, user_id,
     )
     return {
@@ -257,6 +290,49 @@ async def _approve(
         "change_type": rx.get("change_type"),
         "target_name": rx.get("target_name"),
     }
+
+
+def _record_board_task_result(
+    db, workspace_id: UUID, raw_task_id: Any, apply_result: Dict[str, Any], decision
+) -> None:
+    """Write the actuation outcome onto the board task's ``result`` column.
+
+    The status action carries no result field, so — as with ``_reject`` — the
+    ORM row is set directly (this is internal server code, not an LLM tool call).
+    Best-effort: a failure here must not undo an already-applied change, so it is
+    logged and swallowed. Keeps the completed governed task from carrying a null
+    result (the F048 acceptance: status=done, result != null).
+    """
+    import json as _json
+
+    from core.models.core import BoardTask
+
+    try:
+        row = (
+            db.query(BoardTask)
+            .filter(
+                BoardTask.id == int(raw_task_id),
+                BoardTask.workspace_id == workspace_id,
+            )
+            .first()
+        )
+    except (TypeError, ValueError):
+        row = None
+    if not row:
+        return
+    try:
+        row.result = _json.dumps({
+            "actuated": True,
+            "policy_verdict": decision.reason,
+            "apply_result": apply_result.get("data", apply_result),
+        })
+        row.completed_at = datetime.now(timezone.utc)
+        db.commit()
+    except Exception:
+        logger.warning(
+            "[HARNESS] Could not persist board-task result for task %s", raw_task_id,
+            exc_info=True,
+        )
 
 
 async def _reject(

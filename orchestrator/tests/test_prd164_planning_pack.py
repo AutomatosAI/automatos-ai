@@ -255,10 +255,12 @@ class TestPlanningModeRegistered:
             assert name in SECTION_REGISTRY, f"section '{name}' not registered"
 
     def test_planning_sections_cover_the_four_sources(self):
-        # RAG-on-goal, mission memory, KG subgraph, roster+performance (S1).
+        # RAG-on-goal, mission memory, KG subgraph, roster+performance (PRD-164
+        # S1) + the workspace field digest (PRD-179 S1, F021 read-half — a
+        # completed mission's promoted distillation reaching the next plan).
         assert MODE_CONFIGS[ContextMode.PLANNING].sections == [
             "planning_knowledge", "planning_history",
-            "business_graph", "agent_roster",
+            "business_graph", "field_memory", "agent_roster",
         ]
 
     def test_planning_budget_exists(self):

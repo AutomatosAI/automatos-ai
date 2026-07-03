@@ -73,14 +73,14 @@ MODE_CONFIGS: dict[ContextMode, ModeConfig] = {
         max_tokens=8000,
     ),
     # personality=False: heartbeat agents execute scheduled tasks autonomously.
-    # NOTE: memory intentionally excluded to keep context lean. No memory
-    # section also means no daily logs. Heartbeat agents are stateless by
-    # design — add "memory" here if agents need cross-run learning.
-    # See PRD-81 Task 3.5 / Task 5.5.
+    # PRD-179 S1 (F021 read-half): the workspace-scoped "field_memory" digest
+    # gives recurring agents the cross-run learning they were previously blind to
+    # (patterns earlier missions accumulated). User-memory / daily logs stay out
+    # to keep the tick lean — this is the durable-field slice, not chat memory.
     ContextMode.HEARTBEAT_AGENT: ModeConfig(
         sections=[
             "identity", "skills", "composio", "plugins",
-            "platform_actions", "task_context", "datetime_context",
+            "platform_actions", "task_context", "field_memory", "datetime_context",
         ],
         tool_loading="full",
         personality=False,
@@ -137,11 +137,14 @@ MODE_CONFIGS: dict[ContextMode, ModeConfig] = {
     # every planner — MissionPlanner, board plan_task, AutoBrain — assembled
     # exclusively by ContextService.build_planning_context (the one assembler).
     # planning_history has priority 2 so recorded failures survive budget
-    # pressure (the learning demo).
+    # pressure (the learning demo). PRD-179 S1 (F021 read-half): "field_memory"
+    # adds the workspace-scoped field digest so a completed mission's promoted
+    # distillation reaches the next mission's plan — the compounding arm PRD-164
+    # left open (documents + KG but never the field).
     ContextMode.PLANNING: ModeConfig(
         sections=[
             "planning_knowledge", "planning_history",
-            "business_graph", "agent_roster",
+            "business_graph", "field_memory", "agent_roster",
         ],
         tool_loading="none",
         personality=False,

@@ -328,6 +328,11 @@ class RAGService:
         if self.config.enable_reranking:
             candidates = await self._rerank_candidates(query, candidates)
 
+        # PRD-179 S4 (F070): rag_feedback shapes ranking on the live path — a
+        # document a user marked unhelpful de-ranks (and can fall out of top-K).
+        if workspace_id:
+            candidates = self._apply_feedback_penalty(candidates, workspace_id)
+
         # Parent-child context expansion (PRD-172 F005: scoped to workspace).
         candidates = await self._expand_to_parent_context(
             candidates, self.config.expansion_window, workspace_id=workspace_id
@@ -401,7 +406,109 @@ class RAGService:
                 db.close()
         except Exception as e:
             logger.debug(f"Document access tracking failed: {e}")
-    
+
+    # ------------------------------------------------------------------
+    # PRD-179 S4 (F070): rag_feedback → live retrieval ranking
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _negative_feedback_doc_ids(workspace_id: str) -> set:
+        """Document ids this workspace marked unhelpful (recent, hot-path read).
+
+        Negative = a ``thumbs_down`` or a ``rating`` at/below
+        ``RAG_FEEDBACK_NEGATIVE_RATING_MAX``, within the lookback window. Returns
+        a set of stringified doc ids. Fail-soft: any error yields an empty set so
+        retrieval ranking is never blocked by the feedback read.
+        """
+        from config import config
+        from core.database.database import SessionLocal
+        from sqlalchemy import text
+
+        db = SessionLocal()
+        try:
+            # UNNEST expands the document_ids INT[] so each flagged doc surfaces
+            # once. Bind params go through CAST(:p AS type), the SQLAlchemy-2.0
+            # form (the raw colon-colon cast does not bind under 2.0).
+            rows = db.execute(
+                text(
+                    """
+                    SELECT DISTINCT UNNEST(document_ids) AS doc_id
+                    FROM rag_feedback
+                    WHERE workspace_id = CAST(:ws AS uuid)
+                      AND document_ids IS NOT NULL
+                      AND (
+                            feedback_type = 'thumbs_down'
+                            OR (rating IS NOT NULL AND rating <= CAST(:rating_max AS int))
+                      )
+                      AND created_at >= NOW() - CAST(:days AS int) * INTERVAL '1 day'
+                    """
+                ),
+                {
+                    "ws": str(workspace_id),
+                    "rating_max": config.RAG_FEEDBACK_NEGATIVE_RATING_MAX,
+                    "days": config.RAG_FEEDBACK_LOOKBACK_DAYS,
+                },
+            ).fetchall()
+            return {str(r.doc_id) for r in rows if r.doc_id is not None}
+        except Exception as e:
+            logger.debug(f"rag_feedback ranking read failed: {e}")
+            return set()
+        finally:
+            db.close()
+
+    def _apply_feedback_penalty(
+        self, candidates: List[Dict[str, Any]], workspace_id: str
+    ) -> List[Dict[str, Any]]:
+        """De-rank candidates whose document was marked unhelpful (F070).
+
+        Multiplies the retrieval score of each penalised candidate by
+        ``RAG_FEEDBACK_PENALTY_FACTOR`` and re-sorts descending, so a doc a user
+        thumbed-down drops in rank (and out of a tight top-K) on the next
+        retrieval. Pure re-ranking on the ranking path — no tool-affinity edges.
+        Immutable: returns a new list of shallow-copied candidates. Fail-soft.
+        """
+        from config import config
+
+        if not candidates:
+            return candidates
+        factor = config.RAG_FEEDBACK_PENALTY_FACTOR
+        if factor >= 1.0:  # feature disabled — leave ranking untouched
+            return candidates
+        try:
+            penalised_ids = self._negative_feedback_doc_ids(workspace_id)
+        except Exception as e:
+            logger.debug(f"feedback penalty skipped (read failed): {e}")
+            return candidates
+        if not penalised_ids:
+            return candidates
+
+        adjusted: List[Dict[str, Any]] = []
+        demoted = 0
+        for c in candidates:
+            doc_id = self._candidate_doc_id(c)
+            if doc_id is not None and doc_id in penalised_ids:
+                new_c = dict(c)
+                # Lower every score key the downstream ranker might sort on.
+                for key in ("score", "similarity", "rerank_score", "rrf_score"):
+                    if isinstance(new_c.get(key), (int, float)):
+                        new_c[key] = new_c[key] * factor
+                new_c["feedback_penalised"] = True
+                adjusted.append(new_c)
+                demoted += 1
+            else:
+                adjusted.append(c)
+
+        if demoted:
+            adjusted.sort(
+                key=lambda x: x.get("score", x.get("similarity", 0.0) or 0.0),
+                reverse=True,
+            )
+            logger.info(
+                "[RAG] Feedback penalty de-ranked %d/%d candidates (ws=%s)",
+                demoted, len(candidates), workspace_id,
+            )
+        return adjusted
+
     @staticmethod
     def _candidate_doc_id(c: Dict) -> Optional[str]:
         """Best-effort document id for a candidate chunk (S3 stores it as external_file_id)."""

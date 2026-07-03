@@ -861,6 +861,11 @@ class Config:
     FIELD_PRUNE_THRESHOLD: float = float(os.getenv("FIELD_PRUNE_THRESHOLD", "0.01"))
     FIELD_COMPACTION_MAX_SCAN: int = int(os.getenv("FIELD_COMPACTION_MAX_SCAN", "10000"))
     SHARED_CONTEXT_BACKEND: str = os.getenv("SHARED_CONTEXT_BACKEND", "vector_field")  # "vector_field" or "redis"
+    # PRD-179 S2 (F049): how many completed missions the synthesis-flywheel ingest
+    # sweep processes per coordinator tick. The sweep now orders newest-first and
+    # excludes already-ingested / previously-failed runs SQL-side, so raising this
+    # drains a backlog faster without ever re-touching a done run.
+    FLYWHEEL_INGEST_BATCH: int = int(os.getenv("FLYWHEEL_INGEST_BATCH", "3"))
 
     # PRD-178 S4 — Field → durable (mem0 L3) promotion, the moat arm.
     # Strong, frequently-recalled field patterns are distilled into durable
@@ -945,7 +950,17 @@ class Config:
             return str(val).lower() == "true" if val else False
         except Exception:
             return os.getenv("RAG_RERANK_ENABLED", "false").lower() == "true"
-    
+
+    # PRD-179 S4 (F070): rag_feedback feeds retrieval ranking. A document that
+    # accrued negative feedback (thumbs_down, or a rating at/below the floor) has
+    # its retrieval score multiplied by this factor on the live hot path — a doc
+    # marked unhelpful de-ranks and can fall out of the top-K. 1.0 disables it.
+    RAG_FEEDBACK_PENALTY_FACTOR: float = float(os.getenv("RAG_FEEDBACK_PENALTY_FACTOR", "0.5"))
+    # A rating at/below this counts as negative (thumbs_down is always negative).
+    RAG_FEEDBACK_NEGATIVE_RATING_MAX: int = int(os.getenv("RAG_FEEDBACK_NEGATIVE_RATING_MAX", "2"))
+    # Only feedback from the last N days shapes ranking (stale opinions decay out).
+    RAG_FEEDBACK_LOOKBACK_DAYS: int = int(os.getenv("RAG_FEEDBACK_LOOKBACK_DAYS", "90"))
+
     # =============================================================================
     # LLM ANALYTICS (PRD-54: Model Tiers & Cost Optimization)
     # =============================================================================
