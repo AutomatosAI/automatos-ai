@@ -54,6 +54,17 @@ def _module_defines(mod_path: Path):
             for t in node.targets:
                 if isinstance(t, ast.Name):
                     names.add(t.id)
+                elif isinstance(t, (ast.Tuple, ast.List)):
+                    names.update(e.id for e in t.elts if isinstance(e, ast.Name))
+        elif isinstance(node, ast.AnnAssign):
+            # annotated module constants, e.g. `VALID_EVENT_TYPES: frozenset = ...`
+            if isinstance(node.target, ast.Name):
+                names.add(node.target.id)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            # a module re-exports the names it imports
+            for alias in node.names:
+                if alias.name != "*":
+                    names.add(alias.asname or alias.name.split(".")[0])
     return names
 
 
@@ -82,6 +93,6 @@ def test_no_legacy_recipe_service_imports():
     offenders = [
         f"{src.relative_to(_ORCH)}:{lineno} -> core.services.{mod}"
         for src, mod, name, lineno in _iter_service_imports()
-        if mod in {"recipe_memory_service", "recipe_learning_service"}
+        if mod in {"recipe_memory_service", "recipe_learning_service", "recipe_quality_service"}
     ]
     assert not offenders, "Legacy recipe_* service imports still present:\n" + "\n".join(offenders)

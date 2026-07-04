@@ -1295,8 +1295,8 @@ async def assess_execution_quality(
 
         learnings = body.get('learnings')
 
-        from core.services.recipe_quality_service import RecipeQualityService
-        service = RecipeQualityService(db=db)
+        from core.services.playbook_quality_service import PlaybookQualityService
+        service = PlaybookQualityService(db=db)
         result = service.assess_quality(execution_id, learnings=learnings)
 
         return result
