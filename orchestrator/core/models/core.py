@@ -1142,6 +1142,11 @@ class Message(Base):
     role = Column(String(20), nullable=False)
     parts = Column(JSONB, nullable=False, default=list, server_default='[]')
     attachments = Column(JSONB, default=list, server_default='[]')
+    # PRD-185 S7: retrieval provenance for the turn that produced this message
+    # ({document_ids, chunk_ids, query}). Read at vote time to write a complete
+    # rag_feedback row. NULL for turns that retrieved nothing. Kept off `parts`
+    # so it never reaches the AI-SDK render contract.
+    retrieval_context = Column(JSONB, nullable=True)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     
     # Relationships

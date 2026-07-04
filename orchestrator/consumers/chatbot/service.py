@@ -375,9 +375,15 @@ class ChatService:
         role: str,
         parts: List[Dict[str, Any]],
         attachments: Optional[List[Dict[str, Any]]] = None,
-        workspace_id: Optional[str] = None
+        workspace_id: Optional[str] = None,
+        retrieval_context: Optional[Dict[str, Any]] = None,
     ) -> Message:
-        """Save a message to the database."""
+        """Save a message to the database.
+
+        ``retrieval_context`` (PRD-185 S7) carries the turn's retrieved
+        ``{document_ids, chunk_ids, query}`` on assistant messages; NULL for
+        turns that retrieved nothing. Read back at vote time to feed rag_feedback.
+        """
         try:
             chat_uuid = uuid.UUID(chat_id)
         except ValueError:
@@ -420,6 +426,7 @@ class ChatService:
             role=role,
             parts=parts,
             attachments=attachments or [],
+            retrieval_context=retrieval_context,
             created_at=datetime.utcnow()
         )
         self.db.add(message)
@@ -450,6 +457,21 @@ class ChatService:
         if limit:
             query = query.limit(limit)
         return query.all()
+
+    def get_message(self, chat_id: str, message_id: str) -> Optional[Message]:
+        """Fetch a single message by (chat_id, message_id). None on bad id/miss.
+
+        PRD-185 S7: the vote path reads the assistant message's
+        ``retrieval_context`` to write a complete rag_feedback row.
+        """
+        try:
+            chat_uuid = uuid.UUID(chat_id)
+            message_uuid = uuid.UUID(message_id)
+        except ValueError:
+            return None
+        return self.db.query(Message).filter(
+            and_(Message.chat_id == chat_uuid, Message.id == message_uuid)
+        ).first()
 
     def vote_message(
         self,
@@ -536,9 +558,49 @@ class StreamingChatService:
         self.workspace_id = workspace_id
         self.widget_mode = widget_mode
 
+        # PRD-185 S7: per-turn retrieval provenance. The instance is constructed
+        # per request (one request == one turn), so these accumulate the turn's
+        # retrieved ids (pinned docs + retrieval-tool results) and are read at the
+        # assistant-message save. Reset defensively at each stream entrypoint.
+        self._turn_document_ids: Set[int] = set()
+        self._turn_chunk_ids: Set[int] = set()
+
         from modules.agents.factory.agent_factory import AgentFactory
         self.agent_factory = AgentFactory(db_session=db)
         logger.info("StreamingChatService initialized with AgentFactory integration")
+
+    def _reset_turn_retrieval(self) -> None:
+        """Clear per-turn retrieval provenance at the start of a turn."""
+        self._turn_document_ids = set()
+        self._turn_chunk_ids = set()
+
+    def _collect_tool_retrieval(self, tool_name: Optional[str], result: Any) -> None:
+        """Accumulate retrieved doc/chunk ids from a retrieval-tool result.
+
+        Best-effort and gated to retrieval tools — never raises into the turn.
+        """
+        try:
+            from modules.rag.retrieval_provenance import (
+                is_retrieval_tool, collect_doc_ids_from_tool_result,
+            )
+            if not is_retrieval_tool(tool_name):
+                return
+            docs, chunks = collect_doc_ids_from_tool_result(result)
+            self._turn_document_ids |= docs
+            self._turn_chunk_ids |= chunks
+        except Exception:
+            logger.debug("[PRD-185 S7] tool retrieval provenance collect failed", exc_info=True)
+
+    def _turn_retrieval_context(self, query: Optional[str]) -> Optional[Dict[str, Any]]:
+        """Build the retrieval_context blob for the assistant message, or None."""
+        try:
+            from modules.rag.retrieval_provenance import build_retrieval_context
+            return build_retrieval_context(
+                self._turn_document_ids, self._turn_chunk_ids, query,
+            )
+        except Exception:
+            logger.debug("[PRD-185 S7] retrieval_context build failed", exc_info=True)
+            return None
 
     # ─────────────────────────────────────────────────────────────────────
     # Internal helpers
@@ -1055,6 +1117,17 @@ class StreamingChatService:
             insert_at = 1 if (llm_messages and llm_messages[0].get("role") == "system") else 0
             llm_messages.insert(insert_at, {"role": "system", "content": content})
             logger.info("[PRD-157 S5] injected pinned-document context for chat %s", chat_id)
+
+            # PRD-185 S7: pinned documents are retrieved context for this turn —
+            # record their ids so a later vote writes complete rag_feedback.
+            try:
+                from modules.rag.pinned_context import list_pinned
+                for row in list_pinned(self.db, chat_id=chat_id, workspace_id=self.workspace_id):
+                    did = row.get("document_id")
+                    if isinstance(did, int):
+                        self._turn_document_ids.add(did)
+            except Exception:
+                logger.debug("[PRD-185 S7] pinned provenance collect failed", exc_info=True)
         except Exception:
             logger.warning("[PRD-157 S5] pinned-document injection failed", exc_info=True)
 
@@ -1351,6 +1424,8 @@ class StreamingChatService:
                     prior_action=_prior_action,
                 ),
             )
+            # PRD-185 S7: capture retrieved doc ids (retrieval tools only).
+            self._collect_tool_retrieval(name, result)
             # Record this call as the prior_action for the NEXT tool in the turn
             # (resolved to the per-action name so composio chains pair correctly).
             _prior_action = resolve_action_name(name, args if isinstance(args, dict) else {})
@@ -1878,6 +1953,9 @@ class StreamingChatService:
         """
         import asyncio
 
+        # PRD-185 S7: start the turn with clean retrieval provenance.
+        self._reset_turn_retrieval()
+
         try:
             # Ensure workspace_id is available
             if not self.workspace_id:
@@ -2160,6 +2238,8 @@ class StreamingChatService:
             self.chat_service.save_message(
                 chat_id=chat_id, role="assistant",
                 parts=assistant_parts, workspace_id=self.workspace_id,
+                # PRD-185 S7: stamp the turn's retrieved doc ids for vote feedback.
+                retrieval_context=self._turn_retrieval_context(latest_text),
             )
 
             # Post-response: memory, metrics, eval
@@ -2190,6 +2270,9 @@ class StreamingChatService:
     ) -> AsyncGenerator[str, None]:
         """Stream chat response using legacy SSE format."""
         from core.llm import create_llm_manager
+
+        # PRD-185 S7: start the turn with clean retrieval provenance.
+        self._reset_turn_retrieval()
 
         # Get tools from SINGLE SOURCE if not provided.
         # PRD-138 US-009: extract latest user turn first so the dispatcher
@@ -2237,6 +2320,8 @@ class StreamingChatService:
                             agent_id=1, workspace_id=self.workspace_id,
                             original_intent=latest_text,
                         )
+                        # PRD-185 S7: capture retrieved doc ids (retrieval tools only).
+                        self._collect_tool_retrieval(tool_name, result)
                         if result['success']:
                             tool_data.update(result['frontend_data'])
 
@@ -2271,6 +2356,8 @@ class StreamingChatService:
                 self.chat_service.save_message(
                     chat_id=chat_id, role='assistant',
                     parts=assistant_parts, workspace_id=self.workspace_id,
+                    # PRD-185 S7: stamp the turn's retrieved doc ids for vote feedback.
+                    retrieval_context=self._turn_retrieval_context(latest_text),
                 )
 
             yield self.streaming_handler.format_sse_done()
@@ -2313,6 +2400,8 @@ class StreamingChatService:
                 agent_id=agent_id, workspace_id=self.workspace_id,
                 original_intent=query,
             )
+            # PRD-185 S7: capture retrieved doc ids (retrieval tools only).
+            self._collect_tool_retrieval(tool_name, result)
 
             if result['success']:
                 tool_data.update(result['frontend_data'])

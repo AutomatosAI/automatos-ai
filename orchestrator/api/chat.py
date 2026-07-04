@@ -670,7 +670,33 @@ async def vote_message(
         request.messageId,
         request.isUpvoted
     )
-    
+
+    # PRD-185 S7: feed the RAG feedback loop. Write a rag_feedback row from the
+    # voted assistant message's retrieved doc ids so the PRD-179 live ranker can
+    # learn from thumbs. Best-effort — never fail the vote — but log loudly if it
+    # breaks (this wave exists because of silent swallows).
+    if success:
+        try:
+            from modules.rag.feedback_writer import feedback_from_retrieval_context
+            message = chat_service.get_message(request.chatId, request.messageId)
+            if message is not None:
+                feedback_from_retrieval_context(
+                    db,
+                    retrieval_context=message.retrieval_context,
+                    is_upvoted=request.isUpvoted,
+                    workspace_id=ctx.workspace_id,
+                    user_id=user_id,
+                )
+        except Exception:
+            # The vote itself is already committed; roll back only the failed
+            # feedback partial so the per-request session isn't left poisoned.
+            db.rollback()
+            logger.warning(
+                "[PRD-185 S7] rag_feedback write from chat vote failed "
+                "(chat=%s message=%s)",
+                request.chatId, request.messageId, exc_info=True,
+            )
+
     return {"success": success}
 
 
