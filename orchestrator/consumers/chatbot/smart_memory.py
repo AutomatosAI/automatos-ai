@@ -213,6 +213,26 @@ class SmartMemoryManager:
 
                 memories = global_memories + agent_memories
 
+                # PRD-185 S11: assembly-side guard — never inject sub-floor or
+                # noise-typed (heartbeat/playbook-summary) memories into the prompt.
+                # The relevance floor is also applied at the L3 search boundary
+                # (mem0_client.filter_by_relevance_floor, PRD-159 S3); re-asserting
+                # it over the MERGED set closes the content-type gap the search
+                # layer lacks, at the one chokepoint that feeds the LLM formatter.
+                from modules.memory.injection_filter import filter_injectable_memories
+                try:
+                    from config import config as _cfg
+                    _floor = float(getattr(_cfg, "MEMORY_RELEVANCE_FLOOR", 0.3))
+                except Exception:
+                    _floor = 0.3
+                _before = len(memories)
+                memories = filter_injectable_memories(memories, floor=_floor)
+                if len(memories) != _before:
+                    logger.info(
+                        "[SmartMemory] Injection guard dropped %d/%d memories (floor+type)",
+                        _before - len(memories), _before,
+                    )
+
                 if memories:
                     for i, mem in enumerate(memories[:3]):
                         tier = mem.get("_tier", "global")

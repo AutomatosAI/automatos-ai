@@ -12,7 +12,7 @@ import json
 import logging
 import asyncio
 from typing import Optional, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.jobstores.memory import MemoryJobStore
@@ -136,6 +136,9 @@ class HeartbeatService:
         self._scheduler: Optional[AsyncIOScheduler] = None
         self._owns_scheduler: bool = False  # True when we created our own scheduler (tests)
         self._running_ticks: Dict[str, bool] = {}  # track concurrent ticks
+        # PRD-185 S11: last emitted memory-primitive status, so the 30s Mem0 probe
+        # writes a heartbeat_results row only on a state CHANGE (not every tick).
+        self._last_mem0_probe_status: Optional[str] = None
         self._max_concurrent_per_workspace = 5
 
     # ------------------------------------------------------------------
@@ -209,6 +212,34 @@ class HeartbeatService:
         except Exception:
             logger.error("[Heartbeat] Failed to schedule Mem0 health probe", exc_info=True)
 
+        # PRD-185 S2: per-lane telemetry canary. Alarms when organic tool-execution
+        # rows stop landing (the 2-month type-poison outage S1 repaired had no such
+        # signal). Registered here beside the Mem0 probe; the first run fires at boot
+        # as the boot-probe, then every TELEMETRY_CANARY_INTERVAL_SECONDS.
+        try:
+            from config import config as _cfg
+
+            if _cfg.TELEMETRY_CANARY_ENABLED:
+                from apscheduler.triggers.interval import IntervalTrigger
+                from services.telemetry_canary import telemetry_canary_tick
+
+                canary_interval = int(_cfg.TELEMETRY_CANARY_INTERVAL_SECONDS)
+                self._scheduler.add_job(
+                    telemetry_canary_tick,
+                    IntervalTrigger(seconds=canary_interval),
+                    id="telemetry_canary",
+                    replace_existing=True,
+                    max_instances=1,
+                    coalesce=True,
+                    next_run_time=datetime.now(timezone.utc),  # boot-probe: run once now
+                )
+                logger.info(
+                    "[Heartbeat] Telemetry canary scheduled every %ds (boot-probe now)",
+                    canary_interval,
+                )
+        except Exception:
+            logger.error("[Heartbeat] Failed to schedule telemetry canary", exc_info=True)
+
         logger.info("[Heartbeat] Service started (daily summary at 01:00 UTC)")
 
     async def stop(self):
@@ -244,6 +275,14 @@ class HeartbeatService:
         if self._scheduler is None:
             return
         primitive_status = "green" if healthy else "down"
+        # PRD-185 S11: emit the memory primitive finding ONLY on a state change.
+        # This 30s probe previously wrote one heartbeat_results row per workspace
+        # EVERY tick (~2880/ws/day) — pure noise that polluted the table and the
+        # primitive-health read. The tile is latest-wins with no freshness gate
+        # (api/analytics_real.get_primitive_health), so one row per transition
+        # keeps it correct while ending the spam. First tick emits the baseline.
+        if primitive_status == self._last_mem0_probe_status:
+            return
         detail = "mem0 probe ok" if healthy else "mem0 probe failed; breakers tripped"
         try:
             for job in self._scheduler.get_jobs():
@@ -252,6 +291,7 @@ class HeartbeatService:
                     continue
                 ws_id = jid[len("orch_hb_"):]
                 emit_primitive_finding(ws_id, "memory", primitive_status, detail)
+            self._last_mem0_probe_status = primitive_status
         except Exception:
             logger.error(
                 "[Heartbeat] memory primitive emit loop errored", exc_info=True
@@ -1027,66 +1067,17 @@ class HeartbeatService:
                     error_count = sum(1 for r in ws_rows if r.status == "error")
                     total_tokens = sum(r.tokens_used or 0 for r in ws_rows)
 
-                    summary_text = (
-                        f"Heartbeat Daily Summary ({cutoff.strftime('%Y-%m-%d')} to {datetime.utcnow().strftime('%Y-%m-%d')}):\n"
-                        f"- Total ticks: {len(ws_rows)}\n"
-                        f"- Successful: {success_count}\n"
-                        f"- Errors: {error_count}\n"
-                        f"- Tokens used: {total_tokens}\n"
+                    # PRD-185 S11: the daily digest is an OPERATIONAL LOG, not a
+                    # memory. It used to be double-written into the memory plane —
+                    # once as a fabricated user/assistant L3 turn (a fake summary
+                    # "request" + digest reply) that then got injected into real
+                    # client prompts, and once as an L2 heartbeat_log row. Both are
+                    # removed: the raw ticks are the source of truth in
+                    # heartbeat_results; the digest is logged here, never injected.
+                    logger.info(
+                        "[Heartbeat] Daily summary ws=%s: %d ticks, %d ok, %d errors, %d tokens",
+                        ws_id, len(ws_rows), success_count, error_count, total_tokens,
                     )
-
-                    # Add notable findings
-                    notable = []
-                    for r in ws_rows:
-                        findings = r.findings if isinstance(r.findings, list) else json.loads(r.findings or "[]")
-                        for f in findings:
-                            if f.get("check") in ("error", "llm_error"):
-                                notable.append(f"[{r.source_type}/{r.source_id}] {f.get('detail', '')[:120]}")
-                    if notable:
-                        summary_text += "\nNotable issues:\n" + "\n".join(f"- {n}" for n in notable[:10])
-
-                    # Store in SmartMemoryManager as long-term memory
-                    try:
-                        from consumers.chatbot.smart_memory import get_smart_memory_manager
-
-                        mem_mgr = get_smart_memory_manager()
-                        await mem_mgr.store_conversation(
-                            workspace_id=ws_id,
-                            agent_id=None,
-                            user_message="Daily heartbeat summary request",
-                            assistant_response=summary_text,
-                            chat_id=None,
-                        )
-                        logger.info("[Heartbeat] Stored daily summary for ws=%s (%d ticks)", ws_id, len(ws_rows))
-                    except Exception as mem_err:
-                        logger.warning("[Heartbeat] Failed to store summary in memory for ws=%s: %s", ws_id, mem_err)
-
-                    # L2: Store heartbeat summary in short-term memory (fire-and-forget)
-                    try:
-                        from modules.memory.unified_memory_service import get_unified_memory_service
-
-                        unified = get_unified_memory_service()
-                        asyncio.create_task(
-                            unified.store_short_term(
-                                workspace_id=ws_id,
-                                content=summary_text[:1500],
-                                content_type="heartbeat_log",
-                                importance=0.4,
-                                metadata={
-                                    "type": "heartbeat_daily_summary",
-                                    "date": cutoff.strftime("%Y-%m-%d"),
-                                    "tick_count": len(ws_rows),
-                                    "success_count": success_count,
-                                    "error_count": error_count,
-                                },
-                            )
-                        )
-                    except Exception:
-                        logger.debug(
-                            "[Heartbeat] L2 store_short_term failed for ws=%s",
-                            ws_id,
-                            exc_info=True,
-                        )
 
             finally:
                 db.close()
