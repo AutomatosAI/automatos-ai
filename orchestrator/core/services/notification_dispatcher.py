@@ -53,6 +53,7 @@ VALID_EVENT_TYPES: frozenset[str] = frozenset(
         "mission_complete",
         "playbook_step_complete",
         "playbook_complete",
+        "playbook_failed",
         "trigger_fired",
         "report_submitted",
         "agent_error",

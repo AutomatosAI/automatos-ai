@@ -1963,6 +1963,23 @@ async def _fail_execution(
             except Exception:
                 db.rollback()
 
+            # PRD-185 S4: dispatch a playbook_failed notification so a human sees
+            # the failure — mirrors playbook_complete on the success path. Its
+            # absence made a ~17-day OpenRouter 402 outage silent (board closed
+            # 'done', no event, nobody notified).
+            try:
+                await _dispatch_playbook_event(
+                    db=db,
+                    workspace_id=execution.workspace_id,
+                    recipe_execution_id=execution_id,
+                    event_type="playbook_failed",
+                    title="Playbook failed",
+                    message=(error_message[:200] if error_message else "Playbook execution failed"),
+                    status="error",
+                )
+            except Exception:
+                logger.warning("[recipe_direct] playbook_failed dispatch failed for %s", execution_id)
+
             logger.info(f"[recipe_direct] Execution {execution_id} marked FAILED: {error_message}")
             # Update agent performance_metrics for failure
             _update_agent_performance_metrics(db, step_results or [], success=False)
