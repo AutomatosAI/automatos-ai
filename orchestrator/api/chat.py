@@ -79,8 +79,19 @@ class VoteRequest(BaseModel):
 
 
 # Helper function to get user ID from database
-def get_user_id(db: Session) -> int:
-    """Get default user ID (id=1) for MVP"""
+def get_user_id(db: Session, ctx=None) -> int:
+    """Resolve the authenticated user id (PRD-185 S6).
+
+    Prefer the real principal from the request context; fall back to a default
+    user only for genuinely principal-less (system/anonymous) paths — never
+    hardcode id=1 for a logged-in caller. The old id=1 default mis-attributed
+    every chat, message save, vote-ownership check, and mid-chat mission approval
+    (_driving_clerk derives from this) to user 1.
+    """
+    if ctx is not None and getattr(ctx, "user", None) is not None:
+        uid = getattr(ctx.user, "id", None)
+        if uid is not None:
+            return uid
     result = db.execute(text("SELECT id FROM users WHERE id = 1 LIMIT 1")).fetchone()
     if not result:
         result = db.execute(text("SELECT id FROM users LIMIT 1")).fetchone()
@@ -145,7 +156,7 @@ async def stream_chat(
     # _workspace_has_admin_owner() which checks if the workspace has an
     # admin/owner member.  Admin workspace → all tools; user workspace → restricted.
     streaming_service = StreamingChatService(db, workspace_id=ctx.workspace_id)
-    user_id = get_user_id(db)
+    user_id = get_user_id(db, ctx)
 
     def get_parts(msg: ChatMessageRequest) -> List[MessagePart]:
         if msg.parts:
@@ -463,7 +474,7 @@ async def get_chat_history(
 ):
     """Get chat history for the current user within their workspace"""
     chat_service = ChatService(db)
-    user_id = get_user_id(db)
+    user_id = get_user_id(db, ctx)
 
     chats = chat_service.get_chat_history(user_id=user_id, limit=limit, workspace_id=ctx.workspace_id)
     
@@ -489,7 +500,7 @@ async def get_chat(
 ):
     """Get a specific chat (workspace-scoped)"""
     chat_service = ChatService(db)
-    user_id = get_user_id(db)
+    user_id = get_user_id(db, ctx)
 
     chat = chat_service.get_chat(chat_id, workspace_id=ctx.workspace_id)
     if not chat:
@@ -517,7 +528,7 @@ async def get_chat_messages(
 ):
     """Get all messages for a chat (workspace-scoped)"""
     chat_service = ChatService(db)
-    user_id = get_user_id(db)
+    user_id = get_user_id(db, ctx)
 
     # Verify chat access within workspace
     chat = chat_service.get_chat(chat_id, workspace_id=ctx.workspace_id)
@@ -552,7 +563,7 @@ async def search_chat_history(
     """Search across chat messages by keyword (workspace-scoped)."""
     from datetime import datetime, timedelta
 
-    user_id = get_user_id(db)
+    user_id = get_user_id(db, ctx)
     since = datetime.utcnow() - timedelta(days=min(days, 365))
     search_term = f"%{q}%"
 
@@ -602,7 +613,7 @@ async def delete_chat(
 ):
     """Delete a chat (workspace-scoped)"""
     chat_service = ChatService(db)
-    user_id = get_user_id(db)
+    user_id = get_user_id(db, ctx)
 
     chat = chat_service.get_chat(chat_id, workspace_id=ctx.workspace_id)
     if not chat:
@@ -624,7 +635,7 @@ async def update_chat(
 ):
     """Update chat title (workspace-scoped)"""
     chat_service = ChatService(db)
-    user_id = get_user_id(db)
+    user_id = get_user_id(db, ctx)
 
     chat = chat_service.get_chat(chat_id, workspace_id=ctx.workspace_id)
     if not chat:
@@ -645,7 +656,7 @@ async def vote_message(
 ):
     """Vote on a message (workspace-scoped)"""
     chat_service = ChatService(db)
-    user_id = get_user_id(db)
+    user_id = get_user_id(db, ctx)
 
     chat = chat_service.get_chat(request.chatId, workspace_id=ctx.workspace_id)
     if not chat:
@@ -712,7 +723,7 @@ async def switch_agent(
     import json
     
     chat_service = ChatService(db)
-    user_id = get_user_id(db)
+    user_id = get_user_id(db, ctx)
     
     chat = chat_service.get_chat(chat_id, workspace_id=ctx.workspace_id)
     if not chat:
