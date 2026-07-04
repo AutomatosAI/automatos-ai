@@ -644,6 +644,21 @@ class Config:
     # today's per-router gates (nothing new enters the path). Flag ON ⇒ the plane.
     POLICY_PLANE_ENABLED: bool = os.getenv("AUTOMATOS_POLICY_PLANE", "false").lower() in ("true", "1", "yes")
 
+    # PRD-185 S2 — per-lane telemetry canary. The type-poison outage S1 repaired
+    # went unseen for ~2 months because nothing alarmed on "organic tool-execution
+    # rows/day = 0". This canary counts production (telemetry_source='production')
+    # ToolExecutionLog rows per lane (app_name) over a window and logs LOUD when a
+    # lane — or the platform — has gone silent. Default ON (it only reads + logs).
+    TELEMETRY_CANARY_ENABLED: bool = os.getenv("TELEMETRY_CANARY_ENABLED", "true").lower() == "true"
+    # How often the scheduled check runs (default hourly). Its first run fires at
+    # boot as the boot-probe.
+    TELEMETRY_CANARY_INTERVAL_SECONDS: int = int(os.getenv("TELEMETRY_CANARY_INTERVAL_SECONDS", "3600"))
+    # Look-back window for "have any organic rows landed?" (default 24h).
+    TELEMETRY_CANARY_WINDOW_SECONDS: int = int(os.getenv("TELEMETRY_CANARY_WINDOW_SECONDS", "86400"))
+    # Platform-wide organic-row count at/under which the canary alarms (default 0
+    # → alarm only on a totally silent platform; raise to catch partial silence).
+    TELEMETRY_CANARY_MIN_ROWS: int = int(os.getenv("TELEMETRY_CANARY_MIN_ROWS", "0"))
+
     # =============================================================================
     # PRD-181 W11 — Governance & Compliance staging
     # =============================================================================
