@@ -979,6 +979,13 @@ class RAGService:
             return candidates
 
         except Exception as e:
+            from core.llm.clients.base import EmbeddingUnavailableError
+            if isinstance(e, EmbeddingUnavailableError):
+                # PRD-185 S3: typed EMPTY (honest "no grounding"), NOT an error
+                # result — loud so a lapsed/absent embedding key is visible, never
+                # silent noise from random-vector retrieval.
+                logger.warning(f"Retrieval returned EMPTY — embeddings unavailable: {e}")
+                return []
             logger.error(f"Error getting candidates from S3 Vectors: {e}", exc_info=True)
             return []
     
