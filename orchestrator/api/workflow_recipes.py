@@ -1228,8 +1228,8 @@ async def analyze_execution_learning(
                 detail=f"Execution '{execution_id}' not found for recipe '{recipe_id}'"
             )
 
-        from core.services.recipe_learning_service import RecipeLearningService
-        service = RecipeLearningService(db=db)
+        from core.services.playbook_learning_service import PlaybookLearningService
+        service = PlaybookLearningService(db=db)
         result = service.analyze_execution(execution_id)
 
         return result

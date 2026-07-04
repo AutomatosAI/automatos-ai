@@ -1115,8 +1115,8 @@ async def _execute_recipe_inner(
         # --- Pre-execution: load Mem0 memories ---
         recipe_memories = None
         try:
-            from core.services.recipe_memory_service import RecipeMemoryService
-            memory_svc = RecipeMemoryService(db=db)
+            from core.services.playbook_memory_service import PlaybookMemoryService
+            memory_svc = PlaybookMemoryService(db=db)
             recipe_memories = await memory_svc.retrieve_relevant_memories(
                 recipe_id=recipe.id,
                 context={"workspace_id": str(workspace_id), "input_data": input_data}
@@ -1739,8 +1739,8 @@ async def _execute_recipe_inner(
         learning_result = None
         if post_exec_config.get('auto_learning') or post_exec_config.get('auto_learn', False):
             try:
-                from core.services.recipe_learning_service import RecipeLearningService
-                learning_svc = RecipeLearningService(db=db)
+                from core.services.playbook_learning_service import PlaybookLearningService
+                learning_svc = PlaybookLearningService(db=db)
                 learning_result = learning_svc.analyze_execution(recipe_execution_id)
                 logger.info(f"[recipe_direct] Auto-learning completed for {recipe_execution_id}")
             except Exception as e:
