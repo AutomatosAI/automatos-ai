@@ -1,5 +1,5 @@
 {
-  "route_count": 766,
+  "route_count": 769,
   "routes": [
     {
       "method": "GET",
@@ -299,6 +299,10 @@
     },
     {
       "method": "GET",
+      "path": "/api/analytics/activation/workspace"
+    },
+    {
+      "method": "GET",
       "path": "/api/analytics/agents"
     },
     {
@@ -380,6 +384,10 @@
     {
       "method": "GET",
       "path": "/api/analytics/dashboard/task-completion-time"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/deliverable-freshness"
     },
     {
       "method": "GET",
@@ -468,6 +476,10 @@
     {
       "method": "GET",
       "path": "/api/analytics/selection-health"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/slos"
     },
     {
       "method": "GET",
