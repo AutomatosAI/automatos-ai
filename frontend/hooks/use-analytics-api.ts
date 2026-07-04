@@ -6,6 +6,9 @@ import type {
   ErrorsBySubsystemMetric,
   WidgetEngagementMetric,
   PrimitiveHealthMetric,
+  SlosMetric,
+  WorkspaceActivationMetric,
+  DeliverableFreshnessMetric,
 } from '@/lib/api-client'
 
 export const analyticsQueryKeys = {
@@ -93,6 +96,28 @@ export function usePrimitiveHealth() {
   return useQuery<PrimitiveHealthMetric>({
     queryKey: ['analytics', 'primitive-health'],
     queryFn: () => apiClient.getPrimitiveHealth()
+  })
+}
+
+// PRD-185 S12 — own-workspace cockpit tiles (workspace-admin reachable)
+export function useSLOs(window: string = '24h') {
+  return useQuery<SlosMetric>({
+    queryKey: ['analytics', 'slos', window],
+    queryFn: () => apiClient.getSLOs(window)
+  })
+}
+
+export function useWorkspaceActivation() {
+  return useQuery<WorkspaceActivationMetric>({
+    queryKey: ['analytics', 'workspace-activation'],
+    queryFn: () => apiClient.getWorkspaceActivation()
+  })
+}
+
+export function useDeliverableFreshness() {
+  return useQuery<DeliverableFreshnessMetric>({
+    queryKey: ['analytics', 'deliverable-freshness'],
+    queryFn: () => apiClient.getDeliverableFreshness()
   })
 }
 

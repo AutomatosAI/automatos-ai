@@ -86,6 +86,7 @@ def _make_client(
     from fastapi.testclient import TestClient
 
     from api.analytics_real import router as analytics_router
+    from api.analytics_real import ws_router as analytics_ws_router  # PRD-185 S12: widget-engagement moved here
     from core.auth.dependencies import RequestContext, UserContext
     from core.auth.hybrid import get_request_context_hybrid
     from core.database.database import get_db
@@ -127,6 +128,7 @@ def _make_client(
 
     app = FastAPI()
     app.include_router(analytics_router)
+    app.include_router(analytics_ws_router)  # PRD-185 S12: /widget-engagement now on the workspace-admin router
 
     def _override_ctx():
         return RequestContext(

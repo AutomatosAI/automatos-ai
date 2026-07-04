@@ -73,6 +73,38 @@ export interface PrimitiveHealthMetric {
   generated_at: string
 }
 
+// PRD-185 S12 — own-workspace cockpit tiles (workspace-admin reachable).
+export interface SloItem {
+  sli: string
+  description: string
+  value: number | null
+  unit: string
+  target: number
+  target_comparator: string
+  window_seconds: number
+  sample_size: number
+  meets_target: boolean | null
+}
+
+export interface SlosMetric {
+  generated_at: string
+  window_seconds: number
+  slos: SloItem[]
+}
+
+export interface WorkspaceActivationMetric {
+  activated: boolean
+  completed_missions: number
+  generated_at: string
+}
+
+export interface DeliverableFreshnessMetric {
+  last_produced_at: string | null
+  age_seconds: number | null
+  total: number
+  generated_at: string
+}
+
 // ─── Admin workspace override ────────────────────────────────────────
 // Module-level override that takes priority over localStorage.
 // Set by AdminWorkspaceSwitcher; reset on unmount.
@@ -1550,6 +1582,19 @@ class ApiClient {
 
   async getPrimitiveHealth(): Promise<PrimitiveHealthMetric> {
     return this.request<PrimitiveHealthMetric>('/api/analytics/primitive-health')
+  }
+
+  // ===== PRD-185 S12 own-workspace cockpit tiles =====
+  async getSLOs(window: string = '24h'): Promise<SlosMetric> {
+    return this.request<SlosMetric>(`/api/analytics/slos?window=${encodeURIComponent(window)}`)
+  }
+
+  async getWorkspaceActivation(): Promise<WorkspaceActivationMetric> {
+    return this.request<WorkspaceActivationMetric>('/api/analytics/activation/workspace')
+  }
+
+  async getDeliverableFreshness(): Promise<DeliverableFreshnessMetric> {
+    return this.request<DeliverableFreshnessMetric>('/api/analytics/deliverable-freshness')
   }
 
   async getAgentAnalytics(timeRange: string) {
