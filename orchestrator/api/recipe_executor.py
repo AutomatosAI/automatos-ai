@@ -1115,8 +1115,8 @@ async def _execute_recipe_inner(
         # --- Pre-execution: load Mem0 memories ---
         recipe_memories = None
         try:
-            from core.services.recipe_memory_service import RecipeMemoryService
-            memory_svc = RecipeMemoryService(db=db)
+            from core.services.playbook_memory_service import PlaybookMemoryService
+            memory_svc = PlaybookMemoryService(db=db)
             recipe_memories = await memory_svc.retrieve_relevant_memories(
                 recipe_id=recipe.id,
                 context={"workspace_id": str(workspace_id), "input_data": input_data}
@@ -1739,8 +1739,8 @@ async def _execute_recipe_inner(
         learning_result = None
         if post_exec_config.get('auto_learning') or post_exec_config.get('auto_learn', False):
             try:
-                from core.services.recipe_learning_service import RecipeLearningService
-                learning_svc = RecipeLearningService(db=db)
+                from core.services.playbook_learning_service import PlaybookLearningService
+                learning_svc = PlaybookLearningService(db=db)
                 learning_result = learning_svc.analyze_execution(recipe_execution_id)
                 logger.info(f"[recipe_direct] Auto-learning completed for {recipe_execution_id}")
             except Exception as e:
@@ -1962,6 +1962,23 @@ async def _fail_execution(
                 _complete_board(db, execution_id, success=False, error_message=error_message)
             except Exception:
                 db.rollback()
+
+            # PRD-185 S4: dispatch a playbook_failed notification so a human sees
+            # the failure — mirrors playbook_complete on the success path. Its
+            # absence made a ~17-day OpenRouter 402 outage silent (board closed
+            # 'done', no event, nobody notified).
+            try:
+                await _dispatch_playbook_event(
+                    db=db,
+                    workspace_id=execution.workspace_id,
+                    recipe_execution_id=execution_id,
+                    event_type="playbook_failed",
+                    title="Playbook failed",
+                    message=(error_message[:200] if error_message else "Playbook execution failed"),
+                    status="error",
+                )
+            except Exception:
+                logger.warning("[recipe_direct] playbook_failed dispatch failed for %s", execution_id)
 
             logger.info(f"[recipe_direct] Execution {execution_id} marked FAILED: {error_message}")
             # Update agent performance_metrics for failure

@@ -44,6 +44,48 @@ def resolve_action_name(tool_name: str, parameters: Dict[str, Any]) -> str:
     return str(raw_action).upper().strip()
 
 
+# clerk_user_id (str) -> users.id (int). Stable mapping; cached to keep the
+# telemetry write off a per-call User lookup on the hot path.
+_CLERK_ID_CACHE: Dict[str, int] = {}
+_CLERK_ID_CACHE_MAX = 5000
+
+
+def _coerce_user_id(db: Session, raw: Any) -> Optional[int]:
+    """Coerce a caller_context ``user_id`` into the integer ``users.id`` the column expects.
+
+    The chat lane threads a Clerk *string* principal (``driving_clerk``) while
+    ``ToolExecutionLog.user_id`` is an ``Integer`` column — binding the raw string
+    makes every logged-in tool call's INSERT fail, which is exactly why the table
+    carried 0 organic rows across 21 workspaces and the whole learning plane
+    starved. Pass ints through; resolve a Clerk id to ``users.id`` (cached); return
+    ``None`` when unresolvable so the row STILL lands (a null-user row beats no row).
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, int):
+        return raw
+    s = str(raw).strip()
+    if not s:
+        return None
+    if s.isdigit():
+        return int(s)
+    cached = _CLERK_ID_CACHE.get(s)
+    if cached is not None:
+        return cached
+    try:
+        from core.models.core import User
+
+        row = db.query(User.id).filter(User.clerk_user_id == s).first()
+    except Exception:
+        return None
+    if not row:
+        return None
+    uid = row[0]
+    if len(_CLERK_ID_CACHE) < _CLERK_ID_CACHE_MAX:
+        _CLERK_ID_CACHE[s] = uid
+    return uid
+
+
 async def write_telemetry(
     db: Session,
     *,
@@ -88,7 +130,7 @@ async def write_telemetry(
             app_name=app_name[:100],
             action_name=action_name[:255],
             workspace_id=workspace_id,
-            user_id=ctx.get("user_id"),
+            user_id=_coerce_user_id(db, ctx.get("user_id")),
             input_parameters={"keys": list(parameters.keys())} if isinstance(parameters, dict) else {},
             user_query=ctx.get("user_query"),
             status=status,
@@ -105,7 +147,9 @@ async def write_telemetry(
         db.add(log_entry)
         db.commit()
     except Exception as exc:
-        logger.debug(f"[telemetry] Failed to write tool execution log: {exc}")
+        # Loud on purpose (PRD-185 S1): a DEBUG swallow here hid a 2-month,
+        # 0-organic-rows telemetry outage. Failures must be visible.
+        logger.warning(f"[telemetry] Failed to write tool execution log: {exc}")
         try:
             db.rollback()
         except Exception:

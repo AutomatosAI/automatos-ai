@@ -109,9 +109,10 @@ def complete_recipe_board_task(
     if not task:
         return
 
-    # Always mark done — failed playbooks log the error, individual bug tickets
-    # are the actionable output (not the playbook wrapper task itself).
-    task.status = 'done'
+    # PRD-185 S4: honor the success flag — a failed playbook must show 'failed',
+    # not silently close 'done' (that hid a ~17-day OpenRouter 402 outage where
+    # the board reported green while every run failed).
+    task.status = 'done' if success else 'failed'
     task.completed_at = datetime.now(timezone.utc)
 
     if result:
