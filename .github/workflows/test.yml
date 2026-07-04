@@ -258,6 +258,55 @@ jobs:
         run: |
           python -m evals.operating_graph_uplift --json
 
+  # PRD-185 S10 — the first memory quality number: recall@5 / MRR + a
+  # with-vs-without task-lift of the memory retriever over a labelled workspace
+  # gold-set. NON-REQUIRED, same posture as the uplift eval above — the number is
+  # the deliverable, a sub-threshold recall is an honest outcome, not a CI
+  # failure. The real gate is this harness run against a LIVE workspace snapshot
+  # with the production retriever injected (--corpus + retriever_factory).
+  memory-recall-eval:
+    name: Memory-recall eval (non-required)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      # Dummy values keep any import-time config resolution from failing; the
+      # eval itself reads only the jsonl fixtures and stdlib.
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: test_db
+      ENVIRONMENT: development
+
+    defaults:
+      run:
+        working-directory: orchestrator
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run the memory-recall harness self-tests
+        run: |
+          python -m pip install --upgrade pip pytest
+          pytest tests/test_p2w0_memory_recall.py -q -p no:cacheprovider
+
+      # A sub-threshold recall is a BUSINESS signal, not a CI failure — the
+      # number is the deliverable. The harness already exits 0 on a low recall
+      # (evals/memory_recall.main returns 0 always); continue-on-error is
+      # belt-and-braces so this informational emit can never redden the job.
+      # The self-tests step above stays the real gate.
+      - name: Emit the per-tenant memory-recall number (informational)
+        continue-on-error: true
+        run: |
+          python -m evals.memory_recall --json
+
   # PRD-176 F010 — the reliability bar: Alembic replays from zero to exactly
   # ONE head. NON-REQUIRED (same posture as the test net) until the Step-2
   # single-baseline squash lands.

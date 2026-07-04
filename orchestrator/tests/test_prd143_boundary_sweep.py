@@ -521,10 +521,26 @@ def _fill_path_params(path: str) -> str:
 
 
 def _module_routers(module_name: str) -> List[Tuple[str, APIRouter]]:
+    """Every super-admin-locked APIRouter in the module.
+
+    PRD-185 S12 added a sibling ``require_workspace_admin`` router in
+    ``analytics_real`` for own-workspace health tiles — a deliberately narrower
+    tier, gated and swept separately (``test_p2w0_cockpit_reach``). It is excluded
+    here. An accidentally *ungated* router (neither gate) still surfaces and trips
+    the structural ``require_super_admin`` assertion below, so the guard keeps its
+    teeth against a new endpoint added without any lock.
+    """
+    from core.auth.workspace_admin import require_workspace_admin
+
     module = importlib.import_module(f"api.{module_name}")
-    routers = [
-        (attr, obj) for attr, obj in vars(module).items() if isinstance(obj, APIRouter)
-    ]
+    routers = []
+    for attr, obj in vars(module).items():
+        if not isinstance(obj, APIRouter):
+            continue
+        dep_fns = [getattr(d, "dependency", None) for d in (obj.dependencies or [])]
+        if require_workspace_admin in dep_fns:
+            continue  # S12 own-workspace tier — not part of the super-admin sweep
+        routers.append((attr, obj))
     assert routers, f"no APIRouter found in api.{module_name} — manifest stale?"
     return routers
 

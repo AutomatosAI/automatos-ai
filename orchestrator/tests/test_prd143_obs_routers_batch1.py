@@ -50,7 +50,7 @@ ROUTERS = [
     pytest.param("api.heartbeat", "/api/heartbeat/status", id="heartbeat"),
     pytest.param("api.analytics", "/analytics/dashboard/summary", id="analytics"),
     pytest.param("api.analytics_api", "/api/analytics/dashboard/overview", id="analytics_api"),
-    pytest.param("api.analytics_real", "/api/analytics/errors/by-subsystem", id="analytics_real"),
+    pytest.param("api.analytics_real", "/api/analytics/selection-health", id="analytics_real"),
     pytest.param("api.analytics_charts", "/api/analytics/charts/presets", id="analytics_charts"),
 ]
 

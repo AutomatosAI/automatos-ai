@@ -10,15 +10,24 @@
  * signal. PRIMITIVES reads the W3-S2 /primitive-health endpoint (8 canonical
  * primitives); a primitive with no heartbeat finding renders as "awaiting
  * checks" rather than a fake green.
+ *
+ * PRD-185 S12: the whole strip is now reachable by a workspace admin (not just
+ * the super-admin) via the own-workspace analytics tier. ACTIVATION is
+ * workspace-scoped ("has THIS workspace reached first value?"), and two tiles
+ * were added — SLOs (the 3 tracked PRD-180 objectives) and DELIVERABLES
+ * (freshness of the last output, the signal that would have caught the 06-16
+ * silent stop on day one).
  */
 
 import type { SparklineTone } from './sparkline'
 import {
-  useActivationMetrics,
+  useWorkspaceActivation,
   useMissionSuccessRate,
   useErrorsBySubsystem,
   useWidgetEngagement,
   usePrimitiveHealth,
+  useSLOs,
+  useDeliverableFreshness,
 } from '@/hooks/use-analytics-api'
 
 interface Cell {
@@ -29,13 +38,12 @@ interface Cell {
 }
 
 export function IsItWorkingStrip() {
-  const { data: activation } = useActivationMetrics()
+  const { data: activation } = useWorkspaceActivation()
   const { data: mission } = useMissionSuccessRate()
   const { data: errors } = useErrorsBySubsystem('24h')
   const { data: widget } = useWidgetEngagement('7d')
-
-  const totalWs = activation?.total_workspaces ?? 0
-  const activationPct = totalWs > 0 ? Math.round((activation?.rate ?? 0) * 100) : 0
+  const { data: slos } = useSLOs('24h')
+  const { data: fresh } = useDeliverableFreshness()
 
   const missionTotal = mission?.total_executions ?? 0
   const missionPct = missionTotal > 0 ? Math.round(mission?.value ?? 0) : 0
@@ -56,12 +64,32 @@ export function IsItWorkingStrip() {
   const primDegraded = prim.filter((p) => p.status === 'degraded').length
   const primDown = prim.filter((p) => p.status === 'down').length
 
+  // SLOs (PRD-180) — met vs breached over the window; null meets_target = no data.
+  const sloList = slos?.slos ?? []
+  const sloTotal = sloList.length
+  const sloMeasured = sloList.filter((s) => s.meets_target !== null).length
+  const sloMet = sloList.filter((s) => s.meets_target === true).length
+  const sloBreached = sloList.filter((s) => s.meets_target === false)
+
+  // Deliverable freshness — the "is Auto still producing?" signal (S12).
+  const freshTotal = fresh?.total ?? 0
+  const freshAge = fresh?.age_seconds ?? null
+  const freshHours = freshAge != null ? Math.floor(freshAge / 3600) : null
+  const freshLabel =
+    freshHours == null
+      ? '—'
+      : freshHours < 1
+        ? '<1h'
+        : freshHours < 48
+          ? `${freshHours}h`
+          : `${Math.floor(freshHours / 24)}d`
+
   const cells: Cell[] = [
     {
       label: 'ACTIVATION',
-      value: totalWs > 0 ? `${activationPct}%` : '—',
-      tone: totalWs > 0 ? 'ok' : 'muted',
-      delta: totalWs > 0 ? `${activation?.activated ?? 0}/${totalWs} workspaces` : 'no workspaces',
+      value: activation && activation.completed_missions > 0 ? String(activation.completed_missions) : '—',
+      tone: activation?.activated ? 'ok' : 'muted',
+      delta: activation?.activated ? 'reached first value' : 'awaiting first value',
     },
     {
       label: 'MISSIONS',
@@ -76,6 +104,23 @@ export function IsItWorkingStrip() {
       value: String(errorTotal),
       tone: errorTotal > 0 ? 'err' : 'ok',
       delta: errorTotal > 0 && worst ? `${worst.subsystem} (${worst.count}) · 24h` : 'none · 24h',
+    },
+    {
+      label: 'SLOs',
+      value: sloMeasured > 0 ? `${sloMet}/${sloTotal}` : '—',
+      tone: sloBreached.length > 0 ? 'err' : sloMeasured > 0 ? 'ok' : 'muted',
+      delta:
+        sloMeasured === 0
+          ? 'awaiting data'
+          : sloBreached.length > 0
+            ? `${sloBreached[0].sli.replace(/_/g, ' ')} off target`
+            : 'all met · 24h',
+    },
+    {
+      label: 'DELIVERABLES',
+      value: freshTotal > 0 ? freshLabel : '—',
+      tone: freshTotal === 0 ? 'muted' : freshHours != null && freshHours >= 48 ? 'warn' : 'ok',
+      delta: freshTotal > 0 ? `${freshTotal} total · last output` : 'none produced yet',
     },
     {
       label: 'WIDGET',

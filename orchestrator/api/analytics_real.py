@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, desc, asc, text
 from typing import Dict, Any, List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from core.database.database import get_db
 from core.models import (
     Agent, Skill, Pattern, Workflow, WorkflowExecution,
@@ -32,13 +32,26 @@ from pydantic import BaseModel
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
 from core.auth.super_admin import require_super_admin
+from core.auth.workspace_admin import require_workspace_admin
 
 logger = logging.getLogger(__name__)
 # PRD-143 S6: observability tier — router-wide super-admin lock (fail-closed).
+# Platform/cross-workspace analytics (selection-health, platform activation, the
+# perf + dashboard suite) stay behind this router.
 router = APIRouter(
     prefix="/api/analytics",
     tags=["analytics"],
     dependencies=[Depends(require_super_admin)],
+)
+
+# PRD-185 S12: own-workspace health tiles the Command Center "is-it-working"
+# strip needs. Same prefix, but gated by require_workspace_admin so the people
+# who run a workspace can see their own health (every endpoint here is filtered
+# by ctx.workspace_id — no cross-tenant leak). Platform tiles stay on `router`.
+ws_router = APIRouter(
+    prefix="/api/analytics",
+    tags=["analytics"],
+    dependencies=[Depends(require_workspace_admin)],
 )
 
 # Pydantic models for new endpoints
@@ -60,7 +73,7 @@ class PerformanceEnhancements(BaseModel):
 
 # ==== NEW DASHBOARD METRICS ====
 
-@router.get("/dashboard/success-rate")
+@ws_router.get("/dashboard/success-rate")
 async def get_agent_success_rate(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Get agent success rate percentage with trend (UNION: workflows + missions)"""
     try:
@@ -119,7 +132,7 @@ async def get_agent_success_rate(ctx: RequestContext = Depends(get_request_conte
         return {"value": 0, "trend": 0, "total_executions": 0, "successful_executions": 0, "error": str(e)}
 
 
-@router.get("/slos")
+@ws_router.get("/slos")
 async def get_slos(
     window: str = "24h",
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -129,9 +142,10 @@ async def get_slos(
 
     Reuses ``services.slo_metrics`` (no parallel metrics stack): tool-call success
     rate, board-dispatch p95 latency, and board-event freshness — each with its
-    target, comparator, sample size, and a pass/fail. Router is super-admin-locked
-    (observability tier). Honest by construction: an SLI with no data reports a
-    ``null`` value, never a fabricated number.
+    target, comparator, sample size, and a pass/fail. Own-workspace only
+    (``ctx.workspace_id``-scoped), reachable by a workspace admin (PRD-185 S12).
+    Honest by construction: an SLI with no data reports a ``null`` value, never a
+    fabricated number.
     """
     from services.slo_metrics import compute_slos
 
@@ -165,7 +179,7 @@ def _parse_window(window: str) -> timedelta:
     return timedelta(hours=24)
 
 
-@router.get("/errors/by-subsystem")
+@ws_router.get("/errors/by-subsystem")
 async def get_errors_by_subsystem(
     window: str = "24h",
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -282,7 +296,7 @@ async def get_selection_health(
     }
 
 
-@router.get("/primitive-health")
+@ws_router.get("/primitive-health")
 async def get_primitive_health(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -358,7 +372,7 @@ async def get_primitive_health(
     }
 
 
-@router.get("/widget-engagement")
+@ws_router.get("/widget-engagement")
 async def get_widget_engagement(
     window: str = "7d",
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -479,6 +493,80 @@ async def get_activation(
         "total_workspaces": int(total_workspaces),
         "rate": rate,
         "generated_at": datetime.utcnow().isoformat(),
+    }
+
+
+@ws_router.get("/activation/workspace")
+async def get_workspace_activation(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Own-workspace activation (PRD-185 S12) — has THIS workspace reached first value?
+
+    The tenant-scoped counterpart to the platform ``/activation`` founder metric
+    (which stays super-admin): a workspace is "activated" once it has >=1
+    ``OrchestrationRun`` in the terminal COMPLETED state — at least one mission has
+    produced a real outcome. No cross-workspace counts are exposed here; the
+    strip's activation tile reads this, never the platform aggregate.
+
+    Returns ``{activated, completed_missions, generated_at}``.
+    """
+    completed = (
+        db.query(func.count(OrchestrationRun.id))
+        .filter(
+            OrchestrationRun.workspace_id == ctx.workspace_id,
+            OrchestrationRun.state == RunState.COMPLETED.value,
+        )
+        .scalar()
+    ) or 0
+
+    return {
+        "activated": completed > 0,
+        "completed_missions": int(completed),
+        "generated_at": datetime.utcnow().isoformat(),
+    }
+
+
+@ws_router.get("/deliverable-freshness")
+async def get_deliverable_freshness(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Age of the most recent deliverable in the workspace (PRD-185 S12).
+
+    The "is Auto still producing?" tile — the freshness signal that would have
+    surfaced the 2026-06-16 silent stop on day one, when deliverable output
+    dropped to zero and nothing said so. Reads the ``v_workspace_outputs``
+    deliverables read-model, workspace-scoped. Honest empties: a workspace with no
+    deliverables reports ``last_produced_at = null`` and ``age_seconds = null``,
+    never a fabricated fresh zero.
+
+    Returns ``{last_produced_at, age_seconds, total, generated_at}``.
+    """
+    row = db.execute(
+        text(
+            """
+            SELECT MAX(created_at) AS last_at, COUNT(*) AS total
+            FROM v_workspace_outputs
+            WHERE workspace_id = :ws
+              AND deleted_at IS NULL
+            """
+        ),
+        {"ws": str(ctx.workspace_id)},
+    ).fetchone()
+
+    last_at = row.last_at if row else None
+    total = int(row.total) if row and row.total is not None else 0
+    age_seconds: Optional[float] = None
+    if last_at is not None:
+        aware = last_at if last_at.tzinfo else last_at.replace(tzinfo=timezone.utc)
+        age_seconds = max(0.0, (datetime.now(timezone.utc) - aware).total_seconds())
+
+    return {
+        "last_produced_at": last_at.isoformat() if last_at else None,
+        "age_seconds": age_seconds,
+        "total": total,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
     }
 
 
