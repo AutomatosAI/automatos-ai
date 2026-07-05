@@ -407,6 +407,55 @@ class TestFirePlaybook:
         # Should NOT create an execution
         mock_db.add.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_fire_playbook_breaker_open(self, mock_playbook):
+        """PRD-185 S4(c): with the repeated-failure breaker OPEN, a cron tick
+        creates no execution row and launches nothing — the daily-402 re-fire
+        spam stops until a manual run succeeds."""
+        svc = PlaybookSchedulerService()
+        svc._scheduler = MagicMock()
+
+        mock_db, db_module = _make_db_mock(first_result=mock_playbook)
+        mock_launch = MagicMock()
+
+        extra = {
+            "api.recipe_executor": MagicMock(launch_recipe_task=mock_launch),
+            # breaker reports OPEN — the scheduler must short-circuit before any
+            # execution row is created or the launch seam is touched
+            "services.playbook_breaker": MagicMock(
+                breaker_is_open=MagicMock(return_value=True)
+            ),
+        }
+
+        with patch.dict(sys.modules, _lazy_import_patches(db_module, extra)):
+            await svc._fire_playbook(mock_playbook.id, str(mock_playbook.workspace_id))
+
+        mock_db.add.assert_not_called()   # no execution-history noise while open
+        mock_launch.assert_not_called()   # broken playbook did not re-fire
+
+    @pytest.mark.asyncio
+    async def test_fire_playbook_breaker_closed_still_fires(self, mock_playbook):
+        """Breaker CLOSED (healthy playbook) -> cron fires normally. Guards
+        against the breaker gating every run."""
+        svc = PlaybookSchedulerService()
+        svc._scheduler = MagicMock()
+
+        mock_db, db_module = _make_db_mock(first_result=mock_playbook)
+        mock_launch = MagicMock()
+
+        extra = {
+            "api.recipe_executor": MagicMock(launch_recipe_task=mock_launch),
+            "services.playbook_breaker": MagicMock(
+                breaker_is_open=MagicMock(return_value=False)
+            ),
+        }
+
+        with patch.dict(sys.modules, _lazy_import_patches(db_module, extra)):
+            await svc._fire_playbook(mock_playbook.id, str(mock_playbook.workspace_id))
+
+        mock_db.add.assert_called_once()   # execution created
+        mock_launch.assert_called_once()   # and launched
+
 
 # ===========================================================================
 # Status

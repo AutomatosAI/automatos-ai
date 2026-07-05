@@ -171,6 +171,22 @@ class PlaybookSchedulerService:
                 logger.warning("[PlaybookScheduler] Playbook %d has no steps, skipping", playbook_id)
                 return
 
+            # PRD-185 S4: repeated-failure circuit breaker. A cron playbook that
+            # fails on every run re-fires forever (the 2026-06 daily 402 spam).
+            # Once the last N terminal runs are all failures, stop re-firing until
+            # a human intervenes; a manual run that succeeds breaks the streak and
+            # auto-resets. Checked BEFORE creating an execution row so an open
+            # breaker adds no history noise and stays stably open.
+            from services.playbook_breaker import breaker_is_open
+            if breaker_is_open(db, playbook.id):
+                from config import config as _cfg
+                logger.warning(
+                    "[PlaybookScheduler] Circuit breaker OPEN for playbook %d (%s) — "
+                    "last %d runs all failed; skipping cron re-fire until a manual run succeeds",
+                    playbook.id, playbook.name, _cfg.PLAYBOOK_BREAKER_THRESHOLD,
+                )
+                return
+
             execution_id = f"cron-{uuid4().hex[:12]}"
             execution = RecipeExecution(
                 execution_id=execution_id,
