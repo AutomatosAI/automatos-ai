@@ -31,6 +31,15 @@ def _count_tokens(text: str) -> int:
 
 logger = logging.getLogger(__name__)
 
+# PRD-185 S9: vendor-neutral tracing seam. Import is cheap (no backend loaded at
+# module import — langfuse is lazy, config-gated, default-OFF).
+from core.observability.tracer import (
+    fire_retrieval_score,
+    STATUS_HIT,
+    STATUS_EMPTY,
+    STATUS_ERROR,
+)
+
 
 @dataclass
 class RAGResult:
@@ -221,6 +230,49 @@ class RAGService:
         self._initialized = True
         
     async def retrieve(
+        self,
+        query: str,
+        max_chunks: int = 8,
+        max_tokens: int = None,
+        diversity: float = None,
+        context_type: str = "chatbot",
+        workspace_id: str = None,
+        team: str = None,
+    ) -> RAGResult:
+        """Public retrieval funnel — the single place a turn's docs + scores are
+        known. Wraps the implementation to emit a live grounding score at the
+        retrieval chokepoint (PRD-185 S9): num_docs, top similarity, and a
+        hit/empty/error status (the "was retrieval grounded" number over real
+        traffic). Fire-and-forget + fully guarded — a tracing fault, or the
+        seam being OFF, never changes what retrieval returns.
+        """
+        result: Optional[RAGResult] = None
+        status = STATUS_ERROR
+        try:
+            result = await self._retrieve_impl(
+                query,
+                max_chunks=max_chunks,
+                max_tokens=max_tokens,
+                diversity=diversity,
+                context_type=context_type,
+                workspace_id=workspace_id,
+                team=team,
+            )
+            status = STATUS_HIT if result.chunks else STATUS_EMPTY
+            return result
+        finally:
+            fire_retrieval_score(
+                query=query,
+                num_docs=len(result.chunks) if result else 0,
+                top_score=(
+                    max((c.get("similarity", 0.0) or 0.0 for c in result.chunks), default=0.0)
+                    if result else 0.0
+                ),
+                status=status,
+                workspace_id=workspace_id,
+            )
+
+    async def _retrieve_impl(
         self,
         query: str,
         max_chunks: int = 8,
