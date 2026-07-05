@@ -144,7 +144,9 @@ def test_rag_feedback_to_ranking(svc):
     from api import rag_feedback as rag_feedback_api
     from modules.rag import feedback_writer
 
-    write_src = inspect.getsource(feedback_writer.write_rag_feedback)
+    # The INSERT lives in a module-level statement (_INSERT) that the writer
+    # references, so inspect the whole module source, not just the function body.
+    write_src = inspect.getsource(feedback_writer)
     assert "INSERT INTO rag_feedback" in write_src
     assert "document_ids" in write_src and "feedback_type" in write_src
     assert "write_rag_feedback" in inspect.getsource(rag_feedback_api.submit_feedback), (
