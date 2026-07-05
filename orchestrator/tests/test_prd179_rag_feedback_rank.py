@@ -137,12 +137,21 @@ def test_rag_feedback_to_ranking(svc):
     """
     import inspect
 
-    # Write side: the endpoint persists feedback_type + document_ids to rag_feedback.
+    # Write side: the shared writer persists feedback_type + document_ids to
+    # rag_feedback, and the endpoint delegates to it. PRD-185 S7 moved the INSERT
+    # into modules.rag.feedback_writer so the chat-vote path writes through the
+    # same seam — the write contract is unchanged, only its home.
     from api import rag_feedback as rag_feedback_api
+    from modules.rag import feedback_writer
 
-    write_src = inspect.getsource(rag_feedback_api.submit_feedback)
+    # The INSERT lives in a module-level statement (_INSERT) that the writer
+    # references, so inspect the whole module source, not just the function body.
+    write_src = inspect.getsource(feedback_writer)
     assert "INSERT INTO rag_feedback" in write_src
     assert "document_ids" in write_src and "feedback_type" in write_src
+    assert "write_rag_feedback" in inspect.getsource(rag_feedback_api.submit_feedback), (
+        "feedback endpoint no longer delegates to the shared rag_feedback writer"
+    )
 
     # Read side consumes those same columns (thumbs_down / document_ids).
     read_src = inspect.getsource(RAGService._negative_feedback_doc_ids)
