@@ -795,6 +795,22 @@ class Config:
     TOOL_SELECTION_STASH_MAXSIZE: int = int(os.getenv("TOOL_SELECTION_STASH_MAXSIZE", "512"))
 
     # =============================================================================
+    # OBSERVABILITY / TRACING (PRD-185 S9) — vendor-neutral trace seam
+    # =============================================================================
+    # Default OFF: zero overhead + zero data egress until explicitly enabled.
+    # When ON, live traces/scores land at the tool-dispatch and retrieval
+    # chokepoints via a vendor-neutral seam (core/observability/tracer.py) —
+    # "was the tool call good / was retrieval grounded" as a queryable number.
+    # Backend today = Langfuse Cloud; swappable behind the seam (data residency
+    # is the axis that flips to self-host). `langfuse` is an OPTIONAL import: the
+    # OFF path never imports it, and enabled-but-missing degrades to no-op.
+    TRACING_ENABLED: bool = os.getenv("TRACING_ENABLED", "false").lower() in ("true", "1", "yes")
+    TRACING_BACKEND: str = os.getenv("TRACING_BACKEND", "langfuse")
+    LANGFUSE_PUBLIC_KEY: str = os.getenv("LANGFUSE_PUBLIC_KEY")
+    LANGFUSE_SECRET_KEY: str = os.getenv("LANGFUSE_SECRET_KEY")
+    LANGFUSE_HOST: str = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
+
+    # =============================================================================
     # AWS S3 VECTORS (PRD-42: Cloud Document Sync)
     # =============================================================================
     AWS_REGION: str = os.getenv("AWS_REGION", "us-east-1")

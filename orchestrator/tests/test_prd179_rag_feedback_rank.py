@@ -104,10 +104,14 @@ def test_feedback_penalty_never_raises(svc):
 
 def test_retrieve_calls_feedback_penalty_on_hot_path():
     """The live retrieve() path must invoke the feedback penalty — proves the
-    signal feeds ranking, not just that a helper exists."""
+    signal feeds ranking, not just that a helper exists.
+
+    PRD-185 S9 wrapped retrieve() in a thin tracing shim that delegates to
+    _retrieve_impl(), so the penalty now lives in the impl. Introspect both so
+    the guard proves the penalty is on the live path regardless of the split."""
     import inspect
 
-    src = inspect.getsource(RAGService.retrieve)
+    src = inspect.getsource(RAGService.retrieve) + inspect.getsource(RAGService._retrieve_impl)
     assert "_apply_feedback_penalty" in src, (
         "retrieve() does not apply rag_feedback to ranking on the live path"
     )

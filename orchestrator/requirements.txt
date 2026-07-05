@@ -127,3 +127,12 @@ prometheus-client>=0.20.0
 
 # PRD-126: Business Knowledge Graph (Graphify Integration)
 graphifyy[leiden]>=0.3.28
+
+# PRD-185 S9: Observability / tracing seam (vendor-neutral, default-OFF).
+# `langfuse` is an OPTIONAL backend — the OFF path never imports it and the seam
+# (core/observability/tracer.py) degrades to a logged no-op if it is absent.
+# Kept OUT of the default install so the default (disabled) posture adds zero
+# weight and zero resolver risk to the pinned dep graph. To activate: uncomment,
+# reinstall, set TRACING_ENABLED=true + LANGFUSE_PUBLIC_KEY/SECRET_KEY
+# (+ optional LANGFUSE_HOST, defaults to Langfuse Cloud).
+# langfuse>=3.0.0,<4.0.0

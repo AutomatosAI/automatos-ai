@@ -36,6 +36,7 @@ from modules.tools.execution import exec_workspace
 from modules.tools.execution import exec_planning
 from modules.tools.execution.telemetry import fire_telemetry
 from modules.memory.tool_outcome_capture import capture_tool_outcome
+from core.observability.tracer import fire_tool_trace
 
 # PRD-36: Composio Integration (lazy import to avoid startup overhead)
 _composio_executor = None
@@ -612,6 +613,19 @@ class UnifiedToolExecutor:
                 result=result,
                 workspace_id=workspace_id,
                 agent_id=agent_id,
+            )
+            # PRD-185 S9: emit a vendor-neutral trace/score at the tool-dispatch
+            # chokepoint (beside telemetry) — "was the tool call good" as a live
+            # number over real traffic. Config-gated default-OFF (NoOp) + fully
+            # guarded, so it never fails the tool call.
+            _ok = bool(result.get("success", result.get("successful"))) if isinstance(result, dict) else False
+            fire_tool_trace(
+                tool_name=tool_name,
+                success=_ok,
+                duration_ms=_exec_ms,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                error=(result.get("error") if isinstance(result, dict) and not _ok else None),
             )
 
     # ------------------------------------------------------------------
