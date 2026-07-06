@@ -1,0 +1,44 @@
+{
+  "project": "Automatos AI Platform — PRD-186 S3 Vectors Relight (Phase-2, completes P2-03 / the S8 gate)",
+  "branchName": "ralph/prd-186-s3-vectors-relight",
+  "description": "Cut from origin/main (post-#510, 649482aa3) — re-verify every ref by grep, line numbers drift. SCOPE = the TWO CODE stories only: S1+S2 = the config-integrity guard (a placeholder-less-while-enabled S3 bucket must fail LOUD at boot AND in CI), S3 = dimension-mismatch fail-loud. The THREE OPS stories in the PRD (S1 bucket env change, S4 prod re-embed via the existing migrate_to_s3_vectors.py, S5 S8-probe re-run) are GERARD'S prod actions — NOT in this Ralph run and NOT acceptance criteria; they need prod DB + AWS creds the agent must not have. WHY this matters: prod S3_VECTORS_BUCKET='automatos-ai' lacks the '{workspace_id}' placeholder, so S3VectorsBackend.__init__ raises F005 — but run_stage SWALLOWED that RuntimeError and the server booted dark for weeks (~19,130 healthy pgvector chunks were never reachable through the active backend). This PRD makes that class of misconfig un-swallowable. BINDING: no os.getenv outside config.py; NO backward-compat shim (extract the F005 assertion, DELETE the inline branch — do not leave both); NEVER delete/recreate a populated index (fail loud, don't mutate). All tests PURE — mock config / the s3vectors client at the boundary, no DB/network/AWS. Full spec: /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai-wave1-prds/docs/PRDS/PRD-186-PHASE2-S3-VECTORS-RELIGHT.md",
+  "userStories": [
+    {
+      "id": "P186-S1",
+      "title": "Pure config-integrity assertion — a placeholder-less bucket raises",
+      "description": "Extract a pure config.assert_vector_config_integrity() that raises a typed error when S3_VECTORS_ENABLED is true AND S3_VECTORS_BUCKET is empty or does not contain the '{workspace_id}' placeholder. Refactor the existing F005 branch of validate_security (config.py, ~1075-1088 — grep to confirm) to CALL the shared assertion; DELETE the inline duplicate so the F005 message string lives in ONE place (no shim, no duplicated string). No boot wiring in this story — that is S2. Reuse the exact F005 message shape already present.",
+      "acceptanceCriteria": [
+        "test_vector_config_integrity_rejects_placeholderless_bucket: raises when enabled + bucket='automatos-ai' AND when the bucket is empty",
+        "test_vector_config_integrity_accepts_templated_bucket: no raise for 'automatos-vectors-{workspace_id}'",
+        "test_vector_config_integrity_noop_when_disabled: silent when S3_VECTORS_ENABLED=false (open-core local)",
+        "validate_security() now calls assert_vector_config_integrity(); the inline F005 branch is deleted and the message string is not duplicated (grep-proven)",
+        "Pure tests — patch config values at the boundary, no DB/network/AWS; cd orchestrator && python3 -m pytest -q green"
+      ],
+      "files": ["orchestrator/config.py", "orchestrator/tests/"]
+    },
+    {
+      "id": "P186-S2",
+      "title": "Fail-closed boot — the integrity failure hard-aborts, not swallowed by run_stage",
+      "description": "The plane stayed dark because the F005 RuntimeError was SWALLOWED by run_stage (core/models/bootstrap.py ~127-136 catches every exception, marks the stage 'failed', does NOT re-raise; called at main.py ~179 and ~508 — grep to confirm). Wire assert_vector_config_integrity() into boot OUTSIDE that swallowing path so a failure HARD-ABORTS the process (fail-closed: a misconfigured retrieval plane must not serve traffic silently). Either call the assertion before run_stage(DATABASE_INIT), or escalate this class of DATABASE_INIT failure into a real boot abort — not merely a recorded 'failed' stage. Depends on S1.",
+      "acceptanceCriteria": [
+        "test_boot_aborts_on_bad_vector_config: the boot path RAISES / aborts (not a swallowed 'failed' stage) when enabled + bucket='automatos-ai'",
+        "The integrity check is invoked outside/before the swallowing run_stage (grep main.py: the call is not inside the try whose except run_stage swallows)",
+        "No backward-compat shim; fail-closed by construction",
+        "Pure test — mock the config + boot seam at the boundary, no DB/network; cd orchestrator && python3 -m pytest -q green"
+      ],
+      "files": ["orchestrator/main.py", "orchestrator/core/models/bootstrap.py", "orchestrator/tests/"]
+    },
+    {
+      "id": "P186-S3",
+      "title": "Dimension-mismatch fails loud — raise, never mutate a populated index",
+      "description": "_verify_or_recreate_index (orchestrator/modules/search/vector_store/backends/s3_vectors_backend.py ~118-131 — grep to confirm) only LOGS when an existing index's dimension differs from config.S3_VECTORS_DIMENSION (now 2048, config.py ~835). Make a confirmed mismatch RAISE a typed error at construction/first-use so 2048-dim vectors can never be written to, or queried against, a differently-dimensioned index. It must NEVER delete/recreate a populated index — the existing ':119' never-delete invariant holds; fail loud, do not mutate. Extract the pure comparison (configured_dim, reported_dim) into a small helper so it is unit-testable without boto3.",
+      "acceptanceCriteria": [
+        "test_index_dimension_mismatch_raises: mocked get_index returns dimension=4096 under config.S3_VECTORS_DIMENSION=2048 → typed error raised (not a warning log)",
+        "test_index_dimension_match_passes: dimension=2048 → no raise",
+        "The mismatch branch raises and does NOT delete/recreate the index (grep-proven: no delete call on the mismatch path)",
+        "Pure tests — mock the s3vectors client at the boundary, no AWS; cd orchestrator && python3 -m pytest -q green"
+      ],
+      "files": ["orchestrator/modules/search/vector_store/backends/s3_vectors_backend.py", "orchestrator/tests/"]
+    }
+  ]
+}
