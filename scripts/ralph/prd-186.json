@@ -8,11 +8,11 @@
       "title": "Pure config-integrity assertion — a placeholder-less bucket raises",
       "description": "Extract a pure config.assert_vector_config_integrity() that raises a typed error when S3_VECTORS_ENABLED is true AND S3_VECTORS_BUCKET is empty or does not contain the '{workspace_id}' placeholder. Refactor the existing F005 branch of validate_security (config.py, ~1075-1088 — grep to confirm) to CALL the shared assertion; DELETE the inline duplicate so the F005 message string lives in ONE place (no shim, no duplicated string). No boot wiring in this story — that is S2. Reuse the exact F005 message shape already present.",
       "acceptanceCriteria": [
-        "test_vector_config_integrity_rejects_placeholderless_bucket: raises when enabled + bucket='automatos-ai' AND when the bucket is empty",
-        "test_vector_config_integrity_accepts_templated_bucket: no raise for 'automatos-vectors-{workspace_id}'",
-        "test_vector_config_integrity_noop_when_disabled: silent when S3_VECTORS_ENABLED=false (open-core local)",
-        "validate_security() now calls assert_vector_config_integrity(); the inline F005 branch is deleted and the message string is not duplicated (grep-proven)",
-        "Pure tests — patch config values at the boundary, no DB/network/AWS; cd orchestrator && python3 -m pytest -q green"
+        "DONE — test_vector_config_integrity_rejects_placeholderless_bucket (tests/test_prd186_config_integrity.py): enabled + 'automatos-ai' → RuntimeError match 'workspace_id'; enabled + '' → RuntimeError",
+        "DONE — test_vector_config_integrity_accepts_templated_bucket: 'automatos-vectors-{workspace_id}' → no raise",
+        "DONE — test_vector_config_integrity_noop_when_disabled: S3_VECTORS_ENABLED=false → no raise (even with junk bucket)",
+        "DONE — config.py:assert_vector_config_integrity() extracted; validate_security() calls it (test_validate_security_calls_shared_assertion_in_source, ast-proven); inline F005 branch deleted; grep 'does not contain the' count==1 (test_f005_message_not_duplicated)",
+        "DONE — pure (config patched at boundary, no DB/network/AWS); 41 passed incl. existing tests/security/test_prd172 F005 contract (test_config_boot_asserts_bucket_placeholder intact); collection 3137 clean"
       ],
       "files": ["orchestrator/config.py", "orchestrator/tests/"]
     },

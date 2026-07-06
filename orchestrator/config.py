@@ -1070,33 +1070,54 @@ class Config:
                 "any Authorization header (fail-open). Set SHOPIFY_INTERNAL_API_KEY."
             )
 
-        # F005 — a shared S3 Vectors bucket with no per-workspace placeholder
-        # leaks chunks across tenants. Only assert when the feature is enabled.
-        if self.S3_VECTORS_ENABLED:
-            bucket = (self.S3_VECTORS_BUCKET or "").strip()
-            if not bucket:
-                errors.append(
-                    "S3_VECTORS_ENABLED=true but S3_VECTORS_BUCKET is unset."
-                )
-            elif "{workspace_id}" not in bucket:
-                errors.append(
-                    "S3_VECTORS_ENABLED=true but S3_VECTORS_BUCKET "
-                    f"({bucket!r}) does not contain the '{{workspace_id}}' "
-                    "placeholder — every workspace would share one bucket "
-                    "(cross-tenant vector leak). Use e.g. "
-                    "'automatos-vectors-{workspace_id}'."
-                )
-
         if errors:
             raise RuntimeError(
                 "Tenant-isolation security config invalid (PRD-172):\n  - "
                 + "\n  - ".join(errors)
             )
 
+        # F005 — delegated to the shared integrity assertion (PRD-186) so the
+        # identical check is also wired into boot OUTSIDE the swallowing
+        # run_stage (main lifespan). A shared S3 Vectors bucket with no
+        # {workspace_id} placeholder leaks chunks across tenants; the assertion
+        # is a no-op when the feature is disabled.
+        self.assert_vector_config_integrity()
+
         # PRD-175 (F008) — the edition boot guard runs in the same hard-fail phase
         # so a saas deploy that lost its Clerk env aborts boot rather than silently
         # downgrading to the anonymous local identity and serving tenant data.
         self.validate_auth_edition()
+
+    def assert_vector_config_integrity(self) -> None:
+        """PRD-186 (F005): fail loud when S3 Vectors is enabled with a bucket
+        that cannot isolate tenants.
+
+        Extracted from ``validate_security`` so the identical check can be wired
+        into boot *outside* the swallowing ``run_stage`` (see the ``main``
+        lifespan). The misconfig that booted the retrieval plane dark for weeks
+        — prod ``S3_VECTORS_BUCKET='automatos-ai'`` with no ``{workspace_id}``
+        placeholder — must abort the process, not be recorded as a silently
+        'failed' stage.
+
+        Raises ``RuntimeError`` when ``S3_VECTORS_ENABLED`` is true and
+        ``S3_VECTORS_BUCKET`` is empty or omits the ``{workspace_id}``
+        placeholder. No-op when the feature is disabled (open-core local).
+        """
+        if not self.S3_VECTORS_ENABLED:
+            return
+        bucket = (self.S3_VECTORS_BUCKET or "").strip()
+        if not bucket:
+            raise RuntimeError(
+                "S3_VECTORS_ENABLED=true but S3_VECTORS_BUCKET is unset."
+            )
+        if "{workspace_id}" not in bucket:
+            raise RuntimeError(
+                "S3_VECTORS_ENABLED=true but S3_VECTORS_BUCKET "
+                f"({bucket!r}) does not contain the '{{workspace_id}}' "
+                "placeholder — every workspace would share one bucket "
+                "(cross-tenant vector leak). Use e.g. "
+                "'automatos-vectors-{workspace_id}'."
+            )
 
     def validate_auth_edition(self) -> None:
         """PRD-175 (F008): fail-closed boot guard for the open-core edition flag.
