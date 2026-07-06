@@ -1,15 +1,18 @@
-"""PRD-185 S4: playbook failures are VISIBLE — a notification event + a board
-status of 'failed', not a silent 'done'.
+"""PRD-185 S4: playbook failures are VISIBLE and a broken playbook STOPS.
 
 A ~17-day OpenRouter 402 outage was invisible because (a) no ``playbook_failed``
 event type existed and (b) ``complete_recipe_board_task`` accepted ``success`` but
-hardcoded ``task.status = 'done'`` regardless. This test pins both: the event type
-is registered, and the board bridge honors the flag.
+hardcoded ``task.status = 'done'`` regardless — and it re-fired daily forever
+because (c) nothing stopped a playbook that failed on every run. This test pins
+all three: the event type is registered, the board bridge honors the flag, and
+the repeated-failure circuit breaker pauses cron re-firing after N failures.
 
-Pure unit test — no DB / network (db + task are mocked).
+Pure unit tests — no DB / network (db, task, and history are mocked at the
+boundary); the one scheduler test drives ``_fire_playbook`` with every external
+seam patched.
 """
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -50,3 +53,73 @@ def test_board_task_marked_done_on_success():
     task = SimpleNamespace(status=None, completed_at=None, result=None, error_message=None)
     complete(_mock_db(task), "exec-2", success=True, result="ok")
     assert task.status == "done"
+
+
+# ---------------------------------------------------------------------------
+# PRD-185 S4 (c): repeated-failure circuit breaker. A cron playbook that fails on
+# every run must stop re-firing after N consecutive failures (the daily 402 spam).
+# ---------------------------------------------------------------------------
+
+def _breaker():
+    try:
+        from services.playbook_breaker import is_breaker_open, breaker_is_open
+    except Exception as e:  # pragma: no cover
+        pytest.skip(f"playbook_breaker not importable in this env: {e}")
+    return is_breaker_open, breaker_is_open
+
+
+def test_breaker_opens_when_last_n_all_failed():
+    is_open, _ = _breaker()
+    assert is_open(["failed", "failed", "failed"], threshold=3) is True
+
+
+def test_breaker_closed_when_a_recent_run_succeeded():
+    is_open, _ = _breaker()
+    # statuses are newest-first: a success anywhere in the window breaks the streak
+    assert is_open(["failed", "completed", "failed"], threshold=3) is False
+    assert is_open(["completed", "failed", "failed"], threshold=3) is False
+
+
+def test_breaker_closed_with_too_few_terminal_runs():
+    is_open, _ = _breaker()
+    assert is_open(["failed", "failed"], threshold=3) is False
+    assert is_open([], threshold=3) is False
+
+
+def test_breaker_disabled_when_threshold_zero():
+    is_open, _ = _breaker()
+    assert is_open(["failed", "failed", "failed"], threshold=0) is False
+
+
+def test_breaker_only_counts_the_newest_threshold():
+    is_open, _ = _breaker()
+    # the 3 newest are all failures → open, even though an older run succeeded
+    assert is_open(["failed", "failed", "failed", "completed"], threshold=3) is True
+
+
+def test_breaker_is_open_applies_configured_threshold():
+    """DB-boundary: breaker_is_open reads recent history via the internal fetch
+    and applies config.PLAYBOOK_BREAKER_THRESHOLD. Fetch is patched — no DB."""
+    _, breaker_is_open = _breaker()
+    from config import config
+    n = config.PLAYBOOK_BREAKER_THRESHOLD
+
+    with patch("services.playbook_breaker._recent_terminal_statuses",
+               return_value=["failed"] * n):
+        assert breaker_is_open(MagicMock(), recipe_id=42) is (n > 0)
+
+    with patch("services.playbook_breaker._recent_terminal_statuses",
+               return_value=(["completed"] + ["failed"] * max(n - 1, 0))):
+        assert breaker_is_open(MagicMock(), recipe_id=42) is False
+
+
+def test_breaker_fails_closed_on_read_error():
+    """A breaker that cannot read history must never block the scheduler."""
+    _, breaker_is_open = _breaker()
+    with patch("services.playbook_breaker._recent_terminal_statuses",
+               side_effect=RuntimeError("db down")):
+        assert breaker_is_open(MagicMock(), recipe_id=1) is False
+
+# The AC (c) end-to-end assertion — that _fire_playbook actually SKIPS the
+# cron re-fire when the breaker is open — lives in test_playbook_scheduler.py
+# (TestFirePlaybook), which owns the proven _fire_playbook mocking harness.

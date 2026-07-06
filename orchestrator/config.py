@@ -528,6 +528,12 @@ class Config:
     PLAYBOOK_DEFAULT_TOTAL_TIMEOUT_SECONDS: int = int(os.getenv("PLAYBOOK_DEFAULT_TOTAL_TIMEOUT_SECONDS", "1800"))  # 30 min
     PLAYBOOK_MIN_STEP_TIMEOUT_SECONDS: int = int(os.getenv("PLAYBOOK_MIN_STEP_TIMEOUT_SECONDS", "300"))            # 5 min floor
     PLAYBOOK_MIN_TOTAL_TIMEOUT_SECONDS: int = int(os.getenv("PLAYBOOK_MIN_TOTAL_TIMEOUT_SECONDS", "900"))          # 15 min floor
+    # PRD-185 S4: repeated-failure circuit breaker for cron playbooks. Once the
+    # last N *terminal* runs of a playbook are all 'failed', the cron scheduler
+    # stops re-firing it (the 2026-06 daily OpenRouter-402 spam re-fired forever).
+    # A manual run that succeeds breaks the streak and auto-resets the breaker.
+    # Set to 0 to disable the breaker entirely.
+    PLAYBOOK_BREAKER_THRESHOLD: int = int(os.getenv("PLAYBOOK_BREAKER_THRESHOLD", "3"))
 
     # =============================================================================
     # RAILWAY API (Log retrieval for agents)
