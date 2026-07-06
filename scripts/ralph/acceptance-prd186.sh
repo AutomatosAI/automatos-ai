@@ -29,8 +29,8 @@ check "S1 assert_vector_config_integrity() defined in config.py" \
 check "S1 validate_security calls the shared assertion (extracted, not inline)" \
   "grep -qE 'assert_vector_config_integrity\\(' $CFG"
 
-check "S1 the {workspace_id} placeholder message is NOT duplicated (lives in ONE place)" \
-  "[ \"\$(grep -c \"{workspace_id}' placeholder\" $CFG 2>/dev/null || echo 0)\" -le 1 ]"
+check "S1 the F005 message lives in ONE place (inline branch deleted — no shim/duplicate)" \
+  "[ \"\$(grep -c 'does not contain the' $CFG)\" -eq 1 ]"
 
 # --- S2: the integrity check is wired into boot (un-swallowable) ------------------
 check "S2 boot wiring calls assert_vector_config_integrity in main.py" \
