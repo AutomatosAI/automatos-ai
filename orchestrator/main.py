@@ -504,6 +504,16 @@ async def lifespan(app: FastAPI):
     app.state.ready = False
 
     try:
+        # ── PRD-186 S2: fail-closed on the retrieval-plane misconfig ──
+        # validate_security() also checks F005, but it runs INSIDE
+        # run_stage(DATABASE_INIT) below, whose except records the stage 'failed'
+        # and never re-raises — which is exactly how a placeholder-less
+        # S3_VECTORS_BUCKET booted the plane dark for weeks. Assert the same
+        # integrity here, OUTSIDE the swallowing run_stage, so the RuntimeError
+        # propagates to the outer handler (which re-raises) and boot aborts
+        # rather than serving traffic against an unreachable vector backend.
+        config.assert_vector_config_integrity()
+
         # ── Phase 1: Core Infrastructure ──
         await run_stage(report, BootstrapStage.DATABASE_INIT, _boot_phase_1_core)
         # Seed embeddings (fire-and-forget background task)

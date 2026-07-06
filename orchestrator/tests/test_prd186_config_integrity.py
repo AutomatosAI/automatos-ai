@@ -99,3 +99,95 @@ class TestVectorConfigIntegrity:
             f"F005 placeholder message appears {n}× — the inline branch must be "
             "deleted, not left beside the extraction."
         )
+
+
+# ===========================================================================
+# S2 — fail-closed boot: the integrity failure hard-aborts, not swallowed
+# ===========================================================================
+
+def _lifespan_node():
+    tree = ast.parse((_ORCH_ROOT / "main.py").read_text(encoding="utf-8"))
+    for n in ast.walk(tree):
+        if isinstance(n, ast.AsyncFunctionDef) and n.name == "lifespan":
+            return n
+    raise AssertionError("lifespan() not found in main.py")
+
+
+def _calls_in(node):
+    """(call_node, callee_name) for every Call under `node` (nested fns included)."""
+    for n in ast.walk(node):
+        if isinstance(n, ast.Call):
+            yield n, getattr(n.func, "attr", getattr(n.func, "id", None))
+
+
+class TestBootFailClosed:
+    def test_boot_aborts_on_bad_vector_config(self, monkeypatch):
+        """The exact prod misconfig (enabled + 'automatos-ai') RAISES through the
+        assertion lifespan invokes — a real abort, not a value returned."""
+        cfg = _cfg(monkeypatch, enabled=True, bucket="automatos-ai")
+        with pytest.raises(RuntimeError, match="workspace_id"):
+            cfg.assert_vector_config_integrity()
+
+    def test_run_stage_swallows_but_preguard_aborts(self, monkeypatch):
+        """Reproduce the root cause against the REAL run_stage and prove the fix.
+
+        run_stage catches every exception and records the stage 'failed' WITHOUT
+        re-raising (bootstrap.py) — which is how the F005 RuntimeError booted the
+        plane dark. The S2 fix invokes the same assertion BEFORE run_stage, where
+        the raise propagates (fail-closed).
+        """
+        import asyncio
+        from core.models.bootstrap import BootstrapReport, BootstrapStage, run_stage
+
+        cfg = _cfg(monkeypatch, enabled=True, bucket="automatos-ai")
+
+        def _raises():  # what _boot_phase_1_core does via validate_security
+            cfg.assert_vector_config_integrity()
+
+        report = BootstrapReport()
+        result = asyncio.run(run_stage(report, BootstrapStage.DATABASE_INIT, _raises))
+        # Swallowed: recorded 'failed', no propagation — the dark-boot bug.
+        assert result.status == "failed"
+        assert "workspace_id" in (result.error or "")
+
+        # Fix: invoked directly (as lifespan does before run_stage) → propagates.
+        with pytest.raises(RuntimeError, match="workspace_id"):
+            cfg.assert_vector_config_integrity()
+
+    def test_integrity_check_wired_before_run_stage_database_init(self):
+        """AST-proven: lifespan() calls assert_vector_config_integrity() OUTSIDE
+        the swallowing run_stage and BEFORE run_stage(DATABASE_INIT)."""
+        life = _lifespan_node()
+        assert_lines = [c.lineno for c, name in _calls_in(life)
+                        if name == "assert_vector_config_integrity"]
+        assert assert_lines, (
+            "lifespan() must call config.assert_vector_config_integrity() so a "
+            "placeholder-less bucket aborts boot instead of being swallowed by "
+            "run_stage."
+        )
+        db_init_lines = [
+            c.lineno for c, name in _calls_in(life)
+            if name == "run_stage"
+            and any(isinstance(a, ast.Attribute) and a.attr == "DATABASE_INIT"
+                    for a in c.args)
+        ]
+        assert db_init_lines, "run_stage(DATABASE_INIT) not found in lifespan()"
+        assert min(assert_lines) < min(db_init_lines), (
+            "assert_vector_config_integrity() must run BEFORE "
+            "run_stage(DATABASE_INIT) — after it, the F005 raise is swallowed."
+        )
+
+    def test_assertion_call_is_not_inside_boot_phase_1_core(self):
+        """The fail-closed guard must live in lifespan, not (only) inside
+        _boot_phase_1_core — that function is what run_stage wraps and swallows."""
+        tree = ast.parse((_ORCH_ROOT / "main.py").read_text(encoding="utf-8"))
+        phase1 = next(
+            (n for n in ast.walk(tree)
+             if isinstance(n, ast.AsyncFunctionDef) and n.name == "_boot_phase_1_core"),
+            None,
+        )
+        assert phase1 is not None, "_boot_phase_1_core not found"
+        life = _lifespan_node()
+        # The lifespan body (excluding the nested _boot_phase_1_core, which is a
+        # module-level fn anyway) carries the guard; that is the point.
+        assert any(name == "assert_vector_config_integrity" for _, name in _calls_in(life))

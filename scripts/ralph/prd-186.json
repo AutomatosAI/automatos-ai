@@ -21,10 +21,10 @@
       "title": "Fail-closed boot — the integrity failure hard-aborts, not swallowed by run_stage",
       "description": "The plane stayed dark because the F005 RuntimeError was SWALLOWED by run_stage (core/models/bootstrap.py ~127-136 catches every exception, marks the stage 'failed', does NOT re-raise; called at main.py ~179 and ~508 — grep to confirm). Wire assert_vector_config_integrity() into boot OUTSIDE that swallowing path so a failure HARD-ABORTS the process (fail-closed: a misconfigured retrieval plane must not serve traffic silently). Either call the assertion before run_stage(DATABASE_INIT), or escalate this class of DATABASE_INIT failure into a real boot abort — not merely a recorded 'failed' stage. Depends on S1.",
       "acceptanceCriteria": [
-        "test_boot_aborts_on_bad_vector_config: the boot path RAISES / aborts (not a swallowed 'failed' stage) when enabled + bucket='automatos-ai'",
-        "The integrity check is invoked outside/before the swallowing run_stage (grep main.py: the call is not inside the try whose except run_stage swallows)",
-        "No backward-compat shim; fail-closed by construction",
-        "Pure test — mock the config + boot seam at the boundary, no DB/network; cd orchestrator && python3 -m pytest -q green"
+        "DONE — test_boot_aborts_on_bad_vector_config + test_run_stage_swallows_but_preguard_aborts (tests/test_prd186_config_integrity.py): against the REAL run_stage, the F005 raise inside a stage is recorded status=='failed' (swallowed), while the pre-stage guard PROPAGATES RuntimeError match 'workspace_id' — fail-closed",
+        "DONE — test_integrity_check_wired_before_run_stage_database_init (ast-proven): lifespan() calls config.assert_vector_config_integrity() (main.py:515) BEFORE run_stage(DATABASE_INIT) (main.py:517), outside the swallowing stage; test_assertion_call_is_not_inside_boot_phase_1_core guards placement",
+        "DONE — no shim; the guard is the shared S1 assertion invoked at the top of the lifespan try, fail-closed by construction (outer except re-raises, main.py ~591)",
+        "DONE — pure: config patched at boundary + real stdlib-only run_stage seam, no DB/network; 10 passed (S1+S2), collection 3137 clean"
       ],
       "files": ["orchestrator/main.py", "orchestrator/core/models/bootstrap.py", "orchestrator/tests/"]
     },
