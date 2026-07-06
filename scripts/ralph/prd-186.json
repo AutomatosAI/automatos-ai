@@ -33,10 +33,10 @@
       "title": "Dimension-mismatch fails loud — raise, never mutate a populated index",
       "description": "_verify_or_recreate_index (orchestrator/modules/search/vector_store/backends/s3_vectors_backend.py ~118-131 — grep to confirm) only LOGS when an existing index's dimension differs from config.S3_VECTORS_DIMENSION (now 2048, config.py ~835). Make a confirmed mismatch RAISE a typed error at construction/first-use so 2048-dim vectors can never be written to, or queried against, a differently-dimensioned index. It must NEVER delete/recreate a populated index — the existing ':119' never-delete invariant holds; fail loud, do not mutate. Extract the pure comparison (configured_dim, reported_dim) into a small helper so it is unit-testable without boto3.",
       "acceptanceCriteria": [
-        "test_index_dimension_mismatch_raises: mocked get_index returns dimension=4096 under config.S3_VECTORS_DIMENSION=2048 → typed error raised (not a warning log)",
-        "test_index_dimension_match_passes: dimension=2048 → no raise",
-        "The mismatch branch raises and does NOT delete/recreate the index (grep-proven: no delete call on the mismatch path)",
-        "Pure tests — mock the s3vectors client at the boundary, no AWS; cd orchestrator && python3 -m pytest -q green"
+        "DONE — test_index_dimension_mismatch_raises (tests/test_prd186_dimension_guard.py): get_index→dimension=4096 under index_dimension=2048 raises RuntimeError match 'dimension' (also nested {'index':{'dimension':4096}} shape via _reported_index_dimension, so the guard is not dead against the real nested API response)",
+        "DONE — test_index_dimension_match_passes: dimension=2048 → no raise; unknown/absent dimension and get_index ClientError are unconfirmed → no raise",
+        "DONE — test_mismatch_never_deletes_the_index: on the raise, delete_index/delete_vectors/delete_vector_bucket assert_not_called; grep of _ensure_setup/_verify_or_recreate_index shows zero delete_* client calls (only 'never delete' docstrings) — the :119 invariant holds",
+        "DONE — pure comparison extracted to module-level _index_dimension_mismatch + _reported_index_dimension (unit-tested without boto3); s3vectors client is a MagicMock at the boundary, no AWS; 63 passed across PRD-186 + existing F005 backend/probe tests; collection 3151 clean"
       ],
       "files": ["orchestrator/modules/search/vector_store/backends/s3_vectors_backend.py", "orchestrator/tests/"]
     }

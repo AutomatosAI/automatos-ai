@@ -21,6 +21,35 @@ from config import config
 logger = logging.getLogger(__name__)
 
 
+def _reported_index_dimension(response: Dict[str, Any]) -> int:
+    """Extract the index dimension from a get_index response.
+
+    Tolerates both the flat (``{'dimension': N}``) and the nested
+    (``{'index': {'dimension': N}}``) shapes so the guard is not dead in prod
+    (a flat-only read would always see 0 against the nested API response and the
+    mismatch would never fire). Returns 0 when absent/unreadable — an
+    *unconfirmed* dimension, which must not fail loud.
+    """
+    if not isinstance(response, dict):
+        return 0
+    source = response if "dimension" in response else response.get("index")
+    if not isinstance(source, dict):
+        return 0
+    try:
+        return int(source.get("dimension") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _index_dimension_mismatch(configured_dim: int, reported_dim: int) -> bool:
+    """True only for a *confirmed* conflict: the store reports a positive
+    dimension that differs from the configured one. A missing / zero / unknown
+    reported dimension is NOT a confirmed mismatch (do not fail loud on it)."""
+    if not reported_dim or int(reported_dim) <= 0:
+        return False
+    return int(reported_dim) != int(configured_dim)
+
+
 class S3VectorsBackend:
     """
     AWS S3 Vectors backend for EnhancedVectorStore.
@@ -81,8 +110,10 @@ class S3VectorsBackend:
     def _ensure_setup(self) -> None:
         """Create bucket and index if they don't already exist.
 
-        If an existing index has a different dimension than configured,
-        it is deleted and recreated so embeddings can be stored correctly.
+        If an existing index reports a different dimension than configured,
+        _verify_or_recreate_index RAISES (PRD-186 S3) — the index is NEVER
+        deleted or recreated, since that would destroy stored vectors. A
+        dimension mismatch is a fail-loud misconfig, not a silent recreate.
         """
         # Create bucket
         try:
@@ -116,19 +147,38 @@ class S3VectorsBackend:
         self._setup_complete = True
 
     def _verify_or_recreate_index(self) -> None:
-        """Log existing index info. Never delete — that destroys stored vectors."""
+        """Verify an existing index's dimension matches config; RAISE on a
+        confirmed mismatch. NEVER delete — that destroys stored vectors.
+
+        A 2048-dim embedding written to (or queried against) a differently-
+        dimensioned index corrupts retrieval. Rather than log-and-continue
+        (PRD-186 S3), fail loud so the misconfig is fixed, not masked. A failed
+        metadata call or an absent/zero reported dimension is *unconfirmed* and
+        does not raise.
+        """
         try:
             response = self.client.get_index(
                 vectorBucketName=self.bucket_name,
                 indexName=self.index_name,
             )
-            existing_dim = response.get("dimension", 0)
-            logger.info(
-                f"S3 vector index exists: {self.index_name} "
-                f"(reported dimension={existing_dim}, config={self.index_dimension})"
-            )
         except ClientError as e:
             logger.warning(f"Could not verify S3 vector index: {e}")
+            return
+
+        reported_dim = _reported_index_dimension(response)
+        if _index_dimension_mismatch(self.index_dimension, reported_dim):
+            raise RuntimeError(
+                f"S3 vector index {self.index_name!r} dimension mismatch: store "
+                f"reports {reported_dim}, config S3_VECTORS_DIMENSION="
+                f"{self.index_dimension}. Refusing to use a differently-"
+                "dimensioned index — writing or querying vectors against it "
+                "corrupts retrieval. The index is NOT deleted (that would destroy "
+                "stored vectors); fix S3_VECTORS_DIMENSION or migrate the index."
+            )
+        logger.info(
+            f"S3 vector index exists: {self.index_name} "
+            f"(reported dimension={reported_dim}, config={self.index_dimension})"
+        )
 
     def search(
         self,
