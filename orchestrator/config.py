@@ -1043,6 +1043,32 @@ class Config:
         except Exception:
             return os.getenv("RAG_HYBRID_ENABLED", "true").lower() == "true"
 
+    @property
+    def RAG_CONTEXTUAL_ANNOTATIONS_ENABLED(self) -> bool:
+        """Contextual chunk annotations at ingestion (default: OFF — PRD-188 S2).
+
+        Stays OFF until the existing background reprocess has re-annotated the
+        corpus, so live retrieval never sees a half-annotated store. Flipping
+        it on only affects documents ingested/reprocessed after the flip.
+        """
+        try:
+            from core.llm.manager import get_system_setting
+            val = get_system_setting("rag", "contextual_annotations_enabled", "false")
+            return str(val).lower() == "true" if val else False
+        except Exception:
+            return os.getenv("RAG_CONTEXTUAL_ANNOTATIONS_ENABLED", "false").lower() == "true"
+
+    @property
+    def RAG_CONTEXTUAL_ANNOTATION_MODEL(self) -> str:
+        """Haiku-class model for chunk situating contexts (PRD-188 S2) — cheap,
+        prompt-cached over the parent document."""
+        try:
+            from core.llm.manager import get_system_setting
+            val = get_system_setting("rag", "contextual_annotation_model", "claude-haiku-4-5")
+            return str(val) if val else "claude-haiku-4-5"
+        except Exception:
+            return os.getenv("RAG_CONTEXTUAL_ANNOTATION_MODEL", "claude-haiku-4-5")
+
     # PRD-179 S4 (F070): rag_feedback feeds retrieval ranking. A document that
     # accrued negative feedback (thumbs_down, or a rating at/below the floor) has
     # its retrieval score multiplied by this factor on the live hot path — a doc
