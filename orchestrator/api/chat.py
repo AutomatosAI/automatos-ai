@@ -80,18 +80,48 @@ class VoteRequest(BaseModel):
 
 # Helper function to get user ID from database
 def get_user_id(db: Session, ctx=None) -> int:
-    """Resolve the authenticated user id (PRD-185 S6).
+    """Resolve the authenticated principal to the integer ``users.id`` PK (PRD-185 S6).
 
     Prefer the real principal from the request context; fall back to a default
     user only for genuinely principal-less (system/anonymous) paths — never
     hardcode id=1 for a logged-in caller. The old id=1 default mis-attributed
     every chat, message save, vote-ownership check, and mid-chat mission approval
     (_driving_clerk derives from this) to user 1.
+
+    IMPORTANT: ``UserContext.id`` carries the *Clerk subject string* (or email)
+    for SaaS auth — NOT the integer ``users.id``. But ``chats.user_id`` and the
+    ``messages`` / ``votes`` FKs are INTEGER references to ``users.id``. Returning
+    the raw Clerk string wrote ``'user_xxx'`` into an INTEGER column and 500'd
+    every chat request. So resolve the principal to the integer PK via
+    ``users.clerk_user_id`` — the same pattern team.py, harness.py, marketplace.py
+    and hybrid.py's own provisioning already use.
     """
     if ctx is not None and getattr(ctx, "user", None) is not None:
         uid = getattr(ctx.user, "id", None)
-        if uid is not None:
+        # Fast path: an auth lane that already carries the integer PK.
+        if isinstance(uid, int):
             return uid
+        # SaaS/Clerk lane: ``uid`` is the Clerk subject string (or email).
+        # Resolve to the integer users.id. The row is guaranteed present —
+        # hybrid auth provisions it on first sign-in (INSERT ... ON CONFLICT).
+        clerk_uid = getattr(ctx.user, "clerk_user_id", None) or (uid if isinstance(uid, str) else None)
+        if clerk_uid:
+            row = db.execute(
+                text("SELECT id FROM users WHERE clerk_user_id = :cid LIMIT 1"),
+                {"cid": clerk_uid},
+            ).fetchone()
+            if row:
+                return int(row[0])
+        email = getattr(ctx.user, "email", None)
+        if email:
+            row = db.execute(
+                text("SELECT id FROM users WHERE email = :em LIMIT 1"),
+                {"em": email},
+            ).fetchone()
+            if row:
+                return int(row[0])
+        # Authenticated but unresolvable (should not happen post-provisioning) —
+        # fall through to the default below rather than 500-ing the chat.
     result = db.execute(text("SELECT id FROM users WHERE id = 1 LIMIT 1")).fetchone()
     if not result:
         result = db.execute(text("SELECT id FROM users LIMIT 1")).fetchone()

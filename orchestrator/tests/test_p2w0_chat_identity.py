@@ -39,3 +39,29 @@ def test_falls_back_when_no_principal():
     # ctx=None (system path) and ctx.user=None both fall back cleanly, no crash.
     assert get_user_id(db, None) == 7
     assert get_user_id(db, SimpleNamespace(user=None)) == 7
+
+
+def test_resolves_clerk_string_principal_to_integer_pk():
+    """Regression — prod chat outage (POST /api/chat -> 500).
+
+    ``UserContext.id`` carries the Clerk subject STRING (``user_xxx``) / email,
+    NOT the integer ``users.id``. The S6 change returned it verbatim, so a Clerk
+    string was written into the INTEGER ``chats.user_id`` column:
+    ``invalid input syntax for type integer: "user_38Z...""``. get_user_id must
+    resolve the principal to the integer PK via ``clerk_user_id``.
+    """
+    get_user_id = _get_user_id()
+    db = MagicMock()
+    db.execute.return_value.fetchone.return_value = (99,)
+    ctx = SimpleNamespace(
+        user=SimpleNamespace(
+            id="user_38Z4SP1ttmy9Sk3wf79XgQLS8H1",
+            clerk_user_id="user_38Z4SP1ttmy9Sk3wf79XgQLS8H1",
+            email="pilot@example.com",
+        )
+    )
+    result = get_user_id(db, ctx)
+    assert result == 99
+    # Must be the integer PK from the lookup — never the raw Clerk string.
+    assert isinstance(result, int)
+    db.execute.assert_called()
