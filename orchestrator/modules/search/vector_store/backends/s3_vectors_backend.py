@@ -43,16 +43,15 @@ class S3VectorsBackend:
         bucket_template = config.S3_VECTORS_BUCKET
         if not bucket_template:
             raise ValueError("S3_VECTORS_BUCKET not configured in .env")
-        # PRD-172 F005: a bucket template with NO {workspace_id} placeholder
-        # means every workspace resolves to the same physical bucket — a
-        # cross-tenant vector leak by construction. Boot already asserts this
-        # (config.validate_security), but fail-closed here too so a backend can
-        # never be instantiated against a shared bucket.
-        if "{workspace_id}" not in bucket_template:
-            raise ValueError(
-                "S3_VECTORS_BUCKET must contain the '{workspace_id}' placeholder "
-                f"for per-workspace isolation (got {bucket_template!r})."
-            )
+        # A bucket name may be a single shared bucket, or carry a {workspace_id}
+        # placeholder for physically per-workspace buckets — both are supported.
+        # Tenant isolation does NOT depend on the bucket layout: search() is
+        # fail-closed on workspace_id (it drops any hit whose metadata
+        # workspace_id != this backend's, and returns [] on a mismatched filter),
+        # so a shared bucket is still isolated at query time. PRD-172 F005 also
+        # *required* per-workspace buckets as belt-and-suspenders; that hard
+        # requirement broke a working shared-bucket deployment (2026-07-02) and is
+        # dropped — the query-level filter is the enforced isolation guarantee.
         self.bucket_name = bucket_template.replace("{workspace_id}", self.workspace_id)
 
         # Get index configuration from config

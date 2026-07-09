@@ -254,12 +254,13 @@ class TestF004ShopifyFailClosed:
 
 
 # ===========================================================================
-# F005 — S3 vector search drops cross-workspace hits; bucket placeholder required
+# F005 — S3 vector search drops cross-workspace hits (shared bucket isolated at query time)
 # ===========================================================================
 
 class TestF005VectorIsolation:
-    """S3VectorsBackend.search() now enforces its workspace filter, and a bucket
-    template without {workspace_id} is refused."""
+    """S3VectorsBackend.search() enforces its workspace filter — that is the
+    tenant-isolation guarantee. A shared bucket without {workspace_id} is
+    supported because the query filter, not the bucket layout, isolates tenants."""
 
     def _backend_cls(self):
         from modules.search.vector_store.backends.s3_vectors_backend import S3VectorsBackend
@@ -307,21 +308,31 @@ class TestF005VectorIsolation:
         results = b.search([0.1], filters={"workspace_id": str(WS_B)})
         assert results == []
 
-    def test_init_rejects_bucket_without_placeholder(self, monkeypatch):
+    def test_init_accepts_shared_bucket(self, monkeypatch):
+        # A shared bucket (no {workspace_id}) must construct fine — isolation is
+        # enforced per-query by search(), not the bucket layout. Regression: the
+        # hard placeholder requirement broke a working shared-bucket deployment
+        # on 2026-07-02.
         from config import config as app_config
+        import modules.search.vector_store.backends.s3_vectors_backend as s3mod
         monkeypatch.setattr(app_config, "S3_VECTORS_BUCKET", "one-shared-bucket", raising=False)
+        monkeypatch.setattr(s3mod.boto3, "client", lambda *a, **k: MagicMock())
         cls = self._backend_cls()
-        with pytest.raises(ValueError, match="workspace_id"):
-            cls(workspace_id=str(WS_A))
+        b = cls(workspace_id=str(WS_A))  # must NOT raise
+        assert b.bucket_name == "one-shared-bucket"
+        assert str(b.workspace_id) == str(WS_A)
 
-    def test_config_boot_asserts_bucket_placeholder(self, monkeypatch):
+    def test_config_boot_allows_shared_bucket(self, monkeypatch):
+        # A shared bucket must NOT abort boot — isolation is per-query (search()),
+        # not bucket-layout. Regression: the hard placeholder requirement broke a
+        # working shared-bucket deployment on 2026-07-02.
         from config import Config
         cfg = Config()
         monkeypatch.setattr(cfg, "SHOPIFY_INTERNAL_API_KEY", "x", raising=False)
         monkeypatch.setattr(cfg, "S3_VECTORS_ENABLED", True, raising=False)
         monkeypatch.setattr(cfg, "S3_VECTORS_BUCKET", "shared-no-placeholder", raising=False)
-        with pytest.raises(RuntimeError, match="workspace_id"):
-            cfg.validate_security()
+        monkeypatch.setattr(cfg, "validate_auth_edition", lambda: None, raising=False)
+        cfg.validate_security()  # must not raise on the bucket layout
 
 
 # ===========================================================================
