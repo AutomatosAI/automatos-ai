@@ -82,6 +82,7 @@ class OpenRouterEmbeddingProvider(BaseEmbeddingProvider):
         # foreign loop gets a fresh ephemeral client bound to it.
         self._primary_loop = None
         self.client = None  # created lazily per loop via _client_for_loop()
+        self._extra_body = self._provider_routing_extra_body()
 
         if not api_key:
             logger.warning(
@@ -95,6 +96,24 @@ class OpenRouterEmbeddingProvider(BaseEmbeddingProvider):
                 f"model: {self.config.model}, dim: {self.config.dimension}, "
                 f"max_ctx: {model_info[1]} tokens"
             )
+
+    @staticmethod
+    def _provider_routing_extra_body():
+        """OpenRouter provider-routing preferences for embedding requests.
+
+        OpenRouter's default routing is price-sorted, so the slowest upstream
+        for a model can win ties — measured 37-67s/call on qwen3-embedding-8b
+        (2026-07-09) while all three hosts showed ~100% uptime. sort=latency
+        makes OpenRouter pick the fastest measured provider instead. Config
+        empty string disables (None → field omitted from the request).
+        """
+        try:
+            sort = (getattr(config, "OPENROUTER_EMBEDDING_PROVIDER_SORT", "") or "").strip()
+        except Exception:
+            sort = ""
+        if not sort:
+            return None
+        return {"provider": {"sort": sort}}
 
     def _client_for_loop(self):
         """An AsyncOpenAI client bound to the CURRENT running event loop.
@@ -139,6 +158,7 @@ class OpenRouterEmbeddingProvider(BaseEmbeddingProvider):
             response = await client.embeddings.create(
                 model=self.config.model,
                 input=text,
+                extra_body=self._extra_body,
             )
             embedding = response.data[0].embedding
 
@@ -194,6 +214,7 @@ class OpenRouterEmbeddingProvider(BaseEmbeddingProvider):
             response = await client.embeddings.create(
                 model=self.config.model,
                 input=processed_texts,
+                extra_body=self._extra_body,
             )
 
             embeddings = [None] * len(processed_texts)
@@ -224,6 +245,7 @@ class OpenRouterEmbeddingProvider(BaseEmbeddingProvider):
                     resp = await client.embeddings.create(
                         model=self.config.model,
                         input=text,
+                        extra_body=self._extra_body,
                     )
                     emb = resp.data[0].embedding
                     if len(emb) > self.config.dimension:

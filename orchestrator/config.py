@@ -435,6 +435,10 @@ class Config:
     # =============================================================================
     OPENROUTER_BASE_URL: str = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
     OPENROUTER_SITE_URL: str = os.getenv("OPENROUTER_SITE_URL", "https://automatos.app")
+    # OpenRouter routes embeddings by PRICE by default, so the slowest upstream
+    # can win ties (qwen3-embedding-8b measured 37-67s/call, 2026-07-09).
+    # "latency" re-sorts to the fastest measured provider. Empty string disables.
+    OPENROUTER_EMBEDDING_PROVIDER_SORT: str = os.getenv("OPENROUTER_EMBEDDING_PROVIDER_SORT", "latency")
     COHERE_RERANK_URL: str = os.getenv("COHERE_RERANK_URL", "https://api.cohere.com/v2/rerank")
     RAILWAY_GQL_URL: str = os.getenv("RAILWAY_GQL_URL", "https://backboard.railway.app/graphql/v2")
     # PRD-176 F068: local-safe defaults. SaaS supplies the railway.internal host
