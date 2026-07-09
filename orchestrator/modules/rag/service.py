@@ -955,131 +955,9 @@ class RAGService:
             self._s3_backends[key] = backend
         return backend
 
-    @staticmethod
-    def _s3_vectors_backend_configured(enabled: bool, bucket: Optional[str]) -> bool:
-        """True only when S3 Vectors is enabled AND its bucket carries the
-        ``{workspace_id}`` placeholder.
-
-        A mis-templated/absent bucket means the S3 Vectors plane is dark — the
-        F005 per-workspace guard fail-closes on every query. In that state the
-        document plane must fall back to the live pgvector ``document_chunks``
-        rows rather than return 0 candidates after a full (slow) retrieval
-        attempt. Once PRD-186 relights S3 (templated bucket + populated index)
-        this returns True and the S3 path is used again — no code change needed.
-        """
-        if not enabled:
-            return False
-        return "{workspace_id}" in (bucket or "")
-
-    async def _get_pgvector_candidates(
-        self, query: str, limit: int = 20, min_similarity: float = 0.5, workspace_id: str = None
-    ) -> List[Dict]:
-        """Retrieve candidates from the live pgvector plane (``document_chunks``).
-
-        Queries the same ``document_chunks.embedding`` column the ingestion
-        pipeline populates, scoped to the caller's workspace via
-        ``documents.workspace_id`` (PRD-172 F005). Returns the identical
-        candidate dict shape as the S3 path so the rest of ``retrieve()``
-        (rerank, parent-context expansion, budgeting) stays backend-agnostic.
-        """
-        if not self._embedding_manager:
-            logger.error("Embedding manager not initialized — cannot search")
-            return []
-
-        effective_workspace_id = workspace_id or getattr(self, "_workspace_id", None)
-        if not effective_workspace_id:
-            logger.error("No workspace_id available — cannot search pgvector")
-            return []
-
-        try:
-            query_embedding = await self._embedding_manager.generate_embedding(query)
-            qvec = query_embedding.tolist() if hasattr(query_embedding, "tolist") else list(query_embedding)
-            # pgvector accepts a bracketed literal cast to ::vector
-            vec_literal = "[" + ",".join(repr(float(x)) for x in qvec) + "]"
-
-            import asyncpg
-            from config import config as app_config
-            conn = await asyncpg.connect(app_config.DATABASE_URL)
-            try:
-                rows = await conn.fetch(
-                    """
-                    SELECT dc.id, dc.content, dc.document_id, dc.chunk_index,
-                           dc.metadata, dc.headers, dc.parent_content,
-                           d.filename AS source_file, d.file_type AS file_type,
-                           1 - (dc.embedding <=> $1::vector) AS similarity
-                    FROM document_chunks dc
-                    JOIN documents d ON d.id = dc.document_id
-                    WHERE d.workspace_id = $2::uuid
-                      AND dc.embedding IS NOT NULL
-                      AND 1 - (dc.embedding <=> $1::vector) >= $3
-                    ORDER BY dc.embedding <=> $1::vector
-                    LIMIT $4
-                    """,
-                    vec_literal,
-                    str(effective_workspace_id),
-                    float(min_similarity),
-                    int(limit),
-                )
-            finally:
-                await conn.close()
-
-            candidates = []
-            for r in rows:
-                md = r["metadata"]
-                if isinstance(md, str):
-                    try:
-                        md = json.loads(md)
-                    except Exception:
-                        md = {}
-                if not isinstance(md, dict):
-                    md = {}
-                # parent-context expansion reads document_id + metadata.chunk_index
-                md.setdefault("chunk_index", r["chunk_index"])
-                md.setdefault("document_id", r["document_id"])
-
-                headers = r["headers"]
-                if isinstance(headers, str):
-                    try:
-                        headers = json.loads(headers)
-                    except Exception:
-                        headers = {}
-
-                candidates.append({
-                    "id": str(r["id"]),
-                    "content": r["content"] or "",
-                    "source_file": r["source_file"] or "unknown",
-                    "document_id": r["document_id"] or 0,
-                    "file_type": r["file_type"] or "",
-                    "similarity": float(r["similarity"]) if r["similarity"] is not None else 0.0,
-                    "metadata": md,
-                    "parent_content": r["parent_content"],
-                    "headers": headers if isinstance(headers, dict) else {},
-                })
-
-            logger.info(
-                f"✅ Retrieved {len(candidates)} candidates from pgvector "
-                f"(document_chunks) for workspace={effective_workspace_id}"
-            )
-            return candidates
-
-        except Exception as e:
-            from core.llm.clients.base import EmbeddingUnavailableError
-            if isinstance(e, EmbeddingUnavailableError):
-                # PRD-185 S3: typed EMPTY (honest "no grounding"), not an error.
-                logger.warning(f"Retrieval returned EMPTY — embeddings unavailable: {e}")
-                return []
-            logger.error(f"Error getting candidates from pgvector: {e}", exc_info=True)
-            return []
-
     async def _get_candidates(self, query: str, limit: int = 20, min_similarity: float = 0.5, workspace_id: str = None) -> List[Dict]:
         """
-        Get candidate chunks from the active document-vector backend.
-
-        Uses S3 Vectors only when it is enabled AND correctly configured
-        (:meth:`_s3_vectors_backend_configured`); otherwise falls back to the
-        live pgvector ``document_chunks`` plane, so a dark/mis-templated S3
-        backend never silently returns 0 docs (PRD-186 / 2026-07-09 slow-chat
-        incident).
+        Get candidate chunks via S3 Vectors.
 
         Args:
             workspace_id: Workspace ID for multi-tenant isolation.
@@ -1091,20 +969,8 @@ class RAGService:
 
         effective_workspace_id = workspace_id or getattr(self, "_workspace_id", None)
         if not effective_workspace_id:
-            logger.error("No workspace_id available — cannot search")
+            logger.error("No workspace_id available — cannot search S3 Vectors")
             return []
-
-        # Route to the live pgvector plane unless S3 Vectors is the active,
-        # correctly-configured backend (post-PRD-186 relight).
-        from config import config as _cfg
-        if not self._s3_vectors_backend_configured(
-            getattr(_cfg, "S3_VECTORS_ENABLED", False),
-            getattr(_cfg, "S3_VECTORS_BUCKET", None),
-        ):
-            return await self._get_pgvector_candidates(
-                query, limit=limit, min_similarity=min_similarity,
-                workspace_id=effective_workspace_id,
-            )
 
         try:
             # Generate query embedding

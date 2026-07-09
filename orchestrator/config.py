@@ -1055,10 +1055,10 @@ class Config:
         - F004: ``SHOPIFY_INTERNAL_API_KEY`` is unset while the Shopify
           provisioning surface is reachable — an empty key previously made
           ``_verify_internal_key`` accept any ``Authorization`` header.
-        - F005: S3 Vectors is enabled but ``S3_VECTORS_BUCKET`` does not embed
-          the ``{workspace_id}`` placeholder — a shared bucket with no
-          placeholder is a cross-tenant leak by construction, since every
-          workspace would resolve to the same physical bucket.
+        - F005: S3 Vectors is enabled but ``S3_VECTORS_BUCKET`` is unset. (A
+          shared bucket with no ``{workspace_id}`` placeholder is allowed —
+          tenant isolation is enforced per-query by ``S3VectorsBackend.search()``
+          (fail-closed on ``workspace_id``), not by the bucket layout.)
         """
         errors: list[str] = []
 
@@ -1070,21 +1070,17 @@ class Config:
                 "any Authorization header (fail-open). Set SHOPIFY_INTERNAL_API_KEY."
             )
 
-        # F005 — a shared S3 Vectors bucket with no per-workspace placeholder
-        # leaks chunks across tenants. Only assert when the feature is enabled.
+        # F005 — S3 Vectors, when enabled, needs a bucket. A shared bucket (no
+        # {workspace_id} placeholder) is supported: S3VectorsBackend.search() is
+        # fail-closed on workspace_id, so tenant isolation holds at query time
+        # regardless of bucket layout. Per-workspace buckets stay optional
+        # (belt-and-suspenders); the hard placeholder requirement broke a working
+        # shared-bucket deployment (2026-07-02), so it is not enforced here.
         if self.S3_VECTORS_ENABLED:
             bucket = (self.S3_VECTORS_BUCKET or "").strip()
             if not bucket:
                 errors.append(
                     "S3_VECTORS_ENABLED=true but S3_VECTORS_BUCKET is unset."
-                )
-            elif "{workspace_id}" not in bucket:
-                errors.append(
-                    "S3_VECTORS_ENABLED=true but S3_VECTORS_BUCKET "
-                    f"({bucket!r}) does not contain the '{{workspace_id}}' "
-                    "placeholder — every workspace would share one bucket "
-                    "(cross-tenant vector leak). Use e.g. "
-                    "'automatos-vectors-{workspace_id}'."
                 )
 
         if errors:
