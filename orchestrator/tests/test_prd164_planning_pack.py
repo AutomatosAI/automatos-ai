@@ -254,13 +254,16 @@ class TestPlanningModeRegistered:
         for name in MODE_CONFIGS[ContextMode.PLANNING].sections:
             assert name in SECTION_REGISTRY, f"section '{name}' not registered"
 
-    def test_planning_sections_cover_the_four_sources(self):
-        # RAG-on-goal, mission memory, KG subgraph, roster+performance (PRD-164
-        # S1) + the workspace field digest (PRD-179 S1, F021 read-half — a
-        # completed mission's promoted distillation reaching the next plan).
+    def test_planning_sections_cover_the_cheap_routing_signals(self):
+        # PERF (2026-07-09): the document-RAG leg ("planning_knowledge",
+        # RAG-on-goal) was removed from the classifier's pack — a ~80-113s /
+        # ~3k-token document retrieval on every non-heuristic message just to
+        # classify was the dominant chat latency/cost drain. The pack now
+        # carries only cheap routing signals: mission memory, KG subgraph, the
+        # workspace field digest (PRD-179 S1), and roster+performance. Documents
+        # are retrieved on demand in the response path via Auto's tools.
         assert MODE_CONFIGS[ContextMode.PLANNING].sections == [
-            "planning_knowledge", "planning_history",
-            "business_graph", "field_memory", "agent_roster",
+            "planning_history", "business_graph", "field_memory", "agent_roster",
         ]
 
     def test_planning_budget_exists(self):
