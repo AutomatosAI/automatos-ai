@@ -88,8 +88,17 @@ def test_documents_from_chunk_ranking_first_appearance_wins():
         "docB",
         "docC",
     ]
-    # Unknown chunk ids are skipped, never crash.
-    assert documents_from_chunk_ranking(["nope", "c2"], chunk_to_doc) == ["docB"]
+    # Ids absent from the map pass through as document ids — live mode ranks
+    # real document ids the fixture map has never seen.
+    assert documents_from_chunk_ranking(["nope", "c2"], chunk_to_doc) == ["nope", "docB"]
+
+
+def test_documents_from_chunk_ranking_live_document_id_passthrough():
+    # Live retrievers return document ids directly (build_live_variants); with
+    # a fixture-only map every non-empty id must survive, deduped, in order —
+    # before the passthrough, live runs collapsed to zero recall.
+    live_ranked = ["doc-live-1", "", "doc-live-1", "doc-live-2"]
+    assert documents_from_chunk_ranking(live_ranked, {}) == ["doc-live-1", "doc-live-2"]
 
 
 # ---------------------------------------------------------------------------

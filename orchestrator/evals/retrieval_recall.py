@@ -334,12 +334,17 @@ OFFLINE_VARIANTS: Dict[str, RetrieverFactory] = {
 def documents_from_chunk_ranking(ranked_chunk_ids: List[str], chunk_to_doc: Dict[str, str]) -> List[str]:
     """Collapse a ranked chunk list to a ranked document list — first
     appearance of each document wins (the "did we land on the right doc" view
-    the gold-set labels)."""
+    the gold-set labels).
+
+    Ids absent from the map pass through unchanged: live mode ranks real
+    document ids the fixture chunk→doc map has never seen (the live
+    retrievers already return document ids). Empty ids are dropped.
+    """
     seen = set()
     docs: List[str] = []
     for cid in ranked_chunk_ids:
-        doc = chunk_to_doc.get(cid)
-        if doc is None or doc in seen:
+        doc = chunk_to_doc.get(cid, cid)
+        if not doc or doc in seen:
             continue
         seen.add(doc)
         docs.append(doc)
@@ -454,8 +459,9 @@ def build_live_variants(workspace_id: str) -> Dict[str, RetrieverFactory]:
                 result = asyncio.run(
                     service.retrieve(query, max_chunks=TOP_K * 4, workspace_id=workspace_id)
                 )
-                # Chunk ids double as ranking ids; map to documents downstream
-                # via the live gold corpus (document_id carried on the chunk).
+                # Document ids ARE the ranking ids here — the driver's
+                # chunk→doc collapse passes ids it can't map straight through
+                # (live ids never appear in the fixture map) and drops empties.
                 return [str(c.get("document_id", "")) for c in result.chunks]
 
             return retrieve
