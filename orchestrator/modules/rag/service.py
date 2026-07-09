@@ -651,23 +651,36 @@ class RAGService:
         # Collect results from each query variation
         all_results = defaultdict(lambda: {"ranks": [], "doc": None})
         
-        for query in queries[:5]:  # Max 5 query variations
+        # Run the query variations CONCURRENTLY. Each variation is an
+        # independent embed + vector search, so the old serial await-loop made
+        # retrieval latency the SUM of all variations — the dominant cost in the
+        # ~80-113s context-prep times. asyncio.gather bounds it to the slowest
+        # single variation. RRF is order-independent (a sum of 1/(k+rank) per
+        # doc) and results are consumed in query order, so the fused output is
+        # byte-identical to the serial version.
+        import asyncio
+
+        async def _candidates_for(q: str) -> List[Dict]:
             try:
-                results = await self._get_candidates(
-                    query,
+                return await self._get_candidates(
+                    q,
                     limit=limit_per_query,
                     min_similarity=min_similarity,
-                    workspace_id=workspace_id
+                    workspace_id=workspace_id,
                 )
-                
-                for rank, doc in enumerate(results):
-                    doc_id = doc.get("id", doc.get("content", "")[:100])
-                    all_results[doc_id]["ranks"].append(rank)
-                    all_results[doc_id]["doc"] = doc
-                    
             except Exception as e:
                 logger.debug(f"Query variation failed: {e}")
-                continue
+                return []
+
+        per_query_results = await asyncio.gather(
+            *[_candidates_for(q) for q in queries[:5]]
+        )
+
+        for results in per_query_results:
+            for rank, doc in enumerate(results):
+                doc_id = doc.get("id", doc.get("content", "")[:100])
+                all_results[doc_id]["ranks"].append(rank)
+                all_results[doc_id]["doc"] = doc
         
         # Calculate RRF scores
         k = self.config.rrf_k  # Standard RRF constant (usually 60)
