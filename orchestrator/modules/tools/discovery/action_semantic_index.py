@@ -127,11 +127,14 @@ class ActionSemanticIndex:
         exclude_promoted: bool = True,
         include_super_admin: bool = False,
     ) -> List[Tuple[str, float]]:
+        import time as _perf_t
+        _perf_t0 = _perf_t.monotonic()
         await self.ensure_indexed(
             exclude_admin=exclude_admin,
             exclude_promoted=exclude_promoted,
             include_super_admin=include_super_admin,
         )
+        _perf_t1 = _perf_t.monotonic()
         # Pre-filter eligibility (admin/promoted), then score every remaining
         # action and let cosine similarity decide ranking. Earlier revisions
         # truncated `candidate_names` at 50 in registration order BEFORE
@@ -148,6 +151,7 @@ class ActionSemanticIndex:
         if not candidate_names:
             return []
         query_vec = np.asarray(await self._embedding_manager.generate_embedding(query), dtype=float)
+        _perf_t2 = _perf_t.monotonic()
         q_norm = float(np.linalg.norm(query_vec))
         if q_norm == 0.0:
             return []
@@ -159,6 +163,13 @@ class ActionSemanticIndex:
                 continue
             scored.append((name, float(np.dot(query_vec, vec) / (q_norm * v_norm))))
         scored.sort(key=lambda x: x[1], reverse=True)
+        logger.info(
+            "[perf] rank_actions: ensure_indexed=%.0fms query_embed=%.0fms cosine=%.0fms n_candidates=%d",
+            (_perf_t1 - _perf_t0) * 1000,
+            (_perf_t2 - _perf_t1) * 1000,
+            (_perf_t.monotonic() - _perf_t2) * 1000,
+            len(candidate_names),
+        )
         return scored[:top_k]
 
 
