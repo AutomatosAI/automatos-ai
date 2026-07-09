@@ -1,17 +1,20 @@
-"""PRD-164 S1 — Planning Context Pack consumed by all three planners (Q61).
+"""PRD-164 S1 — Planning Context Pack consumed by the real planners (Q61).
 
 Proves the four S1 acceptance criteria with DB-free tests:
 
 1. GOLDEN (learning demo): a seeded prior-mission failure recalled on the
    PRD-159 path flows through the ONE pack into MissionPlanner's prompt and
    visibly changes the resulting plan (the failed approach is avoided).
-2. GREP GATE: all three planners — MissionPlanner, board ``plan_task``,
-   AutoBrain — call ``ContextService.build_planning_context``; exactly one
+2. GREP GATE: the real planners — MissionPlanner and board ``plan_task`` —
+   call ``ContextService.build_planning_context`` (the hot-path AutoBrain
+   classifier is decoupled: it takes a cheap active-agent roster); exactly one
    assembler definition exists; no planner assembles RAG/memory/KG context
    itself; the pack's RAG section retrieves through the PRD-157 choke point.
 3. BUDGET: the pack stays within its token budget on oversized fixtures
    (both the PRD-157-budgeter cap helper and the full assembler).
-4. Wiring smoke for the AutoBrain and board consumers.
+4. Wiring smoke: the board consumer threads the pack into its prompt; the
+   hot-path AutoBrain classifier threads a cheap active-agent roster instead
+   (it does not build the pack).
 """
 from __future__ import annotations
 
@@ -81,11 +84,12 @@ from modules.context.service import ContextService  # noqa: E402
 
 ORCH_ROOT = Path(__file__).resolve().parent.parent
 
-# The three planners Q61 converges (binding story list, PRD-164 S1).
+# The real planners Q61 converges (binding story list, PRD-164 S1). AutoBrain
+# was removed here: the hot-path classifier no longer shares this pack — it takes
+# a cheap active-agent roster (its ~80-113s/message cost is off the hot path).
 PLANNER_SOURCES: Dict[str, Path] = {
     "mission_planner": ORCH_ROOT / "modules" / "coordination" / "planner.py",
     "board_plan_task": ORCH_ROOT / "api" / "board_tasks.py",
-    "auto_brain": ORCH_ROOT / "consumers" / "chatbot" / "auto.py",
 }
 
 FAILURE_MARKER = "LinkedIn blocks automated scraping"
@@ -254,16 +258,15 @@ class TestPlanningModeRegistered:
         for name in MODE_CONFIGS[ContextMode.PLANNING].sections:
             assert name in SECTION_REGISTRY, f"section '{name}' not registered"
 
-    def test_planning_sections_cover_the_cheap_routing_signals(self):
-        # PERF (2026-07-09): the document-RAG leg ("planning_knowledge",
-        # RAG-on-goal) was removed from the classifier's pack — a ~80-113s /
-        # ~3k-token document retrieval on every non-heuristic message just to
-        # classify was the dominant chat latency/cost drain. The pack now
-        # carries only cheap routing signals: mission memory, KG subgraph, the
-        # workspace field digest (PRD-179 S1), and roster+performance. Documents
-        # are retrieved on demand in the response path via Auto's tools.
+    def test_planning_sections_cover_the_four_sources(self):
+        # RAG-on-goal, mission memory, KG subgraph, roster+performance (PRD-164
+        # S1) + the workspace field digest (PRD-179 S1). This is the full planner
+        # pack, now consumed only by the REAL planners (MissionPlanner + board
+        # plan_task); the hot-path AutoBrain classifier takes a cheap active-agent
+        # roster instead of building this pack (perf/classifier-cheap-roster).
         assert MODE_CONFIGS[ContextMode.PLANNING].sections == [
-            "planning_history", "business_graph", "field_memory", "agent_roster",
+            "planning_knowledge", "planning_history",
+            "business_graph", "field_memory", "agent_roster",
         ]
 
     def test_planning_budget_exists(self):
@@ -423,7 +426,7 @@ class TestGoldenLearningDemo:
 
 
 class TestOneAssemblerGrepGate:
-    def test_all_three_planners_call_the_one_assembler(self):
+    def test_the_real_planners_call_the_one_assembler(self):
         for name, path in PLANNER_SOURCES.items():
             src = path.read_text()
             assert "build_planning_context(" in src, (
@@ -501,12 +504,24 @@ def _marker_pack() -> PlanningContextPack:
     )
 
 
-class TestAutoBrainConsumesPack:
+class TestAutoBrainRosterHint:
+    """The hot-path classifier does NOT build the planner pack. It threads a
+    cheap active-agent roster into the Tier-3 prompt (its ~80-113s/message pack
+    cost is off the per-message path); pack failure must never break classify."""
+
     @pytest.mark.asyncio
-    async def test_tier3_classify_prompt_contains_pack(self):
+    async def test_tier3_classify_prompt_contains_roster(self):
         from consumers.chatbot.auto import AutoBrain
 
-        brain = AutoBrain(db=MagicMock(), workspace_id="ws-auto")
+        db = MagicMock()
+        fake_agents = [
+            SimpleNamespace(name="Lead Scout", role="researcher", description="finds leads"),
+            SimpleNamespace(name="Writer", role="copywriter", description=""),
+        ]
+        # _planning_context_block: db.query(Agent).filter(...).limit(...).all()
+        db.query.return_value.filter.return_value.limit.return_value.all.return_value = fake_agents
+
+        brain = AutoBrain(db=db, workspace_id="ws-auto")
         brain._redis = None
 
         captured: Dict[str, Any] = {}
@@ -520,22 +535,20 @@ class TestAutoBrainConsumesPack:
                     "needs_multi_agent": False, "reasoning": "test",
                 }))
 
-        with patch.object(
-            ContextService, "build_planning_context",
-            new=AsyncMock(return_value=_marker_pack()),
-        ), patch(
-            "core.llm.create_llm_manager", return_value=_ClassifierLLM()
-        ):
+        with patch("core.llm.create_llm_manager", return_value=_ClassifierLLM()):
             assessment = await brain._llm_classify("build me a lead list", 0)
 
-        assert "PACK_MARKER_CONTENT" in captured["prompt"]
+        assert "Available agents" in captured["prompt"]
+        assert "Lead Scout" in captured["prompt"]
         assert assessment.complexity.value == "molecule"
 
     @pytest.mark.asyncio
-    async def test_pack_failure_never_breaks_classification(self):
+    async def test_roster_failure_never_breaks_classification(self):
         from consumers.chatbot.auto import AutoBrain
 
-        brain = AutoBrain(db=MagicMock(), workspace_id="ws-auto")
+        db = MagicMock()
+        db.query.side_effect = RuntimeError("roster query exploded")
+        brain = AutoBrain(db=db, workspace_id="ws-auto")
         brain._redis = None
 
         class _ClassifierLLM:
@@ -546,12 +559,7 @@ class TestAutoBrainConsumesPack:
                     "needs_multi_agent": False, "reasoning": "test",
                 }))
 
-        with patch.object(
-            ContextService, "build_planning_context",
-            new=AsyncMock(side_effect=RuntimeError("pack exploded")),
-        ), patch(
-            "core.llm.create_llm_manager", return_value=_ClassifierLLM()
-        ):
+        with patch("core.llm.create_llm_manager", return_value=_ClassifierLLM()):
             assessment = await brain._llm_classify("hello there friend", 0)
 
         assert assessment is not None

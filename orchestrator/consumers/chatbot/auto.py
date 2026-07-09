@@ -34,9 +34,10 @@ from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
-# PRD-164 S1 (Q61): Tier-3 classification consumes the one planning context
-# pack under a tight budget — the chat hot path can't afford the full 12k.
-_PLANNING_PACK_TOKENS = 2000
+# Tier-3 classification uses a cheap active-agent roster (not the planners'
+# full ContextService pack) — the chat hot path can't afford ~80-113s of
+# doc-RAG + graph BFS just to classify. Cap the roster so the prompt stays lean.
+_ROSTER_LIMIT = 40
 
 
 # ---------------------------------------------------------------------------
@@ -715,32 +716,47 @@ class AutoBrain:
     # ------------------------------------------------------------------
 
     async def _planning_context_block(self, message: str) -> str:
-        """The ONE platform planning pack (PRD-164 S1, Q61) for Tier 3.
+        """Cheap routing hint for Tier-3 classification: the active-agent roster.
 
-        Same assembler as MissionPlanner and board plan_task —
-        ``ContextService.build_planning_context`` — under a tight budget so
-        the hot chat path stays lean. Empty string on any failure: the
-        classifier must never break because context assembly did.
+        The classifier only needs to know which specialisations exist to
+        delegate to. It must NOT share the planners' full
+        ``ContextService.build_planning_context`` pack (doc-RAG + graph BFS +
+        agent-performance history): on the hot path (every non-heuristic
+        message) that ran ~80-113s to inform a decision the message intent
+        already drives. The real planners (MissionPlanner, board plan_task)
+        keep the rich pack; the hot-path classifier does not. Empty string on
+        any failure — the classifier must never break because of this.
         """
         try:
-            from modules.context.service import ContextService
+            from core.models.core import Agent
 
-            pack = await ContextService(self._db).build_planning_context(
-                goal=message,
-                workspace_id=self._workspace_id,
-                max_tokens=_PLANNING_PACK_TOKENS,
+            agents = (
+                self._db.query(Agent)
+                .filter(
+                    Agent.workspace_id == self._workspace_id,
+                    Agent.status == "active",
+                )
+                .limit(_ROSTER_LIMIT)
+                .all()
             )
-            if pack.is_empty:
+            if not agents:
                 return ""
+            lines = []
+            for a in agents:
+                name = getattr(a, "name", None) or getattr(a, "slug", None) or "agent"
+                role = getattr(a, "role", None)
+                desc = (getattr(a, "description", None) or "").strip()
+                label = f"{name} ({role})" if role else str(name)
+                summary = f": {desc[:80]}" if desc else ""
+                lines.append(f"- {label}{summary}")
             return (
-                f"\n## Platform context (for routing)\n{pack.content}\n\n"
-                "Factor this in: prior mission failures suggest which requests "
-                "need careful multi-step handling, and the roster shows which "
-                "specializations actually exist to delegate to.\n"
+                "\n## Available agents (for routing)\n"
+                + "\n".join(lines)
+                + "\n\nThe roster shows which specialisations exist to delegate to.\n"
             )
         except Exception:
             logger.debug(
-                "[AutoBrain] planning context pack unavailable — classifying without it",
+                "[AutoBrain] roster unavailable — classifying without it",
                 exc_info=True,
             )
             return ""

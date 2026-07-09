@@ -143,14 +143,15 @@ MODE_CONFIGS: dict[ContextMode, ModeConfig] = {
     # left open (documents + KG but never the field).
     ContextMode.PLANNING: ModeConfig(
         sections=[
-            # PERF (2026-07-09): the document-RAG section "planning_knowledge"
-            # was removed here. Running a multi-query document retrieval
-            # (~80-113s, ~3k tokens) on EVERY non-heuristic message just to
-            # classify its complexity was the dominant chat latency/cost drain.
-            # PRD-164 Q61 built one pack to inform routing; the doc-RAG leg was
-            # not worth its cost. Auto retrieves documents on demand via its
-            # search_knowledge / semantic_search tools in the response path.
-            "planning_history", "business_graph", "field_memory", "agent_roster",
+            # The full planner pack. Consumed ONLY by the real planners now —
+            # MissionPlanner + board plan_task (they build execution plans and
+            # want doc grounding). The hot-path AutoBrain classifier no longer
+            # uses this pack (it takes a cheap roster instead), so its ~80-113s
+            # cost is off the per-message path. (Restored planning_knowledge that
+            # PR #517 had stripped from the shared pack, which had also removed
+            # the planners' doc grounding as an unintended side effect.)
+            "planning_knowledge", "planning_history",
+            "business_graph", "field_memory", "agent_roster",
         ],
         tool_loading="none",
         personality=False,
