@@ -79,10 +79,10 @@ class ToolsSection(BaseSection):
                 return [], "none"
 
             if strategy == ToolLoadingStrategy.DISPATCHER_ONLY:
-                return self._load_dispatcher_only(query=query)
+                return await self._load_dispatcher_only(query=query)
 
             if strategy == ToolLoadingStrategy.FULL:
-                return self._load_full(agent_id, workspace_id, db_session, query=query)
+                return await self._load_full(agent_id, workspace_id, db_session, query=query)
 
             if strategy == ToolLoadingStrategy.FILTERED:
                 return await self._load_filtered(
@@ -109,7 +109,7 @@ class ToolsSection(BaseSection):
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _load_dispatcher_only(
+    async def _load_dispatcher_only(
         self,
         query: Optional[str] = None,
     ) -> tuple[list[dict[str, Any]], str]:
@@ -117,11 +117,12 @@ class ToolsSection(BaseSection):
 
         PRD-138 US-009: when a query is supplied AND SEMANTIC_TOOL_ROUTING
         is on, narrow the dispatcher's action.enum to top-K relevant
-        actions. Falls back to the full enum on any error.
+        actions. Falls back to the full enum on any error. Ranking is
+        awaited on this loop — never bridged through a helper thread.
         """
         from modules.tools.discovery.action_registry import get_action_registry
         from modules.tools.tool_router import (
-            _rank_actions_for_dispatcher,
+            _rank_actions_for_dispatcher_async,
             _semantic_routing_enabled,
             _semantic_routing_top_k,
         )
@@ -129,7 +130,7 @@ class ToolsSection(BaseSection):
         registry = get_action_registry()
         allowed_names: Optional[list[str]] = None
         if query and _semantic_routing_enabled():
-            allowed_names = _rank_actions_for_dispatcher(
+            allowed_names = await _rank_actions_for_dispatcher_async(
                 query=query,
                 top_k=_semantic_routing_top_k(),
                 exclude_admin=True,
@@ -141,7 +142,7 @@ class ToolsSection(BaseSection):
         )
         return [schema], "auto"
 
-    def _load_full(
+    async def _load_full(
         self,
         agent_id: Optional[int],
         workspace_id: str,
@@ -150,13 +151,13 @@ class ToolsSection(BaseSection):
     ) -> tuple[list[dict[str, Any]], str]:
         """Return all assigned tools (core + platform dispatcher + composio).
 
-        PRD-138 US-009: thread the query down to get_tools_for_agent so the
-        platform_execute dispatcher's action enum narrows when the flag
-        is on.
+        PRD-138 US-009: thread the query down to get_tools_for_agent_async
+        so the platform_execute dispatcher's action enum narrows when the
+        flag is on.
         """
-        from modules.tools.tool_router import get_tools_for_agent
+        from modules.tools.tool_router import get_tools_for_agent_async
 
-        tools = get_tools_for_agent(
+        tools = await get_tools_for_agent_async(
             agent_id=agent_id,
             db_session=db_session,
             workspace_id=workspace_id,
@@ -175,14 +176,14 @@ class ToolsSection(BaseSection):
         conversation_context: Optional[list[dict]] = None,
     ) -> tuple[list[dict[str, Any]], str]:
         """Return intent-filtered subset of tools via SmartToolRouter."""
-        from modules.tools.tool_router import get_tools_for_agent
+        from modules.tools.tool_router import get_tools_for_agent_async
 
         # Step 1: Load all available tools
         # PRD-138 US-009: pass query so the platform_execute dispatcher's
         # enum narrows even before SmartToolRouter sees the list. Both
         # filters compose — semantic narrowing trims the platform_execute
         # action enum, SmartToolRouter trims the top-level tools list.
-        all_tools = get_tools_for_agent(
+        all_tools = await get_tools_for_agent_async(
             agent_id=agent_id,
             db_session=db_session,
             workspace_id=workspace_id,

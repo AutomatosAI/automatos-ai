@@ -133,7 +133,7 @@ def _run_coroutine_blocking(coro: Coroutine) -> Any:
         return result
 
 
-def _rank_actions_for_dispatcher(
+async def _rank_actions_for_dispatcher_async(
     query: str,
     top_k: int,
     exclude_admin: bool,
@@ -142,6 +142,12 @@ def _rank_actions_for_dispatcher(
 ) -> Optional[List[str]]:
     """Return the top-K action names for ``query`` from ActionSemanticIndex,
     or None on any failure (caller falls back to the full enum).
+
+    Async-native: awaits rank_actions on the CALLER'S loop — no thread
+    bridge, so a slow embedding upstream can neither freeze the event loop
+    nor strand httpx clients on ephemeral loops. rank_actions itself bounds
+    the live query embed (SEMANTIC_TOOL_ROUTING_EMBED_TIMEOUT_S) and returns
+    [] on timeout, which lands in the full-enum fallback here.
 
     PRD-143: include_super_admin defaults False (fail-closed) — su actions
     are never ranked for an operator caller.
@@ -159,18 +165,16 @@ def _rank_actions_for_dispatcher(
         _t0 = time.monotonic()
         index = get_action_semantic_index()
         _t1 = time.monotonic()
-        ranked = _run_coroutine_blocking(
-            index.rank_actions(
-                query,
-                top_k=top_k,
-                exclude_admin=exclude_admin,
-                exclude_promoted=exclude_promoted,
-                include_super_admin=include_super_admin,
-            )
+        ranked = await index.rank_actions(
+            query,
+            top_k=top_k,
+            exclude_admin=exclude_admin,
+            exclude_promoted=exclude_promoted,
+            include_super_admin=include_super_admin,
         )
         _t2 = time.monotonic()
         logger.info(
-            "[perf] _rank_actions_for_dispatcher: get_index=%.0fms rank_actions(+bridge)=%.0fms",
+            "[perf] _rank_actions_for_dispatcher: get_index=%.0fms rank_actions=%.0fms",
             (_t1 - _t0) * 1000,
             (_t2 - _t1) * 1000,
         )
@@ -185,6 +189,94 @@ def _rank_actions_for_dispatcher(
             exc,
         )
         return None
+
+
+def _rank_actions_for_dispatcher(
+    query: str,
+    top_k: int,
+    exclude_admin: bool,
+    exclude_promoted: bool,
+    include_super_admin: bool = False,
+) -> Optional[List[str]]:
+    """Sync compatibility entry — bridges to the async core.
+
+    Only for genuinely-sync callers (module-load, scripts). Async code must
+    await _rank_actions_for_dispatcher_async directly instead of paying the
+    thread bridge.
+    """
+    try:
+        return _run_coroutine_blocking(
+            _rank_actions_for_dispatcher_async(
+                query,
+                top_k=top_k,
+                exclude_admin=exclude_admin,
+                exclude_promoted=exclude_promoted,
+                include_super_admin=include_super_admin,
+            )
+        )
+    except Exception as exc:
+        logger.warning(
+            "_rank_actions_for_dispatcher failed (query=%r): %s — "
+            "falling back to full enum",
+            (query or "")[:80],
+            exc,
+        )
+        return None
+
+
+def _narrow_dispatcher_actions_async_inputs(
+    query: Optional[str],
+) -> Optional[str]:
+    """Shared gate for the narrowing paths: a reason string when narrowing
+    must be skipped, None when ranking should run."""
+    if not _semantic_routing_enabled():
+        return "flag SEMANTIC_TOOL_ROUTING=False"
+    if not query:
+        return "no query supplied"
+    return None
+
+
+async def _narrow_dispatcher_actions_async(
+    query: Optional[str],
+    is_admin: bool,
+    is_super_admin: bool,
+) -> Tuple[Optional[List[str]], Optional[str]]:
+    """Resolve (allowed_names, narrow_reason) for the dispatcher enum —
+    async-native (awaits ranking on the caller's loop)."""
+    skip_reason = _narrow_dispatcher_actions_async_inputs(query)
+    if skip_reason is not None:
+        return None, skip_reason
+    allowed = await _rank_actions_for_dispatcher_async(
+        query=query,
+        top_k=_semantic_routing_top_k(),
+        exclude_admin=not is_admin,
+        exclude_promoted=True,
+        include_super_admin=is_super_admin,
+    )
+    if allowed is None:
+        return None, "rank_actions returned empty or raised"
+    return allowed, None
+
+
+def _narrow_dispatcher_actions_sync(
+    query: Optional[str],
+    is_admin: bool,
+    is_super_admin: bool,
+) -> Tuple[Optional[List[str]], Optional[str]]:
+    """Sync twin of _narrow_dispatcher_actions_async (thread bridge)."""
+    skip_reason = _narrow_dispatcher_actions_async_inputs(query)
+    if skip_reason is not None:
+        return None, skip_reason
+    allowed = _rank_actions_for_dispatcher(
+        query=query,
+        top_k=_semantic_routing_top_k(),
+        exclude_admin=not is_admin,
+        exclude_promoted=True,
+        include_super_admin=is_super_admin,
+    )
+    if allowed is None:
+        return None, "rank_actions returned empty or raised"
+    return allowed, None
 
 
 def _resolve_relative_date_window_utc(intent: str) -> Optional[tuple[datetime.date, datetime.date]]:
@@ -236,50 +328,83 @@ def _rewrite_query_after_before(query: str, after_date: datetime.date, before_da
 # =============================================================================
 
 
-def get_tools_for_agent(
-    agent_id: Optional[int] = None,
-    db_session=None,
-    workspace_id: Optional[Any] = None,
-    is_admin: bool = False,
-    query: Optional[str] = None,
-    is_super_admin: bool = False,
-) -> List[Dict[str, Any]]:
-    """
-    Get tools from modules.tools.ToolRegistry in OpenAI function format.
-    SINGLE SOURCE OF TRUTH — no duplicate definitions.
+def _resolve_workspace_id_from_agent(
+    session_used,
+    agent_id: Optional[int],
+    workspace_id: Optional[Any],
+    trace_id: str,
+) -> Optional[Any]:
+    """Resolve workspace_id from the agent row when not provided (needed for
+    Composio gating and workspace-admin resolution)."""
+    if agent_id is None or workspace_id is not None:
+        return workspace_id
+    try:
+        from core.models import Agent as AgentModel
+        agent_row = session_used.query(AgentModel).filter(AgentModel.id == agent_id).first()
+        if agent_row and getattr(agent_row, "workspace_id", None):
+            workspace_id = agent_row.workspace_id
+            logger.info(f"[tool-trace {trace_id}] Resolved workspace_id from agent {agent_id} for tool list gating")
+    except Exception as exc:
+        logger.warning(f"[tool-trace {trace_id}] Failed to resolve workspace_id for agent {agent_id}: {exc}")
+    return workspace_id
 
-    Args:
-        query: Optional natural-language query (typically the latest user
-            turn). When provided AND SEMANTIC_TOOL_ROUTING is on, the
-            platform_execute dispatcher's action.enum is narrowed via
-            ActionSemanticIndex to the top-K most relevant actions —
-            closes the prompt-vs-schema gap from PRD-138 Phase 1 (US-008).
-            On any error or empty rank, falls back to the full enum.
-        is_super_admin: PRD-143 — True ONLY when the driving principal is
-            literally system_role == 'super_admin'. Fail-closed default:
-            super_admin_only actions are excluded from the dispatcher enum,
-            first-class schemas, and semantic ranking. Unlike ``is_admin``,
-            this is NEVER auto-resolved from workspace roles or autonomy.
+
+def _resolve_workspace_admin(
+    session_used,
+    workspace_id: Optional[Any],
+    is_admin: bool,
+    trace_id: str,
+) -> bool:
+    """PRD-122 fix: auto-resolve admin status from workspace owner role when
+    no explicit is_admin was passed (heartbeat, agent factory paths).
+
+    PRD-143: this fallback may flip is_admin ONLY — is_super_admin is never
+    derived from workspace roles (su trap #2, PRD-143 §9)."""
+    if is_admin or not workspace_id or session_used is None:
+        return is_admin
+    try:
+        from core.workspaces.models import WorkspaceMember
+        has_admin = (
+            session_used.query(WorkspaceMember)
+            .filter(
+                WorkspaceMember.workspace_id == workspace_id,
+                WorkspaceMember.role.in_(("owner", "admin")),
+                WorkspaceMember.is_active.is_(True),
+            )
+            .first()
+        )
+        if has_admin:
+            logger.info(f"[tool-trace {trace_id}] Workspace {workspace_id} has admin/owner — including admin tools")
+            return True
+    except Exception as exc:
+        logger.debug(f"[tool-trace {trace_id}] Could not resolve workspace admin status: {exc}")
+    return is_admin
+
+
+def _get_tools_for_agent_core(
+    *,
+    agent_id: Optional[int],
+    session_used,
+    workspace_id: Optional[Any],
+    is_admin: bool,
+    is_super_admin: bool,
+    query: Optional[str],
+    narrowing: Tuple[Optional[List[str]], Optional[str]],
+    trace_id: str,
+    start_time: float,
+) -> List[Dict[str, Any]]:
+    """Shared body for get_tools_for_agent / get_tools_for_agent_async.
+
+    Callers resolve workspace_id / is_admin and compute ``narrowing`` =
+    (allowed_names, narrow_reason) FIRST — sync callers via the thread
+    bridge, async callers by awaiting on their own loop — so this body
+    stays loop-free. The session is owned (and closed) by the caller.
     """
-    session_used = db_session or SessionLocal()
-    trace_id = _new_trace_id()
-    start_time = time.time()
     try:
         registry = registry_get_tool_registry(db_session=session_used)
         all_candidates = registry.get_all_tools(active_only=True)
         filtered_tools = all_candidates
         denied: List[Dict[str, Any]] = []
-
-        # Resolve workspace_id from agent if not provided (needed for Composio gating)
-        if agent_id is not None and workspace_id is None:
-            try:
-                from core.models import Agent as AgentModel
-                agent_row = session_used.query(AgentModel).filter(AgentModel.id == agent_id).first()
-                if agent_row and getattr(agent_row, "workspace_id", None):
-                    workspace_id = agent_row.workspace_id
-                    logger.info(f"[tool-trace {trace_id}] Resolved workspace_id from agent {agent_id} for tool list gating")
-            except Exception as exc:
-                logger.warning(f"[tool-trace {trace_id}] Failed to resolve workspace_id for agent {agent_id}: {exc}")
 
         if agent_id is not None:
             filtered_tools = []
@@ -384,28 +509,6 @@ def get_tools_for_agent(
                 "function": schema
             })
 
-        # PRD-122 fix: Auto-resolve admin status from workspace owner role
-        # when no explicit is_admin was passed (heartbeat, agent factory paths).
-        # PRD-143: this fallback may flip is_admin ONLY — is_super_admin is
-        # never derived from workspace roles (su trap #2, PRD-143 §9).
-        if not is_admin and workspace_id and session_used:
-            try:
-                from core.workspaces.models import WorkspaceMember
-                has_admin = (
-                    session_used.query(WorkspaceMember)
-                    .filter(
-                        WorkspaceMember.workspace_id == workspace_id,
-                        WorkspaceMember.role.in_(("owner", "admin")),
-                        WorkspaceMember.is_active.is_(True),
-                    )
-                    .first()
-                )
-                if has_admin:
-                    is_admin = True
-                    logger.info(f"[tool-trace {trace_id}] Workspace {workspace_id} has admin/owner — including admin tools")
-            except Exception as exc:
-                logger.debug(f"[tool-trace {trace_id}] Could not resolve workspace admin status: {exc}")
-
         # PRD-64: Single dispatcher for platform actions (reduces 58 schemas → 1)
         # PRD-138 US-009: Narrow the dispatcher's action.enum to the top-K
         # semantically relevant actions when a query is supplied AND
@@ -417,22 +520,9 @@ def get_tools_for_agent(
             from modules.tools.discovery import get_action_registry
             action_registry = get_action_registry()
 
-            allowed_names: Optional[List[str]] = None
-            narrow_reason: Optional[str] = None
-            if not _semantic_routing_enabled():
-                narrow_reason = "flag SEMANTIC_TOOL_ROUTING=False"
-            elif not query:
-                narrow_reason = "no query supplied"
-            else:
-                allowed_names = _rank_actions_for_dispatcher(
-                    query=query,
-                    top_k=_semantic_routing_top_k(),
-                    exclude_admin=not is_admin,
-                    exclude_promoted=True,
-                    include_super_admin=is_super_admin,
-                )
-                if allowed_names is None:
-                    narrow_reason = "rank_actions returned empty or raised"
+            # Narrowing was resolved by the public entry (sync bridge or
+            # native await) BEFORE this loop-free body ran.
+            allowed_names, narrow_reason = narrowing
 
             dispatcher_schema = action_registry.to_dispatcher_schema(
                 exclude_admin=not is_admin,
@@ -503,9 +593,114 @@ def get_tools_for_agent(
     except Exception as e:
         logger.error(f"[tool-trace {trace_id}] Error loading tools from registry: {e}")
         return []
+
+
+_GET_TOOLS_DOC = """
+    Get tools from modules.tools.ToolRegistry in OpenAI function format.
+    SINGLE SOURCE OF TRUTH — no duplicate definitions.
+
+    Args:
+        query: Optional natural-language query (typically the latest user
+            turn). When provided AND SEMANTIC_TOOL_ROUTING is on, the
+            platform_execute dispatcher's action.enum is narrowed via
+            ActionSemanticIndex to the top-K most relevant actions —
+            closes the prompt-vs-schema gap from PRD-138 Phase 1 (US-008).
+            On any error, empty rank, or embed timeout
+            (SEMANTIC_TOOL_ROUTING_EMBED_TIMEOUT_S), falls back to the
+            full enum.
+        is_super_admin: PRD-143 — True ONLY when the driving principal is
+            literally system_role == 'super_admin'. Fail-closed default:
+            super_admin_only actions are excluded from the dispatcher enum,
+            first-class schemas, and semantic ranking. Unlike ``is_admin``,
+            this is NEVER auto-resolved from workspace roles or autonomy.
+    """
+
+
+def get_tools_for_agent(
+    agent_id: Optional[int] = None,
+    db_session=None,
+    workspace_id: Optional[Any] = None,
+    is_admin: bool = False,
+    query: Optional[str] = None,
+    is_super_admin: bool = False,
+) -> List[Dict[str, Any]]:
+    session_used = db_session or SessionLocal()
+    trace_id = _new_trace_id()
+    start_time = time.time()
+    try:
+        workspace_id = _resolve_workspace_id_from_agent(session_used, agent_id, workspace_id, trace_id)
+        is_admin = _resolve_workspace_admin(session_used, workspace_id, is_admin, trace_id)
+        narrowing = _narrow_dispatcher_actions_sync(query, is_admin, is_super_admin)
+        return _get_tools_for_agent_core(
+            agent_id=agent_id,
+            session_used=session_used,
+            workspace_id=workspace_id,
+            is_admin=is_admin,
+            is_super_admin=is_super_admin,
+            query=query,
+            narrowing=narrowing,
+            trace_id=trace_id,
+            start_time=start_time,
+        )
+    except Exception as e:
+        logger.error(f"[tool-trace {trace_id}] Error loading tools from registry: {e}")
+        return []
     finally:
         if db_session is None:
             session_used.close()
+
+
+async def get_tools_for_agent_async(
+    agent_id: Optional[int] = None,
+    db_session=None,
+    workspace_id: Optional[Any] = None,
+    is_admin: bool = False,
+    query: Optional[str] = None,
+    is_super_admin: bool = False,
+) -> List[Dict[str, Any]]:
+    session_used = db_session or SessionLocal()
+    trace_id = _new_trace_id()
+    start_time = time.time()
+    try:
+        workspace_id = _resolve_workspace_id_from_agent(session_used, agent_id, workspace_id, trace_id)
+        is_admin = _resolve_workspace_admin(session_used, workspace_id, is_admin, trace_id)
+        narrowing = await _narrow_dispatcher_actions_async(query, is_admin, is_super_admin)
+        return _get_tools_for_agent_core(
+            agent_id=agent_id,
+            session_used=session_used,
+            workspace_id=workspace_id,
+            is_admin=is_admin,
+            is_super_admin=is_super_admin,
+            query=query,
+            narrowing=narrowing,
+            trace_id=trace_id,
+            start_time=start_time,
+        )
+    except Exception as e:
+        logger.error(f"[tool-trace {trace_id}] Error loading tools from registry: {e}")
+        return []
+    finally:
+        if db_session is None:
+            session_used.close()
+
+
+get_tools_for_agent.__doc__ = (
+    _GET_TOOLS_DOC
+    + """
+    Sync entry — for genuinely-sync callers only (module-load, scripts).
+    When invoked while an event loop is running, the semantic ranking pays
+    a thread bridge. Async code must use get_tools_for_agent_async.
+    """
+)
+get_tools_for_agent_async.__doc__ = (
+    _GET_TOOLS_DOC
+    + """
+    Async-native entry — the hot chat/agent paths. The narrowing embed is
+    awaited on the caller's loop (no thread bridge, no loop freeze) and is
+    time-bounded so a degraded embedding upstream costs at most
+    SEMANTIC_TOOL_ROUTING_EMBED_TIMEOUT_S before the full-enum fallback.
+    """
+)
 
 
 # =============================================================================

@@ -46,11 +46,13 @@ from consumers.chatbot.streaming import get_streaming_handler
 from consumers.chatbot.tool_router import get_tool_router
 
 # Import from modules — SINGLE SOURCE for tool schemas
+# Async-native entries: the chat hot path must never bridge the narrowing
+# embed through a helper thread (freezes the event loop for its duration).
 from modules.tools.tool_router import (
-    _rank_actions_for_dispatcher,
+    _rank_actions_for_dispatcher_async,
     _semantic_routing_enabled,
     _semantic_routing_top_k,
-    get_tools_for_agent,
+    get_tools_for_agent_async,
 )
 
 logger = logging.getLogger(__name__)
@@ -751,7 +753,7 @@ class StreamingChatService:
     # Tool source — SINGLE SOURCE OF TRUTH
     # ─────────────────────────────────────────────────────────────────────
 
-    def _get_tools(
+    async def _get_tools(
         self,
         agent_id: int,
         skill_tools: Optional[List[Dict[str, Any]]] = None,
@@ -772,7 +774,7 @@ class StreamingChatService:
                 is system_role == 'super_admin'. Fail-closed default excludes
                 the su tool tier from the surface.
         """
-        all_tools = get_tools_for_agent(
+        all_tools = await get_tools_for_agent_async(
             agent_id=agent_id,
             db_session=self.db,
             workspace_id=self.workspace_id,
@@ -2044,7 +2046,7 @@ class StreamingChatService:
             agent_ctx = await self._load_agent_context(agent_runtime)
             all_tools = []
             if _complexity != Complexity.ATOM:
-                all_tools = self._get_tools(
+                all_tools = await self._get_tools(
                     agent_id,
                     agent_ctx.get("skill_tools"),
                     query=latest_text,
@@ -2062,7 +2064,7 @@ class StreamingChatService:
                     from modules.tools.discovery.action_registry import get_action_registry
                     _allowed = None
                     if _semantic_routing_enabled() and latest_text:
-                        _allowed = _rank_actions_for_dispatcher(
+                        _allowed = await _rank_actions_for_dispatcher_async(
                             query=latest_text,
                             top_k=_semantic_routing_top_k(),
                             exclude_admin=True,
@@ -2279,7 +2281,7 @@ class StreamingChatService:
         # enum can be narrowed to relevant actions for this query.
         if tools is None:
             _query = self.prompt_analyzer.extract_latest_user_text(messages)
-            tools = get_tools_for_agent(query=_query)
+            tools = await get_tools_for_agent_async(query=_query)
 
         try:
             llm_manager = create_llm_manager(service_name="chatbot", workspace_id=self.workspace_id, request_type="chat")
