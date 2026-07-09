@@ -1028,6 +1028,21 @@ class Config:
         except Exception:
             return os.getenv("RAG_RERANK_MODEL", "rerank-v3.5")
 
+    @property
+    def RAG_HYBRID_ENABLED(self) -> bool:
+        """Real dense+sparse hybrid retrieval (default: ON — PRD-188 S3).
+
+        The BM25 leg reads the document_chunks.search_vector index the
+        platform already maintains on every insert; OFF preserves the old
+        dense-only behaviour exactly.
+        """
+        try:
+            from core.llm.manager import get_system_setting
+            val = get_system_setting("rag", "hybrid_enabled", "true")
+            return str(val).lower() == "true" if val else True
+        except Exception:
+            return os.getenv("RAG_HYBRID_ENABLED", "true").lower() == "true"
+
     # PRD-179 S4 (F070): rag_feedback feeds retrieval ranking. A document that
     # accrued negative feedback (thumbs_down, or a rating at/below the floor) has
     # its retrieval score multiplied by this factor on the live hot path — a doc
