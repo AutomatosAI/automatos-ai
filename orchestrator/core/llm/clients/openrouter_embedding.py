@@ -221,7 +221,7 @@ class OpenRouterEmbeddingProvider(BaseEmbeddingProvider):
         async def embed_one(idx: int, text: str):
             async with semaphore:
                 try:
-                    resp = await self.client.embeddings.create(
+                    resp = await client.embeddings.create(
                         model=self.config.model,
                         input=text,
                     )
