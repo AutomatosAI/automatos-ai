@@ -61,9 +61,11 @@ export const chatMarkdownComponents = {
     <li className="text-foreground dark:text-gray-100 pl-1">{children}</li>
   ),
   // Inline code ONLY — block code never reaches this because `pre` below
-  // renders fenced blocks itself via CodeBlock.
+  // renders fenced blocks itself via CodeBlock. Neutral tones on purpose:
+  // audit-style replies carry dozens of inline spans per message, and a
+  // brand-orange pill at that density floods the whole transcript.
   code: ({ children }: any) => (
-    <code className="rounded bg-primary/10 px-1.5 py-0.5 text-[13px] font-mono text-primary border border-primary/10">
+    <code className="rounded bg-secondary/60 px-1.5 py-0.5 text-[13px] font-mono text-foreground/90 border border-border/50 dark:bg-white/[0.06] dark:text-gray-200 dark:border-white/10">
       {children}
     </code>
   ),
