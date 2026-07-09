@@ -127,7 +127,9 @@ class RAGConfig:
     # Phase 2: Advanced retrieval options
     enable_query_enhancement: bool = True
     enable_rrf_fusion: bool = True
-    enable_reranking: bool = False
+    # None = "caller didn't choose" → resolved in __post_init__ from the
+    # canonical config accessor (default ON). An explicit True/False wins.
+    enable_reranking: Optional[bool] = None
     rrf_k: int = 60
 
     # Hybrid search settings
@@ -152,8 +154,16 @@ class RAGConfig:
         if self.min_similarity is None:
             self.min_similarity = _get_rag_setting_float("min_similarity", 0.5)
         
-        # Load reranking toggle from system_settings
-        self.enable_reranking = _get_rag_setting_str("rag_rerank_enabled", "false") == "true"
+        # PRD-188 S1: rerank defaults ON via the canonical accessor
+        # (config.RAG_RERANK_ENABLED — system_settings 'rag'/'rerank_enabled',
+        # then env). An explicit caller value wins: the eval lever grid and
+        # per-request overrides rely on that. The old read of the flat
+        # 'rag_rerank_enabled' key is deleted — PRD-136 renamed that key, so
+        # the lookup always missed, always returned "false", and silently
+        # pinned the pipeline's highest-precision stage off.
+        if self.enable_reranking is None:
+            from config import config as app_config
+            self.enable_reranking = bool(app_config.RAG_RERANK_ENABLED)
 
         logger.info(f"RAGConfig loaded: max_tokens={self.max_tokens}, diversity={self.diversity}, min_similarity={self.min_similarity}, reranking={self.enable_reranking}")
 

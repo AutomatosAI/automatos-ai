@@ -1466,7 +1466,6 @@ async def rag_retrieve(
         config = RAGConfig(
             enable_query_enhancement=True,
             enable_rrf_fusion=True,
-            enable_reranking=False,  # Disabled by default for speed
             **config_kwargs
         )
         

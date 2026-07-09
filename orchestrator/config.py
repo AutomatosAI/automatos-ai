@@ -1003,13 +1003,30 @@ class Config:
     
     @property
     def RAG_RERANK_ENABLED(self) -> bool:
-        """Get rerank enabled from system settings (default: False)"""
+        """Rerank on the retrieval hot path (default: ON — PRD-188 S1).
+
+        Cohere stays a graceful-degrade seam: with no COHERE_API_KEY the
+        reranker returns identity order, never an error, so ON is safe even
+        before the key exists.
+        """
         try:
             from core.llm.manager import get_system_setting
-            val = get_system_setting("rag", "rerank_enabled", "false")
-            return str(val).lower() == "true" if val else False
+            val = get_system_setting("rag", "rerank_enabled", "true")
+            return str(val).lower() == "true" if val else True
         except Exception:
-            return os.getenv("RAG_RERANK_ENABLED", "false").lower() == "true"
+            return os.getenv("RAG_RERANK_ENABLED", "true").lower() == "true"
+
+    @property
+    def RAG_RERANK_MODEL(self) -> str:
+        """Cohere rerank model id — the default lives here, not in
+        rerank_manager (PRD-188 S1). rerank-v3.5 is the current verified
+        Cohere id; upgrading is a setting/env flip, never a code change."""
+        try:
+            from core.llm.manager import get_system_setting
+            val = get_system_setting("rag", "rerank_model", "rerank-v3.5")
+            return str(val) if val else "rerank-v3.5"
+        except Exception:
+            return os.getenv("RAG_RERANK_MODEL", "rerank-v3.5")
 
     # PRD-179 S4 (F070): rag_feedback feeds retrieval ranking. A document that
     # accrued negative feedback (thumbs_down, or a rating at/below the floor) has
