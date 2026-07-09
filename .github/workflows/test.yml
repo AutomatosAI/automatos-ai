@@ -307,6 +307,57 @@ jobs:
         run: |
           python -m evals.memory_recall --json
 
+  # PRD-188 S5 (P2-07) — the RAG quality number: document-level recall@5 / MRR
+  # per retrieval variant (dense proxy, BM25, hybrid RRF) over a labelled
+  # workspace gold-set, including the Internal-Audit-v1 phrasing-sensitivity
+  # slice (natural vs keyword pairs). NON-REQUIRED, same posture as the memory
+  # eval above — the number is the deliverable, a sub-threshold recall is an
+  # honest outcome, not a CI failure. The real verdict is the --live lever grid
+  # (rerank / hybrid / query-enhancement toggled) against a provisioned
+  # workspace snapshot.
+  retrieval-recall-eval:
+    name: Retrieval-recall eval (non-required)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      # Dummy values keep any import-time config resolution from failing; the
+      # eval itself reads only the jsonl fixtures and stdlib.
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: test_db
+      ENVIRONMENT: development
+
+    defaults:
+      run:
+        working-directory: orchestrator
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run the retrieval-recall harness self-tests
+        run: |
+          python -m pip install --upgrade pip pytest
+          pytest tests/test_p2w1_retrieval_recall.py -q -p no:cacheprovider
+
+      # A sub-threshold recall is a BUSINESS signal, not a CI failure — the
+      # number is the deliverable. The harness already exits 0 on a low recall
+      # (evals/retrieval_recall.main returns 0 always); continue-on-error is
+      # belt-and-braces so this informational emit can never redden the job.
+      # The self-tests step above stays the real gate.
+      - name: Emit the per-variant retrieval-recall number (informational)
+        continue-on-error: true
+        run: |
+          python -m evals.retrieval_recall --json
+
   # PRD-176 F010 — the reliability bar: Alembic replays from zero to exactly
   # ONE head. NON-REQUIRED (same posture as the test net) until the Step-2
   # single-baseline squash lands.
