@@ -127,11 +127,15 @@ class RAGConfig:
     # Phase 2: Advanced retrieval options
     enable_query_enhancement: bool = True
     enable_rrf_fusion: bool = True
-    enable_reranking: bool = False
+    # None = "caller didn't choose" → resolved in __post_init__ from the
+    # canonical config accessor (default ON). An explicit True/False wins.
+    enable_reranking: Optional[bool] = None
     rrf_k: int = 60
 
-    # Hybrid search settings
-    hybrid_search_enabled: bool = True
+    # Hybrid search settings. The weights are REAL (PRD-188 S3): they weight
+    # the dense vs sparse legs inside the RRF fusion. None = resolved from the
+    # canonical config accessor in __post_init__; an explicit value wins.
+    hybrid_search_enabled: Optional[bool] = None
     hybrid_vector_weight: float = 0.7
     hybrid_keyword_weight: float = 0.3
     parent_child_expansion: bool = True
@@ -152,8 +156,19 @@ class RAGConfig:
         if self.min_similarity is None:
             self.min_similarity = _get_rag_setting_float("min_similarity", 0.5)
         
-        # Load reranking toggle from system_settings
-        self.enable_reranking = _get_rag_setting_str("rag_rerank_enabled", "false") == "true"
+        # PRD-188 S1+S3: rerank and hybrid default ON via the canonical config
+        # accessors (system_settings 'rag' group, then env). An explicit caller
+        # value wins: the eval lever grid and per-request overrides rely on
+        # that. The old read of the flat 'rag_rerank_enabled' key is deleted —
+        # PRD-136 renamed that settings key, so the lookup always missed,
+        # always returned "false", and silently pinned the pipeline's
+        # highest-precision stage off.
+        if self.enable_reranking is None or self.hybrid_search_enabled is None:
+            from config import config as app_config
+            if self.enable_reranking is None:
+                self.enable_reranking = bool(app_config.RAG_RERANK_ENABLED)
+            if self.hybrid_search_enabled is None:
+                self.hybrid_search_enabled = bool(app_config.RAG_HYBRID_ENABLED)
 
         logger.info(f"RAGConfig loaded: max_tokens={self.max_tokens}, diversity={self.diversity}, min_similarity={self.min_similarity}, reranking={self.enable_reranking}")
 
@@ -354,7 +369,20 @@ class RAGService:
                 min_similarity=self.config.min_similarity,
                 workspace_id=workspace_id
             )
-        
+
+        # PRD-188 S3: real hybrid — fuse the dense candidates with the
+        # Postgres BM25 sparse leg (the reader the always-maintained
+        # search_vector index never had). Runs BEFORE the empty-check so an
+        # exact-term query the embeddings miss can still be rescued by the
+        # lexical leg (the audit's keyword-vs-natural failure mode).
+        if self.config.hybrid_search_enabled:
+            candidates = await self._fuse_with_sparse_leg(
+                query,
+                candidates,
+                filters,
+                limit=max_chunks * 3 * team_multiplier,
+            )
+
         if not candidates:
             return RAGResult(
                 chunks=[],
@@ -646,18 +674,13 @@ class RAGService:
         RRF score: sum(1 / (k + rank_i)) for each query where document appears
         This is the standard approach from Context-Engineering research.
         """
-        from collections import defaultdict
-        
-        # Collect results from each query variation
-        all_results = defaultdict(lambda: {"ranks": [], "doc": None})
-        
         # Run the query variations CONCURRENTLY. Each variation is an
         # independent embed + vector search, so the old serial await-loop made
         # retrieval latency the SUM of all variations — the dominant cost in the
         # ~80-113s context-prep times. asyncio.gather bounds it to the slowest
         # single variation. RRF is order-independent (a sum of 1/(k+rank) per
         # doc) and results are consumed in query order, so the fused output is
-        # byte-identical to the serial version.
+        # unchanged from the serial version.
         import asyncio
 
         async def _candidates_for(q: str) -> List[Dict]:
@@ -676,30 +699,53 @@ class RAGService:
             *[_candidates_for(q) for q in queries[:5]]
         )
 
-        for results in per_query_results:
-            for rank, doc in enumerate(results):
-                doc_id = doc.get("id", doc.get("content", "")[:100])
-                all_results[doc_id]["ranks"].append(rank)
-                all_results[doc_id]["doc"] = doc
-        
-        # Calculate RRF scores
-        k = self.config.rrf_k  # Standard RRF constant (usually 60)
-        rrf_scored = []
-        
-        for doc_id, data in all_results.items():
-            if data["doc"]:
-                rrf_score = sum(1.0 / (k + rank) for rank in data["ranks"])
-                doc = data["doc"].copy()
-                doc["rrf_score"] = rrf_score
-                doc["query_count"] = len(data["ranks"])  # Appears in N queries
-                rrf_scored.append(doc)
-        
-        # Sort by RRF score (higher is better)
-        rrf_scored.sort(key=lambda x: x["rrf_score"], reverse=True)
-        
+        # PRD-188 S3: the fusion math lives in the shared pure fuser — the
+        # same function the dense+sparse hybrid uses. One fusion path.
+        from modules.rag.fusion import reciprocal_rank_fuse
+
+        rrf_scored = reciprocal_rank_fuse(per_query_results, k=self.config.rrf_k)
         logger.info(f"RRF fusion: {len(rrf_scored)} unique docs from {len(queries)} queries")
         return rrf_scored
-    
+
+    async def _fuse_with_sparse_leg(
+        self,
+        query: str,
+        dense_candidates: List[Dict],
+        filters,
+        limit: int = 20,
+    ) -> List[Dict]:
+        """Fuse dense + BM25 sparse through the one shared RRF (PRD-188 S3).
+
+        The hybrid_vector_weight / hybrid_keyword_weight knobs finally do what
+        they always claimed: weight the two legs inside the fusion. A sparse-leg
+        failure degrades to dense-only with a WARNING — loud, never fatal,
+        mirroring the rerank seam's posture.
+        """
+        try:
+            from modules.rag.bm25_leg import bm25_search
+
+            sparse = await bm25_search(query, filters=filters, limit=limit)
+        except Exception as e:
+            logger.warning(f"BM25 sparse leg failed — dense-only for this query: {e}")
+            return dense_candidates
+
+        if not sparse:
+            return dense_candidates
+        if not dense_candidates:
+            logger.info(f"hybrid: dense leg empty, sparse leg rescued {len(sparse)} candidates")
+
+        from modules.rag.fusion import reciprocal_rank_fuse
+
+        fused = reciprocal_rank_fuse(
+            [dense_candidates, sparse],
+            k=self.config.rrf_k,
+            weights=[self.config.hybrid_vector_weight, self.config.hybrid_keyword_weight],
+        )
+        logger.info(
+            f"hybrid fusion: dense {len(dense_candidates)} + sparse {len(sparse)} → {len(fused)}"
+        )
+        return fused
+
     async def _rerank_candidates(
         self,
         query: str,

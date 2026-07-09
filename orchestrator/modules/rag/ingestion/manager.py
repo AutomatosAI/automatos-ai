@@ -1149,6 +1149,19 @@ class DocumentManager:
 
                 filtered_chunks.append(chunk)
 
+            # PRD-188 S2: contextual annotations — situate each chunk within
+            # its parent document BEFORE embedding (Anthropic contextual-
+            # retrieval pattern). The annotated content is what gets embedded
+            # AND stored, so the tsvector trigger indexes the preface for the
+            # BM25 leg too. Flag default OFF until the corpus reprocess has
+            # run; failure is loud and falls back to raw text — an annotation
+            # can never fail an ingest.
+            if filtered_chunks:
+                from config import config as app_config
+                if app_config.RAG_CONTEXTUAL_ANNOTATIONS_ENABLED:
+                    from modules.rag.ingestion.contextual_annotator import annotate_chunks
+                    filtered_chunks = await annotate_chunks(filtered_chunks, text)
+
             # Phase 2: Batch embed all chunks with parallel processing
             if filtered_chunks:
                 chunk_texts = [c.content for c in filtered_chunks]

@@ -21,7 +21,6 @@ logger = logging.getLogger(__name__)
 
 COHERE_RERANK_URL = config.COHERE_RERANK_URL
 COHERE_DOC_CHAR_LIMIT = 4096
-DEFAULT_RERANK_MODEL = "rerank-v3.5"
 
 
 @dataclass
@@ -36,7 +35,9 @@ class RerankManager:
 
     def __init__(self):
         self._api_key: Optional[str] = None
-        self._model: str = DEFAULT_RERANK_MODEL
+        # Model default lives in config (PRD-188 S1) — resolved at construction
+        # (the singleton is lazy), never at module import.
+        self._model: str = config.RAG_RERANK_MODEL
         self._loaded = False
         self._client: Optional[httpx.AsyncClient] = None
 

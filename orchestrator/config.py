@@ -1003,13 +1003,71 @@ class Config:
     
     @property
     def RAG_RERANK_ENABLED(self) -> bool:
-        """Get rerank enabled from system settings (default: False)"""
+        """Rerank on the retrieval hot path (default: ON — PRD-188 S1).
+
+        Cohere stays a graceful-degrade seam: with no COHERE_API_KEY the
+        reranker returns identity order, never an error, so ON is safe even
+        before the key exists.
+        """
         try:
             from core.llm.manager import get_system_setting
-            val = get_system_setting("rag", "rerank_enabled", "false")
+            val = get_system_setting("rag", "rerank_enabled", "true")
+            return str(val).lower() == "true" if val else True
+        except Exception:
+            return os.getenv("RAG_RERANK_ENABLED", "true").lower() == "true"
+
+    @property
+    def RAG_RERANK_MODEL(self) -> str:
+        """Cohere rerank model id — the default lives here, not in
+        rerank_manager (PRD-188 S1). rerank-v3.5 is the current verified
+        Cohere id; upgrading is a setting/env flip, never a code change."""
+        try:
+            from core.llm.manager import get_system_setting
+            val = get_system_setting("rag", "rerank_model", "rerank-v3.5")
+            return str(val) if val else "rerank-v3.5"
+        except Exception:
+            return os.getenv("RAG_RERANK_MODEL", "rerank-v3.5")
+
+    @property
+    def RAG_HYBRID_ENABLED(self) -> bool:
+        """Real dense+sparse hybrid retrieval (default: ON — PRD-188 S3).
+
+        The BM25 leg reads the document_chunks.search_vector index the
+        platform already maintains on every insert; OFF preserves the old
+        dense-only behaviour exactly.
+        """
+        try:
+            from core.llm.manager import get_system_setting
+            val = get_system_setting("rag", "hybrid_enabled", "true")
+            return str(val).lower() == "true" if val else True
+        except Exception:
+            return os.getenv("RAG_HYBRID_ENABLED", "true").lower() == "true"
+
+    @property
+    def RAG_CONTEXTUAL_ANNOTATIONS_ENABLED(self) -> bool:
+        """Contextual chunk annotations at ingestion (default: OFF — PRD-188 S2).
+
+        Stays OFF until the existing background reprocess has re-annotated the
+        corpus, so live retrieval never sees a half-annotated store. Flipping
+        it on only affects documents ingested/reprocessed after the flip.
+        """
+        try:
+            from core.llm.manager import get_system_setting
+            val = get_system_setting("rag", "contextual_annotations_enabled", "false")
             return str(val).lower() == "true" if val else False
         except Exception:
-            return os.getenv("RAG_RERANK_ENABLED", "false").lower() == "true"
+            return os.getenv("RAG_CONTEXTUAL_ANNOTATIONS_ENABLED", "false").lower() == "true"
+
+    @property
+    def RAG_CONTEXTUAL_ANNOTATION_MODEL(self) -> str:
+        """Haiku-class model for chunk situating contexts (PRD-188 S2) — cheap,
+        prompt-cached over the parent document."""
+        try:
+            from core.llm.manager import get_system_setting
+            val = get_system_setting("rag", "contextual_annotation_model", "claude-haiku-4-5")
+            return str(val) if val else "claude-haiku-4-5"
+        except Exception:
+            return os.getenv("RAG_CONTEXTUAL_ANNOTATION_MODEL", "claude-haiku-4-5")
 
     # PRD-179 S4 (F070): rag_feedback feeds retrieval ranking. A document that
     # accrued negative feedback (thumbs_down, or a rating at/below the floor) has
