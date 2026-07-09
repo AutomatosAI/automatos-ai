@@ -73,18 +73,22 @@ class OpenRouterEmbeddingProvider(BaseEmbeddingProvider):
             raise ImportError("OpenAI package not installed. Run: pip install openai")
 
         api_key = self.config.api_key or config.OPENROUTER_API_KEY
+        self._api_key = api_key or None
+        self._base_url = config.OPENROUTER_BASE_URL
+        # AsyncOpenAI binds its httpx pool to the event loop it is created on.
+        # The tool-router runs embedding coroutines in a fresh THREAD loop
+        # (sync->async bridge); a main-loop-bound client used there retries for
+        # ~18s. So build the client per loop: the primary loop reuses one, a
+        # foreign loop gets a fresh ephemeral client bound to it.
+        self._primary_loop = None
+        self.client = None  # created lazily per loop via _client_for_loop()
 
         if not api_key:
             logger.warning(
                 "OpenRouter API key not configured. "
                 "Embedding features will fail until key is added."
             )
-            self.client = None
         else:
-            self.client = AsyncOpenAI(
-                api_key=api_key,
-                base_url=config.OPENROUTER_BASE_URL,
-            )
             model_info = OPENROUTER_EMBEDDING_MODELS.get(self.config.model, (4096, 8192))
             logger.info(
                 f"Initialized OpenRouter embedding client — "
@@ -92,9 +96,33 @@ class OpenRouterEmbeddingProvider(BaseEmbeddingProvider):
                 f"max_ctx: {model_info[1]} tokens"
             )
 
+    def _client_for_loop(self):
+        """An AsyncOpenAI client bound to the CURRENT running event loop.
+
+        Reusing one client across loops binds its httpx pool to a stale loop and
+        makes calls retry for ~18s (the tool-router thread-bridge stall). The
+        primary loop reuses a cached client; any other loop (e.g. the router's
+        per-call thread loop) gets a fresh ephemeral one, GC'd with that loop.
+        """
+        if self._api_key is None:
+            return None
+        import asyncio
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if self._primary_loop is None:
+            self._primary_loop = loop
+        if loop is self._primary_loop:
+            if self.client is None:
+                self.client = AsyncOpenAI(api_key=self._api_key, base_url=self._base_url)
+            return self.client
+        return AsyncOpenAI(api_key=self._api_key, base_url=self._base_url)
+
     async def generate_embedding(self, text: str) -> List[float]:
         """Generate a single embedding via OpenRouter API"""
-        if self.client is None:
+        client = self._client_for_loop()
+        if client is None:
             raise ValueError(
                 "OpenRouter API key not configured. "
                 "Set OPENROUTER_API_KEY or configure in Settings > General"
@@ -108,7 +136,7 @@ class OpenRouterEmbeddingProvider(BaseEmbeddingProvider):
             logger.debug(f"Text truncated to ~{model_info[1]} tokens for {self.config.model}")
 
         try:
-            response = await self.client.embeddings.create(
+            response = await client.embeddings.create(
                 model=self.config.model,
                 input=text,
             )
@@ -144,7 +172,8 @@ class OpenRouterEmbeddingProvider(BaseEmbeddingProvider):
         Returns:
             List of embedding vectors in same order as input texts
         """
-        if self.client is None:
+        client = self._client_for_loop()
+        if client is None:
             raise ValueError("OpenRouter API key not configured.")
 
         if not texts:
@@ -162,7 +191,7 @@ class OpenRouterEmbeddingProvider(BaseEmbeddingProvider):
         # Try single batch call first (most efficient)
         # OpenRouter supports array input like OpenAI
         try:
-            response = await self.client.embeddings.create(
+            response = await client.embeddings.create(
                 model=self.config.model,
                 input=processed_texts,
             )
