@@ -949,13 +949,14 @@ class AgentFactory:
                 tool_schemas = list(context_result.tools)
             else:
                 # Explicit system_prompt path: load tools directly
-                from modules.tools.tool_router import get_tools_for_agent
+                from modules.tools.tool_router import get_tools_for_agent_async
 
                 # PRD-138 US-009: pass the user prompt so the dispatcher
                 # enum narrows in lockstep with the prompt summary. Falls
                 # back to the full enum if SEMANTIC_TOOL_ROUTING is off,
-                # the prompt is empty, or ranking fails.
-                tool_schemas = get_tools_for_agent(
+                # the prompt is empty, or ranking fails. Awaited on this
+                # loop — never bridged through a helper thread.
+                tool_schemas = await get_tools_for_agent_async(
                     agent_id=agent_runtime.agent_id,
                     db_session=self.db_session,
                     workspace_id=agent_runtime.workspace_id,

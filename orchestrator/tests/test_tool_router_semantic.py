@@ -612,3 +612,98 @@ def test_get_tools_for_agent_excludes_admin_when_not_admin():
     enum = _enum_of_tool(_dispatcher_from(tools))
     assert "platform_list_agents" in enum
     assert "platform_admin_only_action" not in enum
+
+
+# ===========================================================================
+# Test: get_tools_for_agent_async — async-native narrowing (no thread bridge)
+# ===========================================================================
+
+
+def test_get_tools_for_agent_async_narrows_enum_without_bridge(caplog):
+    """The async entry awaits ranking on the caller's loop — narrowed enum,
+    and the thread-bridge helper is never engaged."""
+    _FAKE_CONFIG_CLS.SEMANTIC_TOOL_ROUTING = True
+
+    async def _rank(query, top_k, exclude_admin, exclude_promoted, include_super_admin=False):
+        return [
+            ("platform_list_agents", 0.95),
+            ("platform_create_agent", 0.80),
+        ]
+
+    _dummy_index.rank_actions = _rank
+    with caplog.at_level(logging.INFO):
+        tools = asyncio.run(
+            tool_router.get_tools_for_agent_async(
+                agent_id=None,
+                workspace_id=None,
+                is_admin=True,
+                query="list all agents",
+            )
+        )
+    enum = _enum_of_tool(_dispatcher_from(tools))
+    assert sorted(enum) == ["platform_create_agent", "platform_list_agents"]
+    assert any(
+        "dispatcher enum narrowed to 2 actions" in r.message for r in caplog.records
+    )
+    assert not any(
+        "_run_coroutine_blocking" in r.message for r in caplog.records
+    ), "async entry must not pay the thread bridge"
+
+
+def test_get_tools_for_agent_async_rank_failure_falls_back(caplog):
+    """Async entry: a raising ranker still yields the full-enum dispatcher."""
+    _FAKE_CONFIG_CLS.SEMANTIC_TOOL_ROUTING = True
+
+    async def _boom(*args, **kwargs):
+        raise RuntimeError("ranker exploded")
+
+    _dummy_index.rank_actions = _boom
+    with caplog.at_level(logging.INFO):
+        tools = asyncio.run(
+            tool_router.get_tools_for_agent_async(
+                agent_id=None,
+                workspace_id=None,
+                is_admin=True,
+                query="list all agents",
+            )
+        )
+    enum = _enum_of_tool(_dispatcher_from(tools))
+    assert "platform_list_agents" in enum
+    assert "platform_get_workspace_info" in enum
+    assert any(
+        "rank_actions returned empty or raised" in r.message for r in caplog.records
+    )
+
+
+def test_get_tools_for_agent_async_no_query_full_enum():
+    """Async entry mirrors the sync no-query behavior (full enum)."""
+    _FAKE_CONFIG_CLS.SEMANTIC_TOOL_ROUTING = True
+    tools = asyncio.run(
+        tool_router.get_tools_for_agent_async(
+            agent_id=None,
+            workspace_id=None,
+            is_admin=True,
+        )
+    )
+    enum = _enum_of_tool(_dispatcher_from(tools))
+    assert "platform_list_agents" in enum
+    assert "platform_get_workspace_info" in enum
+
+
+def test_rank_actions_for_dispatcher_async_happy_path():
+    async def _fake_rank(query, top_k, exclude_admin, exclude_promoted, include_super_admin=False):
+        return [
+            ("platform_list_agents", 0.91),
+            ("platform_create_agent", 0.83),
+        ]
+
+    _dummy_index.rank_actions = _fake_rank
+    names = asyncio.run(
+        tool_router._rank_actions_for_dispatcher_async(
+            query="list all agents",
+            top_k=5,
+            exclude_admin=True,
+            exclude_promoted=True,
+        )
+    )
+    assert names == ["platform_list_agents", "platform_create_agent"]

@@ -119,6 +119,63 @@ class ActionSemanticIndex:
                 logger.info("ActionSemanticIndex: indexed %d actions", len(self._action_embeddings))
                 self._indexed = True
 
+    def _embed_timeout_s(self) -> Optional[float]:
+        """Budget for a LIVE query embed, from the canonical config singleton.
+
+        <= 0 disables the bound. Defaults to 2.5s when config is unavailable
+        (pure unit-test environments)."""
+        try:
+            from config import config
+            timeout = float(getattr(config, "SEMANTIC_TOOL_ROUTING_EMBED_TIMEOUT_S", 2.5))
+        except Exception:
+            timeout = 2.5
+        return timeout if timeout > 0 else None
+
+    async def _embed_query_bounded(
+        self, query: str, model_key: str, timeout_s: Optional[float]
+    ) -> Tuple[Optional[List[float]], bool, bool]:
+        """Resolve the query vector: Redis cache first, then a time-bounded
+        live embed.
+
+        Returns (vector-or-None, cache_hit, timed_out). On timeout the embed
+        task is NOT cancelled — it finishes in the background and writes the
+        Redis cache so the next identical query narrows instantly. Rationale:
+        narrowing is an optimization; it must never cost more than it saves
+        (observed 37–67s/call when the OpenRouter embedding upstream degrades).
+        """
+        try:
+            cached = self._cache.get_embeddings_batch([query], model=model_key).get(query)
+        except Exception:
+            cached = None
+        if cached:
+            return cached, True, False
+
+        task = asyncio.ensure_future(self._embedding_manager.generate_embedding(query))
+        done, pending = await asyncio.wait({task}, timeout=timeout_s)
+        if pending:
+            def _stash_when_done(t: "asyncio.Task") -> None:
+                try:
+                    self._cache.set_embeddings_batch({query: t.result()}, model=model_key)
+                except Exception:
+                    logger.debug("query-embed background cache write failed", exc_info=True)
+
+            task.add_done_callback(_stash_when_done)
+            logger.warning(
+                "ActionSemanticIndex: query embed exceeded %.1fs — narrowing "
+                "falls back to the full enum; embed continues in background "
+                "to warm the cache (query=%r)",
+                timeout_s,
+                query[:80],
+            )
+            return None, False, True
+
+        vec = task.result()  # raises if the embed failed — caller's fallback handles it
+        try:
+            self._cache.set_embeddings_batch({query: vec}, model=model_key)
+        except Exception:
+            logger.debug("query-embed cache write failed", exc_info=True)
+        return vec, False, False
+
     async def rank_actions(
         self,
         query: str,
@@ -126,12 +183,16 @@ class ActionSemanticIndex:
         exclude_admin: bool = True,
         exclude_promoted: bool = True,
         include_super_admin: bool = False,
+        embed_timeout_s: Optional[float] = None,
     ) -> List[Tuple[str, float]]:
+        import time as _perf_t
+        _perf_t0 = _perf_t.monotonic()
         await self.ensure_indexed(
             exclude_admin=exclude_admin,
             exclude_promoted=exclude_promoted,
             include_super_admin=include_super_admin,
         )
+        _perf_t1 = _perf_t.monotonic()
         # Pre-filter eligibility (admin/promoted), then score every remaining
         # action and let cosine similarity decide ranking. Earlier revisions
         # truncated `candidate_names` at 50 in registration order BEFORE
@@ -147,7 +208,25 @@ class ActionSemanticIndex:
         candidate_names = [n for n in eligible_names if n in self._action_embeddings]
         if not candidate_names:
             return []
-        query_vec = np.asarray(await self._embedding_manager.generate_embedding(query), dtype=float)
+        if embed_timeout_s is None:
+            embed_timeout_s = self._embed_timeout_s()
+        elif embed_timeout_s <= 0:
+            embed_timeout_s = None
+        raw_vec, cache_hit, timed_out = await self._embed_query_bounded(
+            query,
+            model_key=self._cache_model_key(),
+            timeout_s=embed_timeout_s,
+        )
+        _perf_t2 = _perf_t.monotonic()
+        if raw_vec is None:
+            logger.info(
+                "[perf] rank_actions: ensure_indexed=%.0fms query_embed=%.0fms (TIMED OUT) n_candidates=%d",
+                (_perf_t1 - _perf_t0) * 1000,
+                (_perf_t2 - _perf_t1) * 1000,
+                len(candidate_names),
+            )
+            return []
+        query_vec = np.asarray(raw_vec, dtype=float)
         q_norm = float(np.linalg.norm(query_vec))
         if q_norm == 0.0:
             return []
@@ -159,6 +238,14 @@ class ActionSemanticIndex:
                 continue
             scored.append((name, float(np.dot(query_vec, vec) / (q_norm * v_norm))))
         scored.sort(key=lambda x: x[1], reverse=True)
+        logger.info(
+            "[perf] rank_actions: ensure_indexed=%.0fms query_embed=%.0fms cosine=%.0fms n_candidates=%d cache_hit=%d",
+            (_perf_t1 - _perf_t0) * 1000,
+            (_perf_t2 - _perf_t1) * 1000,
+            (_perf_t.monotonic() - _perf_t2) * 1000,
+            len(candidate_names),
+            int(cache_hit),
+        )
         return scored[:top_k]
 
 
