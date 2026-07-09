@@ -114,23 +114,12 @@ def _run_coroutine_blocking(coro: Coroutine) -> Any:
     helper thread that owns its own loop. Coroutines aren't bound to a
     specific loop until they're awaited, so this transfer is safe.
     """
-    _t0 = time.monotonic()
     try:
         asyncio.get_running_loop()
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            result = pool.submit(asyncio.run, coro).result()
-        logger.info(
-            "[perf] _run_coroutine_blocking THREADED %.0fms",
-            (time.monotonic() - _t0) * 1000,
-        )
-        return result
+            return pool.submit(asyncio.run, coro).result()
     except RuntimeError:
-        result = asyncio.run(coro)
-        logger.info(
-            "[perf] _run_coroutine_blocking DIRECT %.0fms",
-            (time.monotonic() - _t0) * 1000,
-        )
-        return result
+        return asyncio.run(coro)
 
 
 async def _rank_actions_for_dispatcher_async(
@@ -162,21 +151,13 @@ async def _rank_actions_for_dispatcher_async(
         from modules.tools.discovery.action_semantic_index import (
             get_action_semantic_index,
         )
-        _t0 = time.monotonic()
         index = get_action_semantic_index()
-        _t1 = time.monotonic()
         ranked = await index.rank_actions(
             query,
             top_k=top_k,
             exclude_admin=exclude_admin,
             exclude_promoted=exclude_promoted,
             include_super_admin=include_super_admin,
-        )
-        _t2 = time.monotonic()
-        logger.info(
-            "[perf] _rank_actions_for_dispatcher: get_index=%.0fms rank_actions=%.0fms",
-            (_t1 - _t0) * 1000,
-            (_t2 - _t1) * 1000,
         )
         if not ranked:
             return None
