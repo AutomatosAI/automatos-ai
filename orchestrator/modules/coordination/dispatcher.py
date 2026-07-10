@@ -443,18 +443,24 @@ class MissionDispatcher:
     def _budget_ceiling_usd(run: OrchestrationRun) -> float:
         """PRD-163 S5: the run's DOLLAR budget ceiling — an explicit
         ``config['cost_ceiling']`` when set, otherwise the plan's token estimate
-        priced out at the configured rate. 0 = unlimited."""
+        priced through ``modules.policy.pricing`` (PRD-192 S3 — one pricing
+        source; a run aggregates several agents/models so no single model id
+        exists here and pricing's flat last-resort applies). 0 = unlimited."""
+        from modules.policy import pricing as _pricing
+
         config = run.config or {}
         ceiling = config.get("cost_ceiling")
         if isinstance(ceiling, (int, float)) and ceiling > 0:
             return float(ceiling)
-        budget_tokens = run.token_budget_estimate or 0
-        return (budget_tokens / 1000.0) * Config.COORDINATOR_COST_PER_1K_TOKENS
+        return _pricing.price_total_tokens_usd(None, None, run.token_budget_estimate or 0)
 
     @staticmethod
     def _cost_used_usd(run: OrchestrationRun) -> float:
-        """Actual dollar cost incurred so far (tokens_used priced out)."""
-        return ((run.tokens_used or 0) / 1000.0) * Config.COORDINATOR_COST_PER_1K_TOKENS
+        """Actual dollar cost incurred so far (tokens_used priced through the
+        one pricing source, PRD-192 S3)."""
+        from modules.policy import pricing as _pricing
+
+        return _pricing.price_total_tokens_usd(None, None, run.tokens_used or 0)
 
     @staticmethod
     def _get_budget_status(run: OrchestrationRun) -> BudgetStatus:

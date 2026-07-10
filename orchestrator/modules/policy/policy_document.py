@@ -46,6 +46,13 @@ RISK_EXTERNAL = "external_side_effect"
 RISK_DESTRUCTIVE = "destructive"
 RISK_PUBLISH = "publish"  # templates / brand-kits publish step
 
+# PRD-192 S1 (locked): the risk classes that FAIL CLOSED on a plane error under
+# the enforce stages — and the exact set the `destructive` stage enforces.
+# read / internal_write fail open (marked + counted); an unclassifiable call is
+# treated destructive (closed). One frozenset so the stage boundary and the
+# fail posture can never drift apart.
+FAIL_CLOSED_RISK_CLASSES = frozenset({RISK_DESTRUCTIVE, RISK_EXTERNAL, RISK_PUBLISH})
+
 # The Balanced routing table: risk class -> "auto" | "ask".
 _BALANCED_ROUTING: Dict[str, str] = {
     RISK_READ: "auto",
@@ -122,6 +129,16 @@ def _defaults_doc() -> PolicyDocument:
     )
 
 
+def _enforcement_active() -> bool:
+    """Guarded read of the enforce-stage flag — never raises (PRD-192 S1)."""
+    try:
+        from modules.policy.flag import enforcement_active
+
+        return enforcement_active()
+    except Exception:
+        return False
+
+
 def load_policy_document(db: Any, workspace_id: UUID | str) -> PolicyDocument:
     """Return the workspace's ``policy_plane`` settings as a :class:`PolicyDocument`.
 
@@ -141,6 +158,12 @@ def load_policy_document(db: Any, workspace_id: UUID | str) -> PolicyDocument:
             "[policy.document] read failed for workspace=%s — Balanced defaults",
             workspace_id, exc_info=True,
         )
+        # PRD-192 S1: under an enforce stage a posture-read fault must not
+        # silently pre-decide the routing — re-raise so the gate's single
+        # except owns the fail posture (closed for high-risk classes). In
+        # off/shadow the historical Balanced fallback stands.
+        if _enforcement_active():
+            raise
         return _defaults_doc()
 
     posture = cfg.get("posture")

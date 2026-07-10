@@ -2423,9 +2423,17 @@ class CoordinatorService:
 
     def _estimate_cost_usd(self, token_estimate: int) -> float:
         """PRD-163 S3/S5: dollar cost for a token estimate — the currency the
-        approval policy and budget ceilings are denominated in."""
-        tokens = max(0, int(token_estimate or 0))
-        return (tokens / 1000.0) * Config.COORDINATOR_COST_PER_1K_TOKENS
+        approval policy and budget ceilings are denominated in.
+
+        PRD-192 S3 (F059 finish): priced through ``modules.policy.pricing`` —
+        the ONE pricing source. A mission plan spans multiple agents/models, so
+        no single model id exists at plan time; pricing applies its documented
+        flat last-resort rate (the demoted coordinator constant, now owned by
+        pricing.py alone — source-grep-guarded).
+        """
+        from modules.policy import pricing as _pricing
+
+        return _pricing.price_total_tokens_usd(None, None, token_estimate)
 
     def check_approval_countdowns(self, db: Session, workspace_id: Optional[UUID] = None) -> int:
         """PRD-163 S3: auto-proceed any awaiting-approval mission whose countdown

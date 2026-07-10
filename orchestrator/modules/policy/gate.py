@@ -69,6 +69,11 @@ class ToolCall:
     model_id: Optional[str] = None
     est_input_tokens: int = 0
     est_output_tokens: int = 0
+    # PRD-192 S1: the EXECUTOR's knowledge of whether this call is a Composio
+    # action (it routes per-action SDK names like GMAIL_SEND_EMAIL via its
+    # `composio_actions` dict / registry metadata — names the gate's prefix
+    # check cannot recognise). ``None`` ⇒ the gate falls back to the prefix.
+    is_composio: Optional[bool] = None
 
 
 class PolicyGate:
@@ -83,7 +88,15 @@ class PolicyGate:
         """Evaluate one tool call. Returns the merged verdict (deny > ask > allow)."""
         doc = _policy_doc.load_policy_document(self.db, call.workspace_id)
         action_def = self._lookup_action(call.tool_name)
-        is_composio = self._is_composio(call.tool_name)
+        # PRD-192 S1: the caller's hint wins (the executor knows its per-action
+        # Composio routing); the prefix check is only the fallback — otherwise
+        # SDK per-action sends classify internal_write and auto-run under
+        # Balanced even with the plane ON.
+        is_composio = (
+            call.is_composio
+            if call.is_composio is not None
+            else self._is_composio(call.tool_name)
+        )
 
         # 1) super-admin gate (fail-closed) — highest precedence.
         if action_def is not None and getattr(action_def, "super_admin_only", False):
@@ -196,6 +209,16 @@ class PolicyGate:
         action_def: Any,
         is_composio: bool,
     ) -> Verdict:
+        # PRD-192 S5 (locked #6) — the HUMAN-DIRECT actor rule: a request a
+        # human makes directly through an API surface (widget email send is
+        # the concrete case) satisfies the ask gate BY ITSELF — the click is
+        # the approval. Only the act-vs-ask routing is bypassed: the budget
+        # gate (stage 3) already ran, the audit row still records the call,
+        # and agent-initiated calls on the same lane carry no marker and
+        # still ask.
+        if (call.caller_context or {}).get("actor_type") == "user_direct":
+            return Verdict.allow("human-direct request — ask satisfied by the caller")
+
         # Full autonomy short-circuits the ask routing (auto dial). The
         # destructive backstop + super-admin gate are unaffected (they ran
         # above / run downstream in platform_executor).
@@ -242,6 +265,9 @@ class PolicyGate:
 
     @staticmethod
     def _is_composio(tool_name: str) -> bool:
+        """Prefix-based FALLBACK only (PRD-192 S1): callers that know better
+        (the executor's `composio_actions` / registry metadata) pass the
+        ``ToolCall.is_composio`` hint, which takes precedence in ``check()``."""
         name = (tool_name or "")
         return name.startswith("composio_") or name == "composio_execute"
 

@@ -53,9 +53,18 @@ class _User:
 
 @pytest.fixture
 def flag(monkeypatch):
-    """Toggle the policy-plane flag at its single source of truth."""
+    """Toggle the policy-plane flag at its single source of truth.
+
+    PRD-192 S1: the boolean became a staged mode dial — keep BOTH derived
+    attrs coherent (mode ``on``/``off`` ⇔ enabled True/False) so tests reading
+    either surface agree, exactly as the config parse guarantees at runtime.
+    """
     def set_flag(value: bool):
         monkeypatch.setattr(_config_mod.config, "POLICY_PLANE_ENABLED", value)
+        monkeypatch.setattr(
+            _config_mod.config, "POLICY_PLANE_MODE", "on" if value else "off",
+            raising=False,
+        )
     return set_flag
 
 
@@ -117,6 +126,11 @@ def test_f040_middleware_registration_is_flag_guarded():
 
 
 def test_config_flag_defaults_off():
-    """The master flag must default OFF (safety rule #1)."""
+    """The master flag must default OFF (safety rule #1).
+
+    PRD-192 S1: the boolean became the staged mode dial — the default is the
+    ``off`` stage and the derived boolean is mode ≠ off.
+    """
     src = (_ORCH / "config.py").read_text()
-    assert 'os.getenv("AUTOMATOS_POLICY_PLANE", "false")' in src
+    assert 'os.getenv("AUTOMATOS_POLICY_PLANE", "off")' in src
+    assert 'POLICY_PLANE_ENABLED: bool = POLICY_PLANE_MODE != "off"' in src

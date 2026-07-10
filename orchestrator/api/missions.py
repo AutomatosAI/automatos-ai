@@ -1043,8 +1043,14 @@ async def get_mission_cost(
         ]
 
         total_tokens = sum(tb.tokens_used for tb in task_breakdowns)
-        cost_rate = config.COORDINATOR_COST_PER_1K_TOKENS
-        estimated_cost = round((total_tokens / 1000.0) * cost_rate, 6)
+        # PRD-192 S3 (F059 finish): priced through modules.policy.pricing — the
+        # ONE pricing source. A mission's tasks span models, so the read-out
+        # uses pricing's documented flat last-resort rate (same number the
+        # ceiling/admission math uses; llm_usage stays the ledger of record).
+        from modules.policy import pricing as _pricing
+
+        cost_rate = _pricing.flat_rate_per_1k()
+        estimated_cost = _pricing.price_total_tokens_usd(db, None, total_tokens)
 
         return MissionCostResponse(
             mission_id=str(run.id),

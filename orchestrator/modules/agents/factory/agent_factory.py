@@ -1054,12 +1054,23 @@ class AgentFactory:
                                 ),
                             }
                         try:
+                            # PRD-192 S3: turn-level budget estimate on the
+                            # agent lane (same shared estimator as chat) so
+                            # the policy gate prices this call.
+                            from core.context_guard import estimate_turn_budget
+                            _turn_budget = estimate_turn_budget(
+                                agent_runtime.llm_manager, messages
+                            )
+                            _cb_caller_context = (
+                                {**(_field_caller_context or {}), **_turn_budget}
+                                or None
+                            )
                             raw = await agent_runtime.tool_executor.execute_tool(
                                 tool_name=name,
                                 parameters=args,
                                 agent_id=agent_runtime.agent_id,
                                 workspace_id=ws_id,
-                                caller_context=_field_caller_context,
+                                caller_context=_cb_caller_context,
                             )
                             return {
                                 "success": True,

@@ -80,8 +80,10 @@ from api.notifications import (  # PRD-128: Unified notification system
     preferences_router as notification_preferences_router,
 )
 
-# PRD-56: Workspace Tasks
-from api.tasks import router as tasks_router
+# PRD-56's /api/tasks direct-step router was DELETED (PRD-192 S6, locked #5):
+# an ungoverned side-effecting ingress with zero product callers (grep-proven
+# across backend, frontend, SDK, tests). The workspace worker + its exec
+# sandbox stay (workspace_github still enqueues background jobs).
 
 # PRD-127: Ephemeral multimodal attachments
 from api.attachments import router as attachments_router
@@ -996,7 +998,6 @@ app.include_router(agent_endpoints_router)
 app.include_router(database_knowledge_router)  # PRD-21: Database Knowledge
 app.include_router(rag_feedback_router)  # PRD-168 S2: RAG feedback (Q87)
 app.include_router(database_analytics_router)  # PRD-21: Database Analytics
-app.include_router(tasks_router)  # PRD-56: Workspace task management
 app.include_router(attachments_router)  # PRD-127: Ephemeral multimodal attachments
 app.include_router(workspace_files_router)  # PRD-66: Workspace file browser
 app.include_router(team_router)  # PRD-37: Team Management
