@@ -108,7 +108,14 @@ def test_agent_skills_relationship_ordered_by_priority():
 # ---------------------------------------------------------------------------
 
 _estimator_stub = types.ModuleType("modules.context.estimator")
-_estimator_stub.estimate_tokens = lambda text: max(1, len(text) // 4)
+
+
+class _FakeEstimator:
+    def estimate(self, text):
+        return len(text) // 4
+
+
+_estimator_stub.TokenEstimator = _FakeEstimator
 
 
 def _load_skills_section():
