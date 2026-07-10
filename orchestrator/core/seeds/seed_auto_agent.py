@@ -87,64 +87,89 @@ def _upsert_platform_management_skill(db: Session) -> Skill | None:
     """
     import hashlib
 
+    from sqlalchemy import text as _sql_text
+    from sqlalchemy.exc import IntegrityError
+
+    # PRD-191 S3: serialize concurrent seeders (hybrid/chat/workspaces run this
+    # on hot paths across workers). The xact-scoped advisory lock releases with
+    # the surrounding transaction; the IntegrityError fallback covers the race
+    # against the live UNIQUE(name) WHERE workspace_id IS NULL index.
     try:
-        skill = db.query(Skill).filter(
+        db.execute(_sql_text(
+            "SELECT pg_advisory_xact_lock(hashtext('seed:platform-management'))"
+        ))
+    except Exception:
+        logger.warning("Advisory lock unavailable — continuing unserialized", exc_info=True)
+
+    skill = db.query(Skill).filter(
+        Skill.name == "platform-management",
+        Skill.skill_source == "builtin-core",
+    ).first()
+
+    if skill:
+        logger.info("Platform-management skill exists (id=%s), skipping seed", skill.id)
+        return skill
+
+    if not _PLATFORM_SKILL_PATH.exists():
+        logger.warning("Platform-management SKILL.md not found at %s", _PLATFORM_SKILL_PATH)
+        return None
+
+    raw = _PLATFORM_SKILL_PATH.read_text(encoding="utf-8").strip()
+
+    # Split YAML frontmatter from markdown body
+    if raw.startswith("---"):
+        parts = raw.split("---", 2)
+        markdown_body = parts[2].strip() if len(parts) > 2 else raw
+    else:
+        markdown_body = raw
+
+    content_hash = hashlib.sha256(markdown_body.encode("utf-8")).hexdigest()
+
+    skill = Skill(
+        name="platform-management",
+        description="Complete platform operations — marketplace, agents, playbooks, heartbeats, board, governance, LLMs, workspace setup",
+        skill_type="technical",
+        category="agent-role",
+        skill_version="1.0.0",
+        skill_source="builtin-core",
+        prompt_template=markdown_body,
+        content_hash=content_hash,
+        tags=["platform", "admin", "marketplace", "agents", "playbooks", "governance"],
+        is_active=True,
+        workspace_id=None,  # global skill
+    )
+    db.add(skill)
+    try:
+        db.flush()
+    except IntegrityError:
+        # Another worker won the insert race despite the lock (or the lock
+        # was unavailable): the row exists — re-select and return it. Never
+        # swallow this into a silent no-seed (the Wave-0 lesson).
+        db.expunge(skill)
+        existing = db.query(Skill).filter(
             Skill.name == "platform-management",
             Skill.skill_source == "builtin-core",
         ).first()
-
-        if skill:
-            logger.info("Platform-management skill exists (id=%s), skipping seed", skill.id)
-            return skill
-
-        if not _PLATFORM_SKILL_PATH.exists():
-            logger.warning("Platform-management SKILL.md not found at %s", _PLATFORM_SKILL_PATH)
-            return None
-
-        raw = _PLATFORM_SKILL_PATH.read_text(encoding="utf-8").strip()
-
-        # Split YAML frontmatter from markdown body
-        if raw.startswith("---"):
-            parts = raw.split("---", 2)
-            markdown_body = parts[2].strip() if len(parts) > 2 else raw
-        else:
-            markdown_body = raw
-
-        content_hash = hashlib.sha256(markdown_body.encode("utf-8")).hexdigest()
-
-        skill = Skill(
-            name="platform-management",
-            description="Complete platform operations — marketplace, agents, playbooks, heartbeats, board, governance, LLMs, workspace setup",
-            skill_type="technical",
-            category="agent-role",
-            skill_version="1.0.0",
-            skill_source="builtin-core",
-            prompt_template=markdown_body,
-            content_hash=content_hash,
-            tags=["platform", "admin", "marketplace", "agents", "playbooks", "governance"],
-            is_active=True,
-            workspace_id=None,  # global skill
-        )
-        db.add(skill)
-        db.flush()
-        logger.info("Platform-management skill created (id=%s)", skill.id)
-        return skill
-    except Exception:
-        logger.exception("Failed to seed platform-management skill")
-        return None
+        logger.info("Platform-management skill seeded by a concurrent worker (id=%s)",
+                    getattr(existing, "id", None))
+        return existing
+    logger.info("Platform-management skill created (id=%s)", skill.id)
+    return skill
 
 
 def _assign_skill_to_agent(db: Session, agent: Agent, skill: Skill) -> None:
-    """Idempotent: link agent ↔ skill via agent_skills join table."""
-    exists = db.execute(
-        agent_skills.select().where(
-            agent_skills.c.agent_id == agent.id,
-            agent_skills.c.skill_id == skill.id,
-        )
-    ).first()
-    if not exists:
-        db.execute(agent_skills.insert().values(agent_id=agent.id, skill_id=skill.id))
-        logger.info("Assigned skill '%s' to agent '%s'", skill.name, agent.name)
+    """Idempotent under concurrency: ON CONFLICT (agent_id, skill_id) DO
+    NOTHING, backed by PRD-191 S1's unique constraint — the SELECT-then-INSERT
+    race that quadruplicated Auto's platform-management link is closed."""
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    stmt = (
+        pg_insert(agent_skills)
+        .values(agent_id=agent.id, skill_id=skill.id)
+        .on_conflict_do_nothing(index_elements=["agent_id", "skill_id"])
+    )
+    db.execute(stmt)
+    logger.info("Ensured skill '%s' is assigned to agent '%s'", skill.name, agent.name)
 
 
 def seed_auto_agent(db: Session, workspace_id: UUID) -> Agent:
