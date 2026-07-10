@@ -5,6 +5,11 @@ tasks, playbook runs, and (future) scheduled/webhook agents. A pending grant
 holds its subject blocked; granting it here authorises the subject and re-queues
 a blocked board task; revoking a live grant retracts the authorisation.
 
+PRD-196 S2 (P2-15, governance C.8): the whole surface is workspace-admin gated
+via the canonical ``require_workspace_admin`` dependency (PRD-185 S12) — a
+plain member must not be able to authorise an agent's destructive action, and
+the approvals surface is ws-admin-only by Gerard's posture call (196 Q2).
+
 Every state change is audited (governance action) via the S1 nullable-user audit
 path — the actor here is the human approver.
 """
@@ -16,8 +21,8 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
+from core.auth.workspace_admin import require_workspace_admin
 from core.database.database import get_db
 from core.models.approval_grants import ApprovalGrant, GrantStatus, SUBJECT_BOARD_TASK
 from core.models.core import BoardTask
@@ -58,7 +63,7 @@ def _audit(db: Session, ctx: RequestContext, action: str, grant: ApprovalGrant) 
 @router.get("")
 async def list_grants(
     status: Optional[str] = None,
-    ctx: RequestContext = Depends(get_request_context_hybrid),
+    ctx: RequestContext = Depends(require_workspace_admin),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """List this workspace's approval grants, newest first. Filter by ``status``."""
@@ -83,7 +88,7 @@ def _load_grant(db: Session, ctx: RequestContext, grant_id: int) -> ApprovalGran
 @router.post("/{grant_id}/grant")
 async def grant_approval(
     grant_id: int,
-    ctx: RequestContext = Depends(get_request_context_hybrid),
+    ctx: RequestContext = Depends(require_workspace_admin),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """Approve a pending grant (a human says yes) and re-queue any blocked subject."""
@@ -103,7 +108,7 @@ async def grant_approval(
 @router.post("/{grant_id}/deny")
 async def deny_approval(
     grant_id: int,
-    ctx: RequestContext = Depends(get_request_context_hybrid),
+    ctx: RequestContext = Depends(require_workspace_admin),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """Refuse a pending grant — the subject fails rather than retrying."""
@@ -123,7 +128,7 @@ async def deny_approval(
 @router.post("/{grant_id}/revoke")
 async def revoke_approval(
     grant_id: int,
-    ctx: RequestContext = Depends(get_request_context_hybrid),
+    ctx: RequestContext = Depends(require_workspace_admin),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """Retract a granted authorisation before it expires."""

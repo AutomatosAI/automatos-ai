@@ -10,7 +10,9 @@ through the **same** ``evaluate_approval`` primitive missions use (PRD-163):
     **blocked** until a human grants it — not hard-blocked, not auto-allowed.
 
 The grant is the tool-agnostic record the future scheduled/webhook agents share.
-Every grant creation is audited (governance action).
+Every grant creation is audited (governance action), and — PRD-196 S2 (C.8) —
+announced to the workspace's admins via an ``approval_pending`` notification,
+so a blocked task never waits silently.
 
 This module is the decision glue only; the dispatch wiring (moving the board task
 to ``blocked`` and re-queuing it on grant) lives in ``api.board_tasks`` and
@@ -18,12 +20,17 @@ to ``blocked`` and re-queuing it on grant) lives in ``api.board_tasks`` and
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Optional, Set
 from uuid import UUID
 
 logger = logging.getLogger(__name__)
+
+# Strong refs to fire-and-forget notification tasks (the api/webhooks.py
+# background-task idiom) so the loop cannot GC them mid-flight.
+_NOTIFY_TASKS: Set["asyncio.Task"] = set()
 
 
 @dataclass(frozen=True)
@@ -138,6 +145,17 @@ def evaluate_board_task_approval(
         estimated_cost_usd=estimated_cost_usd,
         risk_tier=risk_tier,
     )
+    # PRD-196 S2 (C.8): a pending grant must never wait silently — tell the
+    # workspace's humans. Only on fresh creation (the reuse branch above was
+    # already announced when its grant was created).
+    _notify_approval_pending(
+        workspace_id,
+        grant_id=getattr(grant, "id", None),
+        subject_id=str(task_id),
+        risk_tier=risk_tier,
+        reason=reason,
+        estimated_cost_usd=estimated_cost_usd,
+    )
     return BoardApprovalOutcome(
         requires_approval=True,
         reason=reason,
@@ -145,6 +163,78 @@ def evaluate_board_task_approval(
         policy=policy,
         estimated_cost_usd=estimated_cost_usd,
     )
+
+
+async def _dispatch_approval_pending(
+    workspace_id: str,
+    grant_id: Any,
+    subject_id: str,
+    risk_tier: Optional[str],
+    reason: str,
+    estimated_cost_usd: float,
+) -> None:
+    """Dispatch ``approval_pending`` through the canonical notification seam.
+
+    Owns its session: by the time the loop runs this, the creating caller's
+    transaction is finished (and its session may be closed).
+    """
+    from core.database.database import SessionLocal
+    from core.services.notification_dispatcher import NotificationDispatcher
+
+    db = SessionLocal()
+    try:
+        message = reason
+        if estimated_cost_usd:
+            message = f"{reason} (est. ${estimated_cost_usd:.2f})"
+        if risk_tier:
+            message = f"{message} [risk: {risk_tier}]"
+        await NotificationDispatcher(db, workspace_id).dispatch(
+            event_type="approval_pending",
+            title=f"Approval needed: board task {subject_id}",
+            message=message,
+            link_type="approval_grant",
+            link_id=str(grant_id) if grant_id is not None else None,
+            status="action_required",
+        )
+    except Exception:
+        logger.warning(
+            "[board_approval] approval_pending dispatch failed for grant %s",
+            grant_id, exc_info=True,
+        )
+    finally:
+        db.close()
+
+
+def _notify_approval_pending(
+    workspace_id: UUID | str,
+    *,
+    grant_id: Any,
+    subject_id: str,
+    risk_tier: Optional[str],
+    reason: str,
+    estimated_cost_usd: float,
+) -> None:
+    """Schedule the pending-grant notification without blocking the gate.
+
+    The gate is sync and its live caller runs on the event loop, so the
+    dispatch is scheduled as a tracked task there; with no running loop
+    (scripts, sync tests) it runs inline. Never raises — a notification fault
+    must not wedge board execution (same posture as the gate's caller).
+    """
+    try:
+        coro = _dispatch_approval_pending(
+            str(workspace_id), grant_id, subject_id, risk_tier, reason, estimated_cost_usd,
+        )
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            asyncio.run(coro)
+            return
+        task = loop.create_task(coro)
+        _NOTIFY_TASKS.add(task)
+        task.add_done_callback(_NOTIFY_TASKS.discard)
+    except Exception:
+        logger.warning("[board_approval] approval_pending scheduling failed", exc_info=True)
 
 
 def _decide_from_override(
