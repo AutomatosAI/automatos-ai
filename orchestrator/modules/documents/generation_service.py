@@ -633,15 +633,21 @@ class DocumentGenerationService:
     def _build_result(
         self, path: str, fmt: str, title: str, workspace_id: UUID = None
     ) -> GeneratedDocument:
-        """Build a GeneratedDocument from a file on disk, uploading to S3 for persistence."""
+        """Build a GeneratedDocument from a file on disk, uploading to S3 for persistence.
+
+        The persisted ``download_url`` is the STABLE app path
+        (``/api/documents/generated/{filename}``), never the raw presigned S3 URL —
+        a presign expires after an hour, which rotted every persisted Deliverable
+        link (P2-09 S1 / F030). ``serve_generated_file`` re-mints a fresh presign
+        on each request, so the app path stays live for the Deliverable's lifetime.
+        """
         filename = os.path.basename(path)
         size = os.path.getsize(path)
 
-        # Upload to S3 for persistent storage (containers are ephemeral)
+        # Upload a persistence copy to S3 (containers are ephemeral); the link we
+        # persist stays the app path — the re-mint endpoint owns presigning.
         download_url = f"/api/documents/generated/{filename}"
-        s3_url = self._upload_to_s3(path, filename, workspace_id)
-        if s3_url:
-            download_url = s3_url
+        self._upload_to_s3(path, filename, workspace_id)
 
         return GeneratedDocument(
             path=path,
@@ -654,18 +660,21 @@ class DocumentGenerationService:
 
     def _upload_to_s3(
         self, local_path: str, filename: str, workspace_id: UUID = None
-    ) -> Optional[str]:
-        """Upload generated document to S3 and return a presigned download URL.
+    ) -> bool:
+        """Upload a generated document to S3 for persistence across ephemeral containers.
 
-        Returns None if S3 is not configured (falls back to local serving).
+        Returns True when the upload happened, False when S3 is not configured or
+        the upload failed (local serving still works for the container's lifetime).
+        No download link is minted here — ``serve_generated_file`` presigns on
+        demand, so persisted URLs never expire (P2-09 S1).
         """
         if not boto3:
             logger.debug("[DocGen] boto3 not available, skipping S3 upload")
-            return None
+            return False
 
         if not config.AWS_ACCESS_KEY_ID or not config.AWS_SECRET_ACCESS_KEY:
             logger.debug("[DocGen] AWS credentials not configured, skipping S3 upload")
-            return None
+            return False
 
         ws_id = workspace_id or self.workspace_id
         bucket = config.S3_DOCUMENTS_BUCKET or "automatos-ai"
@@ -693,23 +702,12 @@ class DocumentGenerationService:
                     ContentType=content_type,
                 )
 
-            # Generate presigned URL (1 hour expiry)
-            presigned_url = client.generate_presigned_url(
-                "get_object",
-                Params={
-                    "Bucket": bucket,
-                    "Key": s3_key,
-                    "ResponseContentDisposition": f'attachment; filename="{filename}"',
-                },
-                ExpiresIn=3600,
-            )
-
             logger.info(
                 "[DocGen] Uploaded to S3: s3://%s/%s (%d bytes)",
                 bucket, s3_key, os.path.getsize(local_path),
             )
-            return presigned_url
+            return True
 
         except Exception:
             logger.exception("[DocGen] S3 upload failed, falling back to local serving")
-            return None
+            return False
