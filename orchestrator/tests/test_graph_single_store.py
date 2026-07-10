@@ -101,7 +101,6 @@ KNOWLEDGE_DIR = ORCH_ROOT / "modules" / "knowledge"
 GRAPH_SERVICE_PY = KNOWLEDGE_DIR / "graph_service.py"
 GRAPH_STORAGE_PY = ORCH_ROOT / "core" / "graph_storage.py"
 PRIMITIVE_HEARTBEAT_PY = KNOWLEDGE_DIR / "primitive_heartbeat.py"
-KNOWLEDGE_SYSTEM_PY = ORCH_ROOT / "modules" / "memory" / "storage" / "knowledge_system.py"
 ANALYTICS_ENGINE_PY = ORCH_ROOT / "core" / "services" / "analytics_engine.py"
 SHOPIFY_PY = ORCH_ROOT / "api" / "shopify.py"
 SYSTEM_PY = ORCH_ROOT / "api" / "system.py"
@@ -124,10 +123,9 @@ class TestMoatBoundary:
     catches it.
 
     The deliberately *narrow* scope is the moat producers + the
-    audited referencer set named in PRD-142 §4. The intentional
-    learning-store writers in ``modules/memory/storage/knowledge_system.py``
-    are EXEMPT (they ARE the learning loop) — the boundary is
-    *cross-store* contamination, not *write-side* purity."""
+    audited referencer set named in PRD-142 §4. (The learning-store
+    tables and their writers were deleted in PRD-187 S5 — this gate now
+    also catches any attempt to resurrect writes to them.)"""
 
     _BUSINESS_WRITE_PATTERNS: tuple[str, ...] = (
         # Direct SQL writes the boundary explicitly forbids
@@ -169,22 +167,6 @@ class TestMoatBoundary:
             f"Moat boundary violation in {path.name}: business-entity "
             f"writes to the learning store are forbidden "
             f"(KNOWLEDGE-GRAPH-CANONICAL.md §4). Found tokens: {offenders}"
-        )
-
-    def test_learning_store_owns_its_writes(self):
-        # Sanity check: the learning store models + writers DO live in
-        # modules/memory/storage/knowledge_system.py — boundary is about
-        # *where* business writes happen, not *whether* learning writes
-        # exist at all. If this assertion ever flips, the schema has
-        # disappeared and §4 needs revisiting.
-        src = KNOWLEDGE_SYSTEM_PY.read_text()
-        assert "KnowledgeNode(" in src, (
-            "learning-store model instantiation must remain in "
-            "modules/memory/storage/knowledge_system.py for Wave 4 HARNESS"
-        )
-        assert "KnowledgeEdge(" in src, (
-            "learning-store edge instantiation must remain in "
-            "modules/memory/storage/knowledge_system.py for Wave 4 HARNESS"
         )
 
 
@@ -525,56 +507,6 @@ class TestCrossWorkspaceIsolation:
 # ===========================================================================
 # 5. SCHEMA PRESERVED — knowledge_nodes/edges still defined for Wave 4.
 # ===========================================================================
-
-
-class TestLearningSchemaPreserved:
-    """W3-S10 stops the (non-existent) dual-write — it does NOT delete
-    the learning schema. Wave 4 HARNESS wires the learning loop on top
-    of it; deleting the models here would block that work. Lock the
-    schema in place."""
-
-    @pytest.fixture(scope="class")
-    def ks_source(self) -> str:
-        return KNOWLEDGE_SYSTEM_PY.read_text()
-
-    def test_knowledge_node_model_still_defined(self, ks_source: str):
-        assert "class KnowledgeNode" in ks_source
-        assert "__tablename__ = 'knowledge_nodes'" in ks_source, (
-            "KnowledgeNode.__tablename__ must remain 'knowledge_nodes' — "
-            "Wave 4 HARNESS expects the schema in place"
-        )
-
-    def test_knowledge_edge_model_still_defined(self, ks_source: str):
-        assert "class KnowledgeEdge" in ks_source
-        assert "__tablename__ = 'knowledge_edges'" in ks_source, (
-            "KnowledgeEdge.__tablename__ must remain 'knowledge_edges' — "
-            "Wave 4 HARNESS expects the schema in place"
-        )
-
-    def test_foreign_keys_between_edge_and_node_intact(self, ks_source: str):
-        # If a refactor renames the table the FK targets won't resolve.
-        assert "ForeignKey('knowledge_nodes.id')" in ks_source, (
-            "KnowledgeEdge.from_node_id / to_node_id must still target "
-            "knowledge_nodes.id — schema lock for Wave 4"
-        )
-
-
-# ===========================================================================
-# 6. HEARTBEAT HELPER — _emit_graph_primitive contract.
-# ===========================================================================
-
-
-def _load_primitive_heartbeat():
-    spec = importlib.util.spec_from_file_location(
-        "graph_primitive_heartbeat_w3s10", str(PRIMITIVE_HEARTBEAT_PY)
-    )
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = mod
-    spec.loader.exec_module(mod)
-    return mod
-
-
-PH_MOD = _load_primitive_heartbeat()
 
 
 class TestGraphHeartbeatHelper:

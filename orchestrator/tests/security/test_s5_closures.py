@@ -5,11 +5,9 @@ Structural pins (the behavioral DB/service paths run in CI). document_usage is n
 scoped on BOTH sides — writes attribute each row to its workspace (metadata JSONB,
 no migration), reads filter on metadata->>'workspace_id'.
 
-ONE S5 item remains intentionally surfaced for a human decision rather than
-silently deferred: deleting the mock /api/v1/memory router + AdvancedMemoryManager.
-Its acceptance is the PRD-155 route-contract test (not built), and removal cascades
-into live frontend callers (memory explorer / monitoring tab) — so it needs the
-PRD-155 dependency, or an explicit go to remove those fake-data features.
+(The once-deferred S5 item — deleting the mock /api/v1/memory router +
+AdvancedMemoryManager — was completed by PRD-187 S5; its frontend callers were
+removed with it.)
 """
 from __future__ import annotations
 

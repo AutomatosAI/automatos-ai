@@ -610,51 +610,60 @@ async def get_memory_stats(
     Return memory statistics for the current workspace.
 
     Used by the "What Automatos Knows" section in the Orchestrator tab.
-    Queries the memory_items table scoped to this workspace.
+    Queries the memory_short_term table scoped to this workspace.
     """
     from datetime import datetime, timedelta
 
     workspace_id = ctx.workspace_id
 
     try:
-        from modules.memory.storage.knowledge_system import MemoryItem
+        from modules.memory.models import MemoryShortTerm
     except ImportError:
         # Graceful fallback if the model isn't available
         return {"total_memories": 0, "by_type": {}, "by_level": {}, "recent": []}
 
     try:
-        base = db.query(MemoryItem).filter(MemoryItem.workspace_id == workspace_id)
+        # PRD-187 S5: reads the REAL L2 store (the relic memory_items table
+        # this used to read held 0 rows, lifetime — the section always showed
+        # zeros by construction).
+        base = db.query(MemoryShortTerm).filter(MemoryShortTerm.workspace_id == workspace_id)
 
         total = base.count()
 
         by_type = dict(
-            db.query(MemoryItem.memory_type, func.count(MemoryItem.id))
-            .filter(MemoryItem.workspace_id == workspace_id)
-            .group_by(MemoryItem.memory_type)
+            db.query(MemoryShortTerm.content_type, func.count(MemoryShortTerm.id))
+            .filter(MemoryShortTerm.workspace_id == workspace_id)
+            .group_by(MemoryShortTerm.content_type)
             .all()
         )
 
-        by_level = dict(
-            db.query(MemoryItem.memory_level, func.count(MemoryItem.id))
-            .filter(MemoryItem.workspace_id == workspace_id)
-            .group_by(MemoryItem.memory_level)
-            .all()
+        promoted = (
+            db.query(func.count(MemoryShortTerm.id))
+            .filter(
+                MemoryShortTerm.workspace_id == workspace_id,
+                MemoryShortTerm.promoted_to_l3.is_(True),
+            )
+            .scalar() or 0
         )
+        by_level = {"short_term": total - promoted, "promoted_to_durable": promoted}
 
         agents_with_memories = (
-            db.query(func.count(func.distinct(MemoryItem.agent_id)))
-            .filter(MemoryItem.workspace_id == workspace_id)
+            db.query(func.count(func.distinct(MemoryShortTerm.agent_id)))
+            .filter(
+                MemoryShortTerm.workspace_id == workspace_id,
+                MemoryShortTerm.agent_id.isnot(None),
+            )
             .scalar() or 0
         )
 
         yesterday = datetime.utcnow() - timedelta(hours=24)
         recent_24h = (
-            base.filter(MemoryItem.created_at >= yesterday).count()
+            base.filter(MemoryShortTerm.created_at >= yesterday).count()
         )
 
         # 5 most recent memories (content preview only)
         recent_rows = (
-            base.order_by(desc(MemoryItem.created_at))
+            base.order_by(desc(MemoryShortTerm.created_at))
             .limit(5)
             .all()
         )
@@ -663,8 +672,8 @@ async def get_memory_stats(
             content_preview = str(m.content)[:120] if m.content else ""
             recent.append({
                 "id": str(m.id),
-                "type": m.memory_type,
-                "level": m.memory_level,
+                "type": m.content_type,
+                "level": "promoted_to_durable" if m.promoted_to_l3 else "short_term",
                 "preview": content_preview,
                 "created_at": m.created_at.isoformat() if m.created_at else None,
             })

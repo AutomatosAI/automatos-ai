@@ -387,24 +387,17 @@ class TestF006LegacyExecuteDeleted:
 # ===========================================================================
 
 class TestF039MemoryScope:
-    """A caller-supplied session_id is prefixed with the workspace so tenant A's
-    "abc" and tenant B's "abc" are distinct keys (api/memory.py)."""
+    """F039 is closed BY DELETION (PRD-187 S5): the AdvancedMemoryManager
+    router whose session keys needed workspace-prefixing no longer exists —
+    the strongest form of the isolation guarantee."""
 
-    def _scoped(self):
-        import api.memory as m
-        return m._scoped_session
+    def test_advanced_memory_router_is_gone(self):
+        import importlib.util
 
-    def test_same_session_id_differs_across_workspaces(self):
-        scoped = self._scoped()
-        a = scoped(_ctx(ws=WS_A), "abc")
-        b = scoped(_ctx(ws=WS_B), "abc")
-        assert a != b, "same session_id must not collide across workspaces"
-        assert a.startswith(f"{WS_A}::")
-        assert b.startswith(f"{WS_B}::")
-
-    def test_none_session_preserved(self):
-        scoped = self._scoped()
-        assert scoped(_ctx(ws=WS_A), None) is None
+        assert importlib.util.find_spec("api.memory") is None, (
+            "api/memory.py was deleted in PRD-187 S5 — its resurrection "
+            "reopens the F039 cross-tenant session surface"
+        )
 
 
 # ===========================================================================
@@ -568,8 +561,10 @@ class TestCrossTenantMatrix:
         return not hasattr(wf, "execute_workflow")
 
     def _memory_write_denied(self):
-        import api.memory as m
-        return m._scoped_session(_ctx(ws=WS_A), "shared") != m._scoped_session(_ctx(ws=WS_B), "shared")
+        # Closed by deletion (PRD-187 S5): the cross-tenant-shaped memory
+        # router no longer exists at all.
+        import importlib.util
+        return importlib.util.find_spec("api.memory") is None
 
     def _shopify_sync_denied(self):
         import api.shopify as sh

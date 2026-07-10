@@ -18,7 +18,7 @@ Available Modules (Complete):
 Usage:
     from modules.search import ContextOptimizer
     from modules.rag import RAGService, SemanticChunker
-    from modules.memory import MemoryType
+    from modules.memory.unified_memory_service import get_unified_memory_service
     from modules.agents import AgentService, AgentFactory
     from modules.tools import ToolService, ToolRegistry
     from modules.learning import PlaybookMiner

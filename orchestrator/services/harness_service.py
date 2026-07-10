@@ -318,12 +318,6 @@ class HarnessService:
                 workspace_id, metrics, diagnosis, prescriptions, changelog, db,
             )
 
-            # W4-S12: dual-write this run's prescriptions to the structured DB store
-            # (best-effort, isolated session). The baseline JSON above stays the
-            # authoritative read path until the human cutover after the migration.
-            self._persist_prescriptions_to_db(
-                workspace_id, baseline.get("iteration"), prescriptions, changelog,
-            )
 
             elapsed = time.monotonic() - t0
             logger.info(
@@ -1050,54 +1044,6 @@ class HarnessService:
             f"Proposed: {json.dumps(rx.get('proposed_value', {}))}\n"
             f"Review and approve or reject in the Command Center (prescription {rx_id})."
         )
-
-    def _persist_prescriptions_to_db(self, workspace_id, iteration, prescriptions, changelog):
-        """W4-S12: dual-write this tick's prescriptions to the structured DB store
-        (harness_prescriptions), with status derived from the apply changelog.
-
-        Best-effort with its OWN session — never touches the tick's transaction and
-        never raises: if the migration hasn't been applied (table absent) or any
-        error occurs, it degrades to JSON-only and the weekly loop is unaffected.
-        The baseline JSON remains the authoritative READ path; flipping reads to the
-        DB and dropping the JSON is the human cutover (after migration + parity).
-        """
-        if not prescriptions:
-            return
-        try:
-            from core.database.database import get_db_session
-            from modules.memory.storage.knowledge_system import HarnessPrescription
-
-            cl = changelog or {}
-            applied_ids = {e.get("prescription_id") for e in cl.get("applied", []) if isinstance(e, dict)}
-            queued_ids = {e.get("prescription_id") for e in cl.get("queued", []) if isinstance(e, dict)}
-            run_id = str(iteration) if iteration is not None else None
-
-            with get_db_session() as db:
-                for rx in prescriptions:
-                    rx_id = rx.get("prescription_id")
-                    if rx_id in applied_ids:
-                        status = "applied"
-                    elif rx_id in queued_ids:
-                        status = "queued"
-                    else:
-                        status = "proposed"
-                    db.add(HarnessPrescription(
-                        workspace_id=workspace_id,
-                        run_id=run_id,
-                        prescription_id=rx_id,
-                        target_type=rx.get("target_type"),
-                        target_id=rx.get("target_id"),
-                        target_name=rx.get("target_name"),
-                        change_type=rx.get("change_type"),
-                        risk_score=rx.get("risk_score"),
-                        status=status,
-                        proposed_value=rx.get("proposed_value"),
-                        current_value_before=rx.get("current_value"),
-                        rationale=rx.get("rationale"),
-                    ))
-                db.flush()
-        except Exception as exc:
-            logger.warning("[HARNESS] DB store dual-write skipped (best-effort): %s", exc)
 
     def _workspace_has_channel(self, db: "Session", workspace_id: UUID) -> bool:
         """True if the workspace has any channel_connections row.

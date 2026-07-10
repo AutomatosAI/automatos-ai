@@ -1,8 +1,8 @@
 """
-Memory Stats API — Mem0-first with local DB fallback
-=====================================================
-Queries the Mem0 service (via UnifiedMemoryService) for memory data.
-Falls back to the local memory_items table if Mem0 is unavailable.
+Memory Stats API — durable-store-first with local L2 fallback
+==============================================================
+Queries the durable store (via UnifiedMemoryService) for memory data.
+Falls back to the local memory_short_term table if it is unavailable.
 """
 
 import asyncio
@@ -16,7 +16,7 @@ from sqlalchemy import func, desc, text
 from datetime import datetime
 
 from core.database.database import get_db
-from modules.memory.storage.knowledge_system import MemoryItem
+from modules.memory.models import MemoryShortTerm
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
 from core.auth.super_admin import require_super_admin
@@ -52,7 +52,7 @@ def _get_memory_service():
             _memory_service = svc
             logger.info("[memory_stats] Using UnifiedMemoryService")
         else:
-            logger.warning("[memory_stats] Mem0 not configured")
+            logger.warning("[memory_stats] durable store not configured")
     except Exception as exc:
         logger.warning("[memory_stats] UnifiedMemoryService unavailable: %s", exc)
     return _memory_service
@@ -145,29 +145,33 @@ async def get_real_memory_stats(ctx: RequestContext = Depends(get_request_contex
         except Exception as e:
             logger.warning("Memory stats query failed, falling back to local DB: %s", e, exc_info=True)
 
-    # Local DB stats (always available as secondary source)
-    ws_filter = MemoryItem.workspace_id == ctx.workspace_id
-    local_total = db.query(func.count(MemoryItem.id)).filter(ws_filter).scalar() or 0
+    # Local DB stats — the REAL L2 store (PRD-187 S5: the relic memory_items
+    # table these used to read held 0 rows, lifetime).
+    ws_filter = MemoryShortTerm.workspace_id == ctx.workspace_id
+    local_total = db.query(func.count(MemoryShortTerm.id)).filter(ws_filter).scalar() or 0
 
     total_memories = mem0_total if mem0_available else local_total
 
     # Additional local DB stats
     memory_by_type = db.query(
-        MemoryItem.memory_type,
-        func.count(MemoryItem.id).label('count')
-    ).filter(ws_filter).group_by(MemoryItem.memory_type).all()
+        MemoryShortTerm.content_type,
+        func.count(MemoryShortTerm.id).label('count')
+    ).filter(ws_filter).group_by(MemoryShortTerm.content_type).all()
 
-    memory_by_level = db.query(
-        MemoryItem.memory_level,
-        func.count(MemoryItem.id).label('count')
-    ).filter(ws_filter).group_by(MemoryItem.memory_level).all()
+    live_count = db.query(func.count(MemoryShortTerm.id)).filter(
+        ws_filter, MemoryShortTerm.promoted_to_l3.is_(False)
+    ).scalar() or 0
+    promoted_count = db.query(func.count(MemoryShortTerm.id)).filter(
+        ws_filter, MemoryShortTerm.promoted_to_l3.is_(True)
+    ).scalar() or 0
+    memory_by_level = [("short_term", live_count), ("promoted_to_durable", promoted_count)]
 
     agents_with_memories = db.query(
-        func.count(func.distinct(MemoryItem.agent_id))
-    ).filter(ws_filter).scalar() or 0
+        func.count(func.distinct(MemoryShortTerm.agent_id))
+    ).filter(ws_filter, MemoryShortTerm.agent_id.isnot(None)).scalar() or 0
 
     total_accesses = db.query(
-        func.sum(MemoryItem.access_count)
+        func.sum(MemoryShortTerm.access_count)
     ).filter(ws_filter).scalar() or 0
 
     # Hit rate: calculated from memory_access_log (real search-based metric)
@@ -215,33 +219,34 @@ async def get_real_memory_stats(ctx: RequestContext = Depends(get_request_contex
 async def get_agent_memory_stats(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> List[Dict[str, Any]]:
     """Get memory stats per agent with type/level breakdown."""
     try:
-        ws_filter = MemoryItem.workspace_id == ctx.workspace_id
+        ws_filter = MemoryShortTerm.workspace_id == ctx.workspace_id
 
         agent_stats = db.query(
-            MemoryItem.agent_id,
-            func.count(MemoryItem.id).label('memory_count'),
-            func.avg(MemoryItem.importance).label('avg_importance'),
-            func.sum(MemoryItem.access_count).label('total_accesses'),
-            func.max(MemoryItem.created_at).label('last_memory_at'),
-        ).filter(ws_filter).group_by(MemoryItem.agent_id).all()
+            MemoryShortTerm.agent_id,
+            func.count(MemoryShortTerm.id).label('memory_count'),
+            func.avg(MemoryShortTerm.importance).label('avg_importance'),
+            func.sum(MemoryShortTerm.access_count).label('total_accesses'),
+            func.max(MemoryShortTerm.created_at).label('last_memory_at'),
+        ).filter(ws_filter).group_by(MemoryShortTerm.agent_id).all()
 
         # Memory type distribution per agent
         type_rows = db.query(
-            MemoryItem.agent_id, MemoryItem.memory_type, func.count(MemoryItem.id)
-        ).filter(ws_filter).group_by(MemoryItem.agent_id, MemoryItem.memory_type).all()
+            MemoryShortTerm.agent_id, MemoryShortTerm.content_type, func.count(MemoryShortTerm.id)
+        ).filter(ws_filter).group_by(MemoryShortTerm.agent_id, MemoryShortTerm.content_type).all()
 
         type_map: Dict[Any, Dict[str, int]] = {}
         for agent_id, mtype, cnt in type_rows:
             type_map.setdefault(agent_id, {})[mtype or "UNKNOWN"] = cnt
 
-        # Memory level distribution per agent
+        # Tier distribution per agent (live L2 vs promoted to durable)
         level_rows = db.query(
-            MemoryItem.agent_id, MemoryItem.memory_level, func.count(MemoryItem.id)
-        ).filter(ws_filter).group_by(MemoryItem.agent_id, MemoryItem.memory_level).all()
+            MemoryShortTerm.agent_id, MemoryShortTerm.promoted_to_l3, func.count(MemoryShortTerm.id)
+        ).filter(ws_filter).group_by(MemoryShortTerm.agent_id, MemoryShortTerm.promoted_to_l3).all()
 
         level_map: Dict[Any, Dict[str, int]] = {}
-        for agent_id, mlevel, cnt in level_rows:
-            level_map.setdefault(agent_id, {})[mlevel or "UNKNOWN"] = cnt
+        for agent_id, promoted, cnt in level_rows:
+            key = "promoted_to_durable" if promoted else "short_term"
+            level_map.setdefault(agent_id, {})[key] = cnt
 
         return [
             {
@@ -300,17 +305,17 @@ async def get_recent_memories(
         except Exception as e:
             logger.warning("Memory recent fetch failed, falling back to local: %s", e, exc_info=True)
 
-    # Fallback: local DB
-    recent = db.query(MemoryItem).filter(
-        MemoryItem.workspace_id == ctx.workspace_id
-    ).order_by(desc(MemoryItem.created_at)).limit(limit).all()
+    # Fallback: the real L2 store
+    recent = db.query(MemoryShortTerm).filter(
+        MemoryShortTerm.workspace_id == ctx.workspace_id
+    ).order_by(desc(MemoryShortTerm.created_at)).limit(limit).all()
 
     return [
         {
             "id": str(mem.id),
             "agent_id": mem.agent_id,
-            "memory_type": mem.memory_type,
-            "memory_level": mem.memory_level,
+            "memory_type": mem.content_type,
+            "memory_level": "promoted_to_durable" if mem.promoted_to_l3 else "short_term",
             "content": _truncate(mem.content, 120),
             "importance": mem.importance,
             "access_count": mem.access_count,
