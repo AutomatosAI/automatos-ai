@@ -13,9 +13,10 @@ Automatos app from the Shopify App Store:
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Header
 from pydantic import BaseModel, Field
@@ -352,6 +353,110 @@ async def _sync_catalog_for_workspace(workspace_id: str, event: str) -> None:
         db.close()
 
 
+# ── PRD-189 S3: per-workspace debounce + coalesce + already-running guard ──
+#
+# The old handler fired ``create_task(_sync_catalog_for_workspace(...))`` per
+# catalog event with no debounce, no coalescing, no already-running check, and
+# the task reference dropped (GC-collectable mid-flight). A merchant bulk edit
+# emitting N webhooks launched N concurrent full Bulk-Op re-syncs — each an
+# embedding-bearing full rebuild — relying on Shopify's one-bulk-op-per-shop
+# limit with the losers swallowed.
+#
+# This mirrors the in-process debounce shape ``GraphifyService`` already ships
+# (``graph_service.py`` ``schedule_incremental_update``): a per-workspace timer
+# that resets on every event and accumulates the coalesced event names. On
+# expiry exactly ONE re-sync task runs; its reference is HELD in
+# ``_catalog_sync_tasks`` (GC guard) which doubles as the already-running
+# guard — if the window expires while a re-sync is still in flight, the window
+# re-arms instead of launching a second concurrent sync, so events that arrive
+# mid-flight still get their (single) follow-up re-sync afterwards. In-process
+# by design, like the GraphifyService debounce it mirrors.
+#
+# The window comes from ``config.SHOPIFY_SYNC_DEBOUNCE_SECONDS`` — read at
+# call time, never an inline ``os.getenv``.
+
+_catalog_debounce_handles: Dict[str, asyncio.TimerHandle] = {}
+_catalog_pending_events: Dict[str, List[str]] = {}
+_catalog_sync_tasks: Dict[str, "asyncio.Task[None]"] = {}
+
+
+def _schedule_catalog_sync(workspace_id: str, event: str) -> None:
+    """Debounce a catalog re-sync request for a workspace.
+
+    Every call within the window resets the timer and accumulates the event
+    name, so a webhook burst produces one re-sync carrying a coalesced reason.
+    """
+    _catalog_pending_events.setdefault(workspace_id, []).append(event)
+
+    existing = _catalog_debounce_handles.pop(workspace_id, None)
+    if existing is not None:
+        existing.cancel()
+
+    loop = asyncio.get_running_loop()
+    handle = loop.call_later(
+        config.SHOPIFY_SYNC_DEBOUNCE_SECONDS, _fire_catalog_sync, workspace_id
+    )
+    _catalog_debounce_handles[workspace_id] = handle
+    logger.info(
+        "[PRD-189 S3] Catalog re-sync debounced for workspace=%s reason=%s "
+        "(%d pending, window=%ss)",
+        workspace_id, event,
+        len(_catalog_pending_events[workspace_id]),
+        config.SHOPIFY_SYNC_DEBOUNCE_SECONDS,
+    )
+
+
+def _fire_catalog_sync(workspace_id: str) -> None:
+    """Debounce window expired — run ONE coalesced re-sync for the workspace.
+
+    Already-running guard: if a re-sync for this workspace is still in flight,
+    re-arm the window instead of launching a second concurrent full sync; the
+    accumulated events keep their follow-up re-sync once the running one ends.
+    """
+    _catalog_debounce_handles.pop(workspace_id, None)
+
+    running = _catalog_sync_tasks.get(workspace_id)
+    if running is not None and not running.done():
+        loop = asyncio.get_running_loop()
+        handle = loop.call_later(
+            config.SHOPIFY_SYNC_DEBOUNCE_SECONDS, _fire_catalog_sync, workspace_id
+        )
+        _catalog_debounce_handles[workspace_id] = handle
+        logger.info(
+            "[PRD-189 S3] Catalog re-sync for workspace=%s still in flight — "
+            "deferring the coalesced follow-up by %ss",
+            workspace_id, config.SHOPIFY_SYNC_DEBOUNCE_SECONDS,
+        )
+        return
+
+    events = _catalog_pending_events.pop(workspace_id, [])
+    if not events:
+        return
+    reason = (
+        f"{events[-1]} (+{len(events) - 1} coalesced)"
+        if len(events) > 1
+        else events[0]
+    )
+
+    task = asyncio.get_running_loop().create_task(
+        _sync_catalog_for_workspace(workspace_id, reason)
+    )
+    # Hold the reference: the guard above AND the GC protection the old
+    # fire-and-forget create_task never had.
+    _catalog_sync_tasks[workspace_id] = task
+
+    def _clear(done_task: "asyncio.Task[None]", ws: str = workspace_id) -> None:
+        if _catalog_sync_tasks.get(ws) is done_task:
+            _catalog_sync_tasks.pop(ws, None)
+
+    task.add_done_callback(_clear)
+    logger.info(
+        "[PRD-189 S3] Coalesced catalog re-sync launched for workspace=%s "
+        "(%d events → 1 sync, reason=%s)",
+        workspace_id, len(events), reason,
+    )
+
+
 @router.post("/events")
 async def forward_event(
     request: EventRequest,
@@ -362,9 +467,10 @@ async def forward_event(
     Forward Shopify webhook events for agent context enrichment.
 
     Catalog-mutation events (products/*, collections/*, inventory_levels/update)
-    trigger an incremental commerce-graph refresh (PRD-009 sub-60s freshness,
-    F032). The heavy re-sync runs as a detached background task with its own
-    session, so the webhook returns immediately.
+    trigger a commerce-graph refresh (F032). The heavy re-sync is debounced,
+    coalesced and already-running-guarded per workspace (PRD-189 S3) and runs
+    as a held background task with its own session, so the webhook returns
+    immediately and a burst of N events produces ONE re-sync.
     """
     logger.info(
         "Shopify event received: shop=%s event=%s",
@@ -383,15 +489,7 @@ async def forward_event(
             .first()
         )
         if ws:
-            import asyncio as _asyncio
-
-            _asyncio.create_task(
-                _sync_catalog_for_workspace(str(ws.id), request.event)
-            )
-            logger.info(
-                "[PRD-183 S1] Scheduled catalog re-sync for workspace=%s reason=%s",
-                ws.id, request.event,
-            )
+            _schedule_catalog_sync(str(ws.id), request.event)
 
     return {"status": "received", "event": request.event}
 
@@ -465,6 +563,98 @@ async def start_product_sync(
     """
     effective_ws = _resolve_sync_workspace(ctx, workspace_id)
     return await _product_sync_impl(effective_ws, db)
+
+
+async def _merge_catalog_over_existing(
+    gs: Any, workspace_id: str, catalog_graph: Dict[str, Any]
+) -> tuple[Dict[str, Any], Dict[str, int]]:
+    """Overlay everything the catalog bulk-op does NOT carry onto a fresh catalog.
+
+    PRD-189 S1 — the fix for the FBT wipe. The old catalog sync ended in
+    ``import_graph(merge=False)``: a full graph REPLACEMENT with only the
+    catalog nodes/edges, which erased every ``frequently_bought_with`` edge the
+    orders sync had computed — and every non-catalog node (flywheel syntheses,
+    document/report entities, roster) merged in since. F032 fires that on every
+    catalog webhook, so the marquee cross-sell feature did not survive normal
+    store activity (the pilot reported ``fbt_edges_added: 16`` with 0 present).
+
+    This mirrors the strip-then-merge the orders path already uses below
+    (strip the stale version of what THIS sync produces, keep the rest, merge
+    the fresh version over the top):
+
+    - Catalog content is identified by provenance — nodes/edges whose
+      ``source_file`` starts with :data:`graph_extraction.SHOPIFY_CATALOG_SOURCE`
+      (``shopify://catalog``). The fresh bulk-op carries the complete live
+      catalog, so the stale catalog is dropped: product attrs refresh and
+      store-deleted products fall out.
+    - Everything else — ``frequently_bought_with`` edges (``shopify://orders``
+      provenance), flywheel/document/roster nodes and their edges — is
+      preserved verbatim and overlaid onto the fresh catalog.
+    - A preserved FBT edge whose product was deleted from the store keeps the
+      co-purchase history; its bare endpoint is skipped by the widget resolvers
+      (no ``file_type``) and the next orders sync refreshes the FBT set.
+
+    Returns ``(combined_graph_data, preserved_stats)``. Pure with respect to
+    its inputs — ``catalog_graph`` and the loaded existing graph are not
+    mutated; the combined payload is a new dict.
+    """
+    from modules.knowledge.graph_extraction import SHOPIFY_CATALOG_SOURCE
+
+    existing = await gs.load_graph(workspace_id)
+    if existing is None:
+        # First sync — nothing to preserve; the fresh catalog IS the graph.
+        return catalog_graph, {
+            "nodes_preserved": 0,
+            "edges_preserved": 0,
+            "fbt_edges_preserved": 0,
+        }
+
+    def _is_catalog(source_file: Any) -> bool:
+        return isinstance(source_file, str) and source_file.startswith(
+            SHOPIFY_CATALOG_SOURCE
+        )
+
+    fresh_node_ids = {n.get("id") for n in catalog_graph.get("nodes", [])}
+    fresh_pairs: set = set()
+    for e in catalog_graph.get("edges", []):
+        fresh_pairs.add((e.get("source"), e.get("target")))
+        fresh_pairs.add((e.get("target"), e.get("source")))
+
+    preserved_nodes = [
+        {**attrs, "id": node_id}
+        for node_id, attrs in existing.nodes(data=True)
+        if node_id not in fresh_node_ids and not _is_catalog(attrs.get("source_file"))
+    ]
+    preserved_edges = [
+        {**attrs, "source": u, "target": v}
+        for u, v, attrs in existing.edges(data=True)
+        if (u, v) not in fresh_pairs and not _is_catalog(attrs.get("source_file"))
+    ]
+    fbt_preserved = sum(
+        1
+        for e in preserved_edges
+        if (e.get("relation") or "").lower() == "frequently_bought_with"
+    )
+
+    combined = {
+        "nodes": list(catalog_graph.get("nodes", [])) + preserved_nodes,
+        "edges": list(catalog_graph.get("edges", [])) + preserved_edges,
+        "hyperedges": list(catalog_graph.get("hyperedges", [])),
+    }
+    stats = {
+        "nodes_preserved": len(preserved_nodes),
+        "edges_preserved": len(preserved_edges),
+        "fbt_edges_preserved": fbt_preserved,
+    }
+    logger.info(
+        "[PRD-189 S1] Catalog re-sync for workspace=%s preserving %d non-catalog "
+        "nodes, %d non-catalog edges (%d frequently_bought_with)",
+        workspace_id,
+        stats["nodes_preserved"],
+        stats["edges_preserved"],
+        stats["fbt_edges_preserved"],
+    )
+    return combined, stats
 
 
 async def _product_sync_impl(workspace_id: str, db: Session) -> "SyncStartResponse":
@@ -563,9 +753,35 @@ async def _product_sync_impl(workspace_id: str, db: Session) -> "SyncStartRespon
         # 3. Map to graph (deterministic, in-memory)
         graph = map_shopify_catalog(jsonl_text.splitlines(), bulk_op_id=bulk_op_id)
 
-        # 4. Import via existing GraphifyService — clusters + persists + exports
+        # 4. Merge the fresh catalog over the existing workspace graph (PRD-189
+        #    S1) and import via the existing GraphifyService — clusters +
+        #    persists + exports. The combined payload carries the fresh catalog
+        #    PLUS everything the catalog bulk-op does not itself produce
+        #    (frequently_bought_with edges, flywheel/document/roster nodes), so
+        #    a catalog re-sync no longer wipes the cross-sell intelligence.
         gs = GraphifyService()
-        meta = await gs.import_graph(workspace_id, graph, merge=False)
+        combined, preserved = await _merge_catalog_over_existing(
+            gs, workspace_id, graph
+        )
+        meta = await gs.import_graph(workspace_id, combined, merge=False)
+
+        # PRD-189 S2: FBT-persistence integrity — reported by the last orders
+        # sync vs actually present after THIS import. This is the single query
+        # that would have caught the wipe on day one (16 reported / 0 present);
+        # a drift here means the preservation above silently regressed.
+        from integrations.shopify.integrity import count_fbt_edges, fbt_integrity
+
+        merged_graph = await gs.load_graph(workspace_id)
+        integrity = fbt_integrity(
+            (settings.get("orders_sync") or {}).get("fbt_edges_added"),
+            count_fbt_edges(merged_graph) if merged_graph is not None else 0,
+        )
+        if integrity["ok"] is False:
+            logger.error(
+                "[PRD-189 S2] FBT persistence drift after catalog sync for "
+                "workspace=%s: orders_sync reported %s, graph holds %s",
+                workspace_id, integrity["reported"], integrity["present"],
+            )
 
         duration = time.time() - t0
         settings["product_sync"] = {
@@ -576,6 +792,8 @@ async def _product_sync_impl(workspace_id: str, db: Session) -> "SyncStartRespon
             "node_count": meta.get("node_count"),
             "edge_count": meta.get("edge_count"),
             "community_count": meta.get("community_count"),
+            "fbt_edges_preserved": preserved.get("fbt_edges_preserved", 0),
+            "fbt_integrity": integrity,
             "duration_seconds": duration,
             "completed_at": time.time(),
         }
@@ -843,6 +1061,24 @@ async def _orders_sync_impl(
         gs = GraphifyService()
         meta = await gs.import_graph(workspace_id, graph_delta, merge=True)
 
+        # PRD-189 S2: FBT-persistence integrity — what this sync reported must
+        # be what the merged graph actually holds. Written into the status
+        # block (and mirrored by the Command Center Commerce tile) so a lying
+        # "fbt_edges_added: N / 0 present" state can never go unread again.
+        from integrations.shopify.integrity import count_fbt_edges, fbt_integrity
+
+        merged_graph = await gs.load_graph(workspace_id)
+        integrity = fbt_integrity(
+            fbt_edges,
+            count_fbt_edges(merged_graph) if merged_graph is not None else 0,
+        )
+        if integrity["ok"] is False:
+            logger.error(
+                "[PRD-189 S2] FBT persistence drift after orders sync for "
+                "workspace=%s: reported %s, graph holds %s",
+                workspace_id, integrity["reported"], integrity["present"],
+            )
+
         duration = time.time() - t0
         settings["orders_sync"] = {
             "status": "complete",
@@ -854,6 +1090,7 @@ async def _orders_sync_impl(
             "fbt_edges_added": fbt_edges,
             "stale_fbt_removed": stale_fbt_removed,
             "total_orders_analysed": total_orders,
+            "fbt_integrity": integrity,
             "duration_seconds": duration,
             "completed_at": time.time(),
         }

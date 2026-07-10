@@ -105,6 +105,18 @@ export interface DeliverableFreshnessMetric {
   generated_at: string
 }
 
+// PRD-189 S2 — cross-sell persistence integrity (the Commerce tile).
+export interface CommerceIntegrityMetric {
+  synced: boolean
+  reported_fbt_edges: number | null
+  present_fbt_edges: number | null
+  drift: number | null
+  ok: boolean | null
+  last_orders_sync_at: number | null
+  last_catalog_sync_at: number | null
+  generated_at: string
+}
+
 // ─── Admin workspace override ────────────────────────────────────────
 // Module-level override that takes priority over localStorage.
 // Set by AdminWorkspaceSwitcher; reset on unmount.
@@ -1595,6 +1607,10 @@ class ApiClient {
 
   async getDeliverableFreshness(): Promise<DeliverableFreshnessMetric> {
     return this.request<DeliverableFreshnessMetric>('/api/analytics/deliverable-freshness')
+  }
+
+  async getCommerceIntegrity(): Promise<CommerceIntegrityMetric> {
+    return this.request<CommerceIntegrityMetric>('/api/analytics/commerce-integrity')
   }
 
   async getAgentAnalytics(timeRange: string) {

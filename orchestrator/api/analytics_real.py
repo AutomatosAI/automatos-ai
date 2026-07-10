@@ -570,6 +570,65 @@ async def get_deliverable_freshness(
     }
 
 
+@ws_router.get("/commerce-integrity")
+async def get_commerce_integrity(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Cross-sell persistence integrity — the Commerce tile (PRD-189 S2).
+
+    The one query that would have caught the F1 wipe on day one: the FBT
+    edges the last orders sync REPORTED (``orders_sync.fbt_edges_added``)
+    versus the ``frequently_bought_with`` edges actually PRESENT in the
+    workspace Knowledge Graph. Read-only — the sync status blocks are written
+    by ``api/shopify.py``; the graph is read through the same
+    ``GraphifyService`` the widget resolvers use.
+
+    Own-workspace only (PRD-185 S12 strip posture). Honest empties: a
+    workspace with no commerce sync history reports ``synced: false`` and
+    nulls; a workspace whose graph lost its cross-sell reads the drift, never
+    a fabricated green.
+
+    Returns ``{synced, reported_fbt_edges, present_fbt_edges, drift, ok,
+    last_orders_sync_at, last_catalog_sync_at, generated_at}``.
+    """
+    workspace = db.query(Workspace).get(ctx.workspace_id)
+    settings = (workspace.settings or {}) if workspace else {}
+    orders_sync = settings.get("orders_sync") or {}
+    product_sync = settings.get("product_sync") or {}
+
+    generated_at = datetime.now(timezone.utc).isoformat()
+    if not orders_sync and not product_sync:
+        return {
+            "synced": False,
+            "reported_fbt_edges": None,
+            "present_fbt_edges": None,
+            "drift": None,
+            "ok": None,
+            "last_orders_sync_at": None,
+            "last_catalog_sync_at": None,
+            "generated_at": generated_at,
+        }
+
+    from integrations.shopify.integrity import count_fbt_edges, fbt_integrity
+    from modules.knowledge.graph_service import GraphifyService
+
+    graph = await GraphifyService().load_graph(str(ctx.workspace_id))
+    present = count_fbt_edges(graph) if graph is not None else 0
+    integrity = fbt_integrity(orders_sync.get("fbt_edges_added"), present)
+
+    return {
+        "synced": True,
+        "reported_fbt_edges": integrity["reported"],
+        "present_fbt_edges": integrity["present"],
+        "drift": integrity["drift"],
+        "ok": integrity["ok"],
+        "last_orders_sync_at": orders_sync.get("completed_at"),
+        "last_catalog_sync_at": product_sync.get("completed_at"),
+        "generated_at": generated_at,
+    }
+
+
 @router.get("/dashboard/task-completion-time")
 async def get_avg_task_completion_time(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Get average task completion time (UNION: workflows + missions)"""

@@ -15,6 +15,12 @@ collections, vendors) by ``map_shopify_catalog`` → ``import_graph`` inside
 fixed contract: a catalog-shaped ``/events`` payload triggers a real catalog
 re-sync for the resolved workspace, and a non-catalog event does not.
 
+PRD-189 S3: the re-sync dispatch is now debounced per workspace
+(``_schedule_catalog_sync`` → ``_fire_catalog_sync``), so these tests run with
+a near-zero ``SHOPIFY_SYNC_DEBOUNCE_SECONDS`` and settle past the window
+before asserting. The burst/coalescing/already-running behaviour itself is
+pinned in ``test_prd189_s3_webhook_debounce.py``.
+
 Pure: the Composio/httpx/graph internals of ``_product_sync_impl`` are mocked
 at the boundary; no DB, no network. The webhook body shape the Shopify Remix
 app (Part B) must POST is asserted directly against ``EventRequest``.
@@ -66,17 +72,32 @@ class _FakeDb:
         return _FakeQuery(self._workspace)
 
 
-def _run_and_drain(coro):
-    """Run *coro* to completion, then drain any background tasks it spawned.
+def _prepare_debounce(monkeypatch, window: float = 0.01) -> None:
+    """Fresh per-test debounce state + a near-zero window so the deferred
+    re-sync fires inside the test's settle sleep."""
+    shopify._catalog_debounce_handles.clear()
+    shopify._catalog_pending_events.clear()
+    shopify._catalog_sync_tasks.clear()
+    monkeypatch.setattr(shopify.config, "SHOPIFY_SYNC_DEBOUNCE_SECONDS", window)
 
-    ``forward_event`` dispatches the catalog re-sync via ``create_task`` so the
-    webhook returns immediately; a deterministic test must then let those
-    scheduled tasks run before asserting. We run everything on one fresh loop.
+
+def _run_and_drain(coro, settle: float = 0.08):
+    """Run *coro*, wait out the debounce window, then drain spawned tasks.
+
+    ``forward_event`` debounces the catalog re-sync (PRD-189 S3); a
+    deterministic test must sleep past the window so the timer fires and the
+    re-sync task launches, then let it run. Everything on one fresh loop.
     """
     loop = asyncio.new_event_loop()
     try:
         asyncio.set_event_loop(loop)
-        result = loop.run_until_complete(coro)
+
+        async def _scenario():
+            result = await coro
+            await asyncio.sleep(settle)
+            return result
+
+        result = loop.run_until_complete(_scenario())
         # Drain remaining scheduled tasks (the detached re-sync).
         pending = asyncio.all_tasks(loop)
         if pending:
@@ -111,6 +132,7 @@ def test_catalog_webhook_updates_graph(monkeypatch):
     """
     ws = _FakeWorkspace()
     db = _FakeDb(ws)
+    _prepare_debounce(monkeypatch)
 
     calls = {}
 
@@ -126,7 +148,7 @@ def test_catalog_webhook_updates_graph(monkeypatch):
     result = _run_and_drain(shopify.forward_event(request=req, db=db, _auth=None))
 
     assert result["status"] == "received"
-    # The catalog re-sync was scheduled for the resolved workspace + event.
+    # The catalog re-sync ran for the resolved workspace + event.
     assert calls.get("workspace_id") == "ws-123"
     assert calls.get("event") == "products/update"
 
@@ -135,6 +157,7 @@ def test_non_catalog_event_does_not_resync(monkeypatch):
     """A non-catalog event (e.g. app/uninstalled) must NOT trigger a catalog sync."""
     ws = _FakeWorkspace()
     db = _FakeDb(ws)
+    _prepare_debounce(monkeypatch)
 
     fired = {"count": 0}
 
@@ -153,6 +176,7 @@ def test_non_catalog_event_does_not_resync(monkeypatch):
 def test_catalog_event_unknown_shop_is_safe(monkeypatch):
     """A catalog event for an unknown shop resolves to no workspace and no-ops safely."""
     db = _FakeDb(None)  # no workspace for this shop
+    _prepare_debounce(monkeypatch)
 
     fired = {"count": 0}
 

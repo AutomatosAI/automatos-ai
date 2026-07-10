@@ -17,6 +17,11 @@
  * were added — SLOs (the 3 tracked PRD-180 objectives) and DELIVERABLES
  * (freshness of the last output, the signal that would have caught the 06-16
  * silent stop on day one).
+ *
+ * PRD-189 S2: COMMERCE — cross-sell persistence integrity. Shown only for
+ * workspaces with a commerce sync history; reads reported-vs-present
+ * frequently-bought-together edges (the "16 reported / 0 present" query that
+ * would have caught the FBT wipe on day one).
  */
 
 import type { SparklineTone } from './sparkline'
@@ -28,6 +33,7 @@ import {
   usePrimitiveHealth,
   useSLOs,
   useDeliverableFreshness,
+  useCommerceIntegrity,
 } from '@/hooks/use-analytics-api'
 
 interface Cell {
@@ -44,6 +50,7 @@ export function IsItWorkingStrip() {
   const { data: widget } = useWidgetEngagement('7d')
   const { data: slos } = useSLOs('24h')
   const { data: fresh } = useDeliverableFreshness()
+  const { data: commerce } = useCommerceIntegrity()
 
   const missionTotal = mission?.total_executions ?? 0
   const missionPct = missionTotal > 0 ? Math.round(mission?.value ?? 0) : 0
@@ -122,6 +129,30 @@ export function IsItWorkingStrip() {
       tone: freshTotal === 0 ? 'muted' : freshHours != null && freshHours >= 48 ? 'warn' : 'ok',
       delta: freshTotal > 0 ? `${freshTotal} total · last output` : 'none produced yet',
     },
+    // COMMERCE only exists for workspaces with a commerce sync history —
+    // a workspace that never synced a catalog/orders keeps a 7-cell strip.
+    ...(commerce?.synced
+      ? [
+          {
+            label: 'COMMERCE',
+            value:
+              commerce.present_fbt_edges != null
+                ? String(commerce.present_fbt_edges)
+                : '—',
+            tone: (commerce.ok === false
+              ? 'err'
+              : (commerce.present_fbt_edges ?? 0) > 0
+                ? 'ok'
+                : 'muted') as SparklineTone,
+            delta:
+              commerce.ok === false
+                ? `cross-sell: ${commerce.present_fbt_edges} live · last computed ${commerce.reported_fbt_edges}`
+                : commerce.reported_fbt_edges != null
+                  ? `cross-sell: ${commerce.present_fbt_edges} pairs live · in sync`
+                  : 'no orders sync yet',
+          },
+        ]
+      : []),
     {
       label: 'WIDGET',
       value: String(sessions),

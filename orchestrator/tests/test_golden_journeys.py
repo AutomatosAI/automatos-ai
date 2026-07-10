@@ -6,19 +6,23 @@ test per journey, selectable with ``-m golden``.
 
 Honesty over theatre. There is no in-process FastAPI/TestClient harness in this
 repo, and several journeys cross live external boundaries (Clerk auth, Shopify,
-an LLM, S3, the scheduler). Faking those would test the fakes, not the platform —
-and the project's rule is that integration coverage hits real backends, never
-mocks. So each journey is implemented at the highest layer that can be proven
-*honestly today*:
+an LLM, S3, the scheduler). Faking a platform layer would test the fakes, not
+the platform. So each journey is implemented at the highest layer that can be
+proven *honestly today*:
 
 * **Implemented now** (no external service, deterministic or real local PG):
-  J2 reasoning-entry decision, J5 RAG ingest→select→assemble pipeline,
-  J10 cross-workspace isolation (real Postgres, the P0 security property).
+  J2 reasoning-entry decision, J3 widget → vertical plugin → grounded response,
+  J5 RAG ingest→select→assemble pipeline, J9 Shopify sync → Knowledge Graph →
+  FBT proactive opener, J10 cross-workspace isolation (real Postgres, the P0
+  security property). J3/J9 (PRD-189 S5) mock Shopify at the BOUNDARY only —
+  recorded Bulk-Op JSONL fixtures stand in for Composio + the signed-URL
+  download — while the mappers, the import/merge pipeline, and the widget
+  plugin dispatch are the real production code.
 * **Tracked gaps** — journeys that need infrastructure this suite can't stand up
   offline ``pytest.skip`` with a precise reason naming exactly what they need.
   They are not silent: ``-m golden`` lists them every run, so the backbone shows
   the whole map and the holes in it. Filling them is Wave 2.3 / Wave 3 work
-  (recorded fixtures for the LLM/Shopify legs, an app-level client fixture).
+  (recorded fixtures for the LLM legs, an app-level client fixture).
 
 The implemented journeys compose primitives that W2-S9 (reasoning) and W2-S10
 (RAG, verification) unit-test in isolation; here they are wired end-to-end so a
@@ -98,14 +102,91 @@ async def test_j2_chat_reasoning_entry_routes_message():
 # ===========================================================================
 
 
-def test_j3_widget_plugin_response():
-    pytest.skip(
-        "needs the widget app endpoint + plugin runtime: POST /widget/chat → "
-        "per-vertical plugin (generic + shopify) → response. Requires the "
-        "app-level client and a loaded plugin; the Shopify leg also needs "
-        "recorded product fixtures. Fill with the app client fixture (generic) "
-        "and recorded Shopify fixtures (vertical)."
+@pytest.mark.asyncio
+async def test_j3_widget_plugin_response(monkeypatch):
+    """A widget message reaches the per-vertical plugin and comes back grounded
+    (PRD-189 S5). Exactly the dispatch ``api/widgets/chat.py`` performs —
+    ``PLUGIN_REGISTRY[vertical].handle_widget_message`` — driven directly:
+
+    * **generic**: a regular turn with page context returns the message with
+      the opaque ``(Context: ...)`` grounding prefix.
+    * **shopify**: against the recorded INBUILD-flavoured fixture graph
+      (``integrations/shopify/tests/fixtures/``), a ``proactive_opener``
+      trigger is rewritten into a directive whose facts carry co-purchase
+      provenance — the "bought together in X of Y orders" citation — and a
+      regular shopper turn keeps its verbatim text but gains a
+      ``[PAGE_CONTEXT]`` system preamble.
+
+    No app-level client, no live store: the graph source is the one recorded
+    fixture (the same boundary the US-011 byte-equality tests stub).
+    """
+    import json
+    from pathlib import Path
+    from uuid import uuid4 as _uuid4
+
+    import modules.knowledge.graph_service as graph_service_mod
+    from networkx.readwrite import json_graph
+    from integrations import PLUGIN_REGISTRY
+
+    # --- generic leg: opaque-context grounding, message otherwise untouched.
+    generic = await PLUGIN_REGISTRY["generic"].handle_widget_message(
+        message="do you ship to Ireland?",
+        page_context={"pageType": "product"},
+        trigger_reason=None,
+        workspace_id=_uuid4(),
+        db=MagicMock(),
     )
+    assert generic.message.startswith('(Context: {"pageType": "product"})')
+    assert generic.message.endswith("do you ship to Ireland?")
+
+    # --- shopify leg: recorded fixture graph → grounded, provenance-cited.
+    fixtures = (
+        Path(__file__).resolve().parents[1]
+        / "integrations" / "shopify" / "tests" / "fixtures"
+    )
+    graph_data = json.loads((fixtures / "inbuild_graph_snapshot.json").read_text())
+    if "links" not in graph_data and "edges" in graph_data:
+        graph_data["links"] = graph_data.pop("edges")
+    fixture_graph = json_graph.node_link_graph(graph_data)
+
+    class _FixtureGraphService:
+        async def load_graph(self, _workspace_id):
+            return fixture_graph
+
+    monkeypatch.setattr(graph_service_mod, "GraphifyService", _FixtureGraphService)
+
+    page_context = json.loads((fixtures / "product_page_context.json").read_text())
+    shopify_plugin = PLUGIN_REGISTRY["shopify"]
+
+    opener = await shopify_plugin.handle_widget_message(
+        message="",
+        page_context=page_context,
+        trigger_reason="proactive_opener",
+        workspace_id=_uuid4(),
+        db=MagicMock(),
+    )
+    assert opener.message.startswith("[PROACTIVE_OPENER]")
+    # The grounding facts are real graph provenance, not invention: the top
+    # FBT pair with its co-purchase citation, straight from the fixture edges.
+    assert (
+        '"Hochiki YBN Detector Base" (bought together in 42 of 57 orders)'
+        in opener.message
+    )
+    assert opener.telemetry["trigger_reason"] == "proactive_opener"
+    assert opener.telemetry["related_count"] >= 1
+
+    # A regular shopper turn: verbatim message + page-context preamble.
+    regular = await shopify_plugin.handle_widget_message(
+        message="what wattage is this detector?",
+        page_context=page_context,
+        trigger_reason=None,
+        workspace_id=_uuid4(),
+        db=MagicMock(),
+    )
+    assert regular.message == "what wattage is this detector?"
+    assert regular.system_preamble is not None
+    assert regular.system_preamble.startswith("[PAGE_CONTEXT]")
+    assert "Hochiki ALN Optical Smoke Detector" in regular.system_preamble
 
 
 # ===========================================================================
@@ -214,18 +295,138 @@ def test_j8_nl2sql_query():
 
 
 # ===========================================================================
-# J9 — Shopify sync → Knowledge Graph → FBT proactive opener (the moat)
+# J9 — Shopify sync → Knowledge Graph → FBT proactive opener
+# (the marquee commerce journey: what the merchant installed Automatos FOR)
 # ===========================================================================
 
 
-def test_j9_shopify_sync_to_fbt_opener():
-    pytest.skip(
-        "the moat journey: Shopify sync → Knowledge Graph (frequently-bought-"
-        "together edges) → per-product proactive opener. Needs a live Shopify "
-        "store + the KG build + the widget. Fill with recorded Shopify webhook/"
-        "product fixtures driving a real local KG build in Wave 2.3 — this is the "
-        "highest-value gap to close next."
+@pytest.mark.asyncio
+async def test_j9_shopify_sync_to_fbt_opener(monkeypatch):
+    """The full marquee path, un-skipped (PRD-189 S5), with Shopify mocked at
+    the boundary only — recorded catalog/orders Bulk-Op JSONL fixtures stand in
+    for Composio + the signed-URL download; everything after that boundary is
+    the real production code:
+
+    1. recorded catalog JSONL → real ``map_shopify_catalog`` → real
+       ``GraphifyService.import_graph`` (normalize/cluster/cache);
+    2. recorded orders JSONL → real ``map_shopify_orders`` → real merge —
+       ``frequently_bought_with`` edges land in the workspace Knowledge Graph;
+    3. the real widget plugin (``_resolve_graph_related_products`` +
+       ``_build_proactive_opener_message`` via ``handle_widget_message``)
+       produces a provenance-cited opener from those edges;
+    4. **the PRD-189 S1 guarantee, folded in**: a subsequent catalog re-sync —
+       the REAL ``_product_sync_impl`` over an updated catalog fixture — leaves
+       the FBT edges intact (before S1 this exact step wiped them to 0);
+    5. the opener still cites the co-purchase pair afterwards.
+    """
+    from uuid import UUID, uuid4 as _uuid4
+
+    import modules.knowledge.graph_service as graph_service_mod
+    from integrations import PLUGIN_REGISTRY
+    from modules.knowledge.graph_extraction import (
+        map_shopify_catalog,
+        map_shopify_orders,
     )
+    from tests.helpers_shopify_sync import (
+        CATALOG_JSONL_PATH,
+        CATALOG_RESYNC_JSONL_PATH,
+        ORDERS_JSONL_PATH,
+        FakeDb,
+        FakeWorkspace,
+        fbt_edges_of,
+        make_graph_service,
+        mock_sync_boundaries,
+        silence_graph_primitive,
+    )
+
+    workspace_id = str(_uuid4())
+    silence_graph_primitive(monkeypatch)
+    svc = make_graph_service()
+
+    # 1. Catalog sync — recorded bulk-op JSONL through the real mapper+import.
+    catalog = map_shopify_catalog(
+        CATALOG_JSONL_PATH.read_text().splitlines(),
+        bulk_op_id="gid://shopify/BulkOperation/j9-catalog",
+    )
+    await svc.import_graph(workspace_id, catalog, merge=False)
+
+    # 2. Orders sync — FBT edges merge into the workspace Knowledge Graph.
+    orders = map_shopify_orders(
+        ORDERS_JSONL_PATH.read_text().splitlines(),
+        bulk_op_id="gid://shopify/BulkOperation/j9-orders",
+        min_support=2,
+    )
+    await svc.import_graph(workspace_id, orders, merge=True)
+
+    graph = await svc.load_graph(workspace_id)
+    assert len(fbt_edges_of(graph)) == 2, "orders sync must land the FBT edges"
+
+    # 3. The widget grounds a proactive opener in those edges.
+    monkeypatch.setattr(graph_service_mod, "GraphifyService", lambda: svc)
+    page_context = {
+        "pageType": "product",
+        "productTitle": "Aurora Desk Lamp",
+        "productType": "Lighting",
+        "productVendor": "Lumenworks",
+        "productPrice": "49.00",
+        "productAvailable": True,
+        "productHandle": "aurora-desk-lamp",
+        "shopDomain": "fixture-lighting.myshopify.com",
+        "shopCurrency": "GBP",
+    }
+    citation = '"Nimbus Bulb Duo" (bought together in 3 of 5 orders)'
+
+    opener = await PLUGIN_REGISTRY["shopify"].handle_widget_message(
+        message="",
+        page_context=page_context,
+        trigger_reason="proactive_opener",
+        workspace_id=UUID(workspace_id),
+        db=MagicMock(),
+    )
+    assert opener.message.startswith("[PROACTIVE_OPENER]")
+    assert citation in opener.message, "the opener must cite real co-purchase data"
+
+    # 4. S1's preservation guarantee: a catalog re-sync (product renamed,
+    #    one product deleted from the store) keeps the cross-sell edges. The
+    #    workspace carries the orders_sync block a real orders sync would have
+    #    written (2 FBT edges reported — what step 2 merged), so the S2
+    #    integrity check inside the re-sync has its reported side to compare.
+    workspace = FakeWorkspace(
+        workspace_id,
+        settings={
+            "shopify_domain": "fixture-lighting.myshopify.com",
+            "orders_sync": {"status": "complete", "fbt_edges_added": 2},
+        },
+    )
+    db = FakeDb(workspace)
+    mock_sync_boundaries(
+        monkeypatch,
+        graph_service=svc,
+        jsonl_texts=[CATALOG_RESYNC_JSONL_PATH.read_text()],
+    )
+    from api import shopify as shopify_api
+
+    resync = await shopify_api._product_sync_impl(workspace_id, db)
+    assert resync.status == "complete"
+
+    graph_after = await svc.load_graph(workspace_id)
+    pairs = {frozenset((u, v)): attrs for u, v, attrs in fbt_edges_of(graph_after)}
+    lamp_bulbs = pairs.get(
+        frozenset(("shopify_product_9001", "shopify_product_9002"))
+    )
+    assert lamp_bulbs is not None, "catalog re-sync must not wipe the FBT edge"
+    assert lamp_bulbs.get("attrs", {}).get("co_count") == 3
+    assert workspace.settings["product_sync"]["fbt_integrity"]["ok"] is True
+
+    # 5. And the shopper-facing citation survives normal store activity.
+    opener_after = await PLUGIN_REGISTRY["shopify"].handle_widget_message(
+        message="",
+        page_context=page_context,
+        trigger_reason="proactive_opener",
+        workspace_id=UUID(workspace_id),
+        db=MagicMock(),
+    )
+    assert citation in opener_after.message
 
 
 # ===========================================================================
