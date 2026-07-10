@@ -36,6 +36,16 @@ _VALID_WINDOWS = frozenset({"day", "month", "all"})
 _DEFAULT_WINDOW = "day"
 
 
+def _enforcement_active() -> bool:
+    """Guarded read of the enforce-stage flag — never raises (PRD-192 S1)."""
+    try:
+        from modules.policy.flag import enforcement_active
+
+        return enforcement_active()
+    except Exception:
+        return False
+
+
 class BudgetExceeded(Exception):
     """Raised (or returned as a deny) when a call would breach the workspace budget.
 
@@ -113,6 +123,11 @@ def load_budget(db: Any, workspace_id: Any) -> Dict[str, Any]:
             "[policy.budget] budget read failed for workspace=%s", workspace_id,
             exc_info=True,
         )
+        # PRD-192 S1: under an enforce stage a budget-read fault must not
+        # silently decide "no ceiling ⇒ allow" — re-raise so the gate's single
+        # except owns the fail posture. off/shadow keep the historical swallow.
+        if _enforcement_active():
+            raise
         return {}
 
 
@@ -153,6 +168,10 @@ def spend_to_date(db: Any, workspace_id: Any, window: str) -> Dict[str, float]:
             "[policy.budget] spend-to-date read failed for workspace=%s", workspace_id,
             exc_info=True,
         )
+        # PRD-192 S1: with a ceiling configured, zeros-on-fault silently allow.
+        # Enforce stages re-raise so the gate's except owns the posture.
+        if _enforcement_active():
+            raise
         return dict(zero)
 
 

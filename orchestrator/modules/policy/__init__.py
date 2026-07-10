@@ -7,7 +7,9 @@ one chokepoint), not code scattered across router dependencies.
 
 Public surface:
 
-- Flag: :func:`policy_plane_enabled` (``AUTOMATOS_POLICY_PLANE``, default OFF).
+- Flag / mode dial: :func:`policy_plane_mode` (``AUTOMATOS_POLICY_PLANE`` =
+  ``off | shadow | destructive | on``, default ``off``; PRD-192 S1) and the
+  derived :func:`policy_plane_enabled` (mode ≠ off) for the registration sites.
 - Verdict vocabulary: :class:`Verdict`, :class:`Decision`, :class:`PolicyError`,
   :func:`merge_verdicts` (deny > ask > allow).
 - Chokepoint: :class:`PolicyGate` + :class:`ToolCall` — invoked from
@@ -43,9 +45,16 @@ from modules.policy.bus import (
     reset_policy_bus,
 )
 from modules.policy.errors import ensure_error_envelope, verdict_to_result
-from modules.policy.flag import policy_plane_enabled
+from modules.policy.flag import (
+    ENFORCE_MODES,
+    POLICY_MODES,
+    enforcement_active,
+    policy_plane_enabled,
+    policy_plane_mode,
+)
 from modules.policy.gate import PolicyGate, ToolCall
 from modules.policy.policy_document import (
+    FAIL_CLOSED_RISK_CLASSES,
     PolicyDocument,
     classify_action,
     load_policy_document,
@@ -60,8 +69,13 @@ from modules.policy.types import (
 )
 
 __all__ = [
-    # flag
+    # flag / staged mode dial (PRD-192 S1)
     "policy_plane_enabled",
+    "policy_plane_mode",
+    "enforcement_active",
+    "POLICY_MODES",
+    "ENFORCE_MODES",
+    "FAIL_CLOSED_RISK_CLASSES",
     # verdict vocabulary
     "Decision",
     "Event",

@@ -212,36 +212,55 @@ class UnifiedToolExecutor:
         caller_context: Optional[Dict[str, Any]],
         trace: str,
     ) -> Optional[Dict[str, Any]]:
-        """Evaluate one tool call through the unified PolicyGate.
+        """Evaluate one tool call through the unified PolicyGate (PRD-192 S1).
 
-        Returns ``None`` when execution may proceed (plane OFF, or an ``allow``
-        verdict). Returns an errors-as-data result dict when the plane BLOCKS the
-        call (deny/ask) — the caller returns it directly, so the tool never runs.
+        Returns ``None`` when execution may proceed and an errors-as-data result
+        dict when the plane BLOCKS the call — the caller returns it directly, so
+        the tool never runs.
 
-        Never raises: a fault in the plane must not wedge tool execution, so any
-        error here is logged and treated as "proceed" (the downstream per-tool
-        gates in ``platform_executor`` remain in force for platform actions).
+        Stage semantics (the ``AUTOMATOS_POLICY_PLANE`` mode dial, ops-flipped):
+
+        - ``off``         — byte-for-byte legacy: no evaluation, no bus fire.
+        - ``shadow``      — evaluate + audit EVERY verdict; never block.
+        - ``destructive`` — enforce deny/ask only for the fail-closed risk
+          classes (destructive / external_side_effect / publish); shadow-log
+          blocking verdicts on the open classes.
+        - ``on``          — enforce every blocking verdict.
+
+        Fail posture on a plane fault (locked, PRD-192): under enforce modes the
+        closed classes ⇒ **deny** errors-as-data (``policy_plane_error``);
+        read/internal_write ⇒ proceed with the greppable ``[policy-fail-open]``
+        marker; shadow never blocks; an unclassifiable call is treated
+        destructive (closed). One classification, computed once, is reused for
+        the mode branch, the bus fire, and the fault branch.
+
+        Never raises — every branch resolves to "block with a readable denial"
+        or "proceed" (the downstream per-tool gates in ``platform_executor``
+        remain in force for platform actions at every stage).
         """
         try:
-            from modules.policy import policy_plane_enabled
+            from modules.policy import policy_plane_mode
 
-            if not policy_plane_enabled():
-                return None  # flag OFF — byte-for-byte the legacy per-router gates
+            mode = policy_plane_mode()
+        except Exception:
+            logger.warning(
+                "[tool-trace %s] policy mode read failed for '%s' — plane "
+                "treated off", trace, tool_name, exc_info=True,
+            )
+            return None
+        if mode == "off":
+            return None  # byte-for-byte the legacy per-router gates
 
+        effective_name, effective_params, is_composio = self._resolve_effective_call(
+            tool_name, parameters
+        )
+        # Computed ONCE (best-effort): reused for the mode branch, the bus fire,
+        # and the fault branch. None ⇒ unclassifiable ⇒ treated destructive.
+        risk = self._classify_risk(effective_name, is_composio)
+
+        try:
             from modules.policy import PolicyGate, ToolCall, Decision
             from modules.policy.errors import verdict_to_result
-
-            # Resolve the effective action for the meta-dispatcher: platform_execute
-            # nests the real action under "action" (params may be flat or wrapped).
-            effective_name = tool_name
-            effective_params = parameters if isinstance(parameters, dict) else {}
-            if tool_name == "platform_execute" and isinstance(parameters, dict):
-                action_name = (parameters.get("action") or "").strip()
-                if action_name:
-                    effective_name = action_name
-                    effective_params = parameters.get("params") or {
-                        k: v for k, v in parameters.items() if k not in ("action", "params")
-                    }
 
             verdict = PolicyGate(self.db).check(
                 ToolCall(
@@ -250,35 +269,250 @@ class UnifiedToolExecutor:
                     workspace_id=workspace_id,
                     agent_id=agent_id,
                     caller_context=caller_context,
+                    is_composio=is_composio,
                 )
             )
 
             # PRD-181 S1 (Art.12): fire the policy bus for EVERY verdict — allow,
             # ask, and deny — so the attached audit handler records every tool
             # call + policy decision per tenant. The bus is the single audit
-            # write point (bus.py:18); this is the only place it is fired. A
-            # handler fault is swallowed inside the bus, so audit never wedges
-            # or slows the call. The risk tier is recomputed (pure, cheap) so the
-            # audit row and the S5 approval card both carry it.
+            # write point (bus.py:18). A handler fault is swallowed inside the
+            # bus, so audit never wedges or slows the call.
             self._fire_policy_bus(
                 effective_name, effective_params, verdict,
                 agent_id=agent_id, workspace_id=workspace_id,
                 caller_context=caller_context, trace=trace,
+                risk=risk, mode=mode,
             )
 
             if verdict.decision is Decision.ALLOW:
                 return None
+
+            if mode == "shadow":
+                logger.info(
+                    "[tool-trace %s] policy plane (shadow) would-%s '%s' "
+                    "(risk=%s): %s — proceeding, never blocks",
+                    trace, verdict.decision.value, effective_name, risk,
+                    verdict.reason,
+                )
+                return None
+
+            if mode == "destructive" and not self._risk_fails_closed(risk):
+                logger.info(
+                    "[tool-trace %s] policy plane (destructive stage) shadow-"
+                    "logged %s '%s' (risk=%s): %s — open class, proceeding",
+                    trace, verdict.decision.value, effective_name, risk,
+                    verdict.reason,
+                )
+                return None
+
             logger.info(
                 "[tool-trace %s] policy plane %s '%s': %s",
                 trace, verdict.decision.value, effective_name, verdict.reason,
             )
             return verdict_to_result(verdict, tool_name)
         except Exception:
+            return self._policy_fault_result(
+                tool_name, effective_name, effective_params, risk, mode,
+                agent_id=agent_id, workspace_id=workspace_id,
+                caller_context=caller_context, trace=trace,
+            )
+
+    def _resolve_effective_call(
+        self, tool_name: str, parameters: Any
+    ) -> tuple:
+        """Resolve ``(effective_name, effective_params, is_composio)`` for the gate.
+
+        - ``platform_execute`` nests the real action under ``"action"`` (params
+          may be flat or wrapped) — the gate must judge the ACTION, not the
+          dispatcher.
+        - ``composio_execute`` nests the real Composio action the same way; the
+          resolved per-action name (``GMAIL_SEND_EMAIL``) is what the audit row
+          and risk classification carry.
+        - Per-action SDK names route via ``self.composio_actions`` / registry
+          ``integration_type`` metadata — the executor's own routing knowledge,
+          threaded to the gate so external sends never classify internal
+          (PRD-192 S1, the honest-classification fix).
+
+        Never raises.
+        """
+        params = parameters if isinstance(parameters, dict) else {}
+        try:
+            if tool_name == "platform_execute" and isinstance(parameters, dict):
+                action_name = (parameters.get("action") or "").strip()
+                if not action_name:
+                    return tool_name, params, False
+                effective_params = parameters.get("params") or {
+                    k: v for k, v in parameters.items() if k not in ("action", "params")
+                }
+                return action_name, effective_params, False
+
+            if tool_name == "composio_execute" and isinstance(parameters, dict):
+                raw_action = parameters.get("action") or parameters.get("action_name")
+                effective_name = (
+                    str(raw_action).upper().strip() if raw_action else tool_name
+                )
+                inner = parameters.get("params")
+                effective_params = inner if isinstance(inner, dict) else params
+                return effective_name, effective_params, True
+
+            return tool_name, params, self._tool_is_composio(tool_name)
+        except Exception:
+            return tool_name, params, False
+
+    def _tool_is_composio(self, tool_name: str) -> bool:
+        """The executor's OWN routing knowledge of "is this a Composio call".
+
+        Mirrors ``execute_tool``'s dispatch order: the ``composio_`` prefix /
+        meta-tool, the per-action ``composio_actions`` dict (SDK schema names
+        like ``GMAIL_SEND_EMAIL``), and registry ``integration_type`` metadata.
+        Builtin-routed tools short-circuit False so the registry is never
+        touched for them. Never raises.
+        """
+        name = tool_name or ""
+        if name == "composio_execute" or name.startswith("composio_"):
+            return True
+        if name in self.composio_actions:
+            return True
+        if name.startswith(("platform_", "workspace_")) or name in self.tool_routes:
+            return False
+        try:
+            tool_spec = self.tool_registry.get_tool(name)
+            return bool(
+                tool_spec
+                and tool_spec.metadata
+                and tool_spec.metadata.get("integration_type") == "composio"
+            )
+        except Exception:
+            return False
+
+    def _classify_risk(self, effective_name: str, is_composio: bool) -> Optional[str]:
+        """Best-effort risk class for the call (pure classifier + registry
+        permission level). ``None`` ⇒ unclassifiable — the caller treats that
+        as destructive (fail closed, locked PRD-192 decision)."""
+        try:
+            from modules.policy import classify_action
+
+            action_def = self._policy_action_def(effective_name)
+            permission_level = getattr(action_def, "permission_level", None)
+            return classify_action(
+                effective_name,
+                permission_level=permission_level,
+                is_composio=is_composio,
+            )
+        except Exception:
+            return None
+
+    @staticmethod
+    def _risk_fails_closed(risk: Optional[str]) -> bool:
+        """True when this risk class fails CLOSED on a plane fault under the
+        enforce modes — also the exact set the ``destructive`` stage enforces
+        (one frozenset, ``modules.policy.FAIL_CLOSED_RISK_CLASSES``).
+        Unclassifiable (``None``) is closed; if even the class set can't be
+        read, closed."""
+        if risk is None:
+            return True
+        try:
+            from modules.policy import FAIL_CLOSED_RISK_CLASSES
+
+            return risk in FAIL_CLOSED_RISK_CLASSES
+        except Exception:
+            return True
+
+    def _policy_fault_result(
+        self,
+        tool_name: str,
+        effective_name: str,
+        effective_params: Dict[str, Any],
+        risk: Optional[str],
+        mode: str,
+        *,
+        agent_id: int,
+        workspace_id: Optional[UUID],
+        caller_context: Optional[Dict[str, Any]],
+        trace: str,
+    ) -> Optional[Dict[str, Any]]:
+        """The ONE place that decides the plane's fail posture on a fault
+        (PRD-192 S1, locked matrix).
+
+        Called from ``_policy_gate_check``'s except while the original
+        exception is being handled (``exc_info=True`` captures it). shadow ⇒
+        proceed; enforce modes: open classes (read / internal_write) ⇒ proceed
+        with the greppable ``[policy-fail-open]`` marker (the G.5 rate the
+        shadow report counts); closed classes / unclassifiable ⇒ deny
+        errors-as-data, audited via the bus. Never raises.
+        """
+        if mode == "shadow" or not self._risk_fails_closed(risk):
             logger.warning(
-                "[tool-trace %s] policy gate errored for '%s' — proceeding "
-                "(downstream gates still apply)", trace, tool_name, exc_info=True,
+                "[policy-fail-open] [tool-trace %s] policy gate errored for "
+                "'%s' (risk=%s, mode=%s) — proceeding (downstream gates still "
+                "apply)", trace, effective_name, risk, mode, exc_info=True,
             )
             return None
+
+        logger.error(
+            "[tool-trace %s] policy gate errored for '%s' (risk=%s, mode=%s) "
+            "— FAILING CLOSED, call blocked", trace, effective_name, risk, mode,
+            exc_info=True,
+        )
+        try:
+            from modules.policy import PolicyError, Verdict
+            from modules.policy.errors import verdict_to_result
+
+            deny = Verdict.deny(
+                PolicyError(
+                    code="policy_plane_error",
+                    message_for_model=(
+                        f"The policy plane could not evaluate '{effective_name}' "
+                        f"(risk class: {risk or 'unknown'}). High-risk actions "
+                        "fail closed on a plane fault, so it was NOT executed."
+                    ),
+                    remediation=(
+                        "Retry shortly. If this persists, a workspace admin "
+                        "should check the policy plane or approve the action "
+                        "explicitly."
+                    ),
+                    retryable=True,
+                ),
+                reason=f"policy plane fault — {risk or 'unclassifiable'} fails closed",
+            )
+            self._fire_policy_bus(
+                effective_name, effective_params, deny,
+                agent_id=agent_id, workspace_id=workspace_id,
+                caller_context=caller_context, trace=trace,
+                risk=risk, mode=mode,
+            )
+            return verdict_to_result(deny, tool_name)
+        except Exception:
+            # Even the typed denial failed to build — still block: a closed
+            # class must never run on a plane fault. Hand-rolled envelope with
+            # the same errors-as-data shape.
+            logger.error(
+                "[tool-trace %s] policy fault denial construction failed for "
+                "'%s' — returning minimal closed block", trace, effective_name,
+                exc_info=True,
+            )
+            message = (
+                f"The policy plane could not evaluate '{effective_name}'. "
+                "High-risk actions fail closed, so it was NOT executed."
+            )
+            return {
+                "success": False,
+                "tool": tool_name,
+                "error": message,
+                "llm_context": message,
+                "permission_denied": True,
+                "requires_approval": False,
+                "policy_error": {
+                    "code": "policy_plane_error",
+                    "message_for_model": message,
+                    "remediation": "Retry shortly or ask a workspace admin.",
+                    "retryable": True,
+                },
+                "policy_decision": "deny",
+                "fatal_error": False,
+                "error_type": "policy_plane_error",
+            }
 
     def _fire_policy_bus(
         self,
@@ -290,32 +524,24 @@ class UnifiedToolExecutor:
         workspace_id: Optional[UUID],
         caller_context: Optional[Dict[str, Any]],
         trace: str,
+        risk: Optional[str] = None,
+        mode: Optional[str] = None,
     ) -> None:
         """Fire ``PRE_TOOL_USE`` on the policy bus with the verdict (PRD-181 S1).
 
         The attached audit handler reads ``ctx.data['verdict']`` and writes the
-        per-tenant Art.12 record. Never raises: audit is a side-effect of the
-        chokepoint, so a bus/handler fault must not block or slow the call.
+        per-tenant Art.12 record; ``risk`` and ``mode`` ride along so the audit
+        row (and the PRD-192 S2 shadow report) carry the classification and the
+        stage that produced the decision. Never raises: audit is a side-effect
+        of the chokepoint, so a bus/handler fault must not block or slow the
+        call.
         """
         try:
             from modules.policy import (
                 Event,
                 EventContext,
-                classify_action,
                 get_policy_bus,
             )
-
-            # Recompute the risk tier (pure) so the audit row + S5 card carry it.
-            risk = None
-            try:
-                action_def = self._policy_action_def(effective_name)
-                permission_level = getattr(action_def, "permission_level", None)
-                is_composio = (effective_name or "").startswith("composio_")
-                risk = classify_action(
-                    effective_name, permission_level=permission_level, is_composio=is_composio
-                )
-            except Exception:
-                risk = None
 
             ctx = EventContext(
                 workspace_id=workspace_id,
@@ -326,6 +552,7 @@ class UnifiedToolExecutor:
             )
             ctx.data["verdict"] = verdict
             ctx.data["risk"] = risk
+            ctx.data["mode"] = mode
             ctx.data["trace_id"] = trace
             get_policy_bus().fire(Event.PRE_TOOL_USE, ctx)
         except Exception:

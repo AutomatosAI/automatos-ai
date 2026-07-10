@@ -52,8 +52,12 @@ def _make_executor():
 
 @pytest.mark.asyncio
 async def test_flag_off_gate_is_noop(monkeypatch):
-    """Flag OFF ⇒ _policy_gate_check returns None (byte-for-byte, no gate)."""
-    monkeypatch.setattr("modules.policy.policy_plane_enabled", lambda: False, raising=False)
+    """Mode off ⇒ _policy_gate_check returns None (byte-for-byte, no gate).
+
+    PRD-192 S1: the executor branches on the staged mode dial
+    (``policy_plane_mode``), not the derived boolean.
+    """
+    monkeypatch.setattr("modules.policy.policy_plane_mode", lambda: "off", raising=False)
     ex = _make_executor()
     blocked = ex._policy_gate_check(
         "platform_delete_agent", {"id": 1}, agent_id=1,
@@ -64,9 +68,9 @@ async def test_flag_off_gate_is_noop(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_flag_on_deny_blocks_before_dispatch(monkeypatch):
-    """Flag ON + deny ⇒ execute_tool returns the errors-as-data block and the
-    tool is NEVER dispatched."""
-    monkeypatch.setattr("modules.policy.policy_plane_enabled", lambda: True, raising=False)
+    """Mode on + deny ⇒ execute_tool returns the errors-as-data block and the
+    tool is NEVER dispatched. (PRD-192 S1: on = enforce-all stage.)"""
+    monkeypatch.setattr("modules.policy.policy_plane_mode", lambda: "on", raising=False)
 
     # Force the gate to deny, regardless of DB/registry.
     deny = Verdict.deny(PolicyError(
@@ -96,8 +100,8 @@ async def test_flag_on_deny_blocks_before_dispatch(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_flag_on_allow_reaches_dispatch(monkeypatch):
-    """Flag ON + allow ⇒ the gate is a pass-through; dispatch is reached."""
-    monkeypatch.setattr("modules.policy.policy_plane_enabled", lambda: True, raising=False)
+    """Mode on + allow ⇒ the gate is a pass-through; dispatch is reached."""
+    monkeypatch.setattr("modules.policy.policy_plane_mode", lambda: "on", raising=False)
     monkeypatch.setattr(
         "modules.policy.PolicyGate.check",
         lambda self, call: Verdict.allow("fine"), raising=False,

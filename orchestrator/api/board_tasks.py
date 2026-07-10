@@ -950,8 +950,10 @@ def _board_task_blocked_pending_approval(
       task (status → ``blocked``, ``blocked_reason`` referencing the grant) and
       return True so the caller does NOT execute it.
 
-    Fail-open on any error: approval is a governance gate, not a correctness
-    gate — a policy-read fault must not wedge board execution (the per-tool
+    Fail posture (PRD-192 S1, locked #4): under the policy plane's ENFORCE
+    stages (``destructive`` | ``on``) an approval-gate ERROR blocks the task
+    pending approval — an errored governance gate must never launch autonomous
+    work. In ``off``/``shadow`` the historical fail-open stands (the per-tool
     PolicyGate still applies to every tool the task's agent invokes).
     """
     try:
@@ -987,11 +989,43 @@ def _board_task_blocked_pending_approval(
             )
         return True
     except Exception:
-        logger.warning(
-            "[BoardTasks] approval gate errored for task %s — proceeding "
-            "(per-tool PolicyGate still applies)", task_id, exc_info=True,
+        try:
+            from modules.policy.flag import enforcement_active
+
+            _fail_closed = enforcement_active()
+        except Exception:
+            _fail_closed = False
+
+        if not _fail_closed:
+            logger.warning(
+                "[BoardTasks] approval gate errored for task %s — proceeding "
+                "(per-tool PolicyGate still applies)", task_id, exc_info=True,
+            )
+            return False
+
+        # Enforce stage: BLOCK pending approval, never launch on a gate error.
+        logger.error(
+            "[BoardTasks] approval gate errored for task %s — BLOCKED pending "
+            "approval (policy plane enforce stage fails closed)", task_id,
+            exc_info=True,
         )
-        return False
+        try:
+            db.rollback()  # the failed gate may have poisoned the transaction
+            task = db.query(BoardTask).get(task_id)
+            if task is not None and task.status == "in_progress":
+                task.status = "blocked"
+                task.blocked_at = datetime.now(timezone.utc)
+                task.blocked_reason = (
+                    "Approval gate errored — blocked pending approval "
+                    "(policy plane enforce stage fails closed)"
+                )
+                db.commit()
+        except Exception:
+            logger.warning(
+                "[BoardTasks] could not mark task %s blocked after gate error "
+                "— task still NOT launched", task_id, exc_info=True,
+            )
+        return True
 
 
 def _launch_task_execution(

@@ -663,13 +663,26 @@ class Config:
     # priority and escalated for human approval (when self-management is on).
     HARNESS_HIGH_PRIORITY_RISK: int = int(os.getenv("HARNESS_HIGH_PRIORITY_RISK", "4"))
 
-    # PRD-174 Wave 4 — Unified Policy Plane. THE master flag for the policy
-    # plane: one typed gate (`modules/policy.PolicyGate`) evaluated in one place
-    # (`UnifiedToolExecutor.execute_tool`) for every tool call on every surface,
-    # plus the `on_pre_tool` budget/approval seam. HIGHEST-RISK wave — touches
-    # every execution path — so it ships default OFF. Flag OFF ⇒ byte-for-byte
-    # today's per-router gates (nothing new enters the path). Flag ON ⇒ the plane.
-    POLICY_PLANE_ENABLED: bool = os.getenv("AUTOMATOS_POLICY_PLANE", "false").lower() in ("true", "1", "yes")
+    # PRD-174 Wave 4 / PRD-192 S1 (P2-11) — Unified Policy Plane staged mode
+    # dial. ONE env, `AUTOMATOS_POLICY_PLANE = off | shadow | destructive | on`:
+    #   off         ⇒ byte-for-byte today's per-router gates (no bus fire, no audit)
+    #   shadow      ⇒ evaluate + audit every verdict; NEVER block
+    #   destructive ⇒ enforce deny/ask only for the fail-closed risk classes
+    #                 (destructive / external_side_effect / publish); shadow-log the rest
+    #   on          ⇒ enforce all (PRD-174's original ON)
+    # Legacy booleans map (true/1/yes ⇒ on, false/0/no ⇒ off); unknown values
+    # fail safe to "off". Ships default OFF; stage flips are ops actions on the
+    # deploy env (Railway), never code — each retreat is one env value.
+    _POLICY_PLANE_RAW = os.getenv("AUTOMATOS_POLICY_PLANE", "off").strip().lower()
+    POLICY_PLANE_MODE: str = {
+        "true": "on", "1": "on", "yes": "on",
+        "false": "off", "0": "off", "no": "off", "": "off",
+    }.get(_POLICY_PLANE_RAW, _POLICY_PLANE_RAW)
+    POLICY_PLANE_MODE = POLICY_PLANE_MODE if POLICY_PLANE_MODE in ("off", "shadow", "destructive", "on") else "off"
+    # Derived boolean (mode ≠ off) so the existing registration sites — the
+    # audit-handler attach (main.py), limiter arming (main.py F040), roles.py
+    # F043, widgets/auth.py F042 — arm on ANY live stage, unchanged.
+    POLICY_PLANE_ENABLED: bool = POLICY_PLANE_MODE != "off"
 
     # PRD-185 S2 — per-lane telemetry canary. The type-poison outage S1 repaired
     # went unseen for ~2 months because nothing alarmed on "organic tool-execution

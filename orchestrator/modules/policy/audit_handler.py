@@ -84,6 +84,10 @@ def audit_policy_verdict(
             "verdict": decision,
             "reason": verdict.reason,
             "risk": ctx.data.get("risk"),
+            # PRD-192 S1/S2: which stage of the mode dial produced this row
+            # (off | shadow | destructive | on) — the shadow report aggregates
+            # on it and stage advancement is judged against it.
+            "mode": ctx.data.get("mode"),
             "actor_type": actor_type,
             "agent_id": ctx.agent_id,
             "event": event.value,
