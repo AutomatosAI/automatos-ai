@@ -60,12 +60,27 @@ class SkillsSection(BaseSection):
         if not active_skills:
             return ""
 
-        # Sort by skill priority (highest first); the first becomes the primary.
-        active_skills = sorted(
-            active_skills,
-            key=lambda s: getattr(s, "priority", 0) or 0,
-            reverse=True,
-        )
+        # PRD-191 S4 (closes F054): Agent.skills arrives ordered by the REAL
+        # attachment-level priority (agent_skills.priority DESC — model
+        # order_by). The old sort keyed on a phantom Skill.priority attribute
+        # that no column backed, so the uncapped-primary slot was load order.
+        # PRD-191 S2: never render the same body twice — dedup by id, then by
+        # (name, content_hash), keeping the first (= highest-priority) instance.
+        seen_ids = set()
+        seen_bodies = set()
+        deduped = []
+        for s in active_skills:
+            sid = getattr(s, "id", None)
+            body_key = (getattr(s, "name", None), getattr(s, "content_hash", None))
+            if sid is not None and sid in seen_ids:
+                continue
+            if body_key != (None, None) and body_key in seen_bodies:
+                continue
+            if sid is not None:
+                seen_ids.add(sid)
+            seen_bodies.add(body_key)
+            deduped.append(s)
+        active_skills = deduped
 
         primary_text = self._get_skill_content(active_skills[0], ctx)
         aux_texts = [

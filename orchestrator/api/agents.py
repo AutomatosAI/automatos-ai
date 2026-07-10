@@ -79,6 +79,28 @@ def _stable_tool_id(name: str) -> int:
     return -abs(int(h))
 
 
+def _fetch_attachable_skills(db: Session, skill_ids: List[int], ctx: RequestContext) -> List["Skill"]:
+    """Resolve skill ids to rows the caller may attach (PRD-191 S5, Sec §3.2.a).
+
+    Visibility parity with api/skills.py: global (workspace_id IS NULL) or
+    own-workspace skills only — a foreign workspace's private skill is
+    reported exactly like a nonexistent id, never silently attached (and thus
+    never prompt-injected into the caller's agent).
+    """
+    from api.skills import _skill_visible_to
+
+    rows = db.query(Skill).filter(
+        Skill.id.in_(skill_ids),
+        Skill.is_active == True  # noqa: E712
+    ).all()
+    visible = [sk for sk in rows if _skill_visible_to(sk, ctx)]
+    if len(visible) != len(skill_ids):
+        found_ids = {sk.id for sk in visible}
+        missing_ids = [sid for sid in skill_ids if sid not in found_ids]
+        raise HTTPException(status_code=404, detail=f"Skills not found: {missing_ids}")
+    return visible
+
+
 def _assigned_by_user_id(ctx: RequestContext) -> Optional[int]:
     """
     `agent_app_assignments.assigned_by` is an INTEGER in Postgres.
@@ -362,16 +384,9 @@ async def create_agents_bulk(agents: List[AgentCreate], ctx: RequestContext = De
             db.add(agent)
             db.flush()  # Get the ID
 
-            # Add skills if provided
+            # Add skills if provided (PRD-191 S5: visibility-gated)
             if agent_data.skill_ids:
-                skills = db.query(Skill).filter(
-                    Skill.id.in_(agent_data.skill_ids),
-                    Skill.is_active == True
-                ).all()
-                if len(skills) != len(agent_data.skill_ids):
-                    found_ids = [skill.id for skill in skills]
-                    missing_ids = [sid for sid in agent_data.skill_ids if sid not in found_ids]
-                    raise HTTPException(status_code=404, detail=f"Skills not found: {missing_ids}")
+                skills = _fetch_attachable_skills(db, agent_data.skill_ids, ctx)
                 agent.skills.extend(skills)
             
             # Note: agent.tags is the single source of truth for tags.
@@ -432,16 +447,9 @@ async def create_agent(agent_data: AgentCreate, ctx: RequestContext = Depends(ge
         db.add(agent)
         db.flush()  # Get the ID
         
-        # Add skills if provided
+        # Add skills if provided (PRD-191 S5: visibility-gated)
         if agent_data.skill_ids:
-            skills = db.query(Skill).filter(
-                Skill.id.in_(agent_data.skill_ids),
-                Skill.is_active == True
-            ).all()
-            if len(skills) != len(agent_data.skill_ids):
-                found_ids = [skill.id for skill in skills]
-                missing_ids = [sid for sid in agent_data.skill_ids if sid not in found_ids]
-                raise HTTPException(status_code=404, detail=f"Skills not found: {missing_ids}")
+            skills = _fetch_attachable_skills(db, agent_data.skill_ids, ctx)
             agent.skills.extend(skills)
 
         # Note: agent.tags is the single source of truth for tags.
@@ -782,12 +790,7 @@ async def add_agent_skills(agent_id: int, skill_ids: List[int], ctx: RequestCont
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
         
-        skills = db.query(Skill).filter(Skill.id.in_(skill_ids), Skill.is_active == True).all()
-        if len(skills) != len(skill_ids):
-            found_ids = [skill.id for skill in skills]
-            missing_ids = [sid for sid in skill_ids if sid not in found_ids]
-            raise HTTPException(status_code=404, detail=f"Skills not found: {missing_ids}")
-        
+        skills = _fetch_attachable_skills(db, skill_ids, ctx)  # PRD-191 S5
         agent.skills.extend(skills)
         db.commit()
 

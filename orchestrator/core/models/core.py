@@ -26,9 +26,13 @@ class PriorityLevel(str, Enum):
     LOW = "low"
 
 # Association tables for many-to-many relationships
+# PRD-191 S1/S4: one link per (agent, skill) — enforced, not implied — and a
+# real per-attachment priority (the uncapped-primary slot is a decision, F054).
 agent_skills = Table('agent_skills', Base.metadata,
     Column('agent_id', Integer, ForeignKey('agents.id')),
-    Column('skill_id', Integer, ForeignKey('skills.id'))
+    Column('skill_id', Integer, ForeignKey('skills.id')),
+    Column('priority', Integer, nullable=False, server_default='0'),
+    UniqueConstraint('agent_id', 'skill_id', name='uq_agent_skills_agent_id_skill_id'),
 )
 
 workflow_agents = Table('workflow_agents', Base.metadata,
@@ -289,7 +293,12 @@ class Agent(Base):
     })  # Model usage tracking
     
     # Relationships
-    skills = relationship("Skill", secondary=agent_skills, back_populates="agents")
+    # PRD-191 S4: ordered by the attachment-level priority so the first skill
+    # is the real primary (highest priority wins; stable within equal priority).
+    skills = relationship(
+        "Skill", secondary=agent_skills, back_populates="agents",
+        order_by=agent_skills.c.priority.desc(),
+    )
     workflows = relationship("Workflow", secondary=workflow_agents, back_populates="agents")
     executions = relationship("WorkflowExecution", back_populates="agent")
     # Tool/app assignments are managed via `AgentAppAssignment` (Composio cache model).
