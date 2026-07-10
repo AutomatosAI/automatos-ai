@@ -73,6 +73,10 @@ class MemoryNamespace:
         """Daily activity logs (L2)."""
         return f"mem:{self.workspace_id}:daily"
 
+    def l2(self) -> str:
+        """Semantic mirror of L2 short-term rows (PRD-187 S3)."""
+        return f"mem:{self.workspace_id}:l2"
+
     # --- L1 Session (Redis) namespaces ---
 
     def session(self, conversation_id: str) -> str:
@@ -879,6 +883,14 @@ class UnifiedMemoryService:
                 workspace_id,
                 content_type,
             )
+            # PRD-187 S3: mirror the row into the durable store's L2 namespace
+            # so recall can match by MEANING, not ILIKE substring. Fire-and-
+            # forget — the semantic mirror must never fail the L2 write.
+            if row_id:
+                asyncio.ensure_future(self._mirror_l2_to_durable(
+                    row_id=row_id, workspace_id=workspace_id, content=content,
+                    content_type=content_type, importance=importance,
+                ))
             return row_id
         except Exception:
             logger.error(
@@ -888,6 +900,149 @@ class UnifiedMemoryService:
                 exc_info=True,
             )
             return None
+
+    async def _mirror_l2_to_durable(
+        self,
+        *,
+        row_id: str,
+        workspace_id: str,
+        content: str,
+        content_type: str,
+        importance: float,
+    ) -> None:
+        """Best-effort vector mirror of one L2 row (PRD-187 S3)."""
+        try:
+            await self._durable.add(
+                messages=[{"role": "user", "content": content}],
+                user_id=self.namespace(workspace_id).l2(),
+                metadata={
+                    "l2_id": str(row_id),
+                    "content_type": content_type,
+                    "importance": importance,
+                },
+                workspace_id=workspace_id,
+            )
+        except Exception:
+            logger.error(
+                "[UnifiedMemoryService] L2 semantic mirror failed id=%s ws=%s",
+                row_id, workspace_id, exc_info=True,
+            )
+
+    async def search_short_term_semantic(
+        self,
+        workspace_id: str,
+        query: str,
+        limit: int = 8,
+    ) -> List[Dict[str, Any]]:
+        """Semantic L2 recall (PRD-187 S3) — matches by meaning, every turn.
+
+        Vector-searches the L2 mirror namespace, hydrates the LIVE Postgres
+        rows (archived rows never recall), ranks with the shared
+        ``field_scoring.resonance`` curve (similarity² × stability × recency —
+        the same honest definition field memory uses), and touches each
+        recalled row so ``access_count`` climbs (the recall that finally makes
+        promotion's access signal real).
+
+        A non-temporal query like "what did we learn about the Shopify sync?"
+        — 0 rows by construction under the old ILIKE-behind-a-temporal-regex —
+        now returns the relevant rows.
+        """
+        from config import config
+
+        try:
+            hits = await self._durable.search(
+                query=query,
+                user_id=self.namespace(workspace_id).l2(),
+                limit=max(limit * 2, limit),
+                workspace_id=workspace_id,
+            )
+        except Exception:
+            logger.error(
+                "[UnifiedMemoryService] semantic L2 search failed ws=%s",
+                workspace_id, exc_info=True,
+            )
+            return []
+
+        score_by_l2_id: Dict[str, float] = {}
+        for h in hits:
+            meta = h.get("metadata") or {}
+            l2_id = meta.get("l2_id")
+            if l2_id and l2_id not in score_by_l2_id:
+                score_by_l2_id[str(l2_id)] = h.get("score") or 0.0
+        if not score_by_l2_id:
+            return []
+
+        loop = asyncio.get_event_loop()
+        rows = await loop.run_in_executor(
+            None, self._hydrate_l2_rows_sync, list(score_by_l2_id),
+        )
+
+        from modules.context import field_scoring
+
+        params = field_scoring.ScoringParams(
+            decay_rate=config.FIELD_DECAY_RATE,
+            reinforce_bonus=config.FIELD_REINFORCE_BONUS,
+            reinforce_cap=config.FIELD_REINFORCE_CAP,
+            archival_threshold=config.FIELD_ARCHIVAL_THRESHOLD,
+            half_life_access_scale=config.FIELD_HALF_LIFE_ACCESS_SCALE,
+        )
+        now = datetime.now(timezone.utc)
+        for row in rows:
+            similarity = score_by_l2_id.get(row["id"], 0.0)
+            try:
+                created = datetime.fromisoformat(row["created_at"]) if row.get("created_at") else now
+                age_hours = max(0.0, (now - created).total_seconds() / 3600)
+            except (ValueError, TypeError):
+                age_hours = 0.0
+            row["score"] = field_scoring.resonance(
+                similarity, row.get("importance") or 0.5, age_hours,
+                row.get("access_count") or 0, params,
+            )
+            row["cosine_similarity"] = similarity
+
+        rows.sort(key=lambda r: r["score"], reverse=True)
+        rows = rows[:limit]
+
+        # Recall bumps access_count — the promotion signal (PRD-154 S3 posture).
+        if rows:
+            await asyncio.gather(
+                *(self.touch_short_term(r["id"]) for r in rows if r.get("id")),
+                return_exceptions=True,
+            )
+        logger.debug(
+            "[UnifiedMemoryService] semantic L2 recall ws=%s query=%r → %d rows",
+            workspace_id, query[:60], len(rows),
+        )
+        return rows
+
+    @staticmethod
+    def _hydrate_l2_rows_sync(l2_ids: List[str]) -> List[Dict[str, Any]]:
+        """Fetch LIVE (non-archived) L2 rows by id — archived rows never recall."""
+        from core.database.database import get_db_session
+        from modules.memory.models import MemoryShortTerm
+
+        with get_db_session() as db:
+            rows = (
+                db.query(MemoryShortTerm)
+                .filter(
+                    MemoryShortTerm.id.in_(l2_ids),
+                    MemoryShortTerm.archived_at.is_(None),
+                )
+                .all()
+            )
+            return [
+                {
+                    "id": str(row.id),
+                    "content": row.content,
+                    "content_type": row.content_type,
+                    "importance": row.importance,
+                    "decay_score": row.decay_score,
+                    "access_count": row.access_count,
+                    "metadata": row.metadata_ or {},
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                }
+                for row in rows
+            ]
 
     @staticmethod
     def _search_short_term_sync(
