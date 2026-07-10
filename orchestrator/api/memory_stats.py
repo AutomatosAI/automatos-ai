@@ -652,15 +652,14 @@ async def get_memory_layers(
             )
             .scalar()
         )
+        # PRD-187 S4: the tile counts the SAME eligibility the promotion job
+        # runs (shared policy) — the old copy of the dead access-count gate
+        # made this permanently read 0.
+        from modules.memory.promotion_policy import eligibility_conditions
+
         pending_promo = (
             db.query(func.count(MemoryShortTerm.id))
-            .filter(
-                MemoryShortTerm.workspace_id == ctx.workspace_id,
-                MemoryShortTerm.archived_at.is_(None),
-                MemoryShortTerm.promoted_to_l3 == False,  # noqa: E712
-                MemoryShortTerm.importance > getattr(app_config, "MEMORY_PROMOTION_MIN_IMPORTANCE", 0.7),
-                MemoryShortTerm.access_count > getattr(app_config, "MEMORY_PROMOTION_MIN_ACCESS_COUNT", 3),
-            )
+            .filter(*eligibility_conditions(MemoryShortTerm, ctx.workspace_id))
             .scalar()
             or 0
         )

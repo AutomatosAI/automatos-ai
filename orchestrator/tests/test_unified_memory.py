@@ -48,7 +48,8 @@ _mock_config_obj.MEMORY_DECAY_RATE = 0.004  # PRD-154 S3: week-scale (was 0.1/hr
 _mock_config_obj.MEMORY_DECAY_ARCHIVE_THRESHOLD = 0.3
 _mock_config_obj.MEMORY_DECAY_BATCH_SIZE = 100
 _mock_config_obj.MEMORY_PROMOTION_MIN_IMPORTANCE = 0.7
-_mock_config_obj.MEMORY_PROMOTION_MIN_ACCESS_COUNT = 3
+_mock_config_obj.MEMORY_PROMOTION_HIGH_SIGNAL_TYPES = "user_fact,preference,procedure"
+_mock_config_obj.MEMORY_PROMOTION_HIGH_SIGNAL_MIN_IMPORTANCE = 0.5
 _mock_config_obj.MEMORY_PROMOTION_BATCH_SIZE = 50
 
 _config_mod = types.ModuleType("config")

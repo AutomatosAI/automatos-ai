@@ -108,10 +108,20 @@ class Config:
     MEMORY_DECAY_ARCHIVE_THRESHOLD: float = float(os.getenv("MEMORY_DECAY_ARCHIVE_THRESHOLD", "0.3"))
     # L2 Decay: batch size per workspace (rows per transaction)
     MEMORY_DECAY_BATCH_SIZE: int = int(os.getenv("MEMORY_DECAY_BATCH_SIZE", "100"))
-    # L2→L3 Promotion: minimum importance score for promotion candidates
+    # L2→L3 Promotion (PRD-187 S4): fires on distilled IMPORTANCE with
+    # type-aware thresholds — the old `AND access_count > N` conjunct was a
+    # bootstrap deadlock (promotion needs access → access needs recall → recall
+    # couldn't match) and produced zero promotions ever. Policy lives in
+    # modules/memory/promotion_policy.py. Field→durable promotion keeps ITS
+    # access gate (FIELD_PROMOTION_MIN_ACCESS_COUNT) — there access is real.
     MEMORY_PROMOTION_MIN_IMPORTANCE: float = float(os.getenv("MEMORY_PROMOTION_MIN_IMPORTANCE", "0.7"))
-    # L2→L3 Promotion: minimum access count for promotion candidates
-    MEMORY_PROMOTION_MIN_ACCESS_COUNT: int = int(os.getenv("MEMORY_PROMOTION_MIN_ACCESS_COUNT", "3"))
+    # Types durable memory exists for — promoted from a lower importance bar.
+    MEMORY_PROMOTION_HIGH_SIGNAL_TYPES: str = os.getenv(
+        "MEMORY_PROMOTION_HIGH_SIGNAL_TYPES", "user_fact,preference,procedure"
+    )
+    MEMORY_PROMOTION_HIGH_SIGNAL_MIN_IMPORTANCE: float = float(
+        os.getenv("MEMORY_PROMOTION_HIGH_SIGNAL_MIN_IMPORTANCE", "0.5")
+    )
     # L2→L3 Promotion: batch size per workspace
     MEMORY_PROMOTION_BATCH_SIZE: int = int(os.getenv("MEMORY_PROMOTION_BATCH_SIZE", "50"))
     # Background job intervals (PRD-79 US-023)

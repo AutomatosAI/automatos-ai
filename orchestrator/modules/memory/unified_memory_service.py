@@ -2005,31 +2005,25 @@ class UnifiedMemoryService:
     @staticmethod
     def _get_promotion_candidates_sync(
         workspace_id: str,
-        min_importance: float,
-        min_access_count: int,
         batch_size: int,
     ) -> List[Dict[str, Any]]:
         """
         Fetch L2 rows eligible for promotion to L3 (synchronous, runs in executor).
 
-        Criteria: importance > threshold AND access_count > threshold
-                  AND promoted_to_l3 = False AND archived_at IS NULL.
-
-        Uses the ix_mem_st_ws_promote partial index.
+        Eligibility is the shared type-aware policy (PRD-187 S4,
+        ``modules/memory/promotion_policy``): distilled importance with a lower
+        bar for high-signal types, noise types never — the old
+        ``AND access_count > N`` conjunct (a bootstrap deadlock that produced
+        zero promotions ever) is gone.
         """
         from core.database.database import get_db_session
         from modules.memory.models import MemoryShortTerm
+        from modules.memory.promotion_policy import eligibility_conditions
 
         with get_db_session() as db:
             rows = (
                 db.query(MemoryShortTerm)
-                .filter(
-                    MemoryShortTerm.workspace_id == workspace_id,
-                    MemoryShortTerm.promoted_to_l3.is_(False),
-                    MemoryShortTerm.archived_at.is_(None),
-                    MemoryShortTerm.importance > min_importance,
-                    MemoryShortTerm.access_count > min_access_count,
-                )
+                .filter(*eligibility_conditions(MemoryShortTerm, workspace_id))
                 .order_by(MemoryShortTerm.importance.desc())
                 .limit(batch_size)
                 .all()
@@ -2052,9 +2046,10 @@ class UnifiedMemoryService:
         """
         Run L2→L3 promotion for a single workspace.
 
-        Finds L2 items meeting promotion criteria (importance > threshold,
-        access_count > threshold, not yet promoted, not archived), then
-        promotes each to L3 via the durable store.
+        Finds L2 items meeting the type-aware eligibility policy (PRD-187 S4:
+        distilled importance, lower bar for high-signal types, noise types
+        never, no access-count gate), then promotes each to L3 via the durable
+        store.
 
         Args:
             workspace_id: Workspace to process.
@@ -2070,8 +2065,6 @@ class UnifiedMemoryService:
                 None,
                 self._get_promotion_candidates_sync,
                 workspace_id,
-                config.MEMORY_PROMOTION_MIN_IMPORTANCE,
-                config.MEMORY_PROMOTION_MIN_ACCESS_COUNT,
                 config.MEMORY_PROMOTION_BATCH_SIZE,
             )
         except Exception:

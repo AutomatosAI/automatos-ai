@@ -12,9 +12,10 @@ Registers three recurring jobs on the UnifiedScheduler:
    Updates decay_score for all active L2 rows and archives items
    below the retention threshold (default 0.3).
 
-3. **L2→L3 Promotion** (daily) — Promote important L2 items to Mem0
-   Items with high importance and access count get stored in L3 via
-   Mem0 with infer=True for fact extraction and deduplication.
+3. **L2→L3 Promotion** (daily) — Promote important L2 items to L3
+   Items meeting the type-aware importance policy (PRD-187 S4 —
+   no access-count gate) are stored verbatim in the durable store,
+   deduped by content hash.
 
 All three jobs are resilient: one workspace failure does not stop others.
 Each job logs start/end timestamps and summary metrics.
@@ -195,7 +196,7 @@ class MemoryJobScheduler:
     # ------------------------------------------------------------------
 
     async def _run_promotion(self):
-        """Promote high-importance L2 items to L3 via Mem0."""
+        """Promote policy-eligible L2 items to L3 (durable store)."""
         try:
             from modules.memory.unified_memory_service import (
                 get_unified_memory_service,
