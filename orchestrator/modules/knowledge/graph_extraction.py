@@ -379,7 +379,6 @@ _ROSTER_SOURCE = "platform://agent_roster"
 _BLUEPRINT_SOURCE = "platform://blueprints"
 _SCHEMA_SOURCE = "platform://db_schemas"
 _APPS_SOURCE = "platform://connected_apps"
-_SHOPIFY_SOURCE = "shopify://catalog"
 
 
 def map_agent_roster(agents: list[dict]) -> dict[str, list]:
@@ -489,6 +488,15 @@ def map_connected_apps(apps: list[dict]) -> dict[str, list]:
 # into the same {nodes, edges} shape every other mapper here uses, then hand
 # off to GraphifyService.import_graph for clustering/persistence/embeddings.
 
+# Provenance prefix for every node/edge the catalog bulk-op carries (the
+# actual source_file is "<prefix>#<bulk_op_id>"). Public because the catalog
+# re-sync (api/shopify.py, PRD-189 S1) uses it to tell catalog content apart
+# from graph content the catalog does NOT carry — frequently_bought_with
+# edges from the orders sync, flywheel/document/roster nodes — so a rebuild
+# replaces the former and preserves the latter.
+SHOPIFY_CATALOG_SOURCE = "shopify://catalog"
+
+
 def _shopify_gid_tail(gid: str) -> str:
     """gid://shopify/Product/12345 → '12345'."""
     return (gid or "").rsplit("/", 1)[-1] if gid else ""
@@ -522,7 +530,7 @@ def map_shopify_catalog(jsonl_iter, *, bulk_op_id: str | None = None) -> dict[st
     Pure function — no IO, no embeddings, deterministic.
     """
     result = _empty_graph()
-    source_tag = f"{_SHOPIFY_SOURCE}#{bulk_op_id}" if bulk_op_id else _SHOPIFY_SOURCE
+    source_tag = f"{SHOPIFY_CATALOG_SOURCE}#{bulk_op_id}" if bulk_op_id else SHOPIFY_CATALOG_SOURCE
     seen_vendor: set[str] = set()
     seen_collection: set[str] = set()
 

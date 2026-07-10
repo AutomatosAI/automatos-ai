@@ -467,6 +467,98 @@ async def start_product_sync(
     return await _product_sync_impl(effective_ws, db)
 
 
+async def _merge_catalog_over_existing(
+    gs: Any, workspace_id: str, catalog_graph: Dict[str, Any]
+) -> tuple[Dict[str, Any], Dict[str, int]]:
+    """Overlay everything the catalog bulk-op does NOT carry onto a fresh catalog.
+
+    PRD-189 S1 — the fix for the FBT wipe. The old catalog sync ended in
+    ``import_graph(merge=False)``: a full graph REPLACEMENT with only the
+    catalog nodes/edges, which erased every ``frequently_bought_with`` edge the
+    orders sync had computed — and every non-catalog node (flywheel syntheses,
+    document/report entities, roster) merged in since. F032 fires that on every
+    catalog webhook, so the marquee cross-sell feature did not survive normal
+    store activity (the pilot reported ``fbt_edges_added: 16`` with 0 present).
+
+    This mirrors the strip-then-merge the orders path already uses below
+    (strip the stale version of what THIS sync produces, keep the rest, merge
+    the fresh version over the top):
+
+    - Catalog content is identified by provenance — nodes/edges whose
+      ``source_file`` starts with :data:`graph_extraction.SHOPIFY_CATALOG_SOURCE`
+      (``shopify://catalog``). The fresh bulk-op carries the complete live
+      catalog, so the stale catalog is dropped: product attrs refresh and
+      store-deleted products fall out.
+    - Everything else — ``frequently_bought_with`` edges (``shopify://orders``
+      provenance), flywheel/document/roster nodes and their edges — is
+      preserved verbatim and overlaid onto the fresh catalog.
+    - A preserved FBT edge whose product was deleted from the store keeps the
+      co-purchase history; its bare endpoint is skipped by the widget resolvers
+      (no ``file_type``) and the next orders sync refreshes the FBT set.
+
+    Returns ``(combined_graph_data, preserved_stats)``. Pure with respect to
+    its inputs — ``catalog_graph`` and the loaded existing graph are not
+    mutated; the combined payload is a new dict.
+    """
+    from modules.knowledge.graph_extraction import SHOPIFY_CATALOG_SOURCE
+
+    existing = await gs.load_graph(workspace_id)
+    if existing is None:
+        # First sync — nothing to preserve; the fresh catalog IS the graph.
+        return catalog_graph, {
+            "nodes_preserved": 0,
+            "edges_preserved": 0,
+            "fbt_edges_preserved": 0,
+        }
+
+    def _is_catalog(source_file: Any) -> bool:
+        return isinstance(source_file, str) and source_file.startswith(
+            SHOPIFY_CATALOG_SOURCE
+        )
+
+    fresh_node_ids = {n.get("id") for n in catalog_graph.get("nodes", [])}
+    fresh_pairs: set = set()
+    for e in catalog_graph.get("edges", []):
+        fresh_pairs.add((e.get("source"), e.get("target")))
+        fresh_pairs.add((e.get("target"), e.get("source")))
+
+    preserved_nodes = [
+        {**attrs, "id": node_id}
+        for node_id, attrs in existing.nodes(data=True)
+        if node_id not in fresh_node_ids and not _is_catalog(attrs.get("source_file"))
+    ]
+    preserved_edges = [
+        {**attrs, "source": u, "target": v}
+        for u, v, attrs in existing.edges(data=True)
+        if (u, v) not in fresh_pairs and not _is_catalog(attrs.get("source_file"))
+    ]
+    fbt_preserved = sum(
+        1
+        for e in preserved_edges
+        if (e.get("relation") or "").lower() == "frequently_bought_with"
+    )
+
+    combined = {
+        "nodes": list(catalog_graph.get("nodes", [])) + preserved_nodes,
+        "edges": list(catalog_graph.get("edges", [])) + preserved_edges,
+        "hyperedges": list(catalog_graph.get("hyperedges", [])),
+    }
+    stats = {
+        "nodes_preserved": len(preserved_nodes),
+        "edges_preserved": len(preserved_edges),
+        "fbt_edges_preserved": fbt_preserved,
+    }
+    logger.info(
+        "[PRD-189 S1] Catalog re-sync for workspace=%s preserving %d non-catalog "
+        "nodes, %d non-catalog edges (%d frequently_bought_with)",
+        workspace_id,
+        stats["nodes_preserved"],
+        stats["edges_preserved"],
+        stats["fbt_edges_preserved"],
+    )
+    return combined, stats
+
+
 async def _product_sync_impl(workspace_id: str, db: Session) -> "SyncStartResponse":
     """
     Run a full Shopify catalog sync → knowledge graph for a workspace.
@@ -563,9 +655,17 @@ async def _product_sync_impl(workspace_id: str, db: Session) -> "SyncStartRespon
         # 3. Map to graph (deterministic, in-memory)
         graph = map_shopify_catalog(jsonl_text.splitlines(), bulk_op_id=bulk_op_id)
 
-        # 4. Import via existing GraphifyService — clusters + persists + exports
+        # 4. Merge the fresh catalog over the existing workspace graph (PRD-189
+        #    S1) and import via the existing GraphifyService — clusters +
+        #    persists + exports. The combined payload carries the fresh catalog
+        #    PLUS everything the catalog bulk-op does not itself produce
+        #    (frequently_bought_with edges, flywheel/document/roster nodes), so
+        #    a catalog re-sync no longer wipes the cross-sell intelligence.
         gs = GraphifyService()
-        meta = await gs.import_graph(workspace_id, graph, merge=False)
+        combined, preserved = await _merge_catalog_over_existing(
+            gs, workspace_id, graph
+        )
+        meta = await gs.import_graph(workspace_id, combined, merge=False)
 
         duration = time.time() - t0
         settings["product_sync"] = {
@@ -576,6 +676,7 @@ async def _product_sync_impl(workspace_id: str, db: Session) -> "SyncStartRespon
             "node_count": meta.get("node_count"),
             "edge_count": meta.get("edge_count"),
             "community_count": meta.get("community_count"),
+            "fbt_edges_preserved": preserved.get("fbt_edges_preserved", 0),
             "duration_seconds": duration,
             "completed_at": time.time(),
         }
