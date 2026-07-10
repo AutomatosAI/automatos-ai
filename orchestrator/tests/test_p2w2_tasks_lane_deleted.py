@@ -76,4 +76,6 @@ def test_worker_exec_sandbox_stays():
 
     worker_main = _REPO / "services" / "workspace-worker" / "main.py"
     if worker_main.exists():  # repo-root services/ present in full checkouts
-        assert "background_job" in worker_main.read_text(errors="ignore")
+        # The worker still consumes the priority queues (its exec sandbox and
+        # the github-clone producer are untouched by the ingress deletion).
+        assert "workspace:tasks:" in worker_main.read_text(errors="ignore")
