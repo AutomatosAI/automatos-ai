@@ -1215,6 +1215,19 @@ class ToolRegistry:
                     description="Template to use (e.g., 'Basic Report', 'Invoice'). Omit for auto-selection.",
                     required=False
                 ),
+                # P2-09 S2 (F031/J2): the handler already parses/validates template_id,
+                # but only the chatbot's inline schema declared it — so id-driven
+                # template generation worked in chat and nowhere else. Declaring it
+                # here gives the non-chat autonomy lane (missions/board/scheduled)
+                # parity, and makes platform_get_template_schema's "use before
+                # generate_document" discovery flow followable. Wording mirrors the
+                # inline chat schema (agent_platform_tools.get_available_tools).
+                ToolParameter(
+                    name="template_id",
+                    type="string",
+                    description="UUID of a specific template to fill (from platform_list_templates). Takes precedence over template_name.",
+                    required=False
+                ),
             ],
             returns="JSON with filename, format, download_url, and size_kb",
             security_level=SecurityLevel.CAUTIOUS,

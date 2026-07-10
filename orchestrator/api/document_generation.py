@@ -20,6 +20,7 @@ from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
 from core.database.database import get_db
 from config import config
+from modules.documents.models import UnresolvedDeliverableError
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/documents", tags=["document-generation"])
@@ -276,6 +277,19 @@ async def preview_template(
             template_id=template.id,
             user_id=ctx.user.id if ctx.user else None,
         )
+    except UnresolvedDeliverableError as e:
+        # P2-09 S3: the finalisation gate — tell the caller WHICH variables
+        # blocked the file so they can fill the data / brand kit / template.
+        # (The Studio live preview, /templates/preview-blocks, stays the
+        # visible-marker surface and is not gated.)
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Document blocked: template variables did not resolve",
+                "unresolved": e.unresolved,
+                "unknown": e.unknown,
+            },
+        )
     except Exception as e:
         logger.error(f"Document preview failed: {e}", exc_info=True)
         raise HTTPException(status_code=400, detail="Document preview failed")
@@ -367,6 +381,18 @@ async def generate_document(
             template_name=body.template_name,
             template_id=UUID(body.template_id) if body.template_id else None,
             user_id=ctx.user.id if ctx.user else None,
+        )
+    except UnresolvedDeliverableError as e:
+        # P2-09 S3: a Deliverable with [[unresolved]]/unknown variables is
+        # blocked at finalisation — surface the offending paths, loudly.
+        logger.warning(f"Document generation blocked by unresolved variables: {e}")
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Document blocked: template variables did not resolve",
+                "unresolved": e.unresolved,
+                "unknown": e.unknown,
+            },
         )
     except (ValueError, FileNotFoundError) as e:
         logger.warning(f"Document generation validation error: {e}")

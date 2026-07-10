@@ -65,7 +65,7 @@ except ImportError:
 from config import config
 from core.models.core import DocumentTemplate
 from core.models.workspaces import Workspace
-from modules.documents.models import GeneratedDocument
+from modules.documents.models import GeneratedDocument, UnresolvedDeliverableError
 from modules.documents.template_service import DocumentTemplateService
 from modules.documents.brand_kit import get_brand_kit
 from modules.documents.blocks import (
@@ -154,6 +154,21 @@ class DocumentGenerationService:
         else:
             raise ValueError(f"Unsupported format: {format}. Use pdf, docx, or xlsx.")
 
+        # P2-09 S3 — the finalisation gate. The render-honesty primitives
+        # (RenderedHtml/RenderedDocx.unresolved, ResolvedVariables.unknown) used
+        # to be logged and discarded, so a client could still receive a document
+        # with visible [[variable]] markers. A Deliverable that did not resolve
+        # clean is BLOCKED, loudly — never delivered. (The Studio live preview
+        # renders outside generate() and keeps its visible red markers.)
+        if result.unresolved or result.unknown:
+            logger.warning(
+                "[DocGen] BLOCKED finalisation of '%s' (%s): %d unresolved / %d unknown variable(s)",
+                title, format, len(result.unresolved), len(result.unknown),
+            )
+            raise UnresolvedDeliverableError(
+                unresolved=result.unresolved, unknown=result.unknown
+            )
+
         # Attach markdown content for live widget display
         result.content = self._data_to_markdown(data, title)
         return result
@@ -167,18 +182,22 @@ class DocumentGenerationService:
         return get_brand_kit(getattr(ws, "settings", None))
 
     def _render_block_html(self, block_doc, data, workspace_id, user_id, title):
-        """Resolve a block document's variables and render it to a full HTML page."""
+        """Resolve a block document's variables and render it to a full HTML page.
+
+        Returns ``(html, unresolved, unknown)`` — the render-honesty lists are
+        captured for the finalisation gate in :meth:`generate` (P2-09 S3), not
+        discarded behind a log line. The renderer marks BOTH empty-known and
+        unknown paths as visible ``[[markers]]``; the authoring errors (unknown)
+        are split out so each list stays honest.
+        """
         paths = collect_variable_paths(block_doc)
         resolver = VariableResolver(self.db)
         resolved = resolver.resolve(workspace_id, user_id, paths, extra_data=data)
         brand_kit = self._brand_kit_for(workspace_id)
         rendered = render_document_html(block_doc, resolved.values, brand_kit, title=title)
-        if rendered.unresolved:
-            logger.warning(
-                "[DocGen] %d unresolved variable(s) in block render: %s",
-                len(rendered.unresolved), ", ".join(rendered.unresolved),
-            )
-        return rendered.html
+        unknown = list(resolved.unknown)
+        unresolved = [p for p in rendered.unresolved if p not in set(unknown)]
+        return rendered.html, unresolved, unknown
 
     def register_as_deliverable(
         self,
@@ -196,6 +215,12 @@ class DocumentGenerationService:
         Source attribution travels in ``extra`` (template_id) + ``source_type``. Called
         only for real generations — previews never register. Best-effort: a registration
         failure never fails the generation itself.
+
+        P2-09 S4: per-generation render quality rides the same ``extra`` JSONB —
+        ``render.unresolved_count`` / ``render.unknown_count`` / ``render.template_lane``
+        — no new table, no new column. ``DeliverableService.get_stats`` aggregates it
+        into the clean-render rate; post-S3 the counts double as a durable audit that
+        the finalisation gate held (block-lane documents register only when clean).
         """
         ws = self.workspace_id
         if not ws:
@@ -203,7 +228,15 @@ class DocumentGenerationService:
         try:
             from services.deliverable_service import DeliverableService
 
-            extra = {"template_id": str(template_id)} if template_id else None
+            extra = {
+                "render": {
+                    "unresolved_count": len(result.unresolved),
+                    "unknown_count": len(result.unknown),
+                    "template_lane": result.template_lane,
+                }
+            }
+            if template_id:
+                extra["template_id"] = str(template_id)
             return DeliverableService(self.db, ws).register(
                 file_path=f"generated/{result.filename}",
                 title=title or result.filename,
@@ -252,11 +285,18 @@ class DocumentGenerationService:
             )
 
         block_payload = getattr(template, "blocks", None) if template else None
+        unresolved: list = []
+        unknown: list = []
+        # P2-09 S4: which lane rendered the file — "block" (canonical) vs
+        # "legacy" (Jinja HTML). Tracks the PRD-167 migration off Jinja.
+        template_lane = "block"
 
         if block_payload:
             # Path 1: canonical block template.
             block_doc = validate_blocks(block_payload)
-            rendered_html = self._render_block_html(block_doc, data, workspace_id, user_id, title)
+            rendered_html, unresolved, unknown = self._render_block_html(
+                block_doc, data, workspace_id, user_id, title
+            )
         elif template and template.template_content:
             # Path 2: legacy user-authored Jinja HTML (kept until per-workspace
             # templates are migrated to blocks — see PRD-167 sunset note).
@@ -264,6 +304,7 @@ class DocumentGenerationService:
                 self._validate_and_backfill(data, template.data_schema)
             # PRD-167 S4: expose the brand kit to legacy templates as {{ brand.* }} so
             # they pick up workspace palette instead of hardcoded Automatos colours.
+            template_lane = "legacy"
             render_ctx = {**data, "brand": self._brand_kit_for(workspace_id)}
             try:
                 jinja_template = self._jinja_env.from_string(template.template_content)
@@ -275,7 +316,9 @@ class DocumentGenerationService:
             # Path 3: no template — brand-aware block render of the legacy data shape.
             logger.info("No template found — rendering data via brand-aware block fallback")
             block_doc = blocks_from_legacy(data)
-            rendered_html = self._render_block_html(block_doc, data, workspace_id, user_id, title)
+            rendered_html, unresolved, unknown = self._render_block_html(
+                block_doc, data, workspace_id, user_id, title
+            )
 
         # Generate PDF
         output_path = self._output_path(workspace_id, title, "pdf")
@@ -284,7 +327,10 @@ class DocumentGenerationService:
         except Exception as e:
             raise RuntimeError(f"PDF generation failed: {e}")
 
-        return self._build_result(output_path, "pdf", title, workspace_id)
+        return self._build_result(
+            output_path, "pdf", title, workspace_id,
+            unresolved=unresolved, unknown=unknown, template_lane=template_lane,
+        )
 
     # ------------------------------------------------------------------
     # DOCX Generation (python-docx-template)
@@ -316,13 +362,15 @@ class DocumentGenerationService:
             )
             brand_kit = self._brand_kit_for(workspace_id)
             rendered = render_document_docx(block_doc, resolved.values, brand_kit)
-            if rendered.unresolved:
-                logger.warning(
-                    "[DocGen] %d unresolved variable(s) in DOCX render: %s",
-                    len(rendered.unresolved), ", ".join(rendered.unresolved),
-                )
+            # P2-09 S3: capture the render-honesty lists for the finalisation
+            # gate in generate() — same unknown/unresolved split as the HTML path.
+            unknown = list(resolved.unknown)
+            unresolved = [p for p in rendered.unresolved if p not in set(unknown)]
             rendered.document.save(output_path)
-            return self._build_result(output_path, "docx", title, workspace_id)
+            return self._build_result(
+                output_path, "docx", title, workspace_id,
+                unresolved=unresolved, unknown=unknown, template_lane="block",
+            )
 
         # Path 2: legacy uploaded .docx template via docxtpl.
         try:
@@ -358,7 +406,9 @@ class DocumentGenerationService:
         doc.render(data)
         doc.save(output_path)
 
-        return self._build_result(output_path, "docx", title, workspace_id)
+        return self._build_result(
+            output_path, "docx", title, workspace_id, template_lane="legacy"
+        )
 
     # ------------------------------------------------------------------
     # XLSX Generation (XlsxWriter)
@@ -631,17 +681,36 @@ class DocumentGenerationService:
         return os.path.join(directory, f"{timestamp}_{safe_title}.{ext}")
 
     def _build_result(
-        self, path: str, fmt: str, title: str, workspace_id: UUID = None
+        self,
+        path: str,
+        fmt: str,
+        title: str,
+        workspace_id: UUID = None,
+        *,
+        unresolved: Optional[list] = None,
+        unknown: Optional[list] = None,
+        template_lane: Optional[str] = None,
     ) -> GeneratedDocument:
-        """Build a GeneratedDocument from a file on disk, uploading to S3 for persistence."""
+        """Build a GeneratedDocument from a file on disk, uploading to S3 for persistence.
+
+        The persisted ``download_url`` is the STABLE app path
+        (``/api/documents/generated/{filename}``), never the raw presigned S3 URL —
+        a presign expires after an hour, which rotted every persisted Deliverable
+        link (P2-09 S1 / F030). ``serve_generated_file`` re-mints a fresh presign
+        on each request, so the app path stays live for the Deliverable's lifetime.
+
+        ``unresolved``/``unknown`` are the render-honesty lists captured off the
+        block render (P2-09 S3); non-empty lists make :meth:`generate` block
+        finalisation. ``template_lane`` records which renderer produced the file
+        ("block"/"legacy", P2-09 S4) for the clean-render/lane-coverage metric.
+        """
         filename = os.path.basename(path)
         size = os.path.getsize(path)
 
-        # Upload to S3 for persistent storage (containers are ephemeral)
+        # Upload a persistence copy to S3 (containers are ephemeral); the link we
+        # persist stays the app path — the re-mint endpoint owns presigning.
         download_url = f"/api/documents/generated/{filename}"
-        s3_url = self._upload_to_s3(path, filename, workspace_id)
-        if s3_url:
-            download_url = s3_url
+        self._upload_to_s3(path, filename, workspace_id)
 
         return GeneratedDocument(
             path=path,
@@ -650,22 +719,28 @@ class DocumentGenerationService:
             size=size,
             download_url=download_url,
             preview_url=download_url if fmt == "pdf" else None,
+            unresolved=list(unresolved or []),
+            unknown=list(unknown or []),
+            template_lane=template_lane,
         )
 
     def _upload_to_s3(
         self, local_path: str, filename: str, workspace_id: UUID = None
-    ) -> Optional[str]:
-        """Upload generated document to S3 and return a presigned download URL.
+    ) -> bool:
+        """Upload a generated document to S3 for persistence across ephemeral containers.
 
-        Returns None if S3 is not configured (falls back to local serving).
+        Returns True when the upload happened, False when S3 is not configured or
+        the upload failed (local serving still works for the container's lifetime).
+        No download link is minted here — ``serve_generated_file`` presigns on
+        demand, so persisted URLs never expire (P2-09 S1).
         """
         if not boto3:
             logger.debug("[DocGen] boto3 not available, skipping S3 upload")
-            return None
+            return False
 
         if not config.AWS_ACCESS_KEY_ID or not config.AWS_SECRET_ACCESS_KEY:
             logger.debug("[DocGen] AWS credentials not configured, skipping S3 upload")
-            return None
+            return False
 
         ws_id = workspace_id or self.workspace_id
         bucket = config.S3_DOCUMENTS_BUCKET or "automatos-ai"
@@ -693,23 +768,12 @@ class DocumentGenerationService:
                     ContentType=content_type,
                 )
 
-            # Generate presigned URL (1 hour expiry)
-            presigned_url = client.generate_presigned_url(
-                "get_object",
-                Params={
-                    "Bucket": bucket,
-                    "Key": s3_key,
-                    "ResponseContentDisposition": f'attachment; filename="{filename}"',
-                },
-                ExpiresIn=3600,
-            )
-
             logger.info(
                 "[DocGen] Uploaded to S3: s3://%s/%s (%d bytes)",
                 bucket, s3_key, os.path.getsize(local_path),
             )
-            return presigned_url
+            return True
 
         except Exception:
             logger.exception("[DocGen] S3 upload failed, falling back to local serving")
-            return None
+            return False
