@@ -165,6 +165,14 @@ The Wave-2 premise is *"Auto can't be trusted with client-facing autonomous acti
 | **G4** | **Fossil tables DROP timing** (S8c). | **(rec)** Writer-audit in-PR → author DROP for `agent_tool_permissions`/`permission_audit_logs` (+`tools`/`tool_configurations`/`tool_categories` only if orphaned), you apply post-merge, as with prior DROPs. Alt: unmount-only this wave, DROP in the next kill-list PRD. |
 | **G5** | **Frontend viewer read-only UI** (dossier §I.2 — a viewer currently sees full editors that will now 403). | Fold a minimal "viewer sees disabled write controls" pass into S8, or track as a separate UX story alongside the §I.1 Access panel? Backend enforcement lands either way; this is the UI-honesty follow-through. |
 
+### Decisions — locked 2026-07-10 (Gerard; recommendations adopted)
+
+- **G1:** canonical vocabulary = workspace roles `owner/admin/editor/viewer` + `resource:action` permission strings with canonical resources; **rename `workflows:*` → `missions:*` + `playbooks:*` in this wave** while every checker is being touched; SDK `VALID_PERMISSIONS` aligns (S8d). The `UserContext.role`/`system_role` twins collapse to one field — any straggler read gets a deprecated alias with a same-wave sunset (CLAUDE.md §5's exception clause).
+- **G2:** **decouple** — S1 makes empty=deny + `super_admin ⊇ admin` unconditional (the plane-OFF branches are deleted); `AUTOMATOS_POLICY_PLANE` keeps governing only the governance legs.
+- **G3:** viewer-write-denial ships **hard-on, no flag** (~1.05 users/workspace ⇒ blast radius ~zero). The decorator's system-admin bypass is **narrowed to `super_admin`-only**. Pre-merge data checks on Gerard's side: live widget-key permission population; NULL-workspace credential rows (S7).
+- **G4:** writer-audit in-PR → **DROP migration authored in-PR; Gerard applies post-merge** (as with prior DROPs).
+- **G5:** **fold the minimal viewer read-only pass into S8** (disabled write controls — UI honesty ships with enforcement); the fuller §I.1 Access panel remains the follow-through.
+
 ---
 
 *Traceability: every story cites its dossier ref in `reports/dossiers/auth-identity.md` (J1–J4 = §J upgrade-path rows 1–4; C.1–C.6 root causes; E.2–E.3 verdicts; G.1–G.5 metrics) and the security appendix §3.1/§3.2.b (backlog #8/#9), under review id **P2-14** in `reports/PLATFORM_MODULE_DEEP_REVIEW_2026-07-04.md` §6 (Wave 2). All `file:line` refs were re-verified by grep against this worktree `@ d26ce039d`; drift from the review tree `77bc9c6d5` is flagged inline (`config.py:645→665`, `main.py:977→975`, team.py 4→6 gated sites, widget fork now plane-gated at `api/widgets/auth.py:246-257`, hybrid call sites 657→674, routers 92→91-of-104, routes 754 / 342 mutating per the committed manifest). North-Star framed; PILOT lens applied; no moat framing.*
