@@ -684,6 +684,12 @@ class Config:
     # F043, widgets/auth.py F042 — arm on ANY live stage, unchanged.
     POLICY_PLANE_ENABLED: bool = POLICY_PLANE_MODE != "off"
 
+    # PRD-192 S3 (locked #2a): autonomy-enabled workspaces get a DEFAULT budget
+    # ceiling — max_cost_usd 50 per month — applied in the budget reader when
+    # the workspace has no explicit `plan_limits.budget` (code default, no
+    # migration; explicit budgets always win). 0 disables the default.
+    AUTONOMY_DEFAULT_BUDGET_USD: float = float(os.getenv("AUTOMATOS_AUTONOMY_DEFAULT_BUDGET_USD", "50"))
+
     # PRD-185 S2 — per-lane telemetry canary. The type-poison outage S1 repaired
     # went unseen for ~2 months because nothing alarmed on "organic tool-execution
     # rows/day = 0". This canary counts production (telemetry_source='production')
@@ -772,7 +778,10 @@ class Config:
     # hung embedding/Qdrant backend can never stall the dispatch tick — on
     # timeout the matcher falls back to lexical-only scoring.
     AGENT_MATCH_SIGNAL_TIMEOUT_SECONDS: float = float(os.getenv("AGENT_MATCH_SIGNAL_TIMEOUT_SECONDS", "10"))
-    # Telemetry: cost estimation per 1K tokens (PRD-82B US-004)
+    # Cost estimation per 1K tokens (PRD-82B US-004). PRD-192 S3 (F059 finish):
+    # DEMOTED to modules/policy/pricing.py's registry-miss last resort — pricing
+    # is this constant's ONLY consumer (source-grep-guarded); every dollar
+    # figure routes through the one pricing source.
     COORDINATOR_COST_PER_1K_TOKENS: float = float(os.getenv("COORDINATOR_COST_PER_1K_TOKENS", "0.003"))
     # Replanning limits (PRD-82B US-005)
     COORDINATOR_MAX_REPLANS: int = int(os.getenv("COORDINATOR_MAX_REPLANS", "2"))

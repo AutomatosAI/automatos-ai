@@ -262,6 +262,17 @@ class UnifiedToolExecutor:
             from modules.policy import PolicyGate, ToolCall, Decision
             from modules.policy.errors import verdict_to_result
 
+            # PRD-192 S3: lift the caller's turn-level estimate (driving model +
+            # prompt tokens + output cap) into the ToolCall so budget admission
+            # prices THIS call instead of a structural $0. Callers that don't
+            # know their model pass nothing — spend-to-date still binds.
+            cc = caller_context if isinstance(caller_context, dict) else {}
+            try:
+                est_in = int(cc.get("est_input_tokens") or 0)
+                est_out = int(cc.get("est_output_tokens") or 0)
+            except (TypeError, ValueError):
+                est_in = est_out = 0
+
             verdict = PolicyGate(self.db).check(
                 ToolCall(
                     tool_name=effective_name,
@@ -269,6 +280,9 @@ class UnifiedToolExecutor:
                     workspace_id=workspace_id,
                     agent_id=agent_id,
                     caller_context=caller_context,
+                    model_id=cc.get("model_id"),
+                    est_input_tokens=est_in,
+                    est_output_tokens=est_out,
                     is_composio=is_composio,
                 )
             )
@@ -282,7 +296,7 @@ class UnifiedToolExecutor:
                 effective_name, effective_params, verdict,
                 agent_id=agent_id, workspace_id=workspace_id,
                 caller_context=caller_context, trace=trace,
-                risk=risk, mode=mode,
+                risk=risk, mode=mode, est_tokens=est_in + est_out,
             )
 
             if verdict.decision is Decision.ALLOW:
@@ -547,15 +561,16 @@ class UnifiedToolExecutor:
         trace: str,
         risk: Optional[str] = None,
         mode: Optional[str] = None,
+        est_tokens: Optional[int] = None,
     ) -> None:
         """Fire ``PRE_TOOL_USE`` on the policy bus with the verdict (PRD-181 S1).
 
         The attached audit handler reads ``ctx.data['verdict']`` and writes the
-        per-tenant Art.12 record; ``risk`` and ``mode`` ride along so the audit
-        row (and the PRD-192 S2 shadow report) carry the classification and the
-        stage that produced the decision. Never raises: audit is a side-effect
-        of the chokepoint, so a bus/handler fault must not block or slow the
-        call.
+        per-tenant Art.12 record; ``risk``, ``mode`` and ``est_tokens`` ride
+        along so the audit row (and the PRD-192 S2 shadow report) carry the
+        classification, the stage that produced the decision, and the G.2
+        priced-call signal. Never raises: audit is a side-effect of the
+        chokepoint, so a bus/handler fault must not block or slow the call.
         """
         try:
             from modules.policy import (
@@ -574,6 +589,7 @@ class UnifiedToolExecutor:
             ctx.data["verdict"] = verdict
             ctx.data["risk"] = risk
             ctx.data["mode"] = mode
+            ctx.data["est_tokens"] = est_tokens
             ctx.data["trace_id"] = trace
             get_policy_bus().fire(Event.PRE_TOOL_USE, ctx)
         except Exception:

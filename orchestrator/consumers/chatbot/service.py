@@ -103,6 +103,9 @@ def build_tool_caller_context(
     turn_id: Optional[str],
     driving_clerk: Optional[str],
     prior_action: Optional[str],
+    model_id: Optional[str] = None,
+    est_input_tokens: int = 0,
+    est_output_tokens: int = 0,
 ) -> Optional[Dict[str, Any]]:
     """Build the caller_context threaded into every chat tool execution (PRD-177 S2 / F017).
 
@@ -118,6 +121,10 @@ def build_tool_caller_context(
       exact rather than time-bucketed.
     * ``user_id``          — the driving clerk (unchanged from before F017).
     * ``prior_action``     — the previous tool this turn, for the signal recorder.
+    * ``model_id`` / ``est_input_tokens`` / ``est_output_tokens`` — PRD-192 S3:
+      the turn-level budget estimate (driving model, prompt tokens of the
+      assembled context, configured output cap) the policy chokepoint lifts
+      into ``ToolCall`` so budget admission prices the pending call.
 
     Empty fields are omitted (not written as None) to keep the telemetry row
     clean. Returns ``None`` when there is genuinely nothing to record, matching
@@ -134,6 +141,10 @@ def build_tool_caller_context(
         ctx["user_id"] = driving_clerk
     if prior_action:
         ctx["prior_action"] = prior_action
+    if model_id:
+        ctx["model_id"] = model_id
+        ctx["est_input_tokens"] = int(est_input_tokens or 0)
+        ctx["est_output_tokens"] = int(est_output_tokens or 0)
     return ctx or None
 
 
@@ -1410,6 +1421,11 @@ class StreamingChatService:
                 return {"success": True, "llm_context": llm_context, "raw_result": {}}
 
             user_text = self._extract_user_text(llm_messages)
+            # PRD-192 S3: turn-level budget estimate at the loop boundary —
+            # the driving model + prompt tokens + output cap, so the policy
+            # gate prices this call instead of admitting at a structural $0.
+            from core.context_guard import estimate_turn_budget
+            _turn_budget = estimate_turn_budget(agent_runtime.llm_manager, llm_messages)
             # PRD-177 S2 (F017): thread user_query + conversation/turn ids so the
             # edge builder can cluster intent and pair per-turn used_after edges.
             result = await self.tool_router.execute_and_format(
@@ -1424,6 +1440,9 @@ class StreamingChatService:
                     turn_id=_turn_id,
                     driving_clerk=_driving_clerk,
                     prior_action=_prior_action,
+                    model_id=_turn_budget.get("model_id"),
+                    est_input_tokens=_turn_budget.get("est_input_tokens", 0),
+                    est_output_tokens=_turn_budget.get("est_output_tokens", 0),
                 ),
             )
             # PRD-185 S7: capture retrieved doc ids (retrieval tools only).

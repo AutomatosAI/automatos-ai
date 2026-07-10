@@ -997,9 +997,15 @@ async def _mark_execution_cancelled(execution_id: str, db_url: Optional[str]) ->
 
 
 def _tokens_to_usd(tokens: int, app_config) -> float:
-    """Price tokens with the same rate the mission dollar-ceiling uses (PRD-163 S5)
-    so a playbook's $ budget is denominated identically to a mission's."""
-    return (max(0, int(tokens or 0)) / 1000.0) * float(app_config.COORDINATOR_COST_PER_1K_TOKENS)
+    """Price tokens with the same convention the mission dollar-ceiling uses
+    (PRD-163 S5) so a playbook's $ budget is denominated identically to a
+    mission's. PRD-192 S3 (F059 finish): routed through
+    ``modules.policy.pricing`` — the ONE pricing source; a playbook run spans
+    per-step agents/models so pricing's documented flat last-resort applies.
+    ``app_config`` kept for signature stability at the call sites."""
+    from modules.policy import pricing as _pricing
+
+    return _pricing.price_total_tokens_usd(None, None, tokens)
 
 
 def _playbook_cost_ceiling_usd(exec_config: dict, app_config) -> float:
