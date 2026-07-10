@@ -1,5 +1,5 @@
 {
-  "route_count": 755,
+  "route_count": 750,
   "routes": [
     {
       "method": "GET",
@@ -2096,26 +2096,6 @@
     {
       "method": "GET",
       "path": "/api/system/test-route"
-    },
-    {
-      "method": "GET",
-      "path": "/api/tasks"
-    },
-    {
-      "method": "POST",
-      "path": "/api/tasks/submit"
-    },
-    {
-      "method": "GET",
-      "path": "/api/tasks/{task_id}"
-    },
-    {
-      "method": "POST",
-      "path": "/api/tasks/{task_id}/cancel"
-    },
-    {
-      "method": "GET",
-      "path": "/api/tasks/{task_id}/events"
     },
     {
       "method": "POST",

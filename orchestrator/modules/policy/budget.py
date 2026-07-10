@@ -97,9 +97,11 @@ class BudgetDecision:
 def load_budget(db: Any, workspace_id: Any) -> Dict[str, Any]:
     """Return the workspace's ``plan_limits.budget`` merged onto defaults.
 
-    Empty/missing ⇒ ``{}`` (no ceiling). Fail-safe: an unreadable row returns
-    ``{}`` (no ceiling — the gate is a *cost* control, not a correctness gate;
-    it must not wedge execution if the settings read fails).
+    Empty/missing ⇒ ``{}`` (no ceiling) — except autonomy-enabled workspaces,
+    which get the PRD-192 S3 code-default monthly ceiling (explicit budgets
+    always win). Fail posture on an unreadable row: ``{}`` in off/shadow (the
+    gate is a *cost* control and must not wedge execution), re-raise under the
+    enforce stages so the gate's single except owns the posture (PRD-192 S1).
     """
     if db is None or workspace_id is None:
         return {}

@@ -305,8 +305,10 @@ async def clone_github_repo(
         task_id[:8], workspace_id[:8], body.repo_url,
     )
 
+    # PRD-192 S6: the `events_url` field is gone with the deleted /api/tasks
+    # router — no consumer read it (the widget polls the workspace-files
+    # surface with the task_id; grep-proven).
     return {
         "task_id": task_id,
         "status": "queued",
-        "events_url": f"/api/tasks/{task_id}/events",
     }
