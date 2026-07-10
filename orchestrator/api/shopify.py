@@ -667,6 +667,24 @@ async def _product_sync_impl(workspace_id: str, db: Session) -> "SyncStartRespon
         )
         meta = await gs.import_graph(workspace_id, combined, merge=False)
 
+        # PRD-189 S2: FBT-persistence integrity — reported by the last orders
+        # sync vs actually present after THIS import. This is the single query
+        # that would have caught the wipe on day one (16 reported / 0 present);
+        # a drift here means the preservation above silently regressed.
+        from integrations.shopify.integrity import count_fbt_edges, fbt_integrity
+
+        merged_graph = await gs.load_graph(workspace_id)
+        integrity = fbt_integrity(
+            (settings.get("orders_sync") or {}).get("fbt_edges_added"),
+            count_fbt_edges(merged_graph) if merged_graph is not None else 0,
+        )
+        if integrity["ok"] is False:
+            logger.error(
+                "[PRD-189 S2] FBT persistence drift after catalog sync for "
+                "workspace=%s: orders_sync reported %s, graph holds %s",
+                workspace_id, integrity["reported"], integrity["present"],
+            )
+
         duration = time.time() - t0
         settings["product_sync"] = {
             "status": "complete",
@@ -677,6 +695,7 @@ async def _product_sync_impl(workspace_id: str, db: Session) -> "SyncStartRespon
             "edge_count": meta.get("edge_count"),
             "community_count": meta.get("community_count"),
             "fbt_edges_preserved": preserved.get("fbt_edges_preserved", 0),
+            "fbt_integrity": integrity,
             "duration_seconds": duration,
             "completed_at": time.time(),
         }
@@ -944,6 +963,24 @@ async def _orders_sync_impl(
         gs = GraphifyService()
         meta = await gs.import_graph(workspace_id, graph_delta, merge=True)
 
+        # PRD-189 S2: FBT-persistence integrity — what this sync reported must
+        # be what the merged graph actually holds. Written into the status
+        # block (and mirrored by the Command Center Commerce tile) so a lying
+        # "fbt_edges_added: N / 0 present" state can never go unread again.
+        from integrations.shopify.integrity import count_fbt_edges, fbt_integrity
+
+        merged_graph = await gs.load_graph(workspace_id)
+        integrity = fbt_integrity(
+            fbt_edges,
+            count_fbt_edges(merged_graph) if merged_graph is not None else 0,
+        )
+        if integrity["ok"] is False:
+            logger.error(
+                "[PRD-189 S2] FBT persistence drift after orders sync for "
+                "workspace=%s: reported %s, graph holds %s",
+                workspace_id, integrity["reported"], integrity["present"],
+            )
+
         duration = time.time() - t0
         settings["orders_sync"] = {
             "status": "complete",
@@ -955,6 +992,7 @@ async def _orders_sync_impl(
             "fbt_edges_added": fbt_edges,
             "stale_fbt_removed": stale_fbt_removed,
             "total_orders_analysed": total_orders,
+            "fbt_integrity": integrity,
             "duration_seconds": duration,
             "completed_at": time.time(),
         }

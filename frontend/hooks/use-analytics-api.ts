@@ -9,6 +9,7 @@ import type {
   SlosMetric,
   WorkspaceActivationMetric,
   DeliverableFreshnessMetric,
+  CommerceIntegrityMetric,
 } from '@/lib/api-client'
 
 export const analyticsQueryKeys = {
@@ -118,6 +119,14 @@ export function useDeliverableFreshness() {
   return useQuery<DeliverableFreshnessMetric>({
     queryKey: ['analytics', 'deliverable-freshness'],
     queryFn: () => apiClient.getDeliverableFreshness()
+  })
+}
+
+// PRD-189 S2 — cross-sell persistence integrity (the Commerce tile).
+export function useCommerceIntegrity() {
+  return useQuery<CommerceIntegrityMetric>({
+    queryKey: ['analytics', 'commerce-integrity'],
+    queryFn: () => apiClient.getCommerceIntegrity()
   })
 }
 

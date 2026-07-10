@@ -1,5 +1,5 @@
 {
-  "route_count": 754,
+  "route_count": 755,
   "routes": [
     {
       "method": "GET",
@@ -316,6 +316,10 @@
     {
       "method": "GET",
       "path": "/api/analytics/charts/presets"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/commerce-integrity"
     },
     {
       "method": "GET",
