@@ -464,27 +464,27 @@ async def delete_memory(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
-    """Delete a specific memory by ID — PRD-77."""
+    """Delete a specific memory by ID — PRD-77 / PRD-187 S6.
+
+    Routes to the durable store through the seam. The old mem0-era version
+    pre-scanned 500 memories across every tier for an ownership check, then
+    called ``delete_memory`` WITHOUT its required ``workspace_id`` — a
+    TypeError on every invocation, so this endpoint never deleted anything.
+    Ownership is now enforced where it belongs: the adapter only deletes
+    points whose namespace matches the workspace-resolved user_id.
+    """
     service = _get_memory_service()
     if not service:
         return {"success": False, "error": "Memory service unavailable"}
 
     try:
-        # Ownership check: verify memory belongs to this workspace (any tier)
-        agent_ids = _get_agent_ids(ctx.workspace_id, db)
-        scoped_items = await _fetch_all_scoped_memories(
-            service, str(ctx.workspace_id), agent_ids, limit=500,
+        deleted = await service.delete_memory(
+            memory_id, workspace_id=str(ctx.workspace_id)
         )
-        owned_ids = {str(m.get("id", "")) for _, m in scoped_items}
-
-        if memory_id not in owned_ids:
-            return {"success": False, "error": "Memory not found or not owned by this workspace"}
-
-        deleted = await service.delete_memory(memory_id)
         if deleted:
             logger.info("Memory %s deleted by workspace %s", memory_id, ctx.workspace_id)
             return {"success": True, "message": f"Memory {memory_id} deleted"}
-        return {"success": False, "error": f"Failed to delete memory {memory_id}"}
+        return {"success": False, "error": "Memory not found or not owned by this workspace"}
     except Exception as e:
         logger.error("Memory delete failed: %s", e, exc_info=True)
         return {"success": False, "error": str(e)[:200]}

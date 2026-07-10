@@ -246,3 +246,11 @@ def test_durable_config_knobs_exist():
     assert int(config.DURABLE_MEMORY_PROBE_INTERVAL_SECONDS) > 0
     for gone in ("MEM0_API_URL", "MEM0_API_KEY", "MEM0_HEALTH_PROBE_ENABLED"):
         assert not hasattr(config, gone), f"config.{gone} must be retired with the fork"
+
+
+def test_stats_delete_passes_workspace_scope():
+    # PRD-187 S6: the Explorer delete endpoint calls the seam with its
+    # REQUIRED workspace scope — the mem0-era call omitted it and raised
+    # TypeError on every invocation (the endpoint never deleted anything).
+    src = (_ORCH / "api" / "memory_stats.py").read_text()
+    assert "service.delete_memory(\n            memory_id, workspace_id=str(ctx.workspace_id)\n        )" in src
