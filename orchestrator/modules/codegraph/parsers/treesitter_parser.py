@@ -380,19 +380,27 @@ class TreeSitterParser:
     def _get_docstring(self, node, content_lines: List[str], lang_name: str) -> Optional[str]:
         """Extract docstring or doc comment for a symbol."""
         if lang_name == 'python':
-            # Python docstrings: first child expression_statement containing a string
+            # Python docstrings: first statement in block containing a string.
+            # Grammars with expression_statement as a hidden supertype put the
+            # string directly under the block; older ones wrap it.
             for child in node.children:
                 if child.type == 'block':
                     for block_child in child.children:
-                        if block_child.type == 'expression_statement':
+                        string_node = None
+                        if block_child.type == 'string':
+                            string_node = block_child
+                        elif block_child.type == 'expression_statement':
                             for expr_child in block_child.children:
                                 if expr_child.type == 'string':
-                                    text = expr_child.text.decode('utf-8')
-                                    # Strip triple quotes
-                                    for q in ('"""', "'''"):
-                                        if text.startswith(q) and text.endswith(q):
-                                            return text[3:-3].strip()
-                                    return text.strip('"\'').strip()
+                                    string_node = expr_child
+                                    break
+                        if string_node is not None:
+                            text = string_node.text.decode('utf-8')
+                            # Strip triple quotes
+                            for q in ('"""', "'''"):
+                                if text.startswith(q) and text.endswith(q):
+                                    return text[3:-3].strip()
+                            return text.strip('"\'').strip()
                         break  # Only check first statement in block
         else:
             # JSDoc / Javadoc: look for comment node immediately before
