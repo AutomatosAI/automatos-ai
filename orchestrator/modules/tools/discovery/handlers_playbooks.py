@@ -629,13 +629,23 @@ async def delete_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any
 
     # Durable memory cleanup (non-fatal). The old HTTP cleanup deleted a
     # "playbook-{id}" namespace no writer ever used — this erases the real
-    # recipe bucket the playbook memory writer stores under.
+    # buckets the playbook memory writer stores under: the recipe namespace
+    # plus one recipe_agent namespace per agent in the steps (the same set
+    # retrieve_relevant_memories enumerates).
     try:
         from modules.memory.unified_memory_service import get_unified_memory_service
 
         svc = get_unified_memory_service()
-        recipe_ns = svc.namespace(str(playbook.workspace_id)).recipe(playbook.id)
-        erased = await svc._durable.erase_namespace(recipe_ns)
+        ns = svc.namespace(str(playbook.workspace_id))
+        playbook_key = playbook.template_id or str(playbook.id)
+        erased = await svc._durable.erase_namespace(ns.recipe(playbook_key))
+        agent_ids = {
+            step.get("agent_id")
+            for step in (playbook.steps or [])
+            if isinstance(step, dict) and step.get("agent_id")
+        }
+        for aid in agent_ids:
+            erased += await svc._durable.erase_namespace(ns.recipe_agent(playbook_key, aid))
         cleanup_notes.append(f"Playbook memories cleaned up ({erased})")
     except Exception as e:
         logger.warning("[PlatformExecutor] Durable-memory cleanup failed for playbook %d: %s", playbook.id, e)
