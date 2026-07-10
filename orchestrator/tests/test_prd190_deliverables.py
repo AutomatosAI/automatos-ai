@@ -200,3 +200,95 @@ def test_toolspec_matches_inline_chat_schema_for_template_id():
     exported = spec.to_openai_format()["parameters"]
     assert exported["properties"]["template_id"]["type"] == "string"
     assert "template_id" not in exported["required"]
+
+
+# --------------------------------------------------------------------------- #
+# S3 — enforce the unresolved gate (J5) — the load-bearing assertions
+# --------------------------------------------------------------------------- #
+# generate() is driven end-to-end on the DOCX block path (python-docx is pure
+# Python — no WeasyPrint / native libs needed), with S3 mocked off and the
+# storage dir pointed at tmp_path. The default brand kit has no company.address,
+# so a {{company.address}} chip resolves empty → unresolved.
+
+
+def _gated_service(tmp_path, monkeypatch, template):
+    import modules.documents.generation_service as gs
+
+    monkeypatch.setattr(gs, "GENERATED_DIR", str(tmp_path))
+    monkeypatch.setattr(gs, "boto3", None)  # boundary: no S3 in tests
+    return _service(template=template)
+
+
+@pytest.mark.asyncio
+async def test_unresolved_variable_blocks_finalisation(tmp_path, monkeypatch):
+    """A known-but-empty variable ({{company.address}} with nothing on file)
+    BLOCKS finalisation — raises with the offending path, never returns a
+    document with visible [[markers]]."""
+    from modules.documents.models import UnresolvedDeliverableError
+
+    svc = _gated_service(tmp_path, monkeypatch, _block_template("company.address"))
+
+    with pytest.raises(UnresolvedDeliverableError) as exc:
+        await svc.generate(
+            title="Client Letter", format="docx", data={}, template_name="Branded Letter"
+        )
+
+    assert "company.address" in exc.value.unresolved
+    assert exc.value.unknown == []
+    assert "company.address" in str(exc.value)  # loud AND actionable
+
+
+@pytest.mark.asyncio
+async def test_unknown_variable_blocks_finalisation(tmp_path, monkeypatch):
+    """An authoring error ({{not_a_real.path}}, not in the catalog) is likewise
+    blocked."""
+    from modules.documents.models import UnresolvedDeliverableError
+
+    svc = _gated_service(tmp_path, monkeypatch, _block_template("not_a_real.path"))
+
+    with pytest.raises(UnresolvedDeliverableError) as exc:
+        await svc.generate(
+            title="Client Letter", format="docx", data={}, template_name="Branded Letter"
+        )
+
+    assert "not_a_real.path" in exc.value.unknown
+    assert exc.value.unresolved == []
+
+
+@pytest.mark.asyncio
+async def test_clean_render_passes(tmp_path, monkeypatch):
+    """A fully-resolved template finalises normally — no false positives."""
+    svc = _gated_service(tmp_path, monkeypatch, _block_template("data.client_name"))
+
+    result = await svc.generate(
+        title="Client Letter",
+        format="docx",
+        data={"client_name": "Acme Corp"},
+        template_name="Branded Letter",
+    )
+
+    assert result.unresolved == []
+    assert result.unknown == []
+    assert result.format == "docx"
+    assert result.download_url == f"/api/documents/generated/{result.filename}"
+
+
+def test_pdf_block_render_captures_unresolved():
+    """The shared PDF-path helper captures the honesty lists (and still emits
+    the visible [[marker]] for preview-style consumers) instead of discarding
+    them behind a log line. Pure — no WeasyPrint, no file I/O."""
+    from modules.documents.blocks import validate_blocks
+
+    svc = _service()
+    block_doc = validate_blocks(
+        {"blocks": [
+            {"type": "text", "id": "t0", "content": [{"type": "variable", "path": "company.address"}]},
+            {"type": "text", "id": "t1", "content": [{"type": "variable", "path": "bogus.path"}]},
+        ]}
+    )
+
+    html, unresolved, unknown = svc._render_block_html(block_doc, {}, WS, None, "T")
+
+    assert unresolved == ["company.address"]
+    assert unknown == ["bogus.path"]
+    assert "[[company.address]]" in html

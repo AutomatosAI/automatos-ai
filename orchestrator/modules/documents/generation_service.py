@@ -65,7 +65,7 @@ except ImportError:
 from config import config
 from core.models.core import DocumentTemplate
 from core.models.workspaces import Workspace
-from modules.documents.models import GeneratedDocument
+from modules.documents.models import GeneratedDocument, UnresolvedDeliverableError
 from modules.documents.template_service import DocumentTemplateService
 from modules.documents.brand_kit import get_brand_kit
 from modules.documents.blocks import (
@@ -154,6 +154,21 @@ class DocumentGenerationService:
         else:
             raise ValueError(f"Unsupported format: {format}. Use pdf, docx, or xlsx.")
 
+        # P2-09 S3 — the finalisation gate. The render-honesty primitives
+        # (RenderedHtml/RenderedDocx.unresolved, ResolvedVariables.unknown) used
+        # to be logged and discarded, so a client could still receive a document
+        # with visible [[variable]] markers. A Deliverable that did not resolve
+        # clean is BLOCKED, loudly — never delivered. (The Studio live preview
+        # renders outside generate() and keeps its visible red markers.)
+        if result.unresolved or result.unknown:
+            logger.warning(
+                "[DocGen] BLOCKED finalisation of '%s' (%s): %d unresolved / %d unknown variable(s)",
+                title, format, len(result.unresolved), len(result.unknown),
+            )
+            raise UnresolvedDeliverableError(
+                unresolved=result.unresolved, unknown=result.unknown
+            )
+
         # Attach markdown content for live widget display
         result.content = self._data_to_markdown(data, title)
         return result
@@ -167,18 +182,22 @@ class DocumentGenerationService:
         return get_brand_kit(getattr(ws, "settings", None))
 
     def _render_block_html(self, block_doc, data, workspace_id, user_id, title):
-        """Resolve a block document's variables and render it to a full HTML page."""
+        """Resolve a block document's variables and render it to a full HTML page.
+
+        Returns ``(html, unresolved, unknown)`` — the render-honesty lists are
+        captured for the finalisation gate in :meth:`generate` (P2-09 S3), not
+        discarded behind a log line. The renderer marks BOTH empty-known and
+        unknown paths as visible ``[[markers]]``; the authoring errors (unknown)
+        are split out so each list stays honest.
+        """
         paths = collect_variable_paths(block_doc)
         resolver = VariableResolver(self.db)
         resolved = resolver.resolve(workspace_id, user_id, paths, extra_data=data)
         brand_kit = self._brand_kit_for(workspace_id)
         rendered = render_document_html(block_doc, resolved.values, brand_kit, title=title)
-        if rendered.unresolved:
-            logger.warning(
-                "[DocGen] %d unresolved variable(s) in block render: %s",
-                len(rendered.unresolved), ", ".join(rendered.unresolved),
-            )
-        return rendered.html
+        unknown = list(resolved.unknown)
+        unresolved = [p for p in rendered.unresolved if p not in set(unknown)]
+        return rendered.html, unresolved, unknown
 
     def register_as_deliverable(
         self,
@@ -252,11 +271,15 @@ class DocumentGenerationService:
             )
 
         block_payload = getattr(template, "blocks", None) if template else None
+        unresolved: list = []
+        unknown: list = []
 
         if block_payload:
             # Path 1: canonical block template.
             block_doc = validate_blocks(block_payload)
-            rendered_html = self._render_block_html(block_doc, data, workspace_id, user_id, title)
+            rendered_html, unresolved, unknown = self._render_block_html(
+                block_doc, data, workspace_id, user_id, title
+            )
         elif template and template.template_content:
             # Path 2: legacy user-authored Jinja HTML (kept until per-workspace
             # templates are migrated to blocks — see PRD-167 sunset note).
@@ -275,7 +298,9 @@ class DocumentGenerationService:
             # Path 3: no template — brand-aware block render of the legacy data shape.
             logger.info("No template found — rendering data via brand-aware block fallback")
             block_doc = blocks_from_legacy(data)
-            rendered_html = self._render_block_html(block_doc, data, workspace_id, user_id, title)
+            rendered_html, unresolved, unknown = self._render_block_html(
+                block_doc, data, workspace_id, user_id, title
+            )
 
         # Generate PDF
         output_path = self._output_path(workspace_id, title, "pdf")
@@ -284,7 +309,10 @@ class DocumentGenerationService:
         except Exception as e:
             raise RuntimeError(f"PDF generation failed: {e}")
 
-        return self._build_result(output_path, "pdf", title, workspace_id)
+        return self._build_result(
+            output_path, "pdf", title, workspace_id,
+            unresolved=unresolved, unknown=unknown,
+        )
 
     # ------------------------------------------------------------------
     # DOCX Generation (python-docx-template)
@@ -316,13 +344,15 @@ class DocumentGenerationService:
             )
             brand_kit = self._brand_kit_for(workspace_id)
             rendered = render_document_docx(block_doc, resolved.values, brand_kit)
-            if rendered.unresolved:
-                logger.warning(
-                    "[DocGen] %d unresolved variable(s) in DOCX render: %s",
-                    len(rendered.unresolved), ", ".join(rendered.unresolved),
-                )
+            # P2-09 S3: capture the render-honesty lists for the finalisation
+            # gate in generate() — same unknown/unresolved split as the HTML path.
+            unknown = list(resolved.unknown)
+            unresolved = [p for p in rendered.unresolved if p not in set(unknown)]
             rendered.document.save(output_path)
-            return self._build_result(output_path, "docx", title, workspace_id)
+            return self._build_result(
+                output_path, "docx", title, workspace_id,
+                unresolved=unresolved, unknown=unknown,
+            )
 
         # Path 2: legacy uploaded .docx template via docxtpl.
         try:
@@ -631,7 +661,14 @@ class DocumentGenerationService:
         return os.path.join(directory, f"{timestamp}_{safe_title}.{ext}")
 
     def _build_result(
-        self, path: str, fmt: str, title: str, workspace_id: UUID = None
+        self,
+        path: str,
+        fmt: str,
+        title: str,
+        workspace_id: UUID = None,
+        *,
+        unresolved: Optional[list] = None,
+        unknown: Optional[list] = None,
     ) -> GeneratedDocument:
         """Build a GeneratedDocument from a file on disk, uploading to S3 for persistence.
 
@@ -640,6 +677,10 @@ class DocumentGenerationService:
         a presign expires after an hour, which rotted every persisted Deliverable
         link (P2-09 S1 / F030). ``serve_generated_file`` re-mints a fresh presign
         on each request, so the app path stays live for the Deliverable's lifetime.
+
+        ``unresolved``/``unknown`` are the render-honesty lists captured off the
+        block render (P2-09 S3); non-empty lists make :meth:`generate` block
+        finalisation.
         """
         filename = os.path.basename(path)
         size = os.path.getsize(path)
@@ -656,6 +697,8 @@ class DocumentGenerationService:
             size=size,
             download_url=download_url,
             preview_url=download_url if fmt == "pdf" else None,
+            unresolved=list(unresolved or []),
+            unknown=list(unknown or []),
         )
 
     def _upload_to_s3(
