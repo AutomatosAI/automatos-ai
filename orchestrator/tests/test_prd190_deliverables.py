@@ -145,3 +145,58 @@ def test_download_url_stable_when_s3_unconfigured(tmp_path, monkeypatch):
     result = _service()._build_result(str(doc), "xlsx", "Export", WS)
 
     assert result.download_url == f"/api/documents/generated/{doc.name}"
+
+
+# --------------------------------------------------------------------------- #
+# S2 — template_id on the autonomy lane (F031/J2)
+# --------------------------------------------------------------------------- #
+
+
+def _registry_generate_document_spec():
+    from modules.tools.registry.tool_registry import ToolRegistry
+
+    spec = ToolRegistry().get_tool("generate_document")
+    assert spec is not None, "generate_document ToolSpec missing from the registry"
+    return spec
+
+
+def _inline_chat_generate_document_schema():
+    from modules.agents.services.agent_platform_tools import AgentPlatformTools
+
+    # get_available_tools never touches self — call it unbound so the test stays
+    # pure (no RAGService / CodeGraphService construction).
+    tools = AgentPlatformTools.get_available_tools(object())
+    return next(t for t in tools if t["name"] == "generate_document")
+
+
+def test_generate_document_toolspec_exposes_template_id():
+    """The registry ToolSpec (the non-chat lane: missions/board/scheduled) must
+    declare template_id — the handler already parses, validates and threads it."""
+    spec = _registry_generate_document_spec()
+    param = next((p for p in spec.parameters if p.name == "template_id"), None)
+
+    assert param is not None, (
+        "generate_document ToolSpec must expose template_id (P2-09 S2) — "
+        "without it a non-chat agent cannot pass the id platform_get_template_schema gave it"
+    )
+    assert param.type == "string"
+    assert param.required is False
+
+
+def test_toolspec_matches_inline_chat_schema_for_template_id():
+    """Registry ToolSpec and the chatbot inline schema agree on template_id —
+    the chat-only gap is closed, wording and optionality included."""
+    spec = _registry_generate_document_spec()
+    param = next(p for p in spec.parameters if p.name == "template_id")
+
+    inline = _inline_chat_generate_document_schema()
+    inline_prop = inline["parameters"]["properties"]["template_id"]
+
+    assert param.description == inline_prop["description"]
+    assert "template_id" not in inline["parameters"]["required"]
+    assert param.required is False
+    # And the OpenAI-format export (what the autonomy lane actually hands the
+    # LLM) carries it as an optional string parameter.
+    exported = spec.to_openai_format()["parameters"]
+    assert exported["properties"]["template_id"]["type"] == "string"
+    assert "template_id" not in exported["required"]
