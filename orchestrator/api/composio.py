@@ -612,7 +612,9 @@ async def handle_webhook(
     body = await request.body()
 
     # Verify signature — supports both legacy (x-composio-signature)
-    # and V3 (webhook-signature with "v1,<base64>" format)
+    # and V3 (webhook-signature with "v1,<base64>" format).
+    # When a secret is configured, a valid signature is mandatory:
+    # mismatch, verification error, or missing header ⇒ 401 (P2-13).
     webhook_secret = config.COMPOSIO_WEBHOOK_SECRET
     v3_signature = request.headers.get("webhook-signature")
     if webhook_secret and v3_signature:
@@ -626,10 +628,13 @@ async def handle_webhook(
                 hmac.new(base64.b64decode(webhook_secret), signed_content, hashlib.sha256).digest()
             ).decode()
             sig_value = v3_signature.split(",", 1)[-1] if "," in v3_signature else v3_signature
-            if not hmac.compare_digest(sig_value, expected_sig):
-                logger.warning("V3 webhook signature mismatch — allowing through for debugging")
+            signature_ok = hmac.compare_digest(sig_value, expected_sig)
         except Exception:
-            logger.warning("V3 signature verification error — allowing through for debugging", exc_info=True)
+            logger.warning("V3 signature verification error — rejecting", exc_info=True)
+            raise HTTPException(status_code=401, detail="Invalid webhook signature")
+        if not signature_ok:
+            logger.warning("V3 webhook signature mismatch — rejecting")
+            raise HTTPException(status_code=401, detail="Invalid webhook signature")
     elif webhook_secret and x_composio_signature:
         # Legacy format: plain HMAC hex digest
         expected_sig = hmac.new(
@@ -639,6 +644,9 @@ async def handle_webhook(
         ).hexdigest()
         if not hmac.compare_digest(x_composio_signature, expected_sig):
             raise HTTPException(status_code=401, detail="Invalid webhook signature")
+    elif webhook_secret:
+        logger.warning("Webhook rejected: COMPOSIO_WEBHOOK_SECRET is set but no signature header present")
+        raise HTTPException(status_code=401, detail="Missing webhook signature")
 
     # Parse payload
     try:

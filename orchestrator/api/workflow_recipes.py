@@ -1759,8 +1759,8 @@ async def recipe_webhook(
     Trigger a recipe execution via webhook.
 
     The webhook_id is a persistent secret stored in the recipe's
-    schedule_config.webhook_id. No authentication required — the
-    URL itself is the credential.
+    schedule_config.webhook_id — the URL is the credential floor. When a
+    webhook secret is configured, a valid HMAC signature is also mandatory.
 
     Body (optional):
     - Any JSON payload — passed as input_data to the recipe executor.
@@ -1797,7 +1797,8 @@ async def recipe_webhook(
     if not recipe:
         raise HTTPException(status_code=404, detail="Unknown webhook")
 
-    # Verify HMAC signature if a webhook secret is configured
+    # Verify HMAC signature — mandatory when a webhook secret is configured:
+    # missing header or mismatch ⇒ 401 (P2-13).
     webhook_secret = (recipe.schedule_config or {}).get("webhook_secret") or config.WEBHOOK_SECRET
     if webhook_secret:
         sig_header = (
@@ -1805,17 +1806,19 @@ async def recipe_webhook(
             or request.headers.get("x-composio-signature")
             or request.headers.get("x-webhook-signature")
         )
-        if sig_header:
-            raw_body = await request.body()
-            expected_sig = sig_header.removeprefix("sha256=")
-            computed = hmac.new(
-                webhook_secret.encode("utf-8"),
-                raw_body,
-                hashlib.sha256,
-            ).hexdigest()
-            if not hmac.compare_digest(computed, expected_sig):
-                logger.warning("[webhook] HMAC signature mismatch for recipe webhook %s", webhook_id)
-                raise HTTPException(status_code=401, detail="Invalid webhook signature")
+        if not sig_header:
+            logger.warning("[webhook] Rejected recipe webhook %s: secret configured but no signature header", webhook_id)
+            raise HTTPException(status_code=401, detail="Missing webhook signature")
+        raw_body = await request.body()
+        expected_sig = sig_header.removeprefix("sha256=")
+        computed = hmac.new(
+            webhook_secret.encode("utf-8"),
+            raw_body,
+            hashlib.sha256,
+        ).hexdigest()
+        if not hmac.compare_digest(computed, expected_sig):
+            logger.warning("[webhook] HMAC signature mismatch for recipe webhook %s", webhook_id)
+            raise HTTPException(status_code=401, detail="Invalid webhook signature")
 
     if not recipe.steps:
         raise HTTPException(status_code=400, detail="Recipe has no steps")
