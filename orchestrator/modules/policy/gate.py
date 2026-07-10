@@ -209,6 +209,16 @@ class PolicyGate:
         action_def: Any,
         is_composio: bool,
     ) -> Verdict:
+        # PRD-192 S5 (locked #6) — the HUMAN-DIRECT actor rule: a request a
+        # human makes directly through an API surface (widget email send is
+        # the concrete case) satisfies the ask gate BY ITSELF — the click is
+        # the approval. Only the act-vs-ask routing is bypassed: the budget
+        # gate (stage 3) already ran, the audit row still records the call,
+        # and agent-initiated calls on the same lane carry no marker and
+        # still ask.
+        if (call.caller_context or {}).get("actor_type") == "user_direct":
+            return Verdict.allow("human-direct request — ask satisfied by the caller")
+
         # Full autonomy short-circuits the ask routing (auto dial). The
         # destructive backstop + super-admin gate are unaffected (they ran
         # above / run downstream in platform_executor).

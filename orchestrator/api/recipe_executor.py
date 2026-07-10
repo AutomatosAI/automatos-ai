@@ -585,10 +585,16 @@ async def _execute_step(
                 })
                 continue
 
-            # Direct Composio action execution (SDK search path).
-            # Also catches LLM-inferred actions beyond search results —
-            # if the tool name matches a connected app prefix (e.g. JIRA_*),
-            # route to Composio direct execution instead of tool_router.
+            # Per-action Composio execution (SDK search path). Also catches
+            # LLM-inferred actions beyond search results — if the tool name
+            # matches a connected app prefix (e.g. JIRA_*). PRD-192 S5: these
+            # steps now ride the SPINE (execute_and_format → UnifiedToolExecutor
+            # as the composio_execute meta-tool) instead of calling
+            # ComposioToolService.execute_action raw — the policy gate,
+            # telemetry, and typed outcome capture govern the daily playbook
+            # lane. Dedup, the LinkedIn workaround, and file-upload resolution
+            # are unchanged; the step-level result envelope keeps its shape for
+            # the transcript writer below.
             _is_composio_action = (
                 composio_result and composio_result.entity_id and (
                     tool_name in composio_result.action_set
@@ -652,23 +658,38 @@ async def _execute_step(
                             params=tool_args,
                             workspace_id=workspace_id,
                         )
-                        exec_result = tool_service.execute_action(
-                            action_name=tool_name,
-                            params=tool_args,
-                            entity_id=composio_result.entity_id,
+                        # PRD-192 S5: dispatch through the spine — the per-action
+                        # name rides in `action`, so the gate's effective-name
+                        # resolution, the tracker, and the audit row all see the
+                        # real action; the executor enforces assigned/connected/
+                        # mapped and resolves the workspace entity itself.
+                        spine_result = await tool_router.execute_and_format(
+                            tool_name="composio_execute",
+                            tool_args={"action": tool_name, "params": tool_args},
+                            agent_id=agent.id,
+                            workspace_id=workspace_id,
+                            original_intent=clean_prompt,
+                            caller_context={
+                                "playbook_execution_id": recipe_execution_id,
+                                "playbook_step": step_order,
+                            },
                         )
                         exec_ms = int((time.time() - t0) * 1000)
 
-                        success = exec_result.get("success", False)
-                        data = exec_result.get("data")
-                        error = exec_result.get("error")
+                        raw = spine_result.get("raw_result") or {}
+                        success = bool(spine_result.get("success"))
+                        data = raw.get("data") if isinstance(raw, dict) else None
+                        error = (
+                            (raw.get("error") if isinstance(raw, dict) else None)
+                            or spine_result.get("llm_context")
+                        )
 
                         if success:
-                            result_text = json.dumps(data, default=str) if isinstance(data, (dict, list)) else str(data or "")
-                            logger.info(f"[recipe_step] Composio direct OK: {tool_name} in {exec_ms}ms")
+                            result_text = json.dumps(data, default=str) if isinstance(data, (dict, list)) else str(data or spine_result.get("llm_context") or "")
+                            logger.info(f"[recipe_step] Composio spine OK: {tool_name} in {exec_ms}ms")
                         else:
                             result_text = f"Error executing {tool_name}: {error or 'unknown error'}"
-                            logger.warning(f"[recipe_step] Composio direct failed: {tool_name} — {error}")
+                            logger.warning(f"[recipe_step] Composio spine failed: {tool_name} — {error}")
                     except Exception as exc:
                         exec_ms = int((time.time() - t0) * 1000)
                         result_text = f"Error executing {tool_name}: {exc}"
