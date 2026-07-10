@@ -292,3 +292,94 @@ def test_pdf_block_render_captures_unresolved():
     assert unresolved == ["company.address"]
     assert unknown == ["bogus.path"]
     assert "[[company.address]]" in html
+
+
+# --------------------------------------------------------------------------- #
+# S4 — clean-render + template-lane become tracked numbers (J3/J7)
+# --------------------------------------------------------------------------- #
+
+
+def test_clean_render_recorded_on_extra(monkeypatch):
+    """Registration persists render quality on the Deliverable `extra` JSONB:
+    unresolved/unknown counts + which template lane produced the file."""
+    import modules.documents.generation_service as gs
+    import services.deliverable_service as ds
+
+    captured = {}
+
+    class _FakeDeliverableService:
+        def __init__(self, db, workspace_id):
+            pass
+
+        def register(self, **kwargs):
+            captured.update(kwargs)
+            return {"success": True, "deliverable_id": "d-1", "created": True}
+
+    monkeypatch.setattr(ds, "DeliverableService", _FakeDeliverableService)
+
+    template_id = uuid4()
+    result = gs.GeneratedDocument(
+        path="/data/x.pdf",
+        format="pdf",
+        filename="x.pdf",
+        size=1024,
+        download_url="/api/documents/generated/x.pdf",
+        unresolved=[],
+        unknown=[],
+        template_lane="block",
+    )
+    registration = gs.DocumentGenerationService(_FakeDb(), WS).register_as_deliverable(
+        result, title="Q3 Report", source_type="agent_output", template_id=template_id
+    )
+
+    assert registration["success"] is True
+    render = captured["extra"]["render"]
+    assert render["unresolved_count"] == 0
+    assert render["unknown_count"] == 0
+    assert render["template_lane"] in {"block", "legacy"}
+    # template_id attribution (PRD-167 S6) still rides the same extra dict.
+    assert captured["extra"]["template_id"] == str(template_id)
+    assert captured["preview_url"] == "/api/documents/generated/x.pdf"
+
+
+def _stats_service(render_row):
+    """DeliverableService over a fake Session keyed on the SQL each query runs."""
+    from services.deliverable_service import DeliverableService
+
+    def execute(query, params=None):
+        sql = str(query)
+        if "render" in sql:
+            return SimpleNamespace(fetchone=lambda: render_row)
+        if "artifact_type" in sql:
+            return SimpleNamespace(fetchall=lambda: [])
+        if "agent_id" in sql:
+            return SimpleNamespace(fetchall=lambda: [])
+        return SimpleNamespace(scalar=lambda: 6)
+
+    return DeliverableService(SimpleNamespace(execute=execute), WS)
+
+
+def test_get_stats_reports_clean_render_rate():
+    """With a mix of clean and (pre-gate / legacy-lane) generations recorded,
+    get_stats() reports clean ÷ total plus lane coverage."""
+    stats = _stats_service(
+        SimpleNamespace(rendered_total=4, rendered_clean=3, lane_block=3, lane_legacy=1)
+    ).get_stats()
+
+    assert stats["success"] is True
+    assert stats["clean_render_rate"] == pytest.approx(0.75)
+    assert stats["render"]["total"] == 4
+    assert stats["render"]["clean"] == 3
+    assert stats["render"]["by_lane"] == {"block": 3, "legacy": 1}
+
+
+def test_get_stats_clean_render_rate_honest_empty():
+    """No rendered documents → clean_render_rate is None (honest empty), never
+    a fabricated 100%."""
+    stats = _stats_service(
+        SimpleNamespace(rendered_total=0, rendered_clean=0, lane_block=0, lane_legacy=0)
+    ).get_stats()
+
+    assert stats["success"] is True
+    assert stats["clean_render_rate"] is None
+    assert stats["render"] == {"total": 0, "clean": 0, "by_lane": {"block": 0, "legacy": 0}}

@@ -215,6 +215,12 @@ class DocumentGenerationService:
         Source attribution travels in ``extra`` (template_id) + ``source_type``. Called
         only for real generations — previews never register. Best-effort: a registration
         failure never fails the generation itself.
+
+        P2-09 S4: per-generation render quality rides the same ``extra`` JSONB —
+        ``render.unresolved_count`` / ``render.unknown_count`` / ``render.template_lane``
+        — no new table, no new column. ``DeliverableService.get_stats`` aggregates it
+        into the clean-render rate; post-S3 the counts double as a durable audit that
+        the finalisation gate held (block-lane documents register only when clean).
         """
         ws = self.workspace_id
         if not ws:
@@ -222,7 +228,15 @@ class DocumentGenerationService:
         try:
             from services.deliverable_service import DeliverableService
 
-            extra = {"template_id": str(template_id)} if template_id else None
+            extra = {
+                "render": {
+                    "unresolved_count": len(result.unresolved),
+                    "unknown_count": len(result.unknown),
+                    "template_lane": result.template_lane,
+                }
+            }
+            if template_id:
+                extra["template_id"] = str(template_id)
             return DeliverableService(self.db, ws).register(
                 file_path=f"generated/{result.filename}",
                 title=title or result.filename,
@@ -273,6 +287,9 @@ class DocumentGenerationService:
         block_payload = getattr(template, "blocks", None) if template else None
         unresolved: list = []
         unknown: list = []
+        # P2-09 S4: which lane rendered the file — "block" (canonical) vs
+        # "legacy" (Jinja HTML). Tracks the PRD-167 migration off Jinja.
+        template_lane = "block"
 
         if block_payload:
             # Path 1: canonical block template.
@@ -287,6 +304,7 @@ class DocumentGenerationService:
                 self._validate_and_backfill(data, template.data_schema)
             # PRD-167 S4: expose the brand kit to legacy templates as {{ brand.* }} so
             # they pick up workspace palette instead of hardcoded Automatos colours.
+            template_lane = "legacy"
             render_ctx = {**data, "brand": self._brand_kit_for(workspace_id)}
             try:
                 jinja_template = self._jinja_env.from_string(template.template_content)
@@ -311,7 +329,7 @@ class DocumentGenerationService:
 
         return self._build_result(
             output_path, "pdf", title, workspace_id,
-            unresolved=unresolved, unknown=unknown,
+            unresolved=unresolved, unknown=unknown, template_lane=template_lane,
         )
 
     # ------------------------------------------------------------------
@@ -351,7 +369,7 @@ class DocumentGenerationService:
             rendered.document.save(output_path)
             return self._build_result(
                 output_path, "docx", title, workspace_id,
-                unresolved=unresolved, unknown=unknown,
+                unresolved=unresolved, unknown=unknown, template_lane="block",
             )
 
         # Path 2: legacy uploaded .docx template via docxtpl.
@@ -388,7 +406,9 @@ class DocumentGenerationService:
         doc.render(data)
         doc.save(output_path)
 
-        return self._build_result(output_path, "docx", title, workspace_id)
+        return self._build_result(
+            output_path, "docx", title, workspace_id, template_lane="legacy"
+        )
 
     # ------------------------------------------------------------------
     # XLSX Generation (XlsxWriter)
@@ -669,6 +689,7 @@ class DocumentGenerationService:
         *,
         unresolved: Optional[list] = None,
         unknown: Optional[list] = None,
+        template_lane: Optional[str] = None,
     ) -> GeneratedDocument:
         """Build a GeneratedDocument from a file on disk, uploading to S3 for persistence.
 
@@ -680,7 +701,8 @@ class DocumentGenerationService:
 
         ``unresolved``/``unknown`` are the render-honesty lists captured off the
         block render (P2-09 S3); non-empty lists make :meth:`generate` block
-        finalisation.
+        finalisation. ``template_lane`` records which renderer produced the file
+        ("block"/"legacy", P2-09 S4) for the clean-render/lane-coverage metric.
         """
         filename = os.path.basename(path)
         size = os.path.getsize(path)
@@ -699,6 +721,7 @@ class DocumentGenerationService:
             preview_url=download_url if fmt == "pdf" else None,
             unresolved=list(unresolved or []),
             unknown=list(unknown or []),
+            template_lane=template_lane,
         )
 
     def _upload_to_s3(

@@ -47,3 +47,8 @@ class GeneratedDocument:
     # ``DocumentGenerationService.generate`` (UnresolvedDeliverableError).
     unresolved: List[str] = field(default_factory=list)  # known paths, empty value
     unknown: List[str] = field(default_factory=list)     # paths not in the catalog
+    # P2-09 S4: which render lane produced the file — "block" (canonical block
+    # renderer, incl. the no-template brand-aware fallback) or "legacy" (Jinja
+    # HTML / uploaded-docx). None when no template render applies (xlsx).
+    # Persisted on the Deliverable ``extra`` so lane coverage is a tracked number.
+    template_lane: Optional[str] = None
