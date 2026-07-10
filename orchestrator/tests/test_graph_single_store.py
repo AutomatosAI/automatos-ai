@@ -509,6 +509,19 @@ class TestCrossWorkspaceIsolation:
 # ===========================================================================
 
 
+def _load_primitive_heartbeat():
+    spec = importlib.util.spec_from_file_location(
+        "primitive_heartbeat_under_test", PRIMITIVE_HEARTBEAT_PY
+    )
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+PH_MOD = _load_primitive_heartbeat()
+
+
 class TestGraphHeartbeatHelper:
     """The graph heartbeat helper mirrors the chat / rag / nl2sql
     helpers' shape. Pin the contract here so a drift in any of them

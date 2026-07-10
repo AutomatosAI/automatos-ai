@@ -50,9 +50,17 @@ _RELIC_TOKENS = (
 )
 
 
+def _spec_is_gone(mod: str) -> bool:
+    try:
+        return importlib.util.find_spec(mod) is None
+    except ModuleNotFoundError:
+        # a missing PARENT package raises instead of returning None — equally gone
+        return True
+
+
 def test_removed_memory_relics_unimportable():
     for mod in _RELIC_MODULES:
-        assert importlib.util.find_spec(mod) is None, (
+        assert _spec_is_gone(mod), (
             f"{mod} must stay deleted (PRD-187 S5) — no backward-compat shims"
         )
 
