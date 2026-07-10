@@ -3,7 +3,7 @@
 ``record_error`` emits a single machine-parseable error record so subsystems
 (memory, tools, harness, ...) report failures uniformly instead of via opaque
 ``logger.warning`` calls. It is the measurement instrument for PRD-141: per
-subsystem error rates (e.g. Phase 1's "Mem0 error rate < 0.1%") are counted by
+subsystem error rates (e.g. Phase 1's "memory error rate < 0.1%") are counted by
 filtering the ``automatos.errors`` logger on ``structured_error.subsystem``.
 
 PRD-142 Wave 0 US-001 added a best-effort persistence path so the same

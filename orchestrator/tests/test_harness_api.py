@@ -256,7 +256,8 @@ def test_self_learning_health_combines_sections(monkeypatch):
     assert out["workspace_id"] == str(_WS_ID)
     assert out["harness"]["status"] == "completed"
     assert out["tool_routing"]["recorded"] == 5
-    assert out["prescriptions"] == {"applied": 2, "queued": 1}
+    # PRD-187 S5: the prescriptions DB section is gone with harness_prescriptions
+    assert "prescriptions" not in out
 
 
 def test_self_learning_health_degrades_gracefully(monkeypatch):
@@ -278,4 +279,4 @@ def test_self_learning_health_degrades_gracefully(monkeypatch):
     assert out["workspace_id"] == str(_WS_ID)
     assert "error" in out["harness"]
     assert "error" in out["tool_routing"]
-    assert "error" in out["prescriptions"]
+    assert "prescriptions" not in out

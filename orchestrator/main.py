@@ -44,7 +44,6 @@ from api.documents import router as documents_router
 from api.teams import router as teams_router  # PRD-158: Teams entity
 from api.cache import router as cache_router
 from api.system import router as system_router
-from api.memory import router as memory_router
 from api.widget_memory import router as widget_memory_router  # US-013: Widget memory panel
 from api.analytics import router as analytics_router
 from api.workflow_history import router as workflow_history_router
@@ -394,7 +393,7 @@ async def _boot_phase_2_extensions(app_instance: "FastAPI") -> "DeferredInitResu
                         logger.warning("Could not start MemoryJobScheduler: %s", _mj_err)
 
                 # PRD-178 S4: field → durable promotion (the moat arm) — distill
-                # strong, untainted field patterns into durable mem0 memory
+                # strong, untainted field patterns into durable memory
                 # before compaction hard-deletes them. Taint-gated.
                 if config.FIELD_PROMOTION_ENABLED:
                     try:
@@ -690,7 +689,6 @@ app = FastAPI(
     | 📄 **Documents** | `/api/documents` | Document processing |
     | 🧠 **Context Engineering** | `/api/context-engineering` | Mathematical foundations |
     | 📊 **Evaluation** | `/api/evaluation` | System evaluation |
-    | 🧩 **Memory** | `/api/memory` | Memory management |
     | ⚙️ **System** | `/api/system` | System configuration |
     
     ### 🔌 **Real-time Features**
@@ -957,8 +955,7 @@ app.include_router(teams_router)  # PRD-158: Teams entity (list/create)
 app.include_router(blog_router)  # Authenticated blog management (Deliverables → Blogs)
 app.include_router(cache_router)  # Cache management and monitoring
 app.include_router(system_router)
-app.include_router(memory_stats_router)  # PRD-77: Must be BEFORE memory_router (has /browse, /health, /stats/real specific routes that would otherwise be caught by memory_router's /{memory_id} catch-all)
-app.include_router(memory_router)
+app.include_router(memory_stats_router)  # PRD-77 memory stats (/browse, /health, /stats/real)
 app.include_router(widget_memory_router)  # US-013: Widget memory panel (/api/memory)
 app.include_router(analytics_router)
 app.include_router(workflow_history_router)

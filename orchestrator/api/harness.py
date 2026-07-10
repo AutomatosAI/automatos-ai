@@ -125,17 +125,4 @@ async def self_learning_health(
     except Exception as exc:  # noqa: BLE001
         out["tool_routing"] = {"error": str(exc)}
 
-    try:
-        from sqlalchemy import func
-        from modules.memory.storage.knowledge_system import HarnessPrescription
-        rows = (
-            db.query(HarnessPrescription.status, func.count())
-            .filter(HarnessPrescription.workspace_id == ws)
-            .group_by(HarnessPrescription.status)
-            .all()
-        )
-        out["prescriptions"] = {status: count for status, count in rows}
-    except Exception as exc:  # noqa: BLE001 — table may be absent in un-migrated envs
-        out["prescriptions"] = {"error": str(exc)}
-
     return out

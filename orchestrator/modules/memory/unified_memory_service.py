@@ -3,13 +3,13 @@ Unified Memory Service
 ======================
 
 Single entry point for all memory operations across all consumers.
-Replaces 12 scattered Mem0Client instances with ONE shared service.
+One shared service in front of every memory tier (PRD-79; durable tier un-split in PRD-187).
 
 5-Layer Memory Stack:
   L0: Focus (context window — no code needed)
   L1: Working Memory (Redis session cache)
   L2: Short-term Memory (Postgres + time-based decay)
-  L3: Long-term Memory (Mem0 with fact extraction)
+  L3: Long-term Memory (in-process durable store on Qdrant)
   L4: Organizational Knowledge (RAG/NL2SQL — tools, not pre-fetched)
 
 Usage:
@@ -32,13 +32,13 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# MemoryNamespace — builds standardised user_id strings for Mem0
+# MemoryNamespace — builds standardised user_id strings for the durable store
 # ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class MemoryNamespace:
     """
-    Builds standardised, scoped user_id strings for Mem0 and Redis keys.
+    Builds standardised, scoped user_id strings for the durable store and Redis keys.
 
     All memory consumers MUST use this helper instead of raw string
     concatenation. This prevents the 5+ user_id format inconsistencies
@@ -47,7 +47,7 @@ class MemoryNamespace:
 
     workspace_id: str
 
-    # --- L3 Long-term (Mem0) namespaces ---
+    # --- L3 Long-term (durable store) namespaces ---
 
     def workspace(self) -> str:
         """Workspace-wide facts (L3 global)."""
@@ -73,6 +73,10 @@ class MemoryNamespace:
         """Daily activity logs (L2)."""
         return f"mem:{self.workspace_id}:daily"
 
+    def l2(self) -> str:
+        """Semantic mirror of L2 short-term rows (PRD-187 S3)."""
+        return f"mem:{self.workspace_id}:l2"
+
     # --- L1 Session (Redis) namespaces ---
 
     def session(self, conversation_id: str) -> str:
@@ -82,7 +86,7 @@ class MemoryNamespace:
     # --- L3 Cache (Redis) namespaces ---
 
     def cache_key(self, agent_id: Optional[int], query_hash: str) -> str:
-        """Cache key for L3 Mem0 search results cached in Redis."""
+        """Cache key for L3 durable-store search results cached in Redis."""
         scope = str(agent_id) if agent_id is not None else "global"
         return f"mem:cache:{self.workspace_id}:{scope}:{query_hash}"
 
@@ -102,11 +106,11 @@ class MemoryNamespace:
         """User profile cache key (Redis)."""
         return f"mem:profile:{self.workspace_id}"
 
-    # --- Resolve user_id for Mem0 calls ---
+    # --- Resolve user_id for durable-store calls ---
 
     def resolve(self, agent_id: Optional[int] = None) -> str:
         """
-        Resolve the correct Mem0 user_id for a given scope.
+        Resolve the correct durable-store user_id for a given scope.
 
         If agent_id is provided, returns the agent-scoped namespace.
         Otherwise, returns the workspace-wide namespace.
@@ -158,7 +162,8 @@ class UnifiedMemoryService:
     """
     Single entry point for all memory operations across all consumers.
 
-    Holds ONE shared Mem0Client, ONE Redis client.
+    Holds ONE shared DurableMemoryStore (in-process Qdrant, PRD-187 S1),
+    ONE Redis client.
     DB sessions are acquired per-request from the session pool — never stored
     on the singleton to prevent cross-tenant data leaks.
     """
@@ -178,21 +183,23 @@ class UnifiedMemoryService:
         cls._instance = None
 
     def __init__(self) -> None:
-        # Shared Mem0Client (L3 long-term)
-        from modules.memory.integrations.mem0_client import Mem0Client
+        # Shared in-process durable store (L3 long-term, PRD-187 S1)
+        from modules.memory.durable_store import DurableMemoryStore
 
-        self._mem0 = Mem0Client()
+        self._durable = DurableMemoryStore()
 
         # Shared Redis client (L1 session + caching)
         from core.redis.client import get_redis_client
 
         self._redis_client_getter = get_redis_client
-        logger.info("[UnifiedMemoryService] Initialised with shared Mem0Client and Redis")
+        logger.info("[UnifiedMemoryService] Initialised with shared DurableMemoryStore and Redis")
 
     @property
-    def is_mem0_configured(self) -> bool:
-        """Check if Mem0 backend is configured (has a valid API URL)."""
-        return bool(getattr(self._mem0, "api_url", None))
+    def is_durable_configured(self) -> bool:
+        """Check if the durable L3 backend (Qdrant) is configured."""
+        from config import config
+
+        return bool(config.QDRANT_URL)
 
     # ------------------------------------------------------------------
     # Helpers
@@ -217,7 +224,7 @@ class UnifiedMemoryService:
     # ------------------------------------------------------------------
 
     async def _get_cached_search(self, cache_key: str) -> Optional[List[Dict[str, Any]]]:
-        """Read cached Mem0 search results from Redis. Returns None on miss or error."""
+        """Read cached L3 search results from Redis. Returns None on miss or error."""
         redis_client = self._get_redis()
         if redis_client is None:
             return None
@@ -237,7 +244,7 @@ class UnifiedMemoryService:
             return None
 
     async def _set_cached_search(self, cache_key: str, results: List[Dict[str, Any]]) -> None:
-        """Write Mem0 search results to Redis with configured TTL."""
+        """Write L3 search results to Redis with configured TTL."""
         from config import config
 
         redis_client = self._get_redis()
@@ -308,7 +315,7 @@ class UnifiedMemoryService:
             )
 
     # ------------------------------------------------------------------
-    # L3: Long-term Memory (Mem0)
+    # L3: Long-term Memory (durable store)
     # ------------------------------------------------------------------
 
     async def store_long_term(
@@ -320,17 +327,17 @@ class UnifiedMemoryService:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
-        Store content in L3 long-term memory via Mem0 with fact extraction.
+        Store content in L3 long-term memory (durable store, verbatim).
 
         Args:
             workspace_id: Workspace scope.
-            content: Text to store (Mem0 extracts facts automatically).
+            content: Text to store verbatim (writers curate before storing).
             agent_id: Optional agent scope.
             category: Optional category tag.
             metadata: Optional additional metadata.
 
         Returns:
-            Mem0 response dict, or error dict on failure.
+            Store response dict, or error dict on failure.
         """
         ns = self.namespace(workspace_id)
         user_id = ns.resolve(agent_id)
@@ -342,7 +349,7 @@ class UnifiedMemoryService:
         messages = [{"role": "user", "content": content}]
 
         try:
-            result = await self._mem0.add(messages=messages, user_id=user_id, metadata=meta or None, workspace_id=workspace_id, infer=False)
+            result = await self._durable.add(messages=messages, user_id=user_id, metadata=meta or None, workspace_id=workspace_id)
             logger.info(
                 "[UnifiedMemoryService] store_long_term user_id=%s len=%d",
                 user_id,
@@ -367,10 +374,10 @@ class UnifiedMemoryService:
         limit: int = 5,
     ) -> List[Dict[str, Any]]:
         """
-        Search L3 long-term memory via Mem0 semantic search.
+        Search L3 long-term memory (durable store semantic search).
 
-        Checks Redis cache first (5-min TTL). On cache miss, calls Mem0 and
-        caches the result. Cache key:
+        Checks Redis cache first (5-min TTL). On cache miss, queries the
+        durable store and caches the result. Cache key:
         ``mem:cache:{workspace_id}:{agent_id|global}:{sha256(query)[:16]}``
 
         Args:
@@ -396,9 +403,9 @@ class UnifiedMemoryService:
             )
             return cached
 
-        # --- Cache miss: call Mem0 ---
+        # --- Cache miss: query the durable store ---
         try:
-            results = await self._mem0.search(query=query, user_id=user_id, limit=limit, workspace_id=workspace_id)
+            results = await self._durable.search(query=query, user_id=user_id, limit=limit, workspace_id=workspace_id)
             logger.debug(
                 "[UnifiedMemoryService] search_long_term user_id=%s query=%r → %d results",
                 user_id,
@@ -437,7 +444,7 @@ class UnifiedMemoryService:
         user_id = ns.resolve(agent_id)
 
         try:
-            results = await self._mem0.get_all(user_id=user_id, limit=limit, workspace_id=workspace_id)
+            results = await self._durable.get_all(user_id=user_id, limit=limit, workspace_id=workspace_id)
             logger.debug(
                 "[UnifiedMemoryService] get_all_memories user_id=%s → %d items",
                 user_id,
@@ -459,14 +466,14 @@ class UnifiedMemoryService:
         agent_id: Optional[int] = None,
     ) -> bool:
         """
-        Delete a specific memory by ID from L3 (Mem0).
+        Delete a specific memory by ID from L3 (durable store).
 
-        The Mem0 server only exposes the bulk DELETE endpoint, which requires the
-        owning ``user_id`` — resolved here from the workspace/agent namespace
-        (the same namespace get_all_memories lists under for the ownership check).
+        The delete requires the owning ``user_id`` — resolved here from the
+        workspace/agent namespace — and only removes points whose namespace
+        matches (the same ownership check the old bulk API enforced).
 
         Args:
-            memory_id: The Mem0 memory ID to delete.
+            memory_id: The durable memory ID to delete.
             workspace_id: Workspace scope (used to resolve the namespace user_id).
             agent_id: Optional agent scope.
 
@@ -475,7 +482,7 @@ class UnifiedMemoryService:
         """
         try:
             user_id = self.namespace(workspace_id).resolve(agent_id)
-            result = await self._mem0.delete(
+            result = await self._durable.delete(
                 memory_ids=[memory_id], user_id=user_id, workspace_id=workspace_id
             )
             logger.info("[UnifiedMemoryService] delete_memory id=%s success=%s", memory_id, result)
@@ -492,108 +499,53 @@ class UnifiedMemoryService:
     # GDPR erasure / export (PRD-181 S3/S4)
     # ------------------------------------------------------------------
 
-    async def _workspace_namespaces(self, workspace_id: str, db: Any = None) -> List[str]:
-        """Every mem0 ``user_id`` a workspace's durable memories live under.
+    async def erase_workspace_memories(self, workspace_id: str, db: Any = None) -> int:
+        """GDPR erasure — delete every durable (L3) memory for a workspace.
 
-        mem0 exposes no wildcard/prefix delete, so erasure must enumerate the
-        concrete namespaces: the workspace-wide bucket, plus one per agent and
-        per recipe in the workspace. Agent/recipe ids are read from the DB when a
-        session is supplied; without one, only the workspace-wide namespace is
-        covered (reported as a partial by the caller).
+        One filter delete over the store's ``workspace_id`` payload index —
+        every namespace (workspace-wide, per-agent, per-recipe, daily) carries
+        the workspace tag, so no namespace enumeration is needed. ``db`` is
+        accepted for signature stability with the GDPR service but unused.
+        Returns the number of memories deleted.
         """
-        ns = self.namespace(workspace_id)
-        namespaces = [ns.workspace()]
-        if db is None:
-            return namespaces
         try:
-            from sqlalchemy import text as _text
-
-            agent_ids = [
-                r[0] for r in db.execute(
-                    _text("SELECT id FROM agents WHERE workspace_id::text = :ws"),
-                    {"ws": str(workspace_id)},
-                ).fetchall()
-            ]
-            for aid in agent_ids:
-                namespaces.append(ns.agent(int(aid)))
-            recipe_ids = [
-                r[0] for r in db.execute(
-                    _text(
-                        "SELECT id FROM workflow_templates WHERE workspace_id::text = :ws"
-                    ),
-                    {"ws": str(workspace_id)},
-                ).fetchall()
-            ]
-            for rid in recipe_ids:
-                namespaces.append(ns.recipe(rid))
+            total = await self._durable.erase_workspace(str(workspace_id))
         except Exception:
-            logger.warning(
-                "[UnifiedMemoryService] namespace enumeration partial for ws=%s",
+            logger.error(
+                "[UnifiedMemoryService] durable erase failed for ws=%s",
                 workspace_id, exc_info=True,
             )
-        return namespaces
-
-    async def erase_workspace_memories(self, workspace_id: str, db: Any = None) -> int:
-        """GDPR erasure — delete every durable (L3/mem0) memory for a workspace.
-
-        Iterates each namespace (mem0 has no wildcard delete), fetching ids then
-        bulk-deleting. Returns the total number of memories deleted.
-        """
-        if not self.is_enabled():
             return 0
-        total = 0
-        for user_id in await self._workspace_namespaces(workspace_id, db):
-            try:
-                memories = await self._mem0.get_all(
-                    user_id=user_id, limit=10000, workspace_id=str(workspace_id)
-                )
-                ids = [m.get("id") for m in memories if isinstance(m, dict) and m.get("id")]
-                if ids and await self._mem0.delete(
-                    memory_ids=ids, user_id=user_id, workspace_id=str(workspace_id)
-                ):
-                    total += len(ids)
-            except Exception:
-                logger.warning(
-                    "[UnifiedMemoryService] mem0 erase failed for user_id=%s",
-                    user_id, exc_info=True,
-                )
         logger.warning("[UnifiedMemoryService] GDPR erased %d durable memories for ws=%s", total, workspace_id)
         return total
 
     async def erase_subject_memories(self, workspace_id: str, subject_id: str, db: Any = None) -> int:
         """GDPR subject-level erasure for durable memories (see GDPR-GAP below)."""
-        # GDPR-GAP: mem0 memories are namespaced by workspace / agent / recipe
-        # (MemoryNamespace) and carry no data-subject tag in their metadata, so a
+        # GDPR-GAP: durable memories are namespaced by workspace / agent / recipe
+        # (MemoryNamespace) and carry no data-subject tag in their payload, so a
         # single human's durable memories cannot be filtered from a shared
-        # workspace/agent namespace. Until a subject tag is written into mem0
-        # metadata, subject-level erasure here is not possible without erasing the
+        # workspace/agent namespace. Until a subject tag is written at store
+        # time, subject-level erasure here is not possible without erasing the
         # whole namespace. Returns 0; the gap is surfaced by the GDPR service.
         logger.warning(
             "[UnifiedMemoryService] GDPR subject erase requested subject=%s ws=%s "
-            "but mem0 has no data-subject tag (GDPR-GAP) — 0 memories erased",
+            "but the durable store has no data-subject tag (GDPR-GAP) — 0 memories erased",
             subject_id, workspace_id,
         )
         return 0
 
     async def export_workspace_memories(self, workspace_id: str, db: Any = None) -> List[Dict[str, Any]]:
-        """GDPR export — every durable memory for a workspace as plain dicts."""
-        if not self.is_enabled():
+        """GDPR export — every durable memory for a workspace as plain dicts
+        (one workspace-filter scroll; each item carries its ``namespace``).
+        ``db`` is accepted for signature stability but unused."""
+        try:
+            return await self._durable.export_workspace(str(workspace_id))
+        except Exception:
+            logger.error(
+                "[UnifiedMemoryService] durable export failed for ws=%s",
+                workspace_id, exc_info=True,
+            )
             return []
-        out: List[Dict[str, Any]] = []
-        for user_id in await self._workspace_namespaces(workspace_id, db):
-            try:
-                memories = await self._mem0.get_all(
-                    user_id=user_id, limit=10000, workspace_id=str(workspace_id)
-                )
-                for m in memories:
-                    if isinstance(m, dict):
-                        out.append({"namespace": user_id, **m})
-            except Exception:
-                logger.warning(
-                    "[UnifiedMemoryService] mem0 export failed for user_id=%s",
-                    user_id, exc_info=True,
-                )
-        return out
 
     # ------------------------------------------------------------------
     # L3: Scoped storage (for consumers with custom namespaces)
@@ -609,25 +561,24 @@ class UnifiedMemoryService:
         """
         Store messages in L3 long-term memory with a pre-built namespace user_id.
 
-        Use MemoryNamespace to build the user_id. This supports custom message
-        formats (e.g., conversational user+assistant pairs) for better Mem0
-        fact extraction.
+        Use MemoryNamespace to build the user_id. Supports custom message
+        formats (e.g., conversational user+assistant pairs); the store keeps
+        the text verbatim.
 
         Args:
             user_id: Pre-built user_id from MemoryNamespace (e.g., ns.recipe(id)).
-            messages: Mem0-format messages list.
+            messages: Messages list ([{"role": ..., "content": ...}]).
             metadata: Optional metadata dict.
-            workspace_id: Scopes the circuit breaker. Callers with a workspace in
-                scope (mission/playbook memory) pass it so a failure here doesn't
-                trip the shared "_global" breaker for every other workspace.
+            workspace_id: Stamped on the stored point for fail-closed tenancy
+                and GDPR erasure (parsed from the namespace when omitted).
 
         Returns:
-            Mem0 response dict, or error dict on failure.
+            Store response dict, or error dict on failure.
         """
         try:
-            result = await self._mem0.add(
+            result = await self._durable.add(
                 messages=messages, user_id=user_id, metadata=metadata,
-                workspace_id=workspace_id, infer=False,
+                workspace_id=workspace_id,
             )
             logger.info(
                 "[UnifiedMemoryService] store_long_term_messages user_id=%s",
@@ -658,13 +609,13 @@ class UnifiedMemoryService:
             user_id: Pre-built user_id from MemoryNamespace.
             query: Natural-language search query.
             limit: Maximum results to return.
-            workspace_id: Scopes the circuit breaker (see store_long_term_messages).
+            workspace_id: Tenancy scope (see store_long_term_messages).
 
         Returns:
             List of memory item dicts (may be empty on failure).
         """
         try:
-            results = await self._mem0.search(
+            results = await self._durable.search(
                 query=query, user_id=user_id, limit=limit, workspace_id=workspace_id
             )
             logger.debug(
@@ -696,13 +647,13 @@ class UnifiedMemoryService:
         Args:
             user_id: Pre-built user_id from MemoryNamespace.
             limit: Maximum items.
-            workspace_id: Scopes the circuit breaker (see store_long_term_messages).
+            workspace_id: Tenancy scope (see store_long_term_messages).
 
         Returns:
             List of memory item dicts.
         """
         try:
-            results = await self._mem0.get_all(
+            results = await self._durable.get_all(
                 user_id=user_id, limit=limit, workspace_id=workspace_id
             )
             logger.debug(
@@ -720,7 +671,7 @@ class UnifiedMemoryService:
             return []
 
     # ------------------------------------------------------------------
-    # L3: Daily Logs (Mem0 with daily namespace)
+    # L3: Daily Logs (durable store, daily namespace)
     # ------------------------------------------------------------------
 
     async def store_daily_log(
@@ -731,7 +682,7 @@ class UnifiedMemoryService:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
-        Store a daily log entry in Mem0 under the daily namespace.
+        Store a daily log entry in the durable store under the daily namespace.
 
         Args:
             workspace_id: Workspace scope.
@@ -740,14 +691,14 @@ class UnifiedMemoryService:
             metadata: Additional metadata (must include 'date' and 'type').
 
         Returns:
-            Mem0 response dict, or error dict on failure.
+            Store response dict, or error dict on failure.
         """
         ns = self.namespace(workspace_id)
         user_id = ns.daily()
         messages = [{"role": "system", "content": content}]
 
         try:
-            result = await self._mem0.add(messages=messages, user_id=user_id, metadata=metadata, workspace_id=workspace_id, infer=False)
+            result = await self._durable.add(messages=messages, user_id=user_id, metadata=metadata, workspace_id=workspace_id)
             logger.info(
                 "[UnifiedMemoryService] store_daily_log user_id=%s len=%d",
                 user_id,
@@ -768,7 +719,7 @@ class UnifiedMemoryService:
         limit: int = 50,
     ) -> List[Dict[str, Any]]:
         """
-        Retrieve all daily log entries from Mem0 for a workspace.
+        Retrieve all daily log entries from the durable store for a workspace.
 
         Args:
             workspace_id: Workspace scope.
@@ -781,7 +732,7 @@ class UnifiedMemoryService:
         user_id = ns.daily()
 
         try:
-            results = await self._mem0.get_all(user_id=user_id, limit=limit, workspace_id=workspace_id)
+            results = await self._durable.get_all(user_id=user_id, limit=limit, workspace_id=workspace_id)
             # PRD-159 S3: daily logs are time-ordered (newest first) and bounded,
             # not an arbitrary first-N slice — recall surfaces the most recent
             # operational activity deterministically.
@@ -818,7 +769,7 @@ class UnifiedMemoryService:
 
         Args:
             workspace_id: Workspace scope.
-            messages: Mem0-format messages list.
+            messages: Messages list ([{"role": ..., "content": ...}]).
             agent_id: Agent scope (required for 'agent' or 'both' tiers).
             tier: One of 'global', 'agent', or 'both'.
             metadata: Base metadata (tier tag is added automatically).
@@ -833,7 +784,7 @@ class UnifiedMemoryService:
         async def _store(user_id: str, tier_name: str) -> tuple:
             meta = {**base_meta, "tier": tier_name}
             try:
-                result = await self._mem0.add(messages=messages, user_id=user_id, metadata=meta, workspace_id=workspace_id, infer=False)
+                result = await self._durable.add(messages=messages, user_id=user_id, metadata=meta, workspace_id=workspace_id)
                 return (tier_name, result)
             except Exception:
                 logger.error(
@@ -932,6 +883,14 @@ class UnifiedMemoryService:
                 workspace_id,
                 content_type,
             )
+            # PRD-187 S3: mirror the row into the durable store's L2 namespace
+            # so recall can match by MEANING, not ILIKE substring. Fire-and-
+            # forget — the semantic mirror must never fail the L2 write.
+            if row_id:
+                asyncio.ensure_future(self._mirror_l2_to_durable(
+                    row_id=row_id, workspace_id=workspace_id, content=content,
+                    content_type=content_type, importance=importance,
+                ))
             return row_id
         except Exception:
             logger.error(
@@ -941,6 +900,149 @@ class UnifiedMemoryService:
                 exc_info=True,
             )
             return None
+
+    async def _mirror_l2_to_durable(
+        self,
+        *,
+        row_id: str,
+        workspace_id: str,
+        content: str,
+        content_type: str,
+        importance: float,
+    ) -> None:
+        """Best-effort vector mirror of one L2 row (PRD-187 S3)."""
+        try:
+            await self._durable.add(
+                messages=[{"role": "user", "content": content}],
+                user_id=self.namespace(workspace_id).l2(),
+                metadata={
+                    "l2_id": str(row_id),
+                    "content_type": content_type,
+                    "importance": importance,
+                },
+                workspace_id=workspace_id,
+            )
+        except Exception:
+            logger.error(
+                "[UnifiedMemoryService] L2 semantic mirror failed id=%s ws=%s",
+                row_id, workspace_id, exc_info=True,
+            )
+
+    async def search_short_term_semantic(
+        self,
+        workspace_id: str,
+        query: str,
+        limit: int = 8,
+    ) -> List[Dict[str, Any]]:
+        """Semantic L2 recall (PRD-187 S3) — matches by meaning, every turn.
+
+        Vector-searches the L2 mirror namespace, hydrates the LIVE Postgres
+        rows (archived rows never recall), ranks with the shared
+        ``field_scoring.resonance`` curve (similarity² × stability × recency —
+        the same honest definition field memory uses), and touches each
+        recalled row so ``access_count`` climbs (the recall that finally makes
+        promotion's access signal real).
+
+        A non-temporal query like "what did we learn about the Shopify sync?"
+        — 0 rows by construction under the old ILIKE-behind-a-temporal-regex —
+        now returns the relevant rows.
+        """
+        from config import config
+
+        try:
+            hits = await self._durable.search(
+                query=query,
+                user_id=self.namespace(workspace_id).l2(),
+                limit=max(limit * 2, limit),
+                workspace_id=workspace_id,
+            )
+        except Exception:
+            logger.error(
+                "[UnifiedMemoryService] semantic L2 search failed ws=%s",
+                workspace_id, exc_info=True,
+            )
+            return []
+
+        score_by_l2_id: Dict[str, float] = {}
+        for h in hits:
+            meta = h.get("metadata") or {}
+            l2_id = meta.get("l2_id")
+            if l2_id and l2_id not in score_by_l2_id:
+                score_by_l2_id[str(l2_id)] = h.get("score") or 0.0
+        if not score_by_l2_id:
+            return []
+
+        loop = asyncio.get_event_loop()
+        rows = await loop.run_in_executor(
+            None, self._hydrate_l2_rows_sync, list(score_by_l2_id),
+        )
+
+        from modules.context import field_scoring
+
+        params = field_scoring.ScoringParams(
+            decay_rate=config.FIELD_DECAY_RATE,
+            reinforce_bonus=config.FIELD_REINFORCE_BONUS,
+            reinforce_cap=config.FIELD_REINFORCE_CAP,
+            archival_threshold=config.FIELD_ARCHIVAL_THRESHOLD,
+            half_life_access_scale=config.FIELD_HALF_LIFE_ACCESS_SCALE,
+        )
+        now = datetime.now(timezone.utc)
+        for row in rows:
+            similarity = score_by_l2_id.get(row["id"], 0.0)
+            try:
+                created = datetime.fromisoformat(row["created_at"]) if row.get("created_at") else now
+                age_hours = max(0.0, (now - created).total_seconds() / 3600)
+            except (ValueError, TypeError):
+                age_hours = 0.0
+            row["score"] = field_scoring.resonance(
+                similarity, row.get("importance") or 0.5, age_hours,
+                row.get("access_count") or 0, params,
+            )
+            row["cosine_similarity"] = similarity
+
+        rows.sort(key=lambda r: r["score"], reverse=True)
+        rows = rows[:limit]
+
+        # Recall bumps access_count — the promotion signal (PRD-154 S3 posture).
+        if rows:
+            await asyncio.gather(
+                *(self.touch_short_term(r["id"]) for r in rows if r.get("id")),
+                return_exceptions=True,
+            )
+        logger.debug(
+            "[UnifiedMemoryService] semantic L2 recall ws=%s query=%r → %d rows",
+            workspace_id, query[:60], len(rows),
+        )
+        return rows
+
+    @staticmethod
+    def _hydrate_l2_rows_sync(l2_ids: List[str]) -> List[Dict[str, Any]]:
+        """Fetch LIVE (non-archived) L2 rows by id — archived rows never recall."""
+        from core.database.database import get_db_session
+        from modules.memory.models import MemoryShortTerm
+
+        with get_db_session() as db:
+            rows = (
+                db.query(MemoryShortTerm)
+                .filter(
+                    MemoryShortTerm.id.in_(l2_ids),
+                    MemoryShortTerm.archived_at.is_(None),
+                )
+                .all()
+            )
+            return [
+                {
+                    "id": str(row.id),
+                    "content": row.content,
+                    "content_type": row.content_type,
+                    "importance": row.importance,
+                    "decay_score": row.decay_score,
+                    "access_count": row.access_count,
+                    "metadata": row.metadata_ or {},
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                }
+                for row in rows
+            ]
 
     @staticmethod
     def _search_short_term_sync(
@@ -1644,9 +1746,9 @@ class UnifiedMemoryService:
         """
         Store a raw multi-turn transcript in L2 short-term memory — PRD-131d Phase 3.
 
-        Bypasses Mem0's fact-extraction pipeline entirely. The transcript is
-        preserved verbatim (up to a generous char cap) so agents and users can
-        read back the full conversation context, not just Mem0's distilled facts.
+        The transcript is preserved verbatim (up to a generous char cap) so
+        agents and users can read back the full conversation context, not just
+        the distilled facts the L3 store carries.
 
         Args:
             workspace_id: Workspace scope (UUID string).
@@ -1662,7 +1764,7 @@ class UnifiedMemoryService:
             return None
 
         # Serialize turns as readable multi-line text; cap at 20k chars total
-        # (roughly 5k tokens — well above Mem0's tiny fact-extraction output).
+        # (roughly 5k tokens — well above a distilled fact's size).
         lines: List[str] = []
         for turn in turns:
             role = str(turn.get("role", "user")).strip() or "user"
@@ -1772,7 +1874,7 @@ class UnifiedMemoryService:
 
         Used by the Memory Explorer to surface raw transcripts, mission
         summaries, task failures, and retry recoveries that never make it to
-        Mem0 — or whose Mem0 version was distilled down to a fragment.
+        L3 — or whose durable version was distilled down to a fragment.
         """
         try:
             loop = asyncio.get_event_loop()
@@ -1794,11 +1896,11 @@ class UnifiedMemoryService:
 
     async def promote_to_long_term(self, memory_id: str) -> bool:
         """
-        Promote a single L2 item to L3 long-term memory via Mem0.
+        Promote a single L2 item to L3 long-term memory (durable store).
 
-        Reads the L2 row, sends its content to Mem0 with infer=True
-        (enables fact extraction and deduplication), then marks the row
-        as promoted. The L2 row is NOT deleted — it stays until decay
+        Reads the L2 row, writes its content verbatim into the durable
+        store (same-content writes dedup on content hash), then marks the
+        row as promoted. The L2 row is NOT deleted — it stays until decay
         archives it (belt and suspenders).
 
         Args:
@@ -1825,7 +1927,7 @@ class UnifiedMemoryService:
             content_type = row_data.get("content_type", "exchange")
             metadata = row_data.get("metadata", {})
 
-            # Store in L3 via Mem0 with fact extraction (infer=True is default)
+            # Store in L3 via the durable adapter (content-hash dedup applies)
             result = await self.store_long_term(
                 workspace_id=workspace_id,
                 content=content,
@@ -1903,31 +2005,25 @@ class UnifiedMemoryService:
     @staticmethod
     def _get_promotion_candidates_sync(
         workspace_id: str,
-        min_importance: float,
-        min_access_count: int,
         batch_size: int,
     ) -> List[Dict[str, Any]]:
         """
         Fetch L2 rows eligible for promotion to L3 (synchronous, runs in executor).
 
-        Criteria: importance > threshold AND access_count > threshold
-                  AND promoted_to_l3 = False AND archived_at IS NULL.
-
-        Uses the ix_mem_st_ws_promote partial index.
+        Eligibility is the shared type-aware policy (PRD-187 S4,
+        ``modules/memory/promotion_policy``): distilled importance with a lower
+        bar for high-signal types, noise types never — the old
+        ``AND access_count > N`` conjunct (a bootstrap deadlock that produced
+        zero promotions ever) is gone.
         """
         from core.database.database import get_db_session
         from modules.memory.models import MemoryShortTerm
+        from modules.memory.promotion_policy import eligibility_conditions
 
         with get_db_session() as db:
             rows = (
                 db.query(MemoryShortTerm)
-                .filter(
-                    MemoryShortTerm.workspace_id == workspace_id,
-                    MemoryShortTerm.promoted_to_l3.is_(False),
-                    MemoryShortTerm.archived_at.is_(None),
-                    MemoryShortTerm.importance > min_importance,
-                    MemoryShortTerm.access_count > min_access_count,
-                )
+                .filter(*eligibility_conditions(MemoryShortTerm, workspace_id))
                 .order_by(MemoryShortTerm.importance.desc())
                 .limit(batch_size)
                 .all()
@@ -1950,9 +2046,10 @@ class UnifiedMemoryService:
         """
         Run L2→L3 promotion for a single workspace.
 
-        Finds L2 items meeting promotion criteria (importance > threshold,
-        access_count > threshold, not yet promoted, not archived), then
-        promotes each to L3 via Mem0 with fact extraction.
+        Finds L2 items meeting the type-aware eligibility policy (PRD-187 S4:
+        distilled importance, lower bar for high-signal types, noise types
+        never, no access-count gate), then promotes each to L3 via the durable
+        store.
 
         Args:
             workspace_id: Workspace to process.
@@ -1968,8 +2065,6 @@ class UnifiedMemoryService:
                 None,
                 self._get_promotion_candidates_sync,
                 workspace_id,
-                config.MEMORY_PROMOTION_MIN_IMPORTANCE,
-                config.MEMORY_PROMOTION_MIN_ACCESS_COUNT,
                 config.MEMORY_PROMOTION_BATCH_SIZE,
             )
         except Exception:

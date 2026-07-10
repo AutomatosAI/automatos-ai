@@ -3,7 +3,7 @@
 The memory_stored SSE must fire ONLY after durable facts actually persisted to
 L3, with the real tier. SmartMemoryManager exposes ``_last_l3_facts_stored``
 (0 on zero-fact turns) + ``_last_tier`` which the streaming layer gates on.
-Fork-side sync (UPDATE/DELETE → SQL view, metadata) lives in ../automatos-mem0.
+(The retired fork's UPDATE/DELETE → SQL-view sync no longer applies — PRD-187 S1.)
 """
 import os
 import sys

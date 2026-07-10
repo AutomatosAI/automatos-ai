@@ -43,8 +43,8 @@ async def get_memory_stats(db: Session, workspace_id: UUID, params: Dict[str, An
 
     try:
         service = get_unified_memory_service()
-        if not service.is_mem0_configured:
-            return {"success": False, "error": "Memory service not configured (MEM0_API_URL empty)"}
+        if not service.is_durable_configured:
+            return {"success": False, "error": "Memory service not configured (QDRANT_URL empty)"}
 
         ws_id = str(workspace_id)
 
@@ -169,8 +169,8 @@ async def store_memory(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
         from modules.memory.unified_memory_service import get_unified_memory_service
 
         service = get_unified_memory_service()
-        if not service.is_mem0_configured:
-            return {"success": False, "error": "Memory service not configured (MEM0_API_URL empty)"}
+        if not service.is_durable_configured:
+            return {"success": False, "error": "Memory service not configured (QDRANT_URL empty)"}
 
         ws_id = str(workspace_id)
         agent_id = params.get("agent_id")

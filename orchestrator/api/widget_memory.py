@@ -89,7 +89,7 @@ def _get_memory_service() -> Optional["UnifiedMemoryService"]:
     try:
         from modules.memory.unified_memory_service import get_unified_memory_service
         svc = get_unified_memory_service()
-        if svc.is_mem0_configured:
+        if svc.is_durable_configured:
             _memory_service = svc
             logger.info("[widget_memory] Using UnifiedMemoryService")
         else:

@@ -3,7 +3,7 @@
 Failures and notable successes become typed ``tool_outcome`` memories under the
 workspace namespace, written direct (infer:false) and deduped by content-hash;
 trivial successes are gated out. Pure helpers are unit-tested directly; the
-async write is tested with a recording fake service (no DB / Mem0).
+async write is tested with a recording fake service (no DB / durable store).
 """
 import os
 import sys

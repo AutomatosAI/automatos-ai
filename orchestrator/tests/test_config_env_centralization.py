@@ -57,7 +57,6 @@ _SWEPT_ENV_VARS = (
     "INTERNAL_API_HOSTNAME",
     "INTERNAL_FRONTEND_HOSTNAME",
     "AGENT_OPT_WORKER_URL",
-    "MEM0_API_URL",
     "VOICE_SERVICE_URL",
 )
 
@@ -363,7 +362,6 @@ _RAILWAY_DEFAULT_ATTRS = (
     "LOG_RELAY_URL",
     "LOKI_QUERY_URL",
     "AGENT_OPT_WORKER_URL",
-    "MEM0_API_URL",
     "VOICE_SERVICE_URL",
 )
 
@@ -395,7 +393,6 @@ def test_railway_default_is_localhost(monkeypatch, attr):
         ("LOKI_URL", "LOKI_URL", "http://loki.railway.internal:3100"),
         ("PROMETHEUS_URL", "PROMETHEUS_URL", "http://prometheus.railway.internal:9090"),
         ("AGENT_OPT_WORKER_URL", "AGENT_OPT_WORKER_URL", "http://agent-opt-worker.railway.internal:8080"),
-        ("MEM0_API_URL", "MEM0_API_URL", "http://automatos-mem0-server.railway.internal"),
         ("VOICE_SERVICE_URL", "VOICE_SERVICE_URL", "http://voice-service.railway.internal:8300"),
     ],
 )

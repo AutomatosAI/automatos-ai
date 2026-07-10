@@ -1,5 +1,5 @@
 {
-  "route_count": 769,
+  "route_count": 754,
   "routes": [
     {
       "method": "GET",
@@ -2210,28 +2210,12 @@
       "path": "/api/tools/{app_name}/triggers"
     },
     {
-      "method": "POST",
-      "path": "/api/v1/memory/augment/{memory_id}"
-    },
-    {
-      "method": "POST",
-      "path": "/api/v1/memory/backup"
-    },
-    {
       "method": "GET",
       "path": "/api/v1/memory/browse"
     },
     {
       "method": "POST",
-      "path": "/api/v1/memory/clear"
-    },
-    {
-      "method": "POST",
       "path": "/api/v1/memory/consolidate"
-    },
-    {
-      "method": "POST",
-      "path": "/api/v1/memory/external-knowledge"
     },
     {
       "method": "GET",
@@ -2240,30 +2224,6 @@
     {
       "method": "GET",
       "path": "/api/v1/memory/layers"
-    },
-    {
-      "method": "POST",
-      "path": "/api/v1/memory/optimize"
-    },
-    {
-      "method": "POST",
-      "path": "/api/v1/memory/restore"
-    },
-    {
-      "method": "POST",
-      "path": "/api/v1/memory/retrieve"
-    },
-    {
-      "method": "GET",
-      "path": "/api/v1/memory/retrieve/{session_id}"
-    },
-    {
-      "method": "POST",
-      "path": "/api/v1/memory/search"
-    },
-    {
-      "method": "GET",
-      "path": "/api/v1/memory/stats"
     },
     {
       "method": "GET",
@@ -2278,27 +2238,7 @@
       "path": "/api/v1/memory/stats/recent"
     },
     {
-      "method": "GET",
-      "path": "/api/v1/memory/stats/timeseries/access-patterns"
-    },
-    {
-      "method": "GET",
-      "path": "/api/v1/memory/stats/timeseries/consolidation"
-    },
-    {
-      "method": "POST",
-      "path": "/api/v1/memory/store"
-    },
-    {
       "method": "DELETE",
-      "path": "/api/v1/memory/{memory_id}"
-    },
-    {
-      "method": "GET",
-      "path": "/api/v1/memory/{memory_id}"
-    },
-    {
-      "method": "PUT",
       "path": "/api/v1/memory/{memory_id}"
     },
     {

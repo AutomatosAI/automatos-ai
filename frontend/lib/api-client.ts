@@ -1872,30 +1872,7 @@ class ApiClient {
     return this.request('/api/multi-agent/optimization/statistics')
   }
 
-  // ===== MEMORY ENDPOINTS (All Working ✅) =====
-  async storeMemory(data: { session_id: string, content: any, memory_type?: string, importance?: number, tags?: string[] }) {
-    return this.request('/api/v1/memory/store', {
-      method: 'POST',
-      body: JSON.stringify(data)
-    })
-  }
-
-  async retrieveMemory(sessionId: string, query?: string, maxItems: number = 20, includeAugmented: boolean = true) {
-    const params = new URLSearchParams()
-    if (query) params.append('query', query)
-    params.append('max_items', maxItems.toString())
-    params.append('include_augmented', includeAugmented.toString())
-
-    return this.request(`/api/v1/memory/retrieve/${sessionId}?${params.toString()}`)
-  }
-
-  async consolidateMemory(data?: { session_id?: string, memory_level?: string, strategy?: string }) {
-    return this.request('/api/v1/memory/consolidate', {
-      method: 'POST',
-      body: JSON.stringify(data || {})
-    })
-  }
-
+  // ===== MEMORY ENDPOINTS =====
   async getMemoryStats() {
     return this.request('/api/v1/memory/stats/real')  // REAL data from database!
   }

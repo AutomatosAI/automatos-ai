@@ -23,7 +23,7 @@ What it measures (offline, pure — no LLM, no network, no live store):
       that is published, never a CI gate.
 
   The retriever is an OFFLINE bag-of-words cosine proxy for the production
-  ActionSemanticIndex / Mem0 vector search, so the harness runs in CI without an
+  ActionSemanticIndex / durable-store vector search, so the harness runs in CI without an
   embedding provider or a vector store. A provisioned run injects the real
   retriever via ``retriever_factory`` and points ``--corpus`` at a live snapshot.
 
@@ -189,7 +189,7 @@ RetrieverFactory = Callable[[List[MemoryDoc]], Retriever]
 def _bow_retriever(docs: List[MemoryDoc]) -> Retriever:
     """Deterministic bag-of-words cosine over memory text + category — an offline
     proxy for the production vector search. A provisioned run injects the real
-    retriever (Mem0 / ActionSemanticIndex) against a live snapshot instead."""
+    retriever (durable store / ActionSemanticIndex) against a live snapshot instead."""
     vecs = [(d.memory_id, _bow_vector(_tokenize(f"{d.text} {d.category}"))) for d in docs]
 
     def retrieve(query: str) -> List[str]:

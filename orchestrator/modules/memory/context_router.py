@@ -448,11 +448,15 @@ class ContextRouter:
 
         Fetch strategy (driven by ``analyze_query`` signals):
           - **session_continuation** or default with conversation_id → L1 session
-          - **temporal** → L2 short-term with time filter
-          - **personal_fact** or default → L3 long-term via Mem0 (cached)
+          - **temporal** → L2 short-term with time filter (window'd listing)
+          - every other non-live-data turn → L2 SEMANTIC recall (PRD-187 S3 —
+            the always-on path; matching is by meaning, never gated behind the
+            temporal regex)
+          - **personal_fact** or default → L3 long-term (durable store, cached)
           - **knowledge_query** / **live_data** → awareness text only (no pre-fetch)
 
-        Default (no strong signal): L3 top-5 memories + L1 session summary.
+        Both memory lists pass ``filter_injectable_memories`` (PRD-185 S11) —
+        sub-floor and noise-typed rows never reach the prompt.
 
         All layer fetches are concurrent via ``asyncio.gather``.
         Any single-layer failure is logged and skipped — never breaks the bundle.
@@ -487,6 +491,11 @@ class ContextRouter:
         # prices) still skip memory.
         fetch_long_term = not signals.is_live_data
         fetch_temporal = signals.is_temporal and signals.temporal_window is not None
+        # PRD-187 S3: L2 recall is ALWAYS-ON. Temporal queries keep the
+        # window'd listing; every other non-live-data turn gets semantic L2
+        # recall — "what did we learn about the Shopify sync?" matched zero
+        # rows by construction under the old ILIKE-behind-a-temporal-regex.
+        fetch_l2_semantic = not fetch_temporal and not signals.is_live_data
         # Daily logs on default path (no strong signal)
         fetch_daily = not any([
             signals.is_temporal,
@@ -508,10 +517,18 @@ class ContextRouter:
             self._safe_fetch("L3 long-term", service.search_long_term(workspace_id, query, agent_id=agent_id, limit=5))
             if fetch_long_term else _noop()
         )
-        temporal_task = (
-            self._safe_fetch("L2 temporal", service.search_short_term(workspace_id, query, days=self._window_days(signals.temporal_window)))
-            if fetch_temporal else _noop()
-        )
+        if fetch_temporal:
+            temporal_task = self._safe_fetch(
+                "L2 temporal",
+                service.search_short_term(workspace_id, query, days=self._window_days(signals.temporal_window)),
+            )
+        elif fetch_l2_semantic:
+            temporal_task = self._safe_fetch(
+                "L2 semantic",
+                service.search_short_term_semantic(workspace_id, query),
+            )
+        else:
+            temporal_task = _noop()
         daily_task = (
             self._safe_fetch("daily logs", service.get_all_daily_logs(workspace_id, limit=10))
             if fetch_daily else _noop()
@@ -534,12 +551,22 @@ class ContextRouter:
                     budget_session,
                 )
 
+        # PRD-185 S11 chokepoint: sub-floor and noise-typed rows (heartbeat
+        # digests, playbook summaries) never reach the prompt — re-asserted
+        # here over BOTH memory lists, whatever their source path.
+        from config import config as _cfg
+        from modules.memory.injection_filter import filter_injectable_memories
+
+        _floor = _cfg.MEMORY_RELEVANCE_FLOOR
+
         # Long-term memories
         lt_memories: List[Dict[str, Any]] = lt_result if isinstance(lt_result, list) else []
+        lt_memories = filter_injectable_memories(lt_memories, floor=_floor)
         kept_lt, lt_text = self._memories_to_text(lt_memories, budget_long_term)
 
-        # Temporal results
+        # L2 results (temporal window'd listing, or the always-on semantic recall)
         temporal_memories: List[Dict[str, Any]] = temporal_result if isinstance(temporal_result, list) else []
+        temporal_memories = filter_injectable_memories(temporal_memories, floor=_floor)
         kept_temporal, temporal_text = self._memories_to_text(temporal_memories, budget_temporal)
 
         # Daily logs

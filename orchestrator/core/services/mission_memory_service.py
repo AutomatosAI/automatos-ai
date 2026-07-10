@@ -6,7 +6,7 @@ Stores mission (OrchestrationRun) outcomes into memory so future missions can
 learn from what worked and what failed.
 
 Writes two places via UnifiedMemoryService:
-- L3 long-term (Mem0) workspace namespace — conversational summary for fact
+- L3 long-term (durable store) workspace namespace — conversational summary for fact
   extraction and semantic retrieval
 - L2 short-term (Postgres) with content_type="mission_summary", importance=0.7
   (completed) or 0.8 (failed) so failures promote to L3 faster
@@ -47,7 +47,7 @@ class MissionMemoryService:
         failure_reason: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Store a mission summary in L3 (Mem0) + L2 (Postgres short-term).
+        Store a mission summary in L3 (durable store) + L2 (Postgres short-term).
 
         Args:
             run_id: OrchestrationRun.id
@@ -70,7 +70,7 @@ class MissionMemoryService:
         l3_ok = False
         l2_id: Optional[str] = None
 
-        # L3 — Mem0 long-term, workspace-wide namespace
+        # L3 — durable long-term, workspace-wide namespace
         try:
             ns = MemoryNamespace(workspace_id=workspace_id)
             l3_result = await self._unified.store_long_term_messages(
@@ -154,7 +154,7 @@ class MissionMemoryService:
         (verification max retries, partial max retries, stall max retries).
 
         Writes L2 short-term (content_type="task_failure", importance=0.8) and
-        L3 long-term (Mem0 workspace namespace).
+        L3 long-term (durable workspace namespace).
         """
         run = self.db.query(OrchestrationRun).get(task.run_id)
         if run is None:
@@ -167,7 +167,7 @@ class MissionMemoryService:
         l3_ok = False
         l2_id: Optional[str] = None
 
-        # L3 — Mem0 workspace namespace
+        # L3 — durable workspace namespace
         try:
             ns = MemoryNamespace(workspace_id=workspace_id)
             l3_result = await self._unified.store_long_term_messages(
