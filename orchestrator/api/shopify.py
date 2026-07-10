@@ -13,9 +13,10 @@ Automatos app from the Shopify App Store:
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Header
 from pydantic import BaseModel, Field
@@ -352,6 +353,110 @@ async def _sync_catalog_for_workspace(workspace_id: str, event: str) -> None:
         db.close()
 
 
+# ── PRD-189 S3: per-workspace debounce + coalesce + already-running guard ──
+#
+# The old handler fired ``create_task(_sync_catalog_for_workspace(...))`` per
+# catalog event with no debounce, no coalescing, no already-running check, and
+# the task reference dropped (GC-collectable mid-flight). A merchant bulk edit
+# emitting N webhooks launched N concurrent full Bulk-Op re-syncs — each an
+# embedding-bearing full rebuild — relying on Shopify's one-bulk-op-per-shop
+# limit with the losers swallowed.
+#
+# This mirrors the in-process debounce shape ``GraphifyService`` already ships
+# (``graph_service.py`` ``schedule_incremental_update``): a per-workspace timer
+# that resets on every event and accumulates the coalesced event names. On
+# expiry exactly ONE re-sync task runs; its reference is HELD in
+# ``_catalog_sync_tasks`` (GC guard) which doubles as the already-running
+# guard — if the window expires while a re-sync is still in flight, the window
+# re-arms instead of launching a second concurrent sync, so events that arrive
+# mid-flight still get their (single) follow-up re-sync afterwards. In-process
+# by design, like the GraphifyService debounce it mirrors.
+#
+# The window comes from ``config.SHOPIFY_SYNC_DEBOUNCE_SECONDS`` — read at
+# call time, never an inline ``os.getenv``.
+
+_catalog_debounce_handles: Dict[str, asyncio.TimerHandle] = {}
+_catalog_pending_events: Dict[str, List[str]] = {}
+_catalog_sync_tasks: Dict[str, "asyncio.Task[None]"] = {}
+
+
+def _schedule_catalog_sync(workspace_id: str, event: str) -> None:
+    """Debounce a catalog re-sync request for a workspace.
+
+    Every call within the window resets the timer and accumulates the event
+    name, so a webhook burst produces one re-sync carrying a coalesced reason.
+    """
+    _catalog_pending_events.setdefault(workspace_id, []).append(event)
+
+    existing = _catalog_debounce_handles.pop(workspace_id, None)
+    if existing is not None:
+        existing.cancel()
+
+    loop = asyncio.get_running_loop()
+    handle = loop.call_later(
+        config.SHOPIFY_SYNC_DEBOUNCE_SECONDS, _fire_catalog_sync, workspace_id
+    )
+    _catalog_debounce_handles[workspace_id] = handle
+    logger.info(
+        "[PRD-189 S3] Catalog re-sync debounced for workspace=%s reason=%s "
+        "(%d pending, window=%ss)",
+        workspace_id, event,
+        len(_catalog_pending_events[workspace_id]),
+        config.SHOPIFY_SYNC_DEBOUNCE_SECONDS,
+    )
+
+
+def _fire_catalog_sync(workspace_id: str) -> None:
+    """Debounce window expired — run ONE coalesced re-sync for the workspace.
+
+    Already-running guard: if a re-sync for this workspace is still in flight,
+    re-arm the window instead of launching a second concurrent full sync; the
+    accumulated events keep their follow-up re-sync once the running one ends.
+    """
+    _catalog_debounce_handles.pop(workspace_id, None)
+
+    running = _catalog_sync_tasks.get(workspace_id)
+    if running is not None and not running.done():
+        loop = asyncio.get_running_loop()
+        handle = loop.call_later(
+            config.SHOPIFY_SYNC_DEBOUNCE_SECONDS, _fire_catalog_sync, workspace_id
+        )
+        _catalog_debounce_handles[workspace_id] = handle
+        logger.info(
+            "[PRD-189 S3] Catalog re-sync for workspace=%s still in flight — "
+            "deferring the coalesced follow-up by %ss",
+            workspace_id, config.SHOPIFY_SYNC_DEBOUNCE_SECONDS,
+        )
+        return
+
+    events = _catalog_pending_events.pop(workspace_id, [])
+    if not events:
+        return
+    reason = (
+        f"{events[-1]} (+{len(events) - 1} coalesced)"
+        if len(events) > 1
+        else events[0]
+    )
+
+    task = asyncio.get_running_loop().create_task(
+        _sync_catalog_for_workspace(workspace_id, reason)
+    )
+    # Hold the reference: the guard above AND the GC protection the old
+    # fire-and-forget create_task never had.
+    _catalog_sync_tasks[workspace_id] = task
+
+    def _clear(done_task: "asyncio.Task[None]", ws: str = workspace_id) -> None:
+        if _catalog_sync_tasks.get(ws) is done_task:
+            _catalog_sync_tasks.pop(ws, None)
+
+    task.add_done_callback(_clear)
+    logger.info(
+        "[PRD-189 S3] Coalesced catalog re-sync launched for workspace=%s "
+        "(%d events → 1 sync, reason=%s)",
+        workspace_id, len(events), reason,
+    )
+
+
 @router.post("/events")
 async def forward_event(
     request: EventRequest,
@@ -362,9 +467,10 @@ async def forward_event(
     Forward Shopify webhook events for agent context enrichment.
 
     Catalog-mutation events (products/*, collections/*, inventory_levels/update)
-    trigger an incremental commerce-graph refresh (PRD-009 sub-60s freshness,
-    F032). The heavy re-sync runs as a detached background task with its own
-    session, so the webhook returns immediately.
+    trigger a commerce-graph refresh (F032). The heavy re-sync is debounced,
+    coalesced and already-running-guarded per workspace (PRD-189 S3) and runs
+    as a held background task with its own session, so the webhook returns
+    immediately and a burst of N events produces ONE re-sync.
     """
     logger.info(
         "Shopify event received: shop=%s event=%s",
@@ -383,15 +489,7 @@ async def forward_event(
             .first()
         )
         if ws:
-            import asyncio as _asyncio
-
-            _asyncio.create_task(
-                _sync_catalog_for_workspace(str(ws.id), request.event)
-            )
-            logger.info(
-                "[PRD-183 S1] Scheduled catalog re-sync for workspace=%s reason=%s",
-                ws.id, request.event,
-            )
+            _schedule_catalog_sync(str(ws.id), request.event)
 
     return {"status": "received", "event": request.event}
 

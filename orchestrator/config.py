@@ -488,6 +488,13 @@ class Config:
     WIDGET_TOKEN_SECRET: str = os.getenv("WIDGET_TOKEN_SECRET", "")
     WIDGET_ORIGIN_ALLOWLIST: str = os.getenv("WIDGET_ORIGIN_ALLOWLIST", "")
     SHOPIFY_INTERNAL_API_KEY: str = os.getenv("SHOPIFY_INTERNAL_API_KEY", "")
+    # PRD-189 S3: per-workspace debounce window (seconds) for catalog-webhook
+    # re-syncs. A merchant bulk edit emits a burst of products/update webhooks;
+    # /events coalesces the burst into ONE full Bulk-Op re-sync once it has
+    # been quiet for this long, instead of firing N concurrent re-syncs (each
+    # an embedding-bearing full rebuild). Same config-not-inline-getenv
+    # convention as PLAYBOOK_BREAKER_THRESHOLD.
+    SHOPIFY_SYNC_DEBOUNCE_SECONDS: float = float(os.getenv("SHOPIFY_SYNC_DEBOUNCE_SECONDS", "30"))
     PLAYBOOKS_REQUIRE_TENANT: bool = os.getenv("PLAYBOOKS_REQUIRE_TENANT", "0").lower() in ("1", "true", "yes")
 
     # =============================================================================
