@@ -6,7 +6,7 @@ how a GDPR subject request reaches a tenant). Whole-workspace erasure is
 irreversible, so it requires an explicit confirmation echo of the workspace id.
 
 The heavy lifting is in ``services.gdpr_service`` (the real cascade across SQL,
-Qdrant field memory, and mem0). Every action is audited there.
+Qdrant field memory, and durable memory). Every action is audited there.
 """
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ async def export_my_workspace(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ) -> JSONResponse:
-    """Export this workspace's data (SQL + field memory + mem0) as a JSON bundle."""
+    """Export this workspace's data (SQL + field memory + durable memory) as a JSON bundle."""
     _require_workspace_admin(ctx)
     from services.gdpr_service import export_workspace
 

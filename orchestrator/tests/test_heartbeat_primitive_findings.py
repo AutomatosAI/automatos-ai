@@ -10,12 +10,12 @@ to a product primitive, so the tile has no honest data source.
 W3-S1 builds the mechanism: an ``emit_primitive_finding`` helper alongside
 ``_store_heartbeat_result`` that any primitive's hardening story
 (S6 chat … S13 channels) can call when it has a real signal — and wires
-Memory (W3-S7's pathfinder) as the first real caller via the Mem0 health
+Memory (W3-S7's pathfinder) as the first real caller via the durable-store health
 probe. Guarantees we PIN here:
 
 1. Each emit writes exactly one ``heartbeat_results`` row whose JSONB
    ``findings`` carries the primitive_check shape (no schema change).
-2. The Mem0 probe wiring only emits ``memory`` findings — never
+2. The durable-store probe wiring only emits ``memory`` findings — never
    ``rag`` / ``chat`` / etc. Un-hardened primitives stay silent so the
    tile reads ``unknown`` for them (AC#4: never a fake green).
 3. A failed write is swallowed — the heartbeat cycle cannot be broken by
@@ -108,7 +108,7 @@ def test_primitive_finding_written_with_status(monkeypatch):
     _patch_session_local(monkeypatch, session)
 
     ws_id = str(uuid4())
-    ok = emit_primitive_finding(ws_id, "memory", "green", "mem0 probe ok")
+    ok = emit_primitive_finding(ws_id, "memory", "green", "durable store ok")
 
     assert ok is True
     assert len(session.inserts) == 1, "expected exactly one INSERT"
@@ -127,7 +127,7 @@ def test_primitive_finding_written_with_status(monkeypatch):
     assert f["finding_type"] == "primitive_check"
     assert f["primitive"] == "memory"
     assert f["status"] == "green"
-    assert f["detail"] == "mem0 probe ok"
+    assert f["detail"] == "durable store ok"
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +136,7 @@ def test_primitive_finding_written_with_status(monkeypatch):
 
 
 def test_unhardened_primitive_emits_nothing(monkeypatch):
-    """Running the W3-S1 wiring (Mem0 health probe tick) emits ``memory``
+    """Running the W3-S1 wiring (durable-store probe tick) emits ``memory``
     findings ONLY — never rag/chat/nl2sql/graph/missions/playbooks/channels.
     The other 7 primitives have no caller in this story; the tile must read
     ``unknown`` for them (AC#4)."""
@@ -145,17 +145,16 @@ def test_unhardened_primitive_emits_nothing(monkeypatch):
     session = _CapturingSession()
     _patch_session_local(monkeypatch, session)
 
-    # Mem0 client stub: configured + probe returns healthy → wiring will emit
-    # a 'memory'/'green' finding. Nothing else should fire.
-    async def _probe_ok() -> bool:
-        return True
+    # Durable-store stub: healthy probe → wiring will emit a 'memory'/'green'
+    # finding. Nothing else should fire.
+    async def _health_ok() -> dict:
+        return {"healthy": True}
 
-    fake_client = MagicMock()
-    fake_client.api_url = "http://mem0.test"
-    fake_client.run_health_probe = _probe_ok
+    fake_store = MagicMock()
+    fake_store.health = _health_ok
 
     fake_ums = MagicMock()
-    fake_ums._mem0 = fake_client
+    fake_ums._durable = fake_store
 
     # Stub modules.memory.unified_memory_service in sys.modules BEFORE the
     # heartbeat tick's local ``from ... import get_unified_memory_service``
@@ -176,7 +175,7 @@ def test_unhardened_primitive_emits_nothing(monkeypatch):
     sched.get_jobs.return_value = [job]
     svc._scheduler = sched
 
-    asyncio.run(svc._mem0_health_probe_tick())
+    asyncio.run(svc._durable_memory_probe_tick())
 
     primitives_seen: set[str] = set()
     for _, params in session.inserts:

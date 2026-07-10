@@ -4,7 +4,7 @@ Integration tests for UnifiedMemoryService, ContextRouter, and MemoryNamespace.
 Tests L1 session lifecycle, L2 CRUD + decay, L3 cache hit,
 Context Router signal routing, and MemoryNamespace correctness.
 
-All external dependencies (Redis, Mem0, Postgres) are mocked.
+All external dependencies (Redis, durable store, Postgres) are mocked.
 
 Uses importlib to load modules directly, avoiding the pgvector dependency
 pulled in by modules/memory/__init__.py.
@@ -107,12 +107,10 @@ def _reset_singleton():
 
 
 @pytest.fixture
-def mock_mem0():
-    # Mem0Client is async (PRD-141 US-003): add/search/get_all/delete are
-    # coroutines, so they must be AsyncMock to be awaitable. api_url stays a
-    # plain attribute (read synchronously by is_mem0_configured).
+def mock_durable():
+    # DurableMemoryStore (PRD-187 S1) is async: add/search/get_all/delete are
+    # coroutines, so they must be AsyncMock to be awaitable.
     m = MagicMock()
-    m.api_url = "http://mem0.test"
     m.add = AsyncMock(return_value={"success": True, "id": "mem-001"})
     m.search = AsyncMock(
         return_value=[{"id": "m1", "memory": "user likes dark mode", "score": 0.9}]
@@ -141,9 +139,9 @@ def mock_redis_client(mock_redis_conn):
 
 
 @pytest.fixture
-def service(mock_mem0, mock_redis_client):
+def service(mock_durable, mock_redis_client):
     svc = UnifiedMemoryService.__new__(UnifiedMemoryService)
-    svc._mem0 = mock_mem0
+    svc._durable = mock_durable
     svc._redis_client_getter = lambda: mock_redis_client
     UnifiedMemoryService._instance = svc
     return svc
@@ -302,88 +300,59 @@ class TestL1Session:
 class TestL3:
 
     @pytest.mark.asyncio
-    async def test_store_long_term(self, service, mock_mem0):
+    async def test_store_long_term(self, service, mock_durable):
         result = await service.store_long_term(WS_ID, "dark mode", agent_id=AGENT_ID)
         assert result["success"] is True
-        assert mock_mem0.add.call_args[1]["user_id"] == f"mem:{WS_ID}:agent:{AGENT_ID}"
+        assert mock_durable.add.call_args[1]["user_id"] == f"mem:{WS_ID}:agent:{AGENT_ID}"
 
     @pytest.mark.asyncio
-    async def test_store_long_term_with_category(self, service, mock_mem0):
+    async def test_store_long_term_with_category(self, service, mock_durable):
         await service.store_long_term(WS_ID, "coffee", category="pref", metadata={"src": "chat"})
-        meta = mock_mem0.add.call_args[1]["metadata"]
+        meta = mock_durable.add.call_args[1]["metadata"]
         assert meta["category"] == "pref"
         assert meta["src"] == "chat"
 
     @pytest.mark.asyncio
-    async def test_search_cache_miss(self, service, mock_mem0, mock_redis_conn):
+    async def test_search_cache_miss(self, service, mock_durable, mock_redis_conn):
         mock_redis_conn.get.return_value = None
         results = await service.search_long_term(WS_ID, "dark mode")
         assert len(results) == 1
-        mock_mem0.search.assert_called_once()
+        mock_durable.search.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_search_cache_hit(self, service, mock_mem0, mock_redis_conn):
+    async def test_search_cache_hit(self, service, mock_durable, mock_redis_conn):
         cached = [{"id": "c1", "memory": "cached", "score": 0.8}]
         mock_redis_conn.get.return_value = json.dumps(cached)
 
         results = await service.search_long_term(WS_ID, "dark mode")
         assert results[0]["id"] == "c1"
-        mock_mem0.search.assert_not_called()
+        mock_durable.search.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_search_agent_namespace(self, service, mock_mem0, mock_redis_conn):
+    async def test_search_agent_namespace(self, service, mock_durable, mock_redis_conn):
         mock_redis_conn.get.return_value = None
         await service.search_long_term(WS_ID, "test", agent_id=AGENT_ID)
-        assert mock_mem0.search.call_args[1]["user_id"] == f"mem:{WS_ID}:agent:{AGENT_ID}"
+        assert mock_durable.search.call_args[1]["user_id"] == f"mem:{WS_ID}:agent:{AGENT_ID}"
 
     @pytest.mark.asyncio
-    async def test_search_workspace_namespace(self, service, mock_mem0, mock_redis_conn):
+    async def test_search_workspace_namespace(self, service, mock_durable, mock_redis_conn):
         mock_redis_conn.get.return_value = None
         await service.search_long_term(WS_ID, "test")
-        assert mock_mem0.search.call_args[1]["user_id"] == f"mem:{WS_ID}"
+        assert mock_durable.search.call_args[1]["user_id"] == f"mem:{WS_ID}"
 
     @pytest.mark.asyncio
-    async def test_get_all(self, service, mock_mem0):
+    async def test_get_all(self, service, mock_durable):
         results = await service.get_all_memories(WS_ID)
         assert len(results) == 1
 
     @pytest.mark.asyncio
-    async def test_delete(self, service, mock_mem0):
-        # PRD-154 S3: delete now routes through the bulk endpoint, so the service
-        # resolves the namespace user_id and passes mem0 a memory_ids list.
+    async def test_delete(self, service, mock_durable):
+        # The service resolves the namespace user_id and passes the durable
+        # store a memory_ids list (ownership check happens in the adapter).
         assert await service.delete_memory("mem-001", workspace_id=WS_ID) is True
-        mock_mem0.delete.assert_called_once_with(
+        mock_durable.delete.assert_called_once_with(
             memory_ids=["mem-001"], user_id=f"mem:{WS_ID}", workspace_id=WS_ID
         )
-
-    @pytest.mark.asyncio
-    async def test_store_long_term_infer_false(self, service, mock_mem0):
-        # Curated facts must not be re-extracted by Mem0's personal-info prompt.
-        await service.store_long_term(WS_ID, "distilled durable fact")
-        assert mock_mem0.add.call_args[1].get("infer") is False
-
-    @pytest.mark.asyncio
-    async def test_store_long_term_messages_infer_false(self, service, mock_mem0):
-        await service.store_long_term_messages(
-            f"mem:{WS_ID}:recipe:1", [{"role": "user", "content": "x"}]
-        )
-        assert mock_mem0.add.call_args[1].get("infer") is False
-
-    @pytest.mark.asyncio
-    async def test_store_daily_log_infer_false(self, service, mock_mem0):
-        await service.store_daily_log(WS_ID, "5 tasks done", metadata={"date": "2026-06-10", "type": "s"})
-        assert mock_mem0.add.call_args[1].get("infer") is False
-
-    @pytest.mark.asyncio
-    async def test_store_two_tier_infer_false(self, service, mock_mem0):
-        await service.store_two_tier(WS_ID, [{"role": "user", "content": "x"}], agent_id=1, tier="global")
-        assert mock_mem0.add.call_args[1].get("infer") is False
-
-    def test_all_curated_writers_grep_infer_false(self):
-        # Grep-able guard (PRD-154 S3 AC): every curated L3 writer passes infer=False.
-        for name in ("store_long_term", "store_long_term_messages", "store_daily_log", "store_two_tier"):
-            src = inspect.getsource(getattr(UnifiedMemoryService, name))
-            assert "infer=False" in src, f"{name} must pass infer=False to mem0.add"
 
     @pytest.mark.asyncio
     async def test_recall_touches_each_short_term_result(self, service):
@@ -404,22 +373,24 @@ class TestL3:
         assert set(touched) == {"r1", "r2"}
 
     @pytest.mark.asyncio
-    async def test_store_failure(self, service, mock_mem0):
-        mock_mem0.add.side_effect = Exception("boom")
+    async def test_store_failure(self, service, mock_durable):
+        mock_durable.add.side_effect = Exception("boom")
         result = await service.store_long_term(WS_ID, "x")
         assert result["success"] is False
 
     @pytest.mark.asyncio
-    async def test_search_failure(self, service, mock_mem0, mock_redis_conn):
+    async def test_search_failure(self, service, mock_durable, mock_redis_conn):
         mock_redis_conn.get.return_value = None
-        mock_mem0.search.side_effect = Exception("boom")
+        mock_durable.search.side_effect = Exception("boom")
         assert await service.search_long_term(WS_ID, "x") == []
 
     @pytest.mark.asyncio
-    async def test_is_mem0_configured(self, service, mock_mem0):
-        assert service.is_mem0_configured is True
-        mock_mem0.api_url = None
-        assert service.is_mem0_configured is False
+    async def test_is_durable_configured(self, service):
+        _mock_config_obj.QDRANT_URL = "http://qdrant.test:6333"
+        assert service.is_durable_configured is True
+        _mock_config_obj.QDRANT_URL = ""
+        assert service.is_durable_configured is False
+        _mock_config_obj.QDRANT_URL = "http://qdrant.test:6333"
 
 
 # ===========================================================================
@@ -633,16 +604,16 @@ class TestDecayFormula:
 class TestDailyLogs:
 
     @pytest.mark.asyncio
-    async def test_store_daily_log(self, service, mock_mem0):
+    async def test_store_daily_log(self, service, mock_durable):
         result = await service.store_daily_log(WS_ID, "5 tasks done", metadata={"date": "2026-03-12"})
         assert result["success"] is True
-        assert mock_mem0.add.call_args[1]["user_id"] == f"mem:{WS_ID}:daily"
+        assert mock_durable.add.call_args[1]["user_id"] == f"mem:{WS_ID}:daily"
 
     @pytest.mark.asyncio
-    async def test_get_all_daily_logs(self, service, mock_mem0):
+    async def test_get_all_daily_logs(self, service, mock_durable):
         results = await service.get_all_daily_logs(WS_ID)
         assert len(results) == 1
-        assert mock_mem0.get_all.call_args[1]["user_id"] == f"mem:{WS_ID}:daily"
+        assert mock_durable.get_all.call_args[1]["user_id"] == f"mem:{WS_ID}:daily"
 
 
 # ===========================================================================
@@ -652,10 +623,10 @@ class TestDailyLogs:
 
 class TestSingleton:
 
-    def test_same_instance(self, mock_mem0, mock_redis_client):
+    def test_same_instance(self, mock_durable, mock_redis_client):
         # Bypass __init__ to avoid real imports
         svc = UnifiedMemoryService.__new__(UnifiedMemoryService)
-        svc._mem0 = mock_mem0
+        svc._durable = mock_durable
         svc._redis_client_getter = lambda: mock_redis_client
         UnifiedMemoryService._instance = svc
 
@@ -664,9 +635,9 @@ class TestSingleton:
         assert a is b
         assert a is svc
 
-    def test_reset_clears(self, mock_mem0, mock_redis_client):
+    def test_reset_clears(self, mock_durable, mock_redis_client):
         svc1 = UnifiedMemoryService.__new__(UnifiedMemoryService)
-        svc1._mem0 = mock_mem0
+        svc1._durable = mock_durable
         svc1._redis_client_getter = lambda: mock_redis_client
         UnifiedMemoryService._instance = svc1
 
@@ -674,7 +645,7 @@ class TestSingleton:
         UnifiedMemoryService.reset_instance()
 
         svc2 = UnifiedMemoryService.__new__(UnifiedMemoryService)
-        svc2._mem0 = mock_mem0
+        svc2._durable = mock_durable
         svc2._redis_client_getter = lambda: mock_redis_client
         UnifiedMemoryService._instance = svc2
 

@@ -48,7 +48,7 @@ def _get_memory_service():
     try:
         from modules.memory.unified_memory_service import get_unified_memory_service
         svc = get_unified_memory_service()
-        if svc.is_mem0_configured:
+        if svc.is_durable_configured:
             _memory_service = svc
             logger.info("[memory_stats] Using UnifiedMemoryService")
         else:
@@ -683,7 +683,7 @@ async def get_memory_layers(
         "responding": False,
         "latency_ms": 0,
     }
-    if service and service.is_mem0_configured:
+    if service and service.is_durable_configured:
         try:
             mems = await service.get_all_memories(ws_id, limit=1)
             # get_all_memories returns a list; we just need to confirm it works

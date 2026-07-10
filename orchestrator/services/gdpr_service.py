@@ -1,15 +1,15 @@
 """PRD-181 S3 + S4 — GDPR data export + erasure-with-derived-data-cascade.
 
 Risk #4 (UK right-to-erasure, pilot-binding): a delete that leaves the subject in
-field memory / vectors / mem0 is **not** a GDPR delete. This service is the real
+field memory / vectors / durable memory is **not** a GDPR delete. This service is the real
 cascade — it reaches every store, primary and derived:
 
   - **SQL** — reuses ``services.workspace_purge`` (self-maintaining over every
     ``workspace_id`` table, incl. learned-edge tables + S3 document objects).
   - **Qdrant field memory** — ``VectorFieldSharedContext.erase_workspace`` /
     ``export_workspace`` (workspace_id payload filter, PRD-166 S1).
-  - **mem0 durable memories** — ``UnifiedMemoryService.erase_workspace_memories``
-    (per-namespace, since mem0 has no wildcard delete).
+  - **durable memories** — ``UnifiedMemoryService.erase_workspace_memories``
+    (one workspace-filter delete on the in-process Qdrant store, PRD-187 S1).
   - **RAG document vectors** — S3-Vectors objects live under the
     ``workspaces/{id}/`` prefix and are already wiped by the SQL purge's S3 step;
     pgvector rows carry ``workspace_id`` and are caught by the SQL purge.
@@ -17,14 +17,14 @@ cascade — it reaches every store, primary and derived:
 Every export and every erasure is audited (governance action).
 
 **Subject granularity:** subject-level erasure is implemented where a
-data-subject tag exists. Field memory and mem0 today carry only workspace /
+data-subject tag exists. Field memory and durable memory today carry only workspace /
 mission / agent provenance and **no data-subject tag** — those are surfaced as
 documented ``gaps`` on a subject-level erasure (never silently skipped). The
 single ``erase_data_subject`` / ``erase_workspace`` entrypoints are what the
 future Shopify ``customers/redact`` webhook will call.
 
 The store-specific readers/erasers are module-level functions so they can be
-swapped in tests and so the sync↔async bridge (SQL/audit are sync; Qdrant/mem0
+swapped in tests and so the sync↔async bridge (SQL/audit are sync; Qdrant legs
 are async) lives in exactly one place (:func:`_run_async`).
 """
 from __future__ import annotations
@@ -41,7 +41,7 @@ EXPORT_FORMAT = "automatos.gdpr.export/v1"
 
 
 # ---------------------------------------------------------------------------
-# Async bridge — SQL purge + audit are sync; Qdrant + mem0 are async. Callers
+# Async bridge — SQL purge + audit are sync; the Qdrant legs are async. Callers
 # (a FastAPI endpoint / a webhook) may or may not have a running loop, so run the
 # async legs on a fresh loop when needed.
 # ---------------------------------------------------------------------------
@@ -94,7 +94,7 @@ def _export_field_memory(workspace_id: UUID | str, subject_id: Optional[str] = N
     return _run_async(svc.export_workspace(str(workspace_id)))
 
 
-def _export_mem0(workspace_id: UUID | str, subject_id: Optional[str] = None) -> List[dict]:
+def _export_durable_memory(workspace_id: UUID | str, subject_id: Optional[str] = None) -> List[dict]:
     from modules.memory.unified_memory_service import UnifiedMemoryService
 
     svc = UnifiedMemoryService()
@@ -135,7 +135,7 @@ def _erase_field_memory(workspace_id: UUID | str, subject_id: Optional[str] = No
     return _run_async(svc.erase_workspace(str(workspace_id)))
 
 
-def _erase_mem0(workspace_id: UUID | str, subject_id: Optional[str] = None) -> int:
+def _erase_durable_memory(workspace_id: UUID | str, subject_id: Optional[str] = None) -> int:
     from modules.memory.unified_memory_service import UnifiedMemoryService
 
     svc = UnifiedMemoryService()
@@ -177,9 +177,9 @@ _SUBJECT_GAPS: List[Dict[str, str]] = [
                   "to enable subject-level erasure. Workspace-level erasure works.",
     },
     {
-        "store": "mem0",
-        "reason": "mem0 durable memories are namespaced by workspace/agent/recipe "
-                  "with no data-subject tag in metadata; add one at write to enable "
+        "store": "durable_memory",
+        "reason": "Durable memories are namespaced by workspace/agent/recipe "
+                  "with no data-subject tag in the payload; add one at write to enable "
                   "subject-level erasure. Workspace-level erasure works.",
     },
     {
@@ -205,7 +205,7 @@ def export_workspace(db: Any, workspace_id: UUID | str, *, requested_by: str = "
         "sql": _export_sql_tables(db, workspace_id),
         "derived": {
             "field_memory": _export_field_memory(workspace_id),
-            "mem0": _export_mem0(workspace_id),
+            "durable_memory": _export_durable_memory(workspace_id),
         },
     }
     _audit_gdpr(db, workspace_id, "gdpr:export", requested_by=requested_by)
@@ -217,14 +217,14 @@ def export_workspace(db: Any, workspace_id: UUID | str, *, requested_by: str = "
 # ===========================================================================
 
 def erase_workspace(db: Any, workspace_id: UUID | str, *, requested_by: str) -> Dict[str, Any]:
-    """Erase a whole workspace across SQL + Qdrant field + mem0 (the real cascade).
+    """Erase a whole workspace across SQL + Qdrant field + durable memory (the real cascade).
 
     This is the ``erase_workspace`` entrypoint the future Shopify webhook and the
     admin purge path call. SQL (incl. S3 objects + learned-edge tables) via the
     self-maintaining purge; derived stores via their workspace erasers.
     """
     field_deleted = _safe(lambda: _erase_field_memory(workspace_id), "field_memory")
-    mem0_deleted = _safe(lambda: _erase_mem0(workspace_id), "mem0")
+    durable_deleted = _safe(lambda: _erase_durable_memory(workspace_id), "durable_memory")
     sql_result = _safe(lambda: _purge_sql(workspace_id), "sql") or {}
 
     result = {
@@ -234,7 +234,7 @@ def erase_workspace(db: Any, workspace_id: UUID | str, *, requested_by: str) -> 
         "sql": sql_result,
         "derived": {
             "field_memory_deleted": field_deleted or 0,
-            "mem0_deleted": mem0_deleted or 0,
+            "durable_memory_deleted": durable_deleted or 0,
         },
         "complete": True,
     }
@@ -243,7 +243,7 @@ def erase_workspace(db: Any, workspace_id: UUID | str, *, requested_by: str) -> 
         requested_by=requested_by,
         scope="workspace",
         field_memory_deleted=field_deleted or 0,
-        mem0_deleted=mem0_deleted or 0,
+        durable_memory_deleted=durable_deleted or 0,
         sql_rows=sql_result.get("rows_deleted"),
     )
     return result
@@ -260,7 +260,7 @@ def erase_data_subject(
     the caller is never told a subject was erased from a store where it was not.
     """
     field_deleted = _safe(lambda: _erase_field_memory(workspace_id, subject_id), "field_memory")
-    mem0_deleted = _safe(lambda: _erase_mem0(workspace_id, subject_id), "mem0")
+    durable_deleted = _safe(lambda: _erase_durable_memory(workspace_id, subject_id), "durable_memory")
     sql_result = _safe(lambda: _erase_subject_sql(db, workspace_id, subject_id), "sql") or {"deleted": 0}
 
     result = {
@@ -271,7 +271,7 @@ def erase_data_subject(
         "sql": sql_result,
         "derived": {
             "field_memory_deleted": field_deleted or 0,
-            "mem0_deleted": mem0_deleted or 0,
+            "durable_memory_deleted": durable_deleted or 0,
         },
         "gaps": list(_SUBJECT_GAPS),
     }
@@ -281,7 +281,7 @@ def erase_data_subject(
         scope="subject",
         subject_id=subject_id,
         field_memory_deleted=field_deleted or 0,
-        mem0_deleted=mem0_deleted or 0,
+        durable_memory_deleted=durable_deleted or 0,
         gaps=[g["store"] for g in _SUBJECT_GAPS],
     )
     return result

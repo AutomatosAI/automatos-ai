@@ -1,7 +1,7 @@
 """Regression tests for fire-and-forget memory writes in SmartChatOrchestrator.
 
 PRD-141 widget latency fix: store_exchange() must never block the streaming
-response on Mem0 fact extraction (a multi-second, server-side LLM call). Every
+response on the L3 durable write (previously a multi-second server-side call). Every
 write — distilled facts, daily summary, L2 transcript, L1 session — is scheduled
 fire-and-forget and the turn returns without waiting on the outcome.
 
@@ -92,8 +92,8 @@ async def _drain_background():
 
 
 @pytest.mark.asyncio
-async def test_store_exchange_does_not_block_on_slow_mem0_write():
-    """store_exchange returns before a slow Mem0 write completes."""
+async def test_store_exchange_does_not_block_on_slow_l3_write():
+    """store_exchange returns before a slow L3 write completes."""
     fake = _make_fake_self()
 
     gate = asyncio.Event()
@@ -106,7 +106,7 @@ async def test_store_exchange_does_not_block_on_slow_mem0_write():
 
     fake.memory_manager.store_conversation = blocking_store_conversation
 
-    # If the Mem0 write were awaited inline, `gate` is never set before
+    # If the L3 write were awaited inline, `gate` is never set before
     # store_exchange awaits it, so wait_for would raise TimeoutError. Because the
     # write is backgrounded, store_exchange returns immediately.
     result = await asyncio.wait_for(

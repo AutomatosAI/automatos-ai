@@ -1,6 +1,6 @@
-"""L3 input curation — distil TYPED durable facts before feeding Mem0 (PRD-159 S1).
+"""L3 input curation — distil TYPED durable facts before the L3 write (PRD-159 S1).
 
-The chat path used to send the raw user+assistant exchange to L3 (Mem0). Mem0's
+The chat path used to send the raw user+assistant exchange to L3. The old fork's
 default *server-side* extraction then produced thin, episodic facts like
 "User requested to fire a mission…" — interaction logs, not durable knowledge.
 
@@ -16,7 +16,7 @@ PRD-159 S1 rewrites this:
     the verbatim turn either way.
 
 These tests use a fake LLM manager (no network) and a recording fake of the
-UnifiedMemoryService (no Mem0, no DB).
+UnifiedMemoryService (no durable store, no DB).
 """
 import os
 import sys

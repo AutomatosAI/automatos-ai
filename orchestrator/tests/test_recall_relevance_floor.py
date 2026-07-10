@@ -18,7 +18,7 @@ for _k, _v in {
 }.items():
     os.environ.setdefault(_k, _v)
 
-from modules.memory.integrations.mem0_client import filter_by_relevance_floor  # noqa: E402
+from modules.memory.durable_store import filter_by_relevance_floor  # noqa: E402
 
 
 def _r(score):

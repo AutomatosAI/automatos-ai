@@ -1,4 +1,4 @@
-"""PRD-178 S4 — field → durable (mem0 L3) promotion with a taint guard.
+"""PRD-178 S4 — field → durable (L3) promotion with a taint guard.
 
 The moat arm: strong, frequently-recalled field patterns are distilled into
 durable memory BEFORE compaction hard-deletes them (patterns otherwise decay
@@ -7,12 +7,12 @@ and vanish, so the field never becomes durable). Promotion:
   1. Taint gate FIRST (top-risk #4 — promotion is the poisoning surface): a
      pattern whose provenance names untrusted external content (inbound
      email/web) is NEVER promoted.
-  2. Survivors are distilled into TYPED durable mem0 memories with provenance
+  2. Survivors are distilled into TYPED durable memories with provenance
      preserved, via the existing UnifiedMemoryService.store_long_term path
      (PRD-159) — no parallel durable writer.
   3. Only THEN are they deleted from the field.
 
-Pure predicates live in field_scoring (no IO). The job is tested with mem0 +
+Pure predicates live in field_scoring (no IO). The job is tested with the durable store +
 Qdrant mocked at the boundary.
 """
 from __future__ import annotations
@@ -79,7 +79,7 @@ def test_is_promotable_thresholds_and_taint():
 
 
 # ---------------------------------------------------------------------------
-# Job-level — FieldMemoryPromoter (mem0 + Qdrant mocked)
+# Job-level — FieldMemoryPromoter (durable store + Qdrant mocked)
 # ---------------------------------------------------------------------------
 
 def _payload(key, value, strength, access_count, provenance=None, last_accessed=None):
@@ -233,7 +233,7 @@ async def test_promotion_failure_does_not_delete():
     """If the durable write fails, the field pattern is NOT deleted — never lose
     the pattern to a failed promotion (belt-and-suspenders)."""
     mem = MagicMock()
-    mem.store_long_term = AsyncMock(return_value={"success": False, "error": "mem0 down"})
+    mem.store_long_term = AsyncMock(return_value={"success": False, "error": "durable store down"})
 
     strong = _point("pt-strong", _payload(
         "fact", "durable fact", strength=1.0, access_count=8,

@@ -136,9 +136,9 @@ class HeartbeatService:
         self._scheduler: Optional[AsyncIOScheduler] = None
         self._owns_scheduler: bool = False  # True when we created our own scheduler (tests)
         self._running_ticks: Dict[str, bool] = {}  # track concurrent ticks
-        # PRD-185 S11: last emitted memory-primitive status, so the 30s Mem0 probe
-        # writes a heartbeat_results row only on a state CHANGE (not every tick).
-        self._last_mem0_probe_status: Optional[str] = None
+        # PRD-185 S11: last emitted memory-primitive status, so the durable-store
+        # probe writes a heartbeat_results row only on a state CHANGE (not every tick).
+        self._last_durable_probe_status: Optional[str] = None
         self._max_concurrent_per_workspace = 5
 
     # ------------------------------------------------------------------
@@ -186,29 +186,26 @@ class HeartbeatService:
             max_instances=1,
         )
 
-        # PRD-141 US-006: proactive Mem0 health probe. Pings Mem0 out-of-band on
-        # a fixed interval and trips/resets every workspace breaker at once, so a
-        # Mem0 outage fails fast platform-wide instead of each request timing out.
+        # PRD-187 S1: durable-store health probe (was the PRD-141 US-006 mem0
+        # HTTP probe). Pings the in-process Qdrant durable store on a fixed
+        # interval and feeds the per-workspace memory primitive tile (W3-S1).
         try:
             from config import config as _app_config
 
-            if getattr(_app_config, "MEM0_HEALTH_PROBE_ENABLED", True):
-                from apscheduler.triggers.interval import IntervalTrigger
+            from apscheduler.triggers.interval import IntervalTrigger
 
-                probe_interval = int(
-                    getattr(_app_config, "MEM0_HEALTH_PROBE_INTERVAL_SECONDS", 30)
-                )
-                self._scheduler.add_job(
-                    self._mem0_health_probe_tick,
-                    IntervalTrigger(seconds=probe_interval),
-                    id="mem0_health_probe",
-                    replace_existing=True,
-                    max_instances=1,
-                    coalesce=True,
-                )
-                logger.info(
-                    "[Heartbeat] Mem0 health probe scheduled every %ds", probe_interval
-                )
+            probe_interval = int(_app_config.DURABLE_MEMORY_PROBE_INTERVAL_SECONDS)
+            self._scheduler.add_job(
+                self._durable_memory_probe_tick,
+                IntervalTrigger(seconds=probe_interval),
+                id="durable_memory_probe",
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+            )
+            logger.info(
+                "[Heartbeat] Durable-memory health probe scheduled every %ds", probe_interval
+            )
         except Exception:
             logger.error("[Heartbeat] Failed to schedule Mem0 health probe", exc_info=True)
 
@@ -249,12 +246,12 @@ class HeartbeatService:
             logger.info("[Heartbeat] Standalone scheduler stopped")
         logger.info("[Heartbeat] Service stopped")
 
-    async def _mem0_health_probe_tick(self) -> None:
-        """Probe Mem0 + emit memory primitive heartbeat finding (PRD-141 US-006 + W3-S1).
+    async def _durable_memory_probe_tick(self) -> None:
+        """Probe the durable store + emit memory primitive finding (PRD-187 S1 + W3-S1).
 
-        Resolves the shared Mem0Client (the one real traffic uses, so probe and
-        traffic agree on breaker state) and delegates the trip/reset decision to
-        ``run_health_probe``. Skips silently when Mem0 is unconfigured.
+        Pings the shared in-process durable store (the one real traffic uses)
+        via its ``health()`` Qdrant round-trip — an unreachable store surfaces
+        here LOUDLY instead of skipping silently (the old mem0 failure mode).
 
         W3-S1 (pathfinder wiring): after the probe lands, emit a ``memory``
         primitive_check finding per workspace that has an active orchestrator
@@ -264,26 +261,28 @@ class HeartbeatService:
         try:
             from modules.memory.unified_memory_service import get_unified_memory_service
 
-            client = get_unified_memory_service()._mem0
-            if not getattr(client, "api_url", ""):
-                return  # Mem0 disabled — skip both probe and primitive emit
-            healthy = await client.run_health_probe()
+            health = await get_unified_memory_service()._durable.health()
+            healthy = bool(health.get("healthy"))
+            if not healthy:
+                logger.error(
+                    "[Heartbeat] Durable-memory probe FAILED: %s", health.get("error")
+                )
         except Exception:
-            logger.error("[Heartbeat] Mem0 health probe tick errored", exc_info=True)
+            logger.error("[Heartbeat] Durable-memory probe tick errored", exc_info=True)
             return
 
         if self._scheduler is None:
             return
         primitive_status = "green" if healthy else "down"
         # PRD-185 S11: emit the memory primitive finding ONLY on a state change.
-        # This 30s probe previously wrote one heartbeat_results row per workspace
+        # This probe previously wrote one heartbeat_results row per workspace
         # EVERY tick (~2880/ws/day) — pure noise that polluted the table and the
         # primitive-health read. The tile is latest-wins with no freshness gate
         # (api/analytics_real.get_primitive_health), so one row per transition
         # keeps it correct while ending the spam. First tick emits the baseline.
-        if primitive_status == self._last_mem0_probe_status:
+        if primitive_status == self._last_durable_probe_status:
             return
-        detail = "mem0 probe ok" if healthy else "mem0 probe failed; breakers tripped"
+        detail = "durable store ok" if healthy else "durable store unreachable"
         try:
             for job in self._scheduler.get_jobs():
                 jid = getattr(job, "id", "") or ""
@@ -291,7 +290,7 @@ class HeartbeatService:
                     continue
                 ws_id = jid[len("orch_hb_"):]
                 emit_primitive_finding(ws_id, "memory", primitive_status, detail)
-            self._last_mem0_probe_status = primitive_status
+            self._last_durable_probe_status = primitive_status
         except Exception:
             logger.error(
                 "[Heartbeat] memory primitive emit loop errored", exc_info=True

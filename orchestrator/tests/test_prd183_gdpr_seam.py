@@ -17,7 +17,7 @@ pins the fix: the internal-key-authed ``/api/verticals/{v}/gdpr/*`` surface
     here at the boundary), so every erasure is still audited there.
 
 Pure: the DB session, the workspace resolver, and gdpr_service are faked/mocked
-at the boundary — no Postgres, no Qdrant, no mem0, no network.
+at the boundary — no Postgres, no Qdrant, no durable store, no network.
 """
 
 from __future__ import annotations

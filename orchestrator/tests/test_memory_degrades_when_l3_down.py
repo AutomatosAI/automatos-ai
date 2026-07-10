@@ -1,27 +1,23 @@
 """PRD-142 Wave 3 · W3-S7 — Memory failure-path tests.
 
-BRAIN §3.x Memory contract: *degrades when Mem0 down (circuit breaker built)*.
+BRAIN §3.x Memory contract: *degrades visibly when the durable store is down*.
 GUARDRAILS §H DoD #2: *failure path tested — the primitive degrades or errors
 visibly, never silently*.
 
-These tests pin the failure-path behaviour for the chat → memory write path:
+These tests pin the failure-path behaviour for the chat → memory write path
+(PRD-187 S1: L3 is the in-process durable store; the contract is unchanged):
 
-1. ``test_l2_transcript_still_writes_when_l3_raises`` — when Mem0 raises during
-   ``store_two_tier`` (L3), the L2 transcript write must still happen. The
-   turn is *not lost* even though L3 enrichment failed.
+1. ``test_l2_transcript_still_writes_when_l3_raises`` — when the durable store
+   raises during ``store_two_tier`` (L3), the L2 transcript write must still
+   happen. The turn is *not lost* even though the L3 write failed.
 
-2. ``test_l2_transcript_still_writes_when_l3_unconfigured`` — when Mem0 is
-   unconfigured (no api_url), L3 writes resolve to no-ops; L2 still persists
-   the verbatim transcript.
+2. ``test_l2_transcript_still_writes_when_l3_unconfigured`` — when L3 writes
+   resolve to error dicts (store unavailable), L2 still persists the verbatim
+   transcript.
 
-3. ``test_mem0_failure_is_visible_via_return_value`` — when L3 fully fails and
+3. ``test_l3_failure_is_visible_via_return_value`` — when L3 fully fails and
    nothing was durable, ``store_conversation`` returns ``False`` so the caller
    can observe the degradation (the turn is *visible*, not silent).
-
-4. ``test_per_workspace_breaker_isolation`` — a Mem0 outage in workspace A's
-   breaker does not trip workspace B's breaker. ``Mem0Client._breakers`` is a
-   per-workspace map; this test re-proves the isolation invariant from
-   PRD-141 US-006.
 
 Imports use the same package-stub isolation as
 ``test_memory_single_write_path.py`` so heavy modules (asyncpg / pdfplumber /
@@ -111,14 +107,14 @@ class _FakeUnified:
     async def store_two_tier(self, **kwargs):
         self.two_tier_calls.append(kwargs)
         if self.l3_unconfigured:
-            # Mirror store_two_tier behaviour when Mem0 is disabled — every
-            # tier silently no-ops with an error dict. The shared client logs
-            # at warning level once and returns ``None`` from ``_request``.
+            # Mirror store_two_tier behaviour when the durable store is
+            # unavailable — every tier resolves to an error dict (the adapter
+            # logs the failure loudly; the seam returns the error shape).
             return [
                 ("global", {"success": False, "error": "store_global failed"}),
             ]
         if self.l3_raises:
-            raise RuntimeError("mem0 add boom")
+            raise RuntimeError("durable add boom")
         if self.l3_returns_error:
             return [
                 ("global", {"success": False, "error": "store_global failed"}),
@@ -160,14 +156,14 @@ def _patch_distill(mgr: SmartMemoryManager, result):
 
 
 # ---------------------------------------------------------------------------
-# 1. L2 still writes when L3 (Mem0) raises mid-call
+# 1. L2 still writes when L3 (durable store) raises mid-call
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_l2_transcript_still_writes_when_l3_raises():
-    """A Mem0 outage during ``store_two_tier`` must not lose the turn — the
-    verbatim transcript still persists to L2.
+    """A durable-store outage during ``store_two_tier`` must not lose the
+    turn — the verbatim transcript still persists to L2.
     """
     unified = _FakeUnified(l3_raises=True)
     mgr = _make_mgr(unified)
@@ -186,7 +182,7 @@ async def test_l2_transcript_still_writes_when_l3_raises():
 
     # L2 transcript STILL ran — the turn is preserved.
     assert len(unified.transcript_calls) == 1, (
-        "L2 transcript must persist even when L3 (Mem0) raises — turn loss "
+        "L2 transcript must persist even when L3 raises — turn loss "
         "is the failure mode we are explicitly preventing"
     )
     # L3 was attempted exactly once (no silent retry storm).
@@ -194,14 +190,14 @@ async def test_l2_transcript_still_writes_when_l3_raises():
 
 
 # ---------------------------------------------------------------------------
-# 2. L2 still writes when Mem0 is unconfigured
+# 2. L2 still writes when the durable store is unavailable
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_l2_transcript_still_writes_when_l3_unconfigured():
-    """When Mem0 has no API URL (disabled), L3 writes resolve to error dicts;
-    the L2 transcript still persists so the chat history is not lost.
+    """When the durable store is unavailable, L3 writes resolve to error
+    dicts; the L2 transcript still persists so the chat history is not lost.
     """
     unified = _FakeUnified(l3_unconfigured=True)
     mgr = _make_mgr(unified)
@@ -212,7 +208,7 @@ async def test_l2_transcript_still_writes_when_l3_unconfigured():
         agent_id=11,
         user_message="I prefer light mode for the UI",
         assistant_response="Noted.",
-        chat_id="conv-no-mem0",
+        chat_id="conv-no-l3",
     )
 
     # L2 transcript persisted.
@@ -228,8 +224,8 @@ async def test_l2_transcript_still_writes_when_l3_unconfigured():
 
 
 @pytest.mark.asyncio
-async def test_mem0_failure_is_visible_via_return_value():
-    """When L3 (Mem0) write errors and no durable facts could be stored,
+async def test_l3_failure_is_visible_via_return_value():
+    """When the L3 write errors and no durable facts could be stored,
     ``store_conversation`` returns ``False`` so the caller sees the failure.
     This is the §H "failure path tested — never silently swallowed" check.
     """
@@ -251,63 +247,3 @@ async def test_mem0_failure_is_visible_via_return_value():
     )
     # And L2 still got the transcript — no turn loss.
     assert len(unified.transcript_calls) == 1
-
-
-# ---------------------------------------------------------------------------
-# 4. Per-workspace breaker isolation
-# ---------------------------------------------------------------------------
-
-
-def test_per_workspace_breaker_isolation():
-    """A Mem0 outage in workspace A's breaker must not trip workspace B's.
-
-    The shared Mem0Client carries a per-workspace breaker registry
-    (``_breakers``). Calls scoped to ``workspace_id`` use that workspace's
-    breaker. Calls without a workspace scope share the ``_global`` breaker.
-    This re-proves the isolation invariant (PRD-141 US-006) — it underpins
-    the W3-S7 claim that one workspace's Mem0 outage does not break every
-    other workspace's chat turn.
-    """
-    # Stdlib-only stub for the modules.memory parents — avoid loading the full
-    # memory chain (asyncpg / pdfplumber would be pulled).
-    for _pkg in ("modules", "modules.memory", "modules.memory.integrations"):
-        if _pkg not in sys.modules:
-            _stub = types.ModuleType(_pkg)
-            _stub.__path__ = [str(_ORCH / _pkg.replace(".", "/"))]
-            sys.modules[_pkg] = _stub
-
-    # Stub config.config for Mem0Client init (it reads MEM0_API_URL etc.).
-    if "config" not in sys.modules:
-        cfg = types.ModuleType("config")
-        cfg.config = MagicMock(
-            MEM0_API_URL="",
-            MEM0_API_KEY="",
-            MEM0_TIMEOUT_SECONDS=3.0,
-            MEM0_WRITE_TIMEOUT_SECONDS=5.0,
-            MEM0_CIRCUIT_THRESHOLD=3,
-            MEM0_CIRCUIT_COOLDOWN_SECONDS=60,
-        )
-        sys.modules["config"] = cfg
-
-    from modules.memory.integrations.mem0_client import Mem0Client
-
-    # Reset the breaker registry for a clean test.
-    Mem0Client._breakers = {}
-
-    breaker_a = Mem0Client._get_breaker("ws-iso-A")
-    breaker_b = Mem0Client._get_breaker("ws-iso-B")
-    assert breaker_a is not breaker_b, (
-        "Each workspace must get its own breaker instance"
-    )
-
-    # Trip workspace A's breaker by recording failures up to the threshold.
-    for _ in range(breaker_a.threshold):
-        breaker_a.record_failure()
-
-    assert breaker_a.is_open is True, "A's breaker should be open after threshold failures"
-    assert breaker_b.is_open is False, (
-        "B's breaker must remain closed — per-workspace isolation"
-    )
-    assert breaker_b.allow_request() is True, (
-        "Workspace B should still be allowed to call Mem0 even while A is tripped"
-    )

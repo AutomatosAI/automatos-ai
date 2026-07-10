@@ -85,7 +85,7 @@ async def search_chat_history(db: Session, workspace_id: UUID, params: Dict[str,
 
 
 async def search_memory(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Search Mem0 memories by query."""
+    """Search durable memories by query."""
     from modules.memory.unified_memory_service import get_unified_memory_service
 
     query = params.get("query", "").strip()
@@ -101,8 +101,8 @@ async def search_memory(db: Session, workspace_id: UUID, params: Dict[str, Any])
 
     try:
         service = get_unified_memory_service()
-        if not service.is_mem0_configured:
-            return {"success": False, "error": "Memory service not configured (MEM0_API_URL empty)"}
+        if not service.is_durable_configured:
+            return {"success": False, "error": "Memory service not configured (QDRANT_URL empty)"}
 
         ws_id = str(workspace_id)
 
@@ -194,7 +194,7 @@ async def search_memory(db: Session, workspace_id: UUID, params: Dict[str, Any])
 
 
 async def browse_memories(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Browse/search memories via Mem0."""
+    """Browse/search durable memories."""
     try:
         from modules.memory.unified_memory_service import get_unified_memory_service
 
@@ -228,7 +228,7 @@ async def browse_memories(db: Session, workspace_id: UUID, params: Dict[str, Any
             "success": True,
             "memories": memories,
             "total": len(memories),
-            "source": "mem0",
+            "source": "durable_memory",
             "search_query": query,
         }
     except Exception as e:

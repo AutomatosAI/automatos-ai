@@ -627,25 +627,18 @@ async def delete_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any
         logger.warning("[PlatformExecutor] Trigger cleanup failed for playbook %d: %s", playbook.id, e)
         cleanup_notes.append(f"Trigger cleanup failed: {e}")
 
-    # Mem0 memory cleanup (non-fatal)
+    # Durable memory cleanup (non-fatal). The old HTTP cleanup deleted a
+    # "playbook-{id}" namespace no writer ever used — this erases the real
+    # recipe bucket the playbook memory writer stores under.
     try:
-        import httpx
-        from config import config
-        mem0_url = config.MEM0_API_URL
-        if mem0_url:
-            import asyncio
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                headers = {}
-                if config.MEM0_API_KEY:
-                    headers["Authorization"] = f"Bearer {config.MEM0_API_KEY}"
-                await client.delete(
-                    f"{mem0_url}/api/v1/memories/",
-                    params={"user_id": f"playbook-{playbook.id}"},
-                    headers=headers,
-                )
-            cleanup_notes.append("Playbook memories cleaned up")
+        from modules.memory.unified_memory_service import get_unified_memory_service
+
+        svc = get_unified_memory_service()
+        recipe_ns = svc.namespace(str(playbook.workspace_id)).recipe(playbook.id)
+        erased = await svc._durable.erase_namespace(recipe_ns)
+        cleanup_notes.append(f"Playbook memories cleaned up ({erased})")
     except Exception as e:
-        logger.debug("[PlatformExecutor] Mem0 cleanup skipped for playbook %d: %s", playbook.id, e)
+        logger.warning("[PlatformExecutor] Durable-memory cleanup failed for playbook %d: %s", playbook.id, e)
 
     # Delete the playbook (cascades to executions via FK)
     db.delete(playbook)

@@ -85,7 +85,7 @@ class Config:
     MEMORY_SESSION_TTL_SECONDS: int = int(os.getenv("MEMORY_SESSION_TTL_SECONDS", "86400"))
     # L1 Session: TTL after end_session() called (1 hour consolidation window)
     MEMORY_SESSION_CONSOLIDATION_TTL_SECONDS: int = int(os.getenv("MEMORY_SESSION_CONSOLIDATION_TTL_SECONDS", "3600"))
-    # L3 Cache: TTL for Mem0 search result caching in Redis
+    # L3 Cache: TTL for durable-store search result caching in Redis
     MEMORY_CACHE_TTL_SECONDS: int = int(os.getenv("MEMORY_CACHE_TTL_SECONDS", "300"))
     # Context Router: per-source sub-budgets (tokens).
     # Fallback only — used when the model context window is unknown. When the
@@ -751,7 +751,7 @@ class Config:
     COORDINATOR_TASK_EXECUTION_TIMEOUT: int = int(os.getenv("COORDINATOR_TASK_EXECUTION_TIMEOUT", "240"))
     # Note: synthesis-task model selection is now driven by power_mode +
     # the agent's own configured model — no synthesis-specific override.
-    # System LLM (gemini-2.5-flash) is reserved for codegraph / Mem0 / planner.
+    # System LLM (gemini-2.5-flash) is reserved for codegraph / memory / planner.
     # Cross-task consistency verification — feature flag, lives in `general`
     # (post PRD-136 collapse — no longer an LLM-tier setting).
     @property
@@ -873,35 +873,19 @@ class Config:
     # =============================================================================
     RECIPE_SCRATCHPAD_TTL: int = int(os.getenv("RECIPE_SCRATCHPAD_TTL", "3600"))
     RECIPE_LOG_S3_BUCKET: str = os.getenv("RECIPE_LOG_S3_BUCKET", "automatos-ai")
-    # PRD-176 F068: local-safe default (SaaS sets the railway mem0 host via env).
-    MEM0_API_URL: str = os.getenv("MEM0_API_URL", "http://localhost:8888")
-    MEM0_API_KEY: str = os.getenv("MEM0_API_KEY")
-    # Read path (search/get_all) blocks TTFT — keep short.
-    MEM0_TIMEOUT_SECONDS: float = float(os.getenv("MEM0_TIMEOUT_SECONDS", "3.0"))
-    # Write path runs post-LLM (Mem0 is enrichment, not the critical path).
-    # PRD-137 raised this to 15s because in the SYNC era a too-short write timeout
-    # tripped the single global breaker and caused 5-min blackouts. PRD-141 makes
-    # writes async (no thread held), per-workspace (US-004), with a 60s cooldown
-    # and a reachability probe (US-006) that resets breakers when Mem0 is up — so
-    # a tighter 5s write timeout now fails fast on a down Mem0 without blackouts;
-    # the worst case is losing the slowest (5-7s) enrichment writes.
-    MEM0_WRITE_TIMEOUT_SECONDS: float = float(os.getenv("MEM0_WRITE_TIMEOUT_SECONDS", "5.0"))
-    # Open circuit after this many consecutive failures.
-    MEM0_CIRCUIT_THRESHOLD: int = int(os.getenv("MEM0_CIRCUIT_THRESHOLD", "3"))
-    # Stay open for this many seconds before allowing a probe. Short now that the
-    # proactive probe (US-006) resets breakers the moment Mem0 is reachable again.
-    MEM0_CIRCUIT_COOLDOWN_SECONDS: int = int(os.getenv("MEM0_CIRCUIT_COOLDOWN_SECONDS", "60"))
-    # PRD-141 US-006: proactive Mem0 health probe in the heartbeat. Pings Mem0
-    # out-of-band every interval and trips/resets ALL workspace breakers at once,
-    # so an outage fails fast everywhere instead of each workspace timing out.
-    MEM0_HEALTH_PROBE_ENABLED: bool = os.getenv("MEM0_HEALTH_PROBE_ENABLED", "true").lower() in ("true", "1", "yes")
-    MEM0_HEALTH_PROBE_INTERVAL_SECONDS: int = int(os.getenv("MEM0_HEALTH_PROBE_INTERVAL_SECONDS", "30"))
 
     # =============================================================================
     # QDRANT — PRD-108 Memory Field (Shared Semantic Context)
     # =============================================================================
     QDRANT_URL: str = os.getenv("QDRANT_URL", "http://localhost:6333")
     QDRANT_API_KEY: str = os.getenv("QDRANT_API_KEY", "")
+    # PRD-187 S1: in-process L3 durable memory — a second collection on the same
+    # running Qdrant (field memory is the first). Wave-3 P2-16 consolidates both
+    # under one client/config; keep the collection name a config knob for that.
+    DURABLE_MEMORY_COLLECTION: str = os.getenv("DURABLE_MEMORY_COLLECTION", "durable_memory")
+    # Heartbeat pings the durable store on this interval and feeds the memory
+    # primitive tile (transition-only emits per PRD-185 S11).
+    DURABLE_MEMORY_PROBE_INTERVAL_SECONDS: int = int(os.getenv("DURABLE_MEMORY_PROBE_INTERVAL_SECONDS", "30"))
     FIELD_EMBEDDING_DIM: int = int(os.getenv("FIELD_EMBEDDING_DIM", "2048"))
     FIELD_DECAY_RATE: float = float(os.getenv("FIELD_DECAY_RATE", "0.1"))
     FIELD_REINFORCE_BONUS: float = float(os.getenv("FIELD_REINFORCE_BONUS", "0.05"))
@@ -927,7 +911,7 @@ class Config:
     # drains a backlog faster without ever re-touching a done run.
     FLYWHEEL_INGEST_BATCH: int = int(os.getenv("FLYWHEEL_INGEST_BATCH", "3"))
 
-    # PRD-178 S4 — Field → durable (mem0 L3) promotion, the moat arm.
+    # PRD-178 S4 — Field → durable (L3) promotion.
     # Strong, frequently-recalled field patterns are distilled into durable
     # memory BEFORE compaction hard-deletes them (else the field never becomes
     # durable). Thresholds are config, not hardcoded (D11).

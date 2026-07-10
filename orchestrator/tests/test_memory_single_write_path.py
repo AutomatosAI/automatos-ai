@@ -173,7 +173,7 @@ async def test_chat_turn_writes_l2_exactly_once():
 
 @pytest.mark.asyncio
 async def test_chat_turn_writes_l3_exactly_once():
-    """L3 (Mem0) is invoked exactly once per turn via ``store_conversation``.
+    """L3 (durable store) is invoked exactly once per turn via ``store_conversation``.
 
     ``store_conversation`` routes to a SINGLE namespace per turn — "global" by
     default, or the agent namespace only on an explicit agent-scoped instruction
@@ -194,5 +194,5 @@ async def test_chat_turn_writes_l3_exactly_once():
     await _drain_background()
 
     assert fake.memory_manager.store_conversation.await_count == 1, (
-        "L3 (chat → Mem0 distilled facts) must fire exactly once per turn"
+        "L3 (chat → distilled durable facts) must fire exactly once per turn"
     )

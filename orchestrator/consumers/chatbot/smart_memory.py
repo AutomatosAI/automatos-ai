@@ -216,7 +216,7 @@ class SmartMemoryManager:
                 # PRD-185 S11: assembly-side guard — never inject sub-floor or
                 # noise-typed (heartbeat/playbook-summary) memories into the prompt.
                 # The relevance floor is also applied at the L3 search boundary
-                # (mem0_client.filter_by_relevance_floor, PRD-159 S3); re-asserting
+                # (durable_store.filter_by_relevance_floor, PRD-159 S3); re-asserting
                 # it over the MERGED set closes the content-type gap the search
                 # layer lacks, at the one chokepoint that feeds the LLM formatter.
                 from modules.memory.injection_filter import filter_injectable_memories

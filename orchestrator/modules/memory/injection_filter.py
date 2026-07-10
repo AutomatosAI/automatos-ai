@@ -2,7 +2,7 @@
 
 Sub-floor and noise-typed memories must never reach the prompt. The relevance
 floor is already applied at the L3 search boundary
-(``mem0_client.filter_by_relevance_floor``, PRD-159 S3); this is the guard over
+(``durable_store.filter_by_relevance_floor``, PRD-159 S3); this is the guard over
 the **merged** candidate set at the one chokepoint that feeds
 ``_format_memories_for_llm`` — so it re-asserts the floor over every source
 (L3 global + agent tiers, and any future L2) AND adds the content-type exclusion

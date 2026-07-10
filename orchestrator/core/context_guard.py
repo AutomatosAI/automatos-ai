@@ -12,7 +12,7 @@ Strategy:
    turns; small windows compact earlier and keep fewer
 3. If below the threshold → pass through unchanged; above → compact: summarize
    older turns, keep recent context
-4. Flush key facts to Mem0 before discarding messages
+4. Flush key facts to durable memory before discarding messages
 
 This prevents context_length_exceeded errors and keeps conversations going
 indefinitely without manual truncation.
@@ -277,7 +277,7 @@ class ContextGuard:
         Strategy:
         1. Split messages into: system_msgs | old_turns | recent_turns
         2. Summarize old_turns into a single context message
-        3. Flush key facts from old_turns to Mem0
+        3. Flush key facts from old_turns to durable memory
         4. Return: system_msgs + [summary] + recent_turns
         """
         # Separate system messages (always keep) from conversation turns
@@ -380,7 +380,7 @@ class ContextGuard:
         workspace_id: str,
         agent_id: Optional[int] = None,
     ):
-        """Flush key facts from compacted turns to Mem0 for long-term retention."""
+        """Flush key facts from compacted turns to durable memory for long-term retention."""
         try:
             from consumers.chatbot.smart_memory import get_smart_memory_manager
 
@@ -393,7 +393,7 @@ class ContextGuard:
                 user_message="[Context compaction — key facts from earlier conversation]",
                 assistant_response=key_facts,
             )
-            logger.info("[ContextGuard] Flushed key facts to Mem0")
+            logger.info("[ContextGuard] Flushed key facts to durable memory")
         except Exception as exc:
             logger.warning("[ContextGuard] Memory flush failed (non-fatal): %s", exc)
 

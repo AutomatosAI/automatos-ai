@@ -394,7 +394,7 @@ async def _boot_phase_2_extensions(app_instance: "FastAPI") -> "DeferredInitResu
                         logger.warning("Could not start MemoryJobScheduler: %s", _mj_err)
 
                 # PRD-178 S4: field → durable promotion (the moat arm) — distill
-                # strong, untainted field patterns into durable mem0 memory
+                # strong, untainted field patterns into durable memory
                 # before compaction hard-deletes them. Taint-gated.
                 if config.FIELD_PROMOTION_ENABLED:
                     try:
