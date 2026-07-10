@@ -709,7 +709,15 @@ class PlatformActionExecutor:
                     }
 
             if action_def and action_def.requires_confirmation and not full_autonomy:
-                return {
+                # PRD-193 S1 (P2-12): the ask is no longer a dead end — issue
+                # (or reuse) a PENDING tool_call ApprovalGrant and return the
+                # ask WITH the grant attached, so a human can finally say yes.
+                # Fail-safe: any fault in the grant machinery returns the plain
+                # ask (the ask is the floor — never an exception, never an
+                # execution).
+                from modules.tools.execution import tool_grants
+
+                ask = {
                     "success": False,
                     "requires_confirmation": True,
                     "action": action_name,
@@ -720,13 +728,23 @@ class PlatformActionExecutor:
                     ),
                     "params": params,
                 }
+                return tool_grants.attach_ask_grant(
+                    self.db,
+                    self.workspace_id,
+                    action=action_name,
+                    params=params,
+                    ask=ask,
+                    permission_level=action_def.permission_level,
+                    description=action_def.description,
+                    caller_context=caller_context,
+                )
         except Exception as e:
             # Fail-closed: if we can't verify permissions, require confirmation
             logger.warning(
                 "[PlatformExecutor] Registry lookup failed for %s: %s — requiring confirmation",
                 action_name, e,
             )
-            return {
+            ask = {
                 "success": False,
                 "requires_confirmation": True,
                 "action": action_name,
@@ -737,6 +755,25 @@ class PlatformActionExecutor:
                 ),
                 "params": params,
             }
+            # PRD-193 S1: the fail-closed ask gets the grant loop too (best
+            # effort — the same surface resolves it if/when the registry
+            # heals). NOTE: no grant is CONSUMED on this path — the permission
+            # stack could not be verified, so nothing may execute here.
+            try:
+                from modules.tools.execution import tool_grants
+
+                return tool_grants.attach_ask_grant(
+                    self.db,
+                    self.workspace_id,
+                    action=action_name,
+                    params=params,
+                    ask=ask,
+                    permission_level=None,
+                    description=None,
+                    caller_context=caller_context,
+                )
+            except Exception:  # pragma: no cover - attach_ask_grant never raises
+                return ask
 
         # PRD-140 Phase 1 — hierarchy permission check. Runs before the
         # rate limiter so denied calls don't spend rate-limit budget.
