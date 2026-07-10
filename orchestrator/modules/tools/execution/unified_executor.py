@@ -448,6 +448,27 @@ class UnifiedToolExecutor:
                 "'%s' (risk=%s, mode=%s) — proceeding (downstream gates still "
                 "apply)", trace, effective_name, risk, mode, exc_info=True,
             )
+            # PRD-192 S2: fail-opens are COUNTED, not just logged — fire the
+            # bus with the marker so the audit row exists and the shadow
+            # report can compute the G.5 fail-open rate from data.
+            try:
+                from modules.policy import Verdict
+
+                self._fire_policy_bus(
+                    effective_name, effective_params,
+                    Verdict.allow(
+                        f"[policy-fail-open] plane fault — proceeded "
+                        f"(risk={risk or 'unknown'}, mode={mode})"
+                    ),
+                    agent_id=agent_id, workspace_id=workspace_id,
+                    caller_context=caller_context, trace=trace,
+                    risk=risk, mode=mode,
+                )
+            except Exception:
+                logger.debug(
+                    "[tool-trace %s] fail-open audit fire skipped", trace,
+                    exc_info=True,
+                )
             return None
 
         logger.error(
