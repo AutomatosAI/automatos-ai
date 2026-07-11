@@ -133,7 +133,9 @@ def test_audit_log_scoped_to_ctx_workspace(new_session, two_workspaces):
     _seed_audit(s, ws_b, action="policy:deny")
     s.commit()
 
-    resp = asyncio.run(gov.get_audit_log(ctx=_ctx(ws_a), db=s))
+    # NB: called directly (not via FastAPI), so limit/offset are passed
+    # explicitly — the Query(...) defaults only resolve under a real request.
+    resp = asyncio.run(gov.get_audit_log(ctx=_ctx(ws_a), db=s, limit=50, offset=0))
     actions = [r["action"] for r in resp["rows"]]
     assert resp["total"] == 2, "only this workspace's rows are counted"
     assert set(actions) == {"policy:deny", "gdpr:export"}
@@ -151,18 +153,18 @@ def test_audit_log_filters_compose(new_session, two_workspaces):
     _seed_audit(s, ws_a, action="policy:deny", actor_type="system", created_at=old)
     s.commit()
 
-    # action_prefix
-    policy = asyncio.run(gov.get_audit_log(ctx=_ctx(ws_a), db=s, action_prefix="policy:"))
+    # action_prefix (limit/offset explicit — direct call, no FastAPI to resolve Query)
+    policy = asyncio.run(gov.get_audit_log(ctx=_ctx(ws_a), db=s, action_prefix="policy:", limit=50, offset=0))
     assert all(r["action"].startswith("policy:") for r in policy["rows"])
     assert policy["total"] == 3
 
     # actor_type
-    sys_rows = asyncio.run(gov.get_audit_log(ctx=_ctx(ws_a), db=s, actor_type="system"))
+    sys_rows = asyncio.run(gov.get_audit_log(ctx=_ctx(ws_a), db=s, actor_type="system", limit=50, offset=0))
     assert all(r["actor_type"] == "system" for r in sys_rows["rows"])
 
     # since window drops the 10-day-old row
     since = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
-    recent = asyncio.run(gov.get_audit_log(ctx=_ctx(ws_a), db=s, action_prefix="policy:", since=since))
+    recent = asyncio.run(gov.get_audit_log(ctx=_ctx(ws_a), db=s, action_prefix="policy:", since=since, limit=50, offset=0))
     assert recent["total"] == 2, "the 10-day-old policy row is filtered out by since"
     s.close()
 
