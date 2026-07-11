@@ -104,6 +104,31 @@ def build_tool_outcome(
     app = str(params.get("app_name") or result.get("app") or "platform")
     success = bool(result.get("success"))
 
+    if result.get("requires_confirmation"):
+        # PRD-193 S5 (P2-12): an ask is an ASK — neither a failure nor a
+        # success. The confirmation gate returning requires_confirmation
+        # daily must not become failure-spam in memory (the exact noise
+        # class PRD-187 S2 cleaned up). Deduped per (workspace, app, action)
+        # like every other outcome.
+        signature = "ask:awaiting_approval"
+        fact = f"Tool {action} ({app}) is awaiting human approval before it can run."
+        outcome_hash = _content_hash(workspace_id, app, action, signature)
+        return {
+            "fact": fact,
+            "type": TOOL_OUTCOME_TYPE,
+            "importance": 0.3,
+            "metadata": {
+                "category": TOOL_OUTCOME_TYPE,
+                "importance": 0.3,
+                "app": app,
+                "action": action,
+                "error_class": "",
+                "outcome": "ask",
+                "success": False,
+                "outcome_hash": outcome_hash,
+            },
+        }
+
     if success:
         if not _is_notable_success(result):
             return None  # noise gate: trivial success → no memory
