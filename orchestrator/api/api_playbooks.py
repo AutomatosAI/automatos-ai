@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Optional
 from fastapi import APIRouter, Depends, Header, HTTPException
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -22,7 +23,7 @@ class MineRequest(BaseModel):
     name_prefix: str = "auto"
 
 
-@router.post("/mine")
+@router.post("/mine", dependencies=[Depends(require_workspace_permission("playbooks:create"))])
 def mine(body: MineRequest, db: Session = Depends(get_db), x_tenant_id: str | None = Header(default=None), ctx: RequestContext = Depends(get_request_context_hybrid)):
     # PRD-168 security: scope to the authenticated workspace, never client input
     # (was: tenant_id from body/header → cross-tenant IDOR).

@@ -30,6 +30,7 @@ from sqlalchemy.orm import Session
 from api.harness_commands import handle_harness_command
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 from core.models.core import User
 
@@ -76,7 +77,7 @@ async def _run_command(
     return result
 
 
-@router.post("/prescriptions/{rx_id}/approve")
+@router.post("/prescriptions/{rx_id}/approve", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def approve_prescription(
     rx_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -86,7 +87,7 @@ async def approve_prescription(
     return await _run_command(db, ctx, "/approve", rx_id)
 
 
-@router.post("/prescriptions/{rx_id}/reject")
+@router.post("/prescriptions/{rx_id}/reject", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def reject_prescription(
     rx_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),

@@ -27,6 +27,7 @@ from core.models import Agent
 from core.models.core import RecipeExecution
 from core.models.composio import TriggerSubscription, ComposioEntity
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 from config import config
 
@@ -366,7 +367,7 @@ async def get_workflow_recipe(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("")
+@router.post("", dependencies=[Depends(require_workspace_permission("playbooks:create"))])
 async def create_workflow_recipe(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     recipe_data: Dict[str, Any] = Body(...),
@@ -510,7 +511,7 @@ async def create_workflow_recipe(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.put("/{recipe_id}")
+@router.put("/{recipe_id}", dependencies=[Depends(require_workspace_permission("playbooks:update"))])
 async def update_workflow_recipe(
     recipe_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -638,7 +639,7 @@ async def update_workflow_recipe(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.delete("/{recipe_id}")
+@router.delete("/{recipe_id}", dependencies=[Depends(require_workspace_permission("playbooks:delete"))])
 async def delete_workflow_recipe(
     recipe_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -716,7 +717,7 @@ async def delete_workflow_recipe(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/{recipe_id}/use")
+@router.post("/{recipe_id}/use", dependencies=[Depends(require_workspace_permission("playbooks:update"))])
 async def record_recipe_usage(
     recipe_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -813,7 +814,7 @@ async def list_featured_recipes(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/{recipe_id}/execute")
+@router.post("/{recipe_id}/execute", dependencies=[Depends(require_workspace_permission("playbooks:execute"))])
 async def execute_recipe(
     recipe_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -1013,7 +1014,7 @@ async def get_recipe_execution_detail(
 # CANCEL EXECUTION
 # ===================================================================
 
-@router.post("/{recipe_id}/executions/{execution_id}/cancel")
+@router.post("/{recipe_id}/executions/{execution_id}/cancel", dependencies=[Depends(require_workspace_permission("playbooks:execute"))])
 async def cancel_execution(
     recipe_id: str,
     execution_id: str,
@@ -1180,7 +1181,7 @@ async def get_step_full_logs(
 # SELF-LEARNING ENDPOINTS (Learn, Quality, Suggestions, Executions)
 # ===================================================================
 
-@router.post("/{recipe_id}/learn")
+@router.post("/{recipe_id}/learn", dependencies=[Depends(require_workspace_permission("playbooks:update"))])
 async def analyze_execution_learning(
     recipe_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -1244,7 +1245,7 @@ async def analyze_execution_learning(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/{recipe_id}/assess-quality")
+@router.post("/{recipe_id}/assess-quality", dependencies=[Depends(require_workspace_permission("playbooks:update"))])
 async def assess_execution_quality(
     recipe_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -1416,7 +1417,7 @@ async def list_recipe_executions(
 # MARKETPLACE ENDPOINTS
 # ===================================================================
 
-@router.post("/submit")
+@router.post("/submit", dependencies=[Depends(require_workspace_permission("playbooks:create"))])
 async def submit_recipe_to_marketplace(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     recipe_data: Dict[str, Any] = Body(...),
@@ -1557,7 +1558,7 @@ async def submit_recipe_to_marketplace(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/install/{recipe_id}")
+@router.post("/install/{recipe_id}", dependencies=[Depends(require_workspace_permission("playbooks:create"))])
 async def install_recipe_from_marketplace(
     recipe_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),

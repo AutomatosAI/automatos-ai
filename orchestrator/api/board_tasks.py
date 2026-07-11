@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from config import config
 from core.auth.hybrid import get_request_context_hybrid, require_task_context
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 from core.auth.scopes import TASKS_READ
 from core.database.database import get_db
@@ -287,7 +288,7 @@ def _enrich_with_agents(tasks: list, db: Session, workspace_id) -> list:
 
 # ── CRUD ─────────────────────────────────────────────────────────────
 
-@router.post("")
+@router.post("", dependencies=[Depends(require_workspace_permission("missions:create"))])
 async def create_task(
     request: Request,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -475,7 +476,7 @@ async def get_task(
     return enriched[0]
 
 
-@router.patch("/{task_id}")
+@router.patch("/{task_id}", dependencies=[Depends(require_workspace_permission("missions:update"))])
 async def update_task(
     task_id: int,
     request: Request,
@@ -601,7 +602,7 @@ async def update_task(
     return task.to_dict()
 
 
-@router.delete("/{task_id}")
+@router.delete("/{task_id}", dependencies=[Depends(require_workspace_permission("missions:delete"))])
 async def delete_task(
     task_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -624,7 +625,7 @@ async def delete_task(
 
 # ── Status shortcut (drag-and-drop) ─────────────────────────────────
 
-@router.post("/{task_id}/approve")
+@router.post("/{task_id}/approve", dependencies=[Depends(require_workspace_permission("missions:update"))])
 async def approve_task(
     task_id: int,
     request: Request,
@@ -736,7 +737,7 @@ async def approve_task(
     }
 
 
-@router.post("/{task_id}/reject")
+@router.post("/{task_id}/reject", dependencies=[Depends(require_workspace_permission("missions:update"))])
 async def reject_task(
     task_id: int,
     request: Request,
@@ -793,7 +794,7 @@ async def reject_task(
     }
 
 
-@router.post("/{task_id}/run-now")
+@router.post("/{task_id}/run-now", dependencies=[Depends(require_workspace_permission("missions:execute"))])
 async def run_task_now(
     task_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -832,7 +833,7 @@ async def run_task_now(
     return {"success": True, "task_id": task.id, "status": task.status}
 
 
-@router.patch("/{task_id}/status")
+@router.patch("/{task_id}/status", dependencies=[Depends(require_workspace_permission("missions:update"))])
 async def update_task_status(
     task_id: int,
     request: Request,
@@ -1263,7 +1264,7 @@ async def _board_planning_context(db: Session, workspace_id, goal: str) -> str:
         return ""
 
 
-@router.post("/plan")
+@router.post("/plan", dependencies=[Depends(require_workspace_permission("missions:create"))])
 async def plan_task(
     request: Request,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -1341,7 +1342,7 @@ async def plan_task(
     return {"planning": parsed, "raw_prompt": raw_prompt}
 
 
-@router.post("/plan/refine")
+@router.post("/plan/refine", dependencies=[Depends(require_workspace_permission("missions:create"))])
 async def refine_task(
     request: Request,
     ctx: RequestContext = Depends(get_request_context_hybrid),
