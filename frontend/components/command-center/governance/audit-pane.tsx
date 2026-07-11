@@ -18,6 +18,7 @@ const ACTION_PREFIXES = [
   { value: 'policy:', label: 'Policy verdicts' },
   { value: 'gdpr:', label: 'GDPR' },
   { value: 'approval_grant:', label: 'Approvals' },
+  { value: 'governance:', label: 'Governance config' },
   { value: 'audit:', label: 'Retention' },
 ]
 

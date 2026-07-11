@@ -1,5 +1,5 @@
 {
-  "route_count": 761,
+  "route_count": 765,
   "routes": [
     {
       "method": "GET",
@@ -2232,6 +2232,22 @@
     {
       "method": "GET",
       "path": "/api/v1/governance/audit-log"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/governance/budget"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/governance/budget"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/governance/policy"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/governance/policy"
     },
     {
       "method": "GET",

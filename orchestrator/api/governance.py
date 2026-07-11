@@ -16,7 +16,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -25,7 +25,9 @@ from core.auth.workspace_admin import require_workspace_admin
 from core.database.database import get_db
 from core.models.approval_grants import ApprovalGrant
 from core.workspaces.audit import AuditLog
+from modules.policy.budget import load_budget, set_budget
 from modules.policy.flag import policy_plane_enabled
+from modules.policy.policy_document import load_policy_document, set_policy_document
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +40,32 @@ router = APIRouter(
 
 # The policy-verdict look-back for the status tile's verdict counts.
 _STATUS_WINDOW_DAYS = 30
+
+# The only budget keys the editor accepts (governance-policy §B.1 / budget.py).
+_BUDGET_KEYS = frozenset({"max_cost_usd", "max_total_tokens", "window"})
+
+
+def _actor_ref(ctx: RequestContext) -> str:
+    uid = getattr(ctx, "user_id", None) or getattr(ctx, "internal_user_id", None)
+    return f"user:{uid}" if uid is not None else "user:unknown"
+
+
+def _audit_governance(db: Session, ctx: RequestContext, action: str, details: Dict[str, Any]) -> None:
+    """Record a governance config change so it shows up in the audit view."""
+    try:
+        from core.workspaces.audit import AuditService
+
+        AuditService(db).log(
+            workspace_id=str(ctx.workspace_id),
+            user_id=None,
+            actor_type="user",
+            action=action,
+            resource_type="workspace",
+            resource_id=str(ctx.workspace_id),
+            details={**details, "actor": _actor_ref(ctx)},
+        )
+    except Exception:
+        logger.warning("[governance] audit failed for %s", action, exc_info=True)
 
 
 def _parse_dt(value: Optional[str], field: str) -> Optional[datetime]:
@@ -170,3 +198,89 @@ async def get_status(
         },
         "retention": _retention_status(),
     }
+
+
+# ===========================================================================
+# S4 — policy posture + budget editors (write the config the PRD-192 gate reads)
+# ===========================================================================
+
+@router.get("/policy")
+async def get_policy(
+    ctx: RequestContext = Depends(require_workspace_admin),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """This workspace's policy posture (Balanced/Strict/Permissive), per-risk
+    ``route_overrides``, and ``agents_inherit_admin``. Fail-safe to Balanced."""
+    return load_policy_document(db, ctx.workspace_id).audit_snapshot()
+
+
+@router.put("/policy")
+async def put_policy(
+    body: Dict[str, Any] = Body(default_factory=dict),
+    ctx: RequestContext = Depends(require_workspace_admin),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Set the policy posture / overrides / inherit-admin. Invalid posture or
+    override map surfaces as 422 (from ``set_policy_document``'s own validation).
+    The change only becomes user-visible when the plane is enforcing (S3 tile)."""
+    inherit = body.get("agents_inherit_admin")
+    if inherit is not None and not isinstance(inherit, bool):
+        raise HTTPException(status_code=422, detail="agents_inherit_admin must be a boolean")
+    overrides = body.get("route_overrides")
+    if overrides is not None and not isinstance(overrides, dict):
+        raise HTTPException(status_code=422, detail="route_overrides must be an object")
+    try:
+        doc = set_policy_document(
+            db,
+            ctx.workspace_id,
+            posture=body.get("posture"),
+            agents_inherit_admin=inherit,
+            route_overrides=overrides,
+        )
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(exc))
+    db.commit()
+    # ``governance:`` namespace (not ``policy:``) so a config change is NOT
+    # counted as a policy verdict in /status, but is still auditable.
+    _audit_governance(db, ctx, "governance:policy_updated", doc.audit_snapshot())
+    return doc.audit_snapshot()
+
+
+@router.get("/budget")
+async def get_budget(
+    ctx: RequestContext = Depends(require_workspace_admin),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """This workspace's spend/token ceiling under ``plan_limits.budget`` (empty
+    ⇒ no ceiling; the gate is inert)."""
+    return load_budget(db, ctx.workspace_id)
+
+
+@router.put("/budget")
+async def put_budget(
+    body: Dict[str, Any] = Body(default_factory=dict),
+    ctx: RequestContext = Depends(require_workspace_admin),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Set the budget ceiling. Only the documented keys are accepted
+    (``max_cost_usd`` ≥ 0, ``max_total_tokens`` int ≥ 0, ``window`` ∈
+    day|month|all); anything else is 422. Lands under ``plan_limits.budget`` —
+    no new column."""
+    unknown = set(body) - _BUDGET_KEYS
+    if unknown:
+        raise HTTPException(status_code=422, detail=f"unknown budget keys: {sorted(unknown)}")
+    try:
+        budget = set_budget(
+            db,
+            ctx.workspace_id,
+            max_cost_usd=body.get("max_cost_usd"),
+            max_total_tokens=body.get("max_total_tokens"),
+            window=body.get("window"),
+        )
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(exc))
+    db.commit()
+    _audit_governance(db, ctx, "governance:budget_updated", budget)
+    return budget

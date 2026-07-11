@@ -6,13 +6,21 @@
  * filterable audit-log view. Policy + budget hooks (S4) join this module.
  */
 
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
-import type { GovernanceStatus, AuditLogResponse, AuditLogFilters } from '@/lib/api-client'
+import type {
+  GovernanceStatus,
+  AuditLogResponse,
+  AuditLogFilters,
+  PolicyDocument,
+  BudgetConfig,
+} from '@/lib/api-client'
 
 export const governanceQueryKeys = {
   status: ['governance', 'status'] as const,
   auditLog: (filters: AuditLogFilters) => ['governance', 'audit-log', filters] as const,
+  policy: ['governance', 'policy'] as const,
+  budget: ['governance', 'budget'] as const,
 }
 
 export function useGovernanceStatus() {
@@ -31,5 +39,40 @@ export function useGovernanceAuditLog(filters: AuditLogFilters = {}) {
     queryFn: () => apiClient.getGovernanceAuditLog(filters),
     retry: false,
     keepPreviousData: true,
+  })
+}
+
+export function usePolicy() {
+  return useQuery<PolicyDocument>({
+    queryKey: governanceQueryKeys.policy,
+    queryFn: () => apiClient.getGovernancePolicy(),
+    retry: false,
+  })
+}
+
+export function useUpdatePolicy() {
+  const queryClient = useQueryClient()
+  return useMutation<PolicyDocument, Error, Partial<PolicyDocument>>({
+    mutationFn: (body) => apiClient.putGovernancePolicy(body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: governanceQueryKeys.policy })
+      queryClient.invalidateQueries({ queryKey: governanceQueryKeys.status })
+    },
+  })
+}
+
+export function useBudget() {
+  return useQuery<BudgetConfig>({
+    queryKey: governanceQueryKeys.budget,
+    queryFn: () => apiClient.getGovernanceBudget(),
+    retry: false,
+  })
+}
+
+export function useUpdateBudget() {
+  const queryClient = useQueryClient()
+  return useMutation<BudgetConfig, Error, BudgetConfig>({
+    mutationFn: (body) => apiClient.putGovernanceBudget(body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: governanceQueryKeys.budget }),
   })
 }

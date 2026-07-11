@@ -201,6 +201,18 @@ export interface AuditLogFilters {
   offset?: number
 }
 
+export interface PolicyDocument {
+  posture: 'balanced' | 'strict' | 'permissive' | string
+  agents_inherit_admin: boolean
+  route_overrides: Record<string, 'auto' | 'ask'>
+}
+
+export interface BudgetConfig {
+  window?: 'day' | 'month' | 'all' | string
+  max_cost_usd?: number
+  max_total_tokens?: number
+}
+
 class ApiClient {
   private baseUrl: string
   private defaultHeaders: Record<string, string>
@@ -2141,6 +2153,29 @@ class ApiClient {
     if (filters.offset != null) params.set('offset', String(filters.offset))
     const qs = params.toString()
     return this.request<AuditLogResponse>(`/api/v1/governance/audit-log${qs ? `?${qs}` : ''}`)
+  }
+
+  // ===== PRD-196 S4 governance: policy posture + budget editors =====
+  async getGovernancePolicy(): Promise<PolicyDocument> {
+    return this.request<PolicyDocument>('/api/v1/governance/policy')
+  }
+
+  async putGovernancePolicy(body: Partial<PolicyDocument>): Promise<PolicyDocument> {
+    return this.request<PolicyDocument>('/api/v1/governance/policy', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    })
+  }
+
+  async getGovernanceBudget(): Promise<BudgetConfig> {
+    return this.request<BudgetConfig>('/api/v1/governance/budget')
+  }
+
+  async putGovernanceBudget(body: BudgetConfig): Promise<BudgetConfig> {
+    return this.request<BudgetConfig>('/api/v1/governance/budget', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    })
   }
 }
 

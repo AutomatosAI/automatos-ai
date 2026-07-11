@@ -116,6 +116,53 @@ def load_budget(db: Any, workspace_id: Any) -> Dict[str, Any]:
         return {}
 
 
+def set_budget(
+    db: Any,
+    workspace_id: Any,
+    *,
+    max_cost_usd: Optional[float] = None,
+    max_total_tokens: Optional[int] = None,
+    window: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Persist the workspace budget to ``plan_limits.budget`` (PRD-196 S4).
+
+    The writer beside :func:`load_budget`, mirroring ``set_policy_document``'s
+    ``flag_modified`` JSONB pattern (no new column — budget lives under the
+    existing ``plan_limits`` JSONB). Validates ONLY the documented keys; an
+    invalid value raises ``ValueError`` (the API surfaces it as 422). Only
+    provided fields change. Caller owns the transaction (flushes here).
+    """
+    from core.models.workspaces import Workspace
+    from sqlalchemy.orm.attributes import flag_modified
+
+    if max_cost_usd is not None:
+        if isinstance(max_cost_usd, bool) or not isinstance(max_cost_usd, (int, float)) or max_cost_usd < 0:
+            raise ValueError("max_cost_usd must be a number >= 0")
+    if max_total_tokens is not None:
+        if isinstance(max_total_tokens, bool) or not isinstance(max_total_tokens, int) or max_total_tokens < 0:
+            raise ValueError("max_total_tokens must be an integer >= 0")
+    if window is not None and window not in _VALID_WINDOWS:
+        raise ValueError(f"window must be one of {sorted(_VALID_WINDOWS)}")
+
+    ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
+    if ws is None:
+        raise ValueError(f"workspace {workspace_id} not found")
+
+    plan_limits = dict(ws.plan_limits or {})
+    budget = dict(plan_limits.get("budget") or {})
+    if max_cost_usd is not None:
+        budget["max_cost_usd"] = float(max_cost_usd)
+    if max_total_tokens is not None:
+        budget["max_total_tokens"] = int(max_total_tokens)
+    if window is not None:
+        budget["window"] = window
+    plan_limits["budget"] = budget
+    ws.plan_limits = plan_limits
+    flag_modified(ws, "plan_limits")
+    db.flush()
+    return load_budget(db, workspace_id)
+
+
 def _window_start(window: str, now: Optional[datetime] = None) -> Optional[datetime]:
     now = now or datetime.now(timezone.utc)
     if window == "day":
