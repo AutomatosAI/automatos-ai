@@ -19,6 +19,7 @@ from core.database.database import get_db
 from core.models import RAGConfiguration, Document
 from modules.rag import get_rag_service, RAGService
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 
 # Request models
@@ -52,7 +53,7 @@ class ContextAddRequest(BaseModel):
 
 router = APIRouter(prefix="/api/context", tags=["Context Engineering"])
 
-@router.post("/add")
+@router.post("/add", dependencies=[Depends(require_workspace_permission("documents:create"))])
 async def add_to_context(
     request: ContextAddRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -169,7 +170,7 @@ async def get_context_patterns(
         logger.error(f"Error getting context patterns: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/rag/{config_id}/test")
+@router.post("/rag/{config_id}/test", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def test_rag_configuration(
     config_id: int,
     query: str = Query(..., description="Test query for RAG system"),
@@ -224,7 +225,7 @@ async def get_context_system_health(
         logger.error(f"Error getting system health: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/initialize")
+@router.post("/initialize", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def initialize_context_system(
     database_url: Optional[str] = None,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -371,7 +372,7 @@ async def get_optimization_recommendations(
 
 # ===== RAG CONFIGURATION CRUD ENDPOINTS =====
 
-@router.post("/rag/config")
+@router.post("/rag/config", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def create_rag_configuration(
     config: RAGConfigCreate,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -480,7 +481,7 @@ async def get_rag_configuration(
         logger.error(f"Error getting RAG configuration: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.put("/rag/config/{config_id}")
+@router.put("/rag/config/{config_id}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def update_rag_configuration(
     config_id: int,
     config_update: RAGConfigUpdate,
@@ -527,7 +528,7 @@ async def update_rag_configuration(
         logger.error(f"Error updating RAG configuration: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.delete("/rag/config/{config_id}")
+@router.delete("/rag/config/{config_id}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def delete_rag_configuration(
     config_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),

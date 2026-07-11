@@ -21,8 +21,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.hybrid import get_request_context_hybrid
-from core.composio.client import ComposioClient, get_composio_client
 from core.composio.entity_manager import EntityManager
 from core.database.database import get_db
 
@@ -120,6 +120,38 @@ class ReplyEmailResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+async def _execute_email_action(
+    ctx: RequestContext, action: str, params: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Route a widget email action through the platform SPINE (PRD-192 S5).
+
+    Previously these endpoints called the raw Composio client — no policy
+    gate, no budget admission, no Art.12 audit row, no telemetry. They now
+    dispatch through the same ``UnifiedToolExecutor`` chokepoint as every
+    other tool, as the ``composio_execute`` meta-tool (the per-action name
+    rides in ``action``), with the HUMAN-DIRECT actor marker: a user clicking
+    Send in the widget IS the approval, so the route gate treats the ask as
+    satisfied (locked #6) while budget admission and the audit row still
+    apply. Agent-initiated calls on this integration carry no marker and
+    still ask. Returns the executor's ``{success, data, error}`` envelope —
+    the same shape the endpoints already parse.
+    """
+    from modules.tools.tool_router import execute_tool
+
+    return await execute_tool(
+        "composio_execute",
+        {"action": action, "params": params},
+        agent_id=0,  # no agent — a human-direct API request
+        workspace_id=ctx.workspace_id,
+        caller_context={
+            "actor_type": "user_direct",
+            "user_id": getattr(ctx.user, "id", None),
+            "auth_type": ctx.auth_type,
+            "surface": "widget_email",
+        },
+    )
 
 
 def _get_entity_id(db: Session, workspace_id: UUID) -> str:
@@ -270,8 +302,7 @@ async def list_emails(
     db: Session = Depends(get_db),
 ) -> EmailListResponse:
     """List emails from the connected Gmail or Outlook account via Composio."""
-    entity_id = _get_entity_id(db, ctx.workspace_id)
-    client = get_composio_client()
+    _get_entity_id(db, ctx.workspace_id)  # 404 early when email isn't connected
 
     # Build Composio action params.  GMAIL_FETCH_EMAILS is the standard action.
     params: Dict[str, Any] = {"max_results": limit}
@@ -283,11 +314,7 @@ async def list_emails(
         params["label_ids"] = [label]
 
     try:
-        result = client.execute_action(
-            action="GMAIL_FETCH_EMAILS",
-            params=params,
-            entity_id=entity_id,
-        )
+        result = await _execute_email_action(ctx, "GMAIL_FETCH_EMAILS", params)
     except Exception as exc:
         logger.error("Composio GMAIL_FETCH_EMAILS failed: %s", exc)
         raise HTTPException(status_code=502, detail=f"Email provider error: {exc}")
@@ -333,14 +360,11 @@ async def get_email(
     db: Session = Depends(get_db),
 ) -> EmailDetailResponse:
     """Return a single email by its provider ID."""
-    entity_id = _get_entity_id(db, ctx.workspace_id)
-    client = get_composio_client()
+    _get_entity_id(db, ctx.workspace_id)  # 404 early when email isn't connected
 
     try:
-        result = client.execute_action(
-            action="GMAIL_GET_EMAIL",
-            params={"message_id": email_id},
-            entity_id=entity_id,
+        result = await _execute_email_action(
+            ctx, "GMAIL_GET_EMAIL", {"message_id": email_id}
         )
     except Exception as exc:
         logger.error("Composio GMAIL_GET_EMAIL failed: %s", exc)
@@ -362,15 +386,18 @@ async def get_email(
     return EmailDetailResponse(email=email, provider="composio")
 
 
-@router.post("", response_model=SendEmailResponse)
+@router.post("", response_model=SendEmailResponse, dependencies=[Depends(require_workspace_permission("agents:execute"))])
 async def send_email(
     payload: SendEmailRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ) -> SendEmailResponse:
-    """Send a new email via the connected mail provider."""
-    entity_id = _get_entity_id(db, ctx.workspace_id)
-    client = get_composio_client()
+    """Send a new email via the connected mail provider.
+
+    PRD-192 S5: an external side-effect on the spine — the user's click IS the
+    approval (human-direct rule), budget admission + the audit row still apply.
+    """
+    _get_entity_id(db, ctx.workspace_id)  # 404 early when email isn't connected
 
     params: Dict[str, Any] = {
         "recipient_email": payload.to[0] if len(payload.to) == 1 else payload.to,
@@ -385,11 +412,7 @@ async def send_email(
         params["is_html"] = True
 
     try:
-        result = client.execute_action(
-            action="GMAIL_SEND_EMAIL",
-            params=params,
-            entity_id=entity_id,
-        )
+        result = await _execute_email_action(ctx, "GMAIL_SEND_EMAIL", params)
     except Exception as exc:
         logger.error("Composio GMAIL_SEND_EMAIL failed: %s", exc)
         return SendEmailResponse(success=False, error=str(exc))
@@ -411,16 +434,19 @@ async def send_email(
     return SendEmailResponse(success=True)
 
 
-@router.post("/{email_id}/reply", response_model=ReplyEmailResponse)
+@router.post("/{email_id}/reply", response_model=ReplyEmailResponse, dependencies=[Depends(require_workspace_permission("agents:execute"))])
 async def reply_to_email(
     email_id: str,
     payload: ReplyEmailRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ) -> ReplyEmailResponse:
-    """Reply to an existing email thread."""
-    entity_id = _get_entity_id(db, ctx.workspace_id)
-    client = get_composio_client()
+    """Reply to an existing email thread.
+
+    PRD-192 S5: an external side-effect on the spine — human-direct rule
+    applies (the click is the approval); budget + audit still fire.
+    """
+    _get_entity_id(db, ctx.workspace_id)  # 404 early when email isn't connected
 
     params: Dict[str, Any] = {
         "message_id": email_id,
@@ -434,11 +460,7 @@ async def reply_to_email(
         params["is_html"] = True
 
     try:
-        result = client.execute_action(
-            action="GMAIL_REPLY_TO_EMAIL",
-            params=params,
-            entity_id=entity_id,
-        )
+        result = await _execute_email_action(ctx, "GMAIL_REPLY_TO_EMAIL", params)
     except Exception as exc:
         logger.error("Composio GMAIL_REPLY_TO_EMAIL failed: %s", exc)
         return ReplyEmailResponse(success=False, error=str(exc))

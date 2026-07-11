@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 from core.database.database import get_db
 from config import config
@@ -112,7 +113,7 @@ def _validate_blocks_or_422(blocks: Optional[dict]) -> Optional[dict]:
 # ------------------------------------------------------------------
 
 
-@router.post("/templates", status_code=201)
+@router.post("/templates", status_code=201, dependencies=[Depends(require_workspace_permission("documents:create"))])
 async def create_template(
     body: TemplateCreateRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -210,7 +211,7 @@ async def get_template(
     }
 
 
-@router.put("/templates/{template_id}")
+@router.put("/templates/{template_id}", dependencies=[Depends(require_workspace_permission("documents:update"))])
 async def update_template(
     template_id: UUID,
     body: TemplateUpdateRequest,
@@ -231,7 +232,7 @@ async def update_template(
     return {"id": str(template.id), "name": template.name, "updated": True}
 
 
-@router.delete("/templates/{template_id}")
+@router.delete("/templates/{template_id}", dependencies=[Depends(require_workspace_permission("documents:delete"))])
 async def delete_template(
     template_id: UUID,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -247,7 +248,7 @@ async def delete_template(
     return {"deleted": True}
 
 
-@router.post("/templates/{template_id}/preview")
+@router.post("/templates/{template_id}/preview", dependencies=[Depends(require_workspace_permission("documents:create"))])
 async def preview_template(
     template_id: UUID,
     data: Optional[dict] = None,
@@ -297,7 +298,7 @@ async def preview_template(
     return {"preview_url": result.download_url, "filename": result.filename}
 
 
-@router.post("/templates/upload")
+@router.post("/templates/upload", dependencies=[Depends(require_workspace_permission("documents:create"))])
 async def upload_docx_template(
     name: str = Form(...),
     category: str = Form("general"),
@@ -362,7 +363,7 @@ async def upload_docx_template(
 # ------------------------------------------------------------------
 
 
-@router.post("/generate", response_model=GenerateDocumentResponse)
+@router.post("/generate", response_model=GenerateDocumentResponse, dependencies=[Depends(require_workspace_permission("documents:create"))])
 async def generate_document(
     body: GenerateDocumentRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -470,7 +471,7 @@ async def get_brand_kit_endpoint(
     return get_brand_kit(ws.settings)
 
 
-@router.put("/brand-kit")
+@router.put("/brand-kit", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def update_brand_kit_endpoint(
     body: BrandKitUpdateRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -499,7 +500,7 @@ async def update_brand_kit_endpoint(
     return new_kit
 
 
-@router.post("/preview-blocks")
+@router.post("/preview-blocks", dependencies=[Depends(require_workspace_permission("documents:create"))])
 async def preview_blocks(
     body: PreviewBlocksRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),

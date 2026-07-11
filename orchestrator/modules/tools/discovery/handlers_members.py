@@ -158,7 +158,7 @@ async def set_member_role(db: Session, workspace_id: UUID, params: Dict[str, Any
 
     try:
         from core.workspaces.models import WorkspaceMember
-        from core.workspaces.permissions import WorkspaceRole
+        from modules.policy.roles import WorkspaceRole
 
         member = (
             db.query(WorkspaceMember)
@@ -210,7 +210,7 @@ async def remove_member(db: Session, workspace_id: UUID, params: Dict[str, Any])
 
     try:
         from core.workspaces.models import WorkspaceMember
-        from core.workspaces.permissions import WorkspaceRole
+        from modules.policy.roles import WorkspaceRole
 
         member = (
             db.query(WorkspaceMember)

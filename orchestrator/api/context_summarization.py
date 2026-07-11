@@ -14,6 +14,7 @@ from typing import List, Dict, Any, Optional
 import logging
 from datetime import datetime
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
@@ -55,7 +56,7 @@ class SummarizationResponse(BaseModel):
     response_model=SummarizationResponse,
     summary="Summarize Session Context",
     description="Compress session context using hierarchical summarization (Context Engineering 2.0 'self-baking')"
-)
+, dependencies=[Depends(require_workspace_permission("documents:create"))])
 async def summarize_context(request: SummarizationRequest, ctx: RequestContext = Depends(get_request_context_hybrid)):
     """
     Implement hierarchical context summarization (self-baking).

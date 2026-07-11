@@ -19,9 +19,12 @@ caps) under a ``budget`` key, so no new column:
         }
     }
 
-No budget key ⇒ no ceiling ⇒ the gate is inert (allow). Pricing for the pending
-call is model-aware via :mod:`modules.policy.pricing`. SQLAlchemy is imported
-lazily so this module loads in the stdlib-only unit-test env.
+No budget key ⇒ no ceiling ⇒ the gate is inert (allow) — EXCEPT autonomy-enabled
+workspaces, which get a default monthly ceiling (PRD-192 S3, locked:
+``config.AUTONOMY_DEFAULT_BUDGET_USD`` = 50/month; explicit budgets always
+win; no migration). Pricing for the pending call is model-aware via
+:mod:`modules.policy.pricing`. SQLAlchemy is imported lazily so this module
+loads in the stdlib-only unit-test env.
 """
 from __future__ import annotations
 
@@ -34,6 +37,16 @@ logger = logging.getLogger(__name__)
 
 _VALID_WINDOWS = frozenset({"day", "month", "all"})
 _DEFAULT_WINDOW = "day"
+
+
+def _enforcement_active() -> bool:
+    """Guarded read of the enforce-stage flag — never raises (PRD-192 S1)."""
+    try:
+        from modules.policy.flag import enforcement_active
+
+        return enforcement_active()
+    except Exception:
+        return False
 
 
 class BudgetExceeded(Exception):
@@ -84,9 +97,11 @@ class BudgetDecision:
 def load_budget(db: Any, workspace_id: Any) -> Dict[str, Any]:
     """Return the workspace's ``plan_limits.budget`` merged onto defaults.
 
-    Empty/missing ⇒ ``{}`` (no ceiling). Fail-safe: an unreadable row returns
-    ``{}`` (no ceiling — the gate is a *cost* control, not a correctness gate;
-    it must not wedge execution if the settings read fails).
+    Empty/missing ⇒ ``{}`` (no ceiling) — except autonomy-enabled workspaces,
+    which get the PRD-192 S3 code-default monthly ceiling (explicit budgets
+    always win). Fail posture on an unreadable row: ``{}`` in off/shadow (the
+    gate is a *cost* control and must not wedge execution), re-raise under the
+    enforce stages so the gate's single except owns the posture (PRD-192 S1).
     """
     if db is None or workspace_id is None:
         return {}
@@ -99,6 +114,11 @@ def load_budget(db: Any, workspace_id: Any) -> Dict[str, Any]:
         budget = (ws.plan_limits or {}).get("budget") or {}
         if not isinstance(budget, dict):
             return {}
+        if not budget:
+            # PRD-192 S3 (locked #2a): no explicit budget — autonomy-enabled
+            # workspaces get the code-default monthly ceiling; everyone else
+            # stays ceiling-less exactly as before.
+            return _default_autonomy_budget(db, workspace_id)
         window = budget.get("window")
         if window not in _VALID_WINDOWS:
             window = _DEFAULT_WINDOW
@@ -112,6 +132,41 @@ def load_budget(db: Any, workspace_id: Any) -> Dict[str, Any]:
         logger.warning(
             "[policy.budget] budget read failed for workspace=%s", workspace_id,
             exc_info=True,
+        )
+        # PRD-192 S1: under an enforce stage a budget-read fault must not
+        # silently decide "no ceiling ⇒ allow" — re-raise so the gate's single
+        # except owns the fail posture. off/shadow keep the historical swallow.
+        if _enforcement_active():
+            raise
+        return {}
+
+
+def _default_autonomy_budget(db: Any, workspace_id: Any) -> Dict[str, Any]:
+    """The code-default ceiling for autonomy-enabled workspaces (PRD-192 S3).
+
+    Locked decision #2a: a workspace dialled to full autonomy that has NO
+    explicit ``plan_limits.budget`` gets ``max_cost_usd =
+    config.AUTONOMY_DEFAULT_BUDGET_USD`` per ``month`` — autonomous spend is
+    never unbounded by omission. Explicit budgets always win (the caller only
+    reaches here when none is set); supervised workspaces stay ceiling-less as
+    today. Fail-safe: an unreadable autonomy dial or config ⇒ no default
+    (``{}``), never a surprise ceiling.
+    """
+    try:
+        from core.services.auto_autonomy import is_full_autonomy
+
+        if not is_full_autonomy(db, workspace_id):
+            return {}
+        from config import config
+
+        ceiling = float(config.AUTONOMY_DEFAULT_BUDGET_USD)
+        if ceiling <= 0:
+            return {}
+        return {"window": "month", "max_cost_usd": ceiling, "default_applied": True}
+    except Exception:
+        logger.warning(
+            "[policy.budget] autonomy default-ceiling read failed for "
+            "workspace=%s — no default applied", workspace_id, exc_info=True,
         )
         return {}
 
@@ -200,6 +255,10 @@ def spend_to_date(db: Any, workspace_id: Any, window: str) -> Dict[str, float]:
             "[policy.budget] spend-to-date read failed for workspace=%s", workspace_id,
             exc_info=True,
         )
+        # PRD-192 S1: with a ceiling configured, zeros-on-fault silently allow.
+        # Enforce stages re-raise so the gate's except owns the posture.
+        if _enforcement_active():
+            raise
         return dict(zero)
 
 

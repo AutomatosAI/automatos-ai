@@ -27,6 +27,7 @@ from core.models import (
 from core.models.core import RecipeExecution, WorkflowTemplate as WorkflowRecipe
 # websocket_manager removed - using AI SDK SSE streaming
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.task_runner import get_task_runner, AgentTask, TaskType, TaskPriority
 from core.auth.dependencies import RequestContext
 
@@ -404,7 +405,7 @@ async def get_workflow(workflow_id: int, ctx: RequestContext = Depends(get_reque
         logger.error(f"Error getting workflow {workflow_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.put("/{workflow_id}")
+@router.put("/{workflow_id}", dependencies=[Depends(require_workspace_permission("missions:update"))])
 async def update_workflow(
     workflow_id: int,
     workflow_data: Dict[str, Any] = Body(...),
@@ -460,7 +461,7 @@ async def update_workflow(
         db.rollback()
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.delete("/{workflow_id}")
+@router.delete("/{workflow_id}", dependencies=[Depends(require_workspace_permission("missions:delete"))])
 async def delete_workflow(workflow_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Delete workflow"""
     try:
@@ -502,7 +503,7 @@ async def delete_workflow(workflow_id: int, ctx: RequestContext = Depends(get_re
         db.rollback()
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.delete("/cleanup/old")
+@router.delete("/cleanup/old", dependencies=[Depends(require_workspace_permission("missions:delete"))])
 async def cleanup_old_workflows(days: int = 30, db: Session = Depends(get_db)):
     """Delete workflows older than specified days"""
     from datetime import datetime, timedelta
@@ -554,7 +555,7 @@ async def cleanup_old_workflows(days: int = 30, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("")
+@router.post("", dependencies=[Depends(require_workspace_permission("missions:create"))])
 async def create_workflow(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     workflow_data: Dict[str, Any] = Body(...),
@@ -662,7 +663,7 @@ async def create_workflow(
         db.rollback()
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/{workflow_id}/duplicate")
+@router.post("/{workflow_id}/duplicate", dependencies=[Depends(require_workspace_permission("missions:update"))])
 async def duplicate_workflow(
     workflow_id: int,
     duplicate_data: Dict[str, Any] = Body(None),
@@ -952,7 +953,7 @@ async def get_workflow_live_progress(workflow_id: int, ctx: RequestContext = Dep
         logger.error(f"Error getting live progress for workflow {workflow_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/{workflow_id}/execute-advanced")
+@router.post("/{workflow_id}/execute-advanced", dependencies=[Depends(require_workspace_permission("missions:execute"))])
 async def execute_workflow_advanced(
     workflow_id: int,
     execution_data: Dict[str, Any],
@@ -1128,7 +1129,7 @@ async def get_execution_status(execution_id: int, db: Session = Depends(get_db))
         logger.error(f"Error getting execution status {execution_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/executions/{execution_id}/cancel")
+@router.post("/executions/{execution_id}/cancel", dependencies=[Depends(require_workspace_permission("missions:execute"))])
 async def cancel_execution(execution_id: int, db: Session = Depends(get_db)):
     """Cancel a running workflow execution"""
     try:
@@ -1280,7 +1281,7 @@ async def stream_execution_aisdk(execution_id: int, db: Session = Depends(get_db
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/stream")
+@router.post("/stream", dependencies=[Depends(require_workspace_permission("missions:execute"))])
 async def stream_workflow_chat(request: Dict[str, Any] = Body(...), db: Session = Depends(get_db)):
     """
     AI SDK compatible streaming endpoint for useChat hook.

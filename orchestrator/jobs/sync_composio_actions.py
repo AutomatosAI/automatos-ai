@@ -78,8 +78,24 @@ async def sync_all_composio_actions(
             total_errors = sum(r.errors for r in results)
             total_duration_ms = sum(r.duration_ms for r in results)
 
+            # PRD-194 S6 (P2-13): a silent no-op sync must fail LOUDLY. If
+            # connected apps exist but composio_action_metadata is still
+            # empty after a "completed" run, the feeder is broken — surface
+            # it as a FAILED sync, not a quiet success. This exact failure
+            # (hardcoded app list + await-on-sync TypeError) went undetected
+            # for months because it only ever logged per-app errors.
+            from modules.tools.sync.composio_action_sync import (
+                check_action_metadata_populated,
+            )
+
+            metadata_ok, metadata_detail = check_action_metadata_populated(db)
+            if not metadata_ok:
+                logger.error(
+                    "Composio action sync assertion FAILED: %s", metadata_detail
+                )
+
             _last_sync_result = {
-                "status": "completed",
+                "status": "completed" if metadata_ok else "failed",
                 "started_at": start_time.isoformat(),
                 "completed_at": datetime.utcnow().isoformat(),
                 "duration_ms": total_duration_ms,
@@ -88,6 +104,7 @@ async def sync_all_composio_actions(
                 "classified": total_classified,
                 "skipped": total_skipped,
                 "errors": total_errors,
+                "metadata_assertion": metadata_detail,
                 "per_app_results": [
                     {
                         "app_id": r.app_id,

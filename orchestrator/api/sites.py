@@ -31,6 +31,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db
 from core.models.channels import ChannelConnection
@@ -103,7 +104,7 @@ async def list_sites_route(
     return {"sites": [public_site_dict(s) for s in rows]}
 
 
-@router.post("", status_code=201)
+@router.post("", status_code=201, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def create_site_route(
     body: CreateSiteRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -135,7 +136,7 @@ async def get_site_route(
     return public_site_dict(site)
 
 
-@router.patch("/{site_id}")
+@router.patch("/{site_id}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def patch_site_meta_route(
     site_id: UUID,
     body: UpdateSiteMetaRequest,
@@ -244,7 +245,7 @@ def _validate_callback_destinations(
             )
 
 
-@router.patch("/{site_id}/settings")
+@router.patch("/{site_id}/settings", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def patch_site_settings_route(
     site_id: UUID,
     body: UpdateSiteSettingsRequest,
@@ -303,7 +304,7 @@ _CALLBACK_TEST_NAME = "Dashboard test"
 _CALLBACK_TEST_TOPIC = "Test callback from the dashboard — no action required."
 
 
-@router.post("/{site_id}/callback/test", response_model=CallbackTestResponse)
+@router.post("/{site_id}/callback/test", response_model=CallbackTestResponse, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def send_callback_test_route(
     site_id: UUID,
     ctx: RequestContext = Depends(get_request_context_hybrid),

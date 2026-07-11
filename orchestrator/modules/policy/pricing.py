@@ -63,6 +63,46 @@ def estimate_cost_usd(
     return price.cost_for(input_tokens, output_tokens)
 
 
+def flat_rate_per_1k() -> float:
+    """The documented LAST-RESORT flat $/1k-token rate (PRD-192 S3, F059).
+
+    ``COORDINATOR_COST_PER_1K_TOKENS`` demoted to a registry-miss fallback:
+    this module is its ONLY consumer (source-grep-guarded) — every dollar
+    figure in the platform routes through pricing, and the flat rate only
+    applies when the model registry has no price for the call. Fail-safe: if
+    config can't be read, the historical default (0.003) stands.
+    """
+    try:
+        from config import config
+
+        return float(config.COORDINATOR_COST_PER_1K_TOKENS)
+    except Exception:
+        logger.warning("[policy.pricing] config read failed — flat rate default", exc_info=True)
+        return 0.003
+
+
+def price_total_tokens_usd(db: Any, model_id: Optional[str], total_tokens: int) -> float:
+    """Price an UNDIFFERENTIATED total-token estimate (PRD-192 S3, F059 finish).
+
+    The mission/playbook ceilings and cost read-outs carry a single total-token
+    number with no input/output split (and often span several models). One
+    documented convention, one source:
+
+    - registry hit ⇒ the model's blended per-1k rate (mean of input+output —
+      an admission/read-out ESTIMATE, not billing; ``llm_usage`` stays the
+      ledger of record);
+    - no model / registry miss / no db ⇒ :func:`flat_rate_per_1k` (the demoted
+      ``COORDINATOR_COST_PER_1K_TOKENS`` last resort).
+    """
+    tokens = max(0, int(total_tokens or 0))
+    if model_id:
+        price = price_per_1k(db, model_id)
+        if price is not None:
+            blended = (price.input_per_1k + price.output_per_1k) / 2.0
+            return round((tokens / 1000.0) * blended, 6)
+    return round((tokens / 1000.0) * flat_rate_per_1k(), 6)
+
+
 class ModelPrice:
     """A model's per-1k-token prices, with the token→dollars arithmetic in one place."""
 

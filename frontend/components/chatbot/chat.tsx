@@ -226,6 +226,25 @@ export function Chat({
           } as any)
         }
 
+        // PRD-193 S3 (P2-12): tool approval card — a confirmation-gated
+        // action asked, the S1 gate attached a grant; the human approves or
+        // denies right here (Approve resumes the execution server-side, S4).
+        if (toolData.tool_approval && toolData.tool_approval.grant_id != null) {
+          const ta = toolData.tool_approval
+          addWidget({
+            type: 'tool_approval',
+            title: 'Action approval needed',
+            data: { ...ta },
+            metadata: {
+              source: { type: 'tool', name: ta.action || 'platform_action' },
+              createdAt: new Date(),
+              conversationId: id,
+            },
+            state: 'ready',
+            createdAt: new Date().toISOString(),
+          } as any)
+        }
+
         // Create widgets for database results
         if (toolData.database_results && Array.isArray(toolData.database_results)) {
           toolData.database_results.forEach((dbResult: any) => {

@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from core.database.database import get_db
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 from modules.rag.feedback_writer import write_rag_feedback
 
@@ -48,7 +49,7 @@ class FeedbackStatsResponse(BaseModel):
 
 # --- Endpoints ---
 
-@router.post("")
+@router.post("", dependencies=[Depends(require_workspace_permission("agents:execute"))])
 async def submit_feedback(
     feedback: RAGFeedbackRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),

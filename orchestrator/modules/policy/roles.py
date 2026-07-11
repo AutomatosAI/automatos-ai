@@ -1,4 +1,4 @@
-"""Policy plane — one role + permission semantic (PRD-174 F042/F043).
+"""Policy plane — one role + permission semantic (PRD-174 F042/F043, PRD-195 P2-14).
 
 Two forks the plane closes:
 
@@ -13,12 +13,24 @@ Two forks the plane closes:
   fix is a single semantic — **empty permissions grant nothing** (least
   privilege) — applied on every plane. :func:`has_permission`.
 
-Stdlib-only: no DB, no config, no imports beyond typing. Callers pass the
+PRD-195 (P2-14) makes this module the **single authorization authority**: the
+workspace-role matrix (``owner ⊇ admin ⊇ editor ⊇ viewer``, previously
+``core/workspaces/permissions.py``) lives here beside the system hierarchy, and
+every checker — the admin routers' ``caller_is_admin``, the SDK-key service, the
+widget plane's ``require_permission``, the ``require_workspace_permission``
+gate — delegates to these functions. Permission strings follow the canonical
+vocabulary (G1): ``resource:action`` over ``workspace | members | agents |
+missions | playbooks | documents | knowledge | audit`` — the legacy
+``workflows:*`` strings are renamed to ``missions:*`` + ``playbooks:*`` in the
+same collapse (CLAUDE.md §10: Mission not Workflow, Playbook not Recipe).
+
+Stdlib-only: no DB, no config, no imports beyond typing/enum. Callers pass the
 already-resolved role string / permission list.
 """
 from __future__ import annotations
 
-from typing import Dict, Iterable, Optional, Set
+from enum import Enum
+from typing import Dict, FrozenSet, Iterable, Optional, Set
 
 SUPER_ADMIN = "super_admin"
 ADMIN = "admin"
@@ -75,3 +87,79 @@ def has_permission(
         return False
     perms = set(permissions)
     return required_permission in perms or "*" in perms
+
+
+# ---------------------------------------------------------------------------
+# Workspace roles (PRD-195 S1 — absorbed from core/workspaces/permissions.py)
+# ---------------------------------------------------------------------------
+
+class WorkspaceRole(str, Enum):
+    """Per-tenant role on ``workspace_members.role`` (PRD-37)."""
+
+    OWNER = "owner"
+    ADMIN = "admin"
+    EDITOR = "editor"
+    VIEWER = "viewer"
+
+
+# The workspace-permission matrix — the ONE source the workspace gate reads.
+# Canonical strings (G1): ``resource:action``; ``resource:*`` is the full grant
+# on a resource. Deliberate shape (dossier auth-identity C.2, S3–S6 specs):
+#
+# - ``viewer`` is read-only: no create/update/delete/execute anywhere.
+# - ``editor`` authors and runs but does not destroy or administer:
+#   create/read/update on the five content/execution resources, plus
+#   ``execute`` on agents/missions/playbooks (S3/S4: "editor can" create,
+#   fire and cancel — execute is granted explicitly since the legacy matrix
+#   predates Missions/Playbooks as runnable surfaces). No ``delete``, no
+#   members/workspace/audit administration.
+# - ``admin`` holds full resource wildcards + member invite/remove; only the
+#   ``owner`` changes member roles, manages/deletes/bills the workspace.
+ROLE_PERMISSIONS: Dict[WorkspaceRole, FrozenSet[str]] = {
+    WorkspaceRole.OWNER: frozenset({
+        "workspace:manage", "workspace:delete", "workspace:billing",
+        "members:invite", "members:remove", "members:change_role",
+        "members:read",
+        "agents:*", "missions:*", "playbooks:*", "documents:*", "knowledge:*",
+        "audit:view",
+    }),
+    WorkspaceRole.ADMIN: frozenset({
+        "workspace:manage",
+        "members:invite", "members:remove", "members:read",
+        "agents:*", "missions:*", "playbooks:*", "documents:*", "knowledge:*",
+        "audit:view",
+    }),
+    WorkspaceRole.EDITOR: frozenset({
+        "members:read",
+        "agents:create", "agents:read", "agents:update", "agents:execute",
+        "missions:create", "missions:read", "missions:update", "missions:execute",
+        "playbooks:create", "playbooks:read", "playbooks:update", "playbooks:execute",
+        "documents:create", "documents:read", "documents:update",
+        "knowledge:create", "knowledge:read", "knowledge:update",
+    }),
+    WorkspaceRole.VIEWER: frozenset({
+        "members:read",
+        "agents:read", "missions:read", "playbooks:read",
+        "documents:read", "knowledge:read",
+    }),
+}
+
+
+def workspace_has_permission(role: Optional[str], permission: str) -> bool:
+    """True when workspace ``role`` grants ``permission``.
+
+    Exact match or resource wildcard (``agents:*`` covers ``agents:create``).
+    ``None`` / unknown roles grant nothing (fail-closed) — same posture as
+    :func:`role_satisfies`. Accepts the enum or its string value.
+    """
+    if not role:
+        return False
+    try:
+        role_enum = WorkspaceRole(role)
+    except ValueError:
+        return False
+    permissions = ROLE_PERMISSIONS[role_enum]
+    if permission in permissions:
+        return True
+    resource = permission.split(":", 1)[0]
+    return f"{resource}:*" in permissions

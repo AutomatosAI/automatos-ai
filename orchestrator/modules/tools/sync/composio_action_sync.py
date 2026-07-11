@@ -16,6 +16,7 @@ Design Principles:
 - Batch processing to reduce API calls
 """
 
+import asyncio
 import hashlib
 import logging
 from dataclasses import dataclass
@@ -28,6 +29,42 @@ from ..capabilities.classifier import ActionClassifier, ActionClassification
 from ..capabilities.models import ComposioActionMetadata
 
 logger = logging.getLogger(__name__)
+
+
+def check_action_metadata_populated(db: Session) -> tuple[bool, str]:
+    """Fail-LOUD assertion for the destructive-gate feeder (PRD-194 S6, P2-13).
+
+    ``composio_action_metadata`` backs the destructive-action gate (F018).
+    Its feeder was a silent no-op for months — a hardcoded app list plus an
+    ``await`` on a synchronous client method meant the daily 04:00 sync
+    never wrote a row, and nothing noticed. This check makes that state
+    LOUD: **connected apps with an EMPTY metadata table is a failure**, not
+    a quiet degrade to the 8-keyword intent heuristic.
+
+    Returns ``(ok, detail)``. ok when there are no active connections
+    (cold start — nothing to classify) or when at least one metadata row
+    exists. Callers log ``detail`` at ERROR when not ok; the gate reader's
+    fail-closed keyword floor (action_capability_filter) stays in place
+    either way.
+    """
+    from core.models.composio import ComposioConnection
+
+    connected = db.execute(
+        select(ComposioConnection.id)
+        .where(ComposioConnection.status == "active")
+        .limit(1)
+    ).first()
+    if not connected:
+        return True, "no active Composio connections — nothing to classify"
+
+    row = db.execute(select(ComposioActionMetadata.action_id).limit(1)).first()
+    if row:
+        return True, "composio_action_metadata populated for connected apps"
+    return False, (
+        "connected Composio apps exist but composio_action_metadata is EMPTY — "
+        "the destructive gate (F018) is running blind on the keyword heuristic "
+        "and the action sync is a silent no-op (P2-13 §1.4.a)"
+    )
 
 
 @dataclass
@@ -203,8 +240,16 @@ class ComposioActionSyncService:
             return []
 
         try:
-            # Use Composio SDK to get app actions
-            raw_actions = await self.composio_client.get_app_actions(app_id)
+            # get_app_actions is a synchronous `def` (core/composio/client.py)
+            # and every other call site calls it synchronously. Awaiting it
+            # directly raised TypeError for EVERY app — swallowed as a failed
+            # SyncResult, so the daily sync wrote nothing for months (P2-13
+            # §1.4.a). Offload to a thread — the in-tree idiom for sync
+            # Composio calls (see core/composio/tool_executor.py) — rather
+            # than forking the client into a fake-async method.
+            raw_actions = await asyncio.to_thread(
+                self.composio_client.get_app_actions, app_id
+            )
 
             actions = []
             for raw in raw_actions:
@@ -328,16 +373,22 @@ class ComposioActionSyncService:
         return hashlib.sha256(content.encode()).hexdigest()[:16]
 
     async def _get_all_enabled_apps(self) -> List[str]:
-        """Get list of all Composio apps enabled by any workspace."""
+        """Distinct app names with an ACTIVE Composio connection anywhere.
 
-        # This would query your tools table for Composio apps
-        # Implementation depends on your schema
+        P2-13 (PRD-194 S6): replaces a hardcoded 8-app placeholder that made
+        the daily sync classify apps nobody had connected — and none of the
+        apps they actually had. ``composio_connections.app_name`` (stored
+        uppercase, matching how ``get_app_actions`` is called everywhere
+        else) is the ground truth the destructive gate needs classified.
+        """
+        from core.models.composio import ComposioConnection
 
-        # Placeholder - return common apps for now
-        return [
-            "slack", "github", "gmail", "google_calendar",
-            "notion", "jira", "linear", "discord"
-        ]
+        rows = self.db.execute(
+            select(ComposioConnection.app_name)
+            .where(ComposioConnection.status == "active")
+            .distinct()
+        ).all()
+        return sorted({str(r[0]) for r in rows if r and r[0]})
 
     async def override_classification(
         self,

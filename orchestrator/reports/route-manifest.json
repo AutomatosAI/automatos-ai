@@ -746,6 +746,10 @@
       "path": "/api/code-graph/projects/{project_id}/ask"
     },
     {
+      "method": "PATCH",
+      "path": "/api/code-graph/projects/{project_id}/auto-reindex"
+    },
+    {
       "method": "POST",
       "path": "/api/code-graph/projects/{project_id}/reindex"
     },
@@ -2098,26 +2102,6 @@
       "path": "/api/system/test-route"
     },
     {
-      "method": "GET",
-      "path": "/api/tasks"
-    },
-    {
-      "method": "POST",
-      "path": "/api/tasks/submit"
-    },
-    {
-      "method": "GET",
-      "path": "/api/tasks/{task_id}"
-    },
-    {
-      "method": "POST",
-      "path": "/api/tasks/{task_id}/cancel"
-    },
-    {
-      "method": "GET",
-      "path": "/api/tasks/{task_id}/events"
-    },
-    {
       "method": "POST",
       "path": "/api/team/accept-invitation"
     },
@@ -2212,6 +2196,26 @@
     {
       "method": "GET",
       "path": "/api/tools/{app_name}/triggers"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/approval-grants/{grant_id}/deny"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/approval-grants/{grant_id}/grant"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/approval-grants/{grant_id}/revoke"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/gdpr/erase"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/gdpr/erase-subject"
     },
     {
       "method": "GET",
@@ -2412,6 +2416,18 @@
     {
       "method": "PATCH",
       "path": "/api/v1/tasks/{task_id}/status"
+    },
+    {
+      "method": "POST",
+      "path": "/api/verticals/{vertical}/gdpr/erase"
+    },
+    {
+      "method": "POST",
+      "path": "/api/verticals/{vertical}/gdpr/erase-subject"
+    },
+    {
+      "method": "POST",
+      "path": "/api/verticals/{vertical}/provision"
     },
     {
       "method": "GET",
@@ -2871,7 +2887,15 @@
     },
     {
       "method": "POST",
+      "path": "/api/workspaces/{workspace_id}/canvas/auto-accept"
+    },
+    {
+      "method": "POST",
       "path": "/api/workspaces/{workspace_id}/canvas/commit"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspaces/{workspace_id}/canvas/decision"
     },
     {
       "method": "GET",
@@ -3024,34 +3048,6 @@
     {
       "method": "GET",
       "path": "/openapi.json"
-    },
-    {
-      "method": "POST",
-      "path": "/permissions/assign"
-    },
-    {
-      "method": "GET",
-      "path": "/permissions/assignments"
-    },
-    {
-      "method": "GET",
-      "path": "/permissions/audit"
-    },
-    {
-      "method": "POST",
-      "path": "/permissions/bulk-assign"
-    },
-    {
-      "method": "GET",
-      "path": "/permissions/health"
-    },
-    {
-      "method": "GET",
-      "path": "/permissions/matrix"
-    },
-    {
-      "method": "DELETE",
-      "path": "/permissions/revoke"
     },
     {
       "method": "GET",

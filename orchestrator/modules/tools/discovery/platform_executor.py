@@ -638,6 +638,12 @@ class PlatformActionExecutor:
         if not handler:
             return {"success": False, "error": f"Unknown platform action: {action_name}"}
 
+        # PRD-193 S2 (P2-12): when a human grant authorises this exact call,
+        # its id is recorded here so the execution is audit-marked as
+        # grant-authorised — distinct from the full-autonomy dial skipping
+        # the gate.
+        approved_via_grant_id: Optional[int] = None
+
         # Permission check for write/destructive actions (fail-closed)
         try:
             from modules.tools.discovery import get_action_registry
@@ -709,24 +715,61 @@ class PlatformActionExecutor:
                     }
 
             if action_def and action_def.requires_confirmation and not full_autonomy:
-                return {
-                    "success": False,
-                    "requires_confirmation": True,
-                    "action": action_name,
-                    "permission_level": action_def.permission_level,
-                    "message": (
-                        f"This action ({action_def.permission_level}) requires confirmation. "
-                        f"Action: {action_name} — {action_def.description[:100]}"
-                    ),
-                    "params": params,
-                }
+                # PRD-193 S1/S2 (P2-12): the ask is no longer a dead end.
+                # S2 — consult FIRST: an authorising grant on this exact
+                # subject key (GRANTED + unexpired + params-hash equality)
+                # opens the gate; destructive grants are retired on use
+                # (single-use). Anything else — pending, expired, revoked,
+                # denied, params drift, or ANY error in the consult — falls
+                # through to the ask (fail closed; the ask is the floor).
+                # S1 — otherwise issue (or reuse) a PENDING tool_call
+                # ApprovalGrant and return the ask WITH the grant attached,
+                # so a human finally has something to say yes to.
+                from modules.tools.execution import tool_grants
+
+                _grant = tool_grants.consume_tool_grant(
+                    self.db,
+                    self.workspace_id,
+                    action=action_name,
+                    params=params,
+                    permission_level=action_def.permission_level,
+                )
+                if _grant is not None:
+                    approved_via_grant_id = getattr(_grant, "id", None)
+                    logger.info(
+                        "[PlatformExecutor] '%s' authorised by approval grant %s "
+                        "— proceeding (workspace=%s)",
+                        action_name, approved_via_grant_id, self.workspace_id,
+                    )
+                else:
+                    ask = {
+                        "success": False,
+                        "requires_confirmation": True,
+                        "action": action_name,
+                        "permission_level": action_def.permission_level,
+                        "message": (
+                            f"This action ({action_def.permission_level}) requires confirmation. "
+                            f"Action: {action_name} — {action_def.description[:100]}"
+                        ),
+                        "params": params,
+                    }
+                    return tool_grants.attach_ask_grant(
+                        self.db,
+                        self.workspace_id,
+                        action=action_name,
+                        params=params,
+                        ask=ask,
+                        permission_level=action_def.permission_level,
+                        description=action_def.description,
+                        caller_context=caller_context,
+                    )
         except Exception as e:
             # Fail-closed: if we can't verify permissions, require confirmation
             logger.warning(
                 "[PlatformExecutor] Registry lookup failed for %s: %s — requiring confirmation",
                 action_name, e,
             )
-            return {
+            ask = {
                 "success": False,
                 "requires_confirmation": True,
                 "action": action_name,
@@ -737,6 +780,25 @@ class PlatformActionExecutor:
                 ),
                 "params": params,
             }
+            # PRD-193 S1: the fail-closed ask gets the grant loop too (best
+            # effort — the same surface resolves it if/when the registry
+            # heals). NOTE: no grant is CONSUMED on this path — the permission
+            # stack could not be verified, so nothing may execute here.
+            try:
+                from modules.tools.execution import tool_grants
+
+                return tool_grants.attach_ask_grant(
+                    self.db,
+                    self.workspace_id,
+                    action=action_name,
+                    params=params,
+                    ask=ask,
+                    permission_level=None,
+                    description=None,
+                    caller_context=caller_context,
+                )
+            except Exception:  # pragma: no cover - attach_ask_grant never raises
+                return ask
 
         # PRD-140 Phase 1 — hierarchy permission check. Runs before the
         # rate limiter so denied calls don't spend rate-limit budget.
@@ -936,6 +998,13 @@ class PlatformActionExecutor:
                 and isinstance(result, dict)
             ):
                 result = {**result, "autonomous": True}
+            # PRD-193 S2: a grant-authorised execution records WHICH grant
+            # said yes (router_decision->>'approved_via_grant_id' via the
+            # same universal telemetry hook) — distinct from the dial-skip
+            # marker above. Attribution must be honest: approved is not
+            # autonomous.
+            if approved_via_grant_id is not None and isinstance(result, dict):
+                result = {**result, "approved_via_grant_id": approved_via_grant_id}
             return result
         except Exception as e:
             logger.error(f"[PlatformExecutor] {action_name} failed: {e}", exc_info=True)

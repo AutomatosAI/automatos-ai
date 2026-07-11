@@ -88,6 +88,35 @@ def count_tool_tokens(tools: Optional[List[Dict[str, Any]]]) -> int:
     return count_tokens(json.dumps(tools))
 
 
+def estimate_turn_budget(
+    llm_manager: Any, messages: Optional[List[Dict[str, Any]]]
+) -> Dict[str, Any]:
+    """PRD-192 S3: the turn's budget-admission estimate at a tool-loop boundary.
+
+    Estimator (locked): prompt tokens of the assembled context + the configured
+    output cap, priced later by ``modules.policy.pricing`` against the driving
+    model. Returns the three ``caller_context`` keys the policy chokepoint
+    lifts into ``ToolCall`` (``model_id`` / ``est_input_tokens`` /
+    ``est_output_tokens``) — or ``{}`` when the runtime exposes no model (the
+    gate then admits on spend-to-date alone, exactly as before). Shared by the
+    chat and agent lanes so the two callers can never drift. Never raises: an
+    estimator fault must not touch the tool hot path.
+    """
+    try:
+        cfg = getattr(llm_manager, "config", None)
+        model_id = getattr(cfg, "model", None) if cfg is not None else None
+        if not model_id:
+            return {}
+        return {
+            "model_id": model_id,
+            "est_input_tokens": int(count_message_tokens(messages or [])),
+            "est_output_tokens": int(getattr(cfg, "max_tokens", None) or 0),
+        }
+    except Exception:
+        logger.debug("[PRD-192 S3] turn budget estimate skipped", exc_info=True)
+        return {}
+
+
 # ---------------------------------------------------------------------------
 # Model context window lookup
 # ---------------------------------------------------------------------------

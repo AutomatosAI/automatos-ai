@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 from core.models import (
     ExecutionStatus,
@@ -239,6 +240,8 @@ async def get_workflow_status(
     "/{workflow_id}/pause",
     response_model=WorkflowActionResponse,
     summary="Pause a running workflow",
+
+    dependencies=[Depends(require_workspace_permission("missions:execute"))],
 )
 async def pause_workflow(
     workflow_id: int,
@@ -291,6 +294,8 @@ async def pause_workflow(
     "/{workflow_id}/resume",
     response_model=WorkflowActionResponse,
     summary="Resume a paused workflow",
+
+    dependencies=[Depends(require_workspace_permission("missions:execute"))],
 )
 async def resume_workflow(
     workflow_id: int,
@@ -343,6 +348,8 @@ async def resume_workflow(
     "/{workflow_id}/cancel",
     response_model=WorkflowActionResponse,
     summary="Cancel a running or paused workflow",
+
+    dependencies=[Depends(require_workspace_permission("missions:execute"))],
 )
 async def cancel_workflow(
     workflow_id: int,

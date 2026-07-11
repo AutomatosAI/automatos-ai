@@ -10,10 +10,13 @@ Path coverage (PRD-008-A):
 - ``/api/widgets/*``  — storefront widget calls (any storefront origin)
 - ``/api/sites/*``    — Automatos dashboard Sites CRUD (admin operations)
 
-Both surfaces share the ``WIDGET_ORIGIN_ALLOWLIST`` env var. When empty,
-all origins are allowed (development default). The actual security
-boundary on /api/sites is the JWT in cookies, not CORS — CORS just lets
-the dashboard browser issue the request in the first place.
+Both surfaces share the ``WIDGET_ORIGIN_ALLOWLIST`` env var. An empty
+allowlist is permissive ONLY in the ``local`` edition (dev default); in the
+``saas`` edition the boot guard (``config.validate_security``, PRD-194 S4 /
+P2-13) aborts boot on an empty allowlist, and this module fails CLOSED if
+that state is ever reached anyway. The actual security boundary on
+/api/sites is the JWT in cookies, not CORS — CORS just lets the dashboard
+browser issue the request in the first place.
 """
 
 import logging
@@ -41,12 +44,22 @@ WIDGET_ORIGIN_ALLOWLIST: set[str] = {
 def _origin_allowed(origin: str) -> bool:
     """Return True if *origin* is in the configured allowlist.
 
-    When the allowlist is empty (not configured), ALL origins are allowed
-    for backwards-compatibility during development.  In production the
-    env var should always be set.
+    Empty allowlist (P2-13, PRD-194 S4): permissive ONLY in the ``local``
+    edition — choosing ``AUTH_EDITION=local`` is the explicit dev opt-in. In
+    the ``saas`` edition the boot guard (``config.validate_security``)
+    guarantees a non-empty allowlist, so this branch is unreachable there;
+    if it is ever reached anyway (guard bypassed), the public plane fails
+    CLOSED, loudly — never allow-all in production.
     """
     if not WIDGET_ORIGIN_ALLOWLIST:
-        return True
+        if config.IS_LOCAL_EDITION:
+            return True
+        logger.error(
+            "WIDGET_ORIGIN_ALLOWLIST is empty in the saas edition — denying "
+            "origin %s (fail closed; the boot guard should have prevented this)",
+            origin,
+        )
+        return False
     return origin.rstrip("/") in WIDGET_ORIGIN_ALLOWLIST
 
 

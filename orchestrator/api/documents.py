@@ -33,6 +33,7 @@ from config import config
 from core.credentials.resolver import get_credential_resolver
 from urllib.parse import urlparse
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 
 def parse_database_url(url: str) -> dict:
@@ -107,7 +108,7 @@ ALLOWED_MIME_TYPES = {
 UPLOAD_DIR = Path("/tmp/automotas_uploads")
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50MB
 
-@router.post("/upload", response_model=DocumentUploadResponse)
+@router.post("/upload", response_model=DocumentUploadResponse, dependencies=[Depends(require_workspace_permission("documents:create"))])
 async def handle_request(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     
@@ -636,7 +637,7 @@ async def list_pinned_documents(
     return {"pinned": list_pinned(db, chat_id=chat_id, workspace_id=ctx.workspace_id)}
 
 
-@router.post("/{document_id}/pin")
+@router.post("/{document_id}/pin", dependencies=[Depends(require_workspace_permission("documents:update"))])
 async def pin_document_to_chat(
     document_id: int,
     chat_id: str = Query(..., description="Chat/conversation id to pin the document to"),
@@ -659,7 +660,7 @@ async def pin_document_to_chat(
     return res
 
 
-@router.delete("/{document_id}/pin")
+@router.delete("/{document_id}/pin", dependencies=[Depends(require_workspace_permission("documents:update"))])
 async def unpin_document_from_chat(
     document_id: int,
     chat_id: str = Query(..., description="Chat/conversation id to unpin the document from"),
@@ -819,7 +820,7 @@ async def get_delete_impact(
         logger.error(f"Error getting delete impact for document {document_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.delete("/{document_id}")
+@router.delete("/{document_id}", dependencies=[Depends(require_workspace_permission("documents:delete"))])
 async def delete_document(
     document_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -851,7 +852,7 @@ async def delete_document(
         logger.error(f"Error deleting document {document_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/{document_id}/reprocess")
+@router.post("/{document_id}/reprocess", dependencies=[Depends(require_workspace_permission("documents:update"))])
 async def reprocess_document(
     document_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -1003,7 +1004,7 @@ PREVIEW_CONTEXT_RADIUS = 2  # Number of chunks to include before the best match
 PREVIEW_CHAR_LIMIT = 2000  # Safety limit for preview text length
 
 
-@router.post("/search")
+@router.post("/search", dependencies=[Depends(require_workspace_permission("documents:read"))])
 async def semantic_search(
     query: str = Query(..., description="Search query"),
     limit: int = Query(10, ge=1, le=50, description="Maximum number of results"),
@@ -1410,7 +1411,7 @@ async def get_queue_status(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/rag/retrieve")
+@router.post("/rag/retrieve", dependencies=[Depends(require_workspace_permission("documents:read"))])
 async def rag_retrieve(
     query: str = Query(..., description="Query string for RAG context retrieval"),
     max_chunks: int = Query(5, ge=1, le=20, description="Maximum number of chunks to retrieve"),
@@ -1554,7 +1555,7 @@ async def rag_retrieve(
 
 # Usage Analytics Endpoints
 
-@router.post("/analytics/track")
+@router.post("/analytics/track", dependencies=[Depends(require_workspace_permission("documents:read"))])
 async def track_usage_event(
     event_type: str = Query(..., description="Event type (document_viewed, document_searched, chunk_retrieved, rag_query)"),
     document_id: Optional[int] = Query(None, description="Document ID (if applicable)"),
@@ -1802,7 +1803,7 @@ async def get_usage_analytics(
 # Note: Single document reprocessing is already defined above (line 571)
 
 
-@router.post("/reprocess-all")
+@router.post("/reprocess-all", dependencies=[Depends(require_workspace_permission("documents:update"))])
 async def reprocess_all_documents(
     background_tasks: BackgroundTasks,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -1997,7 +1998,7 @@ class _BulkTeamAccessUpdate(_BaseModel):
     team_access: List[str] = _Field(..., description="List of team names")
 
 
-@router.patch("/{document_id}/team-access")
+@router.patch("/{document_id}/team-access", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def update_document_team_access(
     document_id: int,
     body: _TeamAccessUpdate,
@@ -2036,7 +2037,7 @@ async def update_document_team_access(
     }
 
 
-@router.post("/bulk-team-access")
+@router.post("/bulk-team-access", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def bulk_update_team_access(
     body: _BulkTeamAccessUpdate,
     ctx: RequestContext = Depends(get_request_context_hybrid),

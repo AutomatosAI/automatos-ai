@@ -103,6 +103,9 @@ def build_tool_caller_context(
     turn_id: Optional[str],
     driving_clerk: Optional[str],
     prior_action: Optional[str],
+    model_id: Optional[str] = None,
+    est_input_tokens: int = 0,
+    est_output_tokens: int = 0,
 ) -> Optional[Dict[str, Any]]:
     """Build the caller_context threaded into every chat tool execution (PRD-177 S2 / F017).
 
@@ -118,6 +121,10 @@ def build_tool_caller_context(
       exact rather than time-bucketed.
     * ``user_id``          — the driving clerk (unchanged from before F017).
     * ``prior_action``     — the previous tool this turn, for the signal recorder.
+    * ``model_id`` / ``est_input_tokens`` / ``est_output_tokens`` — PRD-192 S3:
+      the turn-level budget estimate (driving model, prompt tokens of the
+      assembled context, configured output cap) the policy chokepoint lifts
+      into ``ToolCall`` so budget admission prices the pending call.
 
     Empty fields are omitted (not written as None) to keep the telemetry row
     clean. Returns ``None`` when there is genuinely nothing to record, matching
@@ -134,6 +141,10 @@ def build_tool_caller_context(
         ctx["user_id"] = driving_clerk
     if prior_action:
         ctx["prior_action"] = prior_action
+    if model_id:
+        ctx["model_id"] = model_id
+        ctx["est_input_tokens"] = int(est_input_tokens or 0)
+        ctx["est_output_tokens"] = int(est_output_tokens or 0)
     return ctx or None
 
 
@@ -1403,31 +1414,48 @@ class StreamingChatService:
                         duration_ms=int(event.get("duration_ms", 0)),
                     ))
 
-        async def _tool_callback(name: str, args: Dict[str, Any], call_id: str, ws_id) -> Dict[str, Any]:
-            nonlocal last_tool_name, empty_streak, _prior_action
-
-            # Direct Composio per-action shortcut (preserved from legacy loop).
-            is_composio_action = (
+        def _is_chat_composio_action(name: str) -> bool:
+            """A per-action Composio tool from this turn's SDK schema set."""
+            return bool(
                 composio_result and composio_result.entity_id and (
                     name in composio_result.action_set
                     or any(name.startswith(f"{app}_") for app in composio_result.app_names)
                 )
             )
-            if is_composio_action:
-                llm_context = await self._execute_composio_action(name, args, composio_result)
-                # Emit tool-result frame parity (text excerpt as the legacy loop did).
-                await sse_queue.put(self.streaming_handler.format_aisdk_data(
-                    "tool-result",
-                    {"toolCallId": call_id, "toolName": name, "result": llm_context},
-                ))
-                return {"success": True, "llm_context": llm_context, "raw_result": {}}
+
+        async def _tool_callback(name: str, args: Dict[str, Any], call_id: str, ws_id) -> Dict[str, Any]:
+            nonlocal last_tool_name, empty_streak, _prior_action
+
+            # PRD-192 S4: per-action Composio calls ride the SPINE. The legacy
+            # shortcut here called ComposioToolService.execute_action raw and
+            # returned success:True unconditionally — no policy gate, no
+            # telemetry, no outcome capture, no scope enforcement, and a
+            # dishonest envelope (tool-runtime C.3a). They now dispatch through
+            # execute_and_format like every other tool in this callback, as the
+            # composio_execute meta-tool (the executor's registry route — the
+            # per-action name travels in `action`, so the tracker, the policy
+            # gate's effective-name resolution, and the routing graph all see
+            # GMAIL_SEND_EMAIL, not the wrapper). The gate classifies it
+            # external_side_effect via the S1 is_composio hint.
+            dispatch_name, dispatch_args = name, args
+            if _is_chat_composio_action(name):
+                dispatch_name = "composio_execute"
+                dispatch_args = {
+                    "action": name,
+                    "params": args if isinstance(args, dict) else {},
+                }
 
             user_text = self._extract_user_text(llm_messages)
+            # PRD-192 S3: turn-level budget estimate at the loop boundary —
+            # the driving model + prompt tokens + output cap, so the policy
+            # gate prices this call instead of admitting at a structural $0.
+            from core.context_guard import estimate_turn_budget
+            _turn_budget = estimate_turn_budget(agent_runtime.llm_manager, llm_messages)
             # PRD-177 S2 (F017): thread user_query + conversation/turn ids so the
             # edge builder can cluster intent and pair per-turn used_after edges.
             result = await self.tool_router.execute_and_format(
-                tool_name=name,
-                tool_args=args,
+                tool_name=dispatch_name,
+                tool_args=dispatch_args,
                 agent_id=agent_runtime.agent_id if hasattr(agent_runtime, "agent_id") else 1,
                 workspace_id=ws_id,
                 original_intent=user_text,
@@ -1437,6 +1465,9 @@ class StreamingChatService:
                     turn_id=_turn_id,
                     driving_clerk=_driving_clerk,
                     prior_action=_prior_action,
+                    model_id=_turn_budget.get("model_id"),
+                    est_input_tokens=_turn_budget.get("est_input_tokens", 0),
+                    est_output_tokens=_turn_budget.get("est_output_tokens", 0),
                 ),
             )
             # PRD-185 S7: capture retrieved doc ids (retrieval tools only).
@@ -1459,8 +1490,14 @@ class StreamingChatService:
             llm_context = truncate_to_token_budget(llm_context, _TOOL_RESULT_TOKEN_BUDGET)
 
             # Frontend data emission (widget tool-data).
+            # PRD-193 S3 (P2-12): an approval ask (success=False +
+            # requires_confirmation) still carries the tool_approval card —
+            # the human must see it live even though the tool did not run.
             frontend_data = result.get("frontend_data", {})
-            if result.get("success") and frontend_data:
+            _is_approval_ask = bool(
+                (result.get("raw_result") or {}).get("requires_confirmation")
+            )
+            if frontend_data and (result.get("success") or _is_approval_ask):
                 tool_data.update(frontend_data)
                 await sse_queue.put(self.streaming_handler.format_aisdk_tool_data(frontend_data))
 
@@ -1502,8 +1539,14 @@ class StreamingChatService:
             nonlocal action_budget, param_budget
             if not isinstance(result, dict):
                 return None
+            # PRD-192 S4: per-action Composio calls dispatch as the
+            # composio_execute meta-tool — the recovery hook reads the same
+            # honest envelope for both shapes.
+            recovery_name = (
+                "composio_execute" if _is_chat_composio_action(name) else name
+            )
             recovery = self._handle_composio_error_recovery(
-                result, name, llm_messages, agent_runtime,
+                result, recovery_name, llm_messages, agent_runtime,
                 action_budget, param_budget, followup_messages,
             )
             if recovery is None:
@@ -1637,37 +1680,12 @@ class StreamingChatService:
 
         yield {"_final_response": result.response}
 
-    async def _execute_composio_action(
-        self,
-        tool_name: str,
-        tool_args: Dict[str, Any],
-        composio_result: Any,
-    ) -> str:
-        """Execute a Composio per-action tool directly."""
-        try:
-            from modules.tools.services.composio_tool_service import ComposioToolService
-            _exec_svc = ComposioToolService(self.db)
-            exec_result = _exec_svc.execute_action(
-                action_name=tool_name,
-                params=tool_args,
-                entity_id=composio_result.entity_id,
-            )
-            success = exec_result.get("success", False)
-            data = exec_result.get("data")
-            error = exec_result.get("error")
-            if success:
-                llm_context = json.dumps(data, default=str) if isinstance(data, (dict, list)) else str(data or "")
-            else:
-                llm_context = f"Error executing {tool_name}: {error or 'unknown error'}"
-            logger.info(f"[Composio direct] {tool_name}: success={success}")
-        except Exception as exc:
-            llm_context = f"Error executing {tool_name}: {exc}"
-            logger.error(f"[Composio direct] {tool_name} exception: {exc}", exc_info=True)
-
-        # PRD-157 S3: token-budgeted truncation (model-aware), not a char cut.
-        from modules.rag.budget import truncate_to_token_budget
-        llm_context = truncate_to_token_budget(llm_context, _TOOL_RESULT_TOKEN_BUDGET)
-        return llm_context
+    # PRD-192 S4: `_execute_composio_action` (the raw ComposioToolService
+    # shortcut) is DELETED — per-action Composio calls dispatch through
+    # execute_and_format → UnifiedToolExecutor like every other chat tool, so
+    # the policy gate, telemetry, outcome capture, and scope validation all
+    # fire on this lane and failures surface honestly (no unconditional
+    # success:True). No shim (CLAUDE.md §5).
 
     def _track_search_spiral(
         self,

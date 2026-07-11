@@ -116,4 +116,8 @@ class ApprovalGrant(Base):
             "granted_by": self.granted_by,
             "revoked_at": self.revoked_at.isoformat() if self.revoked_at else None,
             "revoked_by": self.revoked_by,
+            # PRD-193 S4 (P2-12): the tool_call snapshot (action + params
+            # digest source) and the resume outcome (details.executed_result)
+            # — the S3 card and the P2-15 approvals queue read these.
+            "details": self.details or {},
         }

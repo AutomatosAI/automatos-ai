@@ -30,6 +30,7 @@ from core.models.database_knowledge import DatabaseKnowledgeSource, DatabaseQuer
 from core.credentials.service import CredentialStore
 from modules.nl2sql import DatabaseIntrospectionService
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
@@ -107,7 +108,7 @@ async def get_item(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/", response_model=Dict[str, Any])
+@router.post("/", response_model=Dict[str, Any], dependencies=[Depends(require_workspace_permission("knowledge:create"))])
 async def create_database_source(
     source: DatabaseKnowledgeSourceCreate,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -160,7 +161,7 @@ async def create_database_source(
         raise HTTPException(status_code=400, detail="Failed to create database source")
 
 
-@router.post("/{source_id}/query", response_model=Dict[str, Any])
+@router.post("/{source_id}/query", response_model=Dict[str, Any], dependencies=[Depends(require_workspace_permission("knowledge:read"))])
 async def query_database(
     source_id: int,
     request: DatabaseQueryRequest,
@@ -203,7 +204,7 @@ async def query_database(
         raise HTTPException(status_code=400, detail="Query execution failed")
 
 
-@router.post("/{source_id}/introspect")
+@router.post("/{source_id}/introspect", dependencies=[Depends(require_workspace_permission("knowledge:read"))])
 async def introspect_schema(
     source_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -291,7 +292,7 @@ async def get_schema(
     return source.schema_metadata
 
 
-@router.post("/{source_id}/semantic")
+@router.post("/{source_id}/semantic", dependencies=[Depends(require_workspace_permission("knowledge:update"))])
 async def update_semantic_layer(
     source_id: int,
     metrics: List[SemanticMetricCreate] = Body(default=[]),
@@ -363,7 +364,7 @@ async def get_database_source(
     }
 
 
-@router.delete("/{source_id}")
+@router.delete("/{source_id}", dependencies=[Depends(require_workspace_permission("knowledge:delete"))])
 async def delete_database_source(
     source_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -434,7 +435,7 @@ async def list_query_templates(
     ]
 
 
-@router.post("/templates/{template_id}/execute")
+@router.post("/templates/{template_id}/execute", dependencies=[Depends(require_workspace_permission("knowledge:read"))])
 async def execute_template(
     template_id: int,
     body: Dict[str, Any] = Body(...),
@@ -464,7 +465,7 @@ async def execute_template(
     return result
 
 
-@router.post("/{source_id}/query/sql")
+@router.post("/{source_id}/query/sql", dependencies=[Depends(require_workspace_permission("knowledge:read"))])
 async def execute_validated_sql(
     source_id: int,
     payload: Dict[str, Any] = Body(...),
@@ -758,7 +759,7 @@ async def list_training_examples(
     ]
 
 
-@router.post("/{source_id}/examples")
+@router.post("/{source_id}/examples", dependencies=[Depends(require_workspace_permission("knowledge:update"))])
 async def add_training_example(
     source_id: int,
     body: Dict[str, Any] = Body(...),
@@ -784,7 +785,7 @@ async def add_training_example(
     return {"success": True, "example_id": example_id}
 
 
-@router.put("/{source_id}/examples/{example_id}")
+@router.put("/{source_id}/examples/{example_id}", dependencies=[Depends(require_workspace_permission("knowledge:update"))])
 async def update_training_example(
     source_id: int,
     example_id: int,
@@ -822,7 +823,7 @@ async def update_training_example(
     return {"success": True, "example_id": example_id}
 
 
-@router.put("/{source_id}/examples/{example_id}/verify")
+@router.put("/{source_id}/examples/{example_id}/verify", dependencies=[Depends(require_workspace_permission("knowledge:update"))])
 async def verify_training_example(
     source_id: int,
     example_id: int,
@@ -838,7 +839,7 @@ async def verify_training_example(
     return {"success": True, "example_id": example_id, "verified": True}
 
 
-@router.delete("/{source_id}/examples/{example_id}")
+@router.delete("/{source_id}/examples/{example_id}", dependencies=[Depends(require_workspace_permission("knowledge:delete"))])
 async def delete_training_example(
     source_id: int,
     example_id: int,
@@ -854,7 +855,7 @@ async def delete_training_example(
     return {"success": True, "deleted_id": example_id}
 
 
-@router.post("/{source_id}/examples/import")
+@router.post("/{source_id}/examples/import", dependencies=[Depends(require_workspace_permission("knowledge:update"))])
 async def import_training_examples(
     source_id: int,
     body: Dict[str, Any] = Body(...),
@@ -909,7 +910,7 @@ async def get_training_example_stats(
 # PRD-61: Schema Refresh API (US-010)
 # =============================================================================
 
-@router.post("/{source_id}/schema/refresh")
+@router.post("/{source_id}/schema/refresh", dependencies=[Depends(require_workspace_permission("knowledge:update"))])
 async def refresh_schema(
     source_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -971,7 +972,7 @@ async def refresh_schema(
 # PRD-61: Benchmark API (US-018)
 # =============================================================================
 
-@router.post("/{source_id}/benchmark/run")
+@router.post("/{source_id}/benchmark/run", dependencies=[Depends(require_workspace_permission("knowledge:update"))])
 async def run_benchmark(
     source_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),

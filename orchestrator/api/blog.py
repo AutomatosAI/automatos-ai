@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from config import config
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 from core.models.workspaces import Workspace
 from core.services.blog_service import BlogService
@@ -71,7 +72,7 @@ class UpdatePostRequest(BaseModel):
 # Endpoints
 # ---------------------------------------------------------------------------
 
-@router.post("/posts")
+@router.post("/posts", dependencies=[Depends(require_workspace_permission("documents:create"))])
 async def create_post(
     body: CreatePostRequest,
     db: Session = Depends(get_db),
@@ -139,7 +140,7 @@ async def get_post(
     return data
 
 
-@router.put("/posts/{post_id}")
+@router.put("/posts/{post_id}", dependencies=[Depends(require_workspace_permission("documents:update"))])
 async def update_post(
     post_id: UUID,
     body: UpdatePostRequest,
@@ -155,7 +156,7 @@ async def update_post(
     return post.to_dict(include_content=True)
 
 
-@router.delete("/posts/{post_id}")
+@router.delete("/posts/{post_id}", dependencies=[Depends(require_workspace_permission("documents:delete"))])
 async def delete_post(
     post_id: UUID,
     db: Session = Depends(get_db),
@@ -168,7 +169,7 @@ async def delete_post(
     return {"success": True}
 
 
-@router.post("/posts/{post_id}/publish")
+@router.post("/posts/{post_id}/publish", dependencies=[Depends(require_workspace_permission("documents:update"))])
 async def publish_post(
     post_id: UUID,
     db: Session = Depends(get_db),
@@ -182,7 +183,7 @@ async def publish_post(
     return post.to_dict(include_content=False)
 
 
-@router.post("/posts/{post_id}/unpublish")
+@router.post("/posts/{post_id}/unpublish", dependencies=[Depends(require_workspace_permission("documents:update"))])
 async def unpublish_post(
     post_id: UUID,
     db: Session = Depends(get_db),
@@ -213,7 +214,7 @@ _ALLOWED_IMAGE_MIMES = {
 _MAX_COVER_IMAGE_BYTES = 8 * 1024 * 1024  # 8 MB
 
 
-@router.post("/cover-image/upload")
+@router.post("/cover-image/upload", dependencies=[Depends(require_workspace_permission("documents:create"))])
 async def upload_cover_image(
     file: UploadFile = File(...),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -254,7 +255,7 @@ async def upload_cover_image(
     }
 
 
-@router.post("/missions")
+@router.post("/missions", dependencies=[Depends(require_workspace_permission("missions:create"))])
 async def create_blog_mission(
     body: CreateBlogMissionRequest,
     db: Session = Depends(get_db),

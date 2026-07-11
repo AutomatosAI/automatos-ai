@@ -39,8 +39,13 @@ WS_A = uuid.uuid4()
 WS_B = uuid.uuid4()
 
 # Principals. system_role drives the super-admin gate (core/auth/super_admin.py).
-USER_A = UserContext(id="u-a", role="member", system_role="user")
-USER_B = UserContext(id="u-b", role="member", system_role="user")
+# PRD-195 S2/S3: mutating routes now sit behind require_workspace_permission —
+# the tenancy tests below exercise the HANDLER's cross-tenant logic, so their
+# workspace callers carry a clerk identity and the db stub answers the gate's
+# member lookup with an admin role (the gate itself is covered by
+# test_p2w2_workspace_permission_gate.py).
+USER_A = UserContext(id="u-a", role="member", system_role="user", clerk_user_id="clerk-u-a")
+USER_B = UserContext(id="u-b", role="member", system_role="user", clerk_user_id="clerk-u-b")
 SUPER_ADMIN = UserContext(id="u-gerard", role="admin", system_role="super_admin")
 
 
@@ -141,6 +146,11 @@ class TestF002GlobalSkillDelete:
         q.first.return_value = skill
         q.delete.return_value = 0
         db.query.return_value = q
+        # Satisfy the PRD-195 workspace-permission gate: the caller is an
+        # admin member of their workspace (agents:delete).
+        gate_row = MagicMock()
+        gate_row.fetchone.return_value = ("admin",)
+        db.execute.return_value = gate_row
 
         app = FastAPI()
         app.include_router(skills.router)
@@ -235,6 +245,9 @@ class TestF004ShopifyFailClosed:
         cfg = Config()
         monkeypatch.setattr(cfg, "SHOPIFY_INTERNAL_API_KEY", "real-secret", raising=False)
         monkeypatch.setattr(cfg, "S3_VECTORS_ENABLED", False, raising=False)
+        # PRD-194 S4: saas boots also require a widget CORS allowlist —
+        # satisfied here so this test stays scoped to the Shopify guard.
+        monkeypatch.setattr(cfg, "WIDGET_ORIGIN_ALLOWLIST", "https://app.automatos.app", raising=False)
         cfg.validate_security()  # no raise
 
     def test_verify_internal_key_rejects_arbitrary_header(self, monkeypatch):
@@ -331,6 +344,9 @@ class TestF005VectorIsolation:
         monkeypatch.setattr(cfg, "SHOPIFY_INTERNAL_API_KEY", "x", raising=False)
         monkeypatch.setattr(cfg, "S3_VECTORS_ENABLED", True, raising=False)
         monkeypatch.setattr(cfg, "S3_VECTORS_BUCKET", "shared-no-placeholder", raising=False)
+        # PRD-194 S4: saas boots also require a widget CORS allowlist —
+        # satisfied here so this test stays scoped to the bucket layout.
+        monkeypatch.setattr(cfg, "WIDGET_ORIGIN_ALLOWLIST", "https://app.automatos.app", raising=False)
         monkeypatch.setattr(cfg, "validate_auth_edition", lambda: None, raising=False)
         cfg.validate_security()  # must not raise on the bucket layout
 

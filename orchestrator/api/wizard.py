@@ -33,6 +33,7 @@ from sqlalchemy.orm import Session
 
 from config import config
 from core.auth.dependencies import RequestContext
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db, get_db_session
 from core.models.business_profiles import BusinessProfile
@@ -180,7 +181,7 @@ def _slug_from_url(url: str) -> str:
 # Endpoints
 # ===========================================================================
 
-@router.post("/start", response_model=StartResponse, status_code=201)
+@router.post("/start", response_model=StartResponse, status_code=201, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def start_wizard(
     body: StartBody,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -224,7 +225,7 @@ async def start_wizard(
     )
 
 
-@router.post("/scan/{profile_id}", response_model=ScanResponse)
+@router.post("/scan/{profile_id}", response_model=ScanResponse, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def scan_domain(
     profile_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -300,6 +301,8 @@ async def scan_domain(
     "/scrape/{profile_id}",
     response_model=ScrapeAcceptedResponse,
     status_code=202,
+
+    dependencies=[Depends(require_workspace_permission("workspace:manage"))],
 )
 async def scrape_selected(
     profile_id: str,
@@ -392,7 +395,7 @@ async def progress_feed(
     )
 
 
-@router.patch("/profile/{profile_id}")
+@router.patch("/profile/{profile_id}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def patch_profile(
     profile_id: str,
     body: ProfilePatch,
@@ -440,7 +443,7 @@ async def get_profile(
     }
 
 
-@router.post("/plan/{profile_id}", response_model=PlanResponse)
+@router.post("/plan/{profile_id}", response_model=PlanResponse, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def generate_plan(
     profile_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),

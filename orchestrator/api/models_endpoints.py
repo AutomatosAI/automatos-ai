@@ -15,6 +15,7 @@ from core.database.database import get_db
 from core.llm.model_registry import ModelRegistry, ModelInfo
 import logging
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
@@ -135,7 +136,7 @@ async def list_providers(ctx: RequestContext = Depends(get_request_context_hybri
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/recommend", response_model=Dict[str, Any])
+@router.post("/recommend", response_model=Dict[str, Any], dependencies=[Depends(require_workspace_permission("agents:read"))])
 async def recommend_model(
     requirements: Dict[str, Any],
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -195,7 +196,7 @@ async def recommend_model(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/estimate-cost", response_model=Dict[str, Any])
+@router.post("/estimate-cost", response_model=Dict[str, Any], dependencies=[Depends(require_workspace_permission("agents:read"))])
 async def estimate_cost(
     request: Dict[str, Any],
     ctx: RequestContext = Depends(get_request_context_hybrid),

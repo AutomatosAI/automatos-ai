@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from config import config
 from core.database.database import get_db
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 from modules.voice.client import VoiceServiceClient
 from modules.voice.audio import validate_audio, upload_voice_audio, get_voice_audio_url
@@ -150,7 +151,7 @@ async def _collect_streaming_response(
     return "".join(collected_text), effective_agent_id
 
 
-@router.post("/api/chat/voice")
+@router.post("/api/chat/voice", dependencies=[Depends(require_workspace_permission("agents:execute"))])
 async def voice_chat(
     audio: UploadFile = File(...),
     conversation_id: str = Form(""),

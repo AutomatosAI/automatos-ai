@@ -164,6 +164,16 @@ These are **decisions**, not descopes. Each blocks or shapes a story and is your
 
 5. **Adjacent channels-hardening (§1.3.a / §1.3.b) — in or out?** The channels lane has two more trust gaps the P2-13 line does *not* name: **§1.3.a** "whoever messages the bot is the workspace" (no inbound-sender allowlist/pairing — `ingestors/webhook.py:101`) and **§1.3.b** credentials stored plaintext while the schema comments claim encryption (`core/models/channels.py:26` vs. `api/channels.py:362`). Both are real and both bite the day a channel goes live. They are **out of scope as written** (P2-13 = webhook reject-on-mismatch + widget + Composio), but flagged here rather than silently dropped — fold into this wave, or track as a separate channels-trust PRD?
 
+### Decisions — locked 2026-07-10 (Gerard)
+
+1. **CORS posture (S4): boot-abort in `saas`** (consistent with `SHOPIFY_INTERNAL_API_KEY` and the Clerk edition guard); `local`/dev keeps the permissive default behind the explicit opt-in.
+2. **Widget key enforcement (S3): audit-first.** Gerard audits live `ak_pub_` usage for header-less callers before the enforcement deploy; merchants get a heads-up only if the audit finds any; an `ak_srv_` server key is built only if a legitimate server-side caller exists — no speculative machinery. Code lands in the wave build; the flip is sequenced after the audit.
+3. **S2 dedup store: Redis `SETNX` + TTL** (reuse `core/redis/client.py`; no migration). A Postgres `webhook_event` table only if an audit-trail requirement emerges.
+4. **§1.4.b chat-shortcut chokepoint: stays with PRD-192 (P2-11)** — its lane-closure stories own the raw `execute_action` call sites; not folded into this PRD.
+5. **Channels §1.3.a/§1.3.b: separate channels-trust PRD** (PRD-197 candidate), scheduled when channels approach go-live — surfaced, not silently dropped.
+
+**Pull-forward note:** S1 shipped early as **PR #530** (Gerard's 2026-07-10 go-ahead) — reject-on-mismatch across the Composio V3 / workspace / playbook lanes + the Slack v0 scheme. The wave build verifies #530 against this PRD's S1 spec and rebases on it rather than re-implementing.
+
 ---
 
 *Traceability: every story cites its security-appendix ref (`reports/dossiers/security-hardening-appendix.md` §1.1 CRITICAL / §1.2 HIGH / §1.4 HIGH) and its module dossier (`channels.md` B1/C2-12, `storefront-widget.md` §C 7–9 / §J 4–5, `composio-integration.md` C.2 / §J P0-2), under review id **P2-13** in `reports/PLATFORM_MODULE_DEEP_REVIEW_2026-07-04.md` §6 (Wave 2) + §7 Top-3 (§253). All `file:line` refs re-confirmed by grep against the worktree `@ d26ce039d` (the review's pinned tree `77bc9c6d5` drifted by ±1–3 lines) and are current as written. Composes with PRD-189 S3 (#528, merged to `origin/main`); relates to P2-11 (policy plane) and P2-14 (authZ consolidation). North-Star framed; PILOT lens applied; no moat framing.*

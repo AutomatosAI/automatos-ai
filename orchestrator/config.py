@@ -485,8 +485,26 @@ class Config:
 
     # Webhooks / Widgets
     WEBHOOK_SECRET: str = os.getenv("WEBHOOK_SECRET")
+    # PRD-194 S2 (P2-13): replay/dedup guard for the three EXTERNAL webhook
+    # lanes (Composio /webhook, workspace /ws/{key}, playbook /recipe/{id}).
+    # Dedup marks live in Redis (SETNX + TTL via core/redis/client.py — no
+    # new table). TTL covers provider retry windows with slack to spare.
+    WEBHOOK_DEDUP_TTL_SECONDS: int = int(os.getenv("WEBHOOK_DEDUP_TTL_SECONDS", "3600"))
+    # Replay skew: reject events whose provider timestamp is further than
+    # this from now (mirrors Slack's documented v0 5-minute window).
+    WEBHOOK_TIMESTAMP_SKEW_SECONDS: int = int(os.getenv("WEBHOOK_TIMESTAMP_SKEW_SECONDS", "300"))
     WIDGET_TOKEN_SECRET: str = os.getenv("WIDGET_TOKEN_SECRET", "")
     WIDGET_ORIGIN_ALLOWLIST: str = os.getenv("WIDGET_ORIGIN_ALLOWLIST", "")
+    # PRD-194 S5 (P2-13): Redis-backed shared widget rate limiter (replaces
+    # the per-process in-memory window). One window length; per-key limits by
+    # key type; and a per-IP ceiling on the two money-spending endpoints
+    # (/api/widgets/chat, /api/widgets/callback) that applies even when a
+    # key is presented.
+    WIDGET_RATE_LIMIT_WINDOW_SECONDS: int = int(os.getenv("WIDGET_RATE_LIMIT_WINDOW_SECONDS", "60"))
+    WIDGET_RATE_LIMIT_PUBLIC_PER_WINDOW: int = int(os.getenv("WIDGET_RATE_LIMIT_PUBLIC_PER_WINDOW", "30"))
+    WIDGET_RATE_LIMIT_SERVER_PER_WINDOW: int = int(os.getenv("WIDGET_RATE_LIMIT_SERVER_PER_WINDOW", "1000"))
+    WIDGET_CHAT_IP_LIMIT_PER_WINDOW: int = int(os.getenv("WIDGET_CHAT_IP_LIMIT_PER_WINDOW", "30"))
+    WIDGET_CALLBACK_IP_LIMIT_PER_WINDOW: int = int(os.getenv("WIDGET_CALLBACK_IP_LIMIT_PER_WINDOW", "10"))
     SHOPIFY_INTERNAL_API_KEY: str = os.getenv("SHOPIFY_INTERNAL_API_KEY", "")
     # PRD-189 S3: per-workspace debounce window (seconds) for catalog-webhook
     # re-syncs. A merchant bulk edit emits a burst of products/update webhooks;
@@ -663,13 +681,32 @@ class Config:
     # priority and escalated for human approval (when self-management is on).
     HARNESS_HIGH_PRIORITY_RISK: int = int(os.getenv("HARNESS_HIGH_PRIORITY_RISK", "4"))
 
-    # PRD-174 Wave 4 — Unified Policy Plane. THE master flag for the policy
-    # plane: one typed gate (`modules/policy.PolicyGate`) evaluated in one place
-    # (`UnifiedToolExecutor.execute_tool`) for every tool call on every surface,
-    # plus the `on_pre_tool` budget/approval seam. HIGHEST-RISK wave — touches
-    # every execution path — so it ships default OFF. Flag OFF ⇒ byte-for-byte
-    # today's per-router gates (nothing new enters the path). Flag ON ⇒ the plane.
-    POLICY_PLANE_ENABLED: bool = os.getenv("AUTOMATOS_POLICY_PLANE", "false").lower() in ("true", "1", "yes")
+    # PRD-174 Wave 4 / PRD-192 S1 (P2-11) — Unified Policy Plane staged mode
+    # dial. ONE env, `AUTOMATOS_POLICY_PLANE = off | shadow | destructive | on`:
+    #   off         ⇒ byte-for-byte today's per-router gates (no bus fire, no audit)
+    #   shadow      ⇒ evaluate + audit every verdict; NEVER block
+    #   destructive ⇒ enforce deny/ask only for the fail-closed risk classes
+    #                 (destructive / external_side_effect / publish); shadow-log the rest
+    #   on          ⇒ enforce all (PRD-174's original ON)
+    # Legacy booleans map (true/1/yes ⇒ on, false/0/no ⇒ off); unknown values
+    # fail safe to "off". Ships default OFF; stage flips are ops actions on the
+    # deploy env (Railway), never code — each retreat is one env value.
+    _POLICY_PLANE_RAW = os.getenv("AUTOMATOS_POLICY_PLANE", "off").strip().lower()
+    POLICY_PLANE_MODE: str = {
+        "true": "on", "1": "on", "yes": "on",
+        "false": "off", "0": "off", "no": "off", "": "off",
+    }.get(_POLICY_PLANE_RAW, _POLICY_PLANE_RAW)
+    POLICY_PLANE_MODE = POLICY_PLANE_MODE if POLICY_PLANE_MODE in ("off", "shadow", "destructive", "on") else "off"
+    # Derived boolean (mode ≠ off) so the existing registration sites — the
+    # audit-handler attach (main.py), limiter arming (main.py F040), roles.py
+    # F043, widgets/auth.py F042 — arm on ANY live stage, unchanged.
+    POLICY_PLANE_ENABLED: bool = POLICY_PLANE_MODE != "off"
+
+    # PRD-192 S3 (locked #2a): autonomy-enabled workspaces get a DEFAULT budget
+    # ceiling — max_cost_usd 50 per month — applied in the budget reader when
+    # the workspace has no explicit `plan_limits.budget` (code default, no
+    # migration; explicit budgets always win). 0 disables the default.
+    AUTONOMY_DEFAULT_BUDGET_USD: float = float(os.getenv("AUTOMATOS_AUTONOMY_DEFAULT_BUDGET_USD", "50"))
 
     # PRD-196 S5 — audit-log retention. EU-AI-Act Art.12 mandates >= 6 months
     # (a floor, so retention is a compliance requirement, not housekeeping) while
@@ -771,7 +808,10 @@ class Config:
     # hung embedding/Qdrant backend can never stall the dispatch tick — on
     # timeout the matcher falls back to lexical-only scoring.
     AGENT_MATCH_SIGNAL_TIMEOUT_SECONDS: float = float(os.getenv("AGENT_MATCH_SIGNAL_TIMEOUT_SECONDS", "10"))
-    # Telemetry: cost estimation per 1K tokens (PRD-82B US-004)
+    # Cost estimation per 1K tokens (PRD-82B US-004). PRD-192 S3 (F059 finish):
+    # DEMOTED to modules/policy/pricing.py's registry-miss last resort — pricing
+    # is this constant's ONLY consumer (source-grep-guarded); every dollar
+    # figure routes through the one pricing source.
     COORDINATOR_COST_PER_1K_TOKENS: float = float(os.getenv("COORDINATOR_COST_PER_1K_TOKENS", "0.003"))
     # Replanning limits (PRD-82B US-005)
     COORDINATOR_MAX_REPLANS: int = int(os.getenv("COORDINATOR_MAX_REPLANS", "2"))
@@ -1137,6 +1177,10 @@ class Config:
           shared bucket with no ``{workspace_id}`` placeholder is allowed —
           tenant isolation is enforced per-query by ``S3VectorsBackend.search()``
           (fail-closed on ``workspace_id``), not by the bucket layout.)
+        - PRD-194 S4 (P2-13): ``WIDGET_ORIGIN_ALLOWLIST`` is empty in the
+          ``saas`` edition — widget CORS would rest at allow-all on the
+          internet-facing plane. Boot-abort in saas (same posture as F004 /
+          the Clerk edition guard); ``local`` keeps the permissive dev default.
         """
         errors: list[str] = []
 
@@ -1160,6 +1204,21 @@ class Config:
                 errors.append(
                     "S3_VECTORS_ENABLED=true but S3_VECTORS_BUCKET is unset."
                 )
+
+        # PRD-194 S4 (P2-13) — the internet-facing widget plane must not rest
+        # at allow-all CORS in production. In the saas edition an empty
+        # WIDGET_ORIGIN_ALLOWLIST is a boot error (locked decision: boot-abort,
+        # matching the F004 and Clerk edition guards). The local edition keeps
+        # the permissive dev default — choosing AUTH_EDITION=local IS the
+        # explicit opt-in.
+        if self.IS_SAAS_EDITION and not (self.WIDGET_ORIGIN_ALLOWLIST or "").strip():
+            errors.append(
+                "WIDGET_ORIGIN_ALLOWLIST is unset in the saas edition — widget "
+                "CORS (/api/widgets, /api/sites) would allow ALL origins on the "
+                "internet-facing plane (fail-open). Set WIDGET_ORIGIN_ALLOWLIST "
+                "to the comma-separated allowed storefront/dashboard origins, or "
+                "run AUTH_EDITION=local for a dev instance."
+            )
 
         if errors:
             raise RuntimeError(

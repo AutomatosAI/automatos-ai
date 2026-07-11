@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db
 from core.team_access import get_or_create_team, list_teams, normalize_team
@@ -43,7 +44,7 @@ async def list_workspace_teams(
     return list_teams(db, ctx.workspace_id)
 
 
-@router.post("", response_model=TeamResponse, status_code=201)
+@router.post("", response_model=TeamResponse, status_code=201, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def create_workspace_team(
     body: CreateTeamRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),

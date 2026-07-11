@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 from core.models.workspaces import Workspace
 from config import config
@@ -547,7 +548,7 @@ class SyncStartResponse(BaseModel):
     error: Optional[str] = None
 
 
-@router.post("/sync/products/start", response_model=SyncStartResponse)
+@router.post("/sync/products/start", response_model=SyncStartResponse, dependencies=[Depends(require_workspace_permission("knowledge:update"))])
 async def start_product_sync(
     workspace_id: Optional[str] = None,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -910,7 +911,7 @@ class OrdersSyncResponse(BaseModel):
     error: Optional[str] = None
 
 
-@router.post("/sync/orders/start", response_model=OrdersSyncResponse)
+@router.post("/sync/orders/start", response_model=OrdersSyncResponse, dependencies=[Depends(require_workspace_permission("knowledge:update"))])
 async def start_orders_sync(
     workspace_id: Optional[str] = None,
     days: int = 90,

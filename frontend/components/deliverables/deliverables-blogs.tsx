@@ -48,6 +48,7 @@ import {
 } from '@/hooks/use-blogs-api'
 import type { BlogPost, BlogFilters } from '@/hooks/use-blogs-api'
 import { BlogEditor } from './blog-editor'
+import { useWorkspace } from '@/components/workspace-provider'
 
 // ─── Status badge colours ───────────────────────────────
 
@@ -119,6 +120,7 @@ function BlogPostCard({
   onUnpublish: (post: BlogPost) => void
   onDelete: (post: BlogPost) => void
 }) {
+  const { canEdit } = useWorkspace()
   const borderColor =
     post.status === 'published'
       ? 'border-l-[hsl(var(--success))]'
@@ -216,7 +218,8 @@ function BlogPostCard({
                 variant="ghost"
                 size="icon"
                 className="h-7 w-7 text-destructive"
-                title="Delete"
+                title={canEdit ? 'Delete' : 'Viewers have read-only access'}
+                disabled={!canEdit}
               >
                 <Trash2 className="w-3.5 h-3.5" />
               </Button>

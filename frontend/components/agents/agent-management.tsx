@@ -25,6 +25,7 @@ import { SearchInput } from '@/components/shared/search-input'
 import { FilterTabs, TabsContent } from '@/components/shared/filter-tabs'
 import { ViewToggle } from '@/components/shared/view-toggle'
 import { useViewMode } from '@/hooks/use-view-mode'
+import { useWorkspace } from '@/components/workspace-provider'
 
 // Import all tab components
 import { AgentRoster } from './agent-roster'
@@ -40,6 +41,7 @@ import { useAgents, useAgentStats, useAgentTypes } from '@/hooks/use-agent-api'
 import { apiClient } from '@/lib/api-client'
 
 export function AgentManagement() {
+  const { canEdit } = useWorkspace()
   const [activeTab, setActiveTab] = useState('roster')
   const [viewMode, setViewMode] = useViewMode('agents')
   const [showCreateModal, setShowCreateModal] = useState(false)
@@ -164,6 +166,8 @@ export function AgentManagement() {
               variant="outline"
               data-tour="create-agent-btn"
               onClick={() => setShowCreateModal(true)}
+              disabled={!canEdit}
+              title={canEdit ? undefined : 'Viewers have read-only access'}
             >
               <Plus className="w-4 h-4 mr-2" />
               Create Agent

@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from config import config
 from core.auth.hybrid import get_request_context_hybrid, require_task_context
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 from core.auth.scopes import TASKS_READ
 from core.database.database import get_db
@@ -287,7 +288,7 @@ def _enrich_with_agents(tasks: list, db: Session, workspace_id) -> list:
 
 # ── CRUD ─────────────────────────────────────────────────────────────
 
-@router.post("")
+@router.post("", dependencies=[Depends(require_workspace_permission("missions:create"))])
 async def create_task(
     request: Request,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -475,7 +476,7 @@ async def get_task(
     return enriched[0]
 
 
-@router.patch("/{task_id}")
+@router.patch("/{task_id}", dependencies=[Depends(require_workspace_permission("missions:update"))])
 async def update_task(
     task_id: int,
     request: Request,
@@ -601,7 +602,7 @@ async def update_task(
     return task.to_dict()
 
 
-@router.delete("/{task_id}")
+@router.delete("/{task_id}", dependencies=[Depends(require_workspace_permission("missions:delete"))])
 async def delete_task(
     task_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -624,7 +625,7 @@ async def delete_task(
 
 # ── Status shortcut (drag-and-drop) ─────────────────────────────────
 
-@router.post("/{task_id}/approve")
+@router.post("/{task_id}/approve", dependencies=[Depends(require_workspace_permission("missions:update"))])
 async def approve_task(
     task_id: int,
     request: Request,
@@ -736,7 +737,7 @@ async def approve_task(
     }
 
 
-@router.post("/{task_id}/reject")
+@router.post("/{task_id}/reject", dependencies=[Depends(require_workspace_permission("missions:update"))])
 async def reject_task(
     task_id: int,
     request: Request,
@@ -793,7 +794,7 @@ async def reject_task(
     }
 
 
-@router.post("/{task_id}/run-now")
+@router.post("/{task_id}/run-now", dependencies=[Depends(require_workspace_permission("missions:execute"))])
 async def run_task_now(
     task_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -832,7 +833,7 @@ async def run_task_now(
     return {"success": True, "task_id": task.id, "status": task.status}
 
 
-@router.patch("/{task_id}/status")
+@router.patch("/{task_id}/status", dependencies=[Depends(require_workspace_permission("missions:update"))])
 async def update_task_status(
     task_id: int,
     request: Request,
@@ -940,6 +941,65 @@ async def _lease_heartbeat(task_id: int) -> None:
         raise
 
 
+def _estimate_board_task_cost_usd(db, task_id: int, agent_id: int) -> float:
+    """PRD-192 S3: a REAL dollar estimate for the pending board task.
+
+    Before this the approval gate always received the ``estimated_cost_usd=0.0``
+    default, so an ``auto_below_budget`` policy auto-approved every task (C.5 —
+    the ceiling could never bind). Estimator: prompt tokens of the task's text
+    (``raw_prompt`` else title+description) + the agent's configured output cap
+    (``model_config.max_tokens``, else the model registry's own ceiling),
+    priced by ``modules.policy.pricing`` against the task agent's model — the
+    flat rate applies only inside pricing as the registry-miss last resort.
+
+    Never raises: 0.0 when nothing is resolvable (the gate then behaves as
+    before for that task).
+    """
+    try:
+        from core.context_guard import count_tokens
+        from modules.policy import pricing as _pricing
+
+        task = db.query(BoardTask).get(task_id)
+        if task is None:
+            return 0.0
+        prompt_text = task.raw_prompt or " ".join(
+            p for p in (task.title, task.description) if p
+        )
+        est_in = count_tokens(prompt_text or "")
+
+        model_id = None
+        est_out = 0
+        agent = db.query(Agent).get(agent_id) if agent_id else None
+        mc = getattr(agent, "model_config", None) or {}
+        if isinstance(mc, dict):
+            model_id = mc.get("model_id")
+            try:
+                est_out = int(mc.get("max_tokens") or 0)
+            except (TypeError, ValueError):
+                est_out = 0
+        if model_id and not est_out:
+            try:
+                from core.models import LLMModel
+
+                m = db.query(LLMModel).filter_by(model_id=model_id).first()
+                est_out = int(m.max_output_tokens or 0) if m else 0
+            except Exception:
+                est_out = 0
+
+        if model_id:
+            priced = _pricing.estimate_cost_usd(db, model_id, est_in, est_out)
+            if priced is not None:
+                return float(priced)
+        # No model / registry miss ⇒ the ONE flat last-resort, inside pricing.
+        return _pricing.price_total_tokens_usd(db, model_id, est_in + est_out)
+    except Exception:
+        logger.warning(
+            "[BoardTasks] cost estimate failed for task %s — passing 0.0",
+            task_id, exc_info=True,
+        )
+        return 0.0
+
+
 def _board_task_blocked_pending_approval(
     db, task_id: int, agent_id: int, workspace_id: str
 ) -> bool:
@@ -950,8 +1010,10 @@ def _board_task_blocked_pending_approval(
       task (status → ``blocked``, ``blocked_reason`` referencing the grant) and
       return True so the caller does NOT execute it.
 
-    Fail-open on any error: approval is a governance gate, not a correctness
-    gate — a policy-read fault must not wedge board execution (the per-tool
+    Fail posture (PRD-192 S1, locked #4): under the policy plane's ENFORCE
+    stages (``destructive`` | ``on``) an approval-gate ERROR blocks the task
+    pending approval — an errored governance gate must never launch autonomous
+    work. In ``off``/``shadow`` the historical fail-open stands (the per-tool
     PolicyGate still applies to every tool the task's agent invokes).
     """
     try:
@@ -967,6 +1029,8 @@ def _board_task_blocked_pending_approval(
 
         outcome = evaluate_board_task_approval(
             db, workspace_id=workspace_id, task_id=task_id, agent_id=agent_id,
+            # PRD-192 S3: a real priced figure — auto_below_budget can bind (C.5).
+            estimated_cost_usd=_estimate_board_task_cost_usd(db, task_id, agent_id),
         )
         if not outcome.requires_approval:
             return False
@@ -987,11 +1051,43 @@ def _board_task_blocked_pending_approval(
             )
         return True
     except Exception:
-        logger.warning(
-            "[BoardTasks] approval gate errored for task %s — proceeding "
-            "(per-tool PolicyGate still applies)", task_id, exc_info=True,
+        try:
+            from modules.policy.flag import enforcement_active
+
+            _fail_closed = enforcement_active()
+        except Exception:
+            _fail_closed = False
+
+        if not _fail_closed:
+            logger.warning(
+                "[BoardTasks] approval gate errored for task %s — proceeding "
+                "(per-tool PolicyGate still applies)", task_id, exc_info=True,
+            )
+            return False
+
+        # Enforce stage: BLOCK pending approval, never launch on a gate error.
+        logger.error(
+            "[BoardTasks] approval gate errored for task %s — BLOCKED pending "
+            "approval (policy plane enforce stage fails closed)", task_id,
+            exc_info=True,
         )
-        return False
+        try:
+            db.rollback()  # the failed gate may have poisoned the transaction
+            task = db.query(BoardTask).get(task_id)
+            if task is not None and task.status == "in_progress":
+                task.status = "blocked"
+                task.blocked_at = datetime.now(timezone.utc)
+                task.blocked_reason = (
+                    "Approval gate errored — blocked pending approval "
+                    "(policy plane enforce stage fails closed)"
+                )
+                db.commit()
+        except Exception:
+            logger.warning(
+                "[BoardTasks] could not mark task %s blocked after gate error "
+                "— task still NOT launched", task_id, exc_info=True,
+            )
+        return True
 
 
 def _launch_task_execution(
@@ -1168,7 +1264,7 @@ async def _board_planning_context(db: Session, workspace_id, goal: str) -> str:
         return ""
 
 
-@router.post("/plan")
+@router.post("/plan", dependencies=[Depends(require_workspace_permission("missions:create"))])
 async def plan_task(
     request: Request,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -1246,7 +1342,7 @@ async def plan_task(
     return {"planning": parsed, "raw_prompt": raw_prompt}
 
 
-@router.post("/plan/refine")
+@router.post("/plan/refine", dependencies=[Depends(require_workspace_permission("missions:create"))])
 async def refine_task(
     request: Request,
     ctx: RequestContext = Depends(get_request_context_hybrid),

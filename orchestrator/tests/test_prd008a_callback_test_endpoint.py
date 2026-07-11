@@ -62,10 +62,13 @@ def _make_client(*, site, dispatch_results=None, monkeypatch=None):
     workspace_id = site.workspace_id if site else uuid4()
 
     def _override_ctx():
+        # PRD-195 S6 gated this route (workspace:manage); the anonymous lane
+        # (trusted local single-user posture) owns its workspace, which keeps
+        # this dispatch-logic test focused on dispatch, not membership rows.
         return RequestContext(
             workspace_id=workspace_id,
-            user=UserContext(id="test-user", email="test@example.com", role="owner"),
-            auth_type="clerk",
+            user=UserContext(id="test-user", email="test@example.com"),
+            auth_type="anonymous",
         )
 
     def _override_db():

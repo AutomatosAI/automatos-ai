@@ -2015,44 +2015,9 @@ class ApiClient {
     })
   }
 
-  // ===== WORKSPACE TASK ENDPOINTS (PRD-56 Phase 2) =====
-  async submitWorkspaceTask(data: {
-    steps: Array<{
-      action: string
-      command?: string
-      repo?: string
-      branch?: string
-      path?: string
-      content?: string
-      cwd?: string
-      timeout?: number
-      description?: string
-    }>
-    priority?: string
-    timeout_seconds?: number
-  }) {
-    return this.request('/api/tasks/submit', {
-      method: 'POST',
-      body: JSON.stringify(data)
-    })
-  }
-
-  async listWorkspaceTasks(params?: { status?: string; limit?: number; offset?: number }) {
-    const qs = new URLSearchParams()
-    if (params?.status) qs.set('status', params.status)
-    if (params?.limit) qs.set('limit', String(params.limit))
-    if (params?.offset) qs.set('offset', String(params.offset))
-    const query = qs.toString()
-    return this.request(`/api/tasks${query ? '?' + query : ''}`)
-  }
-
-  async getWorkspaceTask(taskId: string) {
-    return this.request(`/api/tasks/${taskId}`)
-  }
-
-  async cancelWorkspaceTask(taskId: string) {
-    return this.request(`/api/tasks/${taskId}/cancel`, { method: 'POST' })
-  }
+  // PRD-192 S6: the PRD-56 workspace-task client methods (submit/list/get/
+  // cancel against the deleted tasks router) were removed with the backend —
+  // zero component/hook callers existed (grep-proven).
 
   async getWorkspaceFiles(workspaceId: string, path?: string) {
     const qs = path ? `?path=${encodeURIComponent(path)}` : ''

@@ -27,7 +27,9 @@ from core.models import Agent
 from core.models.core import RecipeExecution
 from core.models.composio import TriggerSubscription, ComposioEntity
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
+from services import webhook_dedup
 from config import config
 
 
@@ -366,7 +368,7 @@ async def get_workflow_recipe(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("")
+@router.post("", dependencies=[Depends(require_workspace_permission("playbooks:create"))])
 async def create_workflow_recipe(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     recipe_data: Dict[str, Any] = Body(...),
@@ -510,7 +512,7 @@ async def create_workflow_recipe(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.put("/{recipe_id}")
+@router.put("/{recipe_id}", dependencies=[Depends(require_workspace_permission("playbooks:update"))])
 async def update_workflow_recipe(
     recipe_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -638,7 +640,7 @@ async def update_workflow_recipe(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.delete("/{recipe_id}")
+@router.delete("/{recipe_id}", dependencies=[Depends(require_workspace_permission("playbooks:delete"))])
 async def delete_workflow_recipe(
     recipe_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -716,7 +718,7 @@ async def delete_workflow_recipe(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/{recipe_id}/use")
+@router.post("/{recipe_id}/use", dependencies=[Depends(require_workspace_permission("playbooks:update"))])
 async def record_recipe_usage(
     recipe_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -813,7 +815,7 @@ async def list_featured_recipes(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/{recipe_id}/execute")
+@router.post("/{recipe_id}/execute", dependencies=[Depends(require_workspace_permission("playbooks:execute"))])
 async def execute_recipe(
     recipe_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -1013,7 +1015,7 @@ async def get_recipe_execution_detail(
 # CANCEL EXECUTION
 # ===================================================================
 
-@router.post("/{recipe_id}/executions/{execution_id}/cancel")
+@router.post("/{recipe_id}/executions/{execution_id}/cancel", dependencies=[Depends(require_workspace_permission("playbooks:execute"))])
 async def cancel_execution(
     recipe_id: str,
     execution_id: str,
@@ -1180,7 +1182,7 @@ async def get_step_full_logs(
 # SELF-LEARNING ENDPOINTS (Learn, Quality, Suggestions, Executions)
 # ===================================================================
 
-@router.post("/{recipe_id}/learn")
+@router.post("/{recipe_id}/learn", dependencies=[Depends(require_workspace_permission("playbooks:update"))])
 async def analyze_execution_learning(
     recipe_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -1244,7 +1246,7 @@ async def analyze_execution_learning(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/{recipe_id}/assess-quality")
+@router.post("/{recipe_id}/assess-quality", dependencies=[Depends(require_workspace_permission("playbooks:update"))])
 async def assess_execution_quality(
     recipe_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -1416,7 +1418,7 @@ async def list_recipe_executions(
 # MARKETPLACE ENDPOINTS
 # ===================================================================
 
-@router.post("/submit")
+@router.post("/submit", dependencies=[Depends(require_workspace_permission("playbooks:create"))])
 async def submit_recipe_to_marketplace(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     recipe_data: Dict[str, Any] = Body(...),
@@ -1557,7 +1559,7 @@ async def submit_recipe_to_marketplace(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/install/{recipe_id}")
+@router.post("/install/{recipe_id}", dependencies=[Depends(require_workspace_permission("playbooks:create"))])
 async def install_recipe_from_marketplace(
     recipe_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -1759,8 +1761,8 @@ async def recipe_webhook(
     Trigger a recipe execution via webhook.
 
     The webhook_id is a persistent secret stored in the recipe's
-    schedule_config.webhook_id. No authentication required — the
-    URL itself is the credential.
+    schedule_config.webhook_id — the URL is the credential floor. When a
+    webhook secret is configured, a valid HMAC signature is also mandatory.
 
     Body (optional):
     - Any JSON payload — passed as input_data to the recipe executor.
@@ -1797,7 +1799,8 @@ async def recipe_webhook(
     if not recipe:
         raise HTTPException(status_code=404, detail="Unknown webhook")
 
-    # Verify HMAC signature if a webhook secret is configured
+    # Verify HMAC signature — mandatory when a webhook secret is configured:
+    # missing header or mismatch ⇒ 401 (P2-13).
     webhook_secret = (recipe.schedule_config or {}).get("webhook_secret") or config.WEBHOOK_SECRET
     if webhook_secret:
         sig_header = (
@@ -1805,17 +1808,39 @@ async def recipe_webhook(
             or request.headers.get("x-composio-signature")
             or request.headers.get("x-webhook-signature")
         )
-        if sig_header:
-            raw_body = await request.body()
-            expected_sig = sig_header.removeprefix("sha256=")
-            computed = hmac.new(
-                webhook_secret.encode("utf-8"),
-                raw_body,
-                hashlib.sha256,
-            ).hexdigest()
-            if not hmac.compare_digest(computed, expected_sig):
-                logger.warning("[webhook] HMAC signature mismatch for recipe webhook %s", webhook_id)
-                raise HTTPException(status_code=401, detail="Invalid webhook signature")
+        if not sig_header:
+            logger.warning("[webhook] Rejected recipe webhook %s: secret configured but no signature header", webhook_id)
+            raise HTTPException(status_code=401, detail="Missing webhook signature")
+        raw_body = await request.body()
+        expected_sig = sig_header.removeprefix("sha256=")
+        computed = hmac.new(
+            webhook_secret.encode("utf-8"),
+            raw_body,
+            hashlib.sha256,
+        ).hexdigest()
+        if not hmac.compare_digest(computed, expected_sig):
+            logger.warning("[webhook] HMAC signature mismatch for recipe webhook %s", webhook_id)
+            raise HTTPException(status_code=401, detail="Invalid webhook signature")
+
+    # Replay guard + event dedup (PRD-194 S2, P2-13): a redelivered event
+    # (same webhook-id header / body event_id) must not create a second
+    # RecipeExecution. A stale provider timestamp is a replay ⇒ 401. No
+    # event id ⇒ nothing to dedup on ⇒ process normally (URL-as-secret
+    # callers that send no id keep working).
+    if webhook_dedup.timestamp_is_stale(request.headers.get("webhook-timestamp")):
+        logger.warning(
+            "[webhook] Rejected recipe webhook %s: stale webhook-timestamp (replay guard)",
+            webhook_id,
+        )
+        raise HTTPException(status_code=401, detail="Stale webhook timestamp")
+    dedup_event_id = request.headers.get("webhook-id") or (
+        body.get("event_id") if isinstance(body, dict) else None
+    )
+    if await webhook_dedup.seen_before(f"recipe:{webhook_id}", dedup_event_id):
+        logger.info(
+            "[webhook] Duplicate recipe webhook event %s — no-op ack", dedup_event_id
+        )
+        return {"status": "duplicate", "event_id": str(dedup_event_id)}
 
     if not recipe.steps:
         raise HTTPException(status_code=400, detail="Recipe has no steps")

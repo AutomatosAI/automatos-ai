@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_, func
 
 from core.auth.dependencies import RequestContext
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db
 from core.models.openrouter_cache import OpenRouterModelCache, OpenRouterSyncJob
@@ -287,7 +288,7 @@ async def stats(
     )
 
 
-@router.post("/sync")
+@router.post("/sync", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def sync(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),

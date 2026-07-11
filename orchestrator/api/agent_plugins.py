@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 
 logger = logging.getLogger(__name__)
@@ -124,7 +125,7 @@ async def list_agent_plugins(
         raise HTTPException(status_code=500, detail="Failed to list agent plugins")
 
 
-@router.put("/{agent_id}/plugins", response_model=None)
+@router.put("/{agent_id}/plugins", response_model=None, dependencies=[Depends(require_workspace_permission("agents:update"))])
 async def update_agent_plugins(
     agent_id: int,
     body: UpdateAgentPluginsBody,

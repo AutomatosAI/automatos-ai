@@ -139,6 +139,15 @@ This is the enforcement leg of **Wave 2 (arm autonomy safely)** — the review's
 > 4. **Board-gate fail posture.** Proposed: under enforce modes a board approval-gate *error* blocks the task pending approval (fail closed) instead of launching (`board_tasks.py:989-994` today). Given board tasks are internal launches whose tools are individually gated downstream, acceptable — or keep the board gate fail-open and rely on per-tool enforcement?
 > 5. **`/api/tasks`: gate it or delete it.** Both dossiers flag deletion; S6 specs the gate. Gate (keeps the queued-runner capability, governed) or delete (one less ingress; P2-25's item retires by removal)?
 > 6. **Human-direct actor rule.** Proposed: a request a human makes directly through an API surface (widget email send is the concrete case) satisfies the ask-gate by itself — budget + audit still apply; agent-initiated calls on the same lane still ask. Confirm, or should widget sends ask a workspace admin under Strict posture regardless?
+>
+> ### Decisions — locked 2026-07-10 (Gerard; recommendations adopted)
+>
+> 1. **Fail matrix:** as proposed — `destructive`/`external_side_effect`/`publish` fail closed on plane error under enforce modes; `read`/`internal_write` fail open, marked + counted; unclassifiable ⇒ treated destructive (closed). The `destructive` stage enforces exactly the three closed classes.
+> 2. **Budget:** (a) autonomy-enabled workspaces get a **default ceiling `max_cost_usd` = 50/month** — opt-in-only rejected: nobody hand-writes JSONB, so the budget leg would stay dead until PRD-196's editor lands to adjust it. (b) The flat `COORDINATOR_COST_PER_1K_TOKENS` stays as the registry-miss **fallback**. (c) Prompt-tokens + output-cap estimator: good enough for admission.
+> 3. **Rollout:** as proposed — ≥7 days `shadow` (fail-open ~0, false-block < 5%, sane row volume) → `destructive` ≥7 days **with PRD-193's card live** → `on` → default-on in `envs/api.defaults`. Flips are Gerard's ops actions on Railway.
+> 4. **Board-gate:** fail closed — an approval-gate *error* blocks the task pending approval; it never launches.
+> 5. **`/api/tasks`: DELETE** (grep-prove 0 product callers first; S6 becomes the deletion; P2-25's overlapping sub-item retires by removal).
+> 6. **Human-direct actor rule:** confirmed — a human's own direct API request satisfies the ask-gate by itself; budget + audit still apply; agent-initiated calls on the same lane still ask.
 
 ---
 

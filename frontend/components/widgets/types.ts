@@ -31,6 +31,8 @@ export type WidgetType =
   | 'coding_canvas'  // Monaco-based workspace file browser + editor
   // PRD-163 S4: in-chat mission plan approval card
   | 'mission_approval'  // Approve/reject an auto-created mission plan
+  // PRD-193 S3 (P2-12): in-chat tool approval card (confirmation-gated action)
+  | 'tool_approval'  // Approve/deny a gated tool call via its approval grant
 
 export interface MissionApprovalTask {
   title: string
@@ -53,6 +55,25 @@ export interface MissionApprovalWidgetData {
   approval_deadline_at?: string
   // PRD-181 S5 (EU-AI-Act Art.14): the autonomy risk tier + why a human is in
   // the loop, shown on the card so the approver sees the risk classification.
+  risk_tier?: 'monitor' | 'human_on_the_loop' | 'human_in_the_loop'
+  risk_class?: string
+  oversight_rationale?: string
+  requires_approval?: boolean
+}
+
+/**
+ * PRD-193 S3 (P2-12): a confirmation-gated tool call awaiting approval.
+ * The card clones the mission-approval presentation but acts on the PRD-181
+ * approval-grant API (grant/deny) — they share presentation, not behaviour.
+ */
+export interface ToolApprovalWidgetData {
+  grant_id: number
+  action: string
+  message?: string
+  permission_level?: string
+  /** Human-readable digest of the model-provided params (server plumbing stripped). */
+  params?: Record<string, unknown>
+  // PRD-181 S5 (EU-AI-Act Art.14) oversight fields, as on the mission card.
   risk_tier?: 'monitor' | 'human_on_the_loop' | 'human_in_the_loop'
   risk_class?: string
   oversight_rationale?: string
