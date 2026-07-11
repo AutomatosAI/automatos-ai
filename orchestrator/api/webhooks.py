@@ -428,13 +428,20 @@ async def general_workspace_webhook(
         raise HTTPException(status_code=404, detail="Unknown webhook")
 
     # 1b. Verify inbound authenticity. Slack signs with its own v0 scheme
-    # (X-Slack-Signature), so Slack-signed requests verify against the
-    # collected signing secret; everything else uses the generic HMAC,
-    # which is mandatory once a webhook secret is configured.
-    if request.headers.get("x-slack-signature"):
-        slack_secret = _resolve_slack_signing_secret(db, workspace)
-        if slack_secret:
-            await _verify_slack_signature(request, slack_secret)
+    # (X-Slack-Signature), so when a Slack signing secret has been collected
+    # the request verifies against it. Every other request goes through the
+    # generic HMAC, which is mandatory once a webhook secret is configured —
+    # including requests that *carry* an x-slack-signature header when no
+    # Slack secret was ever collected. Branching on the header alone would
+    # let any caller bypass the mandatory generic check by adding a garbage
+    # Slack header (P2-13, fail closed).
+    slack_secret = (
+        _resolve_slack_signing_secret(db, workspace)
+        if request.headers.get("x-slack-signature")
+        else None
+    )
+    if slack_secret:
+        await _verify_slack_signature(request, slack_secret)
     else:
         webhook_secret = (workspace.settings or {}).get("webhook_secret") or config.WEBHOOK_SECRET
         await _verify_webhook_signature(request, webhook_secret)

@@ -256,6 +256,20 @@ def test_slack_lane_enforces_collected_signing_secret():
     assert ei.value.status_code == 401
 
 
+def test_slack_header_does_not_bypass_generic_hmac():
+    """S1 gap (P2-13): an x-slack-signature header with NO collected Slack
+    signing secret must not bypass the mandatory generic HMAC. Before this
+    fix the lane branched on the header alone — any caller could skip a
+    configured webhook_secret by adding a garbage Slack header."""
+    ws = _fake_workspace(settings={"webhook_secret": "topsecret"})
+    headers = {"content-type": "application/json", "x-slack-signature": "v0=garbage"}
+    req = _make_request(headers, body=b'{"message": "hi"}')
+    with pytest.raises(HTTPException) as ei:
+        _run(webhooks_api.general_workspace_webhook(
+            workspace_key="k", request=req, db=_RoutingDb(ws, channel_rows=[])))
+    assert ei.value.status_code == 401
+
+
 def test_resolve_slack_signing_secret_prefers_active_row():
     ws = _fake_workspace()
     inactive = SimpleNamespace(config={"signing_secret": "old"}, status="inactive")
