@@ -130,6 +130,14 @@ This is the approvals leg of **Wave 2 (arm autonomy safely)**. Downstream:
 > 3. **`platform_get_system_health` (the review's 12th).** Live tree: su-only read, **no confirmation flag** — a grant cannot open it and this PRD does not touch it. Keep su-only (status quo), or downgrade to admin-read? (Dossier calls the current lock "absurd for a read.")
 > 4. **Agent-lane depth in this wave.** S4 ships the lean board linkage (ask on a board run → task blocked → grant → existing re-queue → re-run completes). Going further — pausing *mid-run* instead of end-of-run, honest `success:false` threading through `_agent_tool_cb` (`agent_factory.py:1063-1067`, dossier §C.3b) — is real work that belongs to the results-honesty fix (dossier J2, not scheduled in §6's Wave 2). Fold J2's agent-callback honesty in here, or hold it for its own slice?
 > 5. **The sibling ask family.** The PRD-177 F018 fail-closed Composio destructive-intent asks (`tool_router.py:~1198-1245`) dead-end in the same way but live on a different lane. Fold them into the same card+grant surface in this wave, or leave prose-only until the Composio lane work?
+>
+> ### Decisions — locked 2026-07-10 (Gerard)
+>
+> 1. **TTL/scope:** as proposed — destructive ⇒ single-use, exact-params (grant retired on use); write-class ⇒ TTL-window per call-key on the existing 24h `APPROVAL_GRANT_TTL_SECONDS`. No standing per-tool grants this wave.
+> 2. **Gated set:** all 8 destructive stay gated, and **all 3 write-class stay gated** (including `platform_cancel_scheduled_task` — simplest posture; revisit if ask-fatigue shows in PRD-192's S2 report).
+> 3. **`platform_get_system_health`:** stays **su-only** (status quo). The PRD-143 observability lock was a deliberate call — not churned in this wave; the dossier's objection is noted, not adopted.
+> 4. **Agent-lane depth:** lean board linkage only (S4 as specced); J2's agent-callback honesty (mid-run pause, honest `success:false`) is held for the results-honesty slice per §6 scheduling.
+> 5. **Sibling Composio asks:** stay prose-only this wave; they join the card+grant surface with the Composio-lane work (P2-11's chokepoint rewire owns that lane).
 
 ---
 
