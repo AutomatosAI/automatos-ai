@@ -26,6 +26,13 @@ from __future__ import annotations
 import inspect
 import json
 import sys
+from pathlib import Path
+
+# Script-mode sys.path[0] is tests/, not the orchestrator root — put the root
+# first so `import core` / `import main` resolve (the -m lanes get this free).
+_ORCH_ROOT = str(Path(__file__).resolve().parents[1])
+if _ORCH_ROOT not in sys.path:
+    sys.path.insert(0, _ORCH_ROOT)
 
 
 def _flatten_calls(dependant, acc):

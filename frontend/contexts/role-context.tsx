@@ -7,8 +7,8 @@ import { useSession } from '@clerk/nextjs'
  * System Role Context
  *
  * Provides the system-level role from Clerk's session token metadata,
- * aligned to the backend's system_role set (PRD-195 S8 — the
- * 'customer_manager' ghost existed in no backend role set and is deleted).
+ * aligned to the backend's system_role set (PRD-195 S8 — the legacy ghost
+ * role that existed in no backend role set is deleted).
  * This is separate from workspace roles (owner/admin/editor/viewer).
  */
 

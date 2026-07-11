@@ -51,7 +51,7 @@ REPRESENTATIVES = [
     ("S3", "api/agents.py", r'"/"', "agents:create", "editor"),
     ("S3", "api/agents.py", r'"/\{agent_id\}/execute"', "agents:execute", "editor"),
     ("S3", "api/agents.py", r'"/\{agent_id\}"', "agents:delete", "admin"),
-    ("S3", "api/workspace_skills.py", r'"/\{skill_id\}"', "agents:update", "editor"),
+    ("S3", "api/workspace_skills.py", r'"/\{workspace_id\}/skills/\{skill_id\}"', "agents:update", "editor"),
     ("S3", "api/tools.py", r'"/add-to-workspace"', "workspace:manage", "admin"),
     ("S3", "api/chat.py", r'""', "agents:execute", "editor"),
     # ---- S4 · execution plane (Missions, board, Playbooks) ----------------

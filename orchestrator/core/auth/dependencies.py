@@ -45,6 +45,13 @@ class UserContext:
         return None
 
 
+# The InitVar's class-level default would otherwise remain readable as a class
+# attribute (``UserContext.role is None``) — delete it so NOTHING can read
+# ``.role`` anymore. The __init__ default is already baked into the generated
+# signature, so construction with or without ``role=`` is unaffected.
+del UserContext.role
+
+
 @dataclass(frozen=True)
 class RequestContext:
     """
