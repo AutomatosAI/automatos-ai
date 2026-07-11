@@ -136,6 +136,9 @@ class VectorFieldSharedContext(SharedContextPort):
         for field_name, schema in [
             ("field_id", PayloadSchemaType.KEYWORD),
             ("workspace_id", PayloadSchemaType.KEYWORD),  # PRD-166 S1: workspace-scoped recall
+            # PRD-196 S6 (GDPR): the data-subject tag, keyword-indexed so
+            # subject-level erasure is one filter-delete (workspace_id AND subject_id).
+            ("subject_id", PayloadSchemaType.KEYWORD),
             ("content_hash", PayloadSchemaType.KEYWORD),
             ("agent_id", PayloadSchemaType.INTEGER),
             ("created_at", PayloadSchemaType.KEYWORD),
@@ -170,6 +173,15 @@ class VectorFieldSharedContext(SharedContextPort):
         its missions' fields."""
         return Filter(must=[
             FieldCondition(key="workspace_id", match=MatchValue(value=workspace_id)),
+        ])
+
+    @staticmethod
+    def _subject_filter(workspace_id: str, subject_id: str) -> Filter:
+        """PRD-196 S6: workspace_id AND subject_id — fail-closed tenancy, so a
+        subject erase can never delete another tenant's field patterns."""
+        return Filter(must=[
+            FieldCondition(key="workspace_id", match=MatchValue(value=str(workspace_id))),
+            FieldCondition(key="subject_id", match=MatchValue(value=str(subject_id))),
         ])
 
     # ── Create / Destroy ────────────────────────────────────────
@@ -228,21 +240,25 @@ class VectorFieldSharedContext(SharedContextPort):
         return count
 
     async def erase_subject(self, workspace_id: str, subject_id: str) -> int:
-        """GDPR subject-level erasure for field memory (see GDPR-GAP note below)."""
-        # GDPR-GAP: field-memory points carry `workspace_id` / `mission_id` /
-        # `task_id` / `agent_id` provenance (PRD-166 S1 / W8) but NO
-        # data-subject tag - there is no `subject_id` on the payload to filter a
-        # single human's patterns from a shared workspace field. Until a
-        # data-subject tag is added at write time, subject-level erasure here is
-        # not possible without over-deleting the whole workspace. This method
-        # returns 0 and the gap is surfaced by the GDPR service so the caller
-        # never believes a subject was erased from field memory when it was not.
-        logger.warning(
-            "[Field] GDPR subject erase requested for subject=%s ws=%s but field "
-            "memory has no data-subject tag (GDPR-GAP) — 0 points erased",
-            subject_id, workspace_id,
+        """GDPR subject-level erasure for field memory (PRD-196 S6).
+
+        One filter-delete over ``workspace_id`` AND ``subject_id`` (both keyword-
+        indexed) — fail-closed tenancy, never workspace-wide. Field points carry
+        the ``subject_id`` provenance tag from write time; untagged pre-tag
+        patterns have a null tag and are reported as untagged history by the GDPR
+        service, never claimed erased. Returns the count deleted."""
+        await self.ensure_shared_collection()
+        flt = self._subject_filter(str(workspace_id), str(subject_id))
+        count = await self._count_by_filter(flt)
+        await self._client.delete(
+            collection_name=SHARED_COLLECTION,
+            points_selector=FilterSelector(filter=flt),
         )
-        return 0
+        logger.warning(
+            "[Field] GDPR subject-erased %d field-memory point(s) for subject=%s ws=%s",
+            count, subject_id, workspace_id,
+        )
+        return count
 
     async def export_workspace(self, workspace_id: str, limit: int = 10000) -> list[dict[str, Any]]:
         """GDPR export — return every field-memory pattern for a workspace as
@@ -348,6 +364,10 @@ class VectorFieldSharedContext(SharedContextPort):
                     # PRD-166 S1: provenance — survives the mission so the
                     # workspace field keeps cross-mission lineage.
                     "workspace_id": prov.get("workspace_id"),
+                    # PRD-196 S6 (GDPR): the data-subject tag (from provenance),
+                    # so a single human's patterns can be filter-deleted. Null
+                    # when the writer has no human principal (agent-internal).
+                    "subject_id": prov.get("subject_id"),
                     "mission_id": prov.get("mission_id"),
                     "task_id": prov.get("task_id"),
                     "agent_id": agent_id,

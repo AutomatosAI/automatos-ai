@@ -107,7 +107,8 @@ class SmartChatIntegration:
         self,
         user_message: str,
         assistant_response: str,
-        chat_id: Optional[str] = None
+        chat_id: Optional[str] = None,
+        subject_id: Optional[str] = None,
     ) -> bool:
         """
         Store a conversation exchange in memory.
@@ -118,6 +119,8 @@ class SmartChatIntegration:
             user_message: The user's message
             assistant_response: The assistant's response
             chat_id: Optional chat session ID
+            subject_id: Optional GDPR data-subject tag (PRD-196 S6) — the human
+                principal as ``user:{users.id}`` (internal id, never Clerk string).
 
         Returns:
             Success status
@@ -125,7 +128,8 @@ class SmartChatIntegration:
         return await self.orchestrator.store_exchange(
             user_message=user_message,
             assistant_response=assistant_response,
-            chat_id=chat_id
+            chat_id=chat_id,
+            subject_id=subject_id,
         )
 
     def get_user_name(self) -> Optional[str]:

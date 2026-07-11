@@ -1221,16 +1221,29 @@ class StreamingChatService:
         agent_id: int,
         response,
         orchestrated: Any,
+        user_id: Optional[int] = None,
     ) -> AsyncGenerator[str, None]:
         """Store memory, emit memory-stored event, update metrics, fire eval."""
         import asyncio
 
         smart_chat = getattr(self, '_smart_chat', None)
 
+        # PRD-196 S6 (GDPR): tag the distilled chat memory with the human
+        # principal as ``user:{users.id}``. ``user_id`` is the INTERNAL integer
+        # id (already resolved upstream — never the Clerk string, the #513
+        # lesson); if it's absent we write NO subject tag rather than a wrong one.
+        # This also keeps subject-erase working on the Clerk-less `local` edition
+        # (the internal id always exists). Reserved namespaces for the other
+        # memory-writing lanes — ``shopper:{salted-hash}`` (widget customer) and
+        # ``channel:{platform}:{peer-id}`` (channel peer) — are DEFERRED to when
+        # those lanes' memory writes go live; wiring them is Gerard's call
+        # (flagged in the PRD-196 PR body, not silently dropped — CLAUDE.md §12).
+        subject_id = f"user:{user_id}" if user_id else None
+
         # Store memory via SmartChatIntegration
         if latest_text and full_response and smart_chat:
             try:
-                _stored = await smart_chat.store(latest_text, full_response, chat_id)
+                _stored = await smart_chat.store(latest_text, full_response, chat_id, subject_id=subject_id)
                 _mm = smart_chat.orchestrator.memory_manager
                 _facts_stored = getattr(_mm, '_last_l3_facts_stored', 0)
                 # PRD-159 S5: honest event — emit ONLY after durable facts were
@@ -2248,6 +2261,7 @@ class StreamingChatService:
             async for chunk in self._post_response(
                 latest_text, full_response, chat_id,
                 agent_runtime, agent_id, response, orchestrated,
+                user_id=user_id,
             ):
                 yield chunk
 

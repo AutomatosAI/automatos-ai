@@ -186,4 +186,11 @@ def test_erasure_reports_gaps(monkeypatch):
     # each gap names the store and why subject-granularity is unavailable
     assert all("store" in g and "reason" in g for g in gaps)
     stores = {g["store"] for g in gaps}
-    assert "field_memory" in stores and "durable_memory" in stores
+    # PRD-196 S6: field_memory + durable_memory now do a real subject filter-
+    # delete, so they are NO LONGER gaps — only SQL remains a structural gap.
+    assert "sql" in stores
+    assert "field_memory" not in stores and "durable_memory" not in stores
+    # pre-tag rows in the (now-tagged) stores are reported as untagged history,
+    # never claimed erased.
+    caveat = result["untagged_history"]
+    assert set(caveat["stores"]) == {"field_memory", "durable_memory"}
