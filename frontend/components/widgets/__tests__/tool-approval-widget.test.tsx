@@ -59,7 +59,9 @@ describe('ToolApprovalWidget — PRD-193 S3', () => {
   it('renders the action, oversight tier + rationale, and the params digest', () => {
     render(<ToolApprovalWidget id="w1" title="Action approval needed" data={data()} metadata={metadata} />)
 
-    expect(screen.getByText('platform_delete_document')).toBeInTheDocument()
+    // The action name appears in the card body (WidgetBase also badges the
+    // widget's source name with the same text — hence getAllByText).
+    expect(screen.getAllByText('platform_delete_document').length).toBeGreaterThan(0)
     // Oversight banner (clone of the mission card presentation).
     expect(screen.getByText(/Human approval required/)).toBeInTheDocument()
     expect(screen.getByText(/deletes data/)).toBeInTheDocument()
