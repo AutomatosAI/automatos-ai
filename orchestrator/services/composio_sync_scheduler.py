@@ -13,6 +13,7 @@ factory idiom). Failure to sync is logged, never raised — a stale metadata
 table degrades gracefully to the fail-closed gate, it must not crash boot.
 """
 
+import asyncio
 import logging
 from typing import Optional
 
@@ -46,6 +47,34 @@ class ComposioSyncScheduler:
             max_instances=1,
         )
         logger.info("[ComposioSync] Scheduled daily metadata sync at %02d:00 UTC", hour)
+
+        # PRD-194 S6 (P2-13): startup assertion — connected apps with an
+        # EMPTY composio_action_metadata table means the destructive gate is
+        # running blind on the keyword heuristic. Say so at boot, loudly,
+        # instead of failing silently for months. Logged, never raised: a
+        # stale table degrades to the fail-closed keyword floor and must not
+        # crash boot (module docstring contract).
+        await asyncio.to_thread(self._startup_metadata_check)
+
+    @staticmethod
+    def _startup_metadata_check() -> None:
+        try:
+            from core.database.database import SessionLocal
+            from modules.tools.sync.composio_action_sync import (
+                check_action_metadata_populated,
+            )
+
+            db = SessionLocal()
+            try:
+                ok, detail = check_action_metadata_populated(db)
+            finally:
+                db.close()
+            if ok:
+                logger.info("[ComposioSync] startup metadata check: %s", detail)
+            else:
+                logger.error("[ComposioSync] STARTUP ASSERTION FAILED: %s", detail)
+        except Exception:
+            logger.exception("[ComposioSync] startup metadata check errored")
 
     async def _run_sync(self):
         """Execute the Composio action metadata sync."""
