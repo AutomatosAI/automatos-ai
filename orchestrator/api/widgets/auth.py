@@ -236,25 +236,23 @@ def require_permission(permission: str) -> Callable:
     async def _check(
         auth: WidgetAuthContext = Depends(widget_auth),
     ) -> WidgetAuthContext:
-        # PRD-174 F042 — one empty-permission semantic. Historically the widget
-        # plane treated an empty permission list as "unrestricted" (a god-key),
-        # while the board plane treats empty as "grants nothing". When the policy
-        # plane is ON we unify on the board plane's least-privilege rule (empty =
-        # deny) via the shared helper; OFF keeps the historical behaviour so the
-        # large population of already-issued keys is not broken mid-rollout.
+        # P2-13 (PRD-194 S3) / PRD-174 F042 — ONE empty-permission semantic on
+        # the widget plane: EMPTY = DENY, regardless of the policy-plane flag.
+        # The internet-facing plane is never the permissive one — a minted
+        # no-permission key must not be a god-key here while the plane rolls
+        # out (P2-11 owns the platform-wide durable fix). Grants are explicit:
+        # membership or a deliberate "*" element (the board plane's
+        # least-privilege rule, modules/policy/roles.has_permission). The
+        # historical flag-gated "empty = unrestricted" branch is deleted.
         try:
-            from modules.policy import policy_plane_enabled
             from modules.policy.roles import has_permission as _has_perm
 
-            _plane_on = policy_plane_enabled()
-        except Exception:
-            _plane_on = False
-
-        if _plane_on:
-            allowed = _has_perm(auth.permissions, permission)  # empty = deny
-        else:
-            # Legacy: empty list = unrestricted; a non-empty list must contain it.
-            allowed = (not auth.permissions) or (permission in auth.permissions)
+            allowed = _has_perm(auth.permissions, permission)
+        except ImportError:
+            # Policy package unavailable (stripped local build) — same
+            # least-privilege rule, locally: empty = deny, explicit grants only.
+            perms = set(auth.permissions or [])
+            allowed = bool(perms) and (permission in perms or "*" in perms)
 
         if not allowed:
             raise HTTPException(

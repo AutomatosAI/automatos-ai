@@ -4,8 +4,9 @@ Pure-function / monkeypatched style (no live DB), mirroring
 ``test_api_key_domain_check.py``. Covers three layers:
 
 1. ``_sdk_key_has_scope`` — the least-privilege scope gate (the security crux:
-   empty/None permissions must be DENIED, diverging from
-   ``ApiKeyService.check_permissions`` which treats empty as "all").
+   empty/None permissions must be DENIED — the rule the whole platform now
+   shares: PRD-195 S1 collapsed ``ApiKeyService.check_permissions`` and the
+   widget plane onto the same empty=deny semantic).
 2. ``_resolve_sdk_key_context`` — the SDK-key → RequestContext resolver, incl.
    the cross-tenant guard (binds to the key's workspace, never env defaults).
 3. ``require_task_context`` — the dependency factory: routes ``ak_*`` bearers to
@@ -98,7 +99,7 @@ class TestExtractOrigin:
 
 class TestSdkKeyHasScope:
     def test_none_permissions_denied(self):
-        # SECURITY: unlike check_permissions, empty/None must NOT mean "all".
+        # SECURITY: empty/None must NOT mean "all" (the shared platform rule).
         assert _sdk_key_has_scope(None, TASKS_READ) is False
 
     def test_empty_permissions_denied(self):

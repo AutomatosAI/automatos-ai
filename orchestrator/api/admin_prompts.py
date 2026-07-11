@@ -47,10 +47,17 @@ router = APIRouter(prefix="/api/admin/prompts", tags=["Admin Prompts"])
 # ===================================================================
 
 def _assert_admin(ctx: RequestContext) -> None:
-    """Require admin role for Clerk users; allow API key auth (service-to-service)."""
+    """Require admin role for Clerk users; allow API key auth (service-to-service).
+
+    PRD-195 S1: the role check delegates to the one authority
+    (``caller_is_admin`` → ``modules.policy.roles``) instead of a module-local
+    ``system_role in (...)`` membership test.
+    """
     if ctx.auth_type == "api_key":
         return  # Service-to-service trust
-    if ctx.user and getattr(ctx.user, "system_role", "user") in ("admin", "super_admin"):
+    from core.auth.roles import caller_is_admin
+
+    if ctx.user and caller_is_admin(ctx.user):
         return
     raise HTTPException(status_code=403, detail="Admin access required")
 
