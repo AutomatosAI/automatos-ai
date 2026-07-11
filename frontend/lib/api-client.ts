@@ -213,6 +213,33 @@ export interface BudgetConfig {
   max_total_tokens?: number
 }
 
+export interface GdprErasureGap {
+  store: string
+  reason: string
+}
+
+export interface GdprUntaggedHistory {
+  stores: string[]
+  reason: string
+}
+
+export interface GdprSubjectErasureResult {
+  workspace_id: string
+  subject_id: string
+  erased_at: string
+  sql: { deleted: number }
+  derived: { field_memory_deleted: number; durable_memory_deleted: number }
+  gaps: GdprErasureGap[]
+  untagged_history: GdprUntaggedHistory
+}
+
+export interface GdprWorkspaceErasureResult {
+  workspace_id: string
+  complete?: boolean
+  derived?: { field_memory_deleted: number; durable_memory_deleted: number }
+  [key: string]: any
+}
+
 class ApiClient {
   private baseUrl: string
   private defaultHeaders: Record<string, string>
@@ -2175,6 +2202,25 @@ class ApiClient {
     return this.request<BudgetConfig>('/api/v1/governance/budget', {
       method: 'PUT',
       body: JSON.stringify(body),
+    })
+  }
+
+  // ===== PRD-196 S7 GDPR self-service (ws-admin gated) =====
+  async getGdprExport(): Promise<any> {
+    return this.request('/api/v1/gdpr/export')
+  }
+
+  async eraseGdprSubject(subjectId: string): Promise<GdprSubjectErasureResult> {
+    return this.request<GdprSubjectErasureResult>('/api/v1/gdpr/erase-subject', {
+      method: 'POST',
+      body: JSON.stringify({ subject_id: subjectId }),
+    })
+  }
+
+  async eraseGdprWorkspace(confirmWorkspaceId: string): Promise<GdprWorkspaceErasureResult> {
+    return this.request<GdprWorkspaceErasureResult>('/api/v1/gdpr/erase', {
+      method: 'POST',
+      body: JSON.stringify({ confirm_workspace_id: confirmWorkspaceId }),
     })
   }
 }

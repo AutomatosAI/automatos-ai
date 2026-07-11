@@ -1,5 +1,5 @@
 {
-  "route_count": 765,
+  "route_count": 768,
   "routes": [
     {
       "method": "GET",
@@ -2228,6 +2228,18 @@
     {
       "method": "POST",
       "path": "/api/v1/approval-grants/{grant_id}/revoke"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/gdpr/erase"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/gdpr/erase-subject"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/gdpr/export"
     },
     {
       "method": "GET",

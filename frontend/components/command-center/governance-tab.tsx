@@ -17,6 +17,7 @@ import { useState } from 'react'
 import { ApprovalsInbox } from './governance/approvals-inbox'
 import { AuditPane } from './governance/audit-pane'
 import { PolicyPane } from './governance/policy-pane'
+import { CompliancePane } from './governance/compliance-pane'
 
 type PaneKey = 'approvals' | 'audit' | 'policy' | 'compliance'
 
@@ -32,6 +33,7 @@ const PANES: Pane[] = [
   { key: 'approvals', label: 'Approvals', node: <ApprovalsInbox /> },
   { key: 'audit', label: 'Audit', node: <AuditPane /> },
   { key: 'policy', label: 'Policy', node: <PolicyPane /> },
+  { key: 'compliance', label: 'Compliance', node: <CompliancePane /> },
 ]
 
 export function GovernanceTab() {

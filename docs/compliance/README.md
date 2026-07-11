@@ -24,25 +24,31 @@ PRD-181 (Wave 11) on top of the merged enforcement substrate (Wave 4 policy plan
 
 ## Known GDPR gaps (documented, not silently skipped)
 
-Subject-level erasure is implemented where a data-subject tag exists. Three stores
-carry only workspace/mission/agent scoping and **no data-subject tag**, so
-subject-level erasure there returns 0 and the gap is surfaced (in code as
-`# GDPR-GAP:` markers and in `erase_data_subject(...)["gaps"]`):
+Subject-level erasure is implemented where a data-subject tag exists. **PRD-196 S6**
+added the `subject_id` data-subject tag to **Qdrant field memory** and the
+**in-process durable memory store** (the PRD-187 un-split replacement for the retired
+mem0 fork) at write time, so a subject erase now does a **real filter-delete**
+(`workspace_id AND subject_id`, fail-closed) in both — reported as deleted counts in
+`erase_data_subject(...)["derived"]`. What remains documented, never hidden:
 
-- **Qdrant field memory** — `workspace_id`/`mission_id`/`task_id`/`agent_id` only.
-- **mem0 durable memories** — namespaced by workspace/agent/recipe.
 - **SQL** — workspace-scoped, not subject-scoped (per-table subject resolution is
   domain-specific, e.g. a Shopify customer id, and belongs to the Shopify redact
-  handler).
+  handler). Still a `# GDPR-GAP:` marker and an `erase_data_subject(...)["gaps"]` entry.
+- **Untagged history** — the subject tag is additive (no backfill — there is no
+  identity to backfill from), so field/durable rows written *before* the tag existed
+  carry no `subject_id` and stay reachable only by workspace-level erasure. Reported
+  as `erase_data_subject(...)["untagged_history"]`, never claimed erased.
 
-Workspace-level erasure fully covers all three. Adding a data-subject tag at write
-time is the follow-up that unlocks subject-level erasure in these stores.
+Workspace-level erasure fully covers every store. Subject tags flow from the chat
+distill path today (`user:{users.id}` — the internal id, never a Clerk string); the
+widget-shopper and channel-peer producers are reserved and wired when those lanes'
+memory writes go live.
 
 ## Scope boundary — Shopify
 
 Platform-side GDPR erasure of Shopify-**derived** data (customer data promoted
-into field/graph/vectors/mem0) is **in scope** and handled by the entrypoints
-above. The sibling `automatos-shopify` Remix GDPR webhook handlers
+into field/graph/vectors/durable memory) is **in scope** and handled by the
+entrypoints above. The sibling `automatos-shopify` Remix GDPR webhook handlers
 (`customers/redact`, `customers/data_request`, `shop/redact`) are **out of scope**
 for this repo — they call `gdpr_service.erase_data_subject(...)` /
 `export_workspace(...)` and are flagged for a dedicated Shopify-pod session.
