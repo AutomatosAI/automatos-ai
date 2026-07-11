@@ -303,9 +303,13 @@ def test_workflow_recipes_router_still_exists():
     assert p.exists(), "api/workflow_recipes.py must NOT be deleted in the agent run"
 
     # The POST /{recipe_id}/execute route still lives here (FE calls it).
+    # PRD-195 S4 gated it (playbooks:execute) — the guard pins path AND gate.
     text = p.read_text()
-    assert '@router.post("/{recipe_id}/execute")' in text, (
+    assert '@router.post("/{recipe_id}/execute"' in text, (
         "execute_recipe POST route is gone — FE will 404"
+    )
+    assert 'require_workspace_permission("playbooks:execute")' in text, (
+        "execute_recipe lost its PRD-195 workspace-permission gate"
     )
 
 

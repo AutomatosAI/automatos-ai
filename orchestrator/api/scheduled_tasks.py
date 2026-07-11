@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 from services.scheduled_task_service import ScheduledTaskService
 
@@ -44,7 +45,7 @@ async def list_scheduled_tasks(
     )
 
 
-@router.patch("/{task_id}/status")
+@router.patch("/{task_id}/status", dependencies=[Depends(require_workspace_permission("missions:update"))])
 async def update_task_status(
     task_id: int,
     body: UpdateStatusRequest,

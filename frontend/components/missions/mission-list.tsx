@@ -10,6 +10,7 @@ import { MissionCard } from './mission-card'
 import { CreateMissionModal } from './create-mission-modal'
 import { cn } from '@/lib/utils'
 import { useMissions, type MissionFilters } from '@/hooks/use-missions-api'
+import { useWorkspace } from '@/components/workspace-provider'
 import type { RunState } from '@/types/missions'
 
 // ── Filter config ─────────────────────────────────────────────
@@ -31,6 +32,7 @@ interface MissionListProps {
 }
 
 export function MissionList({ emptyAction }: MissionListProps = {}) {
+  const { canEdit } = useWorkspace()
   const prefersReducedMotion = useReducedMotion()
   const [activeFilter, setActiveFilter] = useState<FilterKey>('all')
   const [search, setSearch] = useState('')
@@ -106,6 +108,8 @@ export function MissionList({ emptyAction }: MissionListProps = {}) {
             size="sm"
             className="shrink-0"
             onClick={() => setShowCreateModal(true)}
+            disabled={!canEdit}
+            title={canEdit ? undefined : 'Viewers have read-only access'}
           >
             <Plus className="w-3.5 h-3.5 mr-1.5" />
             New Mission
@@ -158,6 +162,8 @@ export function MissionList({ emptyAction }: MissionListProps = {}) {
                 variant="outline"
                 className="border-primary/30 hover:border-primary/50"
                 onClick={() => setShowCreateModal(true)}
+                disabled={!canEdit}
+                title={canEdit ? undefined : 'Viewers have read-only access'}
               >
                 <Target className="w-4 h-4 mr-2" />
                 New Mission

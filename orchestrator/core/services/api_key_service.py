@@ -234,10 +234,13 @@ class ApiKeyService:
     def check_permissions(api_key: SdkApiKey, permission: str) -> bool:
         """Check whether *api_key* grants the requested *permission*.
 
-        An empty or ``None`` ``permissions`` list means **all**
-        permissions are granted (unrestricted key).
+        PRD-195 S1 (P2-14 / F042): delegates to the one authority —
+        ``modules.policy.roles.has_permission``. **Empty or ``None``
+        permissions grant NOTHING** (least privilege); an explicit ``"*"``
+        element is honoured as a deliberate full grant. The legacy
+        "empty = unrestricted" god-key semantic is deleted — all three key
+        checkers (service, widget, board) now share this rule.
         """
-        if not api_key.permissions:
-            return True
+        from modules.policy.roles import has_permission
 
-        return permission in api_key.permissions
+        return has_permission(api_key.permissions, permission)

@@ -66,8 +66,10 @@ const PERMISSIONS = [
   { value: 'data:execute', label: 'Data (Execute)' },
   { value: 'agents:read', label: 'Agents (Read)' },
   { value: 'agents:execute', label: 'Agents (Execute)' },
-  { value: 'workflows:read', label: 'Workflows (Read)' },
-  { value: 'workflows:execute', label: 'Workflows (Execute)' },
+  { value: 'missions:read', label: 'Missions (Read)' },
+  { value: 'missions:execute', label: 'Missions (Execute)' },
+  { value: 'playbooks:read', label: 'Playbooks (Read)' },
+  { value: 'playbooks:execute', label: 'Playbooks (Execute)' },
 ]
 
 const MIN_PLANS = [

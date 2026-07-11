@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 
 from core.database.database import get_db, get_db_session
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 from core.composio.client import get_composio_client, ComposioClient
 from core.composio.entity_manager import EntityManager
@@ -298,7 +299,7 @@ async def test_linkedin_upload_init():
 
 
 
-@router.post("/connect/{app_name}", response_model=InitiateConnectionResponse)
+@router.post("/connect/{app_name}", response_model=InitiateConnectionResponse, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def initiate_connection(
     app_name: str,
     request: InitiateConnectionRequest = None,
@@ -382,7 +383,7 @@ async def initiate_connection(
     )
 
 
-@router.post("/connect/{app_name}/callback")
+@router.post("/connect/{app_name}/callback", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def connection_callback(
     app_name: str,
     connection_id: Optional[str] = Query(None, description="Composio connection ID"),
@@ -450,7 +451,7 @@ async def connection_callback(
     return {"status": "success", "app_name": app_name.upper(), "connected": normalized_status == "active"}
 
 
-@router.delete("/connections/{app_name}")
+@router.delete("/connections/{app_name}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def disconnect_app(
     app_name: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -529,7 +530,7 @@ async def get_agent_app_features(
     ]
 
 
-@router.put("/agents/{agent_id}/apps/{app_name}/features")
+@router.put("/agents/{agent_id}/apps/{app_name}/features", dependencies=[Depends(require_workspace_permission("agents:update"))])
 async def update_agent_app_features(
     agent_id: int,
     app_name: str,
@@ -551,7 +552,7 @@ async def update_agent_app_features(
     return {"updated": count, "app_name": app_name.upper()}
 
 
-@router.post("/agents/{agent_id}/apps/{app_name}/enable-all")
+@router.post("/agents/{agent_id}/apps/{app_name}/enable-all", dependencies=[Depends(require_workspace_permission("agents:update"))])
 async def enable_all_features(
     agent_id: int,
     app_name: str,
@@ -571,7 +572,7 @@ async def enable_all_features(
     return {"enabled": count, "app_name": app_name.upper()}
 
 
-@router.post("/agents/{agent_id}/apps/{app_name}/disable-all")
+@router.post("/agents/{agent_id}/apps/{app_name}/disable-all", dependencies=[Depends(require_workspace_permission("agents:update"))])
 async def disable_all_features(
     agent_id: int,
     app_name: str,
@@ -947,7 +948,7 @@ async def _dispatch_workflow(
 # Trigger Subscription Endpoints
 # =============================================================================
 
-@router.post("/triggers/subscribe")
+@router.post("/triggers/subscribe", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def subscribe_to_trigger(
     request: TriggerSubscriptionRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -1026,7 +1027,7 @@ async def list_trigger_subscriptions(
     ]
 
 
-@router.delete("/triggers/{subscription_id}")
+@router.delete("/triggers/{subscription_id}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def unsubscribe_trigger(
     subscription_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),

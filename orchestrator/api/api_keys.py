@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.scopes import TASKS_READ
 from core.database.database import get_db
@@ -24,6 +25,10 @@ from core.services.api_key_service import ApiKeyService
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/api-keys", tags=["API Keys"])
 
+# PRD-195 S8 (G1): SDK scopes speak the canonical vocabulary — the legacy
+# workflows:* strings are renamed to missions:* + playbooks:* (CLAUDE.md §10).
+# Nothing ever CHECKED workflows:* (grep-verified), so already-minted keys
+# carrying the old strings lose nothing; the validator only shapes new mints.
 VALID_PERMISSIONS = [
     "chat",
     "blog",
@@ -33,8 +38,10 @@ VALID_PERMISSIONS = [
     "data:execute",
     "agents:read",
     "agents:execute",
-    "workflows:read",
-    "workflows:execute",
+    "missions:read",
+    "missions:execute",
+    "playbooks:read",
+    "playbooks:execute",
     # Board task scopes (PRD-09). Named constant = single source of truth shared
     # with the board auth gate in core/auth/hybrid.py.
     TASKS_READ,
@@ -113,7 +120,7 @@ class RevokeResponse(BaseModel):
 # ── Endpoints ─────────────────────────────────────────────────────────
 
 
-@router.post("", response_model=ApiKeyCreateResponse, status_code=201)
+@router.post("", response_model=ApiKeyCreateResponse, status_code=201, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def create_api_key(
     body: ApiKeyCreateRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -168,7 +175,7 @@ async def list_api_keys(
     return [ApiKeyListItem(**k) for k in keys]
 
 
-@router.delete("/{key_id}", response_model=RevokeResponse)
+@router.delete("/{key_id}", response_model=RevokeResponse, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def revoke_api_key(
     key_id: UUID,
     ctx: RequestContext = Depends(get_request_context_hybrid),

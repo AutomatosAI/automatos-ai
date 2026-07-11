@@ -159,7 +159,7 @@ async def invite_member_to_workspace(
     from core.models.workspaces import Workspace
     from core.workspaces.audit import AuditService
     from core.workspaces.models import WorkspaceMember
-    from core.workspaces.permissions import WorkspaceRole
+    from modules.policy.roles import WorkspaceRole
 
     logger = logging.getLogger(__name__)
 

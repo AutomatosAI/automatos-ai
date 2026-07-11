@@ -43,6 +43,7 @@ from modules.rag import (
 )
 from core.credentials.resolver import get_credential_resolver
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
@@ -179,7 +180,7 @@ async def get_knowledge_types(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/items", response_model=KnowledgeItemResponse)
+@router.post("/items", response_model=KnowledgeItemResponse, dependencies=[Depends(require_workspace_permission("knowledge:create"))])
 async def create_knowledge_item(
     item: KnowledgeItemCreate,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -250,7 +251,7 @@ async def create_knowledge_item(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/upload", response_model=DocumentUploadResponse)
+@router.post("/upload", response_model=DocumentUploadResponse, dependencies=[Depends(require_workspace_permission("knowledge:create"))])
 async def upload_document_multimodal(
     file: UploadFile = File(...),
     title: Optional[str] = Form(None),
@@ -668,7 +669,7 @@ async def upload_document_multimodal(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/search", response_model=List[KnowledgeSearchResult])
+@router.post("/search", response_model=List[KnowledgeSearchResult], dependencies=[Depends(require_workspace_permission("knowledge:read"))])
 async def search_knowledge(
     search: KnowledgeSearchRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),

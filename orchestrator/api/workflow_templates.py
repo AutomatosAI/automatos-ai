@@ -20,6 +20,7 @@ router = APIRouter(prefix="/api/workflow-templates", tags=["workflow-templates"]
 # Import the model from main models file
 from core.models import WorkflowTemplate
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 
 
@@ -118,7 +119,7 @@ async def get_workflow_template(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("")
+@router.post("", dependencies=[Depends(require_workspace_permission("playbooks:create"))])
 async def create_workflow_template(
     template_data: Dict[str, Any] = Body(...),
     db: Session = Depends(get_db)
@@ -194,7 +195,7 @@ async def create_workflow_template(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.put("/{template_id}")
+@router.put("/{template_id}", dependencies=[Depends(require_workspace_permission("playbooks:update"))])
 async def update_workflow_template(
     template_id: str,
     template_data: Dict[str, Any] = Body(...),
@@ -249,7 +250,7 @@ async def update_workflow_template(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.delete("/{template_id}")
+@router.delete("/{template_id}", dependencies=[Depends(require_workspace_permission("playbooks:delete"))])
 async def delete_workflow_template(
     template_id: str,
     db: Session = Depends(get_db)
@@ -290,7 +291,7 @@ async def delete_workflow_template(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/{template_id}/use")
+@router.post("/{template_id}/use", dependencies=[Depends(require_workspace_permission("playbooks:update"))])
 async def record_template_usage(
     template_id: str,
     db: Session = Depends(get_db)

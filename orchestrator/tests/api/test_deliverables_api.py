@@ -125,7 +125,12 @@ def _make_ctx(workspace_id=WORKSPACE_ID):
     ctx.workspace_id = workspace_id
     ctx.user = MagicMock()
     ctx.user.id = "user_123"
-    ctx.auth_type = "clerk"
+    # PRD-195 S5 gated deliverable DELETE (documents:delete). These tests
+    # exercise the handler's own logic, so ride the anonymous lane (trusted
+    # local single-user posture = owner of its workspace); the gate's lane
+    # semantics are pinned in test_p2w2_workspace_permission_gate.py.
+    ctx.auth_type = "anonymous"
+    ctx.user.system_role = "user"
     return ctx
 
 

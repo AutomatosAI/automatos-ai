@@ -14,6 +14,7 @@ from datetime import datetime
 
 from core.database.database import get_db
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
@@ -27,7 +28,7 @@ class PlatformHelpRequest(BaseModel):
 # Create router
 router = APIRouter(prefix="/api/query", tags=["🔍 Query"])
 
-@router.post("/platform-help")
+@router.post("/platform-help", dependencies=[Depends(require_workspace_permission("agents:read"))])
 async def platform_help(
     request: PlatformHelpRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),

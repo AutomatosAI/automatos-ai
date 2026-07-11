@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from core.auth.hybrid import get_request_context_hybrid, RequestContext
+from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 from core.models.core import Agent
 
@@ -104,7 +105,7 @@ async def list_onboarding_agents(
     return {"agents": result}
 
 
-@router.put("/{slug}")
+@router.put("/{slug}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def update_onboarding_agent(
     slug: str,
     payload: OnboardingAgentUpdate,

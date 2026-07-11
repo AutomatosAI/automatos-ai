@@ -1,5 +1,5 @@
 {
-  "route_count": 750,
+  "route_count": 754,
   "routes": [
     {
       "method": "GET",
@@ -744,6 +744,10 @@
     {
       "method": "POST",
       "path": "/api/code-graph/projects/{project_id}/ask"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/code-graph/projects/{project_id}/auto-reindex"
     },
     {
       "method": "POST",
@@ -2194,6 +2198,26 @@
       "path": "/api/tools/{app_name}/triggers"
     },
     {
+      "method": "POST",
+      "path": "/api/v1/approval-grants/{grant_id}/deny"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/approval-grants/{grant_id}/grant"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/approval-grants/{grant_id}/revoke"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/gdpr/erase"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/gdpr/erase-subject"
+    },
+    {
       "method": "GET",
       "path": "/api/v1/memory/browse"
     },
@@ -2340,6 +2364,18 @@
     {
       "method": "PATCH",
       "path": "/api/v1/tasks/{task_id}/status"
+    },
+    {
+      "method": "POST",
+      "path": "/api/verticals/{vertical}/gdpr/erase"
+    },
+    {
+      "method": "POST",
+      "path": "/api/verticals/{vertical}/gdpr/erase-subject"
+    },
+    {
+      "method": "POST",
+      "path": "/api/verticals/{vertical}/provision"
     },
     {
       "method": "GET",
@@ -2799,7 +2835,15 @@
     },
     {
       "method": "POST",
+      "path": "/api/workspaces/{workspace_id}/canvas/auto-accept"
+    },
+    {
+      "method": "POST",
       "path": "/api/workspaces/{workspace_id}/canvas/commit"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspaces/{workspace_id}/canvas/decision"
     },
     {
       "method": "GET",
@@ -2952,34 +2996,6 @@
     {
       "method": "GET",
       "path": "/openapi.json"
-    },
-    {
-      "method": "POST",
-      "path": "/permissions/assign"
-    },
-    {
-      "method": "GET",
-      "path": "/permissions/assignments"
-    },
-    {
-      "method": "GET",
-      "path": "/permissions/audit"
-    },
-    {
-      "method": "POST",
-      "path": "/permissions/bulk-assign"
-    },
-    {
-      "method": "GET",
-      "path": "/permissions/health"
-    },
-    {
-      "method": "GET",
-      "path": "/permissions/matrix"
-    },
-    {
-      "method": "DELETE",
-      "path": "/permissions/revoke"
     },
     {
       "method": "GET",

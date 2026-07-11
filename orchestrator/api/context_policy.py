@@ -9,6 +9,7 @@ from core.database.database import get_db
 from modules.search.policies import ContextPolicy, SlotName
 from modules.search.services.context_assembler import ContextAssembler
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 
 
@@ -31,7 +32,7 @@ def read_policy(policy_id: str, tenant_id: Optional[str] = Query(None), ctx: Req
     return policy
 
 
-@router.put("/{policy_id}")
+@router.put("/{policy_id}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 def upsert_policy(policy_id: str, body: PolicyUpsertRequest, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     if body.policy.policy_id != policy_id:
         raise HTTPException(status_code=400, detail="policy_id mismatch")
@@ -46,7 +47,7 @@ class AssembleRequest(BaseModel):
     tenant_id: Optional[str] = None
 
 
-@router.post("/{policy_id}/assemble")
+@router.post("/{policy_id}/assemble", dependencies=[Depends(require_workspace_permission("documents:read"))])
 def assemble(policy_id: str, body: AssembleRequest, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     assembler = ContextAssembler(db)
     policy = assembler.get_policy(policy_id=policy_id, tenant_id=body.tenant_id)
@@ -65,7 +66,7 @@ class ABSetRequest(BaseModel):
     active: str  # "A" | "B"
 
 
-@router.post("/abtest/set")
+@router.post("/abtest/set", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 def set_abtest(body: ABSetRequest, ctx: RequestContext = Depends(get_request_context_hybrid)):
     if body.active not in ("A", "B"):
         raise HTTPException(status_code=400, detail="active must be 'A' or 'B'")

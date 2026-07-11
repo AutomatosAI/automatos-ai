@@ -260,5 +260,7 @@ def test_get_tool_schema_mission_id_is_string_not_integer():
 def test_only_one_resume_route_registered():
     """Exactly one POST /{mission_id}/resume — the byte-duplicate is removed."""
     missions_src = (Path(__file__).resolve().parents[1] / "api" / "missions.py").read_text()
-    count = missions_src.count('@router.post("/{mission_id}/resume")')
+    # PRD-195 S4 gated the route (missions:execute) — count the decorator
+    # PREFIX so the byte-duplicate guard survives dependency kwargs.
+    count = missions_src.count('@router.post("/{mission_id}/resume"')
     assert count == 1, f"expected exactly one /resume route, found {count}"

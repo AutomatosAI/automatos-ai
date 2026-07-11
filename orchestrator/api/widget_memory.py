@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 
 logger = logging.getLogger(__name__)
 
@@ -226,7 +227,7 @@ async def search_memories(
     return MemorySearchResponse(query=q, results=items, total=len(items))
 
 
-@router.post("", response_model=MemoryItem, status_code=201)
+@router.post("", response_model=MemoryItem, status_code=201, dependencies=[Depends(require_workspace_permission("knowledge:create"))])
 async def store_memory(
     body: MemoryCreate,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -265,7 +266,7 @@ async def store_memory(
     return MemoryItem(**record)
 
 
-@router.delete("/{memory_id}", response_model=MemoryDeleteResponse)
+@router.delete("/{memory_id}", response_model=MemoryDeleteResponse, dependencies=[Depends(require_workspace_permission("knowledge:delete"))])
 async def delete_memory(
     memory_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),

@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_, func
 
 from core.auth.dependencies import RequestContext
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db
 from core.models.core import LLMModel, WorkspaceModel
@@ -331,7 +332,7 @@ async def get_model_detail(
     return _model_to_out(m, installed)
 
 
-@router.post("/models/{model_id:path}/install", response_model=InstallResult)
+@router.post("/models/{model_id:path}/install", response_model=InstallResult, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def install_model(
     model_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -370,7 +371,7 @@ async def install_model(
     return InstallResult(success=True, message="Model installed", model_id=model_id)
 
 
-@router.post("/models/{model_id:path}/uninstall", response_model=InstallResult)
+@router.post("/models/{model_id:path}/uninstall", response_model=InstallResult, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def uninstall_model(
     model_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),

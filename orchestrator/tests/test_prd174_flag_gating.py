@@ -1,14 +1,15 @@
-"""PRD-174 W4 — flag gating & byte-for-byte OFF (§6.4/§6.6, safety rule #1).
+"""PRD-174 W4 — flag gating (§6.4/§6.6, safety rule #1) · PRD-195 S1 update.
 
-Proves the flag actually flips behaviour and that OFF is today's behaviour:
+Proves what still rides the flag — and what deliberately no longer does:
 
-- ``core/auth/roles.caller_is_admin`` — OFF ⇒ exactly ``system_role == 'admin'``
-  (super-admin still excluded, byte-for-byte); ON ⇒ super_admin ⊇ admin (the
-  seven-router F043 fix).
-- ``modules.policy.roles.has_permission`` — the empty=deny semantic both planes
-  converge on under the flag (F042).
+- ``core/auth/roles.caller_is_admin`` — **flag-independent** since PRD-195 S1
+  (G2 decoupling): super_admin ⊇ admin at every flag position (F043 closed
+  unconditionally; the plane-OFF legacy fork is deleted).
+- ``modules.policy.roles.has_permission`` — empty=deny, the single semantic all
+  three key planes now share unconditionally (F042).
 - ``modules.policy.flag.policy_plane_enabled`` reads the config flag and fails
-  safe (OFF) if config can't be read.
+  safe (OFF) if config can't be read — it still governs the GOVERNANCE legs
+  (budget, act-vs-ask, F040 limiter), which are PRD-192's.
 - F040 — the SlowAPIMiddleware registration in ``main.py`` is guarded by the
   flag (grep-level assertion; importing main pulls the whole app).
 
@@ -69,22 +70,20 @@ def flag(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# F043 — caller_is_admin: OFF byte-for-byte, ON widens to super_admin
+# F043 — caller_is_admin: super_admin ⊇ admin UNCONDITIONALLY (PRD-195 S1, G2)
 # ---------------------------------------------------------------------------
+# The plane-OFF fork (super-admin excluded unless the governance dial was live)
+# is deleted: authZ correctness no longer rides AUTOMATOS_POLICY_PLANE. The
+# guard is repointed, not removed — the hierarchy must hold at BOTH flag
+# positions, proving the decoupling.
 
-def test_caller_is_admin_flag_off_is_legacy_exact_check(flag):
-    flag(False)
-    assert caller_is_admin(_User("admin")) is True
-    assert caller_is_admin(_User("super_admin")) is False   # legacy: excluded (byte-for-byte)
-    assert caller_is_admin(_User("user")) is False
-    assert caller_is_admin(None) is False
-
-
-def test_caller_is_admin_flag_on_super_admin_passes(flag):
-    flag(True)
-    assert caller_is_admin(_User("admin")) is True
-    assert caller_is_admin(_User("super_admin")) is True    # F043 fix: no longer 403'd
-    assert caller_is_admin(_User("user")) is False
+def test_caller_is_admin_is_flag_independent(flag):
+    for flag_value in (False, True):
+        flag(flag_value)
+        assert caller_is_admin(_User("admin")) is True
+        assert caller_is_admin(_User("super_admin")) is True   # F043 closed at any flag
+        assert caller_is_admin(_User("user")) is False
+        assert caller_is_admin(None) is False
 
 
 # ---------------------------------------------------------------------------

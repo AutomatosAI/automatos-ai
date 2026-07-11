@@ -44,6 +44,7 @@ from sqlalchemy.orm import Session
 from config import config
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 from core.models.core import Agent, BoardTask, WorkflowTemplate
 from core.models.orchestration import (
@@ -391,7 +392,7 @@ def _get_run_for_workspace(
 # ---------------------------------------------------------------------------
 
 
-@router.post("", status_code=201)
+@router.post("", status_code=201, dependencies=[Depends(require_workspace_permission("missions:create"))])
 async def create_mission(
     body: MissionCreateRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -438,7 +439,7 @@ class PlanImportRequest(BaseModel):
     config: Optional[Dict[str, Any]] = Field(None, description="Optional mission config overrides")
 
 
-@router.post("/import-plan", status_code=201)
+@router.post("/import-plan", status_code=201, dependencies=[Depends(require_workspace_permission("missions:create"))])
 async def import_mission_plan(
     body: PlanImportRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -487,7 +488,7 @@ async def get_mission_approval_policy(
     return load_approval_policy(db, ctx.workspace_id)
 
 
-@router.put("/approval-policy")
+@router.put("/approval-policy", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def set_mission_approval_policy(
     body: ApprovalPolicyRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -831,7 +832,7 @@ _UPLOAD_MAX_BYTES = 20 * 1024 * 1024  # 20 MB
 _UPLOAD_ALLOWED_EXTS = {".pdf", ".md", ".txt", ".doc", ".docx", ".json", ".csv", ".xlsx"}
 
 
-@router.post("/upload")
+@router.post("/upload", dependencies=[Depends(require_workspace_permission("missions:create"))])
 async def upload_mission_file(
     file: UploadFile = File(...),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -1072,7 +1073,7 @@ class MissionFieldQueryRequest(BaseModel):
     top_k: int = Field(0, ge=0, le=50, description="0 → config default")
 
 
-@router.post("/{mission_id}/field/query")
+@router.post("/{mission_id}/field/query", dependencies=[Depends(require_workspace_permission("missions:read"))])
 async def query_mission_field(
     mission_id: UUID,
     body: MissionFieldQueryRequest,
@@ -1225,7 +1226,7 @@ async def get_mission_field(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.patch("/{mission_id}/plan")
+@router.patch("/{mission_id}/plan", dependencies=[Depends(require_workspace_permission("missions:update"))])
 async def update_mission_plan(
     mission_id: UUID,
     body: MissionPlanEditRequest,
@@ -1266,7 +1267,7 @@ async def update_mission_plan(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/{mission_id}/approve")
+@router.post("/{mission_id}/approve", dependencies=[Depends(require_workspace_permission("missions:update"))])
 async def approve_plan(
     mission_id: UUID,
     body: MissionApproveRequest = MissionApproveRequest(),
@@ -1311,7 +1312,7 @@ async def approve_plan(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/{mission_id}/reject")
+@router.post("/{mission_id}/reject", dependencies=[Depends(require_workspace_permission("missions:update"))])
 async def reject_plan(
     mission_id: UUID,
     body: MissionRejectRequest,
@@ -1362,7 +1363,7 @@ class MissionReplanRequest(BaseModel):
     )
 
 
-@router.post("/{mission_id}/replan")
+@router.post("/{mission_id}/replan", dependencies=[Depends(require_workspace_permission("missions:update"))])
 async def replan_mission(
     mission_id: UUID,
     body: MissionReplanRequest = MissionReplanRequest(),
@@ -1512,7 +1513,7 @@ def _extract_routine_template(
     }
 
 
-@router.post("/{mission_id}/save-as-routine", status_code=201)
+@router.post("/{mission_id}/save-as-routine", status_code=201, dependencies=[Depends(require_workspace_permission("missions:create"))])
 async def save_as_routine(
     mission_id: UUID,
     body: SaveAsRoutineRequest,
@@ -1639,7 +1640,7 @@ async def save_as_routine(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/{mission_id}/pause")
+@router.post("/{mission_id}/pause", dependencies=[Depends(require_workspace_permission("missions:execute"))])
 async def pause_mission(
     mission_id: UUID,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -1675,7 +1676,7 @@ async def pause_mission(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/{mission_id}/resume")
+@router.post("/{mission_id}/resume", dependencies=[Depends(require_workspace_permission("missions:execute"))])
 async def resume_mission(
     mission_id: UUID,
     request: Request,
@@ -1736,7 +1737,7 @@ async def resume_mission(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/{mission_id}/cancel")
+@router.post("/{mission_id}/cancel", dependencies=[Depends(require_workspace_permission("missions:execute"))])
 async def cancel_mission(
     mission_id: UUID,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -1773,7 +1774,7 @@ async def cancel_mission(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.delete("/{mission_id}", status_code=204)
+@router.delete("/{mission_id}", status_code=204, dependencies=[Depends(require_workspace_permission("missions:delete"))])
 async def delete_mission(
     mission_id: UUID,
     ctx: RequestContext = Depends(get_request_context_hybrid),

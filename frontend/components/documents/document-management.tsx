@@ -68,6 +68,7 @@ import { useDocuments, useDocumentStats, useUploadDocument, useDeleteDocument } 
 import { useTeams, useDocumentTeamCounts } from '@/hooks/use-teams'
 import { useDatabaseKnowledge } from '@/hooks/use-database-knowledge'
 import { useCloudConnections, useTriggerSync, useSelectRootFolder } from '@/hooks/use-cloud-storage'
+import { useWorkspace } from '@/components/workspace-provider'
 
 // Real document interface to match backend response
 interface BackendDocument {
@@ -325,6 +326,7 @@ function AuditHistory({ sourceId }: { sourceId?: number }) {
 }
 
 export function DocumentManagement() {
+  const { canEdit } = useWorkspace()
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('all')
   const [dragActive, setDragActive] = useState(false)
@@ -1016,7 +1018,8 @@ export function DocumentManagement() {
                             <Button
                               className="gradient-accent hover:opacity-90"
                               onClick={() => setShowUploadModal(true)}
-                              disabled={uploadDocumentMutation.isLoading}
+                              disabled={uploadDocumentMutation.isLoading || !canEdit}
+                              title={canEdit ? undefined : 'Viewers have read-only access'}
                             >
                               <Plus className="w-4 h-4 mr-2" />
                               Choose Files

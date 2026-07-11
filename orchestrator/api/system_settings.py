@@ -19,6 +19,7 @@ import json
 from core.database.database import get_db
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
+from core.auth.workspace_permission import require_workspace_permission
 from core.models.system_settings import (
     SystemSetting, SystemSettingResponse, SystemSettingUpdate, 
     SystemSettingCreate, SystemSettingsByCategory, SystemSettingsStats,
@@ -158,7 +159,7 @@ async def get_system_setting(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.put("/{setting_id}", response_model=SystemSettingResponse)
+@router.put("/{setting_id}", response_model=SystemSettingResponse, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def update_system_setting(
     setting_id: int,
     update_data: SystemSettingUpdate,
@@ -190,7 +191,7 @@ async def update_system_setting(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/", response_model=SystemSettingResponse)
+@router.post("/", response_model=SystemSettingResponse, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def create_system_setting(
     setting_data: SystemSettingCreate,
     db: Session = Depends(get_db),
@@ -226,7 +227,7 @@ async def create_system_setting(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.delete("/{setting_id}")
+@router.delete("/{setting_id}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def delete_system_setting(
     setting_id: int,
     db: Session = Depends(get_db),
@@ -259,7 +260,7 @@ async def delete_system_setting(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/bulk-update")
+@router.post("/bulk-update", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def bulk_update_settings(
     request: Request,
     updates: List[BulkUpdateItem] = None,
@@ -313,7 +314,7 @@ async def bulk_update_settings(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/reset-to-defaults")
+@router.post("/reset-to-defaults", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def reset_settings_to_defaults(
     category: Optional[str] = None,
     db: Session = Depends(get_db),

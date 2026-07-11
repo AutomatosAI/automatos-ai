@@ -527,12 +527,13 @@ def _extract_origin(request: Request) -> Optional[str]:
 def _sdk_key_has_scope(permissions: Optional[list], required_scope: str) -> bool:
     """Return True only when *permissions* EXPLICITLY grants *required_scope*.
 
-    SECURITY — this deliberately DIVERGES from ``ApiKeyService.check_permissions``
-    and the widget plane's ``require_permission``, which treat an empty/None list
-    as "unrestricted — all permissions granted". On the board plane an empty or
-    null permission list grants NOTHING: the large population of already-issued
-    publishable keys (chat/widget keys with null or unrelated permissions) must
-    not be able to reach the task board. Least privilege — no scope, no access.
+    SECURITY — least privilege: an empty or null permission list grants
+    NOTHING. The large population of already-issued publishable keys
+    (chat/widget keys with null or unrelated permissions) must not be able to
+    reach the task board. This board-plane rule is now the PLATFORM rule:
+    PRD-195 S1 collapsed ``ApiKeyService.check_permissions`` and the widget
+    plane's ``require_permission`` onto the same empty=deny semantic
+    (``modules.policy.roles.has_permission``). No scope, no access.
     """
     if not permissions:
         return False

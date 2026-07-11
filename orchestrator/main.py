@@ -60,7 +60,6 @@ from api.tools import router as tools_router
 from api.wizard import router as wizard_router  # PRD-130: Business Intake Wizard (PoC)
 from api.onboarding_agents import router as onboarding_agents_router
 from api.statistics import router as statistics_router
-from api.permissions import router as permissions_router
 from api.skills import router as skills_router
 from api.templates import router as templates_router
 from api.blog import router as blog_router
@@ -974,7 +973,6 @@ app.include_router(tools_router)
 app.include_router(wizard_router)  # PRD-130: Business Intake Wizard (PoC)
 app.include_router(onboarding_agents_router)
 app.include_router(statistics_router)
-app.include_router(permissions_router)
 app.include_router(skills_router)
 app.include_router(templates_router)
 app.include_router(context_summarization_router)  # Context Engineering 2.0: Self-baking
