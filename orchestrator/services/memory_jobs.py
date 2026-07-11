@@ -36,6 +36,7 @@ class MemoryJobScheduler:
     JOB_ID_DECAY = "memory_decay_scoring"
     JOB_ID_PROMOTION = "memory_l2_l3_promotion"
     JOB_ID_ARCHIVAL = "memory_graphify_archival"
+    JOB_ID_AUDIT_RETENTION = "audit_retention_sweep"  # PRD-196 S5
 
     def __init__(self):
         self._scheduler: Optional[AsyncIOScheduler] = None
@@ -107,16 +108,32 @@ class MemoryJobScheduler:
                 max_instances=1,
             )
 
+        # PRD-196 S5: audit-log retention sweep (Art.12 floor without unbounded
+        # growth). Reuses this scheduler pattern; its own config-driven interval
+        # (default daily). max_instances=1 so a slow sweep never overlaps itself.
+        retention_interval = getattr(
+            app_config, "AUDIT_RETENTION_SWEEP_INTERVAL_SECONDS", 86400
+        )
+        self._scheduler.add_job(
+            self._run_audit_retention,
+            "interval",
+            seconds=retention_interval,
+            id=self.JOB_ID_AUDIT_RETENTION,
+            replace_existing=True,
+            max_instances=1,
+        )
+
         logger.info(
             "[MemoryJobs] Started — consolidation every %ds, "
             "decay every %ds, promotion daily at %02d:00 UTC, "
-            "archival %s (day=%d hour=%02d)",
+            "archival %s (day=%d hour=%02d), audit-retention every %ds",
             consolidation_interval,
             decay_interval,
             promotion_hour,
             "enabled" if archival_enabled else "disabled",
             archival_day,
             archival_hour,
+            retention_interval,
         )
 
     async def stop(self):
@@ -128,6 +145,7 @@ class MemoryJobScheduler:
             self.JOB_ID_DECAY,
             self.JOB_ID_PROMOTION,
             self.JOB_ID_ARCHIVAL,
+            self.JOB_ID_AUDIT_RETENTION,
         ):
             if self._scheduler.get_job(job_id):
                 self._scheduler.remove_job(job_id)
@@ -246,6 +264,32 @@ class MemoryJobScheduler:
                 exc_info=True,
             )
 
+    async def _run_audit_retention(self):
+        """PRD-196 S5: hard-delete audit_logs rows past the retention floor and
+        write one summary row per affected workspace. Resilient — a failure here
+        never stops the other memory jobs (its own try/except, like the rest)."""
+        try:
+            from core.database.database import SessionLocal
+            from services.audit_retention import sweep_expired_audit_logs
+
+            db = SessionLocal()
+            try:
+                result = sweep_expired_audit_logs(db)
+            finally:
+                db.close()
+            logger.info(
+                "[MemoryJobs] Audit retention sweep: deleted=%d, workspaces=%d, cutoff=%s",
+                result.get("total_deleted", 0),
+                result.get("workspaces_affected", 0),
+                result.get("cutoff"),
+            )
+        except Exception as e:
+            logger.error(
+                "[MemoryJobs] Audit retention sweep failed: %s",
+                e,
+                exc_info=True,
+            )
+
     # ------------------------------------------------------------------
     # Status
     # ------------------------------------------------------------------
@@ -261,6 +305,7 @@ class MemoryJobScheduler:
             self.JOB_ID_DECAY,
             self.JOB_ID_PROMOTION,
             self.JOB_ID_ARCHIVAL,
+            self.JOB_ID_AUDIT_RETENTION,
         ):
             job = self._scheduler.get_job(job_id)
             jobs[job_id] = {
