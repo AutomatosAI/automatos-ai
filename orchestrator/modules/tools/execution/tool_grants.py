@@ -292,6 +292,64 @@ def attach_ask_grant(
 
 
 # ---------------------------------------------------------------------------
+# Consume at the yes (S2)
+# ---------------------------------------------------------------------------
+
+def consume_tool_grant(
+    db: Any,
+    workspace_id: UUID | str,
+    *,
+    action: str,
+    params: Any,
+    permission_level: Optional[str] = None,
+) -> Optional[Any]:
+    """Return the authorising grant for this exact call, or ``None``.
+
+    Authorising = GRANTED + unexpired (``is_authorising``) + ``params_hash``
+    equality (the grant authorises *the* call, not the tool). Destructive
+    grants are single-use: retired here, on use, via ``revoke_grant`` with
+    ``revoked_by="system:consumed"`` — reuse of the existing lifecycle, no new
+    status, no schema change (locked decision 1). Write-class grants stay
+    GRANTED for their TTL window per call-key.
+
+    Never raises; any error ⇒ ``None`` ⇒ the ask stands. Fail-closed is the
+    whole point — this gate fronts deletes / member removal / system settings.
+    """
+    try:
+        from core.models.approval_grants import SUBJECT_TOOL_CALL
+        from core.services.approval_grants import (
+            find_active_grant,
+            is_authorising,
+            revoke_grant,
+        )
+        from modules.policy.policy_document import RISK_DESTRUCTIVE
+
+        subject_id = tool_call_subject_id(workspace_id, action, params)
+        grant = find_active_grant(
+            db, workspace_id, subject_type=SUBJECT_TOOL_CALL, subject_id=subject_id
+        )
+        if grant is None or not is_authorising(grant):
+            return None
+
+        details = grant.details if isinstance(grant.details, dict) else {}
+        if details.get("params_hash") != params_hash(params):
+            # Params drifted from what the human approved — that is a new ask.
+            return None
+
+        stored_risk = grant.risk_tier or _risk_class_for(action, permission_level)
+        if stored_risk == RISK_DESTRUCTIVE:
+            # Single-use: the yes covered exactly one execution.
+            revoke_grant(grant, revoked_by=GRANT_CONSUMED_BY)
+        return grant
+    except Exception:
+        logger.warning(
+            "[tool_grants] grant consult failed for %s — failing closed to the ask",
+            action, exc_info=True,
+        )
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Non-chat-lane notification (S5) — fire-and-forget, never blocks the ask
 # ---------------------------------------------------------------------------
 
@@ -368,6 +426,7 @@ __all__ = [
     "GRANT_CONSUMED_BY",
     "attach_ask_grant",
     "canonical_params",
+    "consume_tool_grant",
     "enrich_ask_with_grant",
     "issue_tool_grant",
     "params_hash",

@@ -137,7 +137,9 @@ async def write_telemetry(
             error_message=result.get("error") if status == "error" else None,
             execution_time_ms=execution_time_ms,
             router_decision=_build_router_decision(
-                ctx, autonomous=result.get("autonomous") is True
+                ctx,
+                autonomous=result.get("autonomous") is True,
+                approved_via_grant_id=result.get("approved_via_grant_id"),
             ),
             intent_cluster_id=ctx.get("intent_cluster_id"),
             routing_source=ctx.get("routing_source"),
@@ -157,7 +159,9 @@ async def write_telemetry(
 
 
 def _build_router_decision(
-    ctx: Dict[str, Any], autonomous: bool = False
+    ctx: Dict[str, Any],
+    autonomous: bool = False,
+    approved_via_grant_id: Optional[Any] = None,
 ) -> Optional[Dict[str, Any]]:
     """Extract routing metadata from caller_context into router_decision JSONB."""
     decision = {}
@@ -165,6 +169,11 @@ def _build_router_decision(
         # PRD-143: confirmation was skipped by the full-autonomy dial — the
         # distinct, queryable audit marker (router_decision->>'autonomous').
         decision["autonomous"] = True
+    if approved_via_grant_id is not None:
+        # PRD-193 S2: this execution was authorised by a specific human
+        # approval grant — queryable and DISTINCT from the dial-skip marker
+        # (router_decision->>'approved_via_grant_id').
+        decision["approved_via_grant_id"] = approved_via_grant_id
     sel = ctx.get("selection_outcome")
     if isinstance(sel, dict) and sel:
         # PRD-143 S14: per-dispatch selection outcome (narrowed/hit/fallback)
