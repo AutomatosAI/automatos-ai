@@ -35,6 +35,7 @@ import {
   useDeliverableFreshness,
   useCommerceIntegrity,
 } from '@/hooks/use-analytics-api'
+import { useGovernanceStatus } from '@/hooks/use-governance'
 
 interface Cell {
   label: string
@@ -51,6 +52,10 @@ export function IsItWorkingStrip() {
   const { data: slos } = useSLOs('24h')
   const { data: fresh } = useDeliverableFreshness()
   const { data: commerce } = useCommerceIntegrity()
+  // PRD-196 S3: the honest policy-plane on/off signal. null = not a workspace
+  // admin (or loading) — shown muted, never a fake green.
+  const { data: gov } = useGovernanceStatus()
+  const enforcing = gov?.policy_plane?.enforcing ?? null
 
   const missionTotal = mission?.total_executions ?? 0
   const missionPct = missionTotal > 0 ? Math.round(mission?.value ?? 0) : 0
@@ -171,6 +176,14 @@ export function IsItWorkingStrip() {
             : primDegraded > 0
               ? `${primDegraded} degraded`
               : 'all green',
+    },
+    {
+      // PRD-196 S3: is governance actually enforcing? OFF is shown loudly (the
+      // plane ships default-OFF) so an operator is never falsely reassured.
+      label: 'POLICY PLANE',
+      value: enforcing == null ? '—' : enforcing ? 'ON' : 'OFF',
+      tone: enforcing == null ? 'muted' : enforcing ? 'ok' : 'warn',
+      delta: enforcing == null ? 'admin only' : enforcing ? 'enforcing' : 'not enforcing yet',
     },
   ]
 

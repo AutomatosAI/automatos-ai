@@ -15,6 +15,7 @@
 
 import { useState } from 'react'
 import { ApprovalsInbox } from './governance/approvals-inbox'
+import { AuditPane } from './governance/audit-pane'
 
 type PaneKey = 'approvals' | 'audit' | 'policy' | 'compliance'
 
@@ -28,6 +29,7 @@ interface Pane {
 // S7 compliance). Approvals is the lead pane.
 const PANES: Pane[] = [
   { key: 'approvals', label: 'Approvals', node: <ApprovalsInbox /> },
+  { key: 'audit', label: 'Audit', node: <AuditPane /> },
 ]
 
 export function GovernanceTab() {

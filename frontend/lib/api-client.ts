@@ -162,6 +162,45 @@ export interface ApprovalGrantsResponse {
   grants: ApprovalGrant[]
 }
 
+export interface GovernanceStatus {
+  policy_plane: { enforcing: boolean }
+  grants: { by_status: Record<string, number>; total: number }
+  audit: {
+    policy_verdicts: { total: number; by_action: Record<string, number> }
+    window_days: number
+  }
+  retention: { retention_days: number | null; floor_days: number | null; configured: boolean }
+}
+
+export interface AuditLogRow {
+  id: number
+  created_at: string | null
+  actor_type: string
+  user_id: number | null
+  action: string
+  resource_type: string | null
+  resource_id: string | null
+  resource_name: string | null
+  details: Record<string, any>
+}
+
+export interface AuditLogResponse {
+  rows: AuditLogRow[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface AuditLogFilters {
+  action_prefix?: string
+  actor_type?: string
+  resource_type?: string
+  since?: string
+  until?: string
+  limit?: number
+  offset?: number
+}
+
 class ApiClient {
   private baseUrl: string
   private defaultHeaders: Record<string, string>
@@ -2084,6 +2123,24 @@ class ApiClient {
 
   async revokeApproval(grantId: number): Promise<{ grant: ApprovalGrant }> {
     return this.request(`/api/v1/approval-grants/${grantId}/revoke`, { method: 'POST' })
+  }
+
+  // ===== PRD-196 S3 governance: status + audit log (ws-admin gated) =====
+  async getGovernanceStatus(): Promise<GovernanceStatus> {
+    return this.request<GovernanceStatus>('/api/v1/governance/status')
+  }
+
+  async getGovernanceAuditLog(filters: AuditLogFilters = {}): Promise<AuditLogResponse> {
+    const params = new URLSearchParams()
+    if (filters.action_prefix) params.set('action_prefix', filters.action_prefix)
+    if (filters.actor_type) params.set('actor_type', filters.actor_type)
+    if (filters.resource_type) params.set('resource_type', filters.resource_type)
+    if (filters.since) params.set('since', filters.since)
+    if (filters.until) params.set('until', filters.until)
+    if (filters.limit != null) params.set('limit', String(filters.limit))
+    if (filters.offset != null) params.set('offset', String(filters.offset))
+    const qs = params.toString()
+    return this.request<AuditLogResponse>(`/api/v1/governance/audit-log${qs ? `?${qs}` : ''}`)
   }
 }
 
