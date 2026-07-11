@@ -137,11 +137,7 @@ OWN_GATE_IN_HANDLER = {
 
 # The agent-tool RBAC fossil (api/permissions.py, vocabulary #5) — unmounted
 # and deleted by S8 together with this set and its manifest rows.
-FOSSIL_PENDING_DELETE = {
-    ("DELETE", "/permissions/revoke"),
-    ("POST", "/permissions/assign"),
-    ("POST", "/permissions/bulk-assign"),
-}
+FOSSIL_PENDING_DELETE: set = set()  # S8 DONE — api/permissions.py unmounted + deleted; tables dropped by prd195 migration
 
 # ---------------------------------------------------------------------------
 # (h) PENDING blocks — the visible debt. Each family story (S3–S6) gates its

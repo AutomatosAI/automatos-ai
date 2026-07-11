@@ -1,5 +1,5 @@
 {
-  "route_count": 750,
+  "route_count": 743,
   "routes": [
     {
       "method": "GET",
@@ -2952,34 +2952,6 @@
     {
       "method": "GET",
       "path": "/openapi.json"
-    },
-    {
-      "method": "POST",
-      "path": "/permissions/assign"
-    },
-    {
-      "method": "GET",
-      "path": "/permissions/assignments"
-    },
-    {
-      "method": "GET",
-      "path": "/permissions/audit"
-    },
-    {
-      "method": "POST",
-      "path": "/permissions/bulk-assign"
-    },
-    {
-      "method": "GET",
-      "path": "/permissions/health"
-    },
-    {
-      "method": "GET",
-      "path": "/permissions/matrix"
-    },
-    {
-      "method": "DELETE",
-      "path": "/permissions/revoke"
     },
     {
       "method": "GET",

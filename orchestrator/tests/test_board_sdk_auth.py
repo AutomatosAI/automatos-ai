@@ -129,7 +129,7 @@ class TestResolveSdkKeyContext:
         assert ctx.auth_type == "sdk_key"
         assert ctx.workspace_id == WS
         assert ctx.api_key_id == str(rec.id)
-        assert ctx.user.role == "service"
+        assert ctx.user.system_role == "service"  # PRD-195 S8: the role twin is gone
         assert ctx.user.id == f"sdk:{rec.id}"
 
     def test_missing_token_401(self, monkeypatch):

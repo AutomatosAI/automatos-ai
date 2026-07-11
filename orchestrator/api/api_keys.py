@@ -25,6 +25,10 @@ from core.services.api_key_service import ApiKeyService
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/api-keys", tags=["API Keys"])
 
+# PRD-195 S8 (G1): SDK scopes speak the canonical vocabulary — the legacy
+# workflows:* strings are renamed to missions:* + playbooks:* (CLAUDE.md §10).
+# Nothing ever CHECKED workflows:* (grep-verified), so already-minted keys
+# carrying the old strings lose nothing; the validator only shapes new mints.
 VALID_PERMISSIONS = [
     "chat",
     "blog",
@@ -34,8 +38,10 @@ VALID_PERMISSIONS = [
     "data:execute",
     "agents:read",
     "agents:execute",
-    "workflows:read",
-    "workflows:execute",
+    "missions:read",
+    "missions:execute",
+    "playbooks:read",
+    "playbooks:execute",
     # Board task scopes (PRD-09). Named constant = single source of truth shared
     # with the board auth gate in core/auth/hybrid.py.
     TASKS_READ,

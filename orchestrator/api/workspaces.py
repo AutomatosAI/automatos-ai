@@ -85,12 +85,26 @@ async def get_current_workspace(
             masked[k] = v
     settings["integrations"] = masked
 
+    # PRD-195 S8 (C.1): this used to return the SYSTEM-role twin
+    # (ctx.user.role) while the frontend typed it as a workspace role — the
+    # exact twin confusion the dossier flagged. Return the real per-tenant
+    # role: member row (owner fallback) via the S2 resolver; the trusted
+    # single-user lanes (local/anonymous) and the super-admin operator render
+    # owner affordances; every other non-member renders read-only — matching
+    # what the write gates now enforce (G5 UI honesty).
+    if ctx.auth_type == "anonymous" or getattr(ctx.user, "system_role", None) == "super_admin":
+        member_role = "owner"
+    else:
+        from core.auth.workspace_permission import resolve_workspace_role
+
+        member_role = resolve_workspace_role(db, ctx) or "viewer"
+
     return {
         "id": str(workspace.id),
         "name": workspace.name,
         "slug": workspace.slug,
         "plan": workspace.plan,
-        "role": ctx.user.role,
+        "role": member_role,
         "plan_limits": workspace.plan_limits or {},
         "is_new_workspace": agent_count == 0,
         "webhook_url": webhook_url,
