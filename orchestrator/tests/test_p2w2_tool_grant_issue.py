@@ -307,6 +307,32 @@ async def test_grant_issue_failure_still_asks(monkeypatch):
     sentinel.assert_not_awaited()
 
 
+async def test_idless_grant_degrades_to_plain_ask(monkeypatch):
+    """A grant row without a usable integer id cannot power the card — the
+    grant/deny endpoints key on it — so the ask degrades to plain prose,
+    never a dead card. (Also keeps MagicMock-db journey suites from leaking a
+    non-serialisable grant_id into SSE tool-data frames.)"""
+    import core.services.approval_grants as grant_service
+
+    class _IdlessGrant:
+        id = None  # a degraded store that never minted a primary key
+
+    monkeypatch.setattr(
+        grant_service, "find_pending_grant", lambda *a, **k: _IdlessGrant()
+    )
+
+    db = _FakeSession()
+    ex = _executor(db)
+    registry = _FakeRegistry(_action(_DESTRUCTIVE_ACTION))
+    p_registry, p_autonomy = _gate_patches(registry)
+
+    with p_registry, p_autonomy:
+        result = await ex.execute(_DESTRUCTIVE_ACTION, {"document_id": 7}, dict(_MEMBER_CTX))
+
+    assert result["requires_confirmation"] is True
+    assert "grant_id" not in result
+
+
 # ===========================================================================
 # 5. The registry-miss fail-closed ask carries a grant too (best-effort)
 # ===========================================================================

@@ -281,7 +281,10 @@ def attach_ask_grant(
             description=description,
             caller_context=caller_context,
         )
-        if grant is None:
+        # A grant without a usable integer id cannot power the card — the
+        # grant/deny endpoints key on it. Degraded stores (or fakes) that
+        # yield id-less rows get the plain prose ask, never a dead card.
+        if grant is None or not isinstance(getattr(grant, "id", None), int):
             return ask
         return enrich_ask_with_grant(
             ask, grant, risk_class=_risk_class_for(action, permission_level)
