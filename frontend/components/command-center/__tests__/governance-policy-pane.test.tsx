@@ -9,9 +9,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 
-const updatePolicy = vi.fn().mockResolvedValue({})
-const updateBudget = vi.fn().mockResolvedValue({})
-const statusMock = vi.fn()
+const { updatePolicy, updateBudget, statusMock } = vi.hoisted(() => ({
+  updatePolicy: vi.fn().mockResolvedValue({}),
+  updateBudget: vi.fn().mockResolvedValue({}),
+  statusMock: vi.fn(),
+}))
 
 vi.mock('@/hooks/use-governance', () => ({
   usePolicy: () => ({

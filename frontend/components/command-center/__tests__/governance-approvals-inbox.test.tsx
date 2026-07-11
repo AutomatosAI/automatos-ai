@@ -9,9 +9,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import type { ApprovalGrant } from '@/lib/api-client'
 
-const grantMutate = vi.fn().mockResolvedValue({})
-const denyMutate = vi.fn().mockResolvedValue({})
-const revokeMutate = vi.fn().mockResolvedValue({})
+const { grantMutate, denyMutate, revokeMutate } = vi.hoisted(() => ({
+  grantMutate: vi.fn().mockResolvedValue({}),
+  denyMutate: vi.fn().mockResolvedValue({}),
+  revokeMutate: vi.fn().mockResolvedValue({}),
+}))
 
 vi.mock('@/hooks/use-approval-grants', () => ({
   useApprovalGrants: vi.fn(),

@@ -9,9 +9,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import type { GdprSubjectErasureResult } from '@/lib/api-client'
 
-const eraseSubjectMutate = vi.fn().mockResolvedValue({})
-const eraseWorkspaceMutate = vi.fn().mockResolvedValue({})
-const subjectHook = vi.fn()
+const { eraseSubjectMutate, eraseWorkspaceMutate, subjectHook } = vi.hoisted(() => ({
+  eraseSubjectMutate: vi.fn().mockResolvedValue({}),
+  eraseWorkspaceMutate: vi.fn().mockResolvedValue({}),
+  subjectHook: vi.fn(),
+}))
 
 vi.mock('@/hooks/use-gdpr', () => ({
   useGdprEraseSubject: () => subjectHook(),

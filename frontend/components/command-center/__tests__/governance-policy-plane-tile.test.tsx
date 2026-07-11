@@ -22,7 +22,7 @@ vi.mock('@/hooks/use-analytics-api', () => ({
   useCommerceIntegrity: () => ({ data: undefined }),
 }))
 
-const statusMock = vi.fn()
+const { statusMock } = vi.hoisted(() => ({ statusMock: vi.fn() }))
 vi.mock('@/hooks/use-governance', () => ({
   useGovernanceStatus: () => statusMock(),
 }))
