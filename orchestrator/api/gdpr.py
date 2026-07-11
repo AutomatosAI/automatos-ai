@@ -17,8 +17,8 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
-from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
+from core.auth.workspace_admin import require_workspace_admin
 from core.database.database import get_db
 
 logger = logging.getLogger(__name__)
@@ -30,20 +30,18 @@ def _actor_ref(ctx: RequestContext) -> str:
     return f"user:{uid}" if uid is not None else "user:unknown"
 
 
-def _require_workspace_admin(ctx: RequestContext) -> None:
-    """GDPR export/erasure is an admin/owner action on the tenant."""
-    role = getattr(ctx, "workspace_role", None) or getattr(getattr(ctx, "user", None), "system_role", None)
-    if role not in ("owner", "admin", "super_admin"):
-        raise HTTPException(status_code=403, detail="GDPR actions require workspace admin or owner")
+# PRD-196 S7: consolidated onto the canonical ``require_workspace_admin``
+# (PRD-185 S12) — the hand-rolled ``_require_workspace_admin`` (a role-string
+# check, different semantics from the membership-row check) is deleted so there
+# is ONE admin semantic across the governance + GDPR surfaces.
 
 
 @router.get("/export")
 async def export_my_workspace(
-    ctx: RequestContext = Depends(get_request_context_hybrid),
+    ctx: RequestContext = Depends(require_workspace_admin),
     db: Session = Depends(get_db),
 ) -> JSONResponse:
     """Export this workspace's data (SQL + field memory + durable memory) as a JSON bundle."""
-    _require_workspace_admin(ctx)
     from services.gdpr_service import export_workspace
 
     bundle = export_workspace(db, ctx.workspace_id, requested_by=_actor_ref(ctx))
@@ -53,7 +51,7 @@ async def export_my_workspace(
 @router.post("/erase")
 async def erase_my_workspace(
     body: Dict[str, Any] = Body(default_factory=dict),
-    ctx: RequestContext = Depends(get_request_context_hybrid),
+    ctx: RequestContext = Depends(require_workspace_admin),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """Erase this whole workspace across every store (irreversible).
@@ -61,7 +59,6 @@ async def erase_my_workspace(
     Requires ``{"confirm_workspace_id": "<this workspace id>"}`` to guard against
     an accidental fire.
     """
-    _require_workspace_admin(ctx)
     confirm = str(body.get("confirm_workspace_id") or "")
     if confirm != str(ctx.workspace_id):
         raise HTTPException(
@@ -77,17 +74,17 @@ async def erase_my_workspace(
 @router.post("/erase-subject")
 async def erase_subject(
     body: Dict[str, Any] = Body(...),
-    ctx: RequestContext = Depends(get_request_context_hybrid),
+    ctx: RequestContext = Depends(require_workspace_admin),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """Erase a single data subject's data within this workspace where a subject
-    tag exists. Stores lacking a subject tag are reported in ``gaps``.
+    tag exists (PRD-196 S6 made field + durable real deletes). Stores lacking a
+    subject tag (SQL) are reported in ``gaps``; pre-tag rows in ``untagged_history``.
 
-    Body: ``{"subject_id": "<id>"}``. This is the platform entrypoint the future
-    Shopify ``customers/redact`` webhook will call (the Remix handler itself is
-    out of scope for this repo — flagged for the Shopify pod).
+    Body: ``{"subject_id": "<id>"}``. This is the platform entrypoint the Shopify
+    ``customers/redact`` webhook calls (the Remix handler itself is out of scope
+    for this repo — flagged for the Shopify pod).
     """
-    _require_workspace_admin(ctx)
     subject_id = str(body.get("subject_id") or "").strip()
     if not subject_id:
         raise HTTPException(status_code=422, detail="subject_id is required")

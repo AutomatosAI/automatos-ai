@@ -77,6 +77,9 @@ MANIFEST_ROUTERS: tuple[RouterSpec, ...] = (
     # PRD-181 W11 governance + compliance surfaces.
     RouterSpec("api.approval_grants"),  # S2 — grant / revoke approvals (F060)
     RouterSpec("api.gdpr"),             # S3/S4 — GDPR export + erasure cascade
+    # PRD-196 (P2-15) — governance operator surface: audit-log + status (S3),
+    # policy posture + budget editors (S4). Ws-admin gated at the router.
+    RouterSpec("api.governance"),
 )
 
 

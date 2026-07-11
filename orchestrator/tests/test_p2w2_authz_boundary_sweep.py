@@ -128,12 +128,10 @@ ADMIN_GATED_IN_HANDLER = {
     # Skills git import is admin-only until a safe user-facing flow exists
     # (PRD-70 FIX-01).
     ("POST", "/api/v1/skills/sources/git"),
-    # GDPR erase — api/gdpr.py's HAND-ROLLED workspace-admin gate (with the
-    # C.1 ctx.workspace_role phantom falling through to system_role, so it is
-    # effectively system-admin-only in prod). PRD-196 S7 owns consolidating it
-    # onto the canonical gate — classified here, deliberately untouched.
-    ("POST", "/api/v1/gdpr/erase"),
-    ("POST", "/api/v1/gdpr/erase-subject"),
+    # PRD-196 S7 DONE: api/gdpr.py's hand-rolled workspace-admin gate was
+    # consolidated onto the canonical ``require_workspace_admin`` DEPENDENCY, so
+    # /api/v1/gdpr/erase + /erase-subject now classify as workspace-admin (not
+    # admin-in-handler) — removed from this set so they classify exactly once.
     ("PUT", "/api/widget-marketplace/widgets/{widget_id}/approve"),
     ("PUT", "/api/widget-marketplace/widgets/{widget_id}/suspend"),
 }
@@ -163,17 +161,11 @@ PENDING_FAMILY_CONTENT: set = set()  # S5 DONE — content plane (documents, kno
 
 PENDING_FAMILY_WORKSPACE: set = set()  # S6 DONE — workspace/admin/config plane fully gated; sweep fully armed
 
-# Routes whose gating a SIBLING open PR owns — visible debt with a named
-# owner, never silently allowlisted. PRD-196 S2 (#531) puts
-# require_workspace_admin on the approval-grant verbs; the moment that lands,
-# these routes classify as workspace-admin AND pending → the exactly-one
-# check forces this block's deletion in the merging PR. Do NOT gate them here
-# (cross-PR coordination: re-gating would collide with #531's hunks).
-PENDING_SIBLING_PRS = {
-    ("POST", "/api/v1/approval-grants/{grant_id}/deny"),
-    ("POST", "/api/v1/approval-grants/{grant_id}/grant"),
-    ("POST", "/api/v1/approval-grants/{grant_id}/revoke"),
-}
+# PRD-196 DONE: #531 landed require_workspace_admin on the approval-grant verbs,
+# so they now classify as workspace-admin. Per #536's PR body this block gets its
+# one-line deletion in the governance PR that merges after #531 — that is this
+# PR (PRD-196). Emptied so the verbs classify exactly once (workspace-admin).
+PENDING_SIBLING_PRS: set = set()
 
 PENDING_BLOCKS = {
     "PENDING_FAMILY_AGENTS": PENDING_FAMILY_AGENTS,

@@ -708,6 +708,18 @@ class Config:
     # migration; explicit budgets always win). 0 disables the default.
     AUTONOMY_DEFAULT_BUDGET_USD: float = float(os.getenv("AUTOMATOS_AUTONOMY_DEFAULT_BUDGET_USD", "50"))
 
+    # PRD-196 S5 — audit-log retention. EU-AI-Act Art.12 mandates >= 6 months
+    # (a floor, so retention is a compliance requirement, not housekeeping) while
+    # GDPR data-minimisation forbids forever. Platform-wide default 365 days; a
+    # configured value below the 180-day Art.12 floor is CLAMPED UP at read
+    # (services/audit_retention.effective_retention_days) — a config can never
+    # dip under the legal floor. No per-workspace override in v1 (Gerard's call).
+    AUDIT_RETENTION_DAYS: int = int(os.getenv("AUDIT_RETENTION_DAYS", "365"))
+    # How often the retention sweep runs (default daily).
+    AUDIT_RETENTION_SWEEP_INTERVAL_SECONDS: int = int(
+        os.getenv("AUDIT_RETENTION_SWEEP_INTERVAL_SECONDS", "86400")
+    )
+
     # PRD-185 S2 — per-lane telemetry canary. The type-poison outage S1 repaired
     # went unseen for ~2 months because nothing alarmed on "organic tool-execution
     # rows/day = 0". This canary counts production (telemetry_source='production')

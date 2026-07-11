@@ -130,6 +130,116 @@ export function getAdminWorkspaceOverride(): string | null {
   return _adminWorkspaceOverride
 }
 
+// ─── PRD-196 governance surface types ────────────────────────────────
+export interface ApprovalGrantOversight {
+  risk_class: string
+  tier: 'monitor' | 'human_on_the_loop' | 'human_in_the_loop' | string
+  rationale: string
+  requires_approval: boolean
+}
+
+export interface ApprovalGrant {
+  id: number
+  workspace_id: string | null
+  subject_type: string
+  subject_id: string
+  tool_name: string | null
+  risk_tier: string | null
+  agent_id: number | null
+  status: string
+  reason: string | null
+  estimated_cost_usd: string | null
+  requested_at: string | null
+  expires_at: string | null
+  granted_at: string | null
+  granted_by: string | null
+  revoked_at: string | null
+  revoked_by: string | null
+  oversight?: ApprovalGrantOversight
+}
+
+export interface ApprovalGrantsResponse {
+  grants: ApprovalGrant[]
+}
+
+export interface GovernanceStatus {
+  policy_plane: { enforcing: boolean }
+  grants: { by_status: Record<string, number>; total: number }
+  audit: {
+    policy_verdicts: { total: number; by_action: Record<string, number> }
+    window_days: number
+  }
+  retention: { retention_days: number | null; floor_days: number | null; configured: boolean }
+}
+
+export interface AuditLogRow {
+  id: number
+  created_at: string | null
+  actor_type: string
+  user_id: number | null
+  action: string
+  resource_type: string | null
+  resource_id: string | null
+  resource_name: string | null
+  details: Record<string, any>
+}
+
+export interface AuditLogResponse {
+  rows: AuditLogRow[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface AuditLogFilters {
+  action_prefix?: string
+  actor_type?: string
+  resource_type?: string
+  since?: string
+  until?: string
+  limit?: number
+  offset?: number
+}
+
+export interface PolicyDocument {
+  posture: 'balanced' | 'strict' | 'permissive' | string
+  agents_inherit_admin: boolean
+  route_overrides: Record<string, 'auto' | 'ask'>
+}
+
+export interface BudgetConfig {
+  window?: 'day' | 'month' | 'all' | string
+  max_cost_usd?: number
+  max_total_tokens?: number
+}
+
+export interface GdprErasureGap {
+  store: string
+  reason: string
+}
+
+export interface GdprUntaggedHistory {
+  stores: string[]
+  reason: string
+}
+
+export interface GdprSubjectErasureResult {
+  workspace_id: string
+  subject_id: string
+  erased_at: string
+  sql: { deleted: number }
+  derived: { field_memory_deleted: number; durable_memory_deleted: number }
+  gaps: GdprErasureGap[]
+  untagged_history: GdprUntaggedHistory
+}
+
+export interface GdprWorkspaceErasureResult {
+  workspace_id: string
+  complete?: boolean
+  derived?: { field_memory_deleted: number; durable_memory_deleted: number }
+  [key: string]: any
+}
+
 class ApiClient {
   private baseUrl: string
   private defaultHeaders: Record<string, string>
@@ -1999,6 +2109,84 @@ class ApiClient {
     })
     console.log('[API] testRAGConfig result:', result)
     return result
+  }
+
+  // ===== PRD-196 S1/S2 governance: approval grants (ws-admin gated) =====
+  async listApprovalGrants(status?: string): Promise<ApprovalGrantsResponse> {
+    const qs = status ? `?status=${encodeURIComponent(status)}` : ''
+    return this.request<ApprovalGrantsResponse>(`/api/v1/approval-grants${qs}`)
+  }
+
+  async grantApproval(grantId: number): Promise<{ grant: ApprovalGrant }> {
+    return this.request(`/api/v1/approval-grants/${grantId}/grant`, { method: 'POST' })
+  }
+
+  async denyApproval(grantId: number): Promise<{ grant: ApprovalGrant }> {
+    return this.request(`/api/v1/approval-grants/${grantId}/deny`, { method: 'POST' })
+  }
+
+  async revokeApproval(grantId: number): Promise<{ grant: ApprovalGrant }> {
+    return this.request(`/api/v1/approval-grants/${grantId}/revoke`, { method: 'POST' })
+  }
+
+  // ===== PRD-196 S3 governance: status + audit log (ws-admin gated) =====
+  async getGovernanceStatus(): Promise<GovernanceStatus> {
+    return this.request<GovernanceStatus>('/api/v1/governance/status')
+  }
+
+  async getGovernanceAuditLog(filters: AuditLogFilters = {}): Promise<AuditLogResponse> {
+    const params = new URLSearchParams()
+    if (filters.action_prefix) params.set('action_prefix', filters.action_prefix)
+    if (filters.actor_type) params.set('actor_type', filters.actor_type)
+    if (filters.resource_type) params.set('resource_type', filters.resource_type)
+    if (filters.since) params.set('since', filters.since)
+    if (filters.until) params.set('until', filters.until)
+    if (filters.limit != null) params.set('limit', String(filters.limit))
+    if (filters.offset != null) params.set('offset', String(filters.offset))
+    const qs = params.toString()
+    return this.request<AuditLogResponse>(`/api/v1/governance/audit-log${qs ? `?${qs}` : ''}`)
+  }
+
+  // ===== PRD-196 S4 governance: policy posture + budget editors =====
+  async getGovernancePolicy(): Promise<PolicyDocument> {
+    return this.request<PolicyDocument>('/api/v1/governance/policy')
+  }
+
+  async putGovernancePolicy(body: Partial<PolicyDocument>): Promise<PolicyDocument> {
+    return this.request<PolicyDocument>('/api/v1/governance/policy', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    })
+  }
+
+  async getGovernanceBudget(): Promise<BudgetConfig> {
+    return this.request<BudgetConfig>('/api/v1/governance/budget')
+  }
+
+  async putGovernanceBudget(body: BudgetConfig): Promise<BudgetConfig> {
+    return this.request<BudgetConfig>('/api/v1/governance/budget', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    })
+  }
+
+  // ===== PRD-196 S7 GDPR self-service (ws-admin gated) =====
+  async getGdprExport(): Promise<any> {
+    return this.request('/api/v1/gdpr/export')
+  }
+
+  async eraseGdprSubject(subjectId: string): Promise<GdprSubjectErasureResult> {
+    return this.request<GdprSubjectErasureResult>('/api/v1/gdpr/erase-subject', {
+      method: 'POST',
+      body: JSON.stringify({ subject_id: subjectId }),
+    })
+  }
+
+  async eraseGdprWorkspace(confirmWorkspaceId: string): Promise<GdprWorkspaceErasureResult> {
+    return this.request<GdprWorkspaceErasureResult>('/api/v1/gdpr/erase', {
+      method: 'POST',
+      body: JSON.stringify({ confirm_workspace_id: confirmWorkspaceId }),
+    })
   }
 }
 

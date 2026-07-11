@@ -17,11 +17,14 @@ cascade — it reaches every store, primary and derived:
 Every export and every erasure is audited (governance action).
 
 **Subject granularity:** subject-level erasure is implemented where a
-data-subject tag exists. Field memory and durable memory today carry only workspace /
-mission / agent provenance and **no data-subject tag** — those are surfaced as
-documented ``gaps`` on a subject-level erasure (never silently skipped). The
+data-subject tag exists. PRD-196 S6 added the ``subject_id`` tag to field memory
+and durable memory, so a subject erase now does a real filter-delete in both
+(reported as deleted counts). **SQL** remains workspace-scoped (a documented
+``gaps`` entry — per-table subject resolution belongs to the Shopify redact
+handler), and rows written *before* the tag existed are reported as an
+``untagged_history`` caveat (additive, no backfill — never claimed erased). The
 single ``erase_data_subject`` / ``erase_workspace`` entrypoints are what the
-future Shopify ``customers/redact`` webhook will call.
+Shopify ``customers/redact`` webhook calls.
 
 The store-specific readers/erasers are module-level functions so they can be
 swapped in tests and so the sync↔async bridge (SQL/audit are sync; Qdrant legs
@@ -165,23 +168,14 @@ def _audit_gdpr(db: Any, workspace_id: UUID | str, action: str, **details: Any) 
 
 
 # ---------------------------------------------------------------------------
-# Gap ledger — the stores that lack a data-subject tag, surfaced (never hidden)
-# on a subject-level operation.
+# Gap ledger — the stores that still lack a data-subject tag, surfaced (never
+# hidden) on a subject-level operation. PRD-196 S6 closed field_memory and
+# durable_memory (they now filter-delete by subject_id), so only SQL remains a
+# structural gap. Pre-tag rows in the tagged stores are reported separately as
+# an untagged-history caveat (below) — never claimed erased.
 # ---------------------------------------------------------------------------
 
 _SUBJECT_GAPS: List[Dict[str, str]] = [
-    {
-        "store": "field_memory",
-        "reason": "Qdrant field-memory points carry workspace/mission/task/agent "
-                  "provenance but no data-subject tag; add a subject tag at write "
-                  "to enable subject-level erasure. Workspace-level erasure works.",
-    },
-    {
-        "store": "durable_memory",
-        "reason": "Durable memories are namespaced by workspace/agent/recipe "
-                  "with no data-subject tag in the payload; add one at write to enable "
-                  "subject-level erasure. Workspace-level erasure works.",
-    },
     {
         "store": "sql",
         "reason": "SQL schema is workspace-scoped, not subject-scoped; per-table "
@@ -189,6 +183,18 @@ _SUBJECT_GAPS: List[Dict[str, str]] = [
                   "is domain-specific and owned by the Shopify redact handler.",
     },
 ]
+
+# PRD-196 S6: the subject tag is ADDITIVE (no backfill — there is no identity to
+# backfill from). Memories written before the tag existed carry no subject_id and
+# cannot be attributed to a subject, so they stay under workspace-level erasure.
+# Reported honestly on every subject erase — never silently claimed erased.
+_UNTAGGED_HISTORY_CAVEAT: Dict[str, Any] = {
+    "stores": ["field_memory", "durable_memory"],
+    "reason": "Subject tagging is additive from PRD-196 S6 onward. Memories "
+              "written before the tag existed carry no data-subject tag and are "
+              "NOT attributable to a subject for deletion; they remain reachable "
+              "only by workspace-level erasure. This is reported, never hidden.",
+}
 
 
 # ===========================================================================
@@ -263,6 +269,8 @@ def erase_data_subject(
     durable_deleted = _safe(lambda: _erase_durable_memory(workspace_id, subject_id), "durable_memory")
     sql_result = _safe(lambda: _erase_subject_sql(db, workspace_id, subject_id), "sql") or {"deleted": 0}
 
+    # Dynamic + honest (PRD-196 S6): field/durable report real deleted counts;
+    # SQL stays a documented gap; pre-tag rows are an untagged-history caveat.
     result = {
         "workspace_id": str(workspace_id),
         "subject_id": subject_id,
@@ -274,6 +282,7 @@ def erase_data_subject(
             "durable_memory_deleted": durable_deleted or 0,
         },
         "gaps": list(_SUBJECT_GAPS),
+        "untagged_history": dict(_UNTAGGED_HISTORY_CAVEAT),
     }
     _audit_gdpr(
         db, workspace_id, "gdpr:erasure",
@@ -283,6 +292,7 @@ def erase_data_subject(
         field_memory_deleted=field_deleted or 0,
         durable_memory_deleted=durable_deleted or 0,
         gaps=[g["store"] for g in _SUBJECT_GAPS],
+        untagged_history=True,
     )
     return result
 

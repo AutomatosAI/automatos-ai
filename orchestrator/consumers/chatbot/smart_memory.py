@@ -382,7 +382,8 @@ class SmartMemoryManager:
         user_message: str,
         assistant_response: str,
         chat_id: Optional[str] = None,
-        widget_mode: bool = False
+        widget_mode: bool = False,
+        subject_id: Optional[str] = None,
     ) -> bool:
         """
         Store a conversation exchange in memory.
@@ -492,6 +493,9 @@ class SmartMemoryManager:
                         agent_id=agent_id,
                         tier=tier,
                         metadata=fact_meta,
+                        # PRD-196 S6: the human principal's GDPR subject tag
+                        # (user:{users.id}); None for widget/agent-internal writes.
+                        subject_id=subject_id,
                     )
                     results.extend(fact_results)
                 except Exception:

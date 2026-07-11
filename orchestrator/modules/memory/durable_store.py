@@ -122,6 +122,10 @@ class DurableMemoryStore:
         for field_name, schema in [
             ("namespace", PayloadSchemaType.KEYWORD),
             ("workspace_id", PayloadSchemaType.KEYWORD),
+            # PRD-196 S6 (GDPR): the data-subject tag. A keyword payload index so
+            # subject-level erasure is one filter-delete (workspace_id AND
+            # subject_id), the same shape as the workspace erase.
+            ("subject_id", PayloadSchemaType.KEYWORD),
             ("content_hash", PayloadSchemaType.KEYWORD),
             ("created_at", PayloadSchemaType.KEYWORD),
         ]:
@@ -152,6 +156,15 @@ class DurableMemoryStore:
         ])
 
     @staticmethod
+    def _subject_filter(workspace_id: str, subject_id: str) -> Filter:
+        """PRD-196 S6: workspace_id AND subject_id — fail-closed tenancy, so a
+        subject erase can never reach beyond the requesting workspace."""
+        return Filter(must=[
+            FieldCondition(key="workspace_id", match=MatchValue(value=str(workspace_id))),
+            FieldCondition(key="subject_id", match=MatchValue(value=str(subject_id))),
+        ])
+
+    @staticmethod
     def _item_from_payload(point_id: Any, payload: Dict, score: Optional[float] = None) -> Dict:
         """Map a point to the memory-item shape L3 consumers already read
         (same keys the mem0 search/get_all results carried)."""
@@ -173,12 +186,19 @@ class DurableMemoryStore:
         user_id: str,
         metadata: Optional[Dict] = None,
         workspace_id: Optional[str] = None,
+        subject_id: Optional[str] = None,
     ) -> Dict:
         """Store one durable memory under a namespace.
 
         Messages are joined to a single text (user content verbatim, other
         roles prefixed) — the same normalisation the retired client applied.
         Same-content writes in the same namespace dedup to the existing point.
+
+        PRD-196 S6: ``subject_id`` is an optional namespaced data-subject tag
+        (``user:{users.id}`` — the INTERNAL id, never a Clerk string) written to
+        the payload so a single human's memories can be filter-deleted for GDPR.
+        Untagged writes (heartbeat / playbook / agent-internal) store a null tag
+        and are reported as untagged history on a subject erase, never as erased.
         """
         await self.ensure_collection()
 
@@ -210,6 +230,7 @@ class DurableMemoryStore:
                 payload={
                     "namespace": user_id,
                     "workspace_id": ws,
+                    "subject_id": subject_id,  # PRD-196 S6 (GDPR data-subject tag)
                     "content": text,
                     "metadata": metadata or {},
                     "created_at": datetime.now(timezone.utc).isoformat(),
@@ -315,6 +336,24 @@ class DurableMemoryStore:
         logger.warning(
             "[Durable] GDPR erased %d durable memor(ies) for workspace %s",
             count, workspace_id,
+        )
+        return count
+
+    async def erase_subject(self, workspace_id: str, subject_id: str) -> int:
+        """GDPR subject-level erasure (PRD-196 S6) — one filter-delete over the
+        ``workspace_id`` AND ``subject_id`` payload indexes. Fail-closed: never
+        workspace-wide. Returns the number of memories erased (0 if the subject
+        has no tagged rows — e.g. only untagged pre-tag history exists)."""
+        await self.ensure_collection()
+        flt = self._subject_filter(workspace_id, subject_id)
+        count = await self._count_by_filter(flt)
+        await self._client.delete(
+            collection_name=self._collection,
+            points_selector=FilterSelector(filter=flt),
+        )
+        logger.warning(
+            "[Durable] GDPR subject-erased %d durable memor(ies) for subject=%s ws=%s",
+            count, subject_id, workspace_id,
         )
         return count
 

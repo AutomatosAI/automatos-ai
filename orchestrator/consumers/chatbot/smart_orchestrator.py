@@ -366,7 +366,8 @@ class SmartChatOrchestrator:
         self,
         user_message: str,
         assistant_response: str,
-        chat_id: Optional[str] = None
+        chat_id: Optional[str] = None,
+        subject_id: Optional[str] = None,
     ) -> bool:
         """
         Store a conversation exchange in memory.
@@ -403,6 +404,7 @@ class SmartChatOrchestrator:
                 assistant_response=assistant_response,
                 chat_id=chat_id,
                 widget_mode=self.widget_mode,
+                subject_id=subject_id,
             ),
             label="store_conversation",
         )

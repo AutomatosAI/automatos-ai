@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Index
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.sql import func
 from core.database.base import Base
@@ -45,6 +45,14 @@ class AuditLog(Base):
     user_agent = Column(String(500), nullable=True)
 
     created_at = Column(DateTime, server_default=func.now())
+
+    __table_args__ = (
+        # PRD-196 S3: the audit-log read view (workspace-scoped, newest-first)
+        # and the S5 retention sweep (created_at < cutoff) both scan by these two
+        # columns. Migration prd196_audit_logs_ws_created_idx creates the same
+        # index in prod; declared here so create_all-based test DBs match.
+        Index("ix_audit_logs_workspace_created", "workspace_id", "created_at"),
+    )
 
 class AuditService:
     """Service for creating audit log entries."""

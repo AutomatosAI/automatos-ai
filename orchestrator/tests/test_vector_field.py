@@ -307,8 +307,11 @@ class TestCreateContext:
         adapter._bootstrap_done = False
         mock_qdrant.collection_exists.return_value = False
         await adapter.create_context([1])
-        # Five indexes: field_id, workspace_id (PRD-166 S1), content_hash, agent_id, created_at
-        assert mock_qdrant.create_payload_index.await_count == 5
+        # Six indexes: field_id, workspace_id (PRD-166 S1), subject_id (PRD-196 S6
+        # GDPR subject tag), content_hash, agent_id, created_at.
+        assert mock_qdrant.create_payload_index.await_count == 6
+        indexed = {c.kwargs["field_name"] for c in mock_qdrant.create_payload_index.await_args_list}
+        assert "subject_id" in indexed  # PRD-196 S6: subject-erase filters on it
 
     @pytest.mark.asyncio
     async def test_bootstrap_skipped_when_collection_present(self, adapter, mock_qdrant):

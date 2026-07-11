@@ -1,5 +1,5 @@
 {
-  "route_count": 754,
+  "route_count": 762,
   "routes": [
     {
       "method": "GET",
@@ -2198,6 +2198,10 @@
       "path": "/api/tools/{app_name}/triggers"
     },
     {
+      "method": "GET",
+      "path": "/api/v1/approval-grants"
+    },
+    {
       "method": "POST",
       "path": "/api/v1/approval-grants/{grant_id}/deny"
     },
@@ -2216,6 +2220,34 @@
     {
       "method": "POST",
       "path": "/api/v1/gdpr/erase-subject"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/gdpr/export"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/governance/audit-log"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/governance/budget"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/governance/budget"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/governance/policy"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/governance/policy"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/governance/status"
     },
     {
       "method": "GET",

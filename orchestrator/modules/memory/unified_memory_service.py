@@ -325,6 +325,7 @@ class UnifiedMemoryService:
         agent_id: Optional[int] = None,
         category: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        subject_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Store content in L3 long-term memory (durable store, verbatim).
@@ -335,6 +336,9 @@ class UnifiedMemoryService:
             agent_id: Optional agent scope.
             category: Optional category tag.
             metadata: Optional additional metadata.
+            subject_id: Optional GDPR data-subject tag (PRD-196 S6) —
+                ``user:{users.id}`` (INTERNAL id, never a Clerk string); enables
+                subject-level erasure. Untagged writes store a null tag.
 
         Returns:
             Store response dict, or error dict on failure.
@@ -349,7 +353,7 @@ class UnifiedMemoryService:
         messages = [{"role": "user", "content": content}]
 
         try:
-            result = await self._durable.add(messages=messages, user_id=user_id, metadata=meta or None, workspace_id=workspace_id)
+            result = await self._durable.add(messages=messages, user_id=user_id, metadata=meta or None, workspace_id=workspace_id, subject_id=subject_id)
             logger.info(
                 "[UnifiedMemoryService] store_long_term user_id=%s len=%d",
                 user_id,
@@ -520,19 +524,27 @@ class UnifiedMemoryService:
         return total
 
     async def erase_subject_memories(self, workspace_id: str, subject_id: str, db: Any = None) -> int:
-        """GDPR subject-level erasure for durable memories (see GDPR-GAP below)."""
-        # GDPR-GAP: durable memories are namespaced by workspace / agent / recipe
-        # (MemoryNamespace) and carry no data-subject tag in their payload, so a
-        # single human's durable memories cannot be filtered from a shared
-        # workspace/agent namespace. Until a subject tag is written at store
-        # time, subject-level erasure here is not possible without erasing the
-        # whole namespace. Returns 0; the gap is surfaced by the GDPR service.
+        """GDPR subject-level erasure for durable memories (PRD-196 S6).
+
+        One filter-delete over the durable store's ``workspace_id`` AND
+        ``subject_id`` payload indexes (fail-closed tenancy — never workspace-
+        wide). ``db`` is accepted for signature stability with the GDPR service
+        but unused. Returns the number of memories erased (0 when the subject has
+        only untagged pre-tag history, which the GDPR service reports as a caveat,
+        never as erased)."""
+        try:
+            total = await self._durable.erase_subject(str(workspace_id), str(subject_id))
+        except Exception:
+            logger.error(
+                "[UnifiedMemoryService] durable subject erase failed subject=%s ws=%s",
+                subject_id, workspace_id, exc_info=True,
+            )
+            return 0
         logger.warning(
-            "[UnifiedMemoryService] GDPR subject erase requested subject=%s ws=%s "
-            "but the durable store has no data-subject tag (GDPR-GAP) — 0 memories erased",
-            subject_id, workspace_id,
+            "[UnifiedMemoryService] GDPR subject-erased %d durable memor(ies) subject=%s ws=%s",
+            total, subject_id, workspace_id,
         )
-        return 0
+        return total
 
     async def export_workspace_memories(self, workspace_id: str, db: Any = None) -> List[Dict[str, Any]]:
         """GDPR export — every durable memory for a workspace as plain dicts
@@ -763,6 +775,7 @@ class UnifiedMemoryService:
         agent_id: Optional[int],
         tier: str,
         metadata: Optional[Dict[str, Any]] = None,
+        subject_id: Optional[str] = None,
     ) -> List[tuple]:
         """
         Store content in global and/or agent-specific tiers.
@@ -773,6 +786,8 @@ class UnifiedMemoryService:
             agent_id: Agent scope (required for 'agent' or 'both' tiers).
             tier: One of 'global', 'agent', or 'both'.
             metadata: Base metadata (tier tag is added automatically).
+            subject_id: Optional GDPR data-subject tag (PRD-196 S6). The chat
+                distill path passes ``user:{users.id}`` here (the human principal).
 
         Returns:
             List of (tier_name, result_dict) tuples.
@@ -784,7 +799,7 @@ class UnifiedMemoryService:
         async def _store(user_id: str, tier_name: str) -> tuple:
             meta = {**base_meta, "tier": tier_name}
             try:
-                result = await self._durable.add(messages=messages, user_id=user_id, metadata=meta, workspace_id=workspace_id)
+                result = await self._durable.add(messages=messages, user_id=user_id, metadata=meta, workspace_id=workspace_id, subject_id=subject_id)
                 return (tier_name, result)
             except Exception:
                 logger.error(
@@ -849,6 +864,7 @@ class UnifiedMemoryService:
         agent_id: Optional[int] = None,
         importance: float = 0.5,
         metadata: Optional[Dict[str, Any]] = None,
+        subject_id: Optional[str] = None,
     ) -> Optional[str]:
         """
         Store content in L2 short-term memory (Postgres).
@@ -890,6 +906,7 @@ class UnifiedMemoryService:
                 asyncio.ensure_future(self._mirror_l2_to_durable(
                     row_id=row_id, workspace_id=workspace_id, content=content,
                     content_type=content_type, importance=importance,
+                    subject_id=subject_id,
                 ))
             return row_id
         except Exception:
@@ -909,8 +926,10 @@ class UnifiedMemoryService:
         content: str,
         content_type: str,
         importance: float,
+        subject_id: Optional[str] = None,
     ) -> None:
-        """Best-effort vector mirror of one L2 row (PRD-187 S3)."""
+        """Best-effort vector mirror of one L2 row (PRD-187 S3). Carries the
+        PRD-196 S6 data-subject tag onto the durable mirror when known."""
         try:
             await self._durable.add(
                 messages=[{"role": "user", "content": content}],
@@ -921,6 +940,7 @@ class UnifiedMemoryService:
                     "importance": importance,
                 },
                 workspace_id=workspace_id,
+                subject_id=subject_id,
             )
         except Exception:
             logger.error(
