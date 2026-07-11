@@ -1133,6 +1133,10 @@ class Config:
           shared bucket with no ``{workspace_id}`` placeholder is allowed —
           tenant isolation is enforced per-query by ``S3VectorsBackend.search()``
           (fail-closed on ``workspace_id``), not by the bucket layout.)
+        - PRD-194 S4 (P2-13): ``WIDGET_ORIGIN_ALLOWLIST`` is empty in the
+          ``saas`` edition — widget CORS would rest at allow-all on the
+          internet-facing plane. Boot-abort in saas (same posture as F004 /
+          the Clerk edition guard); ``local`` keeps the permissive dev default.
         """
         errors: list[str] = []
 
@@ -1156,6 +1160,21 @@ class Config:
                 errors.append(
                     "S3_VECTORS_ENABLED=true but S3_VECTORS_BUCKET is unset."
                 )
+
+        # PRD-194 S4 (P2-13) — the internet-facing widget plane must not rest
+        # at allow-all CORS in production. In the saas edition an empty
+        # WIDGET_ORIGIN_ALLOWLIST is a boot error (locked decision: boot-abort,
+        # matching the F004 and Clerk edition guards). The local edition keeps
+        # the permissive dev default — choosing AUTH_EDITION=local IS the
+        # explicit opt-in.
+        if self.IS_SAAS_EDITION and not (self.WIDGET_ORIGIN_ALLOWLIST or "").strip():
+            errors.append(
+                "WIDGET_ORIGIN_ALLOWLIST is unset in the saas edition — widget "
+                "CORS (/api/widgets, /api/sites) would allow ALL origins on the "
+                "internet-facing plane (fail-open). Set WIDGET_ORIGIN_ALLOWLIST "
+                "to the comma-separated allowed storefront/dashboard origins, or "
+                "run AUTH_EDITION=local for a dev instance."
+            )
 
         if errors:
             raise RuntimeError(
