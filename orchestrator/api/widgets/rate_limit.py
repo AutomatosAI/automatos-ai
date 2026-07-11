@@ -41,7 +41,6 @@ with a ``Retry-After`` header.
 """
 
 import asyncio
-import hashlib
 import json
 import logging
 import time
@@ -51,6 +50,7 @@ from uuid import uuid4
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from config import config
+from core.services.api_key_service import _hash_key
 
 logger = logging.getLogger(__name__)
 
@@ -211,8 +211,11 @@ class WidgetRateLimitMiddleware:
         client_ip = client[0] if client else "unknown"
 
         if api_key:
-            digest = hashlib.sha256(api_key.encode("utf-8")).hexdigest()[:32]
-            identifier = f"key:{digest}"
+            # The canonical key-identity derivation (core/services/
+            # api_key_service._hash_key — the same digest sdk_api_keys
+            # stores as key_hash): the bucket IS the key row's identity,
+            # and no key material lands in Redis.
+            identifier = f"key:{_hash_key(api_key)[:32]}"
             limit = (
                 config.WIDGET_RATE_LIMIT_SERVER_PER_WINDOW
                 if api_key.startswith("ak_srv_")
