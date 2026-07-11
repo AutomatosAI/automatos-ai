@@ -22,6 +22,7 @@ import shutil
 from pathlib import Path
 import zipfile
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 from core.security.git_sanitizer import validate_branch
 from core.security.rate_limiter import check_rate_limit
@@ -371,7 +372,7 @@ async def get_skill_source(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/sources/{source_id}/update", response_model=Dict[str, Any])
+@router.post("/sources/{source_id}/update", response_model=Dict[str, Any], dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def update_git_repository(
     source_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -414,7 +415,7 @@ async def update_git_repository(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/sources/{source_id}/rollback", response_model=Dict[str, Any])
+@router.post("/sources/{source_id}/rollback", response_model=Dict[str, Any], dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def rollback_git_repository(
     source_id: int,
     commit_sha: str = Query(..., description="Commit SHA to rollback to"),
@@ -456,7 +457,7 @@ async def rollback_git_repository(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.delete("/sources/{source_id}")
+@router.delete("/sources/{source_id}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def deactivate_skill_source(
     source_id: int,
     deactivate_skills: bool = Query(False, description="Also deactivate associated skills"),
@@ -727,7 +728,7 @@ async def get_skill_content(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/admin/cleanup-old-mappings")  # Admin endpoint to avoid route conflicts
+@router.post("/admin/cleanup-old-mappings", dependencies=[Depends(require_workspace_permission("workspace:manage"))])  # Admin endpoint to avoid route conflicts
 async def cleanup_old_skill_mappings(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -779,7 +780,7 @@ async def cleanup_old_skill_mappings(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.delete("/{skill_id}")
+@router.delete("/{skill_id}", dependencies=[Depends(require_workspace_permission("agents:delete"))])
 async def deactivate_skill(
     skill_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -903,7 +904,7 @@ async def get_agent_skills(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/agents/{agent_id}/skills")
+@router.post("/agents/{agent_id}/skills", dependencies=[Depends(require_workspace_permission("agents:update"))])
 async def assign_skills_to_agent(
     agent_id: int,
     skill_ids: List[int],
@@ -991,7 +992,7 @@ async def assign_skills_to_agent(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.delete("/agents/{agent_id}/skills")
+@router.delete("/agents/{agent_id}/skills", dependencies=[Depends(require_workspace_permission("agents:update"))])
 async def remove_skills_from_agent(
     agent_id: int,
     skill_ids: List[int] = Query(..., description="Skill IDs to remove"),
@@ -1035,7 +1036,7 @@ async def remove_skills_from_agent(
 # Skill Recommendation Endpoint
 # ============================================================================
 
-@router.post("/recommend", response_model=List[SkillRecommendation])
+@router.post("/recommend", response_model=List[SkillRecommendation], dependencies=[Depends(require_workspace_permission("agents:read"))])
 async def recommend_skills(
     request: SkillRecommendationRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),

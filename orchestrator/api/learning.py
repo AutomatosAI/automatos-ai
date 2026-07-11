@@ -14,6 +14,7 @@ from datetime import datetime
 
 from core.database.database import get_db
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
@@ -33,7 +34,7 @@ class FeedbackProcessRequest(BaseModel):
 # Create router
 router = APIRouter(prefix="/api/learning", tags=["🧠 Learning"])
 
-@router.post("/feedback")
+@router.post("/feedback", dependencies=[Depends(require_workspace_permission("agents:execute"))])
 async def submit_feedback(
     request: FeedbackRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -62,7 +63,7 @@ async def submit_feedback(
         logger.error(f"Error submitting feedback: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/feedback/process")
+@router.post("/feedback/process", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def process_feedback(
     request: FeedbackProcessRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),

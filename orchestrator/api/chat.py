@@ -18,6 +18,7 @@ from core.database.database import get_db
 from consumers.chatbot import ChatService, StreamingChatService
 from consumers.chatbot.auto import AutoBrain, Action
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 from core.routing.cache import get_routing_cache
 from core.routing.engine import UniversalRouter
@@ -172,7 +173,7 @@ def get_default_agent_id(db: Session, workspace_id) -> int:
 
 
 # Endpoints
-@router.post("")
+@router.post("", dependencies=[Depends(require_workspace_permission("agents:execute"))])
 async def stream_chat(
     request: ChatRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -635,7 +636,7 @@ async def search_chat_history(
     return {"query": q, "total": len(results), "results": results}
 
 
-@router.delete("/{chat_id}")
+@router.delete("/{chat_id}", dependencies=[Depends(require_workspace_permission("agents:execute"))])
 async def delete_chat(
     chat_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -656,7 +657,7 @@ async def delete_chat(
     return {"success": success}
 
 
-@router.patch("/{chat_id}")
+@router.patch("/{chat_id}", dependencies=[Depends(require_workspace_permission("agents:execute"))])
 async def update_chat(
     chat_id: str,
     request: UpdateTitleRequest,
@@ -678,7 +679,7 @@ async def update_chat(
     return {"success": success}
 
 
-@router.patch("/vote")
+@router.patch("/vote", dependencies=[Depends(require_workspace_permission("agents:execute"))])
 async def vote_message(
     request: VoteRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -766,7 +767,7 @@ class SwitchAgentRequest(BaseModel):
     reason: Optional[str] = None
 
 
-@router.post("/{chat_id}/switch-agent")
+@router.post("/{chat_id}/switch-agent", dependencies=[Depends(require_workspace_permission("agents:execute"))])
 async def switch_agent(
     chat_id: str,
     request: SwitchAgentRequest,

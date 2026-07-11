@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.composio.client import get_composio_client
 from core.composio.entity_manager import EntityManager
 from core.database.database import get_db
@@ -435,7 +436,7 @@ async def app_triggers(
     return triggers if isinstance(triggers, list) else []
 
 
-@router.post("/{app_name}/actions")
+@router.post("/{app_name}/actions", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def save_app_actions(
     app_name: str,
     payload: Dict[str, Any],
@@ -473,7 +474,7 @@ async def save_app_actions(
     return {"status": "success", "enabled_count": len(enabled_actions), "app_name": app_name.upper()}
 
 
-@router.post("/connect")
+@router.post("/connect", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def connect_app(
     payload: ConnectIn,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -568,7 +569,7 @@ async def workspace_tools(
     return {"apps": out, "total": len(out)}
 
 
-@router.post("/add-to-workspace")
+@router.post("/add-to-workspace", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def add_to_workspace(
     payload: ConnectIn,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -683,7 +684,7 @@ async def debug_connections(
     }
 
 
-@router.delete("/remove-from-workspace/{app_name}")
+@router.delete("/remove-from-workspace/{app_name}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def remove_from_workspace(
     app_name: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -723,7 +724,7 @@ async def remove_from_workspace(
 # transitions instead (e.g. active → expired → active on re-auth).
 
 
-@router.post("/sync")
+@router.post("/sync", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def sync(
     sync_type: str = Query("full", description="full or incremental"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -739,7 +740,7 @@ async def sync(
     return result
 
 
-@router.post("/sync/backfill-params")
+@router.post("/sync/backfill-params", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def backfill_params(
     request: Request,
     apps: str = Query(None, description="Comma-separated app names (e.g. JIRA,GITHUB,SLACK). Omit for auto."),
@@ -764,7 +765,7 @@ async def backfill_params(
     return result
 
 
-@router.post("/refresh-connections")
+@router.post("/refresh-connections", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def refresh_connections(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),

@@ -25,6 +25,7 @@ from core.models import (
 )
 # Import hybrid auth (supports both Clerk JWT and API key)
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
@@ -357,7 +358,7 @@ async def get_agent_stats(ctx: RequestContext = Depends(get_request_context_hybr
         logger.error(f"Error getting agent stats: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/bulk", response_model=List[AgentResponse])
+@router.post("/bulk", response_model=List[AgentResponse], dependencies=[Depends(require_workspace_permission("agents:create"))])
 async def create_agents_bulk(agents: List[AgentCreate], ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Create multiple agents at once"""
     try:
@@ -415,7 +416,7 @@ async def create_agents_bulk(agents: List[AgentCreate], ctx: RequestContext = De
         logger.error(f"Error creating bulk agents: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/", response_model=AgentResponse)
+@router.post("/", response_model=AgentResponse, dependencies=[Depends(require_workspace_permission("agents:create"))])
 async def create_agent(agent_data: AgentCreate, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Create a new agent with enhanced fields"""
     print("🚀 API CALL: create_agent function called!")
@@ -706,7 +707,7 @@ async def get_agent_status(agent_id: int, ctx: RequestContext = Depends(get_requ
         logger.error(f"Error getting agent status: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/{agent_id}/execute")
+@router.post("/{agent_id}/execute", dependencies=[Depends(require_workspace_permission("agents:execute"))])
 async def execute_agent(agent_id: int, execution_data: dict = {}, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Execute an agent with given parameters"""
     try:
@@ -782,7 +783,7 @@ async def get_agent_skills(agent_id: int, ctx: RequestContext = Depends(get_requ
         logger.error(f"Error getting agent skills: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/{agent_id}/skills")
+@router.post("/{agent_id}/skills", dependencies=[Depends(require_workspace_permission("agents:update"))])
 async def add_agent_skills(agent_id: int, skill_ids: List[int], ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Add skills to an agent"""
     try:
@@ -805,7 +806,7 @@ async def add_agent_skills(agent_id: int, skill_ids: List[int], ctx: RequestCont
         logger.error(f"Error adding agent skills: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.delete("/{agent_id}/skills/{skill_id}")
+@router.delete("/{agent_id}/skills/{skill_id}", dependencies=[Depends(require_workspace_permission("agents:update"))])
 async def remove_agent_skill(agent_id: int, skill_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Remove a single skill from an agent"""
     try:
@@ -828,7 +829,7 @@ async def remove_agent_skill(agent_id: int, skill_id: int, ctx: RequestContext =
         logger.error(f"Error removing skill from agent: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.put("/{agent_id}", response_model=AgentResponse)
+@router.put("/{agent_id}", response_model=AgentResponse, dependencies=[Depends(require_workspace_permission("agents:update"))])
 async def update_agent(agent_id: int, agent_update: AgentUpdate, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Update an existing agent"""
     try:
@@ -940,7 +941,7 @@ async def update_agent(agent_id: int, agent_update: AgentUpdate, ctx: RequestCon
         logger.error(f"Error updating agent: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.delete("/{agent_id}")
+@router.delete("/{agent_id}", dependencies=[Depends(require_workspace_permission("agents:delete"))])
 async def delete_agent(agent_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Delete an agent and all related records"""
     try:
@@ -1011,7 +1012,7 @@ async def delete_agent(agent_id: int, ctx: RequestContext = Depends(get_request_
 # PRD-64: Bulk re-index semantic embeddings
 # ------------------------------------------------------------------
 
-@router.post("/reindex-embeddings")
+@router.post("/reindex-embeddings", dependencies=[Depends(require_workspace_permission("agents:update"))])
 async def reindex_embeddings(
     force: bool = Query(False, description="Force re-embed even if text unchanged"),
     ctx: RequestContext = Depends(get_request_context_hybrid),

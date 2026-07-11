@@ -20,6 +20,7 @@ from modules.agents import (
     AgentFactory, AgentLifecycle,
 )
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
@@ -37,7 +38,7 @@ def get_agent_factory():
 
 
 
-@router.post("/create-specialized", response_model=Dict[str, Any])
+@router.post("/create-specialized", response_model=Dict[str, Any], dependencies=[Depends(require_workspace_permission("agents:create"))])
 async def create_specialized_agent_endpoint(
     request: Dict[str, Any],
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -268,7 +269,7 @@ async def get_agent_logs(
         )
 
 
-@router.post("/{agent_id}/test-capabilities")
+@router.post("/{agent_id}/test-capabilities", dependencies=[Depends(require_workspace_permission("agents:execute"))])
 async def test_agent_capabilities_endpoint(agent_id: int, ctx: RequestContext = Depends(get_request_context_hybrid)):
     """
     Run comprehensive capability tests on an agent.
@@ -302,7 +303,7 @@ async def test_agent_capabilities_endpoint(agent_id: int, ctx: RequestContext = 
         )
 
 
-@router.post("/batch-create")
+@router.post("/batch-create", dependencies=[Depends(require_workspace_permission("agents:create"))])
 async def create_agent_batch(
     request: Dict[str, Any],
     ctx: RequestContext = Depends(get_request_context_hybrid)
@@ -402,7 +403,7 @@ async def list_active_agents(ctx: RequestContext = Depends(get_request_context_h
         )
 
 
-@router.post("/{agent_id}/add-skills")
+@router.post("/{agent_id}/add-skills", dependencies=[Depends(require_workspace_permission("agents:update"))])
 async def add_agent_skills(
     agent_id: int,
     request: Dict[str, Any],
@@ -534,7 +535,7 @@ async def get_agent_model_config(
         )
 
 
-@router.put("/{agent_id}/model-config")
+@router.put("/{agent_id}/model-config", dependencies=[Depends(require_workspace_permission("agents:update"))])
 async def update_agent_model_config(
     agent_id: int,
     model_config: Dict[str, Any],
@@ -674,7 +675,7 @@ async def get_agent_model_usage(
         )
 
 
-@router.post("/{agent_id}/switch-model")
+@router.post("/{agent_id}/switch-model", dependencies=[Depends(require_workspace_permission("agents:update"))])
 async def switch_agent_model(
     agent_id: int,
     request: Dict[str, Any],
