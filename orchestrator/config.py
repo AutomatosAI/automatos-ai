@@ -485,8 +485,26 @@ class Config:
 
     # Webhooks / Widgets
     WEBHOOK_SECRET: str = os.getenv("WEBHOOK_SECRET")
+    # PRD-194 S2 (P2-13): replay/dedup guard for the three EXTERNAL webhook
+    # lanes (Composio /webhook, workspace /ws/{key}, playbook /recipe/{id}).
+    # Dedup marks live in Redis (SETNX + TTL via core/redis/client.py — no
+    # new table). TTL covers provider retry windows with slack to spare.
+    WEBHOOK_DEDUP_TTL_SECONDS: int = int(os.getenv("WEBHOOK_DEDUP_TTL_SECONDS", "3600"))
+    # Replay skew: reject events whose provider timestamp is further than
+    # this from now (mirrors Slack's documented v0 5-minute window).
+    WEBHOOK_TIMESTAMP_SKEW_SECONDS: int = int(os.getenv("WEBHOOK_TIMESTAMP_SKEW_SECONDS", "300"))
     WIDGET_TOKEN_SECRET: str = os.getenv("WIDGET_TOKEN_SECRET", "")
     WIDGET_ORIGIN_ALLOWLIST: str = os.getenv("WIDGET_ORIGIN_ALLOWLIST", "")
+    # PRD-194 S5 (P2-13): Redis-backed shared widget rate limiter (replaces
+    # the per-process in-memory window). One window length; per-key limits by
+    # key type; and a per-IP ceiling on the two money-spending endpoints
+    # (/api/widgets/chat, /api/widgets/callback) that applies even when a
+    # key is presented.
+    WIDGET_RATE_LIMIT_WINDOW_SECONDS: int = int(os.getenv("WIDGET_RATE_LIMIT_WINDOW_SECONDS", "60"))
+    WIDGET_RATE_LIMIT_PUBLIC_PER_WINDOW: int = int(os.getenv("WIDGET_RATE_LIMIT_PUBLIC_PER_WINDOW", "30"))
+    WIDGET_RATE_LIMIT_SERVER_PER_WINDOW: int = int(os.getenv("WIDGET_RATE_LIMIT_SERVER_PER_WINDOW", "1000"))
+    WIDGET_CHAT_IP_LIMIT_PER_WINDOW: int = int(os.getenv("WIDGET_CHAT_IP_LIMIT_PER_WINDOW", "30"))
+    WIDGET_CALLBACK_IP_LIMIT_PER_WINDOW: int = int(os.getenv("WIDGET_CALLBACK_IP_LIMIT_PER_WINDOW", "10"))
     SHOPIFY_INTERNAL_API_KEY: str = os.getenv("SHOPIFY_INTERNAL_API_KEY", "")
     # PRD-189 S3: per-workspace debounce window (seconds) for catalog-webhook
     # re-syncs. A merchant bulk edit emits a burst of products/update webhooks;
@@ -1147,6 +1165,10 @@ class Config:
           shared bucket with no ``{workspace_id}`` placeholder is allowed —
           tenant isolation is enforced per-query by ``S3VectorsBackend.search()``
           (fail-closed on ``workspace_id``), not by the bucket layout.)
+        - PRD-194 S4 (P2-13): ``WIDGET_ORIGIN_ALLOWLIST`` is empty in the
+          ``saas`` edition — widget CORS would rest at allow-all on the
+          internet-facing plane. Boot-abort in saas (same posture as F004 /
+          the Clerk edition guard); ``local`` keeps the permissive dev default.
         """
         errors: list[str] = []
 
@@ -1170,6 +1192,21 @@ class Config:
                 errors.append(
                     "S3_VECTORS_ENABLED=true but S3_VECTORS_BUCKET is unset."
                 )
+
+        # PRD-194 S4 (P2-13) — the internet-facing widget plane must not rest
+        # at allow-all CORS in production. In the saas edition an empty
+        # WIDGET_ORIGIN_ALLOWLIST is a boot error (locked decision: boot-abort,
+        # matching the F004 and Clerk edition guards). The local edition keeps
+        # the permissive dev default — choosing AUTH_EDITION=local IS the
+        # explicit opt-in.
+        if self.IS_SAAS_EDITION and not (self.WIDGET_ORIGIN_ALLOWLIST or "").strip():
+            errors.append(
+                "WIDGET_ORIGIN_ALLOWLIST is unset in the saas edition — widget "
+                "CORS (/api/widgets, /api/sites) would allow ALL origins on the "
+                "internet-facing plane (fail-open). Set WIDGET_ORIGIN_ALLOWLIST "
+                "to the comma-separated allowed storefront/dashboard origins, or "
+                "run AUTH_EDITION=local for a dev instance."
+            )
 
         if errors:
             raise RuntimeError(

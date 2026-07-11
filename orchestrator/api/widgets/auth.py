@@ -179,7 +179,25 @@ async def widget_auth(
         )
 
     # ----- 3. Domain / origin check ---------------------------------------
+    # P2-13 (PRD-194 S3): public keys fail CLOSED on a missing origin. An
+    # ak_pub_ key ships in page HTML by design — its entire security model is
+    # the origin lock — so presenting one with no Origin/Referer header
+    # (curl, a server-side script) is a DENY, not a silent skip of the domain
+    # check. Server keys (ak_srv_) are not origin-locked and are unaffected;
+    # an unknown/legacy key_type is treated as public (fail closed). The
+    # merchant opt-in in check_domain (empty allowed_domains = any origin)
+    # is unchanged — this guard is origin-ABSENT ⇒ deny, nothing more.
     origin = _extract_origin(request)
+    is_public_key = (getattr(api_key_record, "key_type", None) or "public") == "public"
+    if is_public_key and not origin:
+        logger.warning(
+            "widget_auth: public key %s presented with no Origin/Referer — denied (fail closed)",
+            api_key_record.key_prefix,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Origin required for public API keys",
+        )
     if origin and not ApiKeyService.check_domain(api_key_record, origin):
         logger.warning(
             "widget_auth: origin %s not in allowed_domains for key %s",
@@ -236,25 +254,23 @@ def require_permission(permission: str) -> Callable:
     async def _check(
         auth: WidgetAuthContext = Depends(widget_auth),
     ) -> WidgetAuthContext:
-        # PRD-174 F042 — one empty-permission semantic. Historically the widget
-        # plane treated an empty permission list as "unrestricted" (a god-key),
-        # while the board plane treats empty as "grants nothing". When the policy
-        # plane is ON we unify on the board plane's least-privilege rule (empty =
-        # deny) via the shared helper; OFF keeps the historical behaviour so the
-        # large population of already-issued keys is not broken mid-rollout.
+        # P2-13 (PRD-194 S3) / PRD-174 F042 — ONE empty-permission semantic on
+        # the widget plane: EMPTY = DENY, regardless of the policy-plane flag.
+        # The internet-facing plane is never the permissive one — a minted
+        # no-permission key must not be a god-key here while the plane rolls
+        # out (P2-11 owns the platform-wide durable fix). Grants are explicit:
+        # membership or a deliberate "*" element (the board plane's
+        # least-privilege rule, modules/policy/roles.has_permission). The
+        # historical flag-gated "empty = unrestricted" branch is deleted.
         try:
-            from modules.policy import policy_plane_enabled
             from modules.policy.roles import has_permission as _has_perm
 
-            _plane_on = policy_plane_enabled()
-        except Exception:
-            _plane_on = False
-
-        if _plane_on:
-            allowed = _has_perm(auth.permissions, permission)  # empty = deny
-        else:
-            # Legacy: empty list = unrestricted; a non-empty list must contain it.
-            allowed = (not auth.permissions) or (permission in auth.permissions)
+            allowed = _has_perm(auth.permissions, permission)
+        except ImportError:
+            # Policy package unavailable (stripped local build) — same
+            # least-privilege rule, locally: empty = deny, explicit grants only.
+            perms = set(auth.permissions or [])
+            allowed = bool(perms) and (permission in perms or "*" in perms)
 
         if not allowed:
             raise HTTPException(

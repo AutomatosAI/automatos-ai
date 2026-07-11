@@ -28,6 +28,7 @@ from core.models.core import RecipeExecution
 from core.models.composio import TriggerSubscription, ComposioEntity
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
+from services import webhook_dedup
 from config import config
 
 
@@ -1819,6 +1820,26 @@ async def recipe_webhook(
         if not hmac.compare_digest(computed, expected_sig):
             logger.warning("[webhook] HMAC signature mismatch for recipe webhook %s", webhook_id)
             raise HTTPException(status_code=401, detail="Invalid webhook signature")
+
+    # Replay guard + event dedup (PRD-194 S2, P2-13): a redelivered event
+    # (same webhook-id header / body event_id) must not create a second
+    # RecipeExecution. A stale provider timestamp is a replay ⇒ 401. No
+    # event id ⇒ nothing to dedup on ⇒ process normally (URL-as-secret
+    # callers that send no id keep working).
+    if webhook_dedup.timestamp_is_stale(request.headers.get("webhook-timestamp")):
+        logger.warning(
+            "[webhook] Rejected recipe webhook %s: stale webhook-timestamp (replay guard)",
+            webhook_id,
+        )
+        raise HTTPException(status_code=401, detail="Stale webhook timestamp")
+    dedup_event_id = request.headers.get("webhook-id") or (
+        body.get("event_id") if isinstance(body, dict) else None
+    )
+    if await webhook_dedup.seen_before(f"recipe:{webhook_id}", dedup_event_id):
+        logger.info(
+            "[webhook] Duplicate recipe webhook event %s — no-op ack", dedup_event_id
+        )
+        return {"status": "duplicate", "event_id": str(dedup_event_id)}
 
     if not recipe.steps:
         raise HTTPException(status_code=400, detail="Recipe has no steps")

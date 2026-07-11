@@ -235,6 +235,9 @@ class TestF004ShopifyFailClosed:
         cfg = Config()
         monkeypatch.setattr(cfg, "SHOPIFY_INTERNAL_API_KEY", "real-secret", raising=False)
         monkeypatch.setattr(cfg, "S3_VECTORS_ENABLED", False, raising=False)
+        # PRD-194 S4: saas boots also require a widget CORS allowlist —
+        # satisfied here so this test stays scoped to the Shopify guard.
+        monkeypatch.setattr(cfg, "WIDGET_ORIGIN_ALLOWLIST", "https://app.automatos.app", raising=False)
         cfg.validate_security()  # no raise
 
     def test_verify_internal_key_rejects_arbitrary_header(self, monkeypatch):
@@ -331,6 +334,9 @@ class TestF005VectorIsolation:
         monkeypatch.setattr(cfg, "SHOPIFY_INTERNAL_API_KEY", "x", raising=False)
         monkeypatch.setattr(cfg, "S3_VECTORS_ENABLED", True, raising=False)
         monkeypatch.setattr(cfg, "S3_VECTORS_BUCKET", "shared-no-placeholder", raising=False)
+        # PRD-194 S4: saas boots also require a widget CORS allowlist —
+        # satisfied here so this test stays scoped to the bucket layout.
+        monkeypatch.setattr(cfg, "WIDGET_ORIGIN_ALLOWLIST", "https://app.automatos.app", raising=False)
         monkeypatch.setattr(cfg, "validate_auth_edition", lambda: None, raising=False)
         cfg.validate_security()  # must not raise on the bucket layout
 

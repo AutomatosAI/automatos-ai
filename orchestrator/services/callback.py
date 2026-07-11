@@ -41,8 +41,11 @@ PHONE_E164_REGEX = re.compile(r"^\+[1-9]\d{7,14}$")
 # are deduplicated to a single dispatch.
 IDEMPOTENCY_WINDOW = timedelta(minutes=5)
 
-# Rate limits — small + safe defaults. Per-Site is the only one
-# currently configurable; per-IP requires Redis (deferred).
+# Rate limits — small + safe defaults. Per-session + per-Site live here
+# (DB-derived). The per-IP ceiling is enforced PRE-handler by the
+# Redis-backed widget rate limiter (api/widgets/rate_limit.py,
+# WIDGET_CALLBACK_IP_LIMIT_PER_WINDOW — PRD-194 S5): it gates the request
+# before this service ever runs.
 DEFAULT_PER_SESSION_COOLDOWN = timedelta(seconds=60)
 DEFAULT_PER_SITE_HOURLY_CAP = 100
 
@@ -125,7 +128,7 @@ def find_recent_duplicate(
 
 
 # ---------------------------------------------------------------------------
-# Rate limiting (per-session + per-Site, IP deferred until Redis)
+# Rate limiting (per-session + per-Site; per-IP is the middleware's job)
 # ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
@@ -145,8 +148,9 @@ def check_rate_limits(
 ) -> RateLimitDecision:
     """Per-session cooldown (60s) + per-Site hourly cap.
 
-    Per-IP rate limit is deferred until Redis-backed atomic counters
-    land (need atomicity to prevent races; SQL-only is too racy).
+    The per-IP ceiling is NOT here: it is enforced pre-handler by the
+    Redis-backed widget rate limiter (api/widgets/rate_limit.py — PRD-194
+    S5), which has the cross-worker atomicity SQL-only checks lacked.
     """
     from core.models.widget_event_log import WidgetEventLog
 

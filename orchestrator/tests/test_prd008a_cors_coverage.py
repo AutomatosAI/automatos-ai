@@ -58,18 +58,22 @@ def test_path_is_covered_excludes_unrelated_paths():
     assert _path_is_covered("/api/some-other-resource/sites") is False
 
 
-def test_origin_allowed_when_no_allowlist_configured():
-    """Empty allowlist → permissive — matches the documented default."""
+def test_origin_allowed_when_no_allowlist_configured(monkeypatch):
+    """Empty allowlist → permissive ONLY in the local edition (PRD-194 S4 /
+    P2-13). In saas the boot guard forbids the state; if reached anyway the
+    public plane fails CLOSED."""
     from api.widgets.cors import _origin_allowed
     import api.widgets.cors as cors_mod
 
-    original = cors_mod.WIDGET_ORIGIN_ALLOWLIST
-    cors_mod.WIDGET_ORIGIN_ALLOWLIST = set()
-    try:
-        assert _origin_allowed("https://random-store.myshopify.com") is True
-        assert _origin_allowed("https://app.automatos.app") is True
-    finally:
-        cors_mod.WIDGET_ORIGIN_ALLOWLIST = original
+    monkeypatch.setattr(cors_mod, "WIDGET_ORIGIN_ALLOWLIST", set())
+
+    monkeypatch.setattr(cors_mod.config, "AUTH_EDITION", "local")
+    assert _origin_allowed("https://random-store.myshopify.com") is True
+    assert _origin_allowed("https://app.automatos.app") is True
+
+    monkeypatch.setattr(cors_mod.config, "AUTH_EDITION", "saas")
+    assert _origin_allowed("https://random-store.myshopify.com") is False
+    assert _origin_allowed("https://app.automatos.app") is False
 
 
 def test_origin_allowed_with_explicit_allowlist():
