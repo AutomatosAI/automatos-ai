@@ -64,8 +64,22 @@ def get_client_ip(request: Request) -> str:
 
 
 def _check_credential_workspace(cred, ctx: RequestContext) -> None:
-    """Verify credential belongs to the caller's workspace (BOLA protection)."""
-    if hasattr(cred, 'workspace_id') and cred.workspace_id and str(cred.workspace_id) != str(ctx.workspace_id):
+    """Verify credential belongs to the caller's workspace (BOLA protection).
+
+    PRD-195 S7 (P2-14 / auth-identity J4): a row with ``workspace_id IS NULL``
+    is **denied for non-admin callers** — it used to pass for EVERY tenant
+    (null-permissive hole). System admins and the env-API-key service lane may
+    still read globally-seeded rows (G3). 404, not 403 — existence-hiding,
+    matching the spine's posture.
+    """
+    cred_ws = getattr(cred, "workspace_id", None)
+    if cred_ws is None:
+        from core.auth.roles import caller_is_admin
+
+        if ctx.auth_type == "api_key" or (ctx.user is not None and caller_is_admin(ctx.user)):
+            return
+        raise HTTPException(status_code=404, detail="Credential not found")
+    if str(cred_ws) != str(ctx.workspace_id):
         raise HTTPException(status_code=404, detail="Credential not found")
 
 
@@ -598,9 +612,14 @@ async def resolve_credential(
                 raise HTTPException(status_code=404, detail="Credential not found")
 
         elif resolve_request.credential_name:
+            # PRD-195 S7: by-name resolution is workspace-scoped — the caller
+            # sees its own workspace's rows first; the admin/service gate above
+            # is what allows the globally-seeded (NULL-workspace) fallback.
             credential = store.get_credential_by_name(
                 resolve_request.credential_name,
-                resolve_request.environment
+                resolve_request.environment,
+                workspace_id=ctx.workspace_id,
+                include_global=True,
             )
             if not credential:
                 raise HTTPException(
