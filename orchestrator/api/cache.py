@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from core.database.database import get_db
 from core.auth.dependencies import RequestContext
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.hybrid import get_request_context_hybrid
 from core.cache import get_cache_service
 
@@ -56,7 +57,7 @@ async def get_cache_stats(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/clear/{namespace}")
+@router.post("/clear/{namespace}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def clear_cache_namespace(
     namespace: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -97,7 +98,7 @@ async def clear_cache_namespace(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/invalidate/cloud/{connection_id}")
+@router.post("/invalidate/cloud/{connection_id}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def invalidate_cloud_cache(
     connection_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),

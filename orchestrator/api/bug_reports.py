@@ -19,6 +19,7 @@ from config import config
 from core.database.database import get_db
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
+from core.auth.workspace_permission import require_workspace_permission
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +101,7 @@ def _build_jira_description(req: BugReportRequest) -> str:
 # Endpoint
 # ---------------------------------------------------------------------------
 
-@router.post("/", response_model=BugReportResponse)
+@router.post("/", response_model=BugReportResponse, dependencies=[Depends(require_workspace_permission("members:read"))])
 async def create_bug_report(
     req: BugReportRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),

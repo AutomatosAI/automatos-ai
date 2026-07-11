@@ -24,12 +24,13 @@ from core.models import (
 import logging
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
+from core.auth.workspace_permission import require_workspace_permission
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/system", tags=["system"])
 
 # System Configuration endpoints
-@router.post("/config", response_model=SystemConfigResponse)
+@router.post("/config", response_model=SystemConfigResponse, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def create_system_config(config_data: SystemConfigCreate, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Create or update system configuration"""
     try:
@@ -154,7 +155,7 @@ async def get_system_config(config_key: str, ctx: RequestContext = Depends(get_r
         logger.error(f"Error getting system config {config_key}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.put("/config/{config_key}", response_model=SystemConfigResponse)
+@router.put("/config/{config_key}", response_model=SystemConfigResponse, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def update_system_config(
     config_key: str, 
     config_data: SystemConfigCreate, 
@@ -203,7 +204,7 @@ async def update_system_config(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 # RAG Configuration endpoints
-@router.post("/rag", response_model=RAGConfigResponse)
+@router.post("/rag", response_model=RAGConfigResponse, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def create_rag_config(rag_data: RAGConfigCreate, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Create RAG configuration"""
     try:
@@ -313,7 +314,7 @@ async def get_rag_config(config_id: int, ctx: RequestContext = Depends(get_reque
         logger.error(f"Error getting RAG config {config_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/rag/{config_id}/test")
+@router.post("/rag/{config_id}/test", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def test_rag_config(
     config_id: int, 
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -884,7 +885,7 @@ async def get_agent_status(
         logger.error(f"Error getting agent status: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/agent/{agent_id}/execute")
+@router.post("/agent/{agent_id}/execute", dependencies=[Depends(require_workspace_permission("agents:execute"))])
 async def execute_agent(
     agent_id: int, 
     execution_data: dict = {}, 
@@ -956,7 +957,7 @@ async def get_performance_baseline(ctx: RequestContext = Depends(get_request_con
         logger.error(f"Error getting performance baseline: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/learning-state/update")
+@router.post("/learning-state/update", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def update_learning_state(
     request: Dict[str, Any] = Body(...),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -987,7 +988,7 @@ async def update_learning_state(
         logger.error(f"Error updating learning state: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/performance-test")
+@router.post("/performance-test", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def run_performance_test(
     request: Dict[str, Any] = Body(...),
     ctx: RequestContext = Depends(get_request_context_hybrid),

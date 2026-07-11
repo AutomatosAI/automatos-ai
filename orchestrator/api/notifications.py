@@ -30,6 +30,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.hybrid import (
     DEFAULT_NOTIFICATION_PREFERENCES,
     get_request_context_hybrid,
@@ -243,7 +244,7 @@ async def unread_count(
     return UnreadCountResponse(success=True, count=int(count or 0))
 
 
-@router.post("/{notification_id}/read", response_model=SimpleSuccessResponse)
+@router.post("/{notification_id}/read", response_model=SimpleSuccessResponse, dependencies=[Depends(require_workspace_permission("members:read"))])
 async def mark_read(
     notification_id: UUID,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -418,8 +419,8 @@ async def list_preferences(
     )
 
 
-@preferences_router.put("", response_model=PreferenceBulkUpdateResponse)
-@preferences_router.put("/", response_model=PreferenceBulkUpdateResponse)
+@preferences_router.put("", response_model=PreferenceBulkUpdateResponse, dependencies=[Depends(require_workspace_permission("members:read"))])
+@preferences_router.put("/", response_model=PreferenceBulkUpdateResponse, dependencies=[Depends(require_workspace_permission("members:read"))])
 async def bulk_update_preferences(
     payload: PreferenceBulkUpdateRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -546,7 +547,7 @@ async def bulk_update_preferences(
     return PreferenceBulkUpdateResponse(success=True, updated_count=updated)
 
 
-@router.post("/read-all", response_model=ReadAllResponse)
+@router.post("/read-all", response_model=ReadAllResponse, dependencies=[Depends(require_workspace_permission("members:read"))])
 async def mark_all_read(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -577,7 +578,7 @@ async def mark_all_read(
     return ReadAllResponse(success=True, marked_count=int(marked))
 
 
-@router.post("/{notification_id}/dismiss", response_model=SimpleSuccessResponse)
+@router.post("/{notification_id}/dismiss", response_model=SimpleSuccessResponse, dependencies=[Depends(require_workspace_permission("members:read"))])
 async def dismiss(
     notification_id: UUID,
     ctx: RequestContext = Depends(get_request_context_hybrid),

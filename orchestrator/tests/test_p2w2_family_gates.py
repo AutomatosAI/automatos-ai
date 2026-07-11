@@ -69,6 +69,12 @@ REPRESENTATIVES = [
     ("S5", "api/knowledge_graph.py", r'"/graph/build"', "knowledge:create", "editor"),
     ("S5", "api/knowledge_graph.py", r'"/graph"', "knowledge:delete", "admin"),
     ("S5", "api/blog.py", r'"/posts/\{post_id\}/publish"', "documents:update", "editor"),
+    # ---- S6 · workspace, admin & config plane ------------------------------
+    # Viewer cannot mint API keys, rewire integrations, or edit settings.
+    ("S6", "api/api_keys.py", r'""', "workspace:manage", "admin"),
+    ("S6", "api/workspaces.py", r'"/current/integrations"', "workspace:manage", "admin"),
+    ("S6", "api/system_settings.py", r'"/"', "workspace:manage", "admin"),
+    ("S6", "api/channels.py", r'""', "workspace:manage", "admin"),
 ]
 
 
@@ -131,6 +137,9 @@ def test_read_shaped_posts_stay_viewer_reachable():
     for module, path_re, perm in [
         ("api/models_endpoints.py", r'"/estimate-cost"', "agents:read"),
         ("api/query.py", r'"/platform-help"', "agents:read"),
+        # Per-user notification state stays reachable for every member,
+        # including viewers (members:read = "is a member of this workspace").
+        ("api/notifications.py", r'"/\{notification_id\}/read"', "members:read"),
     ]:
         src = (_ORCH / module).read_text(encoding="utf-8")
         pattern = re.compile(
@@ -140,8 +149,9 @@ def test_read_shaped_posts_stay_viewer_reachable():
             re.S,
         )
         assert pattern.search(src), f"{module} {path_re} should carry {perm}"
-    # and a viewer indeed passes a :read gate
+    # and a viewer indeed passes the deliberate viewer-reachable gates
     assert workspace_permission_granted(_db("viewer"), _ctx(), "agents:read") is True
+    assert workspace_permission_granted(_db("viewer"), _ctx(), "members:read") is True
 
 
 if __name__ == "__main__":

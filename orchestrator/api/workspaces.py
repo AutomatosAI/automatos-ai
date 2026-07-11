@@ -20,6 +20,7 @@ from core.models.workspaces import Workspace
 
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
+from core.auth.workspace_permission import require_workspace_permission
 from core.llm.defaults import DEFAULT_LLM_PROVIDER, DEFAULT_LLM_MODEL, get_default_model_config
 from config import config
 
@@ -120,7 +121,7 @@ async def get_integrations(
     return result
 
 
-@router.put("/current/integrations")
+@router.put("/current/integrations", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def save_integrations(
     payload: Dict[str, Any] = Body(...),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -180,7 +181,7 @@ async def get_byok_preferences(
     return {"byok_overrides": byok_overrides}
 
 
-@router.put("/current/byok-preferences")
+@router.put("/current/byok-preferences", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def save_byok_preferences(
     payload: Dict[str, Any] = Body(...),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -384,7 +385,7 @@ async def get_orchestrator_settings(
     return result
 
 
-@router.put("/current/orchestrator")
+@router.put("/current/orchestrator", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def save_orchestrator_settings(
     payload: Dict[str, Any] = Body(...),
     ctx: RequestContext = Depends(get_request_context_hybrid),

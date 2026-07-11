@@ -29,6 +29,7 @@ from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
+from core.auth.workspace_permission import require_workspace_permission
 from core.graph_storage import DbWorkspaceClient
 from core.workspace_client import WorkspaceClient
 
@@ -143,7 +144,7 @@ class WriteFileRequest(BaseModel):
     content: str = Field(..., description="File content to write")
 
 
-@router.put("/files/content")
+@router.put("/files/content", dependencies=[Depends(require_workspace_permission("documents:update"))])
 async def write_file_content(
     workspace_id: str,
     body: WriteFileRequest,
@@ -172,7 +173,7 @@ class ExecRequest(BaseModel):
     timeout: int = Field(default=120, ge=1, le=300)
 
 
-@router.post("/exec")
+@router.post("/exec", dependencies=[Depends(require_workspace_permission("agents:execute"))])
 async def exec_command(
     workspace_id: str,
     body: ExecRequest,
@@ -205,7 +206,7 @@ async def exec_command(
 # its workspace mount server-side. These routes only proxy + enforce tenancy.
 
 
-@router.post("/canvas/sessions")
+@router.post("/canvas/sessions", dependencies=[Depends(require_workspace_permission("agents:execute"))])
 async def start_canvas_session(
     workspace_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -243,7 +244,7 @@ async def get_canvas_session_status(
     return result
 
 
-@router.delete("/canvas/sessions")
+@router.delete("/canvas/sessions", dependencies=[Depends(require_workspace_permission("agents:execute"))])
 async def stop_canvas_session(
     workspace_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -456,7 +457,7 @@ async def preview_canvas_commit(
     }
 
 
-@router.post("/canvas/commit")
+@router.post("/canvas/commit", dependencies=[Depends(require_workspace_permission("agents:execute"))])
 async def commit_canvas_session(
     workspace_id: str,
     body: CanvasCommitRequest,

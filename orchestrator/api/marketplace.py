@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, func, desc, text
 
 from core.auth.dependencies import RequestContext
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db
 from core.models.core import Agent, Skill, User as UserModel, WorkflowTemplate as WorkflowRecipe
@@ -465,7 +466,7 @@ def _build_recipe_detail(recipe: WorkflowRecipe, db: Session) -> MarketplaceItem
 # POST /api/marketplace/items/:id/install
 # ===================================================================
 
-@router.post("/items/{item_id}/install", response_model=InstallResponse)
+@router.post("/items/{item_id}/install", response_model=InstallResponse, dependencies=[Depends(require_workspace_permission("agents:create"))])
 async def install_item(
     item_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -684,7 +685,7 @@ async def check_updates(
 # POST /api/marketplace/submit
 # ===================================================================
 
-@router.post("/submit", status_code=status.HTTP_201_CREATED)
+@router.post("/submit", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_workspace_permission("agents:create"))])
 async def submit_item(
     request: SubmitRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),

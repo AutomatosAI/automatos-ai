@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.hybrid import get_request_context_hybrid
 from core.composio.entity_manager import EntityManager
 from core.database.database import get_db
@@ -385,7 +386,7 @@ async def get_email(
     return EmailDetailResponse(email=email, provider="composio")
 
 
-@router.post("", response_model=SendEmailResponse)
+@router.post("", response_model=SendEmailResponse, dependencies=[Depends(require_workspace_permission("agents:execute"))])
 async def send_email(
     payload: SendEmailRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -433,7 +434,7 @@ async def send_email(
     return SendEmailResponse(success=True)
 
 
-@router.post("/{email_id}/reply", response_model=ReplyEmailResponse)
+@router.post("/{email_id}/reply", response_model=ReplyEmailResponse, dependencies=[Depends(require_workspace_permission("agents:execute"))])
 async def reply_to_email(
     email_id: str,
     payload: ReplyEmailRequest,

@@ -39,6 +39,7 @@ from core.credentials.encryption import EncryptionKeyError
 from core.utils.logging_adapter import set_request_id
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
+from core.auth.workspace_permission import require_workspace_permission
 
 logger = logging.getLogger(__name__)
 
@@ -161,7 +162,7 @@ async def get_credential_type_by_name(
 # Credential CRUD Endpoints
 # ============================================================================
 
-@router.post("/", response_model=CredentialResponse)
+@router.post("/", response_model=CredentialResponse, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def handle_request(
     credential: CredentialCreate,
     request: Request,
@@ -403,7 +404,7 @@ async def get_credential(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.put("/{credential_id}", response_model=CredentialResponse)
+@router.put("/{credential_id}", response_model=CredentialResponse, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def update_credential(
     credential_id: int,
     update_data: CredentialUpdate,
@@ -489,7 +490,7 @@ async def update_credential(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.delete("/{credential_id}")
+@router.delete("/{credential_id}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def delete_credential(
     credential_id: int,
     request: Request,
@@ -532,7 +533,7 @@ async def delete_credential(
 # Credential Testing
 # ============================================================================
 
-@router.post("/{credential_id}/test", response_model=CredentialTestResponse)
+@router.post("/{credential_id}/test", response_model=CredentialTestResponse, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def test_credential(
     credential_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -722,7 +723,7 @@ async def credentials_health(ctx: RequestContext = Depends(get_request_context_h
         }
 
 
-@router.post("/cache/clear")
+@router.post("/cache/clear", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def clear_credential_cache(
     credential_name: Optional[str] = Query(None, description="Specific credential to clear"),
     ctx: RequestContext = Depends(get_request_context_hybrid)

@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db
 from core.models.core import UserApiKey
@@ -91,7 +92,7 @@ def _row_to_out(row: UserApiKey, encryption) -> ApiKeyOut:
 
 # ── Endpoints ─────────────────────────────────────────────────────────
 
-@router.post("", response_model=ApiKeyOut, status_code=201)
+@router.post("", response_model=ApiKeyOut, status_code=201, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def add_api_key(
     body: ApiKeyCreate,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -156,7 +157,7 @@ async def list_api_keys(
     return [_row_to_out(r, encryption) for r in rows]
 
 
-@router.delete("/{key_id}", status_code=204)
+@router.delete("/{key_id}", status_code=204, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def delete_api_key(
     key_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -176,7 +177,7 @@ async def delete_api_key(
     logger.info(f"API key {key_id} deleted for workspace={ctx.workspace_id}")
 
 
-@router.post("/{key_id}/test", response_model=ApiKeyTestResult)
+@router.post("/{key_id}/test", response_model=ApiKeyTestResult, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def test_api_key(
     key_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -266,7 +267,7 @@ async def get_platform_key_status(
     return {"platform_keys": result}
 
 
-@router.put("/platform")
+@router.put("/platform", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def set_platform_key(
     body: PlatformKeyCreate,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -362,7 +363,7 @@ async def set_platform_key(
         )
 
 
-@router.delete("/platform/{provider}", status_code=200)
+@router.delete("/platform/{provider}", status_code=200, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def remove_platform_key(
     provider: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),

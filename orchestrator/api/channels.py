@@ -24,6 +24,7 @@ from config import config
 from core.database.database import get_db
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
+from core.auth.workspace_permission import require_workspace_permission
 
 from channels.drivers import (
     ConnectivityMode,
@@ -303,7 +304,7 @@ async def list_channels(
     return out
 
 
-@router.post("")
+@router.post("", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def create_channel(
     payload: Dict[str, Any] = Body(...),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -476,7 +477,7 @@ async def connect_channel_for_workspace(
     }
 
 
-@router.put("/{channel_id}")
+@router.put("/{channel_id}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def update_channel(
     channel_id: str,
     payload: Dict[str, Any] = Body(...),
@@ -513,7 +514,7 @@ async def update_channel(
     return {"status": "updated"}
 
 
-@router.delete("/{channel_id}")
+@router.delete("/{channel_id}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def delete_channel(
     channel_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -612,7 +613,7 @@ async def list_supported_platforms() -> List[Dict[str, Any]]:
     return out
 
 
-@router.post("/{channel_id}/test")
+@router.post("/{channel_id}/test", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def test_channel(
     channel_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -652,7 +653,7 @@ async def test_channel(
     return _verify_result_dict(verify_result)
 
 
-@router.post("/{channel_id}/start")
+@router.post("/{channel_id}/start", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def start_channel(
     channel_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -684,7 +685,7 @@ async def start_channel(
         raise HTTPException(500, "Internal server error")
 
 
-@router.post("/{channel_id}/stop")
+@router.post("/{channel_id}/stop", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def stop_channel(
     channel_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),

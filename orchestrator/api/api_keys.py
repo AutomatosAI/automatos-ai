@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.scopes import TASKS_READ
 from core.database.database import get_db
@@ -113,7 +114,7 @@ class RevokeResponse(BaseModel):
 # ── Endpoints ─────────────────────────────────────────────────────────
 
 
-@router.post("", response_model=ApiKeyCreateResponse, status_code=201)
+@router.post("", response_model=ApiKeyCreateResponse, status_code=201, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def create_api_key(
     body: ApiKeyCreateRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -168,7 +169,7 @@ async def list_api_keys(
     return [ApiKeyListItem(**k) for k in keys]
 
 
-@router.delete("/{key_id}", response_model=RevokeResponse)
+@router.delete("/{key_id}", response_model=RevokeResponse, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def revoke_api_key(
     key_id: UUID,
     ctx: RequestContext = Depends(get_request_context_hybrid),

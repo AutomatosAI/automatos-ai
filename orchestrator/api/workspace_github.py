@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from config import config
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
+from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 from core.composio.entity_manager import EntityManager
 
@@ -182,7 +183,7 @@ async def list_github_repos(
 # ---------------------------------------------------------------------------
 # POST /api/workspaces/{workspace_id}/github/clone
 # ---------------------------------------------------------------------------
-@router.post("/clone")
+@router.post("/clone", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def clone_github_repo(
     workspace_id: str,
     body: CloneRequest,
