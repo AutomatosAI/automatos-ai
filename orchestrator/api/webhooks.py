@@ -30,6 +30,7 @@ from core.models.workspaces import Workspace
 from core.routing.cache import get_routing_cache
 from core.routing.engine import UniversalRouter
 from core.routing.ingestors.webhook import WebhookIngestor
+from services import webhook_dedup
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -445,6 +446,28 @@ async def general_workspace_webhook(
     else:
         webhook_secret = (workspace.settings or {}).get("webhook_secret") or config.WEBHOOK_SECRET
         await _verify_webhook_signature(request, webhook_secret)
+
+    # 1c. Replay guard + event dedup (PRD-194 S2, P2-13). This lane executes
+    # the agent synchronously inside the HTTP request; a slow run triggers
+    # provider redelivery (Slack/Telegram retry on slow ack) and, until this
+    # guard, the SAME event ran again — burning tokens and re-firing
+    # side-effects. Keyed per-workspace on the platform's own event id
+    # (Telegram update_id / Slack event_id / webhook-id header); a
+    # redelivery is a fast no-op ack before any routing. The Shopify
+    # /events debounce (PRD-189 S3) is a different endpoint — untouched.
+    if webhook_dedup.timestamp_is_stale(request.headers.get("webhook-timestamp")):
+        logger.warning("[webhook/ws] Rejected: stale webhook-timestamp (replay guard)")
+        raise HTTPException(status_code=401, detail="Stale webhook timestamp")
+    dedup_event_id = None
+    if isinstance(body, dict):
+        dedup_event_id = body.get("update_id") or body.get("event_id")
+    dedup_event_id = dedup_event_id or request.headers.get("webhook-id")
+    if await webhook_dedup.seen_before(f"ws:{workspace.id}", dedup_event_id):
+        logger.info(
+            "[webhook/ws] Duplicate event %s for workspace %s — no-op ack",
+            dedup_event_id, workspace.id,
+        )
+        return {"status": "duplicate_ignored", "event_id": str(dedup_event_id)}
 
     # 2. Detect platform and extract reply context
     platform = _detect_platform(body) if isinstance(body, dict) else None

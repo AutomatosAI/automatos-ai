@@ -158,12 +158,17 @@ def test_composio_webhook_missing_signature_rejected_when_secret_set(monkeypatch
 
 
 def test_composio_webhook_valid_v3_signature_accepted(monkeypatch):
-    """A correctly signed request passes verification (fails later on 400, not 401)."""
+    """A correctly signed request passes verification (fails later on 400, not 401).
+
+    Timestamp is *fresh*: since PRD-194 S2 a stale provider timestamp is
+    rejected by the replay guard even when the signature verifies.
+    """
     monkeypatch.setattr(composio_api.config, "COMPOSIO_WEBHOOK_SECRET", _COMPOSIO_SECRET_B64)
     body = b"{}"  # no trigger_name → the handler 400s AFTER the signature gate
-    sig = _v3_signature(body, "wh_1", "1700000000", _COMPOSIO_SECRET_B64)
+    ts = str(int(time.time()))
+    sig = _v3_signature(body, "wh_1", ts, _COMPOSIO_SECRET_B64)
     req = _make_request(
-        {"webhook-signature": sig, "webhook-id": "wh_1", "webhook-timestamp": "1700000000"},
+        {"webhook-signature": sig, "webhook-id": "wh_1", "webhook-timestamp": ts},
         body=body,
     )
     with pytest.raises(HTTPException) as ei:

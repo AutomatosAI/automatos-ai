@@ -33,6 +33,7 @@ from core.models.routing import UnroutedEvent
 from core.routing.cache import get_routing_cache
 from core.routing.engine import UniversalRouter
 from core.routing.ingestors.jira_trigger import JiraTriggerIngestor
+from services import webhook_dedup
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -647,6 +648,20 @@ async def handle_webhook(
     elif webhook_secret:
         logger.warning("Webhook rejected: COMPOSIO_WEBHOOK_SECRET is set but no signature header present")
         raise HTTPException(status_code=401, detail="Missing webhook signature")
+
+    # Replay guard + event dedup (PRD-194 S2, P2-13). Composio V3 sends
+    # webhook-id + webhook-timestamp on every delivery, and both are part of
+    # the signed content above — so a valid-signature replay of an old
+    # capture still carries its ORIGINAL timestamp (⇒ stale ⇒ 401), and a
+    # redelivery of an already-accepted webhook-id is a fast no-op ack:
+    # nothing parsed, nothing routed, nothing dispatched.
+    if webhook_dedup.timestamp_is_stale(request.headers.get("webhook-timestamp")):
+        logger.warning("Webhook rejected: stale webhook-timestamp (replay guard)")
+        raise HTTPException(status_code=401, detail="Stale webhook timestamp")
+    dedup_event_id = request.headers.get("webhook-id")
+    if await webhook_dedup.seen_before("composio", dedup_event_id):
+        logger.info("Duplicate Composio webhook %s — no-op ack", dedup_event_id)
+        return {"status": "duplicate", "webhook_id": dedup_event_id}
 
     # Parse payload
     try:

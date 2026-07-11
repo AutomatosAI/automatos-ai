@@ -485,6 +485,14 @@ class Config:
 
     # Webhooks / Widgets
     WEBHOOK_SECRET: str = os.getenv("WEBHOOK_SECRET")
+    # PRD-194 S2 (P2-13): replay/dedup guard for the three EXTERNAL webhook
+    # lanes (Composio /webhook, workspace /ws/{key}, playbook /recipe/{id}).
+    # Dedup marks live in Redis (SETNX + TTL via core/redis/client.py — no
+    # new table). TTL covers provider retry windows with slack to spare.
+    WEBHOOK_DEDUP_TTL_SECONDS: int = int(os.getenv("WEBHOOK_DEDUP_TTL_SECONDS", "3600"))
+    # Replay skew: reject events whose provider timestamp is further than
+    # this from now (mirrors Slack's documented v0 5-minute window).
+    WEBHOOK_TIMESTAMP_SKEW_SECONDS: int = int(os.getenv("WEBHOOK_TIMESTAMP_SKEW_SECONDS", "300"))
     WIDGET_TOKEN_SECRET: str = os.getenv("WIDGET_TOKEN_SECRET", "")
     WIDGET_ORIGIN_ALLOWLIST: str = os.getenv("WIDGET_ORIGIN_ALLOWLIST", "")
     SHOPIFY_INTERNAL_API_KEY: str = os.getenv("SHOPIFY_INTERNAL_API_KEY", "")
