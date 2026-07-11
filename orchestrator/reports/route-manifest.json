@@ -1,5 +1,5 @@
 {
-  "route_count": 768,
+  "route_count": 762,
   "routes": [
     {
       "method": "GET",
@@ -2196,26 +2196,6 @@
     {
       "method": "GET",
       "path": "/api/tools/{app_name}/triggers"
-    },
-    {
-      "method": "POST",
-      "path": "/api/v1/approval-grants/{grant_id}/deny"
-    },
-    {
-      "method": "POST",
-      "path": "/api/v1/approval-grants/{grant_id}/grant"
-    },
-    {
-      "method": "POST",
-      "path": "/api/v1/approval-grants/{grant_id}/revoke"
-    },
-    {
-      "method": "POST",
-      "path": "/api/v1/gdpr/erase"
-    },
-    {
-      "method": "POST",
-      "path": "/api/v1/gdpr/erase-subject"
     },
     {
       "method": "GET",

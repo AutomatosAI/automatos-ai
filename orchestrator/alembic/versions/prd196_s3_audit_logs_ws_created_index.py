@@ -8,19 +8,19 @@ read and every sweep was a full scan. One composite index
 ctx-workspace-scoped newest-first read and the ``created_at < cutoff`` batched
 delete.
 
-Chains onto the single head (prd191). NOTE: PRD-195 (#536) adds a fossil-DROP
-migration onto the SAME head, so whichever of the two PRs merges second will
-show two heads and needs a one-line merge-heads revision (or a re-chain). The
-entrypoint runs ``alembic upgrade heads`` on boot, so both self-apply.
+Chain: PRD-195 (#536) merged first with its fossil-DROP migration
+(``prd195_drop_authz_fossil_tables``) chained onto prd191, so this migration
+re-chains onto THAT (linear: prd191 -> prd195_drop -> prd196_s3) to keep exactly
+one head. The entrypoint runs ``alembic upgrade heads`` on boot.
 
 Revision ID: prd196_audit_logs_ws_created_idx
-Revises: prd191_agent_skills_unique_and_priority
+Revises: prd195_drop_authz_fossil_tables
 Create Date: 2026-07-11
 """
 from alembic import op
 
 revision = "prd196_audit_logs_ws_created_idx"
-down_revision = "prd191_agent_skills_unique_and_priority"
+down_revision = "prd195_drop_authz_fossil_tables"
 branch_labels = None
 depends_on = None
 
