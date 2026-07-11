@@ -265,6 +265,13 @@ async def test_deny_paths_issue_no_grant():
         _action("platform_admin_probe", admin_only=True, requires_confirmation=False,
                 permission_level="read"),
     )
+    # The executor resolves the handler BEFORE the permission gates — stub
+    # both probes so the call reaches the su/admin gates (and prove the
+    # handlers are never awaited on a deny).
+    su_handler = AsyncMock(return_value={"success": True})
+    admin_handler = AsyncMock(return_value={"success": True})
+    ex._handlers["platform_su_probe"] = su_handler
+    ex._handlers["platform_admin_probe"] = admin_handler
     p_registry, p_autonomy = _gate_patches(registry)
 
     with p_registry, p_autonomy:
@@ -273,6 +280,8 @@ async def test_deny_paths_issue_no_grant():
 
     assert su.get("permission_denied") is True
     assert admin.get("permission_denied") is True
+    su_handler.assert_not_awaited()
+    admin_handler.assert_not_awaited()
     assert su.get("grant_id") is None and admin.get("grant_id") is None
     assert db.rows == [], "deny paths must not stage grants"
 
