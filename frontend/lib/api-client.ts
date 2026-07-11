@@ -130,6 +130,38 @@ export function getAdminWorkspaceOverride(): string | null {
   return _adminWorkspaceOverride
 }
 
+// ─── PRD-196 governance surface types ────────────────────────────────
+export interface ApprovalGrantOversight {
+  risk_class: string
+  tier: 'monitor' | 'human_on_the_loop' | 'human_in_the_loop' | string
+  rationale: string
+  requires_approval: boolean
+}
+
+export interface ApprovalGrant {
+  id: number
+  workspace_id: string | null
+  subject_type: string
+  subject_id: string
+  tool_name: string | null
+  risk_tier: string | null
+  agent_id: number | null
+  status: string
+  reason: string | null
+  estimated_cost_usd: string | null
+  requested_at: string | null
+  expires_at: string | null
+  granted_at: string | null
+  granted_by: string | null
+  revoked_at: string | null
+  revoked_by: string | null
+  oversight?: ApprovalGrantOversight
+}
+
+export interface ApprovalGrantsResponse {
+  grants: ApprovalGrant[]
+}
+
 class ApiClient {
   private baseUrl: string
   private defaultHeaders: Record<string, string>
@@ -2034,6 +2066,24 @@ class ApiClient {
     })
     console.log('[API] testRAGConfig result:', result)
     return result
+  }
+
+  // ===== PRD-196 S1/S2 governance: approval grants (ws-admin gated) =====
+  async listApprovalGrants(status?: string): Promise<ApprovalGrantsResponse> {
+    const qs = status ? `?status=${encodeURIComponent(status)}` : ''
+    return this.request<ApprovalGrantsResponse>(`/api/v1/approval-grants${qs}`)
+  }
+
+  async grantApproval(grantId: number): Promise<{ grant: ApprovalGrant }> {
+    return this.request(`/api/v1/approval-grants/${grantId}/grant`, { method: 'POST' })
+  }
+
+  async denyApproval(grantId: number): Promise<{ grant: ApprovalGrant }> {
+    return this.request(`/api/v1/approval-grants/${grantId}/deny`, { method: 'POST' })
+  }
+
+  async revokeApproval(grantId: number): Promise<{ grant: ApprovalGrant }> {
+    return this.request(`/api/v1/approval-grants/${grantId}/revoke`, { method: 'POST' })
   }
 }
 

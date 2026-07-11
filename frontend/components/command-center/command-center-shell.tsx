@@ -30,14 +30,18 @@ import { SummaryTab } from './summary-tab'
 import { BoardTab } from './board-tab'
 import { CalendarTab } from './calendar-tab'
 import { ActivityTab } from './activity-tab'
+import { GovernanceTab } from './governance-tab'
 
-type TabKey = 'summary' | 'board' | 'calendar' | 'activity'
+type TabKey = 'summary' | 'board' | 'calendar' | 'activity' | 'governance'
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'summary', label: 'Summary' },
   { key: 'board', label: 'Board' },
   { key: 'calendar', label: 'Calendar' },
   { key: 'activity', label: 'Activity' },
+  // PRD-196 (P2-15): the governance pillar (Approvals · Audit · Policy ·
+  // Compliance), ws-admin-only. The human surface for the policy plane.
+  { key: 'governance', label: 'Governance' },
 ]
 
 const VALID_TABS = new Set<TabKey>(TABS.map((t) => t.key))
@@ -85,6 +89,9 @@ export function CommandCenterShell() {
       ),
       calendar: schedule?.scheduled?.length ?? 0,
       activity: feed?.total ?? feed?.items?.length ?? 0,
+      // No live badge on Governance — the pending-approvals count lives inside
+      // the ws-admin-gated pane, not fetched for every member on the shell.
+      governance: 0,
     }),
     [decisions, columns, schedule, feed],
   )
@@ -171,6 +178,7 @@ export function CommandCenterShell() {
         {activeTab === 'board' && <BoardTab />}
         {activeTab === 'calendar' && <CalendarTab />}
         {activeTab === 'activity' && <ActivityTab />}
+        {activeTab === 'governance' && <GovernanceTab />}
       </div>
     </div>
   )

@@ -26,9 +26,24 @@ from core.auth.workspace_admin import require_workspace_admin
 from core.database.database import get_db
 from core.models.approval_grants import ApprovalGrant, GrantStatus, SUBJECT_BOARD_TASK
 from core.models.core import BoardTask
+from modules.policy.ai_act import oversight_for_risk
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/approval-grants", tags=["approval-grants"])
+
+
+def grant_with_oversight(grant: ApprovalGrant) -> Dict[str, Any]:
+    """A grant dict enriched with its EU-AI-Act Art.14 oversight tier + rationale.
+
+    PRD-196 S1 (P2-15, governance I.1): the approvals inbox card shows *why* a
+    human is in the loop. Rather than let the client invent a rationale, the list
+    response carries the pure ``oversight_for_risk`` mapping for the grant's risk
+    tier — fail-safe to human-in-the-loop when the risk is unknown/absent
+    (mirroring ``ai_act.py``'s conservative fallback).
+    """
+    data = grant.to_dict()
+    data["oversight"] = oversight_for_risk(grant.risk_tier).to_dict()
+    return data
 
 
 def _actor_ref(ctx: RequestContext) -> str:
@@ -71,7 +86,7 @@ async def list_grants(
     if status:
         q = q.filter(ApprovalGrant.status == status)
     rows: List[ApprovalGrant] = q.order_by(ApprovalGrant.requested_at.desc()).limit(200).all()
-    return {"grants": [g.to_dict() for g in rows]}
+    return {"grants": [grant_with_oversight(g) for g in rows]}
 
 
 def _load_grant(db: Session, ctx: RequestContext, grant_id: int) -> ApprovalGrant:

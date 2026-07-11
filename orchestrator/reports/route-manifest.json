@@ -1,5 +1,5 @@
 {
-  "route_count": 755,
+  "route_count": 759,
   "routes": [
     {
       "method": "GET",
@@ -2212,6 +2212,22 @@
     {
       "method": "GET",
       "path": "/api/tools/{app_name}/triggers"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/approval-grants"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/approval-grants/{grant_id}/deny"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/approval-grants/{grant_id}/grant"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/approval-grants/{grant_id}/revoke"
     },
     {
       "method": "GET",
