@@ -791,7 +791,54 @@ class ToolResultFormatter:
                     "requires_approval": True,
                 }
 
+        # PRD-193 S3 (P2-12): a confirmation ask that carries a grant surfaces
+        # the in-chat tool-approval card — the human's affordance beside the
+        # S15 prose (which stays the model's view). Result-shape driven, not a
+        # tool_name branch: any gated action (direct platform_* call or the
+        # platform_execute meta-dispatch) gets the card when the S1 gate
+        # attached a grant. Mirrors the mission_approval payload above.
+        if result.get("requires_confirmation") and result.get("grant_id") is not None:
+            frontend_data["tool_approval"] = {
+                "grant_id": result.get("grant_id"),
+                "action": result.get("action") or tool_name,
+                "message": result.get("message", ""),
+                "permission_level": result.get("permission_level"),
+                # The human must see exactly what they are approving — a
+                # key/value digest of the model-provided params, never a raw
+                # dump of server plumbing.
+                "params": ToolResultFormatter._tool_params_digest(result.get("params")),
+                # AI-Act oversight fields (attached by the S1 gate; floored
+                # fail-safe here so the card never implies "no oversight").
+                "risk_class": result.get("risk_class") or "unknown",
+                "risk_tier": result.get("risk_tier") or "human_in_the_loop",
+                "oversight_rationale": result.get("oversight_rationale") or (
+                    "This action requires human approval before it runs."
+                ),
+                "requires_approval": True,
+            }
+
         return frontend_data
+
+    @staticmethod
+    def _tool_params_digest(params: Any) -> Dict[str, Any]:
+        """PRD-193 S3: human-readable digest of a gated call's params.
+
+        Server-injected ``_``-prefixed plumbing is dropped; long values are
+        truncated. The approver sees the tool's real arguments (target ids,
+        keys, values) — not a raw JSON dump.
+        """
+        if not isinstance(params, dict):
+            return {}
+        digest: Dict[str, Any] = {}
+        for key, value in params.items():
+            if str(key).startswith("_"):
+                continue
+            if isinstance(value, (int, float, bool)) or value is None:
+                digest[str(key)] = value
+                continue
+            text = value if isinstance(value, str) else str(value)
+            digest[str(key)] = (text[:117] + "…") if len(text) > 120 else text
+        return digest
     
     @staticmethod
     def format_for_llm(result: Dict[str, Any], tool_name: str, max_chars: int = 20000) -> str:

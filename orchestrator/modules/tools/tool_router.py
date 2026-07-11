@@ -923,9 +923,24 @@ class ToolRouter:
                 else error
             )
             logger.warning(f"[tool-trace {trace_id}] {tool_name} failed: {error}")
+            # PRD-193 S3 (P2-12): an approval ask is not an opaque failure —
+            # when the S1 gate attached a grant, emit the tool_approval card
+            # payload so the HUMAN gets an affordance beside the S15 prose
+            # (which stays the model's view, above). Best-effort: a formatter
+            # fault never changes the envelope shape.
+            ask_frontend_data: Dict[str, Any] = {}
+            if result.get("requires_confirmation") and result.get("grant_id") is not None:
+                try:
+                    ask_frontend_data = self.formatter.format_for_frontend(result, tool_name)
+                except Exception:
+                    logger.debug(
+                        f"[tool-trace {trace_id}] tool_approval card formatting skipped",
+                        exc_info=True,
+                    )
+                    ask_frontend_data = {}
             envelope = {
                 "success": False,
-                "frontend_data": {},
+                "frontend_data": ask_frontend_data,
                 "llm_context": f"Tool {tool_name} failed: {llm_error}",
                 "raw_result": result,
                 "fatal_error": fatal_error,

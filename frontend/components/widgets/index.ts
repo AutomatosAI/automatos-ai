@@ -51,6 +51,9 @@ export { FileWidget, FileWidgetDef } from './FileWidget'
 // PRD-163 S4: Mission plan approval card
 export { MissionApprovalWidget, MissionApprovalWidgetDef } from './MissionApprovalWidget'
 
+// PRD-193 S3 (P2-12): Tool-call approval card (confirmation-gated actions)
+export { ToolApprovalWidget, ToolApprovalWidgetDef } from './ToolApprovalWidget'
+
 // PRD-66: Coding Canvas Widget (workspace file browser + Monaco editor)
 export { CodingCanvasWidget, CodingCanvasWidgetDef } from './CodingCanvasWidget'
 

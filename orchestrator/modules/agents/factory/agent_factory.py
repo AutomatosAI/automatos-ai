@@ -1043,6 +1043,20 @@ class AgentFactory:
                         {"field_context": context}
                         if context and context.get("field_id") else None
                     )
+                    # PRD-193 S1/S4 (P2-12): a confirmation ask fired on a
+                    # board-task run must link its grant back to the task
+                    # (details.board_task_id), so the grant API's existing
+                    # board re-queue resumes the run into the now-active
+                    # grant. api/board_tasks passes source/task_id in context.
+                    if (
+                        context
+                        and context.get("source") == "board_task"
+                        and context.get("task_id") is not None
+                    ):
+                        _field_caller_context = {
+                            **(_field_caller_context or {}),
+                            "board_task_id": context.get("task_id"),
+                        }
 
                     async def _agent_tool_cb(name, args, call_id, ws_id):
                         # SLACK empty-params guard.

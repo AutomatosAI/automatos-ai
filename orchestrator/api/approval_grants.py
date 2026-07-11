@@ -99,7 +99,9 @@ async def grant_approval(
         raise HTTPException(status_code=422, detail=f"Grant is not pending (status: {grant.status})")
 
     grant_grant(grant, granted_by=_actor_ref(ctx))
-    _requeue_subject(db, grant)
+    # PRD-193 S4: for tool_call subjects this re-dispatches the stored call
+    # (consume-then-execute inside this one transaction boundary).
+    await _requeue_subject(db, grant)
     db.commit()
     _audit(db, ctx, "approval_grant:granted", grant)
     return {"grant": grant.to_dict()}
@@ -144,29 +146,145 @@ async def revoke_approval(
     return {"grant": grant.to_dict()}
 
 
-def _requeue_subject(db: Session, grant: ApprovalGrant) -> None:
-    """On grant, return a blocked board task to the dispatch queue."""
+async def _requeue_subject(db: Session, grant: ApprovalGrant) -> None:
+    """On grant, resume the blocked subject.
+
+    - ``board_task``: return the blocked task to the dispatch queue (unchanged).
+    - ``tool_call`` (PRD-193 S4, P2-12): re-dispatch the stored call through
+      the spine — or, for board-originated asks, ride the existing board
+      re-queue so the re-run completes into the now-active grant (S2).
+    """
+    from core.models.approval_grants import SUBJECT_TOOL_CALL
+
+    if grant.subject_type == SUBJECT_TOOL_CALL:
+        await _resume_tool_call(db, grant)
+        return
     if grant.subject_type != SUBJECT_BOARD_TASK:
         return
+    _requeue_blocked_task(db, grant.workspace_id, grant.subject_id)
+
+
+def _requeue_blocked_task(db: Session, workspace_id: Any, task_id: Any) -> bool:
+    """Return a BLOCKED board task to the dispatch queue. True iff re-queued.
+
+    Extracted unchanged from the board branch of ``_requeue_subject`` so the
+    PRD-193 S4 board linkage (a ``tool_call`` grant carrying
+    ``details.board_task_id``) resumes through the SAME code path.
+    """
     try:
-        task = db.query(BoardTask).get(int(grant.subject_id))
+        task = db.query(BoardTask).get(int(task_id))
     except (TypeError, ValueError):
-        return
+        return False
     if task is None or task.status != "blocked":
-        return
+        return False
     task.status = "assigned"
     task.blocked_at = None
     task.blocked_reason = None
     try:
         from services.board_dispatcher import notify_task_available
 
-        notify_task_available(db, workspace_id=grant.workspace_id, task_id=task.id)
+        notify_task_available(db, workspace_id=workspace_id, task_id=task.id)
     except Exception:
         logger.warning("[approval_grants.api] notify_task_available failed", exc_info=True)
+    return True
+
+
+async def _resume_tool_call(db: Session, grant: ApprovalGrant) -> None:
+    """PRD-193 S4 (P2-12): approving must complete the work, not just flip a row.
+
+    Board-originated asks (``details.board_task_id`` present + task still
+    blocked) resume via the EXISTING board re-queue — the task re-run retries
+    the call and meets the now-active grant (S2), so nothing double-executes
+    (locked decision 4: lean board linkage). Everything else re-dispatches the
+    stored call directly through ``UnifiedToolExecutor.execute_tool`` — the
+    same spine the original call would have taken, so telemetry, the policy
+    seam, and outcome capture all fire; nothing is exempted by being approved.
+
+    The outcome summary lands on ``details.executed_result`` (returned in the
+    grant response so the S3 card swaps to its executed state). Fail LOUD but
+    contained: a failing re-dispatch surfaces as an honest failure on the
+    grant — never a fake success (tool-runtime dossier C.3), and never an
+    exception out of the grant endpoint.
+    """
+    from datetime import datetime, timezone
+
+    details = dict(grant.details) if isinstance(grant.details, dict) else {}
+
+    board_task_id = details.get("board_task_id")
+    if board_task_id is not None and _requeue_blocked_task(
+        db, grant.workspace_id, board_task_id
+    ):
+        grant.details = {
+            **details,
+            "executed_result": {
+                "resumed_via": "board_task_requeue",
+                "board_task_id": board_task_id,
+                "executed_at": datetime.now(timezone.utc).isoformat(),
+            },
+        }
+        return
+
+    action = details.get("action") or grant.tool_name
+    params = details.get("params")
+    params = dict(params) if isinstance(params, dict) else {}
+    caller_context = details.get("caller_context")
+    caller_context = dict(caller_context) if isinstance(caller_context, dict) else None
+
+    if not action:
+        grant.details = {
+            **details,
+            "executed_result": {
+                "success": False,
+                "error": "grant carries no stored action to resume",
+                "executed_at": datetime.now(timezone.utc).isoformat(),
+            },
+        }
+        return
+
+    try:
+        from modules.tools.execution.unified_executor import UnifiedToolExecutor
+
+        executor = UnifiedToolExecutor(db)
+        raw = await executor.execute_tool(
+            tool_name=str(action),
+            parameters=params,
+            agent_id=int(grant.agent_id or 0),
+            workspace_id=grant.workspace_id,
+            trace_id=f"grant-resume-{grant.id}",
+            caller_context=caller_context,
+        )
+        raw = raw if isinstance(raw, dict) else {}
+        ok = bool(raw.get("success"))
+        summary: Dict[str, Any] = {
+            "success": ok,
+            "error": (str(raw.get("error"))[:500] if (not ok and raw.get("error")) else None),
+            "requires_confirmation": bool(raw.get("requires_confirmation")),
+            "executed_at": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception as exc:
+        logger.error(
+            "[approval_grants.api] tool_call resume failed for grant %s",
+            grant.id, exc_info=True,
+        )
+        summary = {
+            "success": False,
+            "error": str(exc)[:500],
+            "requires_confirmation": False,
+            "executed_at": datetime.now(timezone.utc).isoformat(),
+        }
+    grant.details = {**details, "executed_result": summary}
 
 
 def _fail_subject(db: Session, grant: ApprovalGrant) -> None:
-    """On deny, fail a blocked board task (the human refused the action)."""
+    """On deny, fail the blocked subject (the human refused the action)."""
+    from core.models.approval_grants import SUBJECT_TOOL_CALL
+
+    if grant.subject_type == SUBJECT_TOOL_CALL:
+        # PRD-193 S4: a denied tool call is a no-op execution — the grant's
+        # DENIED status is the record; the S3 card renders the refusal; the
+        # model sees it via context on the next turn. (A blocked board task,
+        # if any, keeps its own board_task-subject grant lifecycle.)
+        return
     if grant.subject_type != SUBJECT_BOARD_TASK:
         return
     try:

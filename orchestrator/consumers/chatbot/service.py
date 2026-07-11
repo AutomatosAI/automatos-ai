@@ -1477,8 +1477,14 @@ class StreamingChatService:
             llm_context = truncate_to_token_budget(llm_context, _TOOL_RESULT_TOKEN_BUDGET)
 
             # Frontend data emission (widget tool-data).
+            # PRD-193 S3 (P2-12): an approval ask (success=False +
+            # requires_confirmation) still carries the tool_approval card —
+            # the human must see it live even though the tool did not run.
             frontend_data = result.get("frontend_data", {})
-            if result.get("success") and frontend_data:
+            _is_approval_ask = bool(
+                (result.get("raw_result") or {}).get("requires_confirmation")
+            )
+            if frontend_data and (result.get("success") or _is_approval_ask):
                 tool_data.update(frontend_data)
                 await sse_queue.put(self.streaming_handler.format_aisdk_tool_data(frontend_data))
 
