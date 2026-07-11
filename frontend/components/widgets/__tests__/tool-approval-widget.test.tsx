@@ -80,7 +80,7 @@ describe('ToolApprovalWidget — PRD-193 S3', () => {
       },
     })
     const user = userEvent.setup()
-    render(<ToolApprovalWidget id="w2" data={data()} metadata={metadata} />)
+    render(<ToolApprovalWidget id="w2" title="Action approval needed" data={data()} metadata={metadata} />)
 
     await user.click(screen.getByRole('button', { name: /approve & run/i }))
 
@@ -99,7 +99,7 @@ describe('ToolApprovalWidget — PRD-193 S3', () => {
       },
     })
     const user = userEvent.setup()
-    render(<ToolApprovalWidget id="w3" data={data()} metadata={metadata} />)
+    render(<ToolApprovalWidget id="w3" title="Action approval needed" data={data()} metadata={metadata} />)
 
     await user.click(screen.getByRole('button', { name: /approve & run/i }))
 
@@ -111,7 +111,7 @@ describe('ToolApprovalWidget — PRD-193 S3', () => {
   it('deny fires the deny mutation and renders the refusal', async () => {
     denyMutateAsync.mockResolvedValue({ grant: { id: 42, status: 'denied' } })
     const user = userEvent.setup()
-    render(<ToolApprovalWidget id="w4" data={data()} metadata={metadata} />)
+    render(<ToolApprovalWidget id="w4" title="Action approval needed" data={data()} metadata={metadata} />)
 
     await user.click(screen.getByRole('button', { name: /deny/i }))
 
@@ -126,6 +126,7 @@ describe('ToolApprovalWidget — PRD-193 S3', () => {
     render(
       <ToolApprovalWidget
         id="w5"
+        title="Action approval needed"
         data={data({ risk_tier: undefined, risk_class: undefined, oversight_rationale: undefined })}
         metadata={metadata}
       />,
