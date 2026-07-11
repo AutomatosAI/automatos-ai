@@ -79,7 +79,11 @@ OWN_AUTH_ROUTES = {
     ("POST", "/api/github/webhook"),
     ("POST", "/api/webhooks/recipe/{webhook_id}"),
     ("POST", "/api/webhooks/ws/{workspace_key}"),
-    # Shopify machine lane — _verify_internal_key shared-secret auth.
+    # Shopify machine lane — _verify_internal_key shared-secret auth
+    # (api/verticals.py provisioning + GDPR forwarding rides the same key).
+    ("POST", "/api/verticals/{vertical}/gdpr/erase"),
+    ("POST", "/api/verticals/{vertical}/gdpr/erase-subject"),
+    ("POST", "/api/verticals/{vertical}/provision"),
     ("POST", "/api/shopify/connect"),
     ("POST", "/api/shopify/deactivate"),
     ("POST", "/api/shopify/events"),
@@ -124,6 +128,12 @@ ADMIN_GATED_IN_HANDLER = {
     # Skills git import is admin-only until a safe user-facing flow exists
     # (PRD-70 FIX-01).
     ("POST", "/api/v1/skills/sources/git"),
+    # GDPR erase — api/gdpr.py's HAND-ROLLED workspace-admin gate (with the
+    # C.1 ctx.workspace_role phantom falling through to system_role, so it is
+    # effectively system-admin-only in prod). PRD-196 S7 owns consolidating it
+    # onto the canonical gate — classified here, deliberately untouched.
+    ("POST", "/api/v1/gdpr/erase"),
+    ("POST", "/api/v1/gdpr/erase-subject"),
     ("PUT", "/api/widget-marketplace/widgets/{widget_id}/approve"),
     ("PUT", "/api/widget-marketplace/widgets/{widget_id}/suspend"),
 }
@@ -153,11 +163,24 @@ PENDING_FAMILY_CONTENT: set = set()  # S5 DONE — content plane (documents, kno
 
 PENDING_FAMILY_WORKSPACE: set = set()  # S6 DONE — workspace/admin/config plane fully gated; sweep fully armed
 
+# Routes whose gating a SIBLING open PR owns — visible debt with a named
+# owner, never silently allowlisted. PRD-196 S2 (#531) puts
+# require_workspace_admin on the approval-grant verbs; the moment that lands,
+# these routes classify as workspace-admin AND pending → the exactly-one
+# check forces this block's deletion in the merging PR. Do NOT gate them here
+# (cross-PR coordination: re-gating would collide with #531's hunks).
+PENDING_SIBLING_PRS = {
+    ("POST", "/api/v1/approval-grants/{grant_id}/deny"),
+    ("POST", "/api/v1/approval-grants/{grant_id}/grant"),
+    ("POST", "/api/v1/approval-grants/{grant_id}/revoke"),
+}
+
 PENDING_BLOCKS = {
     "PENDING_FAMILY_AGENTS": PENDING_FAMILY_AGENTS,
     "PENDING_FAMILY_EXECUTION": PENDING_FAMILY_EXECUTION,
     "PENDING_FAMILY_CONTENT": PENDING_FAMILY_CONTENT,
     "PENDING_FAMILY_WORKSPACE": PENDING_FAMILY_WORKSPACE,
+    "PENDING_SIBLING_PRS": PENDING_SIBLING_PRS,
 }
 
 # The PRD-143 obs tier modules that serve mutating routes — their su lock is
@@ -310,6 +333,8 @@ def test_manifest_sweep_no_unclassified_mutating_routes(app_records):
                     f"{key[0]} {key[1]} is gated ({rec['perm']}) — delete it "
                     f"from {bucket}"
                 )
+            # (a sibling-owned route gaining require_workspace_admin flips to
+            # two buckets above and fails exactly-one — same forcing function)
 
     assert not failures, (
         "authZ boundary sweep failures:\n  " + "\n  ".join(failures)

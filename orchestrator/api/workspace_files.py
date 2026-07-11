@@ -282,7 +282,7 @@ class CanvasAutoAcceptRequest(BaseModel):
     enabled: bool
 
 
-@router.post("/canvas/decision")
+@router.post("/canvas/decision", dependencies=[Depends(require_workspace_permission("agents:execute"))])
 async def decide_canvas_permission(
     workspace_id: str,
     body: CanvasDecisionRequest,
@@ -302,7 +302,7 @@ async def decide_canvas_permission(
     return result
 
 
-@router.post("/canvas/auto-accept")
+@router.post("/canvas/auto-accept", dependencies=[Depends(require_workspace_permission("agents:execute"))])
 async def set_canvas_auto_accept(
     workspace_id: str,
     body: CanvasAutoAcceptRequest,

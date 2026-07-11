@@ -81,7 +81,11 @@ def main() -> None:
                     "wsadmin": require_workspace_admin in calls,
                     "perm": perm,
                     "admin_in_handler": (
-                        "assert_admin(ctx)" in src or "_require_admin(ctx)" in src
+                        "assert_admin(ctx)" in src
+                        or "_require_admin(ctx)" in src
+                        # api/gdpr.py's hand-rolled gate — PRD-196 S7 owns its
+                        # consolidation; classified, not touched (PRD-195).
+                        or "_require_workspace_admin(ctx)" in src
                     ),
                     "own_gate_in_handler": (
                         "Admin access required to resolve credentials" in src

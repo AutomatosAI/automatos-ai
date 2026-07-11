@@ -513,7 +513,7 @@ class AutoReindexRequest(BaseModel):
     enabled: bool
 
 
-@router.patch("/projects/{project_id}/auto-reindex")
+@router.patch("/projects/{project_id}/auto-reindex", dependencies=[Depends(require_workspace_permission("knowledge:update"))])
 async def set_project_auto_reindex(
     project_id: int,
     request: AutoReindexRequest,
