@@ -8,7 +8,8 @@ from core.auth.hybrid import get_request_context_hybrid as get_request_context
 from core.auth.dependencies import RequestContext
 from core.auth.clerk import get_clerk_auth
 from core.database.database import get_db
-from core.workspaces.permissions import require_permission, WorkspaceRole
+from core.auth.workspace_permission import require_workspace_permission
+from modules.policy.roles import WorkspaceRole
 from core.workspaces.invitations import WorkspaceInvitation, invite_member_to_workspace
 from core.workspaces.audit import AuditService
 from core.workspaces.models import WorkspaceMember
@@ -73,8 +74,11 @@ class AcceptInvitationResponse(BaseModel):
     role: str
     already_member: bool
 
-@router.get("/members", response_model=List[TeamMemberResponse])
-@require_permission("members:read")
+@router.get(
+    "/members",
+    response_model=List[TeamMemberResponse],
+    dependencies=[Depends(require_workspace_permission("members:read"))],
+)
 async def list_team_members(
     workspace_id: str,
     ctx: RequestContext = Depends(get_request_context),
@@ -119,8 +123,11 @@ async def list_team_members(
             
     return response
 
-@router.post("/invite", response_model=InvitationResponse)
-@require_permission("members:invite")
+@router.post(
+    "/invite",
+    response_model=InvitationResponse,
+    dependencies=[Depends(require_workspace_permission("members:invite"))],
+)
 async def invite_member(
     workspace_id: str,
     request: InviteMemberRequest,
@@ -156,8 +163,10 @@ async def invite_member(
         created_at=invitation.created_at.isoformat()
     )
 
-@router.patch("/members/{member_id}/role")
-@require_permission("members:change_role")
+@router.patch(
+    "/members/{member_id}/role",
+    dependencies=[Depends(require_workspace_permission("members:change_role"))],
+)
 async def update_member_role(
     workspace_id: str,
     member_id: int,
@@ -205,8 +214,10 @@ async def update_member_role(
     
     return {"status": "success", "new_role": request.role}
 
-@router.delete("/members/{member_id}")
-@require_permission("members:remove")
+@router.delete(
+    "/members/{member_id}",
+    dependencies=[Depends(require_workspace_permission("members:remove"))],
+)
 async def remove_member(
     workspace_id: str,
     member_id: int,
@@ -260,8 +271,11 @@ async def remove_member(
 # Pending invitations (admin)
 # ──────────────────────────────────────────────────────────────────────────────
 
-@router.get("/invitations", response_model=List[InvitationResponse])
-@require_permission("members:invite")
+@router.get(
+    "/invitations",
+    response_model=List[InvitationResponse],
+    dependencies=[Depends(require_workspace_permission("members:invite"))],
+)
 async def list_pending_invitations(
     workspace_id: str,
     ctx: RequestContext = Depends(get_request_context),
@@ -287,8 +301,10 @@ async def list_pending_invitations(
     ]
 
 
-@router.delete("/invitations/{invitation_id}")
-@require_permission("members:invite")
+@router.delete(
+    "/invitations/{invitation_id}",
+    dependencies=[Depends(require_workspace_permission("members:invite"))],
+)
 async def revoke_pending_invitation(
     workspace_id: str,
     invitation_id: int,
