@@ -61,6 +61,14 @@ REPRESENTATIVES = [
     ("S4", "api/board_tasks.py", r'""', "missions:create", "editor"),
     ("S4", "api/workflow_recipes.py", r'"/\{recipe_id\}/execute"', "playbooks:execute", "editor"),
     ("S4", "api/missions.py", r'"/approval-policy"', "workspace:manage", "admin"),
+    # ---- S5 · content plane (documents, knowledge, deliverables) ----------
+    ("S5", "api/documents.py", r'"/upload"', "documents:create", "editor"),
+    # C.2's marquee consequence dies here: deliverable delete is owner/admin.
+    ("S5", "api/deliverables.py", r'"/\{deliverable_id\}"', "documents:delete", "admin"),
+    ("S5", "api/documents.py", r'"/\{document_id\}"', "documents:delete", "admin"),
+    ("S5", "api/knowledge_graph.py", r'"/graph/build"', "knowledge:create", "editor"),
+    ("S5", "api/knowledge_graph.py", r'"/graph"', "knowledge:delete", "admin"),
+    ("S5", "api/blog.py", r'"/posts/\{post_id\}/publish"', "documents:update", "editor"),
 ]
 
 

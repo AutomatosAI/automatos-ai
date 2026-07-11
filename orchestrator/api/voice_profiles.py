@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 from config import config
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 
 logger = logging.getLogger(__name__)
@@ -203,7 +204,7 @@ async def list_voice_profiles(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/profiles", status_code=201, response_model=VoiceProfileOut)
+@router.post("/profiles", status_code=201, response_model=VoiceProfileOut, dependencies=[Depends(require_workspace_permission("documents:create"))])
 async def create_voice_profile(
     body: CreateVoiceProfileBody,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -269,7 +270,7 @@ async def get_voice_profile(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.put("/profiles/{profile_id}", response_model=VoiceProfileOut)
+@router.put("/profiles/{profile_id}", response_model=VoiceProfileOut, dependencies=[Depends(require_workspace_permission("documents:update"))])
 async def update_voice_profile(
     profile_id: UUID,
     body: UpdateVoiceProfileBody,
@@ -320,7 +321,7 @@ async def update_voice_profile(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.delete("/profiles/{profile_id}")
+@router.delete("/profiles/{profile_id}", dependencies=[Depends(require_workspace_permission("documents:delete"))])
 async def delete_voice_profile(
     profile_id: UUID,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -363,7 +364,7 @@ async def delete_voice_profile(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/profiles/{profile_id}/preview")
+@router.post("/profiles/{profile_id}/preview", dependencies=[Depends(require_workspace_permission("documents:create"))])
 async def preview_voice_profile(
     profile_id: UUID,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -412,7 +413,7 @@ async def preview_voice_profile(
         raise HTTPException(status_code=500, detail="Voice preview failed")
 
 
-@router.post("/profiles/clone", status_code=201, response_model=VoiceProfileOut)
+@router.post("/profiles/clone", status_code=201, response_model=VoiceProfileOut, dependencies=[Depends(require_workspace_permission("documents:create"))])
 async def clone_voice_profile(
     name: str = Query(..., min_length=1, max_length=255, description="Profile name"),
     provider: str = Query("chatterbox", max_length=100, description="TTS provider"),

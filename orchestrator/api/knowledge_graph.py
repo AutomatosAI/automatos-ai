@@ -14,6 +14,7 @@ import json
 import logging
 
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
@@ -28,7 +29,7 @@ router = APIRouter(prefix="/api/knowledge", tags=["🧠 Knowledge Graph"])
 _MAX_GRAPH_IMPORT_SIZE = 50 * 1024 * 1024  # 50MB
 
 
-@router.post("/graph/import")
+@router.post("/graph/import", dependencies=[Depends(require_workspace_permission("knowledge:create"))])
 async def import_graph(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     file: UploadFile = File(...),
@@ -81,7 +82,7 @@ async def import_graph(
     }
 
 
-@router.delete("/graph")
+@router.delete("/graph", dependencies=[Depends(require_workspace_permission("knowledge:delete"))])
 async def delete_graph(
     ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
@@ -98,7 +99,7 @@ async def delete_graph(
     return {"success": True, "message": "Graph deleted"}
 
 
-@router.post("/graph/build")
+@router.post("/graph/build", dependencies=[Depends(require_workspace_permission("knowledge:create"))])
 async def trigger_graph_build(
     ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
@@ -246,7 +247,7 @@ async def search_graph_nodes(
     return {"success": True, "query": q, "match_count": len(matches), "matches": matches}
 
 
-@router.patch("/graph/community/{community_id}/label")
+@router.patch("/graph/community/{community_id}/label", dependencies=[Depends(require_workspace_permission("knowledge:update"))])
 async def set_community_label(
     community_id: int,
     payload: dict = Body(...),

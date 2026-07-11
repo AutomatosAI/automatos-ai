@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from core.database.database import get_db
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 from core.models.cloud_sync import CloudDocument, CloudSyncConfig, CloudSyncJob
 from core.models.composio import ComposioConnection, ComposioEntity
@@ -337,6 +338,8 @@ async def list_files(
 @router.post(
     "/connections/{connection_id}/select-folder",
     response_model=SelectFolderResponse,
+
+    dependencies=[Depends(require_workspace_permission("workspace:manage"))],
 )
 async def select_folder(
     connection_id: int,
@@ -393,6 +396,8 @@ async def select_folder(
 @router.post(
     "/connections/{connection_id}/sync",
     response_model=SyncTriggerResponse,
+
+    dependencies=[Depends(require_workspace_permission("workspace:manage"))],
 )
 async def trigger_sync(
     connection_id: int,
@@ -530,6 +535,8 @@ async def get_sync_status(
 @router.delete(
     "/connections/{connection_id}",
     response_model=DisconnectResponse,
+
+    dependencies=[Depends(require_workspace_permission("workspace:manage"))],
 )
 async def disconnect_connection(
     connection_id: int,
@@ -588,7 +595,7 @@ async def disconnect_connection(
 # US-012: Cloud RAG query endpoint
 # ===================================================================
 
-@router.post("/rag/query", response_model=RAGQueryResponse)
+@router.post("/rag/query", response_model=RAGQueryResponse, dependencies=[Depends(require_workspace_permission("documents:read"))])
 async def cloud_rag_query(
     body: RAGQueryRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),

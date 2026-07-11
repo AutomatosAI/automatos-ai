@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from core.database.database import get_db
 from modules.codegraph import CodeGraphService
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 from core.security.rate_limiter import check_rate_limit
 from config import config
@@ -112,7 +113,7 @@ def get_codegraph_service(db: Session = Depends(get_db)) -> CodeGraphService:
 
 
 # Endpoints
-@router.post("/index/github", response_model=IndexResponse)
+@router.post("/index/github", response_model=IndexResponse, dependencies=[Depends(require_workspace_permission("knowledge:create"))])
 async def index_github_repository(
     request: IndexGitHubRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -375,7 +376,7 @@ async def get_project(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.delete("/projects/{project_id}")
+@router.delete("/projects/{project_id}", dependencies=[Depends(require_workspace_permission("knowledge:delete"))])
 async def delete_project(
     project_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -404,7 +405,7 @@ async def delete_project(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/projects/{project_id}/reindex")
+@router.post("/projects/{project_id}/reindex", dependencies=[Depends(require_workspace_permission("knowledge:update"))])
 async def reindex_project(
     project_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -615,7 +616,7 @@ class CodeQuestionRequest(BaseModel):
     question: str = Field(..., min_length=1, description="Natural language question about the codebase")
 
 
-@router.post("/projects/{project_id}/ask")
+@router.post("/projects/{project_id}/ask", dependencies=[Depends(require_workspace_permission("knowledge:read"))])
 async def ask_code_question(
     project_id: int,
     body: CodeQuestionRequest,

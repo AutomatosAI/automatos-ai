@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 from services.deliverable_service import DeliverableService
 
@@ -83,7 +84,7 @@ async def deliverable_stats(
 
 
 # ── Retention ───────────────────────────────────────────────────────
-@router.post("/retention")
+@router.post("/retention", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def apply_retention(
     source_type: str = Body("heartbeat", embed=True),
     keep_per_agent: int = Body(50, embed=True),
@@ -116,7 +117,7 @@ async def get_deliverable(
 
 
 # ── Soft Delete ──────────────────────────────────────────────────────
-@router.delete("/{deliverable_id}")
+@router.delete("/{deliverable_id}", dependencies=[Depends(require_workspace_permission("documents:delete"))])
 async def delete_deliverable(
     deliverable_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
