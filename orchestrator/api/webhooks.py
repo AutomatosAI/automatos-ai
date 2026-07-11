@@ -5,7 +5,9 @@ General Webhook Endpoints
 Two webhook paths:
 1. POST /api/webhooks/ws/{workspace_key}  — General workspace webhook
    Routes incoming requests through UniversalRouter to the right agent.
-   No auth required — the workspace_key in the URL is the credential.
+   The workspace_key in the URL is the credential floor; when a webhook
+   secret (or Slack signing secret) is configured, a valid signature is
+   additionally mandatory.
 
 2. POST /api/webhooks/recipe/{webhook_id} — Recipe-specific webhook
    (Defined in workflow_recipes.py, registered separately.)
@@ -15,6 +17,7 @@ import asyncio
 import hashlib
 import hmac
 import logging
+import time
 from typing import Any, Dict, Optional, Set
 from uuid import UUID, uuid4
 
@@ -51,8 +54,9 @@ async def _verify_webhook_signature(
     Checks headers: X-Hub-Signature-256 (GitHub), X-Composio-Signature,
     X-Webhook-Signature.
 
-    If a secret is configured and a signature header is present, the signature
-    must match. If no secret is configured, verification is skipped (URL-as-secret
+    When a secret is configured, a valid signature is mandatory: a missing
+    header, a mismatch, or a verification error all reject with 401 (P2-13).
+    If no secret is configured, verification is skipped (URL-as-secret
     pattern still applies).
     """
     if not secret:
@@ -65,8 +69,8 @@ async def _verify_webhook_signature(
         or request.headers.get("x-webhook-signature")
     )
     if not sig_header:
-        # No signature header present — skip if not required
-        return
+        logger.warning("[webhook] Rejected: secret configured but no signature header present")
+        raise HTTPException(status_code=401, detail="Missing webhook signature")
 
     raw_body = await request.body()
 
@@ -81,6 +85,67 @@ async def _verify_webhook_signature(
 
     if not hmac.compare_digest(computed, expected_sig):
         logger.warning("[webhook] HMAC signature mismatch")
+        raise HTTPException(status_code=401, detail="Invalid webhook signature")
+
+
+# Slack's documented v0 replay window: reject requests whose signing
+# timestamp is further than 5 minutes from now.
+_SLACK_TS_SKEW_SECONDS = 60 * 5
+
+
+def _resolve_slack_signing_secret(db: Session, workspace: Workspace) -> Optional[str]:
+    """The signing secret collected for this workspace's Slack channel, if any.
+
+    Prefers an active ``channel_connections`` row; falls back to any Slack row
+    that carries a secret. Returns ``None`` when Slack was never configured
+    with a signing secret (verification is then skipped — URL-as-secret floor).
+    """
+    from core.models.channels import ChannelConnection
+
+    rows = (
+        db.query(ChannelConnection)
+        .filter(
+            ChannelConnection.workspace_id == workspace.id,
+            ChannelConnection.platform == "slack",
+        )
+        .all()
+    )
+    fallback: Optional[str] = None
+    for row in rows:
+        secret = (row.config or {}).get("signing_secret")
+        if not secret:
+            continue
+        if row.status == "active":
+            return str(secret)
+        fallback = fallback or str(secret)
+    return fallback
+
+
+async def _verify_slack_signature(request: Request, signing_secret: str) -> None:
+    """Verify Slack's v0 signing scheme.
+
+    Slack signs ``v0:{timestamp}:{raw_body}`` with the app's signing secret and
+    sends ``X-Slack-Signature: v0=<hex>`` + ``X-Slack-Request-Timestamp``.
+    Mandatory once a signing secret is collected: bad timestamp, stale
+    timestamp, or mismatch ⇒ 401 (P2-13).
+    """
+    sig_header = request.headers.get("x-slack-signature", "")
+    ts = request.headers.get("x-slack-request-timestamp", "")
+    raw_body = await request.body()
+
+    try:
+        ts_int = int(ts)
+    except (TypeError, ValueError):
+        logger.warning("[webhook] Slack signature rejected: bad timestamp header")
+        raise HTTPException(status_code=401, detail="Invalid webhook signature")
+    if abs(time.time() - ts_int) > _SLACK_TS_SKEW_SECONDS:
+        logger.warning("[webhook] Slack signature rejected: stale timestamp")
+        raise HTTPException(status_code=401, detail="Invalid webhook signature")
+
+    base = f"v0:{ts}:".encode("utf-8") + raw_body
+    computed = "v0=" + hmac.new(signing_secret.encode("utf-8"), base, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(computed, sig_header):
+        logger.warning("[webhook] Slack signature mismatch")
         raise HTTPException(status_code=401, detail="Invalid webhook signature")
 
 
@@ -314,8 +379,9 @@ async def general_workspace_webhook(
     """
     General workspace webhook — routes incoming requests to the right agent.
 
-    The workspace_key in the URL is the credential (URL-as-secret pattern).
-    No authentication required.
+    The workspace_key in the URL is the credential floor (URL-as-secret
+    pattern). When a webhook secret is configured — or a Slack signing
+    secret has been collected — a valid signature is mandatory on top.
 
     Body (JSON):
     - message / text / content: The message to route
@@ -361,9 +427,17 @@ async def general_workspace_webhook(
     if not workspace:
         raise HTTPException(status_code=404, detail="Unknown webhook")
 
-    # 1b. Verify HMAC signature if a webhook secret is configured
-    webhook_secret = (workspace.settings or {}).get("webhook_secret") or config.WEBHOOK_SECRET
-    await _verify_webhook_signature(request, webhook_secret)
+    # 1b. Verify inbound authenticity. Slack signs with its own v0 scheme
+    # (X-Slack-Signature), so Slack-signed requests verify against the
+    # collected signing secret; everything else uses the generic HMAC,
+    # which is mandatory once a webhook secret is configured.
+    if request.headers.get("x-slack-signature"):
+        slack_secret = _resolve_slack_signing_secret(db, workspace)
+        if slack_secret:
+            await _verify_slack_signature(request, slack_secret)
+    else:
+        webhook_secret = (workspace.settings or {}).get("webhook_secret") or config.WEBHOOK_SECRET
+        await _verify_webhook_signature(request, webhook_secret)
 
     # 2. Detect platform and extract reply context
     platform = _detect_platform(body) if isinstance(body, dict) else None
