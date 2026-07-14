@@ -21,7 +21,101 @@ from .action_registry import ActionDefinition, ActionRegistry
 
 
 def register_skills_actions(registry: ActionRegistry) -> None:
-    """Register skill read/create/update/delete tools."""
+    """Register skill read/create/update/delete + runtime (load/run/enable) tools."""
+
+    # PRD-202 S2: trigger-based L2 activation. Attached skills are listed at L1
+    # (name + description) only; the model calls load_skill to pull a skill's
+    # full body into context when its task matches the description.
+    registry.register(ActionDefinition(
+        name="load_skill",
+        description=(
+            "Load a skill's full instructions (its SKILL.md body) into your "
+            "context for THIS turn. Your attached skills are shown with only "
+            "their name and description until you load them — call this when "
+            "your current task matches a skill's description and you need its "
+            "detailed step-by-step instructions. Returns the skill's full body."
+        ),
+        category="skills",
+        parameters={
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Exact skill name to load (from the 'Available Skills' list in your prompt).",
+                },
+            },
+            "required": ["name"],
+        },
+        permission_level="read",
+        tags=["skills", "load", "progressive-disclosure", "l2"],
+        examples=[
+            "load the growth-hacker skill",
+            "load_skill data-analysis",
+            "pull the full instructions for the sql skill",
+        ],
+    ))
+
+    # PRD-202 S3: L3 script execution via the workspace worker (sandboxed,
+    # per-workspace, token-gated). Only the script OUTPUT enters context.
+    registry.register(ActionDefinition(
+        name="run_skill_script",
+        description=(
+            "Run one of a skill's bundled scripts in the sandboxed workspace "
+            "worker and return only its OUTPUT (stdout/stderr) — the script "
+            "source never enters your context. Use for a skill's executable "
+            "helpers (data crunching, format conversion, generation). The "
+            "skill's L3 scripts must be enabled for this workspace by an admin "
+            "first (import/read is always allowed; running is opt-in)."
+        ),
+        category="skills",
+        parameters={
+            "type": "object",
+            "properties": {
+                "skill": {"type": "string", "description": "Skill name whose script to run."},
+                "script": {"type": "string", "description": "Script filename within the skill's scripts/ bundle (e.g. 'convert.py')."},
+                "args": {"type": "string", "description": "Optional command-line arguments passed to the script."},
+                "interpreter": {"type": "string", "description": "Optional interpreter (default inferred from extension: .py->python, .sh->bash, .js->node)."},
+            },
+            "required": ["skill", "script"],
+        },
+        permission_level="write",
+        tags=["skills", "script", "execute", "l3", "worker"],
+        examples=[
+            "run the convert.py script from the docx skill",
+            "run_skill_script skill=analytics script=summarize.py args='--period 7d'",
+        ],
+    ))
+
+    # PRD-202 S4: workspace-admin enablement gate for L3 execution. Importing /
+    # reading a skill is always allowed once scanned; running its scripts needs
+    # explicit per-workspace enablement (scanner-pass required, audited).
+    registry.register(ActionDefinition(
+        name="platform_set_skill_script_execution",
+        description=(
+            "Enable or disable L3 script execution for a skill in this "
+            "workspace (workspace-admin action, audited). Importing and reading "
+            "a skill is always allowed once scanned — but running its bundled "
+            "scripts is inert until enabled here. Enabling re-runs the security "
+            "scanner and refuses if the skill has critical findings."
+        ),
+        category="skills",
+        parameters={
+            "type": "object",
+            "properties": {
+                "skill_id": {"type": "integer", "description": "Skill id to enable/disable script execution for. Either skill_id or skill_name."},
+                "skill_name": {"type": "string", "description": "Skill name (used when skill_id is not known)."},
+                "enabled": {"type": "boolean", "description": "true to enable L3 script execution, false to disable."},
+            },
+            "required": ["enabled"],
+        },
+        permission_level="write",
+        admin_only=True,
+        tags=["skills", "governance", "l3", "enablement", "admin"],
+        examples=[
+            "enable script execution for the analytics skill",
+            "turn off L3 scripts for skill 42",
+        ],
+    ))
 
     registry.register(ActionDefinition(
         name="platform_get_skill_content",

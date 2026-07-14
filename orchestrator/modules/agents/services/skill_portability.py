@@ -284,6 +284,40 @@ async def import_standard_skill_folder(
 
 
 # ---------------------------------------------------------------------------
+# Bundle read — for L3 worker materialization (S3)
+# ---------------------------------------------------------------------------
+
+def collect_skill_bundle(filesystem_path: Optional[str]) -> Dict[str, str]:
+    """Return ``{relative_path: text_content}`` for a skill's bundled files.
+
+    Walks the skill's on-disk directory (``filesystem_path`` — what
+    ``get_skill_script_path`` resolves against) and returns every classifiable
+    script/resource file's text, EXCLUDING ``SKILL.md`` (the L2 body is the DB's
+    job, not the worker's). This is the bundle S3 materializes into the
+    workspace worker so a script's sibling files resolve at run time.
+    """
+    bundle: Dict[str, str] = {}
+    if not filesystem_path:
+        return bundle
+    root = Path(filesystem_path)
+    if not root.exists() or not root.is_dir():
+        return bundle
+    for path in sorted(root.rglob("*")):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(root)
+        if rel.name.lower() == "skill.md":
+            continue
+        if _classify_file(rel) is None:
+            continue
+        try:
+            bundle[str(rel)] = path.read_text(encoding="utf-8")
+        except Exception:
+            logger.warning("[skill-bundle] could not read %s (skipped)", rel, exc_info=True)
+    return bundle
+
+
+# ---------------------------------------------------------------------------
 # Export — Skill row -> standard folder
 # ---------------------------------------------------------------------------
 

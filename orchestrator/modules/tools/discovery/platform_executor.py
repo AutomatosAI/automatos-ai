@@ -123,6 +123,11 @@ from modules.tools.discovery.handlers_skills import (
     update_skill,
     delete_workspace_skill,
 )
+from modules.tools.discovery.handlers_skill_runtime import (  # PRD-202 S2/S3/S4
+    load_skill,
+    run_skill_script,
+    set_skill_script_execution,
+)
 from modules.tools.discovery.handlers_board_tasks import (
     create_board_task,
     list_board_tasks,
@@ -387,6 +392,10 @@ class PlatformActionExecutor:
             "platform_create_workspace_skill": create_workspace_skill,
             "platform_update_skill": update_skill,
             "platform_delete_workspace_skill": delete_workspace_skill,
+            # Skill runtime (PRD-202): L2 trigger-load / L3 worker exec / L3 enablement
+            "load_skill": load_skill,
+            "run_skill_script": run_skill_script,
+            "platform_set_skill_script_execution": set_skill_script_execution,
             # Agent assignment (PRD-71)
             "platform_assign_tool_to_agent": assign_tool_to_agent,
             "platform_assign_skill_to_agent": assign_skill_to_agent,
