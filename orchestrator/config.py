@@ -771,6 +771,14 @@ class Config:
     # looping mission is auto-replanned (or halted once replans are exhausted).
     COORDINATOR_STALL_LEDGER_LIMIT: int = int(os.getenv("COORDINATOR_STALL_LEDGER_LIMIT", "3"))
     COORDINATOR_MAX_VERIFICATION_RETRIES: int = int(os.getenv("COORDINATOR_MAX_VERIFICATION_RETRIES", "2"))
+    # PRD-200 S1: how many times a FAIL verdict may requeue a COMPLETED task
+    # with the verifier's feedback so the agent can revise (the judge "gates
+    # once"). This is a SEPARATE budget from COORDINATOR_MAX_VERIFICATION_RETRIES
+    # above (the LLM-judge's own malformed-response retry count) and from
+    # COORDINATOR_MAX_TASK_RETRIES (agent-error retries). Capped at 1 by
+    # decision: PARTIAL stays advisory, so the only re-judged verdict is FAIL,
+    # bounding the token-burn the advisory retreat originally closed.
+    COORDINATOR_MAX_VERIFICATION_REQUEUES: int = int(os.getenv("COORDINATOR_MAX_VERIFICATION_REQUEUES", "1"))
     COORDINATOR_VERIFICATION_PASS_THRESHOLD: float = float(os.getenv("COORDINATOR_VERIFICATION_PASS_THRESHOLD", "0.7"))
     COORDINATOR_VERIFICATION_FAIL_THRESHOLD: float = float(os.getenv("COORDINATOR_VERIFICATION_FAIL_THRESHOLD", "0.4"))
     COORDINATOR_VERIFICATION_CONFIDENCE_ESCALATION: float = float(os.getenv("COORDINATOR_VERIFICATION_CONFIDENCE_ESCALATION", "0.5"))

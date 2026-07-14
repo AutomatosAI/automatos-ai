@@ -21,10 +21,15 @@ What this test file proves (matching W3-S11 §AC):
    verdict, with reasoning + failures) produces a ``build_task_prompt``
    string that includes the critique text. A clean first-attempt task
    (no feedback) does NOT carry revision-mode framing.
-2. **AC1 — Reconciler stashes the critique on retry.** Static AST checks
-   on ``_apply_verdict_fail`` / ``_apply_verdict_partial`` prove they
-   write ``previous_output`` + ``verification_feedback`` into
-   ``task.input_context`` (the contract the dispatcher reads).
+2. **AC1 / PRD-200 S1 — the judge gates once (behavioural).** Drive
+   ``MissionReconciler._apply_verdict`` with the verdict verify_task
+   returned: a FAIL requeues the task ONCE (→ RETRYING, ``attempt_number``
+   bumped, ``previous_output`` + ``verification_feedback`` stashed into
+   ``input_context`` — the contract the dispatcher reads), capped at
+   ``COORDINATOR_MAX_VERIFICATION_REQUEUES``; PARTIAL stays advisory; a FAIL
+   at the cap passes through to VERIFIED-with-annotation. (Was AST-static on
+   the then-dead ``_apply_verdict_fail`` / ``_apply_verdict_partial``;
+   PRD-200 S1 wired the former and deleted the latter.)
 3. **AC2 — DB-authoritative + restart-durable regression.** The coordinator
    already gets restart-safety from W1-S6's ``reap_orphaned_runs`` boot
    sweep. Static checks pin the boot wire-up + the ``orphaned_on_restart``
@@ -280,75 +285,176 @@ class TestVerifierCritiqueInRetryPrompt:
 
 
 # ===========================================================================
-# 2. AC1 — RECONCILER WRITES verification_feedback INTO input_context.
+# 2. AC1 / PRD-200 S1 — THE JUDGE GATES ONCE (behavioural).
 #
-# Static AST inspection of _apply_verdict_fail + _apply_verdict_partial:
-# both MUST mutate task.input_context with previous_output +
-# verification_feedback so the dispatcher's prompt builder reads them
-# back on the next dispatch.
+# Flipped from AST-static (which only proved _apply_verdict_fail was SHAPED
+# correctly while it had ZERO callers) to behavioural: drive
+# MissionReconciler._apply_verdict with the verdict verify_task returned and
+# the DB-transition boundary stubbed. A FAIL requeues the task ONCE with the
+# verifier's feedback; PARTIAL stays advisory; a FAIL at the requeue cap
+# passes through to VERIFIED-with-annotation. Pure — no session, no LLM.
 # ===========================================================================
 
 
-class TestReconcilerStashesCritiqueOnRetry:
-    """Pin the reconciler->dispatcher contract: the keys the prompt
-    builder reads are the keys the reconciler writes. A drift here was
-    Mission Zero P3."""
+class TestReconcilerGatesVerdictOnce:
+    """PRD-200 S1: the cross-model judge now gates once on FAIL.
 
-    @pytest.fixture(scope="class")
-    def reconciler_src(self) -> str:
-        return RECONCILER_PY.read_text()
+    The reconciler used to ALWAYS pass the verdict through to VERIFIED (even
+    empty output — the judge's own system prompt admitted "ADVISORY ONLY").
+    Now a FAIL requeues the task a single time with the verifier's critique so
+    the agent revises instead of the wrong/empty output flowing into
+    synthesis, capped at ``COORDINATOR_MAX_VERIFICATION_REQUEUES``. PARTIAL
+    keeps the advisory retreat (the retry-storm scar tissue, Q3)."""
 
-    def _method_body(self, src: str, method_name: str) -> str:
-        tree = ast.parse(src)
-        for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef) and node.name == method_name:
-                lines = src.splitlines()
-                start = node.lineno - 1
-                end = node.end_lineno
-                return "\n".join(lines[start:end])
-        raise AssertionError(f"method {method_name!r} not found in source")
+    @pytest.fixture
+    def rec(self, monkeypatch):
+        """The real reconciler with the DB-transition boundary stubbed, so
+        ``_apply_verdict`` runs as pure logic (no session, no board, no LLM).
+        Imported at fixture-run time — not collection — to match this file's
+        lazy-import discipline (avoids the SQLAlchemy registration order
+        contamination the module docstring warns about)."""
+        from modules.coordination import reconciler as _rec
+        from modules.coordination.verification import (
+            VERDICT_FAIL,
+            VERDICT_PARTIAL,
+            VERDICT_PASS,
+            VerificationResult,
+        )
+        from core.models.orchestration_enums import TaskState
 
-    def test_apply_verdict_fail_writes_previous_output(self, reconciler_src):
-        body = self._method_body(reconciler_src, "_apply_verdict_fail")
-        assert '"previous_output"' in body, (
-            "_apply_verdict_fail must stash previous_output so the retry "
-            "prompt can echo it back (token-saving revision mode)"
+        def _fake_transition(db, task, new_state, **kwargs):
+            # The only DB effect _apply_verdict relies on is the state move.
+            task.state = new_state.value
+
+        async def _noop_async(*_a, **_k):
+            return None
+
+        monkeypatch.setattr(_rec, "transition_task", _fake_transition)
+        monkeypatch.setattr(_rec, "sync_board_status", lambda *a, **k: None)
+        monkeypatch.setattr(_rec, "_store_retry_recovery_safe", _noop_async)
+
+        def _task(**over):
+            base = dict(
+                id="task-1",
+                state=TaskState.VERIFYING.value,
+                attempt_number=0,
+                max_retries=3,
+                output="draft output",
+                input_context=None,
+                output_metadata=None,
+                failure_reason_code=None,
+            )
+            base.update(over)
+            return SimpleNamespace(**base)
+
+        return SimpleNamespace(
+            apply_verdict=_rec.MissionReconciler._apply_verdict,
+            result=VerificationResult,
+            FAIL=VERDICT_FAIL,
+            PARTIAL=VERDICT_PARTIAL,
+            PASS=VERDICT_PASS,
+            TaskState=TaskState,
+            task=_task,
         )
 
-    def test_apply_verdict_fail_writes_verification_feedback(self, reconciler_src):
-        body = self._method_body(reconciler_src, "_apply_verdict_fail")
-        assert '"verification_feedback"' in body, (
-            "_apply_verdict_fail must stash verification_feedback — the "
-            "key the dispatcher's prompt builder reads"
+    @pytest.mark.asyncio
+    async def test_fail_requeues_once_with_critique(self, rec):
+        """A FAIL verdict requeues the task (→ RETRYING), bumps
+        ``attempt_number``, and stashes ``previous_output`` +
+        ``verification_feedback`` (the keys the dispatcher reads back) —
+        Mission Zero P3 is caught, not passed through to synthesis."""
+        task = rec.task(output="v1 draft")
+        result = rec.result(
+            verdict=rec.FAIL,
+            reasoning="Missing the Risk Analysis section.",
+            scores={"completeness": 0.3},
+            deterministic_failures=["required_sections"],
         )
-        # The reasoning field MUST be carried — that's the critique itself.
-        assert "reasoning" in body, (
-            "_apply_verdict_fail must carry result.reasoning so the "
-            "retry prompt can show the verifier's critique"
+        requeued = await rec.apply_verdict(MagicMock(), task, result)
+
+        assert requeued is True
+        assert task.state == rec.TaskState.RETRYING.value
+        assert task.attempt_number == 1
+        assert task.input_context["previous_output"] == "v1 draft"
+        fb = task.input_context["verification_feedback"]
+        assert fb["reasoning"] == "Missing the Risk Analysis section."
+        assert fb["failures"] == ["required_sections"]
+        assert task.input_context["verification_requeues"] == 1
+
+    @pytest.mark.asyncio
+    async def test_fail_at_cap_is_advisory_verified(self, rec):
+        """At the requeue cap (already revised once) a FAIL passes through to
+        VERIFIED with the feedback annotated — it does NOT re-requeue and does
+        NOT fail the mission (that was the retreat; the gate re-opens one
+        notch, not the whole retry storm)."""
+        task = rec.task(input_context={"verification_requeues": 1})
+        result = rec.result(verdict=rec.FAIL, reasoning="Still incomplete.")
+        requeued = await rec.apply_verdict(MagicMock(), task, result)
+
+        assert requeued is False
+        assert task.state == rec.TaskState.VERIFIED.value
+        assert task.output_metadata["review_feedback"]["verdict"] == rec.FAIL
+        assert task.input_context["verification_requeues"] == 1  # unchanged
+
+    @pytest.mark.asyncio
+    async def test_partial_stays_advisory(self, rec):
+        """PARTIAL is never gated (Q3 — gating it re-opens the retry storm the
+        advisory retreat closed): it passes through to VERIFIED with feedback
+        annotated, and stashes NO revision context."""
+        task = rec.task()
+        result = rec.result(
+            verdict=rec.PARTIAL, reasoning="Thin in section 3.", confidence=0.62
         )
+        requeued = await rec.apply_verdict(MagicMock(), task, result)
 
-    def test_apply_verdict_partial_writes_verification_feedback(
-        self, reconciler_src
-    ):
-        body = self._method_body(reconciler_src, "_apply_verdict_partial")
-        assert '"previous_output"' in body
-        assert '"verification_feedback"' in body
-        assert "reasoning" in body
+        assert requeued is False
+        assert task.state == rec.TaskState.VERIFIED.value
+        assert task.output_metadata["review_feedback"]["verdict"] == rec.PARTIAL
+        assert task.input_context is None  # no requeue → no revision context
 
-    def test_apply_verdict_fail_increments_attempt(self, reconciler_src):
-        """The retry counter MUST move so MAX_RETRIES_EXHAUSTED eventually
-        triggers — otherwise the retry loop is infinite."""
-        body = self._method_body(reconciler_src, "_apply_verdict_fail")
-        assert "attempt_number = attempt + 1" in body or \
-               "attempt_number += 1" in body
+    @pytest.mark.asyncio
+    async def test_pass_verifies_without_annotation(self, rec):
+        """A clean PASS transitions to VERIFIED and leaves no review feedback
+        on the task."""
+        task = rec.task()
+        result = rec.result(verdict=rec.PASS, scores={"completeness": 0.9})
+        requeued = await rec.apply_verdict(MagicMock(), task, result)
 
-    def test_apply_verdict_fail_transitions_to_retrying(self, reconciler_src):
-        body = self._method_body(reconciler_src, "_apply_verdict_fail")
-        assert "TaskState.RETRYING" in body, (
-            "FAIL verdict with retries remaining MUST transition the task "
-            "to RETRYING (not stay on completed) so the dispatcher picks "
-            "it up again"
-        )
+        assert requeued is False
+        assert task.state == rec.TaskState.VERIFIED.value
+        assert task.output_metadata is None
+
+    @pytest.mark.asyncio
+    async def test_empty_output_fail_requeues_once(self, rec):
+        """Empty output is the judge's hard FAIL (verification.py:385) — the
+        highest-value catch. It now gets one revision instead of flowing
+        straight into synthesis."""
+        task = rec.task(output="")
+        result = rec.result(verdict=rec.FAIL, reasoning="Task produced empty output.")
+        requeued = await rec.apply_verdict(MagicMock(), task, result)
+
+        assert requeued is True
+        assert task.state == rec.TaskState.RETRYING.value
+        assert task.input_context["verification_requeues"] == 1
+
+    @pytest.mark.asyncio
+    async def test_two_fails_requeue_then_verify(self, rec):
+        """Cap behaviour across one task's lifecycle: the first FAIL requeues,
+        the second FAIL (budget spent) goes advisory-VERIFIED. Exactly ONE
+        requeue — the storm the retreat closed cannot re-open."""
+        task = rec.task(output="v1")
+        fail = rec.result(verdict=rec.FAIL, reasoning="nope")
+
+        first = await rec.apply_verdict(MagicMock(), task, fail)
+        assert first is True
+        assert task.state == rec.TaskState.RETRYING.value
+        assert task.input_context["verification_requeues"] == 1
+
+        # Task re-runs, still FAILs — now at the cap.
+        second = await rec.apply_verdict(MagicMock(), task, fail)
+        assert second is False
+        assert task.state == rec.TaskState.VERIFIED.value
+        assert task.input_context["verification_requeues"] == 1
 
 
 # ===========================================================================
