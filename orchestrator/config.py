@@ -782,6 +782,15 @@ class Config:
     COORDINATOR_VERIFICATION_PASS_THRESHOLD: float = float(os.getenv("COORDINATOR_VERIFICATION_PASS_THRESHOLD", "0.7"))
     COORDINATOR_VERIFICATION_FAIL_THRESHOLD: float = float(os.getenv("COORDINATOR_VERIFICATION_FAIL_THRESHOLD", "0.4"))
     COORDINATOR_VERIFICATION_CONFIDENCE_ESCALATION: float = float(os.getenv("COORDINATOR_VERIFICATION_CONFIDENCE_ESCALATION", "0.5"))
+    # PRD-200 S3: awaiting-approval re-notify + optional expiry sweep. A parked
+    # plan re-dispatches its mission_plan_ready notification every
+    # RENOTIFY_SECONDS so it does not die after one notification (the 47%-parked
+    # unblock). Expiry is OFF by default — under the always_ask posture,
+    # terminating an unapproved plan is the operator's call (Q5); when enabled, a
+    # plan older than MAX_AGE_SECONDS is cancelled.
+    COORDINATOR_APPROVAL_RENOTIFY_SECONDS: int = int(os.getenv("COORDINATOR_APPROVAL_RENOTIFY_SECONDS", "86400"))
+    COORDINATOR_APPROVAL_EXPIRY_ENABLED: bool = os.getenv("COORDINATOR_APPROVAL_EXPIRY_ENABLED", "false").lower() == "true"
+    COORDINATOR_APPROVAL_MAX_AGE_SECONDS: int = int(os.getenv("COORDINATOR_APPROVAL_MAX_AGE_SECONDS", "604800"))
     # Cross-model verification: reads from system_settings → env fallback
     @property
     def COORDINATOR_VERIFIER_MODEL_MAPPING(self) -> str:

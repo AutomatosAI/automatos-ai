@@ -13,7 +13,7 @@
  */
 
 import { useMemo, useState } from 'react'
-import { ShieldAlert, Check, X, Ban, Clock } from 'lucide-react'
+import { ShieldAlert, Check, X, Ban, Clock, Pencil } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 import { oversightTierLabel } from '@/components/widgets/MissionApprovalWidget'
@@ -23,7 +23,14 @@ import {
   useDenyApproval,
   useRevokeApproval,
 } from '@/hooks/use-approval-grants'
+import {
+  useMissions,
+  useApproveMission,
+  useRejectMission,
+  useUpdateMissionPlan,
+} from '@/hooks/use-missions-api'
 import type { ApprovalGrant } from '@/lib/api-client'
+import type { MissionResponse } from '@/types/missions'
 
 const PENDING = 'pending'
 const DECIDED_STATUSES = ['granted', 'denied', 'revoked', 'expired'] as const
@@ -135,8 +142,152 @@ function GrantCard({ grant }: { grant: ApprovalGrant }) {
   )
 }
 
+// PRD-200 S3: parked missions are a second pending plane. The mission list is
+// composed client-side (Q4 — no new route); the run row carries no dollar field,
+// so the coordinator stamps the priced cost into config at park time.
+interface PlanTask {
+  sequence_number?: number
+  title?: string
+  agent_role?: string
+}
+
+function missionCostLabel(mission: MissionResponse): string | null {
+  const cfg = (mission.config ?? {}) as Record<string, unknown>
+  const dollars = cfg.approval_estimated_cost_usd
+  if (typeof dollars === 'number') return `est. $${dollars.toFixed(2)}`
+  if (typeof mission.token_budget_estimate === 'number') {
+    return `~${mission.token_budget_estimate.toLocaleString()} tokens`
+  }
+  return null
+}
+
+function planTasks(mission: MissionResponse): PlanTask[] {
+  const tasks = (mission.plan as { tasks?: unknown } | null)?.tasks
+  return Array.isArray(tasks) ? (tasks as PlanTask[]) : []
+}
+
+/**
+ * MissionApprovalCard — a mission parked at awaiting_approval, rendered in the
+ * same Pending rail as durable grants (shared shell + palette, not a rival
+ * card). Approve / Edit / Reject call the existing mission APIs; Edit reveals
+ * the plan tasks with inline agent reassignment (PATCH /plan), the same
+ * affordance the in-chat MissionApprovalWidget uses.
+ */
+function MissionApprovalCard({ mission }: { mission: MissionResponse }) {
+  const approve = useApproveMission()
+  const reject = useRejectMission()
+  const updatePlan = useUpdateMissionPlan()
+  const [editing, setEditing] = useState(false)
+  const busy = approve.isLoading || reject.isLoading || updatePlan.isLoading
+
+  const cost = missionCostLabel(mission)
+  const tasks = planTasks(mission)
+
+  const handleApprove = async () => {
+    try {
+      await approve.mutateAsync({ id: mission.id, body: {} })
+      toast.success('Mission approved — execution started')
+    } catch {
+      toast.error('Failed to approve mission')
+    }
+  }
+
+  const handleReject = async () => {
+    try {
+      await reject.mutateAsync({ id: mission.id, body: { reason: 'Rejected from approvals inbox' } })
+      toast.info('Mission plan rejected')
+    } catch {
+      toast.error('Failed to reject mission')
+    }
+  }
+
+  // PRD-163 S4/Q57: reassign a task's agent before approval — the edit PATCHes
+  // the plan so the change persists onto the task row the dispatcher executes.
+  const commitRole = async (seq: number, value: string, original: string) => {
+    const next = value.trim()
+    if (!next || next === original.trim()) return
+    try {
+      await updatePlan.mutateAsync({
+        id: mission.id,
+        body: { task_edits: [{ sequence_number: seq, agent_role: next }] },
+      })
+      toast.success(`Task ${seq} reassigned to ${next}`)
+    } catch {
+      toast.error('Failed to update the plan')
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-2 rounded border border-border bg-background/50 p-3">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-sm font-medium truncate">
+            {mission.goal || 'Mission'}
+            <span className="text-xs text-muted-foreground"> · mission</span>
+          </p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Requested {whenLabel(mission.created_at)}
+            {cost && <> · {cost}</>}
+          </p>
+        </div>
+        <span
+          className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide"
+          style={{ color: statusTone(PENDING), border: `1px solid ${statusTone(PENDING)}` }}
+        >
+          awaiting approval
+        </span>
+      </div>
+
+      {editing && tasks.length > 0 && (
+        <ol className="space-y-1 max-h-48 overflow-y-auto" aria-label="Plan tasks">
+          {tasks.map((t, i) => {
+            const seq = t.sequence_number ?? i + 1
+            const role = t.agent_role || ''
+            return (
+              <li key={i} className="flex items-center gap-2 text-sm">
+                <span className="w-5 shrink-0 text-xs text-muted-foreground">{seq}.</span>
+                <span className="flex-1 truncate">{t.title}</span>
+                <input
+                  type="text"
+                  aria-label={`Agent for task ${seq}`}
+                  defaultValue={role}
+                  disabled={busy}
+                  placeholder="agent"
+                  onBlur={(e) => commitRole(seq, e.target.value, role)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                  }}
+                  className="w-24 shrink-0 rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground outline-none focus:border-primary focus:text-foreground disabled:opacity-50"
+                />
+              </li>
+            )
+          })}
+        </ol>
+      )}
+
+      <div className="flex gap-2">
+        <Button size="sm" disabled={busy} onClick={handleApprove} className="flex-1">
+          <Check className="h-4 w-4 mr-1" /> Approve
+        </Button>
+        <Button size="sm" variant="outline" disabled={busy} onClick={() => setEditing((v) => !v)}>
+          <Pencil className="h-4 w-4 mr-1" /> Edit
+        </Button>
+        <Button size="sm" variant="outline" disabled={busy} onClick={handleReject}>
+          <X className="h-4 w-4 mr-1" /> Reject
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 export function ApprovalsInbox() {
   const { data, isLoading, isError } = useApprovalGrants()
+  // PRD-200 S3: parked missions are the second pending source (client-composed
+  // from the existing state-filtered list — Q4, no new route). A missions-query
+  // failure must not blank the grants inbox, so it defaults to empty rather than
+  // gating the whole surface.
+  const missionsQuery = useMissions({ state: 'awaiting_approval' })
+  const awaitingMissions = missionsQuery.data?.missions ?? []
   const [decidedFilter, setDecidedFilter] = useState<string>('all')
 
   const { pending, decided } = useMemo(() => {
@@ -145,6 +296,8 @@ export function ApprovalsInbox() {
     const d = grants.filter((g) => g.status !== PENDING)
     return { pending: p, decided: d }
   }, [data])
+
+  const pendingCount = pending.length + awaitingMissions.length
 
   const decidedShown = useMemo(
     () => (decidedFilter === 'all' ? decided : decided.filter((g) => g.status === decidedFilter)),
@@ -162,14 +315,17 @@ export function ApprovalsInbox() {
     <div className="flex flex-col gap-4">
       <section>
         <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
-          Pending {pending.length > 0 && <span className="text-foreground">({pending.length})</span>}
+          Pending {pendingCount > 0 && <span className="text-foreground">({pendingCount})</span>}
         </h3>
-        {pending.length === 0 ? (
+        {pendingCount === 0 ? (
           <p className="flex items-center gap-2 text-sm text-muted-foreground">
             <Clock className="h-4 w-4" /> No approvals pending. Auto is running within its guardrails.
           </p>
         ) : (
           <div className="flex flex-col gap-2">
+            {awaitingMissions.map((m) => (
+              <MissionApprovalCard key={m.id} mission={m} />
+            ))}
             {pending.map((g) => (
               <GrantCard key={g.id} grant={g} />
             ))}
