@@ -756,9 +756,6 @@ class Config:
 
     WIZARD_ENABLED: bool = os.getenv("WIZARD_ENABLED", "true").lower() == "true"
     WIZARD_REQUIRE_DOMAIN_VERIFY: bool = os.getenv("WIZARD_REQUIRE_DOMAIN_VERIFY", "false").lower() == "true"
-    # Bypass slow knowledge-graph build during local iteration on Step 6 / Mission Zero.
-    # (PRD-142 W3-S5 — was an in-line os.getenv() inside api/wizard.py)
-    WIZARD_SKIP_GRAPHIFY: bool = os.getenv("WIZARD_SKIP_GRAPHIFY", "").lower() in ("1", "true", "yes")
 
     # =============================================================================
     # COORDINATOR — PRD-82A Sequential Mission Coordinator
