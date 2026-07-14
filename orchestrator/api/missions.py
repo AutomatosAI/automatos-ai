@@ -1939,26 +1939,3 @@ async def get_agent_mission_history(
     except Exception as exc:
         logger.error("Failed to get mission history for agent %s: %s", agent_id, exc, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
-
-
-# ---------------------------------------------------------------------------
-# PRD-123 Pattern #8: Session Checkpoints
-# ---------------------------------------------------------------------------
-
-
-@router.get("/{mission_id}/checkpoints")
-async def list_mission_checkpoints(
-    mission_id: str,
-    db: Session = Depends(get_db),
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-):
-    """List available checkpoints for a mission."""
-    from services.checkpoint_service import list_checkpoints
-
-    run = _get_run_for_workspace(db, mission_id, ctx.workspace_id)
-    checkpoints = await list_checkpoints(run.id)
-    return {
-        "mission_id": str(run.id),
-        "checkpoint_count": run.checkpoint_count,
-        "checkpoints": checkpoints,
-    }
