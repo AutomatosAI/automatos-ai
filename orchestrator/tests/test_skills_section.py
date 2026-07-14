@@ -13,10 +13,17 @@ Isolated module load (fake estimator) so skills.py runs without the full graph.
 """
 import asyncio
 import importlib.util
+import os
 import pathlib
 import sys
 import types
 from unittest.mock import MagicMock
+
+for _k, _v in {
+    "POSTGRES_USER": "test", "POSTGRES_PASSWORD": "test",
+    "POSTGRES_HOST": "localhost", "POSTGRES_PORT": "5432", "POSTGRES_DB": "test",
+}.items():
+    os.environ.setdefault(_k, _v)
 
 _ROOT = pathlib.Path(__file__).resolve().parents[1]
 
