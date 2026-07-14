@@ -182,4 +182,8 @@ def test_load_skill_registered_as_platform_action():
     from modules.tools.discovery.action_registry import get_action_registry
 
     reg = get_action_registry()
-    assert reg.get("load_skill") is not None, "load_skill must be a registered platform action"
+    # platform_-prefixed to satisfy the tool-reachability namespace invariant
+    # (test_tool_reachability): every registry action is platform_* / workspace_*.
+    assert reg.get("platform_load_skill") is not None, "platform_load_skill must be registered"
+    assert reg.get("platform_run_skill_script") is not None, "platform_run_skill_script must be registered"
+    assert reg.get("platform_set_skill_script_execution") is not None

@@ -179,8 +179,9 @@ class SkillsSection(BaseSection):
             "## Available Skills\n"
             "These skills are attached to you. Only their names and descriptions "
             "are loaded now — NOT their full instructions. When your task matches "
-            "a skill's description, call `load_skill(name=\"<skill-name>\")` to "
-            "load that skill's full instructions for this turn.\n"
+            "a skill's description, call the `platform_load_skill` action "
+            "(name=\"<skill-name>\") to load that skill's full instructions for "
+            "this turn.\n"
             + "\n".join(entries)
         )
 

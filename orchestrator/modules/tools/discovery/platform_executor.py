@@ -393,8 +393,8 @@ class PlatformActionExecutor:
             "platform_update_skill": update_skill,
             "platform_delete_workspace_skill": delete_workspace_skill,
             # Skill runtime (PRD-202): L2 trigger-load / L3 worker exec / L3 enablement
-            "load_skill": load_skill,
-            "run_skill_script": run_skill_script,
+            "platform_load_skill": load_skill,
+            "platform_run_skill_script": run_skill_script,
             "platform_set_skill_script_execution": set_skill_script_execution,
             # Agent assignment (PRD-71)
             "platform_assign_tool_to_agent": assign_tool_to_agent,

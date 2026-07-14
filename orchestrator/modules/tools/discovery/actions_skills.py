@@ -27,7 +27,7 @@ def register_skills_actions(registry: ActionRegistry) -> None:
     # (name + description) only; the model calls load_skill to pull a skill's
     # full body into context when its task matches the description.
     registry.register(ActionDefinition(
-        name="load_skill",
+        name="platform_load_skill",
         description=(
             "Load a skill's full instructions (its SKILL.md body) into your "
             "context for THIS turn. Your attached skills are shown with only "
@@ -58,7 +58,7 @@ def register_skills_actions(registry: ActionRegistry) -> None:
     # PRD-202 S3: L3 script execution via the workspace worker (sandboxed,
     # per-workspace, token-gated). Only the script OUTPUT enters context.
     registry.register(ActionDefinition(
-        name="run_skill_script",
+        name="platform_run_skill_script",
         description=(
             "Run one of a skill's bundled scripts in the sandboxed workspace "
             "worker and return only its OUTPUT (stdout/stderr) — the script "
@@ -109,7 +109,9 @@ def register_skills_actions(registry: ActionRegistry) -> None:
             "required": ["enabled"],
         },
         permission_level="write",
-        admin_only=True,
+        # PRD-143 Rev 2 emptied the admin_only tier (it was a platform-wide no-op)
+        # — governance here is workspace-scope + audit (SkillAuditLog) + the
+        # write-permission/autonomy gate, same as every other skill-governance write.
         tags=["skills", "governance", "l3", "enablement", "admin"],
         examples=[
             "enable script execution for the analytics skill",
