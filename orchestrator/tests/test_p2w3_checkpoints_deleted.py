@@ -24,7 +24,6 @@ config, which must survive.)
 """
 from __future__ import annotations
 
-import importlib.util
 import pathlib
 import sys
 
@@ -33,8 +32,6 @@ if str(_ORCH) not in sys.path:
     sys.path.insert(0, str(_ORCH))
 
 _SOURCE_DIRS = ("modules", "services", "core", "api", "consumers", "evals")
-
-_GONE_MODULE = "services.checkpoint_service"
 
 # Specific deleted symbols only — NOT the bare word "checkpoint" (PRD-164's
 # joiner "checkpoint" and seed_skills "checkpoint_enabled" are unrelated live code).
@@ -48,17 +45,11 @@ _GONE_TOKENS = (
 )
 
 
-def _spec_is_gone(mod: str) -> bool:
-    try:
-        return importlib.util.find_spec(mod) is None
-    except ModuleNotFoundError:
-        # A missing PARENT package raises instead of returning None — equally gone.
-        return True
-
-
-def test_checkpoint_service_unimportable():
-    assert _spec_is_gone(_GONE_MODULE), (
-        "services.checkpoint_service must stay deleted (PRD-200 S2) — no "
+def test_checkpoint_service_module_deleted():
+    # File-level check (not find_spec) so the guard imports no app package — the
+    # deletion is total whether or not services/__init__ is env-safe to import.
+    assert not (_ORCH / "services" / "checkpoint_service.py").exists(), (
+        "services/checkpoint_service.py must stay deleted (PRD-200 S2) — no "
         "backward-compat shim"
     )
 
