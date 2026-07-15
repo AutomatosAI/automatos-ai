@@ -192,13 +192,15 @@ def test_skills_section_dedupes_identical_bodies():
 
 def test_skills_section_first_skill_is_primary_by_arrival_order():
     # Agent.skills arrives pre-ordered by attachment priority (model order_by);
-    # the section must respect that order — first in, uncapped primary.
+    # the section must respect that order. PRD-202 S2 supersedes the full-body
+    # "primary" render with L1 metadata for non-core skills — so the ordering
+    # invariant is now asserted on the L1 catalog (names in arrival order).
     hi = _skill(1, "hi-priority", "HI-BODY unique-hi")
     lo = _skill(2, "lo-priority", "LO-BODY unique-lo")
     out = _render([hi, lo])
-    assert out.index("HI-BODY") < out.index("LO-BODY")
+    assert out.index("hi-priority") < out.index("lo-priority")
     flipped = _render([lo, hi])
-    assert flipped.index("LO-BODY") < flipped.index("HI-BODY")
+    assert flipped.index("lo-priority") < flipped.index("hi-priority")
 
 
 def test_skills_section_phantom_priority_sort_is_gone():
