@@ -294,7 +294,12 @@ class TestBuildContextChatbot:
     @pytest.mark.asyncio
     async def test_chatbot_skills_in_prompt(
         self, agent, mock_db, messages, mock_platform_actions, mock_memory, mock_tools_full    ):
-        """Skill content (SKILL.md) appears in system prompt."""
+        """PRD-202 S2: the skill's L1 metadata (name) appears in the system prompt.
+
+        The fixture skill ('sentinel') is not in the core always-on set, so its
+        full body is trigger-loaded (load_skill), not pre-injected — the section
+        contributes L1 metadata (name + description) instead.
+        """
         svc = ContextService(mock_db)
         result = await svc.build_context(
             mode=ContextMode.CHATBOT,
@@ -302,7 +307,7 @@ class TestBuildContextChatbot:
             workspace_id="ws_test",
             messages=messages,
         )
-        assert "SENTINEL" in result.system_prompt
+        assert "sentinel" in result.system_prompt  # L1 metadata (name)
         assert "skills" in result.sections_included
 
 

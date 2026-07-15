@@ -553,6 +553,23 @@ class Config:
     WORKER_INTERNAL_URL: str = os.getenv("WORKER_INTERNAL_URL", "http://localhost:8081")
     WORKER_INTERNAL_TOKEN: str = os.getenv("WORKER_INTERNAL_TOKEN", "")
 
+    # PRD-202 S2 (Q4): the small set of "core" skills that stay always-L2 — their
+    # full body renders every turn because they are an agent's core operating
+    # manual (Auto's platform-management), not an optional capability. Every
+    # OTHER attached skill renders only its L1 metadata (~50-100 tokens) and
+    # loads its body on trigger via the load_skill tool. Comma-separated names.
+    SKILL_CORE_ALWAYS_ON = [
+        s.strip()
+        for s in os.getenv("SKILL_CORE_ALWAYS_ON", "platform-management").split(",")
+        if s.strip()
+    ]
+
+    # PRD-202 S3: L3 skill-script execution caps (via the workspace worker only).
+    # Wall-clock cap (seconds) and output-size cap (chars) — the worker is the
+    # isolation boundary; only the script OUTPUT (capped) enters context.
+    SKILL_SCRIPT_TIMEOUT_SECONDS: int = int(os.getenv("SKILL_SCRIPT_TIMEOUT_SECONDS", "60"))
+    SKILL_SCRIPT_OUTPUT_MAX_CHARS: int = int(os.getenv("SKILL_SCRIPT_OUTPUT_MAX_CHARS", "20000"))
+
     # Task Reconciliation (Symphony-inspired stall detection)
     TASK_STALL_TIMEOUT_SECONDS: int = int(os.getenv("TASK_STALL_TIMEOUT_SECONDS", "300"))  # 5 min
     TASK_PENDING_TIMEOUT_SECONDS: int = int(os.getenv("TASK_PENDING_TIMEOUT_SECONDS", "120"))  # 2 min
@@ -768,9 +785,26 @@ class Config:
     # looping mission is auto-replanned (or halted once replans are exhausted).
     COORDINATOR_STALL_LEDGER_LIMIT: int = int(os.getenv("COORDINATOR_STALL_LEDGER_LIMIT", "3"))
     COORDINATOR_MAX_VERIFICATION_RETRIES: int = int(os.getenv("COORDINATOR_MAX_VERIFICATION_RETRIES", "2"))
+    # PRD-200 S1: how many times a FAIL verdict may requeue a COMPLETED task
+    # with the verifier's feedback so the agent can revise (the judge "gates
+    # once"). This is a SEPARATE budget from COORDINATOR_MAX_VERIFICATION_RETRIES
+    # above (the LLM-judge's own malformed-response retry count) and from
+    # COORDINATOR_MAX_TASK_RETRIES (agent-error retries). Capped at 1 by
+    # decision: PARTIAL stays advisory, so the only re-judged verdict is FAIL,
+    # bounding the token-burn the advisory retreat originally closed.
+    COORDINATOR_MAX_VERIFICATION_REQUEUES: int = int(os.getenv("COORDINATOR_MAX_VERIFICATION_REQUEUES", "1"))
     COORDINATOR_VERIFICATION_PASS_THRESHOLD: float = float(os.getenv("COORDINATOR_VERIFICATION_PASS_THRESHOLD", "0.7"))
     COORDINATOR_VERIFICATION_FAIL_THRESHOLD: float = float(os.getenv("COORDINATOR_VERIFICATION_FAIL_THRESHOLD", "0.4"))
     COORDINATOR_VERIFICATION_CONFIDENCE_ESCALATION: float = float(os.getenv("COORDINATOR_VERIFICATION_CONFIDENCE_ESCALATION", "0.5"))
+    # PRD-200 S3: awaiting-approval re-notify + optional expiry sweep. A parked
+    # plan re-dispatches its mission_plan_ready notification every
+    # RENOTIFY_SECONDS so it does not die after one notification (the 47%-parked
+    # unblock). Expiry is OFF by default — under the always_ask posture,
+    # terminating an unapproved plan is the operator's call (Q5); when enabled, a
+    # plan older than MAX_AGE_SECONDS is cancelled.
+    COORDINATOR_APPROVAL_RENOTIFY_SECONDS: int = int(os.getenv("COORDINATOR_APPROVAL_RENOTIFY_SECONDS", "86400"))
+    COORDINATOR_APPROVAL_EXPIRY_ENABLED: bool = os.getenv("COORDINATOR_APPROVAL_EXPIRY_ENABLED", "false").lower() == "true"
+    COORDINATOR_APPROVAL_MAX_AGE_SECONDS: int = int(os.getenv("COORDINATOR_APPROVAL_MAX_AGE_SECONDS", "604800"))
     # Cross-model verification: reads from system_settings → env fallback
     @property
     def COORDINATOR_VERIFIER_MODEL_MAPPING(self) -> str:

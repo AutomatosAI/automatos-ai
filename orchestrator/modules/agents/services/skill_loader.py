@@ -1011,8 +1011,12 @@ class SkillLoader:
                 logger.warning(f"Skill not found: {skill_name}")
                 return None
 
-            # Runtime freshness check for builtin-core skills
-            if skill.skill_source == "builtin-core":
+            # Runtime freshness check for builtin skills. PRD-202 S1: resolve
+            # the provenance through the canonical scheme so BOTH the legacy
+            # tags (``builtin-core``/``builtin-seeds``) and the canonical
+            # ``builtin:<name>`` form match — no bare-string compare survives.
+            from modules.agents.services.skill_source_scheme import scheme_of
+            if scheme_of(skill.skill_source) == "builtin":
                 core_content = self._refresh_builtin_if_stale(skill, db)
                 if core_content:
                     self.core_content_cache[skill_name] = core_content

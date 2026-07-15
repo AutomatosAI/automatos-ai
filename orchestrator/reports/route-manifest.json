@@ -1,5 +1,5 @@
 {
-  "route_count": 764,
+  "route_count": 763,
   "routes": [
     {
       "method": "GET",
@@ -1632,10 +1632,6 @@
     {
       "method": "POST",
       "path": "/api/missions/{mission_id}/cancel"
-    },
-    {
-      "method": "GET",
-      "path": "/api/missions/{mission_id}/checkpoints"
     },
     {
       "method": "GET",
