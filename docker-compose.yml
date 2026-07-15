@@ -258,6 +258,11 @@ services:
       WORKSPACE_DEFAULT_QUOTA_GB: ${WORKSPACE_DEFAULT_QUOTA_GB:-5}
       WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-3}
       WORKER_HEALTH_PORT: 8081
+      # PRD-203 C·S8: model credential for the headless Claude Agent SDK
+      # subprocess (canvas prompt loop). Without one the SDK connects and idles.
+      # Set the same value on the Railway workspace-worker service.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
       # Environment
       ENVIRONMENT: ${ENVIRONMENT:-development}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}

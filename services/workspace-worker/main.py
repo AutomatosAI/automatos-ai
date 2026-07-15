@@ -1034,6 +1034,35 @@ class WorkspaceWorker:
                 )
             return web.json_response(result)
 
+        async def canvas_message_handler(request):
+            """POST /workspaces/{workspace_id}/canvas/session/message — PRD-203 C·S7.
+
+            Send a user prompt to the live session's SDK client (client.query) so
+            the agent actually works. The pump streams the resulting turns back as
+            canvas events. Body: {"prompt": "..."}.
+            """
+            from canvas_session_service import get_canvas_manager
+
+            workspace_id = request.match_info["workspace_id"]
+            try:
+                body = await request.json()
+            except Exception:
+                return web.json_response({"error": "Invalid JSON body"}, status=400)
+
+            prompt = (body.get("prompt") or "").strip()
+            if not prompt:
+                return web.json_response({"error": "prompt is required"}, status=400)
+
+            manager = get_canvas_manager(volume_path, event_sink=_canvas_event_sink)
+            result = await manager.send_message(workspace_id, prompt)
+            if not result.get("success"):
+                status = 404 if result.get("not_found") else 500
+                return web.json_response(
+                    {"error": result.get("error", "Canvas message error")},
+                    status=status,
+                )
+            return web.json_response(result)
+
         app.router.add_get("/health", health_handler)
         app.router.add_get("/workspaces/{workspace_id}/files", list_files_handler)
         app.router.add_get("/workspaces/{workspace_id}/files/content", file_content_handler)
@@ -1048,6 +1077,7 @@ class WorkspaceWorker:
         app.router.add_delete("/workspaces/{workspace_id}/canvas/session", canvas_session_stop_handler)
         app.router.add_post("/workspaces/{workspace_id}/canvas/session/decision", canvas_decision_handler)
         app.router.add_post("/workspaces/{workspace_id}/canvas/session/auto-accept", canvas_auto_accept_handler)
+        app.router.add_post("/workspaces/{workspace_id}/canvas/session/message", canvas_message_handler)
 
         runner = web.AppRunner(app)
         await runner.setup()

@@ -85,9 +85,32 @@ def build_profile(
                 if isinstance(b, dict) and b.get("brand_name"):
                     brands.append(b)
 
+        # PRD-203 O·S3: non-Shopify verticals (SaaS / services / content).
+        elif page_type in ("services", "features"):
+            for s in (
+                (extract.get("industries_served") or [])
+                + (extract.get("target_users") or [])
+            ):
+                if s and s not in sectors:
+                    sectors.append(s)
+
+        elif page_type == "case_study":
+            for s in extract.get("industries_served") or []:
+                if s and s not in sectors:
+                    sectors.append(s)
+
+        elif page_type == "article":
+            category = extract.get("category")
+            if category and category not in sectors:
+                sectors.append(category)
+
         # Voice corpus contribution from any page with substantive markdown
         markdown = result.get("markdown")
-        if markdown and len(markdown) > 200 and page_type in ("about", "solutions", "generic"):
+        _voice_page_types = (
+            "about", "solutions", "generic",
+            "services", "features", "case_study", "article", "docs",
+        )
+        if markdown and len(markdown) > 200 and page_type in _voice_page_types:
             # First 400 chars as a voice sample
             voice_notes_chunks.append(markdown[:400].strip())
 

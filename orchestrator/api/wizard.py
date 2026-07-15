@@ -596,12 +596,6 @@ async def _run_scrape_pipeline(
     Any exception is caught and turned into a ``stage=failed`` event so
     the frontend always gets a terminal signal.
     """
-    # TEMP: WIZARD_SKIP_GRAPHIFY=1 bypasses the slow knowledge-graph build
-    # so we can iterate on Step 6 / Mission Zero without waiting for the
-    # graph on every test run. The existing graph from a previous run is
-    # reused. Remove before E2E testing. (PRD-142 W3-S5 — env via config.)
-    skip_graphify = config.WIZARD_SKIP_GRAPHIFY
-
     try:
         client = _firecrawl_client()
 
@@ -679,38 +673,30 @@ async def _run_scrape_pipeline(
         )
 
         # --- Graphify ---------------------------------------------------
-        if skip_graphify:
+        await progress_emit(
+            profile_id, STAGE_GRAPHIFY,
+            "Building knowledge graph (entity extraction)…",
+        )
+        try:
+            from modules.knowledge.graph_service import GraphifyService
+            graphify = GraphifyService()
+            meta = await graphify.build_graph(workspace_id)
             await progress_emit(
                 profile_id, STAGE_GRAPHIFY,
-                "Skipping graphify (WIZARD_SKIP_GRAPHIFY=1) — reusing existing graph",
+                f"Graph built — {meta.get('node_count', 0)} nodes, "
+                f"{meta.get('edge_count', 0)} edges, "
+                f"{meta.get('community_count', 0)} communities",
+                meta=meta,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "wizard pipeline graphify failed: %s", exc, exc_info=True
+            )
+            await progress_emit(
+                profile_id, STAGE_GRAPHIFY,
+                f"Graph build failed (non-fatal): {exc}",
                 level="warn",
-                meta={"skipped": True},
             )
-        else:
-            await progress_emit(
-                profile_id, STAGE_GRAPHIFY,
-                "Building knowledge graph (entity extraction)…",
-            )
-            try:
-                from modules.knowledge.graph_service import GraphifyService
-                graphify = GraphifyService()
-                meta = await graphify.build_graph(workspace_id)
-                await progress_emit(
-                    profile_id, STAGE_GRAPHIFY,
-                    f"Graph built — {meta.get('node_count', 0)} nodes, "
-                    f"{meta.get('edge_count', 0)} edges, "
-                    f"{meta.get('community_count', 0)} communities",
-                    meta=meta,
-                )
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "wizard pipeline graphify failed: %s", exc, exc_info=True
-                )
-                await progress_emit(
-                    profile_id, STAGE_GRAPHIFY,
-                    f"Graph build failed (non-fatal): {exc}",
-                    level="warn",
-                )
 
         # --- Profile build ----------------------------------------------
         await progress_emit(

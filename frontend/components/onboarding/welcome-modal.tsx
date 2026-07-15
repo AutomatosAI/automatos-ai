@@ -113,31 +113,32 @@ export function WelcomeModal({ open, onOpenChange, userId }: WelcomeModalProps) 
             </div>
           </div>
 
-          {/* Business Intake CTA — PRD-130 (hidden for pilot) */}
-          {/* <div className="p-4 rounded-lg bg-primary/10 border border-primary/30">
+          {/* Business Intake CTA — PRD-130 / PRD-203 O·S1 */}
+          <div className="p-4 rounded-lg bg-primary/10 border border-primary/30" data-testid="business-intake-cta">
             <div className="flex items-start gap-3">
               <div className="mt-0.5">
                 <Building2 className="w-5 h-5 text-primary" />
               </div>
               <div className="flex-1">
-                <div className="font-medium text-gray-200 mb-1">
+                <div className="font-medium text-foreground/90 mb-1">
                   Tell Automatos about your business
                 </div>
-                <div className="text-sm text-gray-400">
-                  Share your domain and we&apos;ll scan your site, build a knowledge graph,
+                <div className="text-sm text-muted-foreground">
+                  Share your domain and Auto will scan your site, build a Knowledge Graph,
                   and draft a Mission Zero plan in under 3 minutes.
                 </div>
                 <Button
                   size="sm"
                   onClick={handleStartIntake}
                   className="mt-3 bg-primary hover:bg-primary/90 text-primary-foreground"
+                  data-testid="business-intake-start"
                 >
                   Start Business Intake
                   <Building2 className="w-4 h-4 ml-2" />
                 </Button>
               </div>
             </div>
-          </div> */}
+          </div>
 
           {/* Tour CTA — desktop only */}
           {!isMobile && (

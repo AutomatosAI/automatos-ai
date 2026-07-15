@@ -47,7 +47,6 @@ _SWEPT_ENV_VARS = (
     "RATE_LIMIT_GIT_CLONE_WINDOW_SECONDS",
     "LOKI_QUERY_URL",
     "ALERT_INGEST_TOKEN",
-    "WIZARD_SKIP_GRAPHIFY",
     "PUBLIC_API_HOST",
     # PRD-176 F068 — the nine railway.internal defaults + log-relay toggle that
     # W6 makes local-safe. Swept so a Railway env value can't mask the new
@@ -317,23 +316,6 @@ def test_alert_ingest_token_default_empty(monkeypatch):
 def test_alert_ingest_token_from_env(monkeypatch):
     cfg = _reload_config(monkeypatch, {"ALERT_INGEST_TOKEN": "tok-123"})
     assert cfg.config.ALERT_INGEST_TOKEN == "tok-123"
-
-
-def test_wizard_skip_graphify_default_false(monkeypatch):
-    cfg = _reload_config(monkeypatch, {})
-    assert cfg.config.WIZARD_SKIP_GRAPHIFY is False
-
-
-@pytest.mark.parametrize("truthy", ["1", "true", "yes", "TRUE", "Yes"])
-def test_wizard_skip_graphify_truthy(monkeypatch, truthy):
-    cfg = _reload_config(monkeypatch, {"WIZARD_SKIP_GRAPHIFY": truthy})
-    assert cfg.config.WIZARD_SKIP_GRAPHIFY is True
-
-
-@pytest.mark.parametrize("falsy", ["", "0", "false", "no", "off"])
-def test_wizard_skip_graphify_falsy(monkeypatch, falsy):
-    cfg = _reload_config(monkeypatch, {"WIZARD_SKIP_GRAPHIFY": falsy})
-    assert cfg.config.WIZARD_SKIP_GRAPHIFY is False
 
 
 def test_public_api_host_default(monkeypatch):

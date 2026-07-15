@@ -28,6 +28,7 @@ import {
 import {
   reduceCanvasEvent,
   resolvePermission,
+  appendUserPrompt,
   initialCanvasSessionState,
   type CanvasSessionUiState,
 } from './canvasSessionState'
@@ -48,6 +49,7 @@ type SessionAction =
   | { kind: 'event'; ev: CanvasEventEnvelope }
   | { kind: 'resolve'; requestId: string; decision: ApprovalDecision }
   | { kind: 'autoAccept'; enabled: boolean }
+  | { kind: 'sent'; prompt: string }
 
 interface CombinedState {
   ui: CanvasSessionUiState
@@ -80,6 +82,12 @@ function sessionReducer(state: CombinedState, action: SessionAction): CombinedSt
       ui: state.ui,
       approvals: setAutoAcceptState(state.approvals, action.enabled),
     }
+  }
+
+  if (action.kind === 'sent') {
+    // Optimistically echo the user's prompt as a turn; the agent's streamed
+    // reply follows via the SSE 'event' fold.
+    return { ui: appendUserPrompt(state.ui, action.prompt), approvals: state.approvals }
   }
 
   const ev = action.ev
@@ -115,6 +123,7 @@ export interface CanvasSessionController {
   treeRefreshTick: number
   start: () => Promise<void>
   stop: () => Promise<void>
+  send: (prompt: string) => Promise<void>
   decide: (requestId: string, decision: ApprovalDecision) => Promise<void>
   setAutoAccept: (enabled: boolean) => Promise<void>
 }
@@ -151,6 +160,25 @@ export function useCanvasSession(
       // Best-effort — the stream/heartbeat will reflect the terminal state.
     }
   }, [workspaceId])
+
+  const send = useCallback(
+    async (prompt: string) => {
+      if (!workspaceId) return
+      const trimmed = prompt.trim()
+      if (!trimmed) return
+      // Optimistically echo the prompt; the streamed reply arrives over SSE.
+      dispatch({ kind: 'sent', prompt: trimmed })
+      try {
+        await apiClient.post(`/api/workspaces/${workspaceId}/canvas/message`, {
+          prompt: trimmed,
+        })
+      } catch {
+        // Best-effort — the SSE stream / session status reflects any failure;
+        // the user can retry from the composer.
+      }
+    },
+    [workspaceId]
+  )
 
   const decide = useCallback(
     async (requestId: string, decision: ApprovalDecision) => {
@@ -257,6 +285,7 @@ export function useCanvasSession(
     treeRefreshTick: state.ui.treeRefreshTick,
     start,
     stop,
+    send,
     decide,
     setAutoAccept,
   }

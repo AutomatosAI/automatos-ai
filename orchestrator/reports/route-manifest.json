@@ -1,5 +1,5 @@
 {
-  "route_count": 761,
+  "route_count": 763,
   "routes": [
     {
       "method": "GET",
@@ -2438,6 +2438,10 @@
       "path": "/api/voice/profiles/{profile_id}/preview"
     },
     {
+      "method": "POST",
+      "path": "/api/voice/retell/llm"
+    },
+    {
       "method": "GET",
       "path": "/api/webhooks/recipe/{webhook_id}"
     },
@@ -2876,6 +2880,10 @@
     {
       "method": "GET",
       "path": "/api/workspaces/{workspace_id}/canvas/events"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspaces/{workspace_id}/canvas/message"
     },
     {
       "method": "DELETE",
