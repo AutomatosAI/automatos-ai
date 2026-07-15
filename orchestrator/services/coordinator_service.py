@@ -1295,6 +1295,16 @@ class CoordinatorService:
                     logger.warning("[Coordinator] approval countdown sweep failed", exc_info=True)
                     db.rollback()
 
+                # --- PRD-200 S3: re-notify (and optionally expire) parked approvals ---
+                try:
+                    r = await self.check_approval_renotify(db)
+                    if r:
+                        db.commit()
+                        summary["approval_renotified"] = r
+                except Exception:
+                    logger.warning("[Coordinator] approval re-notify sweep failed", exc_info=True)
+                    db.rollback()
+
                 # --- PRD-108: Clean up fields for terminal runs ---
                 await self._cleanup_terminal_fields(db)
                 db.commit()  # Persist field_id removal to stop destroy loop
@@ -2388,7 +2398,9 @@ class CoordinatorService:
             # PRD-163 S3: countdown — store a deadline; the tick loop auto-proceeds
             # when it passes (cancelled by an explicit approve/reject in the meantime).
             if decision.countdown_seconds:
-                from datetime import datetime, timezone, timedelta
+                # datetime/timezone/timedelta are module-level (see top imports);
+                # a local re-import here would shadow them as function-locals and
+                # UnboundLocalError the config stamp below on the no-countdown path.
                 deadline = datetime.now(timezone.utc) + timedelta(seconds=decision.countdown_seconds)
                 run.config = {
                     **(run.config or {}),
@@ -2402,6 +2414,16 @@ class CoordinatorService:
                 actor_type=ActorType.COORDINATOR,
                 actor_id="coordinator",
             )
+            # PRD-200 S3: stamp the notification baseline (so the re-notify sweep
+            # can age this park) and the priced cost (so the approvals inbox card,
+            # which composes the mission list, can show est. cost — the run row
+            # carries no dollar field). Immutable merge preserves any countdown
+            # deadline set above.
+            run.config = {
+                **(run.config or {}),
+                "approval_last_notified_at": datetime.now(timezone.utc).isoformat(),
+                "approval_estimated_cost_usd": round(decision.estimated_cost, 2),
+            }
             logger.info("Mission %s → awaiting_approval (%s)", run.id, decision.reason)
             # PRD-163 S1/S5: tell the creating user the plan is ready for review.
             # This is the "plan lands via notification" half of async planning and
@@ -2480,6 +2502,117 @@ class CoordinatorService:
             proceeded += 1
             logger.info("Mission %s auto-proceeded (countdown elapsed)", run.id)
         return proceeded
+
+    async def check_approval_renotify(
+        self, db: Session, workspace_id: Optional[UUID] = None
+    ) -> int:
+        """PRD-200 S3: re-ping (and optionally expire) missions parked at
+        awaiting_approval so a parked plan does not die after one notification.
+
+        A parked run fires exactly one ``mission_plan_ready`` notification and is
+        then invisible to the coordinator (the tick only processes RUNNING runs),
+        so 47% of all missions ever created sit stranded at their approval gate.
+        This sweep re-dispatches that notification every
+        ``COORDINATOR_APPROVAL_RENOTIFY_SECONDS`` so the plan re-pings instead of
+        dying. When ``COORDINATOR_APPROVAL_EXPIRY_ENABLED`` (default OFF — under
+        the ``always_ask`` posture, terminating an unapproved plan is the
+        operator's call, Q5), a plan older than
+        ``COORDINATOR_APPROVAL_MAX_AGE_SECONDS`` is cancelled.
+
+        Never touches a non-AWAITING run. ``workspace_id=None`` sweeps every
+        workspace (the tick uses this). Returns the number of parked runs acted
+        on (re-notified or expired), so the caller commits only when something
+        changed.
+        """
+        def _aware(dt):
+            if dt is None:
+                return None
+            return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
+        def _parse_iso(raw):
+            if not raw:
+                return None
+            try:
+                return _aware(datetime.fromisoformat(raw))
+            except (ValueError, TypeError):
+                return None
+
+        now = datetime.now(timezone.utc)
+        renotify_after = Config.COORDINATOR_APPROVAL_RENOTIFY_SECONDS
+
+        q = db.query(OrchestrationRun).filter(
+            OrchestrationRun.state == RunState.AWAITING_APPROVAL.value,
+        )
+        if workspace_id is not None:
+            q = q.filter(OrchestrationRun.workspace_id == workspace_id)
+        candidates = q.all()
+
+        acted = 0
+        for run in candidates:
+            cfg = run.config or {}
+
+            # Optional expiry (OFF by default): cancel a plan that has sat
+            # unapproved past the max age, measured from creation.
+            if Config.COORDINATOR_APPROVAL_EXPIRY_ENABLED:
+                created = _aware(run.created_at)
+                if (
+                    created is not None
+                    and (now - created).total_seconds()
+                    >= Config.COORDINATOR_APPROVAL_MAX_AGE_SECONDS
+                ):
+                    try:
+                        transition_run(
+                            db=db,
+                            run=run,
+                            new_state=RunState.CANCELLED,
+                            actor_type=ActorType.COORDINATOR,
+                            actor_id="coordinator",
+                            reason="Approval expired: plan sat unapproved past the max age",
+                            stop_reason="approval_expired",
+                            stop_detail=(
+                                f"No approval within "
+                                f"{Config.COORDINATOR_APPROVAL_MAX_AGE_SECONDS}s"
+                            ),
+                        )
+                        acted += 1
+                        logger.info("Mission %s cancelled (approval expired)", run.id)
+                    except ConflictError:
+                        logger.warning(
+                            "Conflict cancelling expired approval %s", run.id
+                        )
+                    continue
+
+            # Re-notify baseline: last notification, else the parked run's last
+            # write (a parked run is not otherwise touched, so updated_at ~= park
+            # time), else creation.
+            baseline = (
+                _parse_iso(cfg.get("approval_last_notified_at"))
+                or _aware(run.updated_at)
+                or _aware(run.created_at)
+            )
+            if baseline is None:
+                continue
+            if (now - baseline).total_seconds() < renotify_after:
+                continue
+
+            task_count = len((run.plan or {}).get("tasks", []))
+            cost = cfg.get("approval_estimated_cost_usd")
+            cost_txt = f", est. ${cost:.2f}" if isinstance(cost, (int, float)) else ""
+            await _dispatch_mission_event(
+                db=db,
+                run=run,
+                event_type="mission_plan_ready",
+                title=f"Reminder — mission plan awaiting approval: {(run.goal or 'Mission')[:110]}",
+                message=(
+                    f"{task_count} task(s) planned{cost_txt}. "
+                    f"Still awaiting your review and approval."
+                ),
+                status="action_required",
+            )
+            run.config = {**cfg, "approval_last_notified_at": now.isoformat()}
+            acted += 1
+
+        return acted
 
     async def _sweep_async_planning(self, db: Session) -> int:
         """PRD-163 S5: run the planner for missions created with

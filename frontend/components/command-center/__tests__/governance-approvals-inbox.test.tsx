@@ -22,6 +22,22 @@ vi.mock('@/hooks/use-approval-grants', () => ({
   useRevokeApproval: () => ({ isLoading: false, mutateAsync: revokeMutate }),
 }))
 
+// PRD-200 S3: parked missions are the second pending source, composed from the
+// state-filtered mission list.
+const mission = vi.hoisted(() => ({
+  missions: [] as any[],
+  approveMutate: vi.fn().mockResolvedValue({}),
+  rejectMutate: vi.fn().mockResolvedValue({}),
+  planMutate: vi.fn().mockResolvedValue({}),
+}))
+
+vi.mock('@/hooks/use-missions-api', () => ({
+  useMissions: () => ({ data: { missions: mission.missions }, isLoading: false, isError: false }),
+  useApproveMission: () => ({ isLoading: false, mutateAsync: mission.approveMutate }),
+  useRejectMission: () => ({ isLoading: false, mutateAsync: mission.rejectMutate }),
+  useUpdateMissionPlan: () => ({ isLoading: false, mutateAsync: mission.planMutate }),
+}))
+
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
 }))
@@ -63,8 +79,27 @@ function setGrants(grants: ApprovalGrant[]) {
   mockUse.mockReturnValue({ data: { grants }, isLoading: false, isError: false } as any)
 }
 
+function setMissions(missions: any[]) {
+  mission.missions = missions
+}
+
+function parkedMission(overrides?: Record<string, unknown>): any {
+  return {
+    id: 'm1',
+    workspace_id: 'ws',
+    goal: 'Draft the Q4 board memo',
+    state: 'awaiting_approval',
+    plan: { tasks: [{ sequence_number: 1, title: 'Research', agent_role: 'researcher' }] },
+    config: { approval_estimated_cost_usd: 4.2 },
+    token_budget_estimate: 12000,
+    created_at: '2026-07-11T10:00:00Z',
+    ...overrides,
+  }
+}
+
 describe('ApprovalsInbox — PRD-196 S1', () => {
   beforeEach(() => {
+    setMissions([])
     grantMutate.mockClear()
     denyMutate.mockClear()
     revokeMutate.mockClear()
@@ -109,5 +144,64 @@ describe('ApprovalsInbox — PRD-196 S1', () => {
     setGrants([])
     render(<ApprovalsInbox />)
     expect(screen.getByText(/No approvals pending/)).toBeInTheDocument()
+  })
+})
+
+describe('ApprovalsInbox — PRD-200 S3 parked missions', () => {
+  beforeEach(() => {
+    setGrants([])
+    setMissions([])
+    mission.approveMutate.mockClear()
+    mission.rejectMutate.mockClear()
+    mission.planMutate.mockClear()
+  })
+
+  it('surfaces an awaiting_approval mission in Pending with subject, cost, and approve/edit/reject', () => {
+    setMissions([parkedMission()])
+    render(<ApprovalsInbox />)
+    expect(screen.getByText(/Draft the Q4 board memo/)).toBeInTheDocument()
+    expect(screen.getByText(/est\. \$4\.20/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Approve/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Edit/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Reject/ })).toBeInTheDocument()
+  })
+
+  it('Approve and Reject call the mission APIs with the mission id', () => {
+    setMissions([parkedMission({ id: 'm7' })])
+    render(<ApprovalsInbox />)
+    fireEvent.click(screen.getByRole('button', { name: /Approve/ }))
+    expect(mission.approveMutate).toHaveBeenCalledWith({ id: 'm7', body: {} })
+    fireEvent.click(screen.getByRole('button', { name: /Reject/ }))
+    expect(mission.rejectMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'm7' }),
+    )
+  })
+
+  it('Edit reveals the plan tasks and reassigning an agent PATCHes the plan', () => {
+    setMissions([parkedMission({ id: 'm9' })])
+    render(<ApprovalsInbox />)
+    fireEvent.click(screen.getByRole('button', { name: /Edit/ }))
+    const input = screen.getByRole('textbox', { name: /Agent for task 1/ })
+    fireEvent.change(input, { target: { value: 'analyst' } })
+    fireEvent.blur(input)
+    expect(mission.planMutate).toHaveBeenCalledWith({
+      id: 'm9',
+      body: { task_edits: [{ sequence_number: 1, agent_role: 'analyst' }] },
+    })
+  })
+
+  it('counts parked missions alongside grants in the Pending header', () => {
+    setGrants([grant()])
+    setMissions([parkedMission()])
+    render(<ApprovalsInbox />)
+    expect(screen.getByText('(2)')).toBeInTheDocument()
+  })
+
+  it('a missions-query with no parked plans leaves the grants inbox unchanged', () => {
+    setGrants([grant()])
+    setMissions([])
+    render(<ApprovalsInbox />)
+    expect(screen.getByRole('button', { name: /Grant/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Approve$/ })).not.toBeInTheDocument()
   })
 })
