@@ -79,6 +79,12 @@ class OrchestratedRequest:
     # Timing
     preparation_time_ms: float
 
+    # PRD-201 S1: the per-turn context-assembly trace (mode, per-section
+    # token/trim detail, model, budget ceiling). Persisted on messages.context_trace
+    # for the assistant turn so "what did Auto know?" is answerable. None when
+    # the build predates this or produced no trace.
+    context_trace: Optional[Dict[str, Any]] = None
+
 
 @dataclass
 class ConversationState:
@@ -261,6 +267,7 @@ class SmartChatOrchestrator:
             user_name=context.user_name or self.state.user_name,
             intent=intent_result.primary_intent,
             intent_confidence=intent_result.confidence,
+            context_trace=context.to_assembly_trace(),  # PRD-201 S1
             requires_tools=bool(context.tools) or intent_result.requires_tools,
             requires_memory=intent_result.requires_memory,
             preparation_time_ms=preparation_time,

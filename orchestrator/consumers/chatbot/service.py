@@ -390,12 +390,17 @@ class ChatService:
         attachments: Optional[List[Dict[str, Any]]] = None,
         workspace_id: Optional[str] = None,
         retrieval_context: Optional[Dict[str, Any]] = None,
+        context_trace: Optional[Dict[str, Any]] = None,
     ) -> Message:
         """Save a message to the database.
 
         ``retrieval_context`` (PRD-185 S7) carries the turn's retrieved
         ``{document_ids, chunk_ids, query}`` on assistant messages; NULL for
         turns that retrieved nothing. Read back at vote time to feed rag_feedback.
+
+        ``context_trace`` (PRD-201 S1) carries the turn's context-assembly trace
+        (mode, per-section token/trim detail, model, budget ceiling) so "what did
+        Auto know?" is answerable; NULL for turns built before it shipped.
         """
         try:
             chat_uuid = uuid.UUID(chat_id)
@@ -440,6 +445,7 @@ class ChatService:
             parts=parts,
             attachments=attachments or [],
             retrieval_context=retrieval_context,
+            context_trace=context_trace,
             created_at=datetime.utcnow()
         )
         self.db.add(message)
@@ -2273,6 +2279,8 @@ class StreamingChatService:
                 parts=assistant_parts, workspace_id=self.workspace_id,
                 # PRD-185 S7: stamp the turn's retrieved doc ids for vote feedback.
                 retrieval_context=self._turn_retrieval_context(latest_text),
+                # PRD-201 S1: persist the assembly trace for this turn.
+                context_trace=getattr(orchestrated, "context_trace", None),
             )
 
             # Post-response: memory, metrics, eval
