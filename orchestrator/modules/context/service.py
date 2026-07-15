@@ -528,18 +528,21 @@ class ContextService:
             reserved_for_messages=0,
         )
 
+        reserved_response = base.reserved_for_response
+        reserved_messages = base.reserved_for_messages
+
         if config.max_tokens is not None:
+            # A deliberate per-mode cap keeps its designed reservations (e.g. the
+            # heartbeat tick's 8000/2048) — no scaling.
             total = config.max_tokens
         else:
             total = get_context_window(model or "", db_session) or base.total
-
-        reserved_response = base.reserved_for_response
-        reserved_messages = base.reserved_for_messages
-        if 0 < total < base.total:
-            # Small window — shrink the absolute reservations to fit.
-            scale = total / base.total
-            reserved_response = max(512, int(reserved_response * scale))
-            reserved_messages = int(reserved_messages * scale)
+            if 0 < total < base.total:
+                # Small MODEL window — shrink the 128k-sized absolute reservations
+                # so available_for_sections never goes negative.
+                scale = total / base.total
+                reserved_response = max(512, int(reserved_response * scale))
+                reserved_messages = int(reserved_messages * scale)
 
         return TokenBudget(
             total=total,
