@@ -16,12 +16,10 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from modules.context.estimator import TokenEstimator
+from core.context_guard import count_tokens
 from modules.context.sections.base import BaseSection, SectionContext
 
 logger = logging.getLogger(__name__)
-
-_estimator = TokenEstimator()
 
 # Overhead per message in tokens (role + delimiters).
 _MESSAGE_OVERHEAD_TOKENS = 4
@@ -117,7 +115,7 @@ class ConversationSection(BaseSection):
         The most recent messages are preserved (trimming from the front).
         """
         total = sum(
-            _estimator.estimate(m.get("content", "")) + _MESSAGE_OVERHEAD_TOKENS
+            count_tokens(m.get("content", "")) + _MESSAGE_OVERHEAD_TOKENS
             for m in messages
         )
 
@@ -129,7 +127,7 @@ class ConversationSection(BaseSection):
         while trimmed and total > budget_tokens:
             dropped = trimmed.pop(0)
             total -= (
-                _estimator.estimate(dropped.get("content", ""))
+                count_tokens(dropped.get("content", ""))
                 + _MESSAGE_OVERHEAD_TOKENS
             )
 

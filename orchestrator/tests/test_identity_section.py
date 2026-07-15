@@ -47,16 +47,22 @@ class _FakePersonality:
 _personality_stub.AutomatosPersonality = _FakePersonality
 _personality_stub.load_orchestrator_settings = lambda ws_id: {}
 
-# Stub context estimator
-_estimator_stub = types.ModuleType("modules.context.estimator")
+# PRD-201 S2: base.py counts + truncates via core.context_guard now (the char/4
+# TokenEstimator was deleted). Stub core.context_guard (cheap, no tiktoken) so
+# the section still loads in isolation with the char/4 behaviour the assertions
+# were written against.
+_cg_stub = types.ModuleType("core.context_guard")
+_cg_stub.count_tokens = lambda text: len(text or "") // 4
 
 
-class _FakeEstimator:
-    def estimate(self, text):
-        return len(text) // 4
+def _cg_truncate(text, max_tokens, *, suffix=""):
+    if not text or max_tokens <= 0:
+        return text
+    limit = max_tokens * 4
+    return text if len(text) <= limit else text[:limit] + suffix
 
 
-_estimator_stub.TokenEstimator = _FakeEstimator
+_cg_stub.truncate_to_token_budget = _cg_truncate
 
 
 def _load_sections_isolated():
@@ -74,7 +80,7 @@ def _load_sections_isolated():
         "consumers.chatbot.personality",
         "modules",
         "modules.context",
-        "modules.context.estimator",
+        "core.context_guard",
         "modules.context.sections",
         "modules.context.sections.base",
     )
@@ -94,7 +100,7 @@ def _load_sections_isolated():
             _pkg.__path__ = []
             sys.modules[_name] = _pkg
         sys.modules["consumers.chatbot.personality"] = _personality_stub
-        sys.modules["modules.context.estimator"] = _estimator_stub
+        sys.modules["core.context_guard"] = _cg_stub
 
         # Now load base and identity
         _base_mod = importlib.util.module_from_spec(

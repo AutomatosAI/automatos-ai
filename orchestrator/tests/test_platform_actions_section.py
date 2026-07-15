@@ -43,7 +43,7 @@ _DISCOVERY = _ORCH / "modules" / "tools" / "discovery"
 # the import-time block so collection of sibling modules sees no fakes.
 # ---------------------------------------------------------------------------
 _IMPORT_KEYS = (
-    "modules.context.estimator",
+    "core.context_guard",
     "modules.context.sections",
     "modules.context.sections.base",
     "modules.context.sections.platform_actions",
@@ -109,14 +109,20 @@ _stub_config_module = ModuleType("config")
 _stub_config_module.config = _StubConfig()
 
 
-class _NoopEstimator:
-    def estimate(self, content: str) -> int:
-        # Cheap surrogate so we don't depend on tiktoken here.
-        return len(content) // 4 + 1
+# PRD-201 S2: base.py counts + truncates via core.context_guard (the char/4
+# TokenEstimator was deleted). Stub it (cheap, no tiktoken) for isolated load.
+_cg_mod = ModuleType("core.context_guard")
+_cg_mod.count_tokens = lambda content: len(content or "") // 4 + 1
 
 
-_estimator_mod = ModuleType("modules.context.estimator")
-_estimator_mod.TokenEstimator = _NoopEstimator
+def _cg_truncate(text, max_tokens, *, suffix=""):
+    if not text or max_tokens <= 0:
+        return text
+    limit = max_tokens * 4
+    return text if len(text) <= limit else text[:limit] + suffix
+
+
+_cg_mod.truncate_to_token_budget = _cg_truncate
 
 
 # Real ActionRegistry classes exposed under the dotted name the section imports.
@@ -184,11 +190,11 @@ def _restore_runtime_stubs() -> None:
 # Import-time block: install just enough to bind BaseSection / SectionContext /
 # PlatformActionsSection from disk, then restore sys.modules. The section's
 # top-level import is ``from modules.context.sections.base import ...``; base's
-# is ``from modules.context.estimator import TokenEstimator`` — both resolve
-# from the dotted stubs we install here. config / registry / index are only
-# touched at render() time, so they stay out of the import entirely.
+# is ``from core.context_guard import count_tokens, truncate_to_token_budget``
+# — both resolve from the stubs we install here. config / registry / index are
+# only touched at render() time, so they stay out of the import entirely.
 # ---------------------------------------------------------------------------
-sys.modules["modules.context.estimator"] = _estimator_mod
+sys.modules["core.context_guard"] = _cg_mod
 
 _sections_pkg = ModuleType("modules.context.sections")
 _sections_pkg.__path__ = [str(_SECTIONS)]

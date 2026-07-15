@@ -73,6 +73,22 @@ class Tracer:
     ) -> None:
         raise NotImplementedError
 
+    def trace_assembly(
+        self,
+        *,
+        trace: Dict[str, Any],
+        workspace_id: Any = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """PRD-201 S1: emit one context-assembly trace span.
+
+        The *durable* per-turn record is written separately (JSONB on the turn
+        row) so "what did Auto know?" is answerable offline even with tracing
+        OFF — this method only mirrors that record onto the live Langfuse plane
+        when it is enabled.
+        """
+        raise NotImplementedError
+
 
 class NoOpTracer(Tracer):
     """The default. Every method returns immediately — zero overhead, zero egress."""
@@ -81,6 +97,9 @@ class NoOpTracer(Tracer):
         return None
 
     def score_retrieval(self, **_: Any) -> None:
+        return None
+
+    def trace_assembly(self, **_: Any) -> None:
         return None
 
 
@@ -147,6 +166,30 @@ class LangfuseTracer(Tracer):
             # Two scores: the raw top similarity, and a binary "was it grounded".
             self._score(span, "retrieval_top_score", float(top_score))
             self._score(span, "retrieval_grounded", 1.0 if status == STATUS_HIT else 0.0)
+
+    def trace_assembly(
+        self,
+        *,
+        trace: Dict[str, Any],
+        workspace_id: Any = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        md: Dict[str, Any] = {"workspace_id": str(workspace_id) if workspace_id else None}
+        if metadata:
+            md.update(metadata)
+        # Fold the small trace shape onto the span metadata — section/token/trim
+        # detail only, never rendered content (keys-only privacy posture).
+        if isinstance(trace, dict):
+            md.update({k: v for k, v in trace.items() if k != "sections"})
+            md["section_count"] = len(trace.get("sections") or [])
+        mode = (trace or {}).get("mode") if isinstance(trace, dict) else None
+        with self._client.start_as_current_span(name=f"assembly:{mode or 'context'}") as span:
+            span.update(metadata=md)
+            # One score: budget honesty — assembled fraction of the ceiling.
+            total = (trace or {}).get("budget_total") or 0
+            est = (trace or {}).get("token_estimate") or 0
+            if total:
+                self._score(span, "assembly_budget_fraction", float(est) / float(total))
 
     @staticmethod
     def _score(span: Any, name: str, value: float) -> None:
@@ -284,3 +327,26 @@ def fire_retrieval_score(
         )
     except Exception:
         logger.debug("[tracing] retrieval score failed", exc_info=True)
+
+
+def fire_assembly_trace(
+    *,
+    trace: Dict[str, Any],
+    workspace_id: Any = None,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Emit a context-assembly trace span (PRD-201 S1). Guarded — never fails a build.
+
+    This mirrors the assembled trace onto the live Langfuse plane when tracing
+    is ON. It is *not* the durable record: the answerable per-turn/run row is
+    the JSONB the assembler hands back on ``ContextResult.to_assembly_trace()``,
+    persisted by the turn writer regardless of ``TRACING_ENABLED``.
+    """
+    try:
+        get_tracer().trace_assembly(
+            trace=trace,
+            workspace_id=workspace_id,
+            metadata=metadata,
+        )
+    except Exception:
+        logger.debug("[tracing] assembly trace failed", exc_info=True)

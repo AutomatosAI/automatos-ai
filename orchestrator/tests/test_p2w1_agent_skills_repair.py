@@ -107,20 +107,26 @@ def test_agent_skills_relationship_ordered_by_priority():
 #    same fake-graph technique as tests/test_skills_section.py)
 # ---------------------------------------------------------------------------
 
-_estimator_stub = types.ModuleType("modules.context.estimator")
+# PRD-201 S2: base.py counts + truncates via core.context_guard (the char/4
+# TokenEstimator was deleted). Stub core.context_guard (cheap, no tiktoken) so
+# base loads in isolation with the char/4 behaviour the assertions expect.
+_cg_stub = types.ModuleType("core.context_guard")
+_cg_stub.count_tokens = lambda text: len(text or "") // 4
 
 
-class _FakeEstimator:
-    def estimate(self, text):
-        return len(text) // 4
+def _cg_truncate(text, max_tokens, *, suffix=""):
+    if not text or max_tokens <= 0:
+        return text
+    limit = max_tokens * 4
+    return text if len(text) <= limit else text[:limit] + suffix
 
 
-_estimator_stub.TokenEstimator = _FakeEstimator
+_cg_stub.truncate_to_token_budget = _cg_truncate
 
 
 def _load_skills_section():
     keys = (
-        "modules", "modules.context", "modules.context.estimator",
+        "modules", "modules.context", "core.context_guard",
         "modules.context.sections", "modules.context.sections.base",
     )
     saved = {k: sys.modules.get(k) for k in keys}
@@ -129,7 +135,7 @@ def _load_skills_section():
             pkg = types.ModuleType(name)
             pkg.__path__ = []
             sys.modules[name] = pkg
-        sys.modules["modules.context.estimator"] = _estimator_stub
+        sys.modules["core.context_guard"] = _cg_stub
         base = importlib.util.module_from_spec(importlib.util.spec_from_file_location(
             "modules.context.sections.base", _ROOT / "modules/context/sections/base.py"))
         sys.modules["modules.context.sections.base"] = base

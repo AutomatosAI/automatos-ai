@@ -14,12 +14,10 @@ import logging
 from dataclasses import dataclass
 from typing import Optional
 
-from modules.context.estimator import TokenEstimator
+from core.context_guard import count_tokens, truncate_to_token_budget
 from modules.context.modes import ContextMode
 
 logger = logging.getLogger(__name__)
-
-_estimator = TokenEstimator()
 
 
 @dataclass(frozen=True)
@@ -80,8 +78,12 @@ class TokenBudgetManager:
         capped: list[RenderedSection] = []
         for section in sections:
             if section.max_tokens is not None and section.token_estimate > section.max_tokens:
-                truncated_content = section.content[: section.max_tokens * 4]
-                new_estimate = _estimator.estimate(truncated_content)
+                # PRD-201 S2: cap on a token boundary (was a char slice that cut
+                # mid-word / mid-JSON). No suffix — a capped section stays clean.
+                truncated_content = truncate_to_token_budget(
+                    section.content, section.max_tokens, suffix=""
+                )
+                new_estimate = count_tokens(truncated_content)
                 saved = section.token_estimate - new_estimate
                 logger.warning(
                     "[TokenBudgetManager] Capped section '%s' from %d to %d tokens (saved %d)",

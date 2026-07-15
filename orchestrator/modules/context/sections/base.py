@@ -13,12 +13,9 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from modules.context.estimator import TokenEstimator
+from core.context_guard import count_tokens, truncate_to_token_budget
 
 logger = logging.getLogger(__name__)
-
-# Shared estimator instance — stateless, safe to reuse.
-_estimator = TokenEstimator()
 
 
 @dataclass
@@ -66,17 +63,16 @@ class BaseSection(ABC):
         ...
 
     def estimate_tokens(self, content: str) -> int:
-        """Estimate token count for rendered content."""
-        return _estimator.estimate(content)
+        """Token count for rendered content (PRD-201 S2: one tokenizer)."""
+        return count_tokens(content)
 
     def truncate(self, content: str, max_tokens: int) -> str:
         """Truncate *content* so it fits within *max_tokens*.
 
-        Uses the fast char-based heuristic (4 chars ≈ 1 token).
+        PRD-201 S2 — lands on a token boundary (via the shared
+        ``truncate_to_token_budget``) instead of a char slice that cut mid-word
+        / mid-JSON. No suffix so a capped section stays clean.
         """
         if not content:
             return content
-        max_chars = max_tokens * 4
-        if len(content) <= max_chars:
-            return content
-        return content[:max_chars]
+        return truncate_to_token_budget(content, max_tokens, suffix="")
