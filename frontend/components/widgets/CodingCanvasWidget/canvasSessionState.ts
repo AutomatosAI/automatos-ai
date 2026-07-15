@@ -28,7 +28,7 @@ export type CanvasSessionStatus =
   | 'failed'
 
 export interface CanvasTurnItem {
-  kind: 'text' | 'tool_call' | 'file_edit'
+  kind: 'text' | 'tool_call' | 'file_edit' | 'user'
   text?: string
   toolName?: string
   path?: string | null
@@ -144,6 +144,20 @@ export function reduceCanvasEvent(
     default:
       return state
   }
+}
+
+/**
+ * Optimistically append the user's prompt as a turn (PRD-203 C·S7) so the
+ * composer echoes it immediately; the agent's streamed reply follows via the
+ * SSE event fold. Pure + immutable — empty/whitespace prompts are a no-op.
+ */
+export function appendUserPrompt(
+  state: CanvasSessionUiState,
+  text: string
+): CanvasSessionUiState {
+  const trimmed = text.trim()
+  if (!trimmed) return state
+  return { ...state, turns: [...state.turns, { kind: 'user', text: trimmed }] }
 }
 
 /** Resolve (drop) a pending permission request once approved/denied (S4). */

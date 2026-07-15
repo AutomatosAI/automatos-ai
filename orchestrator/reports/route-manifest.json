@@ -1,5 +1,5 @@
 {
-  "route_count": 763,
+  "route_count": 764,
   "routes": [
     {
       "method": "GET",
@@ -2884,6 +2884,10 @@
     {
       "method": "GET",
       "path": "/api/workspaces/{workspace_id}/canvas/events"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspaces/{workspace_id}/canvas/message"
     },
     {
       "method": "DELETE",

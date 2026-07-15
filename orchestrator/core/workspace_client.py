@@ -283,6 +283,25 @@ class WorkspaceClient:
         except (httpx.ConnectError, httpx.TimeoutException) as err:
             return _connection_error("canvas_session_auto_accept", err)
 
+    async def canvas_session_send(self, prompt: str) -> Dict[str, Any]:
+        """Send a user prompt to the workspace's live canvas session (PRD-203 C·S7).
+
+        The turn ingress that makes the canvas usable: the worker calls
+        ``client.query(prompt)`` and streams the resulting turns back over the
+        canvas event stream.
+        """
+        client = _get_client()
+        url = _worker_url(self.workspace_id, "/canvas/session/message")
+        try:
+            resp = await client.post(url, json={"prompt": prompt})
+            if resp.status_code != 200:
+                return {"success": False, "error": _parse_error(resp), "status_code": resp.status_code}
+            data = resp.json()
+            data.setdefault("success", True)
+            return data
+        except (httpx.ConnectError, httpx.TimeoutException) as err:
+            return _connection_error("canvas_session_send", err)
+
     # ── Git ────────────────────────────────────────────────────────
 
     async def git(

@@ -285,6 +285,39 @@ class CanvasSessionManager:
         live.auto_accept_edits = bool(enabled)
         return {"success": True, "auto_accept_edits": live.auto_accept_edits}
 
+    # ── Turn ingress (PRD-203 C·S7) ──────────────────────────────────
+
+    async def send_message(self, workspace_id: str, prompt: str) -> Dict[str, Any]:
+        """Send a user turn to the live session's SDK client.
+
+        This is the call that today exists NOWHERE: a streaming-mode SDK client
+        connects and idles until it receives a query. ``start_session`` connects
+        + pumps received messages; this feeds it the prompt so the agent actually
+        works. The pump (already running) streams the resulting turns back out as
+        canvas events. Returns ``not_found`` if there is no live session.
+        """
+        prompt = (prompt or "").strip()
+        if not prompt:
+            return {"success": False, "error": "Empty prompt"}
+
+        live = self._live.get(workspace_id)
+        if live is None or live.state.status not in _ACTIVE_STATUSES:
+            return {
+                "success": False,
+                "not_found": True,
+                "error": f"No live canvas session for workspace {workspace_id}",
+            }
+
+        try:
+            await live.client.query(prompt)
+        except Exception as exc:  # noqa: BLE001 — surfaced to the caller
+            logger.error(
+                "Canvas query failed for %s: %s", workspace_id[:8], exc
+            )
+            return {"success": False, "error": f"Failed to send prompt: {exc}"}
+
+        return {"success": True}
+
     # ── Lifecycle ────────────────────────────────────────────────────
 
     async def start_session(self, workspace_id: str) -> Dict[str, Any]:

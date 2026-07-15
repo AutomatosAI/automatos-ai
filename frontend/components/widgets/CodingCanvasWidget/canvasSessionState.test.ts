@@ -16,6 +16,7 @@ import {
   initialCanvasSessionState,
   reduceCanvasEvent,
   resolvePermission,
+  appendUserPrompt,
   type CanvasSessionUiState,
 } from './canvasSessionState'
 
@@ -151,5 +152,29 @@ describe('reduceCanvasEvent', () => {
       'tool_call',
       'file_edit',
     ])
+  })
+})
+
+describe('appendUserPrompt (C·S7 send action)', () => {
+  it('appends the user prompt as a user turn, immutably', () => {
+    const next = appendUserPrompt(initialCanvasSessionState, 'add validation to X')
+    expect(next).not.toBe(initialCanvasSessionState) // new object
+    expect(initialCanvasSessionState.turns).toHaveLength(0) // original untouched
+    expect(next.turns).toEqual([{ kind: 'user', text: 'add validation to X' }])
+  })
+
+  it('trims whitespace and ignores empty prompts', () => {
+    const trimmed = appendUserPrompt(initialCanvasSessionState, '   hello   ')
+    expect(trimmed.turns).toEqual([{ kind: 'user', text: 'hello' }])
+
+    const noop = appendUserPrompt(initialCanvasSessionState, '   ')
+    expect(noop).toBe(initialCanvasSessionState) // no-op returns same state
+  })
+
+  it('preserves prior turns and appends after them', () => {
+    const first = appendUserPrompt(initialCanvasSessionState, 'first')
+    const second = appendUserPrompt(first, 'second')
+    expect(second.turns.map((t) => t.text)).toEqual(['first', 'second'])
+    expect(second.turns.every((t) => t.kind === 'user')).toBe(true)
   })
 })

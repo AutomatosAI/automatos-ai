@@ -14,7 +14,8 @@
  * this component is presentation only.
  */
 
-import { Loader2, Play, Square, Sparkles } from 'lucide-react'
+import { useState } from 'react'
+import { Loader2, Play, Send, Square, Sparkles } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -51,6 +52,14 @@ export function CanvasSessionPanel({ session, workspaceId }: CanvasSessionPanelP
   const { ui, approvals, starting, startError } = session
   const isLive = ui.status === 'running' || ui.status === 'starting'
   const pendingCards = approvals.cards.filter((c) => c.status === 'pending')
+  const [prompt, setPrompt] = useState('')
+
+  const submitPrompt = () => {
+    const text = prompt.trim()
+    if (!text) return
+    void session.send(text)
+    setPrompt('')
+  }
 
   return (
     <div className="flex h-full flex-col border-l border-border bg-background" data-testid="canvas-session-panel">
@@ -125,6 +134,41 @@ export function CanvasSessionPanel({ session, workspaceId }: CanvasSessionPanelP
         </div>
       </ScrollArea>
 
+      {/* Prompt composer (PRD-203 C·S7) — the box to instruct Auto. */}
+      {isLive && (
+        <form
+          className="flex items-end gap-2 border-t border-border p-2"
+          onSubmit={(e) => {
+            e.preventDefault()
+            submitPrompt()
+          }}
+          data-testid="canvas-composer"
+        >
+          <textarea
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                submitPrompt()
+              }
+            }}
+            rows={2}
+            placeholder="Ask Auto to change this workspace…"
+            className="flex-1 resize-none rounded-md border border-border bg-background px-2 py-1.5 text-sm outline-none focus:ring-1 focus:ring-ring"
+            data-testid="canvas-composer-input"
+          />
+          <Button
+            type="submit"
+            size="sm"
+            disabled={!prompt.trim()}
+            data-testid="canvas-composer-send"
+          >
+            <Send className="h-3.5 w-3.5" />
+          </Button>
+        </form>
+      )}
+
       {/* Commit + push the session's work (S5) — shown once a session exists. */}
       {(isLive || ui.status === 'stopped') && (
         <CanvasCommitControl workspaceId={workspaceId} changeSignal={session.treeRefreshTick} />
@@ -134,6 +178,16 @@ export function CanvasSessionPanel({ session, workspaceId }: CanvasSessionPanelP
 }
 
 function TurnRow({ turn }: { turn: CanvasTurnItem }) {
+  if (turn.kind === 'user') {
+    return (
+      <p
+        className="whitespace-pre-wrap rounded-md bg-secondary/50 px-2 py-1 text-sm leading-relaxed"
+        data-testid="user-turn"
+      >
+        {turn.text}
+      </p>
+    )
+  }
   if (turn.kind === 'text') {
     return <p className="whitespace-pre-wrap text-sm leading-relaxed">{turn.text}</p>
   }

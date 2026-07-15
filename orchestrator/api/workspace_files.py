@@ -15,6 +15,7 @@ worker's HTTP server, which has the persistent volume mounted.
   GET    /api/workspaces/{workspace_id}/canvas/events    — SSE event stream (PRD-170 S3)
   POST   /api/workspaces/{workspace_id}/canvas/decision  — approve/deny an edit (PRD-170 S4)
   POST   /api/workspaces/{workspace_id}/canvas/auto-accept — toggle auto-accept (PRD-170 S4)
+  POST   /api/workspaces/{workspace_id}/canvas/message   — send a prompt turn (PRD-203 C·S7)
   GET    /api/workspaces/{workspace_id}/canvas/commit-preview — editable message (PRD-170 S5)
   POST   /api/workspaces/{workspace_id}/canvas/commit    — commit + push branch (PRD-170 S5)
 """
@@ -282,6 +283,10 @@ class CanvasAutoAcceptRequest(BaseModel):
     enabled: bool
 
 
+class CanvasMessageRequest(BaseModel):
+    prompt: str = Field(..., min_length=1, max_length=10000)
+
+
 @router.post("/canvas/decision", dependencies=[Depends(require_workspace_permission("agents:execute"))])
 async def decide_canvas_permission(
     workspace_id: str,
@@ -314,6 +319,32 @@ async def set_canvas_auto_accept(
 
     client = WorkspaceClient(workspace_id)
     result = await client.canvas_session_auto_accept(body.enabled)
+
+    if result.get("success") is False:
+        status = result.get("status_code", 503)
+        raise HTTPException(status_code=status, detail=result["error"])
+
+    return result
+
+
+@router.post("/canvas/message", dependencies=[Depends(require_workspace_permission("agents:execute"))])
+async def send_canvas_message(
+    workspace_id: str,
+    body: CanvasMessageRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """Send a user prompt to the workspace's canvas session (PRD-203 C·S7).
+
+    The turn ingress that lets the canvas be instructed: the worker calls
+    ``client.query(prompt)`` and streams the resulting turns back over the
+    canvas SSE event stream. Tenancy-checked; behind the same ``agents:execute``
+    permission as its start/stop/decision siblings.
+    """
+    if str(ctx.workspace_id) != workspace_id:
+        raise HTTPException(status_code=403, detail="Workspace access denied")
+
+    client = WorkspaceClient(workspace_id)
+    result = await client.canvas_session_send(body.prompt)
 
     if result.get("success") is False:
         status = result.get("status_code", 503)
