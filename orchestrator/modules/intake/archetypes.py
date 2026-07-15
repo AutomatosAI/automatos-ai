@@ -212,10 +212,11 @@ CONTENT_MEDIA = Archetype(
             "/newsletter",
         ],
         "recommended": [
-            "/authors",
+            "/articles",
+            "/category",
+            "/author",
             "/topics",
             "/archive",
-            "/advertise",
             "/rss",
         ],
         "optional_deep": [

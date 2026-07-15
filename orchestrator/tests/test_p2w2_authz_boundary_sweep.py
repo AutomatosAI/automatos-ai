@@ -79,6 +79,10 @@ OWN_AUTH_ROUTES = {
     ("POST", "/api/github/webhook"),
     ("POST", "/api/webhooks/recipe/{webhook_id}"),
     ("POST", "/api/webhooks/ws/{workspace_key}"),
+    # Retell streaming-voice custom-LLM webhook (PRD-203 V·S4) — authenticated by
+    # RETELL_WEBHOOK_SECRET HMAC (verify_webhook_signature, fail-closed), NOT the
+    # shared hybrid dependency; per-call workspace rides Retell dynamic variables.
+    ("POST", "/api/voice/retell/llm"),
     # Shopify machine lane — _verify_internal_key shared-secret auth
     # (api/verticals.py provisioning + GDPR forwarding rides the same key).
     ("POST", "/api/verticals/{vertical}/gdpr/erase"),

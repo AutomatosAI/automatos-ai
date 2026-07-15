@@ -139,7 +139,11 @@ def test_non_shopify_site_gets_nonempty_checklist(urls, expected_slug):
     assert result.archetype.slug == expected_slug
 
     buckets = select_target_urls(result.archetype, urls)
-    assert buckets["must"], "checklist 'must' bucket is empty for a detected archetype"
+    # The regression was archetype=None → BOTH buckets empty. A detected archetype
+    # must yield a non-empty checklist (must ∪ recommended).
+    assert buckets["must"] or buckets["recommended"], (
+        "checklist is empty for a detected archetype (the single-archetype regression)"
+    )
     assert result.archetype.default_team, "default_team is empty (Mission Zero would get [])"
 
 
