@@ -927,7 +927,15 @@ class AgentFactory:
                         workspace_id=agent_runtime.workspace_id,
                         task_description=prompt,
                     )
-                    messages.append({"role": "system", "content": context_result.system_prompt})
+                    # PRD-201 S4: carry the assembler's cache-stable prefix on the
+                    # system message so the Anthropic client can place its
+                    # cache_control breakpoint there. Non-Anthropic providers
+                    # ignore the extra key.
+                    messages.append({
+                        "role": "system",
+                        "content": context_result.system_prompt,
+                        "cache_prefix": context_result.cacheable_prefix,
+                    })
                 else:
                     # Last resort — should not happen
                     messages.append({"role": "system", "content": f"You are agent {agent_runtime.agent_id}."})
@@ -1024,17 +1032,59 @@ class AgentFactory:
             # --- Execute with retries ---
             last_error = None
             messages_snapshot = list(messages)  # snapshot before retry loop
+
+            # PRD-201 S5: generalise ContextGuard beyond chat — missions and
+            # heartbeats now get the same model-aware compaction the chat path
+            # already had, run once before the tool loop. Guarded: a compaction
+            # fault must never fail the run.
+            try:
+                from core.context_guard import ContextGuard as _ContextGuard
+                _guard_model = getattr(
+                    getattr(agent_runtime.llm_manager, "config", None), "model", None
+                ) or ""
+                _compacted, _was_compacted, _guarded_tools = await _ContextGuard().check_and_compact(
+                    messages=messages_snapshot,
+                    model_name=_guard_model,
+                    llm_manager=agent_runtime.llm_manager,
+                    workspace_id=str(agent_runtime.workspace_id),
+                    agent_id=agent_runtime.agent_id,
+                    db_session=self.db_session,
+                    tools=tool_schemas,
+                )
+                if _was_compacted:
+                    messages_snapshot = _compacted
+                    self.logger.info(
+                        "[PRD-201 S5] ContextGuard compacted headless context for agent %s",
+                        agent_id,
+                    )
+                if _guarded_tools is None and tool_schemas:
+                    tool_schemas = []
+                    self.logger.warning(
+                        "[PRD-201 S5] ContextGuard dropped tools (over budget) for agent %s",
+                        agent_id,
+                    )
+            except Exception as _cg_err:
+                self.logger.debug("[PRD-201 S5] ContextGuard skipped: %s", _cg_err)
+
+            from core.llm.request_scope import headless_run
+
             for attempt in range(max(1, max_retries)):
                 try:
                     messages = list(messages_snapshot)  # reset each attempt
-                    response = await agent_runtime.llm_manager.generate_response(messages, tools=tool_schemas)
+                    # PRD-201 S5: mark the Anthropic call as a headless run so the
+                    # client seam emits context-editing + the memory tool.
+                    with headless_run():
+                        response = await agent_runtime.llm_manager.generate_response(messages, tools=tool_schemas)
                     execution_time = time.time() - start_time
 
                     # --- Converged tool loop (PRD-142 W3-S4 / G6): same executor as chat ---
                     from modules.tools.execution.tool_loop import ToolLoopExecutor
 
                     async def _agent_llm_cb(msgs, tls):
-                        return await agent_runtime.llm_manager.generate_response(msgs, tools=tls)
+                        # PRD-201 S5: keep the headless scope across the tool loop's
+                        # re-invocations so every iteration emits context-editing.
+                        with headless_run():
+                            return await agent_runtime.llm_manager.generate_response(msgs, tools=tls)
 
                     # PRD-178 S1 (F020): thread the calling task's field context
                     # so PlatformActionExecutor binds field tools to THIS run's
@@ -1059,6 +1109,22 @@ class AgentFactory:
                         }
 
                     async def _agent_tool_cb(name, args, call_id, ws_id):
+                        # PRD-201 S5: the Anthropic memory tool is client-executed —
+                        # run it against the durable store with the /memories
+                        # traversal guard, never through the platform tool registry.
+                        if name == "memory":
+                            from modules.memory.memory_tool import (
+                                DurableMemoryStoreBackend,
+                                MemoryToolBackend,
+                            )
+                            _mem_result = await MemoryToolBackend(
+                                DurableMemoryStoreBackend(), workspace_id=ws_id
+                            ).handle(args or {})
+                            return {
+                                "success": True,
+                                "llm_context": _mem_result,
+                                "raw_result": _mem_result,
+                            }
                         # SLACK empty-params guard.
                         if not args and "SLACK" in name:
                             return {

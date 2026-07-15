@@ -36,7 +36,7 @@ _DISCOVERY = _ORCH / "modules" / "tools" / "discovery"
 # Watched sys.modules keys — snapshot now, restore after the import-time block.
 # ---------------------------------------------------------------------------
 _IMPORT_KEYS = (
-    "modules.context.estimator",
+    "core.context_guard",
     "modules.context.sections",
     "modules.context.sections.base",
     "modules.context.sections.platform_actions",
@@ -95,13 +95,20 @@ _stub_config_module = ModuleType("config")
 _stub_config_module.config = _StubConfig()
 
 
-class _NoopEstimator:
-    def estimate(self, c: str) -> int:
-        return len(c) // 4 + 1
+# PRD-201 S2: base.py counts + truncates via core.context_guard (the char/4
+# TokenEstimator was deleted). Stub it (cheap, no tiktoken) for isolated load.
+_cg_mod = ModuleType("core.context_guard")
+_cg_mod.count_tokens = lambda c: len(c or "") // 4 + 1
 
 
-_estimator_mod = ModuleType("modules.context.estimator")
-_estimator_mod.TokenEstimator = _NoopEstimator
+def _cg_truncate(text, max_tokens, *, suffix=""):
+    if not text or max_tokens <= 0:
+        return text
+    limit = max_tokens * 4
+    return text if len(text) <= limit else text[:limit] + suffix
+
+
+_cg_mod.truncate_to_token_budget = _cg_truncate
 
 
 _ar_module = ModuleType("modules.tools.discovery.action_registry")
@@ -180,7 +187,7 @@ def _restore_runtime_stubs() -> None:
 # then restore sys.modules (collection-safe). config / registry / index /
 # graph_router are render()-time only, so they stay out of the import.
 # ---------------------------------------------------------------------------
-sys.modules["modules.context.estimator"] = _estimator_mod
+sys.modules["core.context_guard"] = _cg_mod
 
 _sections_pkg = ModuleType("modules.context.sections")
 _sections_pkg.__path__ = [str(_SECTIONS)]

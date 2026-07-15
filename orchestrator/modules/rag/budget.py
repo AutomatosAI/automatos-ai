@@ -27,16 +27,17 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from core.context_guard import count_tokens, get_context_window
-
-# Local encoder for decode-based truncation (counting itself goes through
-# context_guard.count_tokens so there is a single counting definition).
-try:  # pragma: no cover - import guard
-    import tiktoken
-
-    _enc = tiktoken.get_encoding("cl100k_base")
-except Exception:  # pragma: no cover
-    _enc = None
+# PRD-201 S2: token counting AND token-aware truncation both live in
+# core.context_guard now, so retrieval, conversation compaction and context
+# assembly share one definition of "how big is this". ``truncate_to_token_budget``
+# is re-exported here for this module's existing callers (handlers_documents,
+# tool_loop, chatbot service, planning) — the canonical implementation moved but
+# the public name is unchanged.
+from core.context_guard import (
+    count_tokens,
+    get_context_window,
+    truncate_to_token_budget,
+)
 
 # Fraction of a model's context window spent on retrieved RAG context when a
 # caller doesn't pass an explicit budget. The remainder is reserved for the
@@ -173,25 +174,3 @@ def assemble_with_citations(
         lines.append(f"[{entry['citation']}] {ref}")
 
     return "\n".join(lines), source_map
-
-
-def truncate_to_token_budget(
-    text: str,
-    max_tokens: int,
-    *,
-    suffix: str = "\n... (truncated)",
-) -> str:
-    """Truncate ``text`` to at most ``max_tokens`` tokens on a token boundary.
-
-    Replaces char slices like ``text[:6000]``. Falls back to a ~4-chars/token
-    estimate only if tiktoken is unavailable.
-    """
-    if not text or max_tokens <= 0:
-        return text
-    if _enc is None:
-        limit = max_tokens * 4
-        return text if len(text) <= limit else text[:limit] + suffix
-    tokens = _enc.encode(text)
-    if len(tokens) <= max_tokens:
-        return text
-    return _enc.decode(tokens[:max_tokens]) + suffix

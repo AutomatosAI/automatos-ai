@@ -1156,8 +1156,16 @@ class Message(Base):
     # rag_feedback row. NULL for turns that retrieved nothing. Kept off `parts`
     # so it never reaches the AI-SDK render contract.
     retrieval_context = Column(JSONB, nullable=True)
+    # PRD-201 S1: the per-turn context-assembly trace — mode, per-section
+    # {name, priority, token_estimate, rendered_nonempty, trimmed}, the driving
+    # model, the resolved budget ceiling, injected memory ids and prep_ms. The
+    # durable answer to "what did Auto know when it said that?"; written
+    # regardless of TRACING_ENABLED. NULL for turns built before this shipped or
+    # by non-chat planes. Kept off `parts` so it never reaches the AI-SDK render
+    # contract (same discipline as retrieval_context).
+    context_trace = Column(JSONB, nullable=True)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
-    
+
     # Relationships
     chat = relationship("Chat", back_populates="messages")
     votes = relationship("Vote", back_populates="message", cascade="all, delete-orphan")

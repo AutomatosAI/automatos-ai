@@ -56,6 +56,34 @@ def count_tokens(text: str) -> int:
     return max(1, len(text) // 4)
 
 
+def truncate_to_token_budget(
+    text: str,
+    max_tokens: int,
+    *,
+    suffix: str = "\n... (truncated)",
+) -> str:
+    """Truncate ``text`` to at most ``max_tokens`` tokens on a token boundary.
+
+    The single token-aware truncation primitive for the whole platform — it
+    lands on a token boundary rather than mid-word/mid-JSON (what a raw
+    ``text[: max_tokens * 4]`` char slice does). Lives here, beside
+    ``count_tokens``, so the context assembler (PRD-201 S2) and the RAG budgeter
+    share one definition of "how big is this" without the context module having
+    to import the heavier ``modules.rag`` package. ``modules.rag.budget``
+    re-exports this name for its existing callers. Falls back to a ~4-chars/token
+    estimate only when tiktoken is unavailable.
+    """
+    if not text or max_tokens <= 0:
+        return text
+    if _encoding is None:
+        limit = max_tokens * 4
+        return text if len(text) <= limit else text[:limit] + suffix
+    tokens = _encoding.encode(text)
+    if len(tokens) <= max_tokens:
+        return text
+    return _encoding.decode(tokens[:max_tokens]) + suffix
+
+
 def count_message_tokens(messages: List[Dict[str, Any]]) -> int:
     """
     Estimate total tokens across all messages.
