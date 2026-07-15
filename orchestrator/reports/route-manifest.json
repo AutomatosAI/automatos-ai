@@ -1,5 +1,5 @@
 {
-  "route_count": 762,
+  "route_count": 763,
   "routes": [
     {
       "method": "GET",
@@ -2440,6 +2440,10 @@
     {
       "method": "POST",
       "path": "/api/voice/profiles/{profile_id}/preview"
+    },
+    {
+      "method": "POST",
+      "path": "/api/voice/retell/llm"
     },
     {
       "method": "GET",

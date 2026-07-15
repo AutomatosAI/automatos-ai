@@ -1158,6 +1158,15 @@ class Config:
     VOICE_MAX_AUDIO_SIZE_MB: int = int(os.getenv("VOICE_MAX_AUDIO_SIZE_MB", "25"))
     AUTO_VOICE_PROVIDER: str = os.getenv("AUTO_VOICE_PROVIDER", "chatterbox")
 
+    # PRD-203 V·S4: streaming voice transport (§8-Qa vendor = Retell). Retell
+    # handles STT/TTS/turn-taking/barge-in and posts transcripts to Auto's own
+    # agent loop via the custom-LLM webhook (api/voice_retell.py). Keys unset →
+    # the webhook fails closed (honest-degrade, §8-Qd). The self-hosted pod path
+    # (VoiceServiceClient) stays as the fallback; retiring it is cross-repo (§8-Qa).
+    RETELL_API_KEY: str = os.getenv("RETELL_API_KEY", "")
+    RETELL_WEBHOOK_SECRET: str = os.getenv("RETELL_WEBHOOK_SECRET", "")
+    RETELL_AGENT_ID: str = os.getenv("RETELL_AGENT_ID", "")
+
     def validate_security(self) -> None:
         """PRD-172: fail-closed validation of tenant-isolation secrets.
 

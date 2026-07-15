@@ -92,11 +92,10 @@ export function MultimodalInput({
             content: response.response_text,
             parts: [
               { type: 'text' as const, text: response.response_text },
-              ...((response.audio_base64 || response.audio_url) ? [{
+              ...(response.audio_url ? [{
                 type: 'voice' as const,
                 transcript: response.response_text,
                 audioUrl: getVoiceAudioUrl(response.message_id),
-                audioBase64: response.audio_base64 || undefined,
               }] : []),
             ],
           }
