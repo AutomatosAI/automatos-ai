@@ -54,6 +54,7 @@ from canvas_events import (
     session_status_event,
 )
 from workspace_manager import WorkspaceManager
+from worker_config import model_auth_env
 
 logger = logging.getLogger("workspace-worker.canvas")
 
@@ -342,6 +343,35 @@ class CanvasSessionManager:
             "permission_mode": "default",
             "can_use_tool": self._make_tool_gate(workspace_id, root),
         }
+
+        # PRD-203 C·S8: thread the model credential into the SDK subprocess env.
+        # Without it the streaming SDK client connects and idles forever (no auth).
+        # Fail fast + greppable on the real SDK path when none is configured —
+        # never a silent idle. (Injected test factories skip the guard.)
+        auth_env = model_auth_env()
+        if auth_env:
+            option_kwargs["env"].update(auth_env)
+        elif self._factory is _default_sdk_client_factory:
+            self._live.pop(workspace_id, None)
+            state.status = STATUS_FAILED
+            state.last_error = "missing model credential"
+            state.updated_at = _utcnow()
+            self._persist(root, state)
+            logger.error(
+                "Canvas session start for %s: no model credential — set "
+                "CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY on the "
+                "workspace-worker service (PRD-203 C·S8).",
+                workspace_id[:8],
+            )
+            return {
+                "success": False,
+                "error": (
+                    "Canvas worker has no model credential — set "
+                    "CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY on the "
+                    "workspace-worker service (PRD-203 C·S8)."
+                ),
+            }
+
         if resume_id:
             option_kwargs["resume"] = resume_id
 
