@@ -443,6 +443,17 @@ async def resume_playbook_run_grant(db: Session, grant) -> None:
     details = dict(grant.details) if isinstance(grant.details, dict) else {}
     action = details.get("watch_action")
 
+    # The S8 mission-action executors register on import (deferred to avoid
+    # a module cycle: watch_actions imports from this module).
+    try:
+        import services.watch_actions  # noqa: F401
+    except Exception:
+        logger.warning(
+            "[WatchRerun] watch_actions import failed -- mission actions "
+            "unavailable for grant resume",
+            exc_info=True,
+        )
+
     try:
         if action == "rerun":
             result = await _resume_rerun(db, grant, details)

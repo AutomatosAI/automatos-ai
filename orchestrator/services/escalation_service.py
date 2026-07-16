@@ -101,6 +101,70 @@ def check_blocked_escalations(db: Session, workspace_id) -> int:
 # orchestration_board_bridge, so a second escalation card added nothing.
 
 
+def escalate_watch(
+    db: Session,
+    workspace_id,
+    watch,
+    reason: str,
+) -> Optional[BoardTask]:
+    """PRD-204 S8: hand a watch to a human via a board card.
+
+    A watch-flavoured SIBLING of ``escalate_stalled_task`` -- deliberately
+    NOT an overload of the stall semantics (different tags, different copy,
+    different dedupe key). One open escalation card per watch; the
+    ``watch_escalation`` notification is dispatched by the caller
+    (watch_actions), not here -- this module stays sync + DB-only.
+    """
+    watch_id = str(getattr(watch, "id", ""))
+    title = getattr(watch, "title", None) or "watched work"
+
+    existing = (
+        db.query(BoardTask.id)
+        .filter(
+            BoardTask.workspace_id == workspace_id,
+            BoardTask.tags.contains(["escalation", f"watch:{watch_id}"]),
+            BoardTask.status.notin_(["done"]),
+        )
+        .first()
+    )
+    if existing:
+        return None
+
+    target_type = getattr(watch, "target_type", "?")
+    target_id = getattr(watch, "target_id", "?")
+    actions_taken = getattr(watch, "actions_taken", 0) or 0
+    budget = getattr(watch, "action_budget", 0) or 0
+
+    escalation = BoardTask(
+        workspace_id=workspace_id,
+        title=f"Watch escalation: '{title[:90]}'",
+        description=(
+            f"The watcher is handing this to a human.\n\n"
+            f"**Reason:** {reason}\n\n"
+            f"**Watched target:** {target_type}:{target_id}\n"
+            f"**Corrective actions used:** {actions_taken}/{budget}\n\n"
+            f"Review the watch timeline and decide: rerun, replan, reassign, "
+            f"or accept the outcome."
+        ),
+        status="inbox",
+        priority="high",
+        review_mode="human",
+        created_by_type="system",
+        created_by_id="watch_decider",
+        tags=["escalation", f"watch:{watch_id}"],
+    )
+    db.add(escalation)
+    db.flush()
+
+    logger.warning(
+        "Created watch escalation card for watch %s in workspace %s: %s",
+        watch_id,
+        workspace_id,
+        reason,
+    )
+    return escalation
+
+
 def escalate_stalled_task(
     db: Session,
     workspace_id,
