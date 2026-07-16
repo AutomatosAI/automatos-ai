@@ -85,17 +85,21 @@ class TestS3BackendPooling:
             async def initialize(self):
                 pass
 
+        # PRD-197 S5: the pool is backend-agnostic — pin the config to the S3
+        # path and fake that backend; pgvector-local shares the same seam.
+        import config as config_mod
+        monkeypatch.setattr(config_mod.config, "S3_VECTORS_ENABLED", True, raising=False)
         monkeypatch.setattr(
             "modules.search.vector_store.backends.s3_vectors_backend.S3VectorsBackend",
             FakeBackend,
         )
 
         rag = svc.RAGService.__new__(svc.RAGService)  # bypass __init__ (no DB)
-        rag._s3_backends = {}
+        rag._doc_backends = {}
 
-        b1 = await rag._get_s3_backend("ws1")
-        b2 = await rag._get_s3_backend("ws1")
-        b3 = await rag._get_s3_backend("ws2")
+        b1 = await rag._get_doc_backend("ws1")
+        b2 = await rag._get_doc_backend("ws1")
+        b3 = await rag._get_doc_backend("ws2")
 
         assert b1 is b2 and b1 is not b3
         assert constructed == ["ws1", "ws2"]   # one construct per workspace
