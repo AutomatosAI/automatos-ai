@@ -1,4 +1,4 @@
-# PRD-205 — Memory, Continuity & Personal Context ("Auto Remembers")
+# PRD-206 — Memory, Continuity & Personal Context ("Auto Remembers")
 
 > **Status:** DRAFT for review — spec only, no build yet. Authored from Gerard + Auto's product draft (2026-07-17), grounded file:line against `main @ ecfe3a11a`.
 > **North star (Gerard's words, kept verbatim):** *Auto should carry conversations, follow users page-to-page, build/teach for them, and use memory to make the platform feel personal, continuous, and human.* The auntie test: Auto knows what you're building, has chats with you, reminds you about shit, and remembers that Gerard likes black.
@@ -35,7 +35,7 @@ The product layer on top of the repaired memory substrate: **active project memo
 
 **Net-new (nothing fits — justification per CLAUDE.md §4 rule 1):**
 - **No project entity.** `OrchestrationRun` is an execution run with a goal + plan (`core/models/orchestration.py:39,67-68`); `BoardTask` is a work item (`core/models/core.py:1524`). A *living topic* — purpose, status, decisions, open questions, last-summary, next action, links — is an aggregate neither models; stuffing it into mission goals or graph blobs (rebuild-on-write JSON, `workspace_graphs`) would abuse both. One new table is justified (S4; box Q11 offers the alternative for veto).
-- **Proactive recall does not exist anywhere**, and the natural engine is literally discarding its fuel today: `scheduled_task_service._trigger_agent_chat` runs a background task, extracts the text, and `logger.info(...[:200])`s it into oblivion (`services/scheduled_task_service.py:387-419`). This PRD absorbs the "background→chat injection" candidate that was pencilled as PRD-205.
+- **Proactive recall does not exist anywhere.** Its delivery primitive is landing separately: **PRD-205 "Auto Speaks" (#557)** builds background→chat delivery (ChatMessenger seam, per-user Auto thread, source badge, SSE live receive) and fixes the scheduled-task output discard (`services/scheduled_task_service.py:387-419`). This PRD's S8 builds the *recall brain* (triggers, payloads, caps) on that seam — no delivery plumbing here.
 
 ---
 
@@ -50,7 +50,7 @@ The product layer on top of the repaired memory substrate: **active project memo
 | 5 | Memory Explorer super-admin-locked; user router UI-orphaned (`memory_stats.py:30`; `widget_memory.py`) | Rewire the panel onto the workspace router; add edit / **pin** / forget / archive; project cards UI | **S5** |
 | 6 | Page context is an ephemeral string; never stamped, never recalled (`api/chat.py:212-236`) | Structured `page_context` assembly section + selected-object param; stamp page provenance into memories; page-aware recall boost | **S6** |
 | 7 | Recall ignores importance/recency; no pins (`sections/memory.py:266`) | Composite recall scoring (semantic × recency × importance × pin) **above** the existing floor/exclusions | **S7** |
-| 8 | Proactive recall absent; background output discarded (`scheduled_task_service.py:416-419`) | Open-loop lifecycle + background→chat/notification injection + strict anti-spam rules | **S8** |
+| 8 | Proactive recall absent (delivery primitive lands via PRD-205 #557) | Open-loop lifecycle + trigger rules over the Auto Speaks seam + strict anti-spam | **S8** |
 | 9 | Memory can't become work | "Thread/project → PRD / tasks" actions reusing deliverables + board tools | **S9** |
 | 10 | Continuity is unmeasured | Continuity slice in the memory gold set, riding the PRD-198/S10 eval discipline | **S10** |
 
@@ -87,8 +87,8 @@ Composite recall score on the merged candidate set (`smart_memory.py:222-234` se
 **Test:** `test_recall_ranking_composite` (fixture memories → deterministic order); `test_floor_and_exclusions_still_apply`. Pure.
 
 ### S8 · Proactive recall + open loops (helpful, never creepy) — M
-Open-loop lifecycle: created by S2 checkpoints or explicitly ("that's an open loop"); completed/expired via panel or chat; surfaced ONLY on the draft's trigger list (§13): project-page visit, project-name mention, "what next?", return-after-gap. Two channels: (a) **in-chat contextual recall** — a short "this connects to X from last night" preamble assembled from S4/S2 data when triggers fire; (b) **notifications inbox** for return-after-gap digests — reusing the notifications plane, never a new one. **Fix the discard**: `scheduled_task_service._trigger_agent_chat` output (`:416-419`) lands as a chat message in its owning thread + optional notification (the absorbed PRD-205 candidate). Anti-spam: per-day cap, dismiss-suppresses, pinned-projects-only for unprompted surfacing, config kill-switch default ON for in-chat / OFF for notifications until the eval says otherwise.
-**Test:** `test_background_output_lands_in_thread` (the discard is dead — grep + behavioural); `test_proactive_triggers_and_caps`; `test_dismiss_suppresses`. Pure/mocked.
+Open-loop lifecycle: created by S2 checkpoints or explicitly ("that's an open loop"); completed/expired via panel or chat; surfaced ONLY on the draft's trigger list (§13): project-page visit, project-name mention, "what next?", return-after-gap. Delivery **consumes PRD-205 "Auto Speaks" (#557)** — the ChatMessenger seam, per-user Auto thread, `Auto · background` badge, and live SSE receive it builds (which also kills the scheduled-task output discard) — plus the notifications inbox for return-after-gap digests. This story builds NO delivery plumbing: it is trigger rules + payload assembly (from S2/S4 data) posted through the Auto Speaks seam. Anti-spam: per-day cap, dismiss-suppresses, pinned-projects-only for unprompted surfacing, config kill-switch default ON for in-chat / OFF for notifications until the eval says otherwise.
+**Test:** `test_proactive_posts_via_chat_messenger_seam` (seam mocked); `test_proactive_triggers_and_caps`; `test_dismiss_suppresses`. Pure/mocked. **Depends on #557 merging first.**
 
 ### S9 · Memory to action — S/M
 "Turn this into a PRD / tasks" from a thread or project card: tools that assemble S2/S4 context and call the EXISTING deliverables generation + board-task creation paths (no new generators). The draft's exact scenario — "we talked about Academy last night, turn that into a PRD" — becomes: resume-context fetch → deliverable generation with that context. 
@@ -105,7 +105,7 @@ Extend the memory gold set (the PRD-198/S10 kit) with a **continuity slice**: re
 - **Phase 1 = S1+S2+S3+S7** (foundation: types, thread memory, resume, ranking) — the fastest path to "Auto continues".
 - **Phase 2 = S4+S5** (project memory + the panel/cards — memory gets a UI shape).
 - **Phase 3 = S6** (page-context plane) — small, unblocks page-aware suggestions.
-- **Phase 4 = S8+S9** (proactive + memory-to-action) — only after S10's slice exists so helpfulness is measured, not vibed.
+- **Phase 4 = S8+S9** (proactive + memory-to-action) — S8 after #557 (Auto Speaks) merges, and only after S10's slice exists so helpfulness is measured, not vibed.
 - **S10 lands with Phase 1** (instrument first — the house discipline).
 - Academy learner memory (draft §21) is **deliberately not in this PRD** — different pod/repo; this layer is built reusable (workspace+user scoping, typed contract) and the Academy integration is its own spec there (box Q13).
 
@@ -137,4 +137,4 @@ The draft's ten, plus three of mine. Recommendations inline; build proceeds on t
 
 ---
 
-*Traceability: grounded against `main @ ecfe3a11a` (scout sweep 2026-07-17 — every EXISTS/NET-NEW claim carries file:line above). Extends PRD-159 (typed distill, consolidation, floor), PRD-187 (durable store), PRD-197 S3/S4 (DR + substrate telemetry), PRD-198 S1 + S10 kit (the eval this layer answers to), PRD-201 (context assembly + per-message context trace), PRD-220 (persistent multi-thread chats), PRD-163 (in-chat action cards), PRD-166 (field memory — UI gap noted, not owned here). Absorbs the former "PRD-205 candidate" (background→chat injection) into S8. The T1 verdict (HOLD graph memory substrate) stands — this is a product layer over the existing stores, not a substrate migration. PILOT lens; no moat framing; the auntie stays.*
+*Traceability: grounded against `main @ ecfe3a11a` (scout sweep 2026-07-17 — every EXISTS/NET-NEW claim carries file:line above). Extends PRD-159 (typed distill, consolidation, floor), PRD-187 (durable store), PRD-197 S3/S4 (DR + substrate telemetry), PRD-198 S1 + S10 kit (the eval this layer answers to), PRD-201 (context assembly + per-message context trace), PRD-220 (persistent multi-thread chats), PRD-163 (in-chat action cards), PRD-166 (field memory — UI gap noted, not owned here). Consumes PRD-205 "Auto Speaks" (#557 — background→chat delivery; S8 depends on it). The T1 verdict (HOLD graph memory substrate) stands — this is a product layer over the existing stores, not a substrate migration. PILOT lens; no moat framing; the auntie stays.*
