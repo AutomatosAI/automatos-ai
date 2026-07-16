@@ -112,7 +112,7 @@ def recommend(verdict: str, active_backend: str) -> str:
                     "(S3_VECTORS_BUCKET set — shared or {workspace_id}-templated, "
                     "both valid — plus AWS creds) and re-embed via "
                     "scripts/migrate_to_s3_vectors.py. RAG-quality work is gated "
-                    "on this either way.")
+                    "on this either way (P2-16).")
         return ("Plane is DARK — pgvector holds no embedded documents. Ingestion "
                 "has not populated the vector store; re-embed before relying on "
                 "document grounding.")
