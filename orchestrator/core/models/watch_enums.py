@@ -1,5 +1,5 @@
 """
-Watch Enums — PRD-204 Auto Watcher
+Watch Enums -- PRD-204 Auto Watcher
 ===================================
 
 Canonical StrEnums, transition map, and terminal frozensets for the watch
@@ -14,7 +14,7 @@ from enum import Enum
 
 
 # ---------------------------------------------------------------------------
-# WatchStatus — watch lifecycle states (PRD-204 S1)
+# WatchStatus -- watch lifecycle states (PRD-204 S1)
 # ---------------------------------------------------------------------------
 
 class WatchStatus(str, Enum):
@@ -30,7 +30,7 @@ class WatchStatus(str, Enum):
 
 
 # ---------------------------------------------------------------------------
-# WatchType — what kind of launched unit this watch supervises
+# WatchType -- what kind of launched unit this watch supervises
 # ---------------------------------------------------------------------------
 
 class WatchType(str, Enum):
@@ -40,7 +40,7 @@ class WatchType(str, Enum):
 
 
 # ---------------------------------------------------------------------------
-# WatchTargetType — the concrete row the watch currently points at.
+# WatchTargetType -- the concrete row the watch currently points at.
 # Distinct from WatchType because lineage can repoint a watch (``follow``)
 # and terminal hooks also ingest for board tasks.
 # ---------------------------------------------------------------------------
@@ -53,7 +53,7 @@ class WatchTargetType(str, Enum):
 
 
 # ---------------------------------------------------------------------------
-# WatchPolicy — decision-flow profile (S10 drives the full table; S1-S5 only
+# WatchPolicy -- decision-flow profile (S10 drives the full table; S1-S5 only
 # store the value)
 # ---------------------------------------------------------------------------
 
@@ -65,7 +65,7 @@ class WatchPolicy(str, Enum):
 
 
 # ---------------------------------------------------------------------------
-# WatchEventType — vocabulary for watch_events.event_type
+# WatchEventType -- vocabulary for watch_events.event_type
 # ---------------------------------------------------------------------------
 
 class WatchEventType(str, Enum):
@@ -88,7 +88,7 @@ class WatchEventType(str, Enum):
 
 # ESCALATED is terminal-unless-renewed: it sits in the terminal set (so a new
 # watch on the same target is allowed by the partial unique index) but keeps
-# a single renewal transition back to WATCHING — the same shape as
+# a single renewal transition back to WATCHING -- the same shape as
 # RunState.FAILED -> REPLANNING in orchestration_enums.
 TERMINAL_WATCH_STATUSES: frozenset[WatchStatus] = frozenset(
     {

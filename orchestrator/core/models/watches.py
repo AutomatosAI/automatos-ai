@@ -1,5 +1,5 @@
 """
-Watch Models — PRD-204 Auto Watcher
+Watch Models -- PRD-204 Auto Watcher
 ====================================
 
 SQLAlchemy models for the watch registry:
@@ -48,7 +48,7 @@ class Watch(Base):
     """A workspace-scoped supervisor for one launched unit of work.
 
     The watch follows the work (Section 8 Q9): corrective reruns/replans
-    append to ``lineage`` and repoint ``target_type``/``target_id`` — one
+    append to ``lineage`` and repoint ``target_type``/``target_id`` -- one
     watch, one verdict. At most ONE non-terminal watch may exist per
     (workspace_id, target_type, target_id), enforced by a partial unique
     index.
@@ -56,7 +56,7 @@ class Watch(Base):
 
     __tablename__ = "watches"
 
-    # Primary key — UUID with DB-generated default (house pattern)
+    # Primary key -- UUID with DB-generated default (house pattern)
     id = Column(
         UUID(as_uuid=True),
         primary_key=True,
@@ -95,7 +95,7 @@ class Watch(Base):
         server_default=WatchStatus.WATCHING.value,
     )
 
-    # Intent snapshot — what "good" means for this launch
+    # Intent snapshot -- what "good" means for this launch
     success_criteria = Column(Text, nullable=True)
     failure_criteria = Column(Text, nullable=True)
     quality_threshold = Column(
@@ -136,7 +136,7 @@ class Watch(Base):
     final_score = Column(Float, nullable=True)
     final_verdict = Column(Text, nullable=True)
 
-    # Ordered target chain — reruns/replans append {target_type, target_id,
+    # Ordered target chain -- reruns/replans append {target_type, target_id,
     # followed_at, reason}; the columns above always hold the LIVE target.
     lineage = Column(JSONB, nullable=False, server_default=text("'[]'"))
 
@@ -154,7 +154,7 @@ class Watch(Base):
     )
     closed_at = Column(DateTime(timezone=True), nullable=True)
 
-    # Optimistic locking (house pattern — PRD-82A Section 5 principle 7)
+    # Optimistic locking (house pattern -- PRD-82A Section 5 principle 7)
     version_id = Column(Integer, nullable=False, server_default="1")
 
     __mapper_args__ = {"version_id_col": version_id}
@@ -197,7 +197,7 @@ class WatchEvent(Base):
 
     ``UNIQUE(watch_id, event_key)`` makes ingest idempotent: producers and
     the sweep tick can both report the same observation and exactly one row
-    lands. This table is never updated — no version_id column (same shape as
+    lands. This table is never updated -- no version_id column (same shape as
     OrchestrationEvent).
     """
 
@@ -225,7 +225,7 @@ class WatchEvent(Base):
         Boolean, nullable=False, default=False, server_default=text("false")
     )
 
-    # Idempotency key — semantic identity of the observation
+    # Idempotency key -- semantic identity of the observation
     event_key = Column(String(255), nullable=False)
 
     created_at = Column(

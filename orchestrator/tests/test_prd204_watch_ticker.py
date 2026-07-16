@@ -1,8 +1,8 @@
-"""PRD-204 S5 — watcher tick: sweep fallback, missed-cron detection with a
+"""PRD-204 S5 -- watcher tick: sweep fallback, missed-cron detection with a
 frozen clock, benched recording, expiry, and the no-noise rule.
 
 DB-backed (real Postgres; skips cleanly when absent). All clocks are
-injected (``tick_once(db, now=...)``) — no wall-clock dependence.
+injected (``tick_once(db, now=...)``) -- no wall-clock dependence.
 Notifications are captured at the ticker's dispatch seam (the
 ``notifications`` table itself is migration-only and not present in the
 create_all test schema; the row shape is covered by the S4 mock suite).
@@ -171,7 +171,7 @@ def test_sweep_ingests_missed_terminal_and_notifies_once(
     workspace, new_session, ticker
 ):
     s = new_session()
-    # Run already terminal in the DB — simulates a hook that never fired
+    # Run already terminal in the DB -- simulates a hook that never fired
     # (crash between the terminal write and the hook's transaction).
     run = _seed_run(s, workspace, state=RunState.FAILED.value)
     watch = WatchService.create_watch(
@@ -197,7 +197,7 @@ def test_sweep_ingests_missed_terminal_and_notifies_once(
     assert [d["event_type"] for d in verdicts] == ["watch_verdict"]
     assert verdicts[0]["status"] == "error"
 
-    # Tick idempotence: the closed watch is never claimed again — two ticks,
+    # Tick idempotence: the closed watch is never claimed again -- two ticks,
     # one event, one notification.
     _tick(ticker, s, FROZEN_NOW + timedelta(seconds=600))
     assert len(_watch_events(s, watch, "terminal")) == 1
@@ -229,7 +229,7 @@ def test_running_target_writes_nothing(workspace, new_session, ticker):
 
     s.refresh(watch)
     assert watch.status == WatchStatus.WATCHING.value
-    # Only the creation event exists — the sweep added no noise.
+    # Only the creation event exists -- the sweep added no noise.
     assert [e.event_type for e in _watch_events(s, watch)] == [
         WatchEventType.CREATED.value
     ]
@@ -284,7 +284,7 @@ def test_missed_cron_detected_with_frozen_clock(workspace, new_session, ticker):
     assert len(escalations) == 1
 
     # Second tick at the same frozen instant: the event_key (expected fire
-    # time) dedupes — still exactly one event, one notification.
+    # time) dedupes -- still exactly one event, one notification.
     _make_due(s, watch, FROZEN_NOW)
     _tick(ticker, s, FROZEN_NOW)
     assert len(_watch_events(s, watch, WatchEventType.MISSED_RUN.value)) == 1
@@ -299,7 +299,7 @@ def test_missed_cron_detected_with_frozen_clock(workspace, new_session, ticker):
         )
         == 1
     )
-    # The watch stays live — a missed run is attention-worthy, not terminal.
+    # The watch stays live -- a missed run is attention-worthy, not terminal.
     s.refresh(watch)
     assert watch.status == WatchStatus.WATCHING.value
     s.close()

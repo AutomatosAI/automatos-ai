@@ -1763,7 +1763,7 @@ async def _execute_recipe_inner(
             status="ok",
         )
 
-        # PRD-204 S3: playbook terminal choke point (success) — joins the
+        # PRD-204 S3: playbook terminal choke point (success) -- joins the
         # same transaction as the status update; fail-soft.
         _ingest_playbook_terminal_watch(
             db,
@@ -2020,7 +2020,7 @@ async def _fail_execution(
             if step_results is not None:
                 execution.step_results = step_results
 
-            # PRD-204 S3: playbook terminal choke point (failure) — joins the
+            # PRD-204 S3: playbook terminal choke point (failure) -- joins the
             # failure-status transaction below; fail-soft.
             _ingest_playbook_terminal_watch(
                 db,

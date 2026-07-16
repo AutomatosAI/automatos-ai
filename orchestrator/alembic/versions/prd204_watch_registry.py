@@ -1,4 +1,4 @@
-"""PRD-204 S1: watch registry — watches + watch_events
+"""PRD-204 S1: watch registry -- watches + watch_events
 
 A Watch is a first-class, workspace-scoped row supervising one launched unit
 of work (mission / playbook execution / scheduled playbook) from launch to a

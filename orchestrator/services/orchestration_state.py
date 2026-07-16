@@ -292,7 +292,7 @@ def transition_run(
             "Failed to sync mission board status for run %s", run.id, exc_info=True,
         )
 
-    # PRD-204 S3: mission terminal choke point — EVERY run transition to a
+    # PRD-204 S3: mission terminal choke point -- EVERY run transition to a
     # terminal state flows through here (coordinator, reconciler, joiner,
     # human cancel/reject), so one fail-soft hook covers all producers.
     # watch_ingest_terminal never raises (documented fail-soft seam); the

@@ -1,5 +1,5 @@
 """
-Watch terminal hooks — PRD-204 S3
+Watch terminal hooks -- PRD-204 S3
 ==================================
 
 THE documented fail-soft seam between producers and the watch registry.
@@ -10,7 +10,7 @@ producer, so this wrapper catches EVERYTHING and logs (the
 knowledge_flywheel / _dispatch_mission_event pattern).
 
 This is the one place a blanket ``except Exception`` around watch ingest is
-sanctioned — everywhere else watch errors propagate normally.
+sanctioned -- everywhere else watch errors propagate normally.
 
 Sync + DB-only by design: the mission choke point (``transition_run``) is
 synchronous, so the hook cannot await. The ingest joins the CALLER's
@@ -39,7 +39,7 @@ def watch_ingest_terminal(
     cost_snapshot: Optional[Dict[str, Any]] = None,
     output_pointer: Optional[str] = None,
 ) -> None:
-    """Report a target's terminal state to its live watch — fail-soft.
+    """Report a target's terminal state to its live watch -- fail-soft.
 
     No-op when the target has no live watch. Idempotent per
     (watch, target): duplicate deliveries are swallowed by the event_key
@@ -58,9 +58,9 @@ def watch_ingest_terminal(
             cost_snapshot=cost_snapshot,
             output_pointer=output_pointer,
         )
-    except Exception:  # noqa: BLE001 — the sanctioned fail-soft seam (PRD-204 S3)
+    except Exception:  # noqa: BLE001 -- the sanctioned fail-soft seam (PRD-204 S3)
         logger.warning(
-            "[WatchHooks] terminal ingest failed for %s:%s (state=%s) — "
+            "[WatchHooks] terminal ingest failed for %s:%s (state=%s) -- "
             "producer unaffected",
             target_type,
             target_id,

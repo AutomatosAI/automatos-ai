@@ -1,16 +1,16 @@
 """
-WatchTicker — PRD-204 S5
+WatchTicker -- PRD-204 S5
 =========================
 
 The watcher heartbeat sweep on the UnifiedScheduler (TaskReconciler
-pattern). The S3 event hooks are the FAST path — a terminal state normally
+pattern). The S3 event hooks are the FAST path -- a terminal state normally
 reaches the watch in the producer's own transaction. The tick is the
 fallback and the trend brain:
 
 - claims due watches (``next_check_at <= now``) via FOR UPDATE SKIP LOCKED
   (single-writer; the claim's reschedule doubles as the lease),
 - refreshes the target's state with a cheap status read; a terminal state
-  the hooks missed is ingested here (idempotent — the event_key dedupe
+  the hooks missed is ingested here (idempotent -- the event_key dedupe
   makes "hook then sweep" write exactly one event),
 - handles ``deadline_at`` -> expired,
 - for scheduled-playbook watches: croniter expected-fire vs the latest
@@ -21,11 +21,11 @@ fallback and the trend brain:
 - reschedules ``next_check_at`` (done inside the claim).
 
 Notification rules (PRD-204 S5): the tick dispatches only for conditions no
-producer covers — sweep-caught terminal (``watch_verdict``: the producer's
+producer covers -- sweep-caught terminal (``watch_verdict``: the producer's
 hook AND its own notification evidently did not land), missed run and
 expiry (``watch_escalation``). Benched watch_events are recorded here, but
 the ``playbook_benched`` NOTIFICATION is owned by the scheduler skip path
-(S4, once per breaker-open period) — dispatching it from the tick too would
+(S4, once per breaker-open period) -- dispatching it from the tick too would
 double-notify every bench.
 """
 
@@ -54,7 +54,7 @@ _RUN_TERMINAL = frozenset({"completed", "failed", "cancelled"})
 _EXECUTION_TERMINAL = frozenset({"completed", "failed", "cancelled"})
 _BOARD_TERMINAL = {"done": "completed", "failed": "failed"}
 
-# A cron fire only counts as missed once it is this many seconds overdue —
+# A cron fire only counts as missed once it is this many seconds overdue --
 # absorbs scheduler jitter and slow launches without false alarms.
 MISSED_RUN_GRACE_SECONDS = 120
 
@@ -92,7 +92,7 @@ class WatchTicker:
             replace_existing=True,
             max_instances=1,
         )
-        logger.info("[WatchTicker] Started — tick every %ds", interval)
+        logger.info("[WatchTicker] Started -- tick every %ds", interval)
 
     async def stop(self):
         """Remove the tick job from the scheduler."""
@@ -105,7 +105,7 @@ class WatchTicker:
     # ------------------------------------------------------------------
 
     async def _tick(self):
-        """Scheduled entry point — opens its own session."""
+        """Scheduled entry point -- opens its own session."""
         from core.database.database import SessionLocal
 
         db = SessionLocal()
@@ -119,7 +119,7 @@ class WatchTicker:
     async def tick_once(self, db: Session, now: datetime) -> int:
         """One sweep pass at a fixed ``now`` (injected for frozen-clock
         tests). Returns the number of watches processed. Per-watch errors
-        roll back that watch's work only — the sweep keeps going.
+        roll back that watch's work only -- the sweep keeps going.
         """
         claimed = WatchService.claim_due_watches(db, now=now)  # commits
         for watch in claimed:
@@ -217,7 +217,7 @@ class WatchTicker:
             summary="Detected by watcher sweep",
         )
         if event is not None:
-            # The producer's notification path was evidently missed too —
+            # The producer's notification path was evidently missed too --
             # the watch verdict is the safety-net signal.
             await self._dispatch_watch_event(
                 db,
@@ -317,7 +317,7 @@ class WatchTicker:
         # open the scheduler creates no new rows, so the key is stable for
         # the whole open period -> exactly one benched event per period.
         # The playbook_benched NOTIFICATION is owned by the scheduler skip
-        # path (S4) — see module docstring.
+        # path (S4) -- see module docstring.
         from services.playbook_breaker import breaker_is_open
 
         if breaker_is_open(db, playbook.id):

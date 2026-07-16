@@ -1,4 +1,4 @@
-"""PRD-204 S3 — fail-soft terminal hooks.
+"""PRD-204 S3 -- fail-soft terminal hooks.
 
 Proves the two contract halves:
 1. every producer terminal path reports into the watch registry, and
@@ -6,7 +6,7 @@ Proves the two contract halves:
    playbook executor, board-task dispatch all complete normally).
 
 Mission-path tests are DB-backed (real Postgres, skip cleanly when absent);
-executor/board hook tests run against mocks — the hook seam is what is under
+executor/board hook tests run against mocks -- the hook seam is what is under
 test, not those modules' heavy internals.
 """
 from __future__ import annotations

@@ -1,5 +1,5 @@
 """
-WatchService — PRD-204 S2
+WatchService -- PRD-204 S2
 ==========================
 
 Single owner of watch-registry mutations: create/get/list/cancel, the guarded
@@ -12,7 +12,7 @@ the ``follow`` lineage helper, and the tick's ``claim_due_watches``
 
 Transaction contract:
 - Every method except ``claim_due_watches`` joins the CALLER's transaction
-  (flush only, never commit) — same principle as orchestration_state.
+  (flush only, never commit) -- same principle as orchestration_state.
 - ``claim_due_watches`` COMMITS: the claim is its own transaction so
   SKIP LOCKED serialises concurrent tickers (claim_tasks precedent).
 
@@ -113,7 +113,7 @@ class WatchService:
 
         Raises WatchAlreadyExistsError when a non-terminal watch already
         supervises the target (the partial unique index is the race-safe
-        backstop — a concurrent create surfaces as IntegrityError).
+        backstop -- a concurrent create surfaces as IntegrityError).
         """
         moment = now or _utcnow()
         target_id = str(target_id)
@@ -232,7 +232,7 @@ class WatchService:
         *,
         reason: Optional[str] = None,
     ) -> Watch:
-        """Cancel a live watch (guarded — cancelling a closed watch raises)."""
+        """Cancel a live watch (guarded -- cancelling a closed watch raises)."""
         watch = WatchService.get_watch(db, workspace_id, watch_id)
         if watch is None:
             raise ValueError(f"Watch {watch_id} not found in workspace {workspace_id}")
@@ -316,7 +316,7 @@ class WatchService:
         """Record an observation exactly once.
 
         A duplicate (watch_id, event_key) is swallowed via a SAVEPOINT so the
-        caller's outer transaction survives, and ``None`` is returned — the
+        caller's outer transaction survives, and ``None`` is returned -- the
         caller can use "was this the first writer?" to decide follow-up work
         (the S5 tick notifies only when the sweep beat the producer hook).
         """
@@ -344,7 +344,7 @@ class WatchService:
         return event
 
     # ------------------------------------------------------------------
-    # Terminal ingest — the seam the S3 hooks and the S5 sweep both call
+    # Terminal ingest -- the seam the S3 hooks and the S5 sweep both call
     # ------------------------------------------------------------------
 
     @staticmethod
@@ -363,7 +363,7 @@ class WatchService:
 
         Idempotent: exactly one terminal event per (watch, target). On first
         ingest the watch closes by outcome (WATCH_STATUS_FOR_TERMINAL_TARGET)
-        with an unscored v1 verdict — S6 inserts run-level scoring between
+        with an unscored v1 verdict -- S6 inserts run-level scoring between
         "terminal observed" and "watch closed" without changing this seam.
 
         Returns the NEW WatchEvent when this call was the first writer,
@@ -431,7 +431,7 @@ class WatchService:
         moved WATCHING -> ACTING). Returns ``(watch, False)`` on the hard
         stop: the budget is exhausted, a ``budget_exhausted`` event lands
         (requires_attention) and the watch parks in NEEDS_ATTENTION. The
-        caller (S8/S10 decision step) owns any escalation notification —
+        caller (S8/S10 decision step) owns any escalation notification --
         this module stays sync + DB-only.
         """
         taken = watch.actions_taken or 0
@@ -444,7 +444,7 @@ class WatchService:
                 event_type=WatchEventType.BUDGET_EXHAUSTED.value,
                 event_key=f"budget_exhausted:{taken}",
                 summary=(
-                    f"Action budget exhausted ({taken}/{budget}) — "
+                    f"Action budget exhausted ({taken}/{budget}) -- "
                     f"refused action '{action}'"
                 ),
                 requires_attention=True,
@@ -477,7 +477,7 @@ class WatchService:
         return watch, True
 
     # ------------------------------------------------------------------
-    # Lineage — the watch follows the work (PRD-204 Section 8 Q9)
+    # Lineage -- the watch follows the work (PRD-204 Section 8 Q9)
     # ------------------------------------------------------------------
 
     @staticmethod
@@ -510,7 +510,7 @@ class WatchService:
             "since": moment.isoformat(),
             "reason": reason or "follow",
         }
-        # Immutable append — never mutate the JSONB list in place.
+        # Immutable append -- never mutate the JSONB list in place.
         watch.lineage = [*(watch.lineage or []), entry]
         watch.target_type = new_target_type
         watch.target_id = new_target_id
@@ -527,7 +527,7 @@ class WatchService:
         return watch
 
     # ------------------------------------------------------------------
-    # Tick claim — FOR UPDATE SKIP LOCKED (board_dispatcher idiom)
+    # Tick claim -- FOR UPDATE SKIP LOCKED (board_dispatcher idiom)
     # ------------------------------------------------------------------
 
     @staticmethod
@@ -541,12 +541,12 @@ class WatchService:
 
         The locked SELECT grabs only rows no other transaction holds
         (SKIP LOCKED), and the surrounding UPDATE reschedules
-        ``next_check_at`` in the same statement — the reschedule IS the
+        ``next_check_at`` in the same statement -- the reschedule IS the
         lease, so a crashed ticker simply re-claims on a later tick.
         ``version_id`` is bumped so optimistic ORM writers see the claim.
 
         NOTE: COMMITS the claim (its own transaction), then returns freshly
-        loaded rows — same contract as board_dispatcher.claim_tasks.
+        loaded rows -- same contract as board_dispatcher.claim_tasks.
         """
         moment = now or _utcnow()
         claimable = ", ".join(

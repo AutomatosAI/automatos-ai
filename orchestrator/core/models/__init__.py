@@ -50,7 +50,7 @@ from .orchestration_enums import (  # noqa: F401
     BOARD_STATUS_MAP,
 )
 
-# PRD-204: Auto Watcher — watch registry
+# PRD-204: Auto Watcher -- watch registry
 from .watches import Watch, WatchEvent  # noqa: F401
 from .watch_enums import (  # noqa: F401
     WatchStatus,

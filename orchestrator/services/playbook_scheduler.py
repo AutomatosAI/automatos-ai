@@ -194,7 +194,7 @@ class PlaybookSchedulerService:
                 )
                 # PRD-204 S4: the bench used to be a log line only. Notify
                 # the workspace once per breaker-open period (in-memory
-                # latch — see __init__; cleared below when the breaker
+                # latch -- see __init__; cleared below when the breaker
                 # closes).
                 if playbook.id not in self._benched_notified:
                     self._benched_notified.add(playbook.id)
@@ -203,7 +203,7 @@ class PlaybookSchedulerService:
                     )
                 return
 
-            # Breaker closed — clear the bench latch so the NEXT open period
+            # Breaker closed -- clear the bench latch so the NEXT open period
             # notifies again.
             self._benched_notified.discard(playbook.id)
 
@@ -258,7 +258,7 @@ class PlaybookSchedulerService:
     # ------------------------------------------------------------------
 
     async def _notify_playbook_benched(self, db, playbook, threshold: int) -> None:
-        """Dispatch ``playbook_benched`` — the scheduler skipped a cron fire
+        """Dispatch ``playbook_benched`` -- the scheduler skipped a cron fire
         because the repeated-failure breaker is open. Workspace-wide (a
         scheduled playbook has no single requesting user). Never raises
         into the fire path.

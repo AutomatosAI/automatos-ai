@@ -216,7 +216,7 @@ async def _dispatch_task_complete(db: Session, workspace_id, task: BoardTask) ->
             exc_info=True,
         )
 
-    # PRD-204 S3: board-task terminal choke point (success) — every
+    # PRD-204 S3: board-task terminal choke point (success) -- every
     # completion path funnels through this helper. Fail-soft.
     from services.watch_hooks import watch_ingest_terminal
 

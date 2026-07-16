@@ -218,7 +218,7 @@ class MissionReconciler:
                     tasks_verified=tasks_verified,
                     tasks_verification_failed=tasks_verification_failed,
                 )
-                # PRD-204 S4: run failed on task outcomes — tell the user.
+                # PRD-204 S4: run failed on task outcomes -- tell the user.
                 # (_advance_run_on_completion is sync; this is its async seam.)
                 if (
                     advance_result.run_advanced
@@ -235,7 +235,7 @@ class MissionReconciler:
                     failed_tasks=failed_tasks,
                 )
                 if fatal:
-                    # PRD-204 S4: fatal task failure failed the run — tell
+                    # PRD-204 S4: fatal task failure failed the run -- tell
                     # the user.
                     await MissionReconciler._notify_run_failed(db, run)
                     return ReconcileResult(

@@ -1,4 +1,4 @@
-"""PRD-204 S1 — watch registry schema: model round-trip, dedup, FK integrity.
+"""PRD-204 S1 -- watch registry schema: model round-trip, dedup, FK integrity.
 
 DB-backed (real Postgres): the partial unique index and ON CONFLICT semantics
 are Postgres-only, so this suite follows the test.yml Postgres pattern
@@ -43,7 +43,7 @@ def new_session(engine):
 
 @pytest.fixture
 def workspace(engine, new_session):
-    """Throwaway workspace (seeded FIRST — PRD-158). Yields workspace_id str."""
+    """Throwaway workspace (seeded FIRST -- PRD-158). Yields workspace_id str."""
     ws_id = str(uuid.uuid4())
     s = new_session()
     s.execute(
@@ -59,7 +59,7 @@ def workspace(engine, new_session):
     yield ws_id
 
     s = new_session()
-    # watch_events cascade off watches; watches cascade off workspaces —
+    # watch_events cascade off watches; watches cascade off workspaces --
     # explicit deletes keep teardown independent of CASCADE behaviour.
     s.execute(
         text(

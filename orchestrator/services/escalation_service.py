@@ -1,12 +1,12 @@
 """
-Escalation Service — auto-escalate blocked and repeatedly-stalled tasks.
+Escalation Service -- auto-escalate blocked and repeatedly-stalled tasks.
 
 Creates board tasks for human attention when:
 - A board task has been blocked > 24 hours
 - A task has stalled repeatedly (2+ stalls)
 
 (Budget-paused missions are surfaced by the coordinator's
-``mission_budget_paused`` notification — PRD-204 S4 — not by a board card.)
+``mission_budget_paused`` notification -- PRD-204 S4 -- not by a board card.)
 """
 
 import logging

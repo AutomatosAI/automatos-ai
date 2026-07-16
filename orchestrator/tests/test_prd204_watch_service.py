@@ -1,7 +1,7 @@
-"""PRD-204 S2 — WatchService: transition guard, idempotent ingest, budget
+"""PRD-204 S2 -- WatchService: transition guard, idempotent ingest, budget
 hard-stop, lineage repoint, SKIP LOCKED claim.
 
-DB-backed (real Postgres) — savepoint-swallowed unique violations, the
+DB-backed (real Postgres) -- savepoint-swallowed unique violations, the
 partial unique index and FOR UPDATE SKIP LOCKED are Postgres semantics.
 Skips cleanly when no DB is reachable (test_board_dispatch.py precedent).
 

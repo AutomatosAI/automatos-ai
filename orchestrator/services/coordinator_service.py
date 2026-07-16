@@ -339,7 +339,7 @@ async def notify_mission_failed(db: Session, run: OrchestrationRun) -> None:
     failure site (reconciler task-failure cascades, joiner halt, plan
     validation). Reuses the ``_dispatch_mission_event`` seam (resolves
     ``run.created_by`` to a user_id; never raises). Previously a failed
-    run emitted only an internal RUN_FAILED audit event — the user was
+    run emitted only an internal RUN_FAILED audit event -- the user was
     never told.
     """
     detail = run.stop_detail or run.stop_reason or "Mission failed"
@@ -355,7 +355,7 @@ async def notify_mission_failed(db: Session, run: OrchestrationRun) -> None:
 
 async def notify_mission_budget_paused(db: Session, run: OrchestrationRun) -> None:
     """PRD-204 S4: dispatch ``mission_budget_paused`` at the budget-pause
-    transition (the dispatcher blocked and moved the run to PAUSED —
+    transition (the dispatcher blocked and moved the run to PAUSED --
     previously silent). Single owner of this event; the dead
     ``escalation_service.notify_budget_exceeded`` board-card path was
     removed in the same story.
@@ -1473,7 +1473,7 @@ class CoordinatorService:
         # PRD-204 S4: the dispatcher's budget gate pauses silently (sync
         # code cannot await the dispatcher). This is that transition's
         # async seam: the run entered dispatch RUNNING and came out PAUSED
-        # with a budget skip reason — tell the user, once (the tick will
+        # with a budget skip reason -- tell the user, once (the tick will
         # not re-process a PAUSED run, so this cannot repeat).
         if (
             RunState(run.state) == RunState.PAUSED

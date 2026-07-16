@@ -384,7 +384,7 @@ async def _boot_phase_2_extensions(app_instance: "FastAPI") -> "DeferredInitResu
                 except Exception as _tr_err:
                     logger.warning("Could not start TaskReconciler: %s", _tr_err)
 
-                # PRD-204 S5: Auto Watcher tick — heartbeat sweep for watches
+                # PRD-204 S5: Auto Watcher tick -- heartbeat sweep for watches
                 # (terminal fallback, missed-run/benched detection, expiry).
                 # Rides the same fcntl-locked scheduler: single owner across
                 # workers, so watch claims never race between processes.

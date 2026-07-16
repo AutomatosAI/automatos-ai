@@ -1,4 +1,4 @@
-"""PRD-204 S4 — closing the silent-failure holes.
+"""PRD-204 S4 -- closing the silent-failure holes.
 
 Mock-DB suite (test_prd128_notification_dispatcher.py pattern): each new
 event lands exactly one ``notifications`` row with the right ``event_type``
@@ -161,7 +161,7 @@ def test_failed_mission_board_card_shows_failed():
     from services.orchestration_board_bridge import _RUN_STATE_TO_BOARD_STATUS
 
     assert _RUN_STATE_TO_BOARD_STATUS[RunState.FAILED.value] == "failed"
-    # cancelled stays done — the user deliberately closed it.
+    # cancelled stays done -- the user deliberately closed it.
     assert _RUN_STATE_TO_BOARD_STATUS[RunState.CANCELLED.value] == "done"
     assert _RUN_STATE_TO_BOARD_STATUS[RunState.COMPLETED.value] == "done"
 
@@ -176,7 +176,7 @@ def test_board_failed_status_is_valid_board_status():
 
 
 # ---------------------------------------------------------------------------
-# 5. playbook_benched — once per breaker-open period
+# 5. playbook_benched -- once per breaker-open period
 # ---------------------------------------------------------------------------
 
 

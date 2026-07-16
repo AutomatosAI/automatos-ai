@@ -9,11 +9,11 @@ At PRD-204 branch time ``alembic heads`` returns two divergent heads:
       so never included it)
 
 Two heads make ``alembic upgrade head`` (singular) ambiguous and fail the
-CI "exactly one head" gate. This is a **merge revision only** — no schema
-operations — joining the two lineages so ``alembic heads`` returns exactly
+CI "exactly one head" gate. This is a **merge revision only** -- no schema
+operations -- joining the two lineages so ``alembic heads`` returns exactly
 one revision. The PRD-204 watch-registry migration chains onto this merge.
 
-Do NOT add ``CREATE``/``ALTER`` here — a merge revision that mutates schema
+Do NOT add ``CREATE``/``ALTER`` here -- a merge revision that mutates schema
 is exactly what makes a later from-zero squash lossy (mirrors
 prd176_merge_heads / prd203_merge_heads).
 
@@ -22,7 +22,7 @@ Revises: prd201_s1_msg_context_trace, prd203_merge_heads
 Create Date: 2026-07-16
 """
 
-# A pure merge point — no operations.
+# A pure merge point -- no operations.
 revision = "prd204_merge_heads"
 down_revision = (
     "prd201_s1_msg_context_trace",
