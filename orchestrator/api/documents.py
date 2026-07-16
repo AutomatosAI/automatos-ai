@@ -1465,7 +1465,6 @@ async def rag_retrieve(
             config_kwargs['min_similarity'] = min_similarity
         
         config = RAGConfig(
-            enable_query_enhancement=True,
             enable_rrf_fusion=True,
             **config_kwargs
         )

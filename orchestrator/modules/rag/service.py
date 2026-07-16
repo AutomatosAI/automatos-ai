@@ -125,7 +125,12 @@ class RAGConfig:
     min_similarity: float = None
     
     # Phase 2: Advanced retrieval options
-    enable_query_enhancement: bool = True
+    # None = "caller didn't choose" → resolved in __post_init__ from the
+    # canonical config accessor (default OFF — the 2026-07 live baseline
+    # measured enhancement at −26.9 recall@5 vs plain retrieval while paying
+    # ~4 extra LLM calls per query). An explicit True/False wins: the eval
+    # lever grid relies on that.
+    enable_query_enhancement: Optional[bool] = None
     enable_rrf_fusion: bool = True
     # None = "caller didn't choose" → resolved in __post_init__ from the
     # canonical config accessor (default ON). An explicit True/False wins.
@@ -163,12 +168,20 @@ class RAGConfig:
         # PRD-136 renamed that settings key, so the lookup always missed,
         # always returned "false", and silently pinned the pipeline's
         # highest-precision stage off.
-        if self.enable_reranking is None or self.hybrid_search_enabled is None:
+        if (
+            self.enable_reranking is None
+            or self.hybrid_search_enabled is None
+            or self.enable_query_enhancement is None
+        ):
             from config import config as app_config
             if self.enable_reranking is None:
                 self.enable_reranking = bool(app_config.RAG_RERANK_ENABLED)
             if self.hybrid_search_enabled is None:
                 self.hybrid_search_enabled = bool(app_config.RAG_HYBRID_ENABLED)
+            if self.enable_query_enhancement is None:
+                self.enable_query_enhancement = bool(
+                    app_config.RAG_QUERY_ENHANCEMENT_ENABLED
+                )
 
         logger.info(f"RAGConfig loaded: max_tokens={self.max_tokens}, diversity={self.diversity}, min_similarity={self.min_similarity}, reranking={self.enable_reranking}")
 
