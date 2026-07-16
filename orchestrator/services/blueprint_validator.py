@@ -87,7 +87,11 @@ def validate_agent(
     # Rule: min_tools
     min_tools = rules.get("min_tools")
     if min_tools is not None:
-        from core.models.tool_assignments import AgentAppAssignment
+        # AgentAppAssignment lives in core.models.composio_cache (schema v2);
+        # core.models.tool_assignments only defines WorkspaceToolConfig. The
+        # old import raised ImportError on the FIRST min_tools evaluation --
+        # no test exercised this rule until PRD-204 S8's strict-spawn test.
+        from core.models.composio_cache import AgentAppAssignment
 
         tool_count = (
             db.query(AgentAppAssignment)
