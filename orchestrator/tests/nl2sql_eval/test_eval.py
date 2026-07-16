@@ -58,8 +58,9 @@ def test_goldens_pass_validator():
 
 
 def test_eval_set_is_substantial():
-    """Guard against silently shrinking the eval set."""
-    assert len(harness.load_questions()) >= 20
+    """Guard against silently shrinking the eval set (PRD-199 S3 grew it to
+    32 across joins/dates/negations/ambiguity; PRD-160's own bar wants 30+)."""
+    assert len(harness.load_questions()) >= 30
 
 
 @pytest.mark.skipif(

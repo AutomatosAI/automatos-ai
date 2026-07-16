@@ -1,0 +1,117 @@
+# PRD-199 S3 — run the NL2SQL generation eval FOR REAL, on a schedule.
+#
+# The PR-lane nl2sql-eval job (test.yml) runs only the always-on identity
+# checks; the generation-accuracy eval was opt-in (RUN_NL2SQL_EVAL=1) and
+# nothing ever set it, so baseline.json sat at its 0.0 placeholder since
+# 2026-06-12. This lane sets it, weekly and on demand, against the platform
+# LLM via the OPENROUTER_API_KEY repo secret.
+#
+# Honest-gate posture (PRD-177 S6 shape): the number is the deliverable.
+# The job publishes accuracy to the run summary + artifact and exits 0 on a
+# low number. Recording B0 into baseline.json stays a human-reviewed commit
+# after the first green run — the no-regression gate only bites once the
+# baseline is a real number, never against the placeholder.
+#
+# If the secret is not configured the job says so and exits 0 — an honest
+# skip, not a fake green.
+
+name: NL2SQL generation eval (scheduled)
+
+on:
+  schedule:
+    - cron: "0 5 * * 1" # Mondays 05:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  nl2sql-generation-eval:
+    name: NL2SQL generation eval (non-required, scheduled)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      # Dummy Postgres values keep import-time config resolution from
+      # failing; the eval itself is SQLite-only (mirrors test.yml).
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: test_db
+      ENVIRONMENT: development
+      AUTH_EDITION: local
+      DEFAULT_WORKSPACE_ID: "00000000-0000-0000-0000-0000000000c1"
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+
+    defaults:
+      run:
+        working-directory: orchestrator
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Gate on the LLM secret (honest skip, not a fake green)
+        id: gate
+        run: |
+          if [ -z "$OPENROUTER_API_KEY" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "## NL2SQL generation eval" >> "$GITHUB_STEP_SUMMARY"
+            echo "SKIPPED — OPENROUTER_API_KEY repo secret not configured." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Python
+        if: steps.gate.outputs.configured == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: orchestrator/requirements.txt
+
+      - name: Install system libraries
+        if: steps.gate.outputs.configured == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 \
+            libcairo2 libffi-dev libmagic1 ghostscript
+
+      - name: Install Python dependencies
+        if: steps.gate.outputs.configured == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run the generation eval (RUN_NL2SQL_EVAL=1)
+        if: steps.gate.outputs.configured == 'true'
+        env:
+          RUN_NL2SQL_EVAL: "1"
+        run: |
+          pytest tests/nl2sql_eval \
+            --timeout=600 \
+            --timeout-method=thread \
+            -p no:cacheprovider \
+            -v
+
+      - name: Publish the number (summary + artifact)
+        if: always() && steps.gate.outputs.configured == 'true'
+        run: |
+          echo "## NL2SQL generation eval" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f tests/nl2sql_eval/last_run.json ]; then
+            cat tests/nl2sql_eval/last_run.json >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "Baseline bump (B0) is a human-reviewed commit to tests/nl2sql_eval/baseline.json." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No last_run.json produced — see the eval step log." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload run artifact
+        if: always() && steps.gate.outputs.configured == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: nl2sql-eval-last-run
+          path: orchestrator/tests/nl2sql_eval/last_run.json
+          if-no-files-found: ignore
