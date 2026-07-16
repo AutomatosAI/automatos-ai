@@ -1040,11 +1040,20 @@ async def run_benchmark(
         example_store=SQLExampleStore(db_session=db)
     )
 
+    # PRD-199 S6 (§8-Q4: live source): execution accuracy against the
+    # connected database — each SQL is validated (read-only, LIMIT-capped)
+    # and runs under the pipeline's EXPLAIN/timeout guards. The old runner
+    # mirrored exact-match into execution_match (a TODO since PRD-61);
+    # equivalent-but-textually-different SQL now scores as the match it is.
+    async def _execute(sql: str):
+        return await service.run_validated_readonly_sql(source, sql)
+
     result = await runner.run_benchmark(
         database_source_id=str(source_id),
         workspace_id=str(ctx.workspace_id),
         schema_metadata=source.schema_metadata,
-        dialect=source.dialect or "postgresql"
+        dialect=source.dialect or "postgresql",
+        execute_sql=_execute,
     )
 
     # Persist benchmark run

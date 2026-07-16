@@ -284,6 +284,22 @@ class DatabaseKnowledgeService:
         finally:
             engine.dispose()
 
+    async def run_validated_readonly_sql(self, source, sql: str) -> List[Dict[str, Any]]:
+        """PRD-199 S6: the benchmark executor — validate the statement
+        (read-only roots, table allowlist, LIMIT inject/cap via the S2 AST
+        validator) then execute it against the connected source under the
+        pipeline's existing EXPLAIN dry-run + statement-timeout guards.
+        Returns rows as dicts; raises on validation or execution failure
+        (the benchmark scores a raise as a non-match)."""
+        credentials = self._decrypt_source_credentials(source)
+        validated, _ = SQLValidator().validate_and_rewrite(
+            sql, schema_metadata=source.schema_metadata or {}
+        )
+        _columns, rows = await asyncio.to_thread(
+            self._run_sql_with_guards, source, credentials, validated
+        )
+        return rows
+
     def _augment_schema_with_samples(
         self,
         source,

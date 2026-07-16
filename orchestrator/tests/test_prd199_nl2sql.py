@@ -289,3 +289,77 @@ def test_fake_stats_columns_removed():
         if '"total_queries_executed"' in text or "total_queries_executed =" in text:
             offenders.append(rel)
     assert offenders == []
+
+
+# ---------------------------------------------------------------------------
+# S6 — the benchmark measures EXECUTION accuracy, not string match
+# ---------------------------------------------------------------------------
+
+class _ScriptedGenerator:
+    """Returns SQL equivalent to the golden but textually different."""
+
+    def generate_sql(self, question, schema_metadata, dialect):
+        return (
+            "SELECT   name FROM customers WHERE status='active' ORDER BY name",
+            "",
+            {},
+        )
+
+
+_GOLDEN = {"question": "active customers", "sql": "SELECT name FROM customers WHERE status = 'active'"}
+
+
+@pytest.mark.asyncio
+async def test_benchmark_uses_execution_match():
+    """Equivalent-but-textually-different SQL scores as the match it is —
+    the whole point string-match failed on."""
+    from modules.nl2sql.benchmarks.runner import NL2SQLBenchmarkRunner
+
+    rows = [{"name": "Acme"}, {"name": "Globex"}]
+
+    async def execute_sql(sql):
+        return list(rows)  # both statements produce the same result set
+
+    result = await NL2SQLBenchmarkRunner(nl2sql_service=_ScriptedGenerator()).run_benchmark(
+        database_source_id="1",
+        workspace_id="ws-a",
+        schema_metadata={"tables": []},
+        test_examples=[dict(_GOLDEN)],
+        execute_sql=execute_sql,
+    )
+
+    detail = result.details[0]
+    assert detail["execution_match"] is True
+    assert detail["exact_match"] is False  # string match would have scored 0
+    assert result.execution_match_rate == 1.0
+
+
+@pytest.mark.asyncio
+async def test_benchmark_generated_failure_scores_nonmatch():
+    """Generated SQL that fails on the source is a non-match with the error
+    surfaced — never a silent pass."""
+    from modules.nl2sql.benchmarks.runner import NL2SQLBenchmarkRunner
+
+    async def execute_sql(sql):
+        if "ORDER BY" in sql:  # the generated statement
+            raise RuntimeError("relation does not exist")
+        return [{"name": "Acme"}]
+
+    result = await NL2SQLBenchmarkRunner(nl2sql_service=_ScriptedGenerator()).run_benchmark(
+        database_source_id="1",
+        workspace_id="ws-a",
+        schema_metadata={"tables": []},
+        test_examples=[dict(_GOLDEN)],
+        execute_sql=execute_sql,
+    )
+
+    detail = result.details[0]
+    assert detail["execution_match"] is False
+    assert "relation does not exist" in detail["error"]
+    assert result.execution_match_rate == 0.0
+
+
+def test_benchmark_no_exact_match_fallback():
+    """The 'execution mirrors exact match' TODO stays dead."""
+    src = (_NL2SQL / "benchmarks" / "runner.py").read_text()
+    assert "exec_match = exact" not in src
