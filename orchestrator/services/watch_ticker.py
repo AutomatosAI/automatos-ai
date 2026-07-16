@@ -417,44 +417,22 @@ class WatchTicker:
         message: Optional[str],
         status: str = "ok",
     ) -> None:
-        """Fire a watch-related event through NotificationDispatcher.
+        """Fire a watch-related event through the shared notification seam.
 
-        Joins the caller's transaction (tick commits per watch). Resolves
-        ``watch.created_by`` (Clerk id) to a user_id so the creator is
-        targeted; workspace-wide when unresolvable. Never raises into the
-        sweep.
+        Kept as a ticker method (test seam); the body is the S6 shared
+        helper so the verdict/action/decision paths and the sweep all
+        dispatch identically. Never raises into the sweep.
         """
-        try:
-            from core.models.core import User
-            from core.services.notification_dispatcher import NotificationDispatcher
+        from services.watch_notifications import dispatch_watch_notification
 
-            user_id: Optional[int] = None
-            if watch.created_by:
-                user_row = (
-                    db.query(User.id)
-                    .filter(User.clerk_user_id == watch.created_by)
-                    .first()
-                )
-                if user_row:
-                    user_id = user_row[0]
-
-            dispatcher = NotificationDispatcher(db, str(watch.workspace_id))
-            await dispatcher.dispatch(
-                event_type=event_type,
-                title=title,
-                message=message,
-                link_type="watch",
-                link_id=str(watch.id),
-                status=status,
-                user_id=user_id,
-            )
-        except Exception:
-            logger.error(
-                "[WatchTicker] %s dispatch failed for watch %s",
-                event_type,
-                getattr(watch, "id", "?"),
-                exc_info=True,
-            )
+        await dispatch_watch_notification(
+            db,
+            watch,
+            event_type=event_type,
+            title=title,
+            message=message,
+            status=status,
+        )
 
 
 # ---------------------------------------------------------------------------

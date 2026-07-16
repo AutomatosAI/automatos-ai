@@ -80,6 +80,9 @@ class WatchEventType(str, Enum):
     STATUS_CHANGE = "status_change"    # explicit watch transition worth recording
     TARGET_MISSING = "target_missing"  # target row no longer exists
     CANCELLED = "cancelled"            # watch cancelled
+    SCORED = "scored"                  # run-level verdict written (S6)
+    DIAGNOSED = "diagnosed"            # failure/low-score diagnosis recorded (S10)
+    CHANGE_REPORT = "change_report"    # before/after comparison (watch_change / persistent)
 
 
 # ===========================================================================
