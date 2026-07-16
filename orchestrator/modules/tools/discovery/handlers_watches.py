@@ -38,7 +38,9 @@ def _owner_agent_id(params: Dict[str, Any]) -> Optional[int]:
         return None
 
 
-def _watch_to_dict(watch, *, include_lineage: bool = False) -> Dict[str, Any]:
+def watch_to_dict(watch, *, include_lineage: bool = False) -> Dict[str, Any]:
+    """Canonical watch serialization -- shared by the S9 tool handlers and
+    the S11 watchlist API (api/watches.py) so both surfaces speak one shape."""
     from services.watch_notifications import format_score_display
 
     data = {
@@ -239,7 +241,7 @@ async def create_watch(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
         return {
             "success": True,
             "existing": True,
-            "watch": _watch_to_dict(existing) if existing else None,
+            "watch": watch_to_dict(existing) if existing else None,
             "message": f"That {target_type} is already being watched.",
         }
     except Exception as e:
@@ -249,7 +251,7 @@ async def create_watch(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
     return {
         "success": True,
         "existing": False,
-        "watch": _watch_to_dict(watch),
+        "watch": watch_to_dict(watch),
         "message": (
             f"Watching {target_type} {target_id} to a verdict "
             f"(policy {policy}, bar {threshold:.2f})."
@@ -281,7 +283,7 @@ async def list_watches(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
 
     return {
         "success": True,
-        "watches": [_watch_to_dict(w) for w in watches],
+        "watches": [watch_to_dict(w) for w in watches],
         "total": len(watches),
     }
 
@@ -311,7 +313,7 @@ async def get_watch(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> 
     )
     return {
         "success": True,
-        "watch": _watch_to_dict(watch, include_lineage=True),
+        "watch": watch_to_dict(watch, include_lineage=True),
         "recent_events": [
             {
                 "event_type": e.event_type,
@@ -352,7 +354,7 @@ async def cancel_watch(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
 
     return {
         "success": True,
-        "watch": _watch_to_dict(watch),
+        "watch": watch_to_dict(watch),
         "message": f"Watch {watch.id} cancelled.",
     }
 

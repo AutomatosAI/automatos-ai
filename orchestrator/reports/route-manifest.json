@@ -1,5 +1,5 @@
 {
-  "route_count": 763,
+  "route_count": 767,
   "routes": [
     {
       "method": "GET",
@@ -2394,6 +2394,18 @@
       "path": "/api/v1/tasks/{task_id}/status"
     },
     {
+      "method": "GET",
+      "path": "/api/v1/watches"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/watches/{watch_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/watches/{watch_id}/cancel"
+    },
+    {
       "method": "POST",
       "path": "/api/verticals/{vertical}/gdpr/erase"
     },
@@ -2684,6 +2696,10 @@
     {
       "method": "POST",
       "path": "/api/workflow-recipes/{recipe_id}/executions/{execution_id}/cancel"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workflow-recipes/{recipe_id}/executions/{execution_id}/rerun"
     },
     {
       "method": "GET",

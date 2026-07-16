@@ -240,6 +240,50 @@ export interface GdprWorkspaceErasureResult {
   [key: string]: any
 }
 
+// ===== PRD-204 Auto Watcher: watchlist types =====
+export interface WatchRow {
+  id: string
+  title: string
+  watch_type: string
+  target_type: string
+  target_id: string
+  status: string
+  policy: string
+  success_criteria: string | null
+  quality_threshold: number
+  final_score: number | null
+  /** x10 display convention from the backend, e.g. "8.3/10" or "unscored". */
+  final_score_display: string
+  final_verdict: string | null
+  actions_taken: number
+  action_budget: number
+  last_checked_at: string | null
+  next_check_at: string | null
+  deadline_at: string | null
+  created_at: string | null
+  closed_at: string | null
+  lineage?: Array<Record<string, string>>
+}
+
+export interface WatchEventRow {
+  event_type: string
+  summary: string | null
+  score: number | null
+  action_taken: string | null
+  requires_attention: boolean
+  created_at: string | null
+}
+
+export interface WatchesResponse {
+  watches: WatchRow[]
+  total: number
+}
+
+export interface WatchDetailResponse {
+  watch: WatchRow
+  recent_events: WatchEventRow[]
+}
+
 class ApiClient {
   private baseUrl: string
   private defaultHeaders: Record<string, string>
@@ -2187,6 +2231,20 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify({ confirm_workspace_id: confirmWorkspaceId }),
     })
+  }
+
+  // ===== PRD-204 S11 Auto Watcher: watchlist =====
+  async listWatches(includeClosed: boolean = false): Promise<WatchesResponse> {
+    const qs = includeClosed ? '?include_closed=true' : ''
+    return this.request<WatchesResponse>(`/api/v1/watches${qs}`)
+  }
+
+  async getWatch(watchId: string): Promise<WatchDetailResponse> {
+    return this.request<WatchDetailResponse>(`/api/v1/watches/${watchId}`)
+  }
+
+  async cancelWatch(watchId: string): Promise<{ watch: WatchRow }> {
+    return this.request(`/api/v1/watches/${watchId}/cancel`, { method: 'POST' })
   }
 }
 
