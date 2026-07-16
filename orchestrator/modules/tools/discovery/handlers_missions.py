@@ -125,6 +125,27 @@ async def create_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]
             config=config,
         )
 
+        # PRD-204 S9 (Q1): Auto-launched missions get a run_and_report watch
+        # by default (workspace setting watch_auto_create, default ON);
+        # success_criteria is the user's request text. Fail-soft -- a broken
+        # watcher never breaks a launch.
+        from modules.tools.discovery.handlers_watches import auto_create_watch
+
+        auto_create_watch(
+            db,
+            workspace_id,
+            target_type="mission",
+            target_id=str(run.id),
+            title=f"Watch: {goal[:80]}",
+            success_criteria=goal,
+            created_by=params.get("_created_by"),
+            owner_agent_id=(
+                int(params["_agent_id"])
+                if str(params.get("_agent_id") or "").isdigit()
+                else None
+            ),
+        )
+
         # Summarize the plan for the caller (PRD-164 S2: includes the agent
         # match preview so the approval card can show reasons).
         plan = run.plan or {}

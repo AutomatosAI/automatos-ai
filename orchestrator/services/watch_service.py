@@ -77,6 +77,32 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def watch_auto_create_enabled(db: Session, workspace_id: UUID | str) -> bool:
+    """PRD-204 S9 (Section 8 Q1): the ``watch_auto_create`` workspace setting.
+
+    Default ON. Reads ``workspace.settings`` (the approval_policy pattern).
+    Only an explicit boolean False turns it off; a missing workspace returns
+    False (nothing to attach a watch to), any other read problem defaults ON.
+    """
+    try:
+        from core.models.workspaces import Workspace
+
+        ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
+        if ws is None:
+            return False
+        value = (ws.settings or {}).get("watch_auto_create")
+        if isinstance(value, bool):
+            return value
+        return True
+    except Exception:
+        logger.warning(
+            "[Watch] watch_auto_create read failed for %s -- defaulting ON",
+            workspace_id,
+            exc_info=True,
+        )
+        return True
+
+
 class WatchService:
     """Stateless service over the watch registry (caller manages sessions)."""
 
