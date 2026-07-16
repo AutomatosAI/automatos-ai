@@ -216,18 +216,25 @@ async def _notify_approval_pending(
         from core.services.notification_dispatcher import NotificationDispatcher
 
         dispatcher = NotificationDispatcher(db, str(workspace_id))
-        await dispatcher.dispatch(
-            event_type="approval_pending",
-            title=f"Approval needed: rerun '{recipe.name}'",
-            message=(
-                f"A rerun of playbook '{recipe.name}' is waiting for approval "
-                f"(estimated ${float(grant.estimated_cost_usd or 0):.2f}). "
-                "Review it in the approvals inbox."
-            ),
-            link_type="approval_grant",
-            link_id=str(grant.id),
-            status="warning",
-        )
+        # Land the caller's pending writes (the grant INSERT) BEFORE the
+        # savepoint, then dispatch inside it: a dispatch that dies mid-SQL
+        # aborts only the savepoint, never the caller's transaction. Without
+        # this, a dispatcher failure poisons the tx and the later commit
+        # silently rolls back the grant (found via test_prd204_rerun).
+        db.flush()
+        with db.begin_nested():
+            await dispatcher.dispatch(
+                event_type="approval_pending",
+                title=f"Approval needed: rerun '{recipe.name}'",
+                message=(
+                    f"A rerun of playbook '{recipe.name}' is waiting for approval "
+                    f"(estimated ${float(grant.estimated_cost_usd or 0):.2f}). "
+                    "Review it in the approvals inbox."
+                ),
+                link_type="approval_grant",
+                link_id=str(grant.id),
+                status="warning",
+            )
     except Exception:
         logger.error(
             "[WatchRerun] approval_pending dispatch failed for grant %s",
@@ -468,6 +475,13 @@ async def resume_playbook_run_grant(db: Session, grant) -> None:
         logger.error(
             "[WatchRerun] playbook_run grant %s resume failed", grant.id, exc_info=True
         )
+        # A flush that died mid-resume leaves the session unusable (every
+        # later statement raises PendingRollbackError, poisoning the grant
+        # endpoint). Roll back ONLY in that state so the failure lands on
+        # the grant's executed_result; in the normal error case the caller's
+        # uncommitted grant mutation is preserved.
+        if not db.is_active:
+            db.rollback()
         result = {"success": False, "error": str(exc)[:500]}
 
     grant.details = {
