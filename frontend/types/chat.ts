@@ -206,6 +206,8 @@ export interface Chat {
   updatedAt: string
   visibility: VisibilityType
   lastContext?: AppUsage
+  /** PRD-220: latest message text (truncated server-side) for thread lists. */
+  lastMessagePreview?: string | null
 }
 
 /**

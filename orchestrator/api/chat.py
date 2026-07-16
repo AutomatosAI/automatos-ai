@@ -172,6 +172,70 @@ def get_default_agent_id(db: Session, workspace_id) -> int:
     )
 
 
+def _parts_text(parts) -> str:
+    """Flatten a message's ``parts`` JSONB into plain text."""
+    if not isinstance(parts, list):
+        return ""
+    return " ".join(
+        p.get("text", "") for p in parts if isinstance(p, dict) and p.get("text")
+    ).strip()
+
+
+_PREVIEW_MAX_CHARS = 80
+
+
+def _last_message_previews(db: Session, chat_ids: List[str]) -> dict:
+    """Latest message text per chat, truncated — one query for the whole page (PRD-220 S2)."""
+    if not chat_ids:
+        return {}
+    rows = db.execute(
+        text("""
+            SELECT DISTINCT ON (m.chat_id) m.chat_id, m.parts
+            FROM messages m
+            WHERE m.chat_id = ANY(CAST(:ids AS uuid[]))
+            ORDER BY m.chat_id, m.created_at DESC
+        """),
+        {"ids": chat_ids},
+    ).fetchall()
+    previews = {}
+    for r in rows:
+        content = _parts_text(r.parts)
+        if len(content) > _PREVIEW_MAX_CHARS:
+            content = content[: _PREVIEW_MAX_CHARS - 1] + "…"
+        previews[str(r.chat_id)] = content
+    return previews
+
+
+_PAGE_CONTEXT_MAX_LEN = 80
+
+
+def _inject_page_context(message_history: List[dict], page: Optional[str]) -> List[dict]:
+    """Return ``message_history`` with an ephemeral page-context part on the last
+    user message (PRD-220).
+
+    The widget used to prepend "[Context: …]" into the message text itself, so
+    the hint leaked into the saved message AND the auto-generated chat title.
+    Now the client sends ``request.context = {"page": <label>}`` and the hint is
+    added prompt-side only, AFTER the clean save. Entries are rebuilt, never
+    mutated — ``parts`` here is the ORM row's JSONB list, and an in-place append
+    could flush the hint into the ``messages`` table.
+    """
+    if not page or not isinstance(page, str):
+        return message_history
+    label = page.strip()[:_PAGE_CONTEXT_MAX_LEN]
+    if not label:
+        return message_history
+    for i in range(len(message_history) - 1, -1, -1):
+        entry = message_history[i]
+        if entry.get("role") != "user":
+            continue
+        parts = entry.get("parts") if isinstance(entry.get("parts"), list) else []
+        hint = {"type": "text", "text": f"[Context: the user is currently on the {label} page]"}
+        rebuilt = {**entry, "parts": [*parts, hint]}
+        return [*message_history[:i], rebuilt, *message_history[i + 1:]]
+    return message_history
+
+
 # Endpoints
 @router.post("", dependencies=[Depends(require_workspace_permission("agents:execute"))])
 async def stream_chat(
@@ -309,7 +373,13 @@ async def stream_chat(
                     f"into message_history[{_i}]"
                 )
                 break
-    
+
+    # PRD-220: page context rides in request.context = {"page": <label>} and is
+    # injected prompt-side only — the user message was already saved clean above,
+    # so chat titles and reloaded history never show the hint.
+    _page_ctx = request.context.get("page") if isinstance(request.context, dict) else None
+    message_history = _inject_page_context(message_history, _page_ctx)
+
     # DEBUG: Log incoming request
     logger.info(f"Chat request - agentId: {request.agentId}")
 
@@ -508,7 +578,8 @@ async def get_chat_history(
     user_id = get_user_id(db, ctx)
 
     chats = chat_service.get_chat_history(user_id=user_id, limit=limit, workspace_id=ctx.workspace_id)
-    
+    previews = _last_message_previews(db, [str(chat.id) for chat in chats])
+
     return [
         {
             "id": str(chat.id),
@@ -517,10 +588,69 @@ async def get_chat_history(
             "createdAt": chat.created_at.isoformat(),
             "updatedAt": chat.updated_at.isoformat(),
             "visibility": chat.visibility,
-            "lastContext": chat.last_context
+            "lastContext": chat.last_context,
+            "lastMessagePreview": previews.get(str(chat.id))
         }
         for chat in chats
     ]
+
+
+@router.get("/search")
+async def search_chat_history(
+    q: str,
+    limit: int = 20,
+    days: int = 30,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Search across chat messages by keyword (workspace-scoped).
+
+    MUST be registered before ``GET /{chat_id}`` — routes match in declaration
+    order, so with this below the param route ``/api/chat/search`` resolved as
+    ``chat_id="search"`` and 404'd (PRD-220 drive-by fix).
+    """
+    from datetime import datetime, timedelta
+
+    user_id = get_user_id(db, ctx)
+    since = datetime.utcnow() - timedelta(days=min(days, 365))
+    search_term = f"%{q}%"
+
+    rows = db.execute(
+        text("""
+            SELECT m.id, m.chat_id, m.role, m.parts, m.created_at,
+                   c.title AS chat_title
+            FROM messages m
+            JOIN chats c ON c.id = m.chat_id
+            WHERE c.user_id = :user_id
+              AND c.workspace_id = :workspace_id
+              AND m.created_at >= :since
+              AND EXISTS (
+                  SELECT 1 FROM jsonb_array_elements(m.parts) AS p
+                  WHERE p->>'text' ILIKE :search
+              )
+            ORDER BY m.created_at DESC
+            LIMIT :lim
+        """),
+        {"user_id": user_id, "workspace_id": str(ctx.workspace_id), "since": since, "search": search_term, "lim": min(limit, 100)},
+    ).fetchall()
+
+    results = []
+    for r in rows:
+        # Extract text content from parts
+        parts = r.parts if isinstance(r.parts, list) else []
+        text_content = " ".join(
+            p.get("text", "") for p in parts if isinstance(p, dict) and p.get("text")
+        )
+        results.append({
+            "message_id": str(r.id),
+            "chat_id": str(r.chat_id),
+            "chat_title": r.chat_title,
+            "role": r.role,
+            "content": text_content[:500],
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        })
+
+    return {"query": q, "total": len(results), "results": results}
 
 
 @router.get("/{chat_id}")
@@ -581,59 +711,6 @@ async def get_chat_messages(
         }
         for msg in messages
     ]
-
-
-@router.get("/search")
-async def search_chat_history(
-    q: str,
-    limit: int = 20,
-    days: int = 30,
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db),
-):
-    """Search across chat messages by keyword (workspace-scoped)."""
-    from datetime import datetime, timedelta
-
-    user_id = get_user_id(db, ctx)
-    since = datetime.utcnow() - timedelta(days=min(days, 365))
-    search_term = f"%{q}%"
-
-    rows = db.execute(
-        text("""
-            SELECT m.id, m.chat_id, m.role, m.parts, m.created_at,
-                   c.title AS chat_title
-            FROM messages m
-            JOIN chats c ON c.id = m.chat_id
-            WHERE c.user_id = :user_id
-              AND c.workspace_id = :workspace_id
-              AND m.created_at >= :since
-              AND EXISTS (
-                  SELECT 1 FROM jsonb_array_elements(m.parts) AS p
-                  WHERE p->>'text' ILIKE :search
-              )
-            ORDER BY m.created_at DESC
-            LIMIT :lim
-        """),
-        {"user_id": user_id, "workspace_id": str(ctx.workspace_id), "since": since, "search": search_term, "lim": min(limit, 100)},
-    ).fetchall()
-
-    results = []
-    for r in rows:
-        # Extract text content from parts
-        parts = r.parts if isinstance(r.parts, list) else []
-        text_content = " ".join(
-            p.get("text", "") for p in parts if isinstance(p, dict) and p.get("text")
-        )
-        results.append({
-            "message_id": str(r.id),
-            "chat_id": str(r.chat_id),
-            "chat_title": r.chat_title,
-            "role": r.role,
-            "content": text_content[:500],
-            "created_at": r.created_at.isoformat() if r.created_at else None,
-        })
-
-    return {"query": q, "total": len(results), "results": results}
 
 
 @router.delete("/{chat_id}", dependencies=[Depends(require_workspace_permission("agents:execute"))])

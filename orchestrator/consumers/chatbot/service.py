@@ -318,13 +318,19 @@ class ChatService:
         starting_after: Optional[datetime] = None,
         workspace_id: Optional[uuid.UUID] = None,
     ) -> List[Chat]:
-        """Get chat history for a user within a workspace."""
+        """Get chat history for a user within a workspace.
+
+        Ordered by most recent activity (``updated_at`` — bumped on every
+        ``save_message``), not creation time, so a thread that just received a
+        message surfaces first (PRD-220 S2). ``starting_after`` pages on the
+        same key.
+        """
         query = self.db.query(Chat).filter(Chat.user_id == user_id)
         if workspace_id is not None:
             query = query.filter(Chat.workspace_id == workspace_id)
         if starting_after:
-            query = query.filter(Chat.created_at < starting_after)
-        return query.order_by(desc(Chat.created_at)).limit(limit).all()
+            query = query.filter(Chat.updated_at < starting_after)
+        return query.order_by(desc(Chat.updated_at)).limit(limit).all()
 
     def update_chat_title(self, chat_id: str, title: str) -> bool:
         """Update chat title, handling unique constraint violations."""
