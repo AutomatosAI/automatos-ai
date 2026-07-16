@@ -13,6 +13,7 @@
 Pure — ORM/session mocked at the boundary; no live DB, no LLM.
 """
 import sys
+import tokenize
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -22,6 +23,27 @@ import pytest
 _orchestrator_root = Path(__file__).resolve().parent.parent
 if str(_orchestrator_root) not in sys.path:
     sys.path.insert(0, str(_orchestrator_root))
+
+
+def _code_only(path: Path) -> str:
+    """Module source with comments and string literals stripped.
+
+    The "this symbol is gone" guards below assert against *code*, not prose:
+    the sibling import guard already states the rule ("comment mentions stay
+    allowed; imports do not"). A bare ``symbol not in read_text()`` breaks that
+    rule — service.py's own comment documenting the removed limbs names them
+    (``_build_connection_string`` / ``_validate_semantic_definitions``), which
+    is exactly the drift that should NOT fail CI. Dropping COMMENT and STRING
+    tokens leaves only real identifiers, so a re-added def or call-site still
+    trips the guard while documentation does not.
+    """
+    tokens = []
+    with path.open("r", encoding="utf-8") as fh:
+        for tok in tokenize.generate_tokens(fh.readline):
+            if tok.type in (tokenize.COMMENT, tokenize.STRING):
+                continue
+            tokens.append(tok.string)
+    return " ".join(tokens)
 
 
 # ---------------------------------------------------------------------------
@@ -88,8 +110,9 @@ async def test_update_semantic_layer_is_workspace_scoped(monkeypatch):
 
 def test_no_phantom_semantic_methods():
     """The two never-defined methods the old writer crashed on are gone —
-    deleted, not reimplemented as stubs."""
-    src = (_orchestrator_root / "modules" / "nl2sql" / "service.py").read_text()
+    deleted, not reimplemented as stubs. Comment/docstring mentions are
+    allowed (the module documents what it removed); real code is not."""
+    src = _code_only(_orchestrator_root / "modules" / "nl2sql" / "service.py")
     assert "_get_schema_context" not in src
     assert "_validate_semantic_definitions" not in src
 
@@ -255,8 +278,10 @@ def test_no_intelligence_or_schemalinker_imports_remain():
 
 def test_legacy_limb_removed():
     """The PRD-21 shadow pipeline (incl. the _build_connection_string crash
-    path) is gone from service.py and stays gone."""
-    src = (_NL2SQL / "service.py").read_text()
+    path) is gone from service.py and stays gone. Scans code only — the
+    module's own comment naming the removed limbs is documentation, not a
+    resurrection."""
+    src = _code_only(_NL2SQL / "service.py")
     for symbol in (
         "def _generate_sql",
         "def _validate_sql",
