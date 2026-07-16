@@ -392,11 +392,14 @@ class WatchService:
             summary=summary or f"Target reached terminal state '{terminal_state}'",
             snapshot=snapshot,
         )
-        if event is None:
-            return None
 
-        # Unknown terminal vocabularies park the watch for a human instead of
-        # guessing a verdict.
+        # Close the watch even when the event was a duplicate: a prior
+        # attempt may have committed the event but lost the close on a
+        # version conflict (e.g. the tick's claim bumped version_id under
+        # the producer hook). find_live_watch guarantees the watch is live
+        # here, so the close is the self-healing half of idempotency.
+        # Unknown terminal vocabularies park the watch for a human instead
+        # of guessing a verdict.
         new_status = WATCH_STATUS_FOR_TERMINAL_TARGET.get(
             terminal_state, WatchStatus.NEEDS_ATTENTION
         )
@@ -582,10 +585,16 @@ class WatchService:
         if not ids:
             return []
 
+        # populate_existing is REQUIRED: the raw UPDATE above bumped
+        # version_id outside the ORM, so an identity-mapped instance from
+        # earlier in this session still carries the stale version. Without
+        # the refresh, the next optimistic-locked write on a claimed watch
+        # would StaleDataError against its own claim.
         claimed = (
             db.query(Watch)
             .filter(Watch.id.in_(ids))
             .order_by(Watch.next_check_at.asc())
+            .execution_options(populate_existing=True)
             .all()
         )
         logger.info("[Watch] claimed %d due watch(es)", len(claimed))

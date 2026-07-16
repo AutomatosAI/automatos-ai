@@ -149,6 +149,7 @@ def _seed_recipe(s, ws_id: str, cron: str = "0 9 * * *") -> WorkflowTemplate:
         template_definition={"steps": []},
         steps=[{"step_id": "s1", "order": 1}],
         schedule_config={"type": "cron", "cron_expression": cron},
+        created_by="user_test",  # NOT NULL on workflow_recipes
     )
     s.add(recipe)
     s.commit()

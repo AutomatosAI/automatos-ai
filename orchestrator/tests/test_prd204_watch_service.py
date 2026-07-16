@@ -260,6 +260,41 @@ def test_ingest_terminal_outcome_mapping(
     s.close()
 
 
+def test_ingest_terminal_recovers_lost_close(workspace, new_session):
+    """Self-healing idempotency: if a prior attempt committed the terminal
+    EVENT but lost the CLOSE (version conflict), the next delivery still
+    closes the watch instead of being blocked by the duplicate event."""
+    from core.models.watches import WatchEvent
+
+    s = new_session()
+    watch = _create(s, workspace)
+    # Simulate the half-landed prior attempt: event row exists, watch open.
+    s.add(
+        WatchEvent(
+            watch_id=watch.id,
+            event_type=WatchEventType.TERMINAL.value,
+            event_key=f"terminal:mission:{watch.target_id}",
+            summary="first attempt",
+        )
+    )
+    s.commit()
+
+    result = WatchService.ingest_terminal(
+        s,
+        workspace_id=workspace,
+        target_type="mission",
+        target_id=watch.target_id,
+        terminal_state="completed",
+    )
+    s.commit()
+
+    assert result is None  # not the first writer of the event...
+    s.refresh(watch)
+    assert watch.status == WatchStatus.PASSED.value  # ...but the close lands
+    assert watch.closed_at is not None
+    s.close()
+
+
 def test_ingest_terminal_without_live_watch_is_noop(workspace, new_session):
     s = new_session()
     result = WatchService.ingest_terminal(

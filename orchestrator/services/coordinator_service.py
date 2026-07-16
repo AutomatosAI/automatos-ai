@@ -342,15 +342,28 @@ async def notify_mission_failed(db: Session, run: OrchestrationRun) -> None:
     run emitted only an internal RUN_FAILED audit event -- the user was
     never told.
     """
-    detail = run.stop_detail or run.stop_reason or "Mission failed"
-    await _dispatch_mission_event(
-        db=db,
-        run=run,
-        event_type="mission_failed",
-        title=f"Mission failed: {(run.goal or 'Mission')[:110]}",
-        message=str(detail)[:500],
-        status="error",
-    )
+    try:
+        detail = (
+            getattr(run, "stop_detail", None)
+            or getattr(run, "stop_reason", None)
+            or "Mission failed"
+        )
+        goal = getattr(run, "goal", None) or "Mission"
+        await _dispatch_mission_event(
+            db=db,
+            run=run,
+            event_type="mission_failed",
+            title=f"Mission failed: {goal[:110]}",
+            message=str(detail)[:500],
+            status="error",
+        )
+    except Exception:
+        # A notification must never break the failure path it reports on.
+        logger.error(
+            "[Coordinator] mission_failed notify failed for run %s",
+            getattr(run, "id", "?"),
+            exc_info=True,
+        )
 
 
 async def notify_mission_budget_paused(db: Session, run: OrchestrationRun) -> None:
@@ -360,29 +373,39 @@ async def notify_mission_budget_paused(db: Session, run: OrchestrationRun) -> No
     ``escalation_service.notify_budget_exceeded`` board-card path was
     removed in the same story.
     """
-    spent = run.budget_spent or {}
-    budget_cfg = run.budget_config or {}
-    parts = []
-    if spent.get("cost") is not None:
-        parts.append(f"spent ${float(spent.get('cost') or 0):.2f}")
-    if budget_cfg.get("max_cost") is not None:
-        parts.append(f"ceiling ${float(budget_cfg['max_cost']):.2f}")
-    if run.token_budget_estimate:
-        parts.append(
-            f"tokens {run.tokens_used or 0}/{run.token_budget_estimate}"
+    try:
+        spent = getattr(run, "budget_spent", None) or {}
+        budget_cfg = getattr(run, "budget_config", None) or {}
+        token_budget = getattr(run, "token_budget_estimate", None)
+        parts = []
+        if spent.get("cost") is not None:
+            parts.append(f"spent ${float(spent.get('cost') or 0):.2f}")
+        if budget_cfg.get("max_cost") is not None:
+            parts.append(f"ceiling ${float(budget_cfg['max_cost']):.2f}")
+        if token_budget:
+            parts.append(
+                f"tokens {getattr(run, 'tokens_used', 0) or 0}/{token_budget}"
+            )
+        detail = "; ".join(parts) or "budget exceeded"
+        goal = getattr(run, "goal", None) or "Mission"
+        await _dispatch_mission_event(
+            db=db,
+            run=run,
+            event_type="mission_budget_paused",
+            title=f"Mission paused on budget: {goal[:100]}",
+            message=(
+                f"Budget exceeded ({detail}). Increase the budget and resume "
+                f"to continue."
+            ),
+            status="warning",
         )
-    detail = "; ".join(parts) or "budget exceeded"
-    await _dispatch_mission_event(
-        db=db,
-        run=run,
-        event_type="mission_budget_paused",
-        title=f"Mission paused on budget: {(run.goal or 'Mission')[:100]}",
-        message=(
-            f"Budget exceeded ({detail}). Increase the budget and resume "
-            f"to continue."
-        ),
-        status="warning",
-    )
+    except Exception:
+        # A notification must never break the pause path it reports on.
+        logger.error(
+            "[Coordinator] mission_budget_paused notify failed for run %s",
+            getattr(run, "id", "?"),
+            exc_info=True,
+        )
 
 
 # ---------------------------------------------------------------------------
