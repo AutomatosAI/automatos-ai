@@ -550,6 +550,19 @@ class Config:
     # connection-liveness heartbeat cadence (a ':hb' comment), not a refresh tick.
     BOARD_SSE_HEARTBEAT_SECONDS: float = float(os.getenv("BOARD_SSE_HEARTBEAT_SECONDS", "20"))
 
+    # =============================================================================
+    # AUTO WATCHER (PRD-204: persistent supervision of launched work)
+    # =============================================================================
+    # The watcher tick rides the fcntl-locked UnifiedScheduler (single owner
+    # across workers). Each tick claims due watches with FOR UPDATE SKIP
+    # LOCKED, sweeps terminal states the S3 event hooks missed, detects
+    # missed cron fires / benched schedules on scheduled-playbook watches,
+    # and expires past-deadline watches.
+    WATCHER_ENABLED: bool = os.getenv("WATCHER_ENABLED", "true").lower() == "true"
+    # Sweep cadence. The S3 hooks are the fast path; the tick is the
+    # fallback and the missed-run/trend brain, so 5 minutes is plenty.
+    WATCHER_TICK_SECONDS: int = int(os.getenv("WATCHER_TICK_SECONDS", "300"))
+
     WORKER_INTERNAL_URL: str = os.getenv("WORKER_INTERNAL_URL", "http://localhost:8081")
     WORKER_INTERNAL_TOKEN: str = os.getenv("WORKER_INTERNAL_TOKEN", "")
 

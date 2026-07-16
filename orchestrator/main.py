@@ -384,6 +384,18 @@ async def _boot_phase_2_extensions(app_instance: "FastAPI") -> "DeferredInitResu
                 except Exception as _tr_err:
                     logger.warning("Could not start TaskReconciler: %s", _tr_err)
 
+                # PRD-204 S5: Auto Watcher tick -- heartbeat sweep for watches
+                # (terminal fallback, missed-run/benched detection, expiry).
+                # Rides the same fcntl-locked scheduler: single owner across
+                # workers, so watch claims never race between processes.
+                if config.WATCHER_ENABLED:
+                    try:
+                        from services.watch_ticker import get_watch_ticker
+                        await get_watch_ticker().start(scheduler=shared_sched)
+                        logger.info("WatchTicker started on unified scheduler")
+                    except Exception as _wt_err:
+                        logger.warning("Could not start WatchTicker: %s", _wt_err)
+
                 # PRD-79: Memory background jobs (consolidation, decay, promotion)
                 if config.MEMORY_JOBS_ENABLED:
                     try:

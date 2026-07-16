@@ -50,6 +50,21 @@ from .orchestration_enums import (  # noqa: F401
     BOARD_STATUS_MAP,
 )
 
+# PRD-204: Auto Watcher -- watch registry
+from .watches import Watch, WatchEvent  # noqa: F401
+from .watch_enums import (  # noqa: F401
+    WatchStatus,
+    WatchType,
+    WatchTargetType,
+    WatchPolicy,
+    WatchEventType,
+    ALLOWED_WATCH_TRANSITIONS,
+    TERMINAL_WATCH_STATUSES,
+    LIVE_WATCH_STATUSES,
+    CLAIMABLE_WATCH_STATUSES,
+    WATCH_STATUS_FOR_TERMINAL_TARGET,
+)
+
 # PRD-72: Board Tasks — explicit import so `from core.models import BoardTask` works
 from .core import BoardTask  # noqa: F811
 from .core import BlogPost  # noqa: F811

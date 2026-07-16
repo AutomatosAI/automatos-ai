@@ -192,6 +192,12 @@ from modules.tools.discovery.handlers_blog import (
     create_blog_post_from_topic,
     generate_cover_image,
 )
+from modules.tools.discovery.handlers_watches import (  # PRD-204 S9
+    create_watch,
+    list_watches,
+    get_watch,
+    cancel_watch,
+)
 from modules.tools.discovery.handlers_missions import (
     create_mission,
     list_missions,
@@ -451,6 +457,11 @@ class PlatformActionExecutor:
             "platform_create_mission": create_mission,
             "platform_list_missions": list_missions,
             "platform_get_mission": get_mission,
+            # PRD-204 S9: Watches (supervision to a verdict)
+            "platform_create_watch": create_watch,
+            "platform_list_watches": list_watches,
+            "platform_get_watch": get_watch,
+            "platform_cancel_watch": cancel_watch,
             # PRD-163 S1: mission lifecycle control
             "platform_approve_mission": approve_mission,
             "platform_reject_mission": reject_mission,

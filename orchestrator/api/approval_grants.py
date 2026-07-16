@@ -168,11 +168,20 @@ async def _requeue_subject(db: Session, grant: ApprovalGrant) -> None:
     - ``tool_call`` (PRD-193 S4, P2-12): re-dispatch the stored call through
       the spine — or, for board-originated asks, ride the existing board
       re-queue so the re-run completes into the now-active grant (S2).
+    - ``playbook_run`` (PRD-204 S7/S8): the watcher's corrective-action
+      grants -- ``details.watch_action`` discriminates (rerun / replan /
+      reassign / spawn_agent); the stored spec launches and the supervising
+      watch follows the work. First real wiring of SUBJECT_PLAYBOOK_RUN.
     """
-    from core.models.approval_grants import SUBJECT_TOOL_CALL
+    from core.models.approval_grants import SUBJECT_PLAYBOOK_RUN, SUBJECT_TOOL_CALL
 
     if grant.subject_type == SUBJECT_TOOL_CALL:
         await _resume_tool_call(db, grant)
+        return
+    if grant.subject_type == SUBJECT_PLAYBOOK_RUN:
+        from services.watch_rerun import resume_playbook_run_grant
+
+        await resume_playbook_run_grant(db, grant)
         return
     if grant.subject_type != SUBJECT_BOARD_TASK:
         return
@@ -292,8 +301,14 @@ async def _resume_tool_call(db: Session, grant: ApprovalGrant) -> None:
 
 def _fail_subject(db: Session, grant: ApprovalGrant) -> None:
     """On deny, fail the blocked subject (the human refused the action)."""
-    from core.models.approval_grants import SUBJECT_TOOL_CALL
+    from core.models.approval_grants import SUBJECT_PLAYBOOK_RUN, SUBJECT_TOOL_CALL
 
+    if grant.subject_type == SUBJECT_PLAYBOOK_RUN:
+        # PRD-204 S7: no launch; the supervising watch parks for a human.
+        from services.watch_rerun import fail_playbook_run_grant
+
+        fail_playbook_run_grant(db, grant)
+        return
     if grant.subject_type == SUBJECT_TOOL_CALL:
         # PRD-193 S4: a denied tool call is a no-op execution — the grant's
         # DENIED status is the record; the S3 card renders the refusal; the

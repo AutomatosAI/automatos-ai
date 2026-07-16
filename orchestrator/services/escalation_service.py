@@ -1,10 +1,12 @@
 """
-Escalation Service — auto-escalate blocked tasks and budget-paused missions.
+Escalation Service -- auto-escalate blocked and repeatedly-stalled tasks.
 
 Creates board tasks for human attention when:
 - A board task has been blocked > 24 hours
-- A mission is paused due to budget exceeded
 - A task has stalled repeatedly (2+ stalls)
+
+(Budget-paused missions are surfaced by the coordinator's
+``mission_budget_paused`` notification -- PRD-204 S4 -- not by a board card.)
 """
 
 import logging
@@ -90,22 +92,37 @@ def check_blocked_escalations(db: Session, workspace_id) -> int:
     return created
 
 
-def notify_budget_exceeded(
-    db: Session,
-    run,
-) -> Optional[BoardTask]:
-    """
-    Create a board task notifying humans that a mission was paused due to budget.
-    Idempotent: won't create duplicate notifications.
-    """
-    workspace_id = run.workspace_id
+# PRD-204 S4: notify_budget_exceeded was removed. It was dead code (zero
+# non-test callers since introduction) and duplicated the budget-pause
+# surface. The single owner of that boundary is now the coordinator's
+# ``notify_mission_budget_paused`` (a real ``mission_budget_paused``
+# notification dispatched when the dispatcher's budget gate pauses a run);
+# the paused mission's board card already flips to "blocked" via
+# orchestration_board_bridge, so a second escalation card added nothing.
 
-    # Check for existing notification
+
+def escalate_watch(
+    db: Session,
+    workspace_id,
+    watch,
+    reason: str,
+) -> Optional[BoardTask]:
+    """PRD-204 S8: hand a watch to a human via a board card.
+
+    A watch-flavoured SIBLING of ``escalate_stalled_task`` -- deliberately
+    NOT an overload of the stall semantics (different tags, different copy,
+    different dedupe key). One open escalation card per watch; the
+    ``watch_escalation`` notification is dispatched by the caller
+    (watch_actions), not here -- this module stays sync + DB-only.
+    """
+    watch_id = str(getattr(watch, "id", ""))
+    title = getattr(watch, "title", None) or "watched work"
+
     existing = (
         db.query(BoardTask.id)
         .filter(
             BoardTask.workspace_id == workspace_id,
-            BoardTask.tags.contains(["escalation", f"budget:{run.id}"]),
+            BoardTask.tags.contains(["escalation", f"watch:{watch_id}"]),
             BoardTask.status.notin_(["done"]),
         )
         .first()
@@ -113,35 +130,37 @@ def notify_budget_exceeded(
     if existing:
         return None
 
-    budget_spent = run.budget_spent or {}
-    budget_config = run.budget_config or {}
-    goal = (run.goal or "Mission")[:120]
+    target_type = getattr(watch, "target_type", "?")
+    target_id = getattr(watch, "target_id", "?")
+    actions_taken = getattr(watch, "actions_taken", 0) or 0
+    budget = getattr(watch, "action_budget", 0) or 0
 
     escalation = BoardTask(
         workspace_id=workspace_id,
-        title=f"Budget exceeded: '{goal}' — mission paused",
+        title=f"Watch escalation: '{title[:90]}'",
         description=(
-            f"Mission `{run.id}` has been paused because its budget was exceeded.\n\n"
-            f"**Goal:** {run.goal}\n\n"
-            f"**Spent:** {budget_spent.get('tokens', 0):,} tokens, ${budget_spent.get('cost', 0):.4f}\n"
-            f"**Budget:** {budget_config.get('max_tokens', 'N/A')} tokens, ${budget_config.get('max_cost', 'N/A')}\n\n"
-            f"To resume, increase the budget and use the resume API."
+            f"The watcher is handing this to a human.\n\n"
+            f"**Reason:** {reason}\n\n"
+            f"**Watched target:** {target_type}:{target_id}\n"
+            f"**Corrective actions used:** {actions_taken}/{budget}\n\n"
+            f"Review the watch timeline and decide: rerun, replan, reassign, "
+            f"or accept the outcome."
         ),
         status="inbox",
-        priority="urgent",
+        priority="high",
         review_mode="human",
         created_by_type="system",
-        created_by_id="escalation_service",
-        orchestration_run_id=run.id,
-        tags=["escalation", f"budget:{run.id}"],
+        created_by_id="watch_decider",
+        tags=["escalation", f"watch:{watch_id}"],
     )
     db.add(escalation)
     db.flush()
 
     logger.warning(
-        "Created budget escalation for paused mission %s in workspace %s",
-        run.id,
+        "Created watch escalation card for watch %s in workspace %s: %s",
+        watch_id,
         workspace_id,
+        reason,
     )
     return escalation
 

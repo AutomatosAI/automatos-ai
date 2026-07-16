@@ -216,6 +216,19 @@ async def _dispatch_task_complete(db: Session, workspace_id, task: BoardTask) ->
             exc_info=True,
         )
 
+    # PRD-204 S3: board-task terminal choke point (success) -- every
+    # completion path funnels through this helper. Fail-soft.
+    from services.watch_hooks import watch_ingest_terminal
+
+    watch_ingest_terminal(
+        db,
+        workspace_id=workspace_id,
+        target_type="board_task",
+        target_id=str(task.id),
+        terminal_state="completed",
+        summary=(str(task.result)[:500] if task.result else None),
+    )
+
 
 async def _dispatch_task_failed(db: Session, workspace_id, task: BoardTask) -> None:
     """Fire a ``task_failed`` event (PRD-161 S3).
@@ -249,6 +262,18 @@ async def _dispatch_task_failed(db: Session, workspace_id, task: BoardTask) -> N
             getattr(task, "id", "?"),
             exc_info=True,
         )
+
+    # PRD-204 S3: board-task terminal choke point (failure). Fail-soft.
+    from services.watch_hooks import watch_ingest_terminal
+
+    watch_ingest_terminal(
+        db,
+        workspace_id=workspace_id,
+        target_type="board_task",
+        target_id=str(task.id),
+        terminal_state="failed",
+        summary=(task.error_message or "Execution failed")[:500],
+    )
 
 
 # ── Helpers ──────────────────────────────────────────────────────────

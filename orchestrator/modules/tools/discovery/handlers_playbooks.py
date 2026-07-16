@@ -481,6 +481,45 @@ async def execute_playbook(db: Session, workspace_id: UUID, params: Dict[str, An
     db.add(execution)
     db.commit()  # Must commit before async task (it opens its own session)
 
+    # PRD-204 S9 (Q1): Auto-launched playbook runs get a run_and_report
+    # watch by default (workspace setting watch_auto_create, default ON);
+    # criteria seeded from the request context. Fail-soft by contract --
+    # committed separately AFTER the execution row so a watch problem can
+    # never poison the launch transaction.
+    try:
+        from modules.tools.discovery.handlers_watches import auto_create_watch
+
+        criteria = f"Playbook '{playbook.name}' completes and delivers its expected output."
+        if input_data:
+            import json as _json
+
+            try:
+                criteria += f" Inputs: {_json.dumps(input_data, default=str)[:400]}"
+            except Exception:
+                pass
+        watch = auto_create_watch(
+            db,
+            workspace_id,
+            target_type="playbook_execution",
+            target_id=execution_id,
+            title=f"Watch: {playbook.name[:80]}",
+            success_criteria=criteria,
+            created_by=(str(params.get("_created_by")) if params.get("_created_by") else None),
+            owner_agent_id=(
+                int(params["_agent_id"])
+                if str(params.get("_agent_id") or "").isdigit()
+                else None
+            ),
+        )
+        if watch is not None:
+            db.commit()
+    except Exception:
+        db.rollback()
+        logger.warning(
+            "[PlatformExecutor] watch auto-create commit failed for %s -- "
+            "launch unaffected", execution_id, exc_info=True,
+        )
+
     # Launch async execution via the consolidated PlaybookEngine seam.
     # PRD-142 W3-S12: every backend launch site goes through the engine —
     # the strangler-fig that lets durability/observability land in one place.

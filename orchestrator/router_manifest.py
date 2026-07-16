@@ -81,6 +81,8 @@ MANIFEST_ROUTERS: tuple[RouterSpec, ...] = (
     # PRD-196 (P2-15) — governance operator surface: audit-log + status (S3),
     # policy posture + budget editors (S4). Ws-admin gated at the router.
     RouterSpec("api.governance"),
+    # PRD-204 S11 -- watchlist read/cancel surface over the watch registry.
+    RouterSpec("api.watches"),
 )
 
 

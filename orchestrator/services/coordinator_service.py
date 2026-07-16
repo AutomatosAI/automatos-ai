@@ -332,6 +332,82 @@ async def _dispatch_mission_event(
         )
 
 
+async def notify_mission_failed(db: Session, run: OrchestrationRun) -> None:
+    """PRD-204 S4: dispatch ``mission_failed`` at the run-failure boundary.
+
+    ONE owner of the failure message shape, called from every async
+    failure site (reconciler task-failure cascades, joiner halt, plan
+    validation). Reuses the ``_dispatch_mission_event`` seam (resolves
+    ``run.created_by`` to a user_id; never raises). Previously a failed
+    run emitted only an internal RUN_FAILED audit event -- the user was
+    never told.
+    """
+    try:
+        detail = (
+            getattr(run, "stop_detail", None)
+            or getattr(run, "stop_reason", None)
+            or "Mission failed"
+        )
+        goal = getattr(run, "goal", None) or "Mission"
+        await _dispatch_mission_event(
+            db=db,
+            run=run,
+            event_type="mission_failed",
+            title=f"Mission failed: {goal[:110]}",
+            message=str(detail)[:500],
+            status="error",
+        )
+    except Exception:
+        # A notification must never break the failure path it reports on.
+        logger.error(
+            "[Coordinator] mission_failed notify failed for run %s",
+            getattr(run, "id", "?"),
+            exc_info=True,
+        )
+
+
+async def notify_mission_budget_paused(db: Session, run: OrchestrationRun) -> None:
+    """PRD-204 S4: dispatch ``mission_budget_paused`` at the budget-pause
+    transition (the dispatcher blocked and moved the run to PAUSED --
+    previously silent). Single owner of this event; the dead
+    ``escalation_service.notify_budget_exceeded`` board-card path was
+    removed in the same story.
+    """
+    try:
+        spent = getattr(run, "budget_spent", None) or {}
+        budget_cfg = getattr(run, "budget_config", None) or {}
+        token_budget = getattr(run, "token_budget_estimate", None)
+        parts = []
+        if spent.get("cost") is not None:
+            parts.append(f"spent ${float(spent.get('cost') or 0):.2f}")
+        if budget_cfg.get("max_cost") is not None:
+            parts.append(f"ceiling ${float(budget_cfg['max_cost']):.2f}")
+        if token_budget:
+            parts.append(
+                f"tokens {getattr(run, 'tokens_used', 0) or 0}/{token_budget}"
+            )
+        detail = "; ".join(parts) or "budget exceeded"
+        goal = getattr(run, "goal", None) or "Mission"
+        await _dispatch_mission_event(
+            db=db,
+            run=run,
+            event_type="mission_budget_paused",
+            title=f"Mission paused on budget: {goal[:100]}",
+            message=(
+                f"Budget exceeded ({detail}). Increase the budget and resume "
+                f"to continue."
+            ),
+            status="warning",
+        )
+    except Exception:
+        # A notification must never break the pause path it reports on.
+        logger.error(
+            "[Coordinator] mission_budget_paused notify failed for run %s",
+            getattr(run, "id", "?"),
+            exc_info=True,
+        )
+
+
 # ---------------------------------------------------------------------------
 # Mission cost audit
 # ---------------------------------------------------------------------------
@@ -1417,6 +1493,20 @@ class CoordinatorService:
         # --- Dispatch phase (parallel via dispatch_ready) ---
         dispatch_results = MissionDispatcher.dispatch_ready(db, run, agents)
 
+        # PRD-204 S4: the dispatcher's budget gate pauses silently (sync
+        # code cannot await the dispatcher). This is that transition's
+        # async seam: the run entered dispatch RUNNING and came out PAUSED
+        # with a budget skip reason -- tell the user, once (the tick will
+        # not re-process a PAUSED run, so this cannot repeat).
+        if (
+            RunState(run.state) == RunState.PAUSED
+            and any(
+                r.skipped_reason in ("budget_exceeded", "budget_critical_deferred")
+                for r in dispatch_results
+            )
+        ):
+            await notify_mission_budget_paused(db, run)
+
         # Collect successfully dispatched tasks for concurrent execution
         dispatched = [r for r in dispatch_results if r.dispatched]
 
@@ -1666,6 +1756,8 @@ class CoordinatorService:
                 run.id, run.state, exc_info=True,
             )
             return
+        # PRD-204 S4: the user is told the mission failed (joiner halt path).
+        await notify_mission_failed(db, run)
         await _store_mission_memory_safe(
             db, run.id, outcome="failed", failure_reason=reason,
         )
@@ -2302,6 +2394,8 @@ class CoordinatorService:
                 stop_reason="coordinator_error",
                 stop_detail="Plan validation failed after all retries",
             )
+            # PRD-204 S4: the user is told the mission failed (planning path).
+            await notify_mission_failed(db, run)
             await _store_mission_memory_safe(
                 db, run.id, outcome="failed",
                 failure_reason="Plan validation failed after all retries",

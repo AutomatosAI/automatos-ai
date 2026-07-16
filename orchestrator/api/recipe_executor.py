@@ -83,6 +83,81 @@ async def _dispatch_playbook_event(
 
 
 # ---------------------------------------------------------------------------
+# PRD-204 S3: playbook terminal -> watch registry (fail-soft)
+# ---------------------------------------------------------------------------
+
+def _ingest_playbook_terminal_watch(
+    db: Session,
+    execution,
+    terminal_state: str,
+    summary: Optional[str] = None,
+) -> None:
+    """Report a playbook execution's terminal state to its live watch.
+
+    ONE seam for both the success block and ``_fail_execution`` so each
+    terminal path flows through the same tested call. Fail-soft end to end:
+    ``watch_ingest_terminal`` never raises into the executor.
+    """
+    from services.watch_hooks import watch_ingest_terminal
+
+    output_data = getattr(execution, "output_data", None) or {}
+    cost_snapshot = {
+        "total_tokens": output_data.get("total_tokens", 0),
+        "total_duration_ms": output_data.get("total_duration_ms", 0),
+    }
+    output_pointer = None
+    if output_data.get("final_output"):
+        output_pointer = (
+            f"recipe_execution:{execution.execution_id}:output_data.final_output"
+        )
+    watch_ingest_terminal(
+        db,
+        workspace_id=execution.workspace_id,
+        target_type="playbook_execution",
+        target_id=execution.execution_id,
+        terminal_state=terminal_state,
+        summary=summary,
+        cost_snapshot=cost_snapshot,
+        output_pointer=output_pointer,
+    )
+
+
+# ---------------------------------------------------------------------------
+# PRD-204 S7: per-execution step overrides (rerun tweak)
+# ---------------------------------------------------------------------------
+
+def _apply_step_overrides(
+    steps: List[Dict[str, Any]],
+    overrides: Optional[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Merge ``execution_metadata.step_overrides`` into the step list.
+
+    Shape: ``{step_id: {"prompt_template": "..."}}``. Returns NEW dicts --
+    ``workflow_recipes.steps`` (the shared definition) is never mutated; a
+    tweak affects exactly this execution. Only ``prompt_template`` is
+    honoured; anything else in an override entry is ignored.
+    """
+    if not overrides or not isinstance(overrides, dict):
+        return [dict(step) for step in steps]
+
+    merged: List[Dict[str, Any]] = []
+    for step in steps:
+        step_id = str(step.get("step_id") or "")
+        override = overrides.get(step_id)
+        prompt = override.get("prompt_template") if isinstance(override, dict) else None
+        if isinstance(prompt, str) and prompt.strip():
+            merged.append({**step, "prompt_template": prompt})
+            logger.info(
+                "[recipe_direct] step %s prompt overridden for this execution "
+                "(PRD-204 S7 tweak)",
+                step_id,
+            )
+        else:
+            merged.append(dict(step))
+    return merged
+
+
+# ---------------------------------------------------------------------------
 # Auto-report on playbook completion (mirrors heartbeat & task auto-reports)
 # ---------------------------------------------------------------------------
 async def _auto_create_playbook_report(
@@ -1117,6 +1192,12 @@ async def _execute_recipe_inner(
             await _fail_execution(db, recipe_execution_id, "Recipe has no steps")
             return
 
+        # PRD-204 S7: merge per-execution prompt overrides (rerun tweak) at
+        # execution start. The recipe row is never written back to.
+        step_overrides = (execution.execution_metadata or {}).get("step_overrides")
+        if step_overrides:
+            steps = _apply_step_overrides(steps, step_overrides)
+
         total_steps = len(steps)
         logger.info(f"[recipe_direct] Recipe '{recipe.name}' has {total_steps} steps")
 
@@ -1723,6 +1804,15 @@ async def _execute_recipe_inner(
             status="ok",
         )
 
+        # PRD-204 S3: playbook terminal choke point (success) -- joins the
+        # same transaction as the status update; fail-soft.
+        _ingest_playbook_terminal_watch(
+            db,
+            execution,
+            terminal_state="completed",
+            summary=f"{len(step_results)} steps completed in {total_duration // 1000}s",
+        )
+
         db.commit()
 
         # Complete the board task
@@ -1970,6 +2060,16 @@ async def _fail_execution(
             execution.completed_at = datetime.now(timezone.utc)
             if step_results is not None:
                 execution.step_results = step_results
+
+            # PRD-204 S3: playbook terminal choke point (failure) -- joins the
+            # failure-status transaction below; fail-soft.
+            _ingest_playbook_terminal_watch(
+                db,
+                execution,
+                terminal_state="failed",
+                summary=(error_message or "Playbook execution failed")[:500],
+            )
+
             db.commit()
 
             # PRD-142 W3-S12: playbooks primitive heartbeat at the FAILED

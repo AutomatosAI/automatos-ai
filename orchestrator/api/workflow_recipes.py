@@ -931,6 +931,123 @@ async def execute_recipe(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+@router.post(
+    "/{recipe_id}/executions/{execution_id}/rerun",
+    dependencies=[Depends(require_workspace_permission("playbooks:execute"))],
+)
+async def rerun_recipe_execution(
+    recipe_id: str,
+    execution_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    body: Dict[str, Any] = Body(default={}),
+    db: Session = Depends(get_db),
+):
+    """PRD-204 S7: rerun a prior execution -- the platform's rerun primitive.
+
+    Creates a NEW RecipeExecution copying the original's input_data
+    (retry_of lineage, attempt_count+1) with optional per-execution
+    step_overrides; the shared playbook definition is never mutated.
+
+    Routed through the workspace approval policy with the ORIGINAL run's
+    llm_usage dollar sum as the estimate: auto path launches immediately;
+    ask path parks a durable ApprovalGrant (approvals inbox) and returns
+    202-shaped JSON. A live watch on the original execution follows the
+    rerun (same watch, one verdict).
+
+    Body (optional):
+    - step_overrides: {step_id: {"prompt_template": "..."}}
+    """
+    try:
+        from services.watch_rerun import (
+            TRIGGERED_BY_HUMAN,
+            request_rerun,
+            validate_step_overrides,
+        )
+
+        recipe = db.query(WorkflowRecipe).filter(
+            WorkflowRecipe.owner_type == 'workspace',
+            WorkflowRecipe.workspace_id == ctx.workspace_id,
+            WorkflowRecipe.template_id == recipe_id
+        ).first()
+        if not recipe:
+            raise HTTPException(status_code=404, detail=f"Recipe '{recipe_id}' not found")
+
+        original = db.query(RecipeExecution).filter(
+            RecipeExecution.execution_id == execution_id,
+            RecipeExecution.workspace_id == ctx.workspace_id,
+            RecipeExecution.recipe_id == recipe.id,
+        ).first()
+        if not original:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Execution '{execution_id}' not found for this playbook",
+            )
+
+        step_overrides, err = validate_step_overrides(recipe, body.get("step_overrides"))
+        if err:
+            raise HTTPException(status_code=422, detail=err)
+
+        # Same admission guard as a fresh execute.
+        from services.concurrency_guard import check_concurrency
+        concurrency = await check_concurrency(ctx.workspace_id, db)
+        if not concurrency.allowed:
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "error": "concurrency_limit",
+                    "detail": concurrency.reason,
+                    "limits": concurrency.limits,
+                },
+            )
+
+        # A live watch on the original execution follows the rerun.
+        from services.watch_service import WatchService
+        watch = WatchService.find_live_watch(
+            db,
+            workspace_id=ctx.workspace_id,
+            target_type="playbook_execution",
+            target_id=execution_id,
+        )
+
+        outcome = await request_rerun(
+            db,
+            workspace_id=ctx.workspace_id,
+            recipe=recipe,
+            original=original,
+            step_overrides=step_overrides,
+            triggered_by=TRIGGERED_BY_HUMAN,
+            watch=watch,
+        )
+        db.commit()  # ask-path rows (grant / watch park) are flush-only
+
+        if outcome.launched:
+            return {
+                "recipe_execution_id": outcome.execution_id,
+                "rerun_of": execution_id,
+                "recipe_id": recipe_id,
+                "status": "started",
+                "step_overrides_applied": bool(step_overrides),
+                "approval": outcome.decision.audit_snapshot(),
+                "message": outcome.message,
+            }
+        return {
+            "recipe_execution_id": None,
+            "rerun_of": execution_id,
+            "recipe_id": recipe_id,
+            "status": "awaiting_approval",
+            "grant_id": outcome.grant_id,
+            "approval": outcome.decision.audit_snapshot(),
+            "message": outcome.message,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[rerun_recipe_execution] Unhandled error: {e}", exc_info=True)
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
 @router.get("/{recipe_id}/executions/{execution_id}")
 async def get_recipe_execution_detail(
     recipe_id: str,
