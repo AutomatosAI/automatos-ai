@@ -9,17 +9,24 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 
-const { updatePolicy, updateBudget, statusMock } = vi.hoisted(() => ({
+// The mocked hook data MUST be reference-stable across renders (the sibling
+// tests' mockReturnValue idiom). An inline `() => ({ data: {...} })` mints a
+// NEW object every render, so PolicyPane's `useEffect(..., [policy])` re-runs
+// each pass and its `setOverrides(policy.route_overrides ?? {})` never bails
+// out (fresh object identity) -> an act()-flushed infinite render loop that
+// starves the event loop, hangs the whole vitest worker, and timed the
+// Frontend CI job out at 20m from PRD-196's merge onward.
+const { updatePolicy, updateBudget, statusMock, policyData, budgetData } = vi.hoisted(() => ({
   updatePolicy: vi.fn().mockResolvedValue({}),
   updateBudget: vi.fn().mockResolvedValue({}),
   statusMock: vi.fn(),
+  policyData: { posture: 'balanced', agents_inherit_admin: false, route_overrides: {} },
+  budgetData: {},
 }))
 
 vi.mock('@/hooks/use-governance', () => ({
-  usePolicy: () => ({
-    data: { posture: 'balanced', agents_inherit_admin: false, route_overrides: {} },
-  }),
-  useBudget: () => ({ data: {} }),
+  usePolicy: () => ({ data: policyData }),
+  useBudget: () => ({ data: budgetData }),
   useGovernanceStatus: () => statusMock(),
   useUpdatePolicy: () => ({ isLoading: false, mutateAsync: updatePolicy }),
   useUpdateBudget: () => ({ isLoading: false, mutateAsync: updateBudget }),
