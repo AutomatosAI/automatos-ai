@@ -73,11 +73,9 @@ class IngestionPipeline:
     def __init__(
         self,
         config: PipelineConfig = None,
-        vector_store=None,
         embedding_generator=None
     ):
         self.config = config or PipelineConfig()
-        self.vector_store = vector_store
         self.embedding_generator = embedding_generator
         
         # Initialize handlers
@@ -102,16 +100,14 @@ class IngestionPipeline:
             )
             
             self.processor = DocumentProcessor(
-                vector_store=self.vector_store,
                 embedding_generator=self.embedding_generator,
                 chunker=chunker
             )
-            
+
             logger.info("✅ Using SemanticChunker from modules.rag")
         except ImportError as e:
             logger.warning(f"SemanticChunker not available: {e}")
             self.processor = DocumentProcessor(
-                vector_store=self.vector_store,
                 embedding_generator=self.embedding_generator
             )
     

@@ -175,21 +175,21 @@ class MockS3VectorsBackend:
 
         return deleted
 
-    def delete_all_for_connection(self, connection_id: int) -> int:
+    def delete_for_files(self, external_file_ids) -> int:
         """
-        Delete ALL vectors associated with a Composio connection.
-
-        Used when disconnecting a cloud storage provider with delete_vectors=true.
-        Note: In mock, we delete ALL vectors (can't filter by connection_id in metadata).
+        Delete vectors for the given cloud documents, file by file — the same
+        file-scoped contract as the real backend (PRD-186 S1); the old
+        clear-everything connection sweep is gone.
         """
         self._ensure_setup()
 
-        # In a real implementation, you'd filter by connection metadata
-        # For mock, we'll just clear everything as a simplification
-        deleted = len(self._vectors)
-        self._vectors.clear()
+        deleted = 0
+        for external_file_id in external_file_ids:
+            deleted += self.delete_documents(str(external_file_id))
 
-        logger.info(f"🗑️  Deleted all {deleted} vectors (mock connection cleanup)")
+        logger.info(
+            f"🗑️  Deleted {deleted} vectors across {len(external_file_ids)} files (mock)"
+        )
         return deleted
 
     async def close(self) -> None:

@@ -37,11 +37,9 @@ class DocumentProcessor:
     
     def __init__(
         self,
-        vector_store=None,
         embedding_generator=None,
         chunker: SemanticChunker = None
     ):
-        self.vector_store = vector_store
         self.embedding_generator = embedding_generator
         self.chunker = chunker or SemanticChunker()
         
@@ -262,12 +260,13 @@ class DocumentProcessor:
                 if i < len(chunks):
                     chunks[i].embedding = embedding
         
-        # Store in vector database if available
-        if self.vector_store:
-            await self._store_chunks(chunks, file_path, content_type)
-        
+        # No vector-store write here (PRD-186 S1): the seam this processor
+        # used to carry called a method no backend defines, with metadata that
+        # never stamped workspace_id — a crash if armed, an unlabeled
+        # cross-tenant chunk if it ever "worked". Vector writes happen at the
+        # workspace-stamping path (S3VectorsBackend.add_documents) only.
         processing_time_ms = (datetime.now() - start_time).total_seconds() * 1000
-        
+
         return IngestionResult(
             document_path=file_path,
             chunk_count=len(chunks),
@@ -276,38 +275,7 @@ class DocumentProcessor:
             processing_time_ms=processing_time_ms,
             success=True
         )
-    
-    async def _store_chunks(
-        self,
-        chunks: List[SemanticChunk],
-        file_path: str,
-        content_type: str
-    ) -> None:
-        """Store chunks in vector store"""
 
-        if not self.vector_store:
-            return
-
-        # Extract vectors and metadata for S3VectorStore
-        vectors = []
-        metadata_list = []
-
-        for chunk in chunks:
-            if hasattr(chunk, 'embedding') and chunk.embedding:
-                vectors.append(chunk.embedding)
-                metadata_list.append({
-                    'chunk_id': chunk.metadata.chunk_id,
-                    'content': chunk.content,
-                    'source': file_path,
-                    'content_type': content_type,
-                    'word_count': chunk.metadata.word_count,
-                    'importance_score': chunk.metadata.importance_score
-                })
-
-        if vectors:
-            # S3VectorStore.add_vectors is synchronous, not async
-            self.vector_store.add_vectors(vectors=vectors, metadata=metadata_list)
-    
     def _detect_programming_language(self, extension: str) -> str:
         """Detect programming language from file extension"""
         

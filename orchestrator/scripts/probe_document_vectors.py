@@ -9,9 +9,13 @@ mutating anything**:
 
   1. Which vector backend does the committed config select?  (``S3_VECTORS_ENABLED``)
   2. Can that backend be CONSTRUCTED from the committed config?  (surfaces the
-     F005 / missing-``{workspace_id}`` / missing-credentials failures)
-  3. Is the document index POPULATED, and at what DIMENSION?  (read-only
-     ``get_index`` + ``list_vectors``, or a pgvector row count)
+     F005 missing-bucket / missing-credentials failures; a shared bucket with
+     no ``{workspace_id}`` placeholder is a valid prod shape)
+  3. Is the document index POPULATED, at what DIMENSION, and what fraction of
+     sampled vectors carry a ``workspace_id`` stamp?  (read-only ``get_index``
+     + ``list_vectors``, or a pgvector row count) — the stamped fraction is
+     PRD-186 S5's coverage number: it proves the S1 fail-closed filter (drop
+     unlabeled hits) removes nothing legitimate before it goes live.
 
 It then prints a written finding and a recommendation. It performs NO destructive
 action and NO re-embed — the fix-or-fold decision (relight the plane vs fold into
@@ -44,6 +48,11 @@ VERDICT_LIVE = "live"            # active plane is populated and usable
 VERDICT_DEGRADED = "degraded"    # constructs + has data, but a dimension mismatch
 VERDICT_DARK = "dark"            # active plane cannot be built, or is empty
 VERDICT_UNKNOWN = "unknown"      # probe could not reach the backend to decide
+
+# PRD-186 S5: how many vectors to sample (with metadata) per workspace when
+# measuring workspace_id-stamp coverage — bounded so the probe stays cheap and
+# read-only on large indexes.
+_STAMP_SAMPLE_LIMIT = 2000
 
 
 def classify_plane(
@@ -99,17 +108,33 @@ def recommend(verdict: str, active_backend: str) -> str:
     if verdict == VERDICT_DARK:
         if active_backend == "s3_vectors":
             return ("Plane is DARK — the S3 Vectors backend cannot be built from "
-                    "the committed config, or its index is empty. Decision (§S8, "
-                    "Gerard's call): fix env (S3_VECTORS_BUCKET must carry the "
-                    "'{workspace_id}' placeholder + valid AWS creds) and re-embed "
-                    "as a fast follow, OR fold into the Wave-3 Qdrant "
-                    "consolidation (P2-16). RAG-quality work (P2-07) is gated on "
-                    "this either way.")
+                    "the committed config, or its index is empty. Fix env "
+                    "(S3_VECTORS_BUCKET set — shared or {workspace_id}-templated, "
+                    "both valid — plus AWS creds) and re-embed via "
+                    "scripts/migrate_to_s3_vectors.py. RAG-quality work is gated "
+                    "on this either way.")
         return ("Plane is DARK — pgvector holds no embedded documents. Ingestion "
                 "has not populated the vector store; re-embed before relying on "
                 "document grounding.")
     return ("Plane state UNKNOWN — the probe could not reach the backend. Re-run "
             "with valid credentials / DB access from a prod-configured shell.")
+
+
+def stamped_fraction(sample: List[Dict[str, Any]]) -> Optional[float]:
+    """Fraction of sampled vectors whose metadata carries a workspace_id. Pure.
+
+    ``None`` when the sample is empty (no coverage claim without data) —
+    PRD-186 S5: this is the number that proves the S1 unlabeled-hit drop is a
+    no-op (≈1.0) or a live remediation task (<1.0).
+    """
+    if not sample:
+        return None
+    stamped = sum(
+        1
+        for v in sample
+        if (v.get("metadata") or {}).get("workspace_id") not in (None, "")
+    )
+    return stamped / len(sample)
 
 
 # ---------------------------------------------------------------------------
@@ -167,6 +192,7 @@ def _probe_s3_workspace(workspace_id: str) -> Dict[str, Any]:
         "populated": False,
         "dimension": None,
         "vector_sample_count": 0,
+        "workspace_id_stamped_pct": None,
         "error": None,
     }
     try:
@@ -187,13 +213,30 @@ def _probe_s3_workspace(workspace_id: str) -> Dict[str, Any]:
             return result
 
         try:
-            listed = client.list_vectors(
-                vectorBucketName=backend.bucket_name,
-                indexName=backend.index_name,
-            )
-            sample = listed.get("vectors", []) or []
+            # PRD-186 S5: sample vectors WITH metadata (bounded pagination,
+            # read-only) so the workspace_id-stamped fraction is a measured
+            # number, not an assumption the S1 fail-closed filter rests on.
+            sample: List[Dict[str, Any]] = []
+            next_token = None
+            while len(sample) < _STAMP_SAMPLE_LIMIT:
+                kwargs: Dict[str, Any] = {
+                    "vectorBucketName": backend.bucket_name,
+                    "indexName": backend.index_name,
+                    "returnMetadata": True,
+                }
+                if next_token:
+                    kwargs["nextToken"] = next_token
+                listed = client.list_vectors(**kwargs)
+                sample.extend(listed.get("vectors", []) or [])
+                next_token = listed.get("nextToken")
+                if not next_token:
+                    break
             result["vector_sample_count"] = len(sample)
             result["populated"] = len(sample) > 0
+            fraction = stamped_fraction(sample)
+            result["workspace_id_stamped_pct"] = (
+                round(fraction * 100.0, 1) if fraction is not None else None
+            )
         except ClientError as e:
             result["error"] = f"list_vectors: {e.response.get('Error', {}).get('Code', str(e))}"
     except Exception as e:  # construction / import / auth failure
@@ -300,9 +343,22 @@ def _print_report(finding: Dict[str, Any]) -> None:
         line = (f"  ws={p['workspace_id']}  index_exists={p['index_exists']}  "
                 f"populated={p['populated']}  dimension={p['dimension']}  "
                 f"sample={p['vector_sample_count']}")
+        stamped = p.get("workspace_id_stamped_pct")
+        if stamped is not None:
+            line += f"  ws-stamped={stamped}%"
         if p.get("error"):
             line += f"  ERROR={p['error']}"
         print(line)
+    if any(
+        (p.get("workspace_id_stamped_pct") or 100.0) < 100.0
+        for p in finding["probes"]
+    ):
+        print(
+            "\n  ⚠ PRD-186 S5: unstamped vectors found — remediate by re-embedding "
+            "those documents (scripts/migrate_to_s3_vectors.py) BEFORE relying on "
+            "the S1 unlabeled-hit drop; unstamped chunks are invisible to search "
+            "until re-stamped."
+        )
 
     print(f"\n{'-' * 72}")
     print(f"VERDICT: {finding['verdict'].upper()}")
