@@ -207,7 +207,7 @@ class MissionReconciler:
 
             # --- Advance run state if appropriate ---
             if all_terminal:
-                return MissionReconciler._advance_run_on_completion(
+                advance_result = MissionReconciler._advance_run_on_completion(
                     db=db,
                     run=run,
                     all_tasks=all_tasks,
@@ -218,6 +218,14 @@ class MissionReconciler:
                     tasks_verified=tasks_verified,
                     tasks_verification_failed=tasks_verification_failed,
                 )
+                # PRD-204 S4: run failed on task outcomes — tell the user.
+                # (_advance_run_on_completion is sync; this is its async seam.)
+                if (
+                    advance_result.run_advanced
+                    and advance_result.run_new_state == RunState.FAILED.value
+                ):
+                    await MissionReconciler._notify_run_failed(db, run)
+                return advance_result
 
             # --- Check for fatal failure (task failed, retries exhausted) ---
             if failed_tasks:
@@ -227,6 +235,9 @@ class MissionReconciler:
                     failed_tasks=failed_tasks,
                 )
                 if fatal:
+                    # PRD-204 S4: fatal task failure failed the run — tell
+                    # the user.
+                    await MissionReconciler._notify_run_failed(db, run)
                     return ReconcileResult(
                         run_id=run_id,
                         stalls_detected=stalls_detected,
@@ -990,6 +1001,25 @@ class MissionReconciler:
                     return False
 
         return False
+
+    @staticmethod
+    async def _notify_run_failed(db: Session, run: OrchestrationRun) -> None:
+        """PRD-204 S4: mission_failed notification for reconciler-driven
+        failures (task cascades). Delegates to the single owner of the
+        failure message in coordinator_service; lazy import avoids the
+        module cycle (coordinator_service imports this module). Never
+        raises into reconciliation.
+        """
+        try:
+            from services.coordinator_service import notify_mission_failed
+
+            await notify_mission_failed(db, run)
+        except Exception:
+            logger.error(
+                "mission_failed dispatch failed for run %s (non-fatal)",
+                getattr(run, "id", "?"),
+                exc_info=True,
+            )
 
     @staticmethod
     def _skip_remaining_tasks(

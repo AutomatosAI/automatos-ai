@@ -52,9 +52,21 @@ VALID_EVENT_TYPES: frozenset[str] = frozenset(
         "mission_plan_ready",
         "mission_step_complete",
         "mission_complete",
+        # PRD-204 S4: the silent failure holes — a failed mission and a
+        # budget-paused mission previously reached no subscriber at all.
+        "mission_failed",
+        "mission_budget_paused",
         "playbook_step_complete",
         "playbook_complete",
         "playbook_failed",
+        # PRD-204 S4: scheduler skipped a cron fire on an open breaker with
+        # only a log line — now user-visible, once per breaker-open period.
+        "playbook_benched",
+        # PRD-204 S4: watcher-plane events (verdicts S5/S6, corrective
+        # actions S7/S8, escalations).
+        "watch_verdict",
+        "watch_action",
+        "watch_escalation",
         "trigger_fired",
         "report_submitted",
         "agent_error",

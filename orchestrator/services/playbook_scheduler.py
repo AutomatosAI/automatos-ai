@@ -26,6 +26,13 @@ class PlaybookSchedulerService:
     def __init__(self):
         self._scheduler: Optional[AsyncIOScheduler] = None
         self._owns_scheduler: bool = False  # True when we created our own scheduler (tests)
+        # PRD-204 S4: once-per-breaker-open-period latch for playbook_benched.
+        # In-memory is deliberate and sufficient: the scheduler is a
+        # single-owner process (fcntl lock in main.py lifespan), so exactly
+        # one instance observes every skip. Cleared when the breaker closes
+        # (the check passes again); a process restart re-notifies at most
+        # once per still-open breaker, which is acceptable for an alert.
+        self._benched_notified: set[int] = set()
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -185,7 +192,20 @@ class PlaybookSchedulerService:
                     "last %d runs all failed; skipping cron re-fire until a manual run succeeds",
                     playbook.id, playbook.name, _cfg.PLAYBOOK_BREAKER_THRESHOLD,
                 )
+                # PRD-204 S4: the bench used to be a log line only. Notify
+                # the workspace once per breaker-open period (in-memory
+                # latch — see __init__; cleared below when the breaker
+                # closes).
+                if playbook.id not in self._benched_notified:
+                    self._benched_notified.add(playbook.id)
+                    await self._notify_playbook_benched(
+                        db, playbook, _cfg.PLAYBOOK_BREAKER_THRESHOLD
+                    )
                 return
+
+            # Breaker closed — clear the bench latch so the NEXT open period
+            # notifies again.
+            self._benched_notified.discard(playbook.id)
 
             execution_id = f"cron-{uuid4().hex[:12]}"
             execution = RecipeExecution(
@@ -232,6 +252,45 @@ class PlaybookSchedulerService:
             logger.error("[PlaybookScheduler] Failed to fire playbook %d: %s", playbook_id, e, exc_info=True)
         finally:
             db.close()
+
+    # ------------------------------------------------------------------
+    # PRD-204 S4: benched notification
+    # ------------------------------------------------------------------
+
+    async def _notify_playbook_benched(self, db, playbook, threshold: int) -> None:
+        """Dispatch ``playbook_benched`` — the scheduler skipped a cron fire
+        because the repeated-failure breaker is open. Workspace-wide (a
+        scheduled playbook has no single requesting user). Never raises
+        into the fire path.
+
+        The dispatcher never commits (it joins the caller's transaction);
+        the commit below is THIS caller's: ``_fire_playbook`` owns a
+        scheduler-local session whose only pending write on the skip path
+        is the notification row, and the session closes right after.
+        """
+        try:
+            from core.services.notification_dispatcher import NotificationDispatcher
+
+            dispatcher = NotificationDispatcher(db, str(playbook.workspace_id))
+            await dispatcher.dispatch(
+                event_type="playbook_benched",
+                title=f"Playbook benched: {playbook.name}",
+                message=(
+                    f"The last {threshold} runs all failed, so scheduled runs "
+                    f"are paused. Fix the cause and run it manually once to "
+                    f"re-enable the schedule."
+                ),
+                link_type="playbook",
+                link_id=str(playbook.id),
+                status="warning",
+            )
+            db.commit()
+        except Exception:
+            logger.error(
+                "[PlaybookScheduler] playbook_benched dispatch failed for %s",
+                getattr(playbook, "id", "?"),
+                exc_info=True,
+            )
 
     # ------------------------------------------------------------------
     # Status
