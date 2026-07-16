@@ -1,0 +1,121 @@
+{
+  "frozen_at": "2026-07-16",
+  "instrument": "evals/retrieval_recall.py --live (PRD-188 S5; freeze per PRD-198 S1 / §7)",
+  "window": "recall@k over top-5 documents; 26 paired natural/keyword queries per tenant",
+  "tenant_aliases": {
+    "pilot-a": "primary dogfood workspace, 746 docs / ~18k chunks",
+    "pilot-b": "first client workspace, 19 docs / ~1k chunks"
+  },
+  "provenance": "Gold sets authored 2026-07-16 from read-only prod listings, labels independent of ranker output; kept out of this public repo (they carry tenant/client identifiers) — the freeze publishes aliased numbers only.",
+  "caveats": [
+    "rerank manager logged 30 Event-loop-is-closed failures during the run: live_rerank / live_full_stack partially degraded to no-rerank on affected queries, so their true ceiling is >= the numbers here (bug to fix in PRD-186 hardening).",
+    "live_enhancement adds ~4 LLM calls per query on an unbounded path; it also cost -26.9 recall points vs baseline on pilot-a.",
+    "the top-level passes flag reads the offline hybrid_rrf variant and is meaningless for live runs; the per-variant numbers are the artifact."
+  ],
+  "pilot-a": {
+    "recall_at_5_target": 0.7,
+    "gated_variant": "hybrid_rrf",
+    "top_k": 5,
+    "passes": false,
+    "variants": {
+      "live_baseline": {
+        "mean_recall_at_5": 0.6923,
+        "mean_mrr": 0.3981,
+        "mean_phrasing_gap": 0.3077
+      },
+      "live_rerank": {
+        "mean_recall_at_5": 0.7692,
+        "mean_mrr": 0.4013,
+        "mean_phrasing_gap": 0.1538
+      },
+      "live_hybrid": {
+        "mean_recall_at_5": 0.6923,
+        "mean_mrr": 0.4135,
+        "mean_phrasing_gap": 0.3077
+      },
+      "live_enhancement": {
+        "mean_recall_at_5": 0.4231,
+        "mean_mrr": 0.2801,
+        "mean_phrasing_gap": 0.3846
+      },
+      "live_full_stack": {
+        "mean_recall_at_5": 0.6795,
+        "mean_mrr": 0.3019,
+        "mean_phrasing_gap": 0.1282
+      }
+    },
+    "tenants": [
+      {
+        "variant": "live_baseline",
+        "workspace_id": "pilot-a",
+        "n_queries": 26,
+        "recall_at_1": 0.2308,
+        "recall_at_3": 0.5256,
+        "recall_at_5": 0.6923,
+        "mrr": 0.3981,
+        "recall_at_5_natural": 0.8462,
+        "recall_at_5_keyword": 0.5385,
+        "n_natural": 13,
+        "n_keyword": 13,
+        "phrasing_gap": 0.3077
+      },
+      {
+        "variant": "live_rerank",
+        "workspace_id": "pilot-a",
+        "n_queries": 26,
+        "recall_at_1": 0.1923,
+        "recall_at_3": 0.5641,
+        "recall_at_5": 0.7692,
+        "mrr": 0.4013,
+        "recall_at_5_natural": 0.8462,
+        "recall_at_5_keyword": 0.6923,
+        "n_natural": 13,
+        "n_keyword": 13,
+        "phrasing_gap": 0.1538
+      },
+      {
+        "variant": "live_hybrid",
+        "workspace_id": "pilot-a",
+        "n_queries": 26,
+        "recall_at_1": 0.2692,
+        "recall_at_3": 0.4744,
+        "recall_at_5": 0.6923,
+        "mrr": 0.4135,
+        "recall_at_5_natural": 0.8462,
+        "recall_at_5_keyword": 0.5385,
+        "n_natural": 13,
+        "n_keyword": 13,
+        "phrasing_gap": 0.3077
+      },
+      {
+        "variant": "live_enhancement",
+        "workspace_id": "pilot-a",
+        "n_queries": 26,
+        "recall_at_1": 0.1923,
+        "recall_at_3": 0.3205,
+        "recall_at_5": 0.4231,
+        "mrr": 0.2801,
+        "recall_at_5_natural": 0.6154,
+        "recall_at_5_keyword": 0.2308,
+        "n_natural": 13,
+        "n_keyword": 13,
+        "phrasing_gap": 0.3846
+      },
+      {
+        "variant": "live_full_stack",
+        "workspace_id": "pilot-a",
+        "n_queries": 26,
+        "recall_at_1": 0.0769,
+        "recall_at_3": 0.5,
+        "recall_at_5": 0.6795,
+        "mrr": 0.3019,
+        "recall_at_5_natural": 0.7436,
+        "recall_at_5_keyword": 0.6154,
+        "n_natural": 13,
+        "n_keyword": 13,
+        "phrasing_gap": 0.1282
+      }
+    ]
+  },
+  "pilot-b": "SKIPPED by owner cost-call 2026-07-16 — freeze stands on pilot-a; capture pilot-b only if/when a decision needs it"
+}

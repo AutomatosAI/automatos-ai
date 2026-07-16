@@ -172,10 +172,13 @@ async def _boot_phase_1_core():
     from core.database.database import create_tables, get_db_session, engine
     from core.database.boot_lock import boot_leader_lock
 
-    # PRD-172 F004/F005: fail-closed on tenant-isolation secrets BEFORE any
-    # traffic is served. Raises RuntimeError (aborting boot) if the Shopify
-    # internal key is unset or the S3 Vectors bucket lacks the {workspace_id}
-    # placeholder — a loud boot failure beats a silent cross-tenant leak.
+    # PRD-172 F004/F005 + PRD-186 S3: fail-closed on tenant-isolation secrets
+    # and vector-plane config integrity BEFORE any traffic is served — outside
+    # any swallowing run_stage. Raises RuntimeError (aborting boot) if the
+    # Shopify internal key is unset, S3 Vectors is enabled without a bucket or
+    # with an incoherent dimension, or saas widget CORS would rest allow-all.
+    # (A shared bucket with no {workspace_id} placeholder is valid — isolation
+    # is enforced per-query, fail-closed, by S3VectorsBackend.search().)
     config.validate_security()
 
     # DDL — safe for all workers (idempotent, fast no-op when tables exist)

@@ -553,13 +553,24 @@ async def disconnect_connection(
         ).count()
 
         if delete_vectors and documents_affected > 0:
-            # Delete vectors from S3 Vectors backend
+            # Delete vectors file-by-file, scoped to THIS connection's
+            # documents (PRD-186 S1). The bucket may be shared across tenants,
+            # so an index-wide sweep would reach every workspace's vectors —
+            # these file ids belong to a workspace-checked connection
+            # (_get_connection_or_404 above) and nothing else is touched.
+            file_ids = [
+                row[0]
+                for row in db.query(CloudDocument.external_file_id)
+                .filter(CloudDocument.connection_id == connection_id)
+                .distinct()
+                .all()
+            ]
             from modules.search.vector_store import get_vector_store
             backend = get_vector_store(
                 backend="s3_vectors",
                 workspace_id=str(ctx.workspace_id)
             )
-            backend.delete_all_for_connection(connection_id)
+            backend.delete_for_files(file_ids)
 
             # Remove cloud_documents records
             db.query(CloudDocument).filter(

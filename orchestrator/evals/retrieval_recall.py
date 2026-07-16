@@ -87,6 +87,18 @@ _HERE = Path(__file__).resolve().parent
 _DEFAULT_CORPUS = _HERE.parent / "scripts" / "eval" / "retrieval_recall" / "corpus.jsonl"
 _DEFAULT_GOLD_SET = _HERE.parent / "scripts" / "eval" / "retrieval_recall" / "gold_set.jsonl"
 
+# PRD-186 S4: the frozen live baseline every wave-3 change is measured against
+# (freeze once, serve the wave — PRD-186/197/198/199 all read this artifact).
+# Aliased tenants only; the gold sets themselves never enter the repo.
+_DEFAULT_PARITY_BASELINE = _HERE / "baseline" / "kg_retrieval_2026-07.json"
+
+# PRD-186 S4 / §8-Q3: "flat-or-better" epsilon for the parity gate — a fresh
+# live run may sit this far below the frozen recall@5 before it is flagged a
+# regression (run-to-run noise on a 26-query gold set is real). A drop beyond
+# it is a reported regression to investigate — never a red build; the honest
+# gate stays exit-0 and the number is the deliverable.
+PARITY_EPSILON = 0.02
+
 PHRASING_STYLES = ("natural", "keyword")
 
 
@@ -586,6 +598,78 @@ def render_report(report: RetrievalRecallReport) -> str:
     return "\n".join(lines)
 
 
+def load_frozen_baseline(path: Path) -> Dict:
+    """Load the frozen live-baseline artifact (PRD-186 S4 / PRD-198 S1)."""
+    with path.open("r", encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def parity_deltas(
+    report: RetrievalRecallReport,
+    frozen: Dict,
+    tenant_alias: str = "pilot-a",
+) -> Dict[str, Dict]:
+    """Flat-or-better parity arithmetic vs the frozen baseline. Pure (PRD-186 S4).
+
+    For every variant present in BOTH the fresh report and the frozen
+    artifact's ``variants`` block, compute the recall@5 delta; a drop beyond
+    ``PARITY_EPSILON`` is flagged as a regression. Variants unknown to the
+    frozen artifact are skipped — the gate only speaks where the baseline has
+    a number.
+    """
+    frozen_variants = ((frozen.get(tenant_alias) or {}).get("variants") or {})
+    deltas: Dict[str, Dict] = {}
+    for variant in report.variants():
+        frozen_row = frozen_variants.get(variant)
+        if not frozen_row:
+            continue
+        frozen_r5 = float(frozen_row.get("mean_recall_at_5", 0.0))
+        fresh_r5 = report.mean_recall_at_5(variant)
+        delta = fresh_r5 - frozen_r5
+        deltas[variant] = {
+            "frozen_recall_at_5": round(frozen_r5, 4),
+            "fresh_recall_at_5": round(fresh_r5, 4),
+            "delta": round(delta, 4),
+            "regression": delta < -PARITY_EPSILON,
+        }
+    return deltas
+
+
+def render_parity(deltas: Dict[str, Dict], baseline_path: Path) -> str:
+    """Human-readable parity block appended to the report (PRD-186 S4)."""
+    if not deltas:
+        return (
+            f"\nParity gate: no shared variants with the frozen baseline at "
+            f"{baseline_path} — nothing to compare."
+        )
+    lines = [
+        "",
+        f"## Parity vs frozen baseline ({baseline_path.name}, ε={PARITY_EPSILON})",
+        "",
+        "| variant | frozen r@5 | fresh r@5 | Δ | verdict |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    regressions = []
+    for variant, row in deltas.items():
+        verdict = "REGRESSION" if row["regression"] else "flat-or-better"
+        if row["regression"]:
+            regressions.append(variant)
+        lines.append(
+            f"| {variant} | {row['frozen_recall_at_5']*100:.1f}% | "
+            f"{row['fresh_recall_at_5']*100:.1f}% | {row['delta']*100:+.1f} | {verdict} |"
+        )
+    if regressions:
+        lines.append(
+            f"\nPARITY: {', '.join(regressions)} dropped more than ε below the "
+            "frozen baseline — a reported regression to investigate before "
+            "shipping the change that caused it. Exit stays 0; the number is "
+            "the deliverable."
+        )
+    else:
+        lines.append("\nPARITY: flat-or-better across all shared variants.")
+    return "\n".join(lines)
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Retrieval-recall eval (PRD-188 S5)")
     parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
@@ -597,6 +681,19 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="drive the REAL RAGService.retrieve lever grid (provisioned runs only, never CI)",
     )
     parser.add_argument("--workspace", type=str, default=None, help="workspace id for --live")
+    parser.add_argument(
+        "--parity-baseline",
+        type=Path,
+        default=_DEFAULT_PARITY_BASELINE,
+        help="frozen baseline artifact for the flat-or-better parity gate "
+        "(PRD-186 S4; compared on --live runs when the file exists)",
+    )
+    parser.add_argument(
+        "--parity-tenant",
+        type=str,
+        default="pilot-a",
+        help="tenant alias inside the frozen artifact to compare against",
+    )
     args = parser.parse_args(argv)
 
     corpus = load_corpus(args.corpus)
@@ -611,10 +708,28 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     report = run_retrieval_recall_eval(corpus, gold, variants=variants)
 
+    # PRD-186 S4: on live runs, publish the flat-or-better parity verdict vs
+    # the frozen baseline. Offline snapshot runs share no variants with the
+    # live artifact, so the block is skipped there by construction.
+    parity: Optional[Dict[str, Dict]] = None
+    if args.live and args.parity_baseline.exists():
+        frozen = load_frozen_baseline(args.parity_baseline)
+        parity = parity_deltas(report, frozen, tenant_alias=args.parity_tenant)
+
     if args.json:
-        print(json.dumps(report.to_dict(), indent=2))
+        payload = report.to_dict()
+        if parity is not None:
+            payload["parity"] = {
+                "baseline": str(args.parity_baseline),
+                "tenant_alias": args.parity_tenant,
+                "epsilon": PARITY_EPSILON,
+                "variants": parity,
+            }
+        print(json.dumps(payload, indent=2))
     else:
         print(render_report(report))
+        if parity is not None:
+            print(render_parity(parity, args.parity_baseline))
     # A sub-threshold recall is a valid, honest result to publish — never a CI
     # failure. Exit 0 always; the number is the deliverable. (CI runs this
     # non-required, mirroring evals/memory_recall.)

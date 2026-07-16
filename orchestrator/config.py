@@ -1263,18 +1263,13 @@ class Config:
                 "any Authorization header (fail-open). Set SHOPIFY_INTERNAL_API_KEY."
             )
 
-        # F005 — S3 Vectors, when enabled, needs a bucket. A shared bucket (no
-        # {workspace_id} placeholder) is supported: S3VectorsBackend.search() is
-        # fail-closed on workspace_id, so tenant isolation holds at query time
-        # regardless of bucket layout. Per-workspace buckets stay optional
-        # (belt-and-suspenders); the hard placeholder requirement broke a working
-        # shared-bucket deployment (2026-07-02), so it is not enforced here.
-        if self.S3_VECTORS_ENABLED:
-            bucket = (self.S3_VECTORS_BUCKET or "").strip()
-            if not bucket:
-                errors.append(
-                    "S3_VECTORS_ENABLED=true but S3_VECTORS_BUCKET is unset."
-                )
+        # F005 / PRD-186 S3 — vector-plane config integrity, extracted so CI
+        # can pin the same rules the boot phase enforces (one assertion, no
+        # duplicate strings).
+        try:
+            self.assert_vector_config_integrity()
+        except RuntimeError as e:
+            errors.append(str(e))
 
         # PRD-194 S4 (P2-13) — the internet-facing widget plane must not rest
         # at allow-all CORS in production. In the saas edition an empty
@@ -1301,6 +1296,52 @@ class Config:
         # so a saas deploy that lost its Clerk env aborts boot rather than silently
         # downgrading to the anonymous local identity and serving tenant data.
         self.validate_auth_edition()
+
+    def assert_vector_config_integrity(self) -> None:
+        """PRD-186 S3: pure vector-plane config-integrity assertion.
+
+        The shared-bucket rule set — raises ``RuntimeError`` when the committed
+        config would ship the document plane dark or geometrically wrong:
+
+        - S3 Vectors enabled with no ``S3_VECTORS_BUCKET`` set (the F005
+          lesson: exactly this drift left the plane dark for weeks while a
+          swallowing boot stage reported ``failed`` and served traffic anyway);
+        - a non-positive ``S3_VECTORS_DIMENSION`` (writes/queries would carry
+          meaningless geometry).
+
+        A shared bucket with NO ``{workspace_id}`` placeholder is VALID — the
+        live prod shape. Tenant isolation is enforced fail-closed at query
+        time by ``S3VectorsBackend.search()`` (PRD-186 S1), not by bucket
+        layout; the old hard placeholder requirement broke a working
+        shared-bucket deployment (2026-07-02) and stays retired.
+
+        Called from ``validate_security()`` in the hard-fail boot phase
+        (``main._boot_phase_1_core`` — outside any swallowing ``run_stage``)
+        and pinned directly by CI.
+        """
+        errors: list[str] = []
+
+        if self.S3_VECTORS_ENABLED:
+            bucket = (self.S3_VECTORS_BUCKET or "").strip()
+            if not bucket:
+                errors.append(
+                    "S3_VECTORS_ENABLED=true but S3_VECTORS_BUCKET is unset."
+                )
+            try:
+                dimension = int(self.S3_VECTORS_DIMENSION)
+            except (TypeError, ValueError):
+                dimension = 0
+            if dimension <= 0:
+                errors.append(
+                    "S3_VECTORS_DIMENSION must be a positive integer "
+                    f"(got {self.S3_VECTORS_DIMENSION!r})."
+                )
+
+        if errors:
+            raise RuntimeError(
+                "Vector config integrity invalid (PRD-186 S3):\n  - "
+                + "\n  - ".join(errors)
+            )
 
     def validate_auth_edition(self) -> None:
         """PRD-175 (F008): fail-closed boot guard for the open-core edition flag.
