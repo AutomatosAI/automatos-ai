@@ -24,7 +24,6 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker
 
 from core.database.database import get_database_url
 
@@ -47,11 +46,6 @@ def engine():
     eng.dispose()
 
 
-@pytest.fixture
-def new_session(engine):
-    return sessionmaker(bind=engine, expire_on_commit=False)
-
-
 def _seed_workspace(new_session, name: str) -> str:
     ws_id = str(uuid.uuid4())
     s = new_session()
@@ -68,7 +62,7 @@ def _seed_workspace(new_session, name: str) -> str:
 
 
 def _drop_workspace(new_session, ws_id: str) -> None:
-    s = new_session()
+    s = new_session.sweep()
     for stmt in (
         "DELETE FROM watch_events WHERE watch_id IN "
         "(SELECT id FROM watches WHERE workspace_id = CAST(:w AS uuid))",

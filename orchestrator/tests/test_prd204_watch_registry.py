@@ -14,7 +14,6 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import sessionmaker
 
 from core.database.database import get_database_url
 from core.models.watches import Watch, WatchEvent
@@ -36,12 +35,6 @@ def engine():
 
 
 @pytest.fixture
-def new_session(engine):
-    """A sessionmaker that hands out independent, committing sessions."""
-    return sessionmaker(bind=engine, expire_on_commit=False)
-
-
-@pytest.fixture
 def workspace(engine, new_session):
     """Throwaway workspace (seeded FIRST -- PRD-158). Yields workspace_id str."""
     ws_id = str(uuid.uuid4())
@@ -58,7 +51,7 @@ def workspace(engine, new_session):
 
     yield ws_id
 
-    s = new_session()
+    s = new_session.sweep()
     # watch_events cascade off watches; watches cascade off workspaces --
     # explicit deletes keep teardown independent of CASCADE behaviour.
     s.execute(

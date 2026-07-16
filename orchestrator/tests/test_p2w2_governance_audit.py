@@ -84,13 +84,6 @@ def engine():
 
 
 @pytest.fixture
-def new_session(engine):
-    from sqlalchemy.orm import sessionmaker
-
-    return sessionmaker(bind=engine, expire_on_commit=False)
-
-
-@pytest.fixture
 def two_workspaces(engine, new_session):
     from sqlalchemy import text
 
@@ -104,7 +97,7 @@ def two_workspaces(engine, new_session):
     s.commit()
     s.close()
     yield ws_a, ws_b
-    s = new_session()
+    s = new_session.sweep()
     for ws in (ws_a, ws_b):
         s.execute(text("DELETE FROM audit_logs WHERE workspace_id = CAST(:id AS uuid)"), {"id": ws})
         s.execute(text("DELETE FROM approval_grants WHERE workspace_id = CAST(:id AS uuid)"), {"id": ws})
