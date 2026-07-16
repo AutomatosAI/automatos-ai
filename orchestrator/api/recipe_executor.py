@@ -83,6 +83,46 @@ async def _dispatch_playbook_event(
 
 
 # ---------------------------------------------------------------------------
+# PRD-204 S3: playbook terminal -> watch registry (fail-soft)
+# ---------------------------------------------------------------------------
+
+def _ingest_playbook_terminal_watch(
+    db: Session,
+    execution,
+    terminal_state: str,
+    summary: Optional[str] = None,
+) -> None:
+    """Report a playbook execution's terminal state to its live watch.
+
+    ONE seam for both the success block and ``_fail_execution`` so each
+    terminal path flows through the same tested call. Fail-soft end to end:
+    ``watch_ingest_terminal`` never raises into the executor.
+    """
+    from services.watch_hooks import watch_ingest_terminal
+
+    output_data = getattr(execution, "output_data", None) or {}
+    cost_snapshot = {
+        "total_tokens": output_data.get("total_tokens", 0),
+        "total_duration_ms": output_data.get("total_duration_ms", 0),
+    }
+    output_pointer = None
+    if output_data.get("final_output"):
+        output_pointer = (
+            f"recipe_execution:{execution.execution_id}:output_data.final_output"
+        )
+    watch_ingest_terminal(
+        db,
+        workspace_id=execution.workspace_id,
+        target_type="playbook_execution",
+        target_id=execution.execution_id,
+        terminal_state=terminal_state,
+        summary=summary,
+        cost_snapshot=cost_snapshot,
+        output_pointer=output_pointer,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Auto-report on playbook completion (mirrors heartbeat & task auto-reports)
 # ---------------------------------------------------------------------------
 async def _auto_create_playbook_report(
@@ -1723,6 +1763,15 @@ async def _execute_recipe_inner(
             status="ok",
         )
 
+        # PRD-204 S3: playbook terminal choke point (success) — joins the
+        # same transaction as the status update; fail-soft.
+        _ingest_playbook_terminal_watch(
+            db,
+            execution,
+            terminal_state="completed",
+            summary=f"{len(step_results)} steps completed in {total_duration // 1000}s",
+        )
+
         db.commit()
 
         # Complete the board task
@@ -1970,6 +2019,16 @@ async def _fail_execution(
             execution.completed_at = datetime.now(timezone.utc)
             if step_results is not None:
                 execution.step_results = step_results
+
+            # PRD-204 S3: playbook terminal choke point (failure) — joins the
+            # failure-status transaction below; fail-soft.
+            _ingest_playbook_terminal_watch(
+                db,
+                execution,
+                terminal_state="failed",
+                summary=(error_message or "Playbook execution failed")[:500],
+            )
+
             db.commit()
 
             # PRD-142 W3-S12: playbooks primitive heartbeat at the FAILED
