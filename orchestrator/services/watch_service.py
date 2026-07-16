@@ -492,10 +492,13 @@ class WatchService:
         new_target_id: str,
         reason: Optional[str] = None,
         now: Optional[datetime] = None,
+        snapshot: Optional[Dict[str, Any]] = None,
     ) -> Watch:
         """Repoint a live watch at a new target (rerun/replan stays the SAME
         watch). Appends to ``lineage`` immutably and pulls the next check
-        forward so the tick picks the new target up promptly.
+        forward so the tick picks the new target up promptly. ``snapshot``
+        (e.g. the S7 step_overrides) lands on the FOLLOW event for
+        before/after comparison.
         """
         if WatchStatus(watch.status) in TERMINAL_WATCH_STATUSES:
             raise InvalidTransitionError(
@@ -525,6 +528,7 @@ class WatchService:
             event_type=WatchEventType.FOLLOW.value,
             event_key=f"follow:{new_target_type}:{new_target_id}",
             summary=reason or f"Watch now follows {new_target_type}:{new_target_id}",
+            snapshot=snapshot,
         )
         db.flush()
         return watch

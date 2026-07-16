@@ -123,6 +123,41 @@ def _ingest_playbook_terminal_watch(
 
 
 # ---------------------------------------------------------------------------
+# PRD-204 S7: per-execution step overrides (rerun tweak)
+# ---------------------------------------------------------------------------
+
+def _apply_step_overrides(
+    steps: List[Dict[str, Any]],
+    overrides: Optional[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Merge ``execution_metadata.step_overrides`` into the step list.
+
+    Shape: ``{step_id: {"prompt_template": "..."}}``. Returns NEW dicts --
+    ``workflow_recipes.steps`` (the shared definition) is never mutated; a
+    tweak affects exactly this execution. Only ``prompt_template`` is
+    honoured; anything else in an override entry is ignored.
+    """
+    if not overrides or not isinstance(overrides, dict):
+        return [dict(step) for step in steps]
+
+    merged: List[Dict[str, Any]] = []
+    for step in steps:
+        step_id = str(step.get("step_id") or "")
+        override = overrides.get(step_id)
+        prompt = override.get("prompt_template") if isinstance(override, dict) else None
+        if isinstance(prompt, str) and prompt.strip():
+            merged.append({**step, "prompt_template": prompt})
+            logger.info(
+                "[recipe_direct] step %s prompt overridden for this execution "
+                "(PRD-204 S7 tweak)",
+                step_id,
+            )
+        else:
+            merged.append(dict(step))
+    return merged
+
+
+# ---------------------------------------------------------------------------
 # Auto-report on playbook completion (mirrors heartbeat & task auto-reports)
 # ---------------------------------------------------------------------------
 async def _auto_create_playbook_report(
@@ -1156,6 +1191,12 @@ async def _execute_recipe_inner(
         if not steps:
             await _fail_execution(db, recipe_execution_id, "Recipe has no steps")
             return
+
+        # PRD-204 S7: merge per-execution prompt overrides (rerun tweak) at
+        # execution start. The recipe row is never written back to.
+        step_overrides = (execution.execution_metadata or {}).get("step_overrides")
+        if step_overrides:
+            steps = _apply_step_overrides(steps, step_overrides)
 
         total_steps = len(steps)
         logger.info(f"[recipe_direct] Recipe '{recipe.name}' has {total_steps} steps")
