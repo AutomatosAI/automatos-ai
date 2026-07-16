@@ -168,6 +168,9 @@ def _seed_run_and_watch(s, ws_id: str):
 
 
 def test_mission_failed_transition_ingests_watch(workspace, new_session):
+    """S10 semantics: the producer's terminal is RECORDED at the choke point
+    and the watch is handed to the decision step (next check pulled to now)
+    -- the close now belongs to the decider, not the sync hook."""
     s = new_session()
     run, watch = _seed_run_and_watch(s, workspace)
 
@@ -184,8 +187,11 @@ def test_mission_failed_transition_ingests_watch(workspace, new_session):
     s.commit()
 
     s.refresh(watch)
-    assert watch.status == WatchStatus.FAILED.value
-    assert watch.closed_at is not None
+    assert watch.status == WatchStatus.WATCHING.value  # deferred to the decider
+    assert watch.closed_at is None
+    # Pulled forward for the tick: well inside the original +300s cadence.
+    assert watch.next_check_at is not None
+    assert (watch.next_check_at - watch.created_at).total_seconds() < 60
     events = (
         s.query(WatchEvent)
         .filter(WatchEvent.watch_id == watch.id, WatchEvent.event_type == "terminal")

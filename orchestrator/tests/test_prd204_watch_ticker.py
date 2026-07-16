@@ -103,16 +103,23 @@ def workspace(new_session):
 
 @pytest.fixture
 def ticker(monkeypatch):
-    """A WatchTicker whose notification seam records instead of dispatching."""
+    """A WatchTicker with the SHARED notification seam recording instead of
+    dispatching. S10 note: the decider (terminal verdicts) and the ticker
+    (missed run / expiry) both flow through
+    services.watch_notifications.dispatch_watch_notification -- patching
+    that one seam captures every watcher-plane notification."""
+    import services.watch_notifications as wn
+
     t = WatchTicker()
     t.dispatched = []
 
-    async def _record(self, db, watch, *, event_type, title, message, status="ok"):
-        self.dispatched.append(
+    async def _record(db, watch, *, event_type, title, message, status="ok"):
+        t.dispatched.append(
             {"watch_id": str(watch.id), "event_type": event_type, "status": status}
         )
+        return True
 
-    monkeypatch.setattr(WatchTicker, "_dispatch_watch_event", _record)
+    monkeypatch.setattr(wn, "dispatch_watch_notification", _record)
     return t
 
 
@@ -168,9 +175,13 @@ def _watch_events(s, watch, event_type=None):
 # ---------------------------------------------------------------------------
 
 
-def test_sweep_ingests_missed_terminal_and_notifies_once(
+def test_sweep_ingests_missed_terminal_and_decider_closes_once(
     workspace, new_session, ticker
 ):
+    """S10 flow: the sweep records the terminal the hook missed and the
+    DECISION STEP (run_and_report default) closes the watch with a
+    watch_verdict notification. A failed run with no output scores on the
+    deterministic floor -- no LLM anywhere in this path."""
     s = new_session()
     # Run already terminal in the DB -- simulates a hook that never fired
     # (crash between the terminal write and the hook's transaction).
@@ -192,6 +203,8 @@ def test_sweep_ingests_missed_terminal_and_notifies_once(
 
     s.refresh(watch)
     assert watch.status == WatchStatus.FAILED.value
+    assert watch.closed_at is not None
+    assert watch.final_verdict  # the decider wrote a verdict
     assert len(_watch_events(s, watch, "terminal")) == 1
 
     verdicts = [d for d in ticker.dispatched if d["watch_id"] == str(watch.id)]

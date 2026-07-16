@@ -197,11 +197,17 @@ def test_double_ingest_swallowed_and_transaction_survives(workspace, new_session
 # ---------------------------------------------------------------------------
 
 
-def test_ingest_terminal_closes_watch_by_outcome(workspace, new_session):
+def test_ingest_terminal_records_and_defers_scorable_to_decider(
+    workspace, new_session
+):
+    """PRD-204 S10 semantics (replaces the v1 close-by-outcome): a scorable
+    terminal (completed/failed) records the event and pulls next_check_at
+    to now -- the DECISION STEP (ticker) owns scoring and close."""
     s = new_session()
     watch = _create(s, workspace)
     s.commit()
 
+    moment = FROZEN_NOW + timedelta(minutes=5)
     event = WatchService.ingest_terminal(
         s,
         workspace_id=workspace,
@@ -211,38 +217,38 @@ def test_ingest_terminal_closes_watch_by_outcome(workspace, new_session):
         summary="All tasks verified",
         cost_snapshot={"tokens_used": 900},
         output_pointer=f"mission:{watch.target_id}:output_summary",
+        now=moment,
     )
     s.commit()
 
     assert event is not None
     assert event.snapshot["cost"]["tokens_used"] == 900
     s.refresh(watch)
-    assert watch.status == WatchStatus.PASSED.value
-    assert watch.closed_at is not None
-    assert "completed" in (watch.final_verdict or "")
+    assert watch.status == WatchStatus.WATCHING.value  # NOT closed here
+    assert watch.closed_at is None
+    assert watch.final_verdict is None  # the verdict is the decider's job
+    assert watch.next_check_at == moment  # handed to the tick immediately
 
-    # Second delivery of the same terminal is a no-op.
+    # Second delivery: duplicate event swallowed, but the watch is
+    # re-poked (self-healing for a crashed decider).
+    later = moment + timedelta(minutes=10)
     again = WatchService.ingest_terminal(
         s,
         workspace_id=workspace,
         target_type="mission",
         target_id=watch.target_id,
         terminal_state="completed",
+        now=later,
     )
+    s.commit()
     assert again is None
+    s.refresh(watch)
+    assert watch.status == WatchStatus.WATCHING.value
+    assert watch.next_check_at == later
     s.close()
 
 
-@pytest.mark.parametrize(
-    "terminal_state,expected_status",
-    [
-        ("failed", WatchStatus.FAILED.value),
-        ("cancelled", WatchStatus.CANCELLED.value),
-    ],
-)
-def test_ingest_terminal_outcome_mapping(
-    workspace, new_session, terminal_state, expected_status
-):
+def test_ingest_terminal_failed_also_defers(workspace, new_session):
     s = new_session()
     watch = _create(s, workspace)
     s.commit()
@@ -252,46 +258,53 @@ def test_ingest_terminal_outcome_mapping(
         workspace_id=workspace,
         target_type="mission",
         target_id=watch.target_id,
-        terminal_state=terminal_state,
+        terminal_state="failed",
     )
     s.commit()
     s.refresh(watch)
-    assert watch.status == expected_status
+    # Failed runs are scored/diagnosed by the decision step too.
+    assert watch.status == WatchStatus.WATCHING.value
+    assert watch.closed_at is None
     s.close()
 
 
-def test_ingest_terminal_recovers_lost_close(workspace, new_session):
-    """Self-healing idempotency: if a prior attempt committed the terminal
-    EVENT but lost the CLOSE (version conflict), the next delivery still
-    closes the watch instead of being blocked by the duplicate event."""
-    from core.models.watches import WatchEvent
-
+def test_ingest_terminal_cancelled_closes_immediately(workspace, new_session):
+    """Cancelled work has nothing to score -- the v1 close survives."""
     s = new_session()
     watch = _create(s, workspace)
-    # Simulate the half-landed prior attempt: event row exists, watch open.
-    s.add(
-        WatchEvent(
-            watch_id=watch.id,
-            event_type=WatchEventType.TERMINAL.value,
-            event_key=f"terminal:mission:{watch.target_id}",
-            summary="first attempt",
-        )
-    )
     s.commit()
 
-    result = WatchService.ingest_terminal(
+    WatchService.ingest_terminal(
         s,
         workspace_id=workspace,
         target_type="mission",
         target_id=watch.target_id,
-        terminal_state="completed",
+        terminal_state="cancelled",
     )
     s.commit()
-
-    assert result is None  # not the first writer of the event...
     s.refresh(watch)
-    assert watch.status == WatchStatus.PASSED.value  # ...but the close lands
+    assert watch.status == WatchStatus.CANCELLED.value
     assert watch.closed_at is not None
+    assert "cancelled" in (watch.final_verdict or "")
+    s.close()
+
+
+def test_ingest_terminal_unknown_vocabulary_parks(workspace, new_session):
+    s = new_session()
+    watch = _create(s, workspace)
+    s.commit()
+
+    WatchService.ingest_terminal(
+        s,
+        workspace_id=workspace,
+        target_type="mission",
+        target_id=watch.target_id,
+        terminal_state="vaporised",
+    )
+    s.commit()
+    s.refresh(watch)
+    assert watch.status == WatchStatus.NEEDS_ATTENTION.value
+    assert "vaporised" in (watch.final_verdict or "")
     s.close()
 
 
@@ -379,17 +392,18 @@ def test_follow_repoints_target_and_appends_lineage(workspace, new_session):
     assert watch.lineage[-1]["target_id"] == new_target
     assert watch.next_check_at == FROZEN_NOW + timedelta(minutes=10)
 
-    # Terminal ingest for the NEW target closes the same watch.
+    # Terminal ingest for the NEW target hits the SAME watch (cancelled is
+    # the still-closing-at-ingest state under S10 semantics).
     WatchService.ingest_terminal(
         s,
         workspace_id=workspace,
         target_type="mission",
         target_id=new_target,
-        terminal_state="completed",
+        terminal_state="cancelled",
     )
     s.commit()
     s.refresh(watch)
-    assert watch.status == WatchStatus.PASSED.value
+    assert watch.status == WatchStatus.CANCELLED.value
     s.close()
 
 

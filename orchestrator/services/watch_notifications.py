@@ -126,11 +126,17 @@ async def notify_watch_verdict(
     message = build_verdict_message(
         watch, score=score, explanation=explanation, terminal_state=terminal_state
     )
+    if passed:
+        status = "ok"
+    elif terminal_state == "failed":
+        status = "error"
+    else:
+        status = "warning"  # completed but below the bar
     return await dispatch_watch_notification(
         db,
         watch,
         event_type="watch_verdict",
         title=title,
         message=message,
-        status="ok" if passed else "warning",
+        status=status,
     )

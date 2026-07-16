@@ -20,12 +20,15 @@ fallback and the trend brain:
   writes nothing),
 - reschedules ``next_check_at`` (done inside the claim).
 
-Notification rules (PRD-204 S5): the tick dispatches only for conditions no
-producer covers -- sweep-caught terminal (``watch_verdict``: the producer's
-hook AND its own notification evidently did not land), missed run and
-expiry (``watch_escalation``). Benched watch_events are recorded here, but
-the ``playbook_benched`` NOTIFICATION is owned by the scheduler skip path
-(S4, once per breaker-open period) -- dispatching it from the tick too would
+Notification rules (PRD-204 S5/S10): terminal-state verdicts are owned by
+the DECISION STEP (services/watch_decider.py) -- the tick records the
+terminal (idempotent) and hands the live watch to
+``WatchDecider.decide_terminal`` which scores (S6), acts (S7/S8) or closes,
+and dispatches ``watch_verdict``/``watch_action``. The tick itself
+dispatches only what no other owner covers: missed run and expiry
+(``watch_escalation``). Benched watch_events are recorded here, but the
+``playbook_benched`` NOTIFICATION is owned by the scheduler skip path (S4,
+once per breaker-open period) -- dispatching it from the tick too would
 double-notify every bench.
 """
 
@@ -42,6 +45,7 @@ from core.models.watches import Watch
 from core.models.watch_enums import (
     CLAIMABLE_WATCH_STATUSES,
     WatchEventType,
+    WatchPolicy,
     WatchStatus,
     WatchTargetType,
 )
@@ -206,29 +210,29 @@ class WatchTicker:
         if state not in _RUN_TERMINAL:
             return  # no-noise: running -> running writes nothing
 
-        # Sweep fallback: the hook missed this terminal (crash between the
-        # terminal write and the hook's transaction, hook disabled, etc.).
-        event = WatchService.ingest_terminal(
+        # Record the terminal (idempotent; the producer hook usually beat
+        # us here). PRD-204 S10: ingest no longer closes scorable terminals
+        # -- the DECISION STEP owns score -> act/close -> notify.
+        WatchService.ingest_terminal(
             db,
             workspace_id=watch.workspace_id,
             target_type=watch.target_type,
             target_id=watch.target_id,
             terminal_state=state,
             summary="Detected by watcher sweep",
+            now=now,
         )
-        if event is not None:
-            # The producer's notification path was evidently missed too --
-            # the watch verdict is the safety-net signal.
-            await self._dispatch_watch_event(
-                db,
-                watch,
-                event_type="watch_verdict",
-                title=f"Watch closed ({state}): {watch.title[:100]}",
-                message=(
-                    f"The watched {watch.watch_type} reached terminal state "
-                    f"'{state}'. Verdict: {watch.status}."
-                ),
-                status="ok" if state == "completed" else "error",
+        if WatchStatus(watch.status) in CLAIMABLE_WATCH_STATUSES:
+            from services.watch_decider import get_watch_decider
+
+            decision = await get_watch_decider().decide_terminal(
+                db, watch, state, now
+            )
+            logger.info(
+                "[WatchTicker] decision for watch %s (terminal=%s): %s",
+                watch.id,
+                state,
+                decision,
             )
 
     def _read_target_state(self, db: Session, watch: Watch) -> Optional[str]:
@@ -402,6 +406,14 @@ class WatchTicker:
                 ),
                 status="warning",
             )
+
+        # PRD-204 S10: persistent watches also report OUTCOME FLIPS between
+        # consecutive runs (completed <-> failed) -- notify on meaningful
+        # change, never close on a run terminal.
+        if watch.policy == WatchPolicy.PERSISTENT.value:
+            from services.watch_decider import get_watch_decider
+
+            await get_watch_decider().observe_scheduled(db, watch, playbook, now)
 
     # ------------------------------------------------------------------
     # Notification seam (mirrors coordinator_service._dispatch_mission_event)

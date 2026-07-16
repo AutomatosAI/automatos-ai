@@ -384,13 +384,25 @@ class WatchService:
         summary: Optional[str] = None,
         cost_snapshot: Optional[Dict[str, Any]] = None,
         output_pointer: Optional[str] = None,
+        now: Optional[datetime] = None,
     ) -> Optional[WatchEvent]:
         """Ingest a target's terminal state into its live watch, if any.
 
-        Idempotent: exactly one terminal event per (watch, target). On first
-        ingest the watch closes by outcome (WATCH_STATUS_FOR_TERMINAL_TARGET)
-        with an unscored v1 verdict -- S6 inserts run-level scoring between
-        "terminal observed" and "watch closed" without changing this seam.
+        Idempotent: exactly one terminal event per (watch, target).
+
+        S10 semantics (replaces the v1 close-by-outcome):
+        - scorable terminals (completed/verified/done/failed) do NOT close
+          the watch here -- the terminal is recorded and ``next_check_at``
+          is pulled to now, so the watcher tick hands the watch to the
+          decision step (score -> act/close -> notify) within one tick.
+          Sync producers cannot await the judge; the tick is the one async
+          brain.
+        - ``cancelled`` closes immediately (nothing to score) -- v1 shape.
+        - unknown terminal vocabularies park the watch for a human
+          (needs_attention) instead of guessing a verdict -- v1 shape.
+
+        The pull-forward runs even on duplicate deliveries (self-healing:
+        a crashed decider gets re-poked until the watch closes).
 
         Returns the NEW WatchEvent when this call was the first writer,
         else ``None`` (already ingested, or no live watch on the target).
@@ -419,26 +431,47 @@ class WatchService:
             snapshot=snapshot,
         )
 
-        # Close the watch even when the event was a duplicate: a prior
-        # attempt may have committed the event but lost the close on a
-        # version conflict (e.g. the tick's claim bumped version_id under
-        # the producer hook). find_live_watch guarantees the watch is live
-        # here, so the close is the self-healing half of idempotency.
-        # Unknown terminal vocabularies park the watch for a human instead
-        # of guessing a verdict.
-        new_status = WATCH_STATUS_FOR_TERMINAL_TARGET.get(
-            terminal_state, WatchStatus.NEEDS_ATTENTION
-        )
-        verdict = (
-            f"Target {target_type}:{target_id} reached terminal state "
-            f"'{terminal_state}'."
-        )
-        if summary:
-            verdict = f"{verdict} {summary}"
-        watch.final_verdict = verdict
-        WatchService.transition(
-            db, watch, new_status, reason=f"target terminal: {terminal_state}"
-        )
+        mapped = WATCH_STATUS_FOR_TERMINAL_TARGET.get(terminal_state)
+
+        if mapped is None:
+            # Unknown vocabulary -> park for a human (unchanged from v1).
+            verdict = (
+                f"Target {target_type}:{target_id} reached unknown terminal "
+                f"state '{terminal_state}'."
+            )
+            if summary:
+                verdict = f"{verdict} {summary}"
+            watch.final_verdict = verdict
+            if WatchStatus(watch.status) != WatchStatus.NEEDS_ATTENTION:
+                WatchService.transition(
+                    db,
+                    watch,
+                    WatchStatus.NEEDS_ATTENTION,
+                    reason=f"unknown terminal state: {terminal_state}",
+                )
+            return event
+
+        if mapped == WatchStatus.CANCELLED:
+            # Cancelled work has nothing to score -- close now (v1 shape).
+            verdict = (
+                f"Target {target_type}:{target_id} was cancelled."
+            )
+            if summary:
+                verdict = f"{verdict} {summary}"
+            watch.final_verdict = verdict
+            WatchService.transition(
+                db, watch, WatchStatus.CANCELLED, reason="target cancelled"
+            )
+            return event
+
+        # Scorable terminal: hand to the decision step (S6/S10) by pulling
+        # the next check to NOW. Status is untouched -- the watch stays
+        # claimable for the tick. Recurring (persistent) watches keep their
+        # normal cadence: they observe terminals forever, and a pull-forward
+        # on every duplicate delivery would make them hot-loop every tick.
+        if watch.policy != WatchPolicy.PERSISTENT.value:
+            watch.next_check_at = now or _utcnow()
+            db.flush()
         return event
 
     # ------------------------------------------------------------------
