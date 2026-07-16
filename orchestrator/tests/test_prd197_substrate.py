@@ -5,6 +5,10 @@
   retrieval stack the live path never imported, whose "cosine" ranking used
   the L2 operator and whose namesake table was dropped in PRD-135. A guard
   pins that no import of them ever comes back.
+* S2 — settings-plane truth: every reader queries the canonical
+  ``(embeddings, provider|model|cache_dir|dimensions|rerank_model)`` rows that
+  PRD-136's migration/seeder/admin-card actually produce. The pre-rename long
+  names matched nothing, so the admin embeddings card was a placebo.
 * S5 — the open-core/local edition gets a working document read leg:
   ``PgVectorLocalBackend`` over ``document_chunks.embedding`` (which "legacy
   pgvector mode" ingestion already populates when S3 is off), selected by
@@ -175,3 +179,73 @@ async def test_saas_edition_rag_constructs_s3_backend(monkeypatch):
 
     backend = await rag._get_doc_backend("ws-saas")
     assert isinstance(backend, FakeS3Backend)
+
+
+# ---------------------------------------------------------------------------
+# S2 — settings-plane truth: readers use the canonical (embeddings, *) keys
+# ---------------------------------------------------------------------------
+
+# Only settings READS by the old names are defects (get_system_setting("...")
+# or an ORM filter on SystemSetting.key). Bare quoted strings stay legal —
+# api/context.py uses "embedding_model" as a JSON response field, which is a
+# different namespace entirely.
+_STALE_SETTINGS_READS = re.compile(
+    r"(?:get_system_setting\(\s*|SystemSetting\.key\s*==\s*)"
+    r"[\"'](?:embedding_provider|embedding_model|embedding_cache_dir"
+    r"|vector_store_dimensions|rag_rerank_model)[\"']"
+)
+
+
+def test_no_stale_settings_reads():
+    """PRD-136 renamed the embedding rows to (embeddings, provider|model|
+    cache_dir|dimensions|rerank_model). No prod code may query the old long
+    names — those rows no longer exist, so such a read is a silent placebo
+    (the reader falls back to config and the admin card changes nothing).
+    The PRD-136 migration itself holds the rename map and is exempt."""
+    offenders = []
+    for py in _orchestrator_root.rglob("*.py"):
+        rel = py.relative_to(_orchestrator_root).as_posix()
+        if rel.startswith((".venv", "venv", "node_modules", "tests/", "alembic/")):
+            continue
+        if _STALE_SETTINGS_READS.search(py.read_text(errors="ignore")):
+            offenders.append(rel)
+    assert offenders == []
+
+
+def test_embeddings_settings_roundtrip(monkeypatch):
+    """The admin embeddings card saves the canonical (embeddings, provider|
+    model|cache_dir|dimensions) rows — _load_provider must configure the
+    provider from exactly those rows, proving the card is no longer a
+    placebo."""
+    import core.llm.manager as mgr
+    import core.llm.embedding_manager as em
+
+    rows = {
+        ("embeddings", "provider"): "openai",
+        ("embeddings", "model"): "text-embedding-3-large",
+        ("embeddings", "cache_dir"): "/tmp/emb-cache",
+        ("embeddings", "dimensions"): "1536",
+    }
+    monkeypatch.setattr(
+        mgr,
+        "get_system_setting",
+        lambda category, key, default=None: rows.get((category, key), default),
+    )
+    monkeypatch.setattr(em, "get_credential_field", lambda *a, **k: "sk-test")
+
+    captured = {}
+
+    def _capture(self, cfg):
+        captured["cfg"] = cfg
+        return MagicMock()
+
+    monkeypatch.setattr(em.EmbeddingManager, "_create_provider", _capture)
+
+    manager = em.EmbeddingManager()
+    manager._load_provider()
+
+    cfg = captured["cfg"]
+    assert cfg.provider == em.EmbeddingProvider("openai")
+    assert cfg.model == "text-embedding-3-large"
+    assert cfg.dimension == 1536
+    assert cfg.cache_dir == "/tmp/emb-cache"

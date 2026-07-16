@@ -66,11 +66,15 @@ class EmbeddingManager:
     def _load_provider(self):
         """Load embedding provider from system settings"""
         try:
-            #Get from General Settings
-            provider_type = get_system_setting("embedding_provider")
-            model = get_system_setting("embedding_model")
-            cache_dir = get_system_setting("embedding_cache_dir") or "./model_cache"
-            dimension_str = get_system_setting("vector_store_dimensions") or "2048"
+            # PRD-197 S2: read the CANONICAL (embeddings, *) keys. PRD-136
+            # renamed the rows to the short names (provider/model/cache_dir/
+            # dimensions); these reads kept the old long names, so every
+            # lookup missed and the admin embeddings card was a placebo —
+            # it wrote keys nothing ever read back.
+            provider_type = get_system_setting("provider")
+            model = get_system_setting("model")
+            cache_dir = get_system_setting("cache_dir") or "./model_cache"
+            dimension_str = get_system_setting("dimensions") or "2048"
 
             logger.debug(f"Loaded embedding settings: provider={provider_type}, model={model}, dim={dimension_str}")
 
@@ -136,7 +140,7 @@ class EmbeddingManager:
             
         except Exception as e:
             logger.error(f"Failed to load embedding provider: {e}. Using fallback.")
-            dimension_str = get_system_setting("vector_store_dimensions") or "2048"
+            dimension_str = get_system_setting("dimensions") or "2048"
             self.provider = DeterministicEmbeddingProvider(dimension=int(dimension_str))
     
     def _create_provider(self, config: EmbeddingConfig) -> BaseEmbeddingProvider:
@@ -239,8 +243,8 @@ class EmbeddingManager:
     def get_dimension(self) -> int:
         """Get embedding dimension from provider or system settings"""
         if self.provider is None:
-            # Read from system settings
-            dimension_str = get_system_setting("vector_store_dimensions")
+            # Read from system settings (canonical short key — PRD-197 S2)
+            dimension_str = get_system_setting("dimensions")
             if dimension_str:
                 return int(dimension_str)
             return 2048  # Last resort fallback

@@ -61,8 +61,12 @@ class RerankManager:
                 if key_setting and key_setting.value:
                     self._api_key = key_setting.value
 
+                # PRD-197 S2: PRD-136 renamed the row to (embeddings,
+                # rerank_model); the old key missed on every read, silently
+                # pinning the model to config regardless of the admin's choice.
                 model_setting = db.query(SystemSetting).filter(
-                    SystemSetting.key == "rag_rerank_model"
+                    SystemSetting.category == "embeddings",
+                    SystemSetting.key == "rerank_model",
                 ).first()
                 if model_setting and model_setting.value:
                     self._model = model_setting.value
