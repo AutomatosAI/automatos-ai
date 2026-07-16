@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -253,23 +254,62 @@ class DurableMemoryStore:
         """Semantic search within a namespace, floor-filtered (PRD-159 S3)."""
         await self.ensure_collection()
 
-        query_embedding = await self._embedder.generate_embedding(query)
-        response = await self._client.query_points(
-            collection_name=self._collection,
-            query=query_embedding,
-            query_filter=self._namespace_filter(user_id),
-            limit=max(limit, 1),
-        )
-        results = [
-            self._item_from_payload(hit.id, hit.payload, score=hit.score)
-            for hit in response.points
-        ]
-        results = filter_by_relevance_floor(results, config.MEMORY_RELEVANCE_FLOOR)
+        # PRD-197 S4: memory-seam substrate telemetry — candidates/latency/
+        # errors feed the Command Center substrate tile. Fire-and-forget;
+        # a raise still propagates to the caller unchanged.
+        seam_t0 = time.perf_counter()
+        try:
+            query_embedding = await self._embedder.generate_embedding(query)
+            response = await self._client.query_points(
+                collection_name=self._collection,
+                query=query_embedding,
+                query_filter=self._namespace_filter(user_id),
+                limit=max(limit, 1),
+            )
+            results = [
+                self._item_from_payload(hit.id, hit.payload, score=hit.score)
+                for hit in response.points
+            ]
+            results = filter_by_relevance_floor(results, config.MEMORY_RELEVANCE_FLOOR)
+        except Exception:
+            from core.observability.substrate_metrics import (
+                SEAM_MEMORY,
+                STATUS_ERROR,
+                record_substrate_search_nowait,
+            )
+
+            record_substrate_search_nowait(
+                seam=SEAM_MEMORY,
+                workspace_id=workspace_id,
+                candidates=0,
+                latency_ms=(time.perf_counter() - seam_t0) * 1000.0,
+                status=STATUS_ERROR,
+                query=query,
+            )
+            raise
         logger.debug(
             "[Durable] search namespace=%s query=%r → %d results",
             user_id, query[:60], len(results),
         )
-        return results[:limit]
+        returned = results[:limit]
+
+        from core.observability.substrate_metrics import (
+            SEAM_MEMORY,
+            STATUS_EMPTY,
+            STATUS_HIT,
+            record_substrate_search_nowait,
+        )
+
+        record_substrate_search_nowait(
+            seam=SEAM_MEMORY,
+            workspace_id=workspace_id,
+            candidates=len(returned),
+            latency_ms=(time.perf_counter() - seam_t0) * 1000.0,
+            status=STATUS_HIT if returned else STATUS_EMPTY,
+            query=query,
+            top_score=float(returned[0].get("score") or 0.0) if returned else 0.0,
+        )
+        return returned
 
     async def get_all(
         self,

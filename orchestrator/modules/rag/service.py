@@ -40,6 +40,16 @@ from core.observability.tracer import (
     STATUS_ERROR,
 )
 
+# PRD-197 S4: per-seam substrate telemetry (documents seam) — always-on DB
+# sink behind the Command Center substrate tile; fire-and-forget, never
+# blocks or fails retrieval.
+import time as _time
+
+from core.observability.substrate_metrics import (
+    SEAM_DOCUMENTS,
+    record_substrate_search_nowait,
+)
+
 
 @dataclass
 class RAGResult:
@@ -1062,6 +1072,7 @@ class RAGService:
             logger.error("No workspace_id available — cannot search document vectors")
             return []
 
+        seam_t0 = _time.perf_counter()
         try:
             # Generate query embedding
             query_embedding = await self._embedding_manager.generate_embedding(query)
@@ -1122,9 +1133,28 @@ class RAGService:
                 logger.info(f"📈 Similarity range: {min(similarity_scores):.3f} - {max(similarity_scores):.3f}")
             logger.info(f"✅ Retrieved {len(candidates)} candidates from S3 Vectors")
 
+            record_substrate_search_nowait(
+                seam=SEAM_DOCUMENTS,
+                workspace_id=effective_workspace_id,
+                candidates=len(candidates),
+                latency_ms=(_time.perf_counter() - seam_t0) * 1000.0,
+                status=STATUS_HIT if candidates else STATUS_EMPTY,
+            )
             return candidates
 
         except Exception as e:
+            # Substrate tile semantics: ANY failed search — including an
+            # unavailable embedding key — is an error on the documents seam
+            # (the dark-plane signal S4 exists to catch). The grounding
+            # semantics below are unchanged: embedding-unavailable still
+            # returns a typed EMPTY result to the caller (PRD-185 S3).
+            record_substrate_search_nowait(
+                seam=SEAM_DOCUMENTS,
+                workspace_id=effective_workspace_id,
+                candidates=0,
+                latency_ms=(_time.perf_counter() - seam_t0) * 1000.0,
+                status=STATUS_ERROR,
+            )
             from core.llm.clients.base import EmbeddingUnavailableError
             if isinstance(e, EmbeddingUnavailableError):
                 # PRD-185 S3: typed EMPTY (honest "no grounding"), NOT an error

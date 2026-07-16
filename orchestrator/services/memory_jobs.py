@@ -38,6 +38,7 @@ class MemoryJobScheduler:
     JOB_ID_ARCHIVAL = "memory_graphify_archival"
     JOB_ID_AUDIT_RETENTION = "audit_retention_sweep"  # PRD-196 S5
     JOB_ID_SNAPSHOT = "memory_qdrant_snapshot"  # PRD-197 S3
+    JOB_ID_SUBSTRATE_PRUNE = "substrate_metrics_prune"  # PRD-197 S4
 
     def __init__(self):
         self._scheduler: Optional[AsyncIOScheduler] = None
@@ -141,6 +142,20 @@ class MemoryJobScheduler:
                 max_instances=1,
             )
 
+        # PRD-197 S4: prune substrate telemetry rows past retention — always
+        # on (the table always accrues while retrieval runs).
+        substrate_prune_interval = getattr(
+            app_config, "SUBSTRATE_METRICS_PRUNE_INTERVAL_SECONDS", 86400
+        )
+        self._scheduler.add_job(
+            self._run_substrate_prune,
+            "interval",
+            seconds=substrate_prune_interval,
+            id=self.JOB_ID_SUBSTRATE_PRUNE,
+            replace_existing=True,
+            max_instances=1,
+        )
+
         logger.info(
             "[MemoryJobs] Started — consolidation every %ds, "
             "decay every %ds, promotion daily at %02d:00 UTC, "
@@ -168,6 +183,7 @@ class MemoryJobScheduler:
             self.JOB_ID_ARCHIVAL,
             self.JOB_ID_AUDIT_RETENTION,
             self.JOB_ID_SNAPSHOT,
+            self.JOB_ID_SUBSTRATE_PRUNE,
         ):
             if self._scheduler.get_job(job_id):
                 self._scheduler.remove_job(job_id)
@@ -316,6 +332,34 @@ class MemoryJobScheduler:
     # Job: Qdrant memory snapshots (PRD-197 S3)
     # ------------------------------------------------------------------
 
+    async def _run_substrate_prune(self):
+        """PRD-197 S4: delete substrate_metric_events rows past retention.
+        Fail-soft like the rest."""
+        try:
+            from config import config as app_config
+            from core.database.database import SessionLocal
+            from services.substrate_health import prune_substrate_metrics
+
+            db = SessionLocal()
+            try:
+                deleted = prune_substrate_metrics(
+                    db,
+                    retention_days=getattr(
+                        app_config, "SUBSTRATE_METRICS_RETENTION_DAYS", 14
+                    ),
+                )
+            finally:
+                db.close()
+            if deleted:
+                logger.info(
+                    "[MemoryJobs] Substrate metrics prune: deleted=%d", deleted
+                )
+        except Exception as e:
+            logger.error(
+                "[MemoryJobs] Substrate metrics prune failed: %s", e,
+                exc_info=True,
+            )
+
     async def _run_snapshot(self):
         """PRD-197 S3: snapshot durable_memory + field_memory to the object
         store and prune to retention. Fail-soft like the rest — a snapshot
@@ -358,6 +402,7 @@ class MemoryJobScheduler:
             self.JOB_ID_ARCHIVAL,
             self.JOB_ID_AUDIT_RETENTION,
             self.JOB_ID_SNAPSHOT,
+            self.JOB_ID_SUBSTRATE_PRUNE,
         ):
             job = self._scheduler.get_job(job_id)
             jobs[job_id] = {

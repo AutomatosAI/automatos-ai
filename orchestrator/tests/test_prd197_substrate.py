@@ -13,6 +13,10 @@
   daily to the object store and pruned to retention (the memory planes' DR
   arm — documents are S3 Vectors, PRD-186's DR). Restore:
   ``docs/runbooks/DR-qdrant.md``.
+* S4 — substrate telemetry: every retrieval seam (documents / memory /
+  field) records candidates/latency/status to ``substrate_metric_events``
+  (fire-and-forget, never blocks or fails retrieval), aggregated by
+  ``services/substrate_health.py`` into the Command Center RETRIEVAL tile.
 * S5 — the open-core/local edition gets a working document read leg:
   ``PgVectorLocalBackend`` over ``document_chunks.embedding`` (which "legacy
   pgvector mode" ingestion already populates when S3 is off), selected by
@@ -389,3 +393,75 @@ async def test_run_snapshot_cycle_uploads_and_prunes(monkeypatch):
     s3.delete_object.assert_any_call(
         Bucket="test-bucket", Key="qdrant-snapshots/durable_memory/stale"
     )
+
+
+# ---------------------------------------------------------------------------
+# S4 — substrate telemetry: per-seam candidates/latency/status, never raising
+# ---------------------------------------------------------------------------
+
+from core.observability.substrate_metrics import (  # noqa: E402
+    SEAM_DOCUMENTS,
+    record_substrate_search,
+)
+from services.substrate_health import seam_status  # noqa: E402
+
+
+def test_seam_status_rollup():
+    """Pure roll-up: unknown on no data; down/degraded on error rate; a
+    sustained all-empty pattern degrades only once there are enough
+    searches to mean it (legitimate zero-result queries exist)."""
+    assert seam_status(0, 0.0, 0.0) == "unknown"
+    assert seam_status(20, 0.5, 0.0) == "down"
+    assert seam_status(20, 0.1, 0.0) == "degraded"
+    assert seam_status(20, 0.0, 1.0) == "degraded"  # all-empty, enough volume
+    assert seam_status(5, 0.0, 1.0) == "green"  # all-empty but tiny sample
+    assert seam_status(20, 0.0, 0.3) == "green"
+
+
+@pytest.mark.asyncio
+async def test_substrate_telemetry_records_candidates_latency(monkeypatch):
+    """The seam write lands one row with seam/status/candidates/latency —
+    the number the RETRIEVAL tile aggregates."""
+    import core.database.database as db_mod
+
+    fake_db = MagicMock()
+    monkeypatch.setattr(db_mod, "SessionLocal", lambda: fake_db)
+
+    await record_substrate_search(
+        seam=SEAM_DOCUMENTS,
+        workspace_id="ws-a",
+        candidates=7,
+        latency_ms=42.5,
+        status="hit",
+    )
+
+    assert fake_db.add.call_count == 1
+    row = fake_db.add.call_args.args[0]
+    assert row.seam == "documents"
+    assert row.workspace_id == "ws-a"
+    assert row.status == "hit"
+    assert row.candidates == 7
+    assert row.latency_ms == 42.5
+    fake_db.commit.assert_called_once()
+    fake_db.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_substrate_telemetry_never_raises(monkeypatch):
+    """A telemetry failure must never fail the retrieval that produced it
+    (and is logged at WARNING, not swallowed at DEBUG — the tool-telemetry
+    lesson)."""
+    import core.database.database as db_mod
+
+    def _boom():
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(db_mod, "SessionLocal", _boom)
+
+    await record_substrate_search(
+        seam=SEAM_DOCUMENTS,
+        workspace_id="ws-a",
+        candidates=0,
+        latency_ms=1.0,
+        status="error",
+    )  # completing without raising IS the assertion
