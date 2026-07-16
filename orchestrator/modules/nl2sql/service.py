@@ -51,26 +51,11 @@ class DatabaseDialect(Enum):
     REDSHIFT = "redshift"
 
 
-@dataclass
-class SemanticMetric:
-    """Semantic layer metric definition"""
-    name: str
-    display_name: str
-    sql_expression: str
-    aggregation: str  # sum, avg, count, min, max
-    format: str  # number, currency, percentage
-    description: str
-    tables: List[str]
-
-
-@dataclass
-class SemanticDimension:
-    """Semantic layer dimension definition"""
-    name: str
-    display_name: str
-    sql_expression: str
-    type: str  # categorical, temporal, geographical
-    hierarchy: Optional[List[str]] = None
+# PRD-199 S1/S2: the SemanticMetric/SemanticDimension dataclasses are gone.
+# They were the broken writer's intermediate format (list-of-__dict__ with
+# sql_expression keys) — a shape the reader (nl2sql_service.py, dict-of-dicts
+# keyed on 'sql') could never consume. The canonical semantic doc is the
+# READER's shape, built at the API edge; no intermediate classes.
 
 
 class DatabaseKnowledgeService:
@@ -651,31 +636,74 @@ class DatabaseKnowledgeService:
             logger.warning(f"Confidence scoring failed: {e}")
             return {"score": 0, "level": "unknown", "factors": {}, "recommendation": "review_sql"}
     
+    async def get_semantic_layer(
+        self,
+        source_id: str,
+        workspace_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Return the stored canonical semantic doc (PRD-199 S2 — the
+        editor's load path; only POST existed before, so every load 405'd)."""
+        source = await self._get_source(source_id, workspace_id=workspace_id)
+        return source.semantic_layer or {
+            "instructions": "",
+            "metrics": {},
+            "dimensions": {},
+        }
+
     async def update_semantic_layer(
         self,
         source_id: str,
-        metrics: List[SemanticMetric],
-        dimensions: List[SemanticDimension]
-    ) -> None:
+        semantic_doc: Dict[str, Any],
+        workspace_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Persist the canonical semantic doc — PRD-199 S1.
+
+        The doc is the READER's shape (nl2sql_service.py renders it into the
+        generation prompt): ``{instructions: str, metrics: {name: {sql,
+        description}}, dimensions: {category: {name: sql}}}``.
+
+        The pre-199 writer was broken end-to-end: it called two methods that
+        were never defined anywhere (AttributeError on every save), wrote to
+        the detached object ``_get_source`` returns (session closed — no
+        commit), stored ``metrics`` as a LIST with ``sql_expression`` keys the
+        dict-shaped reader could not consume, and had no ``instructions``
+        write path at all. It also never workspace-scoped the lookup — the
+        crash was the only thing stopping a cross-tenant write, so repairing
+        the save without the scope (W3-S9) would have armed that hole.
+
+        The SQL fragments are deliberately NOT validated here: they are
+        prompt guidance the reader interpolates as text, never executed
+        directly — the generated SQL they influence still passes the AST
+        validator downstream. The phantom ``_validate_semantic_definitions``
+        is deleted, not reimplemented as a stub.
         """
-        Update the semantic layer for a database source.
-        """
-        source = await self._get_source(source_id)
-        
-        # Validate metrics and dimensions reference existing tables/columns
-        schema_context = await self._get_schema_context(source)
-        await self._validate_semantic_definitions(metrics, dimensions, schema_context)
-        
-        # Update source
-        source.semantic_layer = {
-            'metrics': [m.__dict__ for m in metrics],
-            'dimensions': [d.__dict__ for d in dimensions],
-            'updated_at': datetime.utcnow().isoformat()
+        from core.database.database import SessionLocal
+        from core.models.database_knowledge import DatabaseKnowledgeSource as DBKSource
+
+        doc = {
+            "instructions": str(semantic_doc.get("instructions") or "").strip(),
+            "metrics": dict(semantic_doc.get("metrics") or {}),
+            "dimensions": dict(semantic_doc.get("dimensions") or {}),
+            "updated_at": datetime.utcnow().isoformat(),
         }
-        
+
+        db_session = SessionLocal()
+        try:
+            query = db_session.query(DBKSource).filter(DBKSource.id == int(source_id))
+            if workspace_id is not None:
+                query = query.filter(DBKSource.workspace_id == str(workspace_id))
+            source = query.first()
+            if not source:
+                raise ValueError(f"Database source {source_id} not found")
+            source.semantic_layer = doc
+            db_session.commit()
+        finally:
+            db_session.close()
+
         # Clear cache to force refresh
         if source_id in self.schema_cache:
             del self.schema_cache[source_id]
+        return doc
     
     async def _generate_sql(
         self,

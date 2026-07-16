@@ -342,33 +342,11 @@ class DatabaseKnowledgeSourceCreate(BaseModel):
     query_cache_ttl: int = 300
 
 
-class SemanticMetricCreate(BaseModel):
-    """Create a business metric"""
-    name: str
-    display_name: str
-    category: str
-    sql_expression: str
-    aggregation: str = "sum"
-    format: str = "number"
-    description: Optional[str] = None
-    business_definition: Optional[str] = None
-    tables_used: List[str]
-    drill_down_dimensions: Optional[List[str]] = []
-    supports_time_grain: bool = True
-    default_time_grain: str = "month"
-    is_featured: bool = False
-
-
-class SemanticDimensionCreate(BaseModel):
-    """Create a dimension for grouping"""
-    name: str
-    display_name: str
-    category: str
-    sql_expression: str
-    type: str  # categorical, temporal, geographical
-    description: Optional[str] = None
-    hierarchy_levels: Optional[List[str]] = None
-    is_featured: bool = False
+# PRD-199 S1/S2: SemanticMetricCreate/SemanticDimensionCreate deleted — they
+# were the request models of the broken pre-199 writer (list-shaped,
+# sql_expression keys the dict-shaped reader never consumed). The canonical
+# semantic body lives at the API edge (api/database_knowledge.py
+# SemanticLayerBody), reader-shaped.
 
 
 class TrainingExampleCreate(BaseModel):

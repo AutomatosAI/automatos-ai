@@ -44,8 +44,6 @@ Sellable as: automatos-nl2sql
 from .service import (
     DatabaseKnowledgeService,
     DatabaseDialect,
-    SemanticMetric,
-    SemanticDimension,
     get_database_knowledge_service,
 )
 
@@ -88,8 +86,6 @@ __all__ = [
     "DatabaseKnowledgeService",
     "get_database_knowledge_service",
     "DatabaseDialect",
-    "SemanticMetric",
-    "SemanticDimension",
     # Query
     "NaturalLanguageToSQLService",
     "NLToSQLService",
