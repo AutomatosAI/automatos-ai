@@ -18,19 +18,10 @@ Usage:
     db_service = DatabaseKnowledgeService(...)
     result = await db_service.query_database(source_id, query, user_id)
 
-    # Smart Agent (PandasAI-inspired)
-    from modules.nl2sql import SmartNL2SQLAgent
-    agent = SmartNL2SQLAgent(llm_provider, schema_metadata)
-
     # Training examples (Vanna-inspired)
     from modules.nl2sql import SQLExampleStore
     store = SQLExampleStore()
     await store.add_example("top 10 customers", "SELECT ...", source_id, ...)
-
-    # Schema linking
-    from modules.nl2sql import SchemaLinker
-    linker = SchemaLinker()
-    linked = await linker.link(question, schema)
 
     # Confidence scoring
     from modules.nl2sql import QueryConfidenceScorer
@@ -55,21 +46,14 @@ from .query.validator import SQLValidator, SQLValidationError
 from .schema.introspection import DatabaseIntrospectionService, make_json_serializable
 from .schema.provider import SchemaProvider, get_schema_provider
 
-# Intelligence features (PandasAI-inspired)
-from .intelligence import (
-    SmartNL2SQLAgent,
-    QueryClarifier,
-    QueryRephraser,
-    ResultExplainer,
-    VisualizationSuggester,
-)
-from .intelligence.agent import create_smart_agent
+# PRD-199 S5: the intelligence/ package (1,687 LOC, zero external callers,
+# advertised by a tool card it never backed) and the SchemaLinker (0-caller,
+# false "embedding" docstring — the assigned embedding_manager was never
+# used) are DELETED, not kept on life support. A real embedding schema
+# linker is a new bet against a working keyword design, not this dead code.
 
 # PRD-61: Training (Vanna-inspired RAG for SQL)
 from .training.example_store import SQLExampleStore
-
-# PRD-61: Schema Linking
-from .query.schema_linker import SchemaLinker, LinkedSchema
 
 # PRD-61: Confidence Scoring
 from .query.confidence import QueryConfidenceScorer, ConfidenceScore, ScoringContext
@@ -97,17 +81,9 @@ __all__ = [
     "SchemaProvider",
     "get_schema_provider",
     # Intelligence (Smart Agent)
-    "SmartNL2SQLAgent",
-    "create_smart_agent",
-    "QueryClarifier",
-    "QueryRephraser",
-    "ResultExplainer",
-    "VisualizationSuggester",
     # PRD-61: Training
     "SQLExampleStore",
     # PRD-61: Schema Linking
-    "SchemaLinker",
-    "LinkedSchema",
     # PRD-61: Confidence
     "QueryConfidenceScorer",
     "ConfidenceScore",

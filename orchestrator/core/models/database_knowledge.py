@@ -65,9 +65,11 @@ class DatabaseKnowledgeSource(Base):
     schema_cache_ttl = Column(Integer, default=3600)  # 1 hour default
     query_cache_ttl = Column(Integer, default=300)   # 5 minutes default
     
-    # Statistics
-    total_queries_executed = Column(Integer, default=0)
-    avg_query_time_ms = Column(Float)
+    # Statistics — PRD-199 S5: total_queries_executed / avg_query_time_ms
+    # deleted. Never written by any code path, permanent fake zeros in every
+    # API payload. If real per-source stats are ever wanted, derive them from
+    # database_query_audit (the dual-entry choke point), don't resurrect
+    # unwritten counters.
     last_successful_query = Column(DateTime)
     
     # Status

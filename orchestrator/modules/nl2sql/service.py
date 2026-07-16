@@ -18,7 +18,6 @@ import logging
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime, timedelta
 from enum import Enum
-import sqlparse
 
 logger = logging.getLogger(__name__)
 from dataclasses import dataclass
@@ -78,7 +77,6 @@ class DatabaseKnowledgeService:
         self.context_engineering = context_engineering
         self.audit_service = audit_service
         self.schema_cache = {}
-        self.query_cache = {}
         self.analytics_engine = get_pandasai_service()
     
     async def _get_source(
@@ -705,210 +703,12 @@ class DatabaseKnowledgeService:
             del self.schema_cache[source_id]
         return doc
     
-    async def _generate_sql(
-        self,
-        query: str,
-        schema_context: Dict,
-        semantic_layer: Optional[Dict]
-    ) -> Dict[str, Any]:
-        """
-        Generate SQL from natural language using LLM.
-        """
-        # Build prompt with schema and semantic context
-        system_prompt = self._build_sql_generation_prompt(
-            schema_context,
-            semantic_layer
-        )
-        
-        response = await self.llm_provider.generate(
-            system_prompt=system_prompt,
-            user_prompt=query,
-            temperature=0.1,
-            response_format="json"
-        )
-        
-        return json.loads(response)
-    
-    async def _validate_sql(
-        self,
-        sql: str,
-        schema_context: Dict,
-        dialect: DatabaseDialect
-    ) -> str:
-        """
-        Three-tier SQL validation system.
-        """
-        # Tier 1: Syntax validation
-        try:
-            parsed = sqlparse.parse(sql)[0]
-            if not parsed:
-                raise ValueError("Invalid SQL syntax")
-        except Exception as e:
-            raise ValueError(f"SQL syntax error: {e}")
-        
-        # Tier 2: Security validation
-        sql_upper = sql.upper()
-        security_checks = [
-            ('SELECT' in sql_upper and not any(
-                word in sql_upper for word in 
-                ['INSERT', 'UPDATE', 'DELETE', 'DROP', 'CREATE', 'ALTER', 'TRUNCATE']
-            ), "Query must be SELECT-only"),
-            ('LIMIT' in sql_upper or 'FETCH' in sql_upper, "Query must have LIMIT clause"),
-            (';' not in sql or sql.strip().endswith(';'), "No multiple statements allowed"),
-            ('INFORMATION_SCHEMA' not in sql_upper and 'PG_' not in sql_upper, 
-             "System tables not allowed")
-        ]
-        
-        for check, message in security_checks:
-            if not check:
-                raise ValueError(f"Security validation failed: {message}")
-        
-        # Tier 3: Semantic validation
-        # Verify tables and columns exist in schema
-        tables_in_query = self._extract_tables_from_sql(sql)
-        valid_tables = set(schema_context.get('tables', {}).keys())
-        
-        for table in tables_in_query:
-            if table.lower() not in valid_tables:
-                raise ValueError(f"Table '{table}' not found in schema")
-        
-        # Add LIMIT if missing
-        if 'LIMIT' not in sql_upper:
-            sql = f"{sql.rstrip(';')} LIMIT 1000"
-        
-        return sql
-    
-    async def _execute_query(
-        self,
-        sql: str,
-        credentials: Dict,
-        dialect: DatabaseDialect
-    ) -> List[Dict]:
-        """
-        Execute SQL query with timeout and row limits.
-        """
-        connection_string = self._build_connection_string(credentials, dialect)
-        engine = create_engine(
-            connection_string,
-            pool_size=5,
-            max_overflow=10,
-            pool_timeout=30,
-            pool_pre_ping=True
-        )
-        
-        try:
-            with engine.connect() as connection:
-                # Set timeout based on dialect
-                if dialect == DatabaseDialect.POSTGRESQL:
-                    connection.execute(text("SET statement_timeout = 30000"))
-                elif dialect == DatabaseDialect.MYSQL:
-                    connection.execute(text("SET max_execution_time = 30000"))
-                
-                # Execute query
-                result = connection.execute(text(sql))
-                rows = result.fetchall()
-                
-                # Convert to list of dicts
-                return [dict(row._mapping) for row in rows]
-                
-        except Exception as e:
-            raise ValueError(f"Query execution failed: {e}")
-        finally:
-            engine.dispose()
-    
-    async def _create_agent_tools(self, source: Dict[str, Any]) -> None:
-        """
-        Auto-create agent tools for database source.
-        """
-        # Create a specific tool for this database
-        tool_definition = {
-            "name": f"query_{source.name.lower().replace(' ', '_')}_database",
-            "display_name": f"Query {source.name} Database",
-            "description": f"Query {source.name} database using natural language",
-            "category": "database",
-            "security_level": "read_only",
-            "parameters": {
-                "query": {
-                    "type": "string",
-                    "description": "Natural language query",
-                    "required": True
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Maximum rows to return",
-                    "default": 100
-                }
-            },
-            "metadata": {
-                "source_id": source.id,
-                "dialect": source.dialect,
-                "requires_credential": source.credential_id
-            }
-        }
-        
-        # Register with tool registry
-        # This would integrate with your Tool Registry (PRD-17)
-        pass
-    
-    def _build_sql_generation_prompt(
-        self,
-        schema_context: Dict,
-        semantic_layer: Optional[Dict]
-    ) -> str:
-        """
-        Build the system prompt for SQL generation.
-        """
-        prompt = """You are an expert SQL query generator. Generate safe, efficient SELECT-only queries.
-
-Database Schema:
-"""
-        # Add tables and columns
-        for table_name, table_info in schema_context.get('tables', {}).items():
-            prompt += f"\nTable: {table_name}\n"
-            for col in table_info.get('columns', []):
-                prompt += f"  - {col['name']} ({col['type']})\n"
-        
-        # Add relationships
-        if schema_context.get('relationships'):
-            prompt += "\nRelationships:\n"
-            for rel in schema_context['relationships']:
-                prompt += f"  - {rel['from']} -> {rel['to']} ({rel['type']})\n"
-        
-        # Add semantic layer
-        if semantic_layer:
-            if semantic_layer.get('metrics'):
-                prompt += "\nAvailable Metrics:\n"
-                for metric in semantic_layer['metrics']:
-                    prompt += f"  - {metric['name']}: {metric['description']} (SQL: {metric['sql_expression']})\n"
-            
-            if semantic_layer.get('dimensions'):
-                prompt += "\nAvailable Dimensions:\n"
-                for dim in semantic_layer['dimensions']:
-                    prompt += f"  - {dim['name']}: {dim['description']} (SQL: {dim['sql_expression']})\n"
-        
-        prompt += """
-Rules:
-1. Generate SELECT-only queries
-2. Always include LIMIT (max 1000)
-3. Use proper JOINs based on relationships
-4. Apply semantic metrics when relevant
-5. Return JSON with: sql, explanation, visualization_hint, confidence_score
-"""
-        return prompt
-    
-    def _get_cache_key(self, sql: str, source_id: str) -> str:
-        """Generate cache key for query results."""
-        return hashlib.md5(f"{source_id}:{sql}".encode()).hexdigest()
-    
-    def _extract_tables_from_sql(self, sql: str) -> List[str]:
-        """Extract table names from SQL query."""
-        # Simple extraction - would use proper SQL parser in production
-        tables = []
-        parsed = sqlparse.parse(sql)[0]
-        for token in parsed.tokens:
-            if token.ttype is None and isinstance(token, sqlparse.sql.Identifier):
-                tables.append(str(token))
-        return tables
+    # PRD-199 S5: the legacy PRD-21 limb is deleted — _generate_sql /
+    # _validate_sql / _execute_query / _create_agent_tools /
+    # _build_sql_generation_prompt / _get_cache_key / _extract_tables_from_sql
+    # were a shadow duplicate of the real pipeline (modules/nl2sql/query/*)
+    # with zero callers, and _execute_query called a _build_connection_string
+    # that was never defined anywhere (AttributeError if ever reached).
 
     async def analyze_database(
         self,

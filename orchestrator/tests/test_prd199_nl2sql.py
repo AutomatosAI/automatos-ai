@@ -207,3 +207,85 @@ def test_semantic_fixture_is_reader_shaped():
     for category, dims in doc.get("dimensions", {}).items():
         for dim_name, sql in dims.items():
             assert isinstance(dim_name, str) and isinstance(sql, str)
+
+
+# ---------------------------------------------------------------------------
+# S5 — kill-list guards: the decoys stay dead (PRD-185-S5 source-grep shape)
+# ---------------------------------------------------------------------------
+
+import re  # noqa: E402
+
+_NL2SQL = _orchestrator_root / "modules" / "nl2sql"
+
+_KILLED_FILES = [
+    "modules/nl2sql/intelligence/__init__.py",
+    "modules/nl2sql/intelligence/agent.py",
+    "modules/nl2sql/intelligence/clarifier.py",
+    "modules/nl2sql/intelligence/explainer.py",
+    "modules/nl2sql/intelligence/rephraser.py",
+    "modules/nl2sql/intelligence/visualizer.py",
+    "modules/nl2sql/query/schema_linker.py",
+]
+
+_KILLED_IMPORT = re.compile(
+    r"^\s*(?:from|import)\s+[\w.]*"
+    r"(?:nl2sql\.intelligence\b|schema_linker\b"
+    r"|SchemaLinker|SmartNL2SQLAgent|create_smart_agent)",
+    re.M,
+)
+
+
+def test_no_intelligence_files_remain():
+    for rel in _KILLED_FILES:
+        assert not (_orchestrator_root / rel).exists(), f"{rel} resurrected"
+
+
+def test_no_intelligence_or_schemalinker_imports_remain():
+    """No import statement anywhere may reference the deleted decoys —
+    comment mentions stay allowed; imports do not."""
+    offenders = []
+    for py in _orchestrator_root.rglob("*.py"):
+        rel = py.relative_to(_orchestrator_root).as_posix()
+        if rel.startswith((".venv", "venv", "node_modules")) or rel == "tests/test_prd199_nl2sql.py":
+            continue
+        if _KILLED_IMPORT.search(py.read_text(errors="ignore")):
+            offenders.append(rel)
+    assert offenders == []
+
+
+def test_legacy_limb_removed():
+    """The PRD-21 shadow pipeline (incl. the _build_connection_string crash
+    path) is gone from service.py and stays gone."""
+    src = (_NL2SQL / "service.py").read_text()
+    for symbol in (
+        "def _generate_sql",
+        "def _validate_sql",
+        "def _execute_query",
+        "def _build_sql_generation_prompt",
+        "def _extract_tables_from_sql",
+        "def _create_agent_tools",
+        "_build_connection_string",
+    ):
+        assert symbol not in src, f"legacy limb symbol back: {symbol}"
+
+
+def test_example_store_training_stubs_removed():
+    """add_ddl/add_documentation (Vanna-imitation, 0 callers, would pollute
+    few-shot if ever called) are gone."""
+    src = (_NL2SQL / "training" / "example_store.py").read_text()
+    assert "def add_ddl" not in src
+    assert "def add_documentation" not in src
+
+
+def test_fake_stats_columns_removed():
+    """The never-written stats columns are gone from the model and no prod
+    code serializes them (real stats derive from database_query_audit)."""
+    offenders = []
+    for py in _orchestrator_root.rglob("*.py"):
+        rel = py.relative_to(_orchestrator_root).as_posix()
+        if rel.startswith((".venv", "venv", "node_modules", "alembic/", "tests/")):
+            continue
+        text = py.read_text(errors="ignore")
+        if '"total_queries_executed"' in text or "total_queries_executed =" in text:
+            offenders.append(rel)
+    assert offenders == []

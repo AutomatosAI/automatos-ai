@@ -96,8 +96,6 @@ async def get_item(
                 "dialect": s.dialect,
                 "is_active": s.is_active,
                 "status": s.status,
-                "total_queries_executed": s.total_queries_executed or 0,
-                "avg_query_time_ms": s.avg_query_time_ms,
                 "last_introspected": s.last_introspected.isoformat() if s.last_introspected else None,
                 "created_at": s.created_at.isoformat() if s.created_at else None,
                 "schema_tables_count": len(s.schema_metadata.get('tables', {})) if s.schema_metadata else 0,
@@ -400,8 +398,6 @@ async def get_database_source(
         "dialect": source.dialect,
         "status": source.status,
         "is_active": source.is_active,
-        "total_queries_executed": source.total_queries_executed,
-        "avg_query_time_ms": source.avg_query_time_ms,
         "last_introspected": source.last_introspected,
         "created_at": source.created_at
     }

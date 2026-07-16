@@ -304,39 +304,6 @@ class SQLExampleStore:
         finally:
             self._close_if_owned(db)
 
-    async def add_ddl(
-        self,
-        ddl: str,
-        database_source_id: str,
-        workspace_id: str
-    ) -> str:
-        """Store DDL for schema context retrieval (like Vanna's add_ddl)."""
-        return await self.add_example(
-            question=f"[DDL] {ddl[:100]}",
-            sql=ddl,
-            database_source_id=database_source_id,
-            workspace_id=workspace_id,
-            is_verified=True,
-            verification_source="ddl",
-            metadata={"type": "ddl"}
-        )
-
-    async def add_documentation(
-        self,
-        doc: str,
-        database_source_id: str,
-        workspace_id: str
-    ) -> str:
-        """Store business context documentation (like Vanna's add_documentation)."""
-        return await self.add_example(
-            question=f"[DOC] {doc[:100]}",
-            sql=doc,
-            database_source_id=database_source_id,
-            workspace_id=workspace_id,
-            is_verified=True,
-            verification_source="documentation",
-            metadata={"type": "documentation"}
-        )
 
     async def delete_example(self, example_id: int, workspace_id: str) -> None:
         """Delete a training example."""
