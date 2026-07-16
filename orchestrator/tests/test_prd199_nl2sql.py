@@ -163,3 +163,47 @@ def test_semantic_body_defaults_are_empty_not_required():
     body = SemanticLayerBody(instructions="only text")
     assert body.metrics == []
     assert body.dimensions == []
+
+
+# ---------------------------------------------------------------------------
+# S4 — the A/B harness computes ΔS = acc_with − acc_without (pure, no LLM)
+# ---------------------------------------------------------------------------
+
+def test_ab_eval_reports_delta():
+    """Given scripted generators (semantic-on answers two goldens, off
+    answers one), the A/B reports the arithmetic — treatment minus
+    baseline, the honest-gate shape."""
+    from tests.nl2sql_eval import harness
+
+    questions = harness.load_questions()
+    goldens = {q["question"]: (q["id"], q["golden_sql"]) for q in questions}
+
+    def factory(semantic_doc):
+        answered = {"q01", "q03"} if semantic_doc else {"q01"}
+
+        def generate_fn(question, schema):
+            qid, golden = goldens[question]
+            return golden if qid in answered else "SELECT 1"
+
+        return generate_fn
+
+    ab = harness.evaluate_ab(factory)
+
+    assert ab["total"] == len(questions)
+    assert ab["with_correct"] == 2
+    assert ab["without_correct"] == 1
+    assert ab["delta_s"] == pytest.approx(1 / len(questions), abs=1e-3)
+
+
+def test_semantic_fixture_is_reader_shaped():
+    """The seeded A/B doc is consumable by the reader's exact iteration —
+    the same contract the S1/S2 write path persists."""
+    from tests.nl2sql_eval import harness
+
+    doc = harness.load_semantic_fixture()
+    assert str(doc.get("instructions") or "").strip()
+    for name, metric in doc["metrics"].items():
+        assert isinstance(name, str) and metric.get("sql")
+    for category, dims in doc.get("dimensions", {}).items():
+        for dim_name, sql in dims.items():
+            assert isinstance(dim_name, str) and isinstance(sql, str)

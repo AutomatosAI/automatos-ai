@@ -107,11 +107,17 @@ jobs:
           else
             echo "No last_run.json produced — see the eval step log." >> "$GITHUB_STEP_SUMMARY"
           fi
+          if [ -f tests/nl2sql_eval/ab_run.json ]; then
+            echo "### Semantic A/B (PRD-199 S4 — ΔS decides §8-Q1)" >> "$GITHUB_STEP_SUMMARY"
+            cat tests/nl2sql_eval/ab_run.json >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Upload run artifact
         if: always() && steps.gate.outputs.configured == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: nl2sql-eval-last-run
-          path: orchestrator/tests/nl2sql_eval/last_run.json
+          path: |
+            orchestrator/tests/nl2sql_eval/last_run.json
+            orchestrator/tests/nl2sql_eval/ab_run.json
           if-no-files-found: ignore

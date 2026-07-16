@@ -105,3 +105,41 @@ def test_generation_accuracy_no_regression(capsys):
     assert report.accuracy >= baseline - tolerance, (
         f"accuracy {report.accuracy:.3f} regressed vs baseline {baseline:.3f}"
     )
+
+
+@pytest.mark.skipif(
+    os.getenv("RUN_NL2SQL_EVAL") != "1",
+    reason="semantic A/B eval is opt-in (set RUN_NL2SQL_EVAL=1 with an LLM)",
+)
+def test_semantic_ab_reports_delta(capsys):
+    """PRD-199 S4: semantic-on vs semantic-off on the same LLM and set.
+    The delta is REPORTED (printed + ab_run.json), never asserted against a
+    target — the target is set after the first honest measurement (§8-Q1)."""
+    from modules.nl2sql.query.nl2sql_service import NaturalLanguageToSQLService
+    from modules.nl2sql.query.validator import SQLValidator
+    from core.llm import create_llm_manager
+
+    generator = NaturalLanguageToSQLService(
+        llm_provider=create_llm_manager(service_name="orchestrator")
+    )
+
+    def factory(semantic_doc):
+        def generate_fn(question, schema):
+            sql, _expl, meta = generator.generate_sql(
+                question=question, schema_metadata=schema, dialect="sqlite",
+                semantic_layer=semantic_doc,
+            )
+            if not sql or meta.get("success") is False:
+                raise RuntimeError(meta.get("error") or "generation failed")
+            validated, _ = SQLValidator().validate_and_rewrite(sql, schema_metadata=schema)
+            return validated
+        return generate_fn
+
+    ab = harness.evaluate_ab(factory)
+
+    with capsys.disabled():
+        print(f"\n[nl2sql-eval] semantic A/B: with={ab['acc_with_semantic']:.3f} "
+              f"without={ab['acc_without_semantic']:.3f} delta_s={ab['delta_s']:+.3f}")
+
+    (harness.HERE / "ab_run.json").write_text(json.dumps(ab, indent=2))
+    assert ab["total"] > 0  # shape only — the number is the deliverable
