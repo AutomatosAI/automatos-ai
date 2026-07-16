@@ -1128,6 +1128,24 @@ class Config:
             return os.getenv("RAG_HYBRID_ENABLED", "true").lower() == "true"
 
     @property
+    def RAG_QUERY_ENHANCEMENT_ENABLED(self) -> bool:
+        """LLM query enhancement — HyDE, decomposition, expansion — on the
+        retrieval hot path (default: OFF).
+
+        The 2026-07 live retrieval baseline measured enhancement at −26.9
+        recall@5 points versus plain dense retrieval while adding ~4 LLM
+        calls per query (evals/baseline/kg_retrieval_2026-07.json). OFF
+        until an eval shows a variant that pays; the setting keeps it one
+        flip away, and the eval lever grid still exercises it explicitly.
+        """
+        try:
+            from core.llm.manager import get_system_setting
+            val = get_system_setting("rag", "query_enhancement_enabled", "false")
+            return str(val).lower() == "true" if val else False
+        except Exception:
+            return os.getenv("RAG_QUERY_ENHANCEMENT_ENABLED", "false").lower() == "true"
+
+    @property
     def RAG_CONTEXTUAL_ANNOTATIONS_ENABLED(self) -> bool:
         """Contextual chunk annotations at ingestion (default: OFF — PRD-188 S2).
 
