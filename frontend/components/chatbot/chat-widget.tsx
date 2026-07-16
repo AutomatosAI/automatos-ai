@@ -14,6 +14,8 @@ import {
   Bug,
   Loader2,
   ArrowUpRight,
+  ChevronDown,
+  Plus,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -30,6 +32,22 @@ import {
 import { useUser } from '@clerk/nextjs'
 import { useSubmitBugReport, type BugReportRequest } from '@/hooks/use-bug-report-api'
 import { useChat } from '@/lib/chat/hooks'
+import { getChatHistory, getChatMessages } from '@/lib/chat/api'
+import {
+  EMPTY_WIDGET_SESSION,
+  isThreadUnread,
+  loadWidgetSession,
+  saveWidgetSession,
+  threadTimeAgo,
+  visibleThreads,
+  widgetSessionKey,
+  withActiveChat,
+  withThreadClosed,
+  withThreadRead,
+  withoutActiveChat,
+  type WidgetChatSession,
+} from '@/lib/chat/widget-session'
+import type { Chat, ChatMessage } from '@/types'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useRouter } from 'next/navigation'
@@ -62,11 +80,302 @@ const PAGE_LABELS: Record<string, string> = {
 }
 
 // =============================================================================
-// Mini Auto Chat Tab
+// Mini Auto Chat Tab — persistent & multi-threaded (PRD-220)
 // =============================================================================
+
+function widgetWorkspaceId(): string | null {
+  if (typeof window === 'undefined') return null
+  return localStorage.getItem('last_active_workspace')
+}
 
 function AutoChatTab({ currentPage, onClose }: { currentPage: string; onClose?: () => void }) {
   const router = useRouter()
+  const { user, isLoaded: userLoaded } = useUser()
+
+  // Session key is workspace+user scoped; until Clerk resolves, run ephemeral.
+  const storageKey = userLoaded ? widgetSessionKey(widgetWorkspaceId(), user?.id) : null
+
+  const [session, setSession] = useState<WidgetChatSession | null>(null)
+  const [activeChatId, setActiveChatId] = useState<string | null>(null)
+  const [seedMessages, setSeedMessages] = useState<ChatMessage[]>([])
+  const [reconnecting, setReconnecting] = useState(false)
+  const [threads, setThreads] = useState<Chat[]>([])
+  const [threadsOpen, setThreadsOpen] = useState(false)
+  // Bumped only on explicit thread changes — remounts the conversation below.
+  const [conversationInstance, setConversationInstance] = useState(0)
+  // Monotonic token so a slow history fetch can't stomp a newer thread change.
+  const loadSeqRef = useRef(0)
+
+  const updateSession = useCallback(
+    (mutate: (s: WidgetChatSession) => WidgetChatSession) => {
+      if (!storageKey) return
+      setSession((prev) => {
+        const next = mutate(prev ?? EMPTY_WIDGET_SESSION)
+        saveWidgetSession(storageKey, next)
+        return next
+      })
+    },
+    [storageKey]
+  )
+
+  const refreshThreads = useCallback(async () => {
+    try {
+      setThreads(await getChatHistory(10))
+    } catch {
+      // Thread list is best-effort — the active conversation still works.
+    }
+  }, [])
+
+  // S1: restore the session and reconnect to the active thread on mount.
+  useEffect(() => {
+    if (!storageKey) return
+    const restored = loadWidgetSession(storageKey)
+    setSession(restored)
+    refreshThreads().catch(() => {})
+    if (!restored.activeChatId) return
+
+    const chatId = restored.activeChatId
+    setReconnecting(true)
+    const seq = ++loadSeqRef.current
+    let cancelled = false
+    ;(async () => {
+      try {
+        const history = await getChatMessages(chatId)
+        if (cancelled || seq !== loadSeqRef.current) return
+        setSeedMessages(history)
+        setActiveChatId(chatId)
+        setConversationInstance((v) => v + 1)
+      } catch {
+        // Stale or inaccessible chat (deleted, workspace switch) — start fresh.
+        if (!cancelled && seq === loadSeqRef.current) updateSession((s) => withoutActiveChat(s))
+      } finally {
+        if (!cancelled && seq === loadSeqRef.current) setReconnecting(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storageKey])
+
+  // Backend assigned (or confirmed) the conversation id — persist it. Fires
+  // each turn, which also keeps the active thread's read marker current.
+  const handleChatIdAssigned = useCallback(
+    (chatId: string) => {
+      setActiveChatId(chatId)
+      updateSession((s) => withActiveChat(s, chatId))
+      refreshThreads().catch(() => {})
+    },
+    [updateSession, refreshThreads]
+  )
+
+  const switchThread = useCallback(
+    async (thread: Chat) => {
+      setThreadsOpen(false)
+      if (thread.id === activeChatId) return
+      // Leaving a thread the user was just viewing — stamp it read.
+      updateSession((s) => withActiveChat(withThreadRead(s, activeChatId), thread.id))
+      setReconnecting(true)
+      const seq = ++loadSeqRef.current
+      try {
+        const history = await getChatMessages(thread.id)
+        if (seq !== loadSeqRef.current) return
+        setSeedMessages(history)
+        setActiveChatId(thread.id)
+        setConversationInstance((v) => v + 1)
+      } catch {
+        if (seq === loadSeqRef.current) updateSession((s) => withoutActiveChat(s))
+      } finally {
+        if (seq === loadSeqRef.current) setReconnecting(false)
+      }
+    },
+    [activeChatId, updateSession]
+  )
+
+  const startNewThread = useCallback(() => {
+    setThreadsOpen(false)
+    loadSeqRef.current++ // invalidate any in-flight thread load
+    setReconnecting(false)
+    updateSession((s) => withoutActiveChat(withThreadRead(s, activeChatId)))
+    setActiveChatId(null)
+    setSeedMessages([])
+    setConversationInstance((v) => v + 1)
+  }, [activeChatId, updateSession])
+
+  // Hides the thread from the switcher — the conversation stays in full chat.
+  const closeThread = useCallback(
+    (thread: Chat, e: React.MouseEvent) => {
+      e.stopPropagation()
+      updateSession((s) => withThreadClosed(s, thread.id))
+      if (thread.id === activeChatId) {
+        loadSeqRef.current++ // invalidate any in-flight thread load
+        setReconnecting(false)
+        setActiveChatId(null)
+        setSeedMessages([])
+        setConversationInstance((v) => v + 1)
+      }
+    },
+    [activeChatId, updateSession]
+  )
+
+  // S3: promote — the full chat page loads the thread via ?chatId= deep-link.
+  const openFullChat = useCallback(() => {
+    setThreadsOpen(false)
+    onClose?.()
+    router.push(activeChatId ? `/chat?chatId=${activeChatId}` : '/chat')
+  }, [activeChatId, onClose, router])
+
+  const effectiveSession = session ?? EMPTY_WIDGET_SESSION
+  const listedThreads = visibleThreads(threads, effectiveSession)
+  const activeThread = threads.find((t) => t.id === activeChatId)
+  const hasUnread = listedThreads.some((t) => isThreadUnread(effectiveSession, t))
+  const pageLabel = PAGE_LABELS[currentPage] || currentPage
+
+  return (
+    <div className="flex flex-col h-[400px]">
+      {/* Thread switcher toolbar (S2) */}
+      <div className="relative px-3 pb-1.5">
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => {
+              setThreadsOpen((v) => !v)
+              if (!threadsOpen) refreshThreads().catch(() => {})
+            }}
+            className="flex min-w-0 flex-1 items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            title="Conversations"
+          >
+            <ChevronDown
+              className={`w-3 h-3 shrink-0 transition-transform ${threadsOpen ? 'rotate-180' : ''}`}
+            />
+            <span className="truncate">
+              {activeThread?.title || (activeChatId ? 'Conversation' : 'New conversation')}
+            </span>
+            {hasUnread && (
+              <span
+                className="w-1.5 h-1.5 rounded-full bg-primary shrink-0"
+                aria-label="Unread messages"
+              />
+            )}
+          </button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={startNewThread}
+            className="h-6 w-6 p-0 shrink-0 text-muted-foreground hover:text-foreground"
+            title="New thread"
+          >
+            <Plus className="w-3.5 h-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={openFullChat}
+            className="h-6 w-6 p-0 shrink-0 text-muted-foreground hover:text-foreground"
+            title="Open in full chat"
+          >
+            <ArrowUpRight className="w-3.5 h-3.5" />
+          </Button>
+        </div>
+
+        {threadsOpen && (
+          <>
+            {/* Click-outside catcher */}
+            <div className="fixed inset-0 z-10" onClick={() => setThreadsOpen(false)} />
+            <div className="absolute left-2 right-2 top-7 z-20 overflow-hidden rounded-xl border border-border/60 bg-background/95 backdrop-blur-xl shadow-xl">
+              <button
+                onClick={startNewThread}
+                className="flex w-full items-center gap-2 px-3 py-2 text-xs text-foreground hover:bg-secondary/40 transition-colors"
+              >
+                <Plus className="w-3 h-3" />
+                New thread
+              </button>
+              {listedThreads.length > 0 && <div className="h-px bg-border/50" />}
+              <div className="max-h-56 overflow-y-auto">
+                {listedThreads.map((thread) => (
+                  <div
+                    key={thread.id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => switchThread(thread)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        switchThread(thread)
+                      }
+                    }}
+                    className={`group flex w-full cursor-pointer flex-col gap-0.5 px-3 py-2 text-left transition-colors hover:bg-secondary/40 ${
+                      thread.id === activeChatId ? 'bg-secondary/30' : ''
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      {isThreadUnread(effectiveSession, thread) && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />
+                      )}
+                      <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
+                        {thread.title}
+                      </span>
+                      <span className="shrink-0 text-[10px] text-muted-foreground">
+                        {threadTimeAgo(thread.updatedAt)}
+                      </span>
+                      <button
+                        onClick={(e) => closeThread(thread, e)}
+                        className="shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
+                        title="Close thread"
+                        aria-label={`Close thread ${thread.title}`}
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                    {thread.lastMessagePreview && (
+                      <p className="truncate text-[11px] text-muted-foreground">
+                        {thread.lastMessagePreview}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <div className="h-px bg-border/50" />
+              <button
+                onClick={openFullChat}
+                className="flex w-full items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:bg-secondary/40 hover:text-foreground transition-colors"
+              >
+                <ArrowUpRight className="w-3 h-3" />
+                Open in full chat
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+
+      {reconnecting ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-2 text-muted-foreground">
+          <Loader2 className="w-4 h-4 animate-spin" />
+          <p className="text-xs">Continuing conversation…</p>
+        </div>
+      ) : (
+        <WidgetConversation
+          key={conversationInstance}
+          initialChatId={activeChatId}
+          initialMessages={seedMessages}
+          pageLabel={pageLabel}
+          onChatIdAssigned={handleChatIdAssigned}
+        />
+      )}
+    </div>
+  )
+}
+
+function WidgetConversation({
+  initialChatId,
+  initialMessages,
+  pageLabel,
+  onChatIdAssigned,
+}: {
+  initialChatId: string | null
+  initialMessages: ChatMessage[]
+  pageLabel: string
+  onChatIdAssigned: (chatId: string) => void
+}) {
   const inputRef = useRef<HTMLInputElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [inputValue, setInputValue] = useState('')
@@ -77,20 +386,13 @@ function AutoChatTab({ currentPage, onClose }: { currentPage: string; onClose?: 
     sendMessage,
     stop,
   } = useChat({
-    id: 'auto-widget',
+    // Empty id → the backend creates the chat and streams its id back.
+    id: initialChatId ?? '',
+    initialMessages,
     selectedAgentId: undefined, // Routes to Auto (default agent)
+    pageContext: pageLabel,
+    onChatIdUpdate: onChatIdAssigned,
   })
-
-  const handleOpenFullChat = () => {
-    // Stash widget messages so the full chat page can pick them up
-    if (messages.length > 0) {
-      try {
-        sessionStorage.setItem('auto-widget-handoff', JSON.stringify(messages))
-      } catch { /* quota exceeded — navigate anyway */ }
-    }
-    onClose?.()
-    router.push('/chat')
-  }
 
   // Auto-scroll on new messages
   useEffect(() => {
@@ -102,14 +404,7 @@ function AutoChatTab({ currentPage, onClose }: { currentPage: string; onClose?: 
   const handleSend = () => {
     const text = inputValue.trim()
     if (!text || isLoading) return
-
-    // Prepend page context as a quiet hint on first message
-    const pageLabel = PAGE_LABELS[currentPage] || currentPage
-    const contextHint = messages.length === 0
-      ? `[Context: User is on the ${pageLabel} page]\n\n${text}`
-      : text
-
-    sendMessage(contextHint)
+    sendMessage(text)
     setInputValue('')
   }
 
@@ -121,7 +416,7 @@ function AutoChatTab({ currentPage, onClose }: { currentPage: string; onClose?: 
   }
 
   return (
-    <div className="flex flex-col h-[400px]">
+    <div className="flex min-h-0 flex-1 flex-col">
       {/* Messages area */}
       <div
         ref={scrollRef}
@@ -134,7 +429,7 @@ function AutoChatTab({ currentPage, onClose }: { currentPage: string; onClose?: 
             </div>
             <p className="text-sm font-medium text-foreground mb-1">Hey, I'm Auto</p>
             <p className="text-xs text-muted-foreground">
-              Ask me anything about {PAGE_LABELS[currentPage] || 'this page'}, or tell me what you need help with.
+              Ask me anything about {pageLabel || 'this page'}, or tell me what you need help with.
             </p>
           </div>
         )}
@@ -172,19 +467,6 @@ function AutoChatTab({ currentPage, onClose }: { currentPage: string; onClose?: 
           </div>
         )}
       </div>
-
-      {/* Open in full chat — carries conversation context */}
-      {messages.length > 0 && (
-        <div className="px-3 pb-1">
-          <button
-            onClick={handleOpenFullChat}
-            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors"
-          >
-            <ArrowUpRight className="w-3 h-3" />
-            Open in full chat
-          </button>
-        </div>
-      )}
 
       {/* Input area */}
       <div className="px-3 pb-3 pt-1">

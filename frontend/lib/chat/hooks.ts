@@ -11,6 +11,7 @@ export function useChat({
   selectedAgentId,
   missionMode = false,
   planMode = false,
+  pageContext,
   onData,
   onChatIdUpdate,
   onRoutingDecision,
@@ -20,6 +21,9 @@ export function useChat({
   selectedAgentId?: number | null
   missionMode?: boolean
   planMode?: boolean
+  // PRD-220: where the user is (widget). Sent as request context, injected
+  // prompt-side by the backend — never stored in the message or the title.
+  pageContext?: string
   onData?: (data: any) => void
   onChatIdUpdate?: (chatId: string) => void
   onRoutingDecision?: (info: RoutingInfo) => void
@@ -120,6 +124,8 @@ export function useChat({
             ...(missionMode ? { missionMode: true } : {}),
             // Plan mode — research and strategy, no execution
             ...(planMode ? { planMode: true } : {}),
+            // PRD-220: page context for the widget (prompt-only server-side)
+            ...(pageContext ? { context: { page: pageContext } } : {}),
           }),
           signal: abortControllerRef.current.signal,
         })
@@ -377,7 +383,7 @@ export function useChat({
         setIsLoading(false)
       }
     },
-    [chatId, isLoading, selectedAgentId, missionMode, planMode, onData, onChatIdUpdate, onRoutingDecision]
+    [chatId, isLoading, selectedAgentId, missionMode, planMode, pageContext, onData, onChatIdUpdate, onRoutingDecision]
   )
 
   return {
