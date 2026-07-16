@@ -541,7 +541,9 @@ def test_grant_deny_no_launch_watch_needs_attention(
     s.close()
 
 
-def test_resume_with_missing_target_parks_watch(workspace, new_session, stub_launch):
+def test_resume_with_missing_target_parks_watch(
+    workspace, new_session, stub_launch, capture_notifications
+):
     """Self-healing: a granted rerun whose recipe/execution vanished parks
     the watch instead of crashing the grant endpoint."""
     from services.watch_rerun import resume_playbook_run_grant
