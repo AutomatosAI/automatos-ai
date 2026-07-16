@@ -18,6 +18,7 @@ vi.mock('@/hooks/use-analytics-api', () => ({
   useWidgetEngagement: () => ({ data: undefined }),
   usePrimitiveHealth: () => ({ data: undefined }),
   useSLOs: () => ({ data: undefined }),
+  useSubstrateHealth: () => ({ data: undefined }),
   useDeliverableFreshness: () => ({ data: undefined }),
   useCommerceIntegrity: () => ({ data: undefined }),
 }))
