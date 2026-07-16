@@ -9,6 +9,10 @@
   ``(embeddings, provider|model|cache_dir|dimensions|rerank_model)`` rows that
   PRD-136's migration/seeder/admin-card actually produce. The pre-rename long
   names matched nothing, so the admin embeddings card was a placebo.
+* S3 — Qdrant memory snapshots: durable_memory + field_memory snapshotted
+  daily to the object store and pruned to retention (the memory planes' DR
+  arm — documents are S3 Vectors, PRD-186's DR). Restore:
+  ``docs/runbooks/DR-qdrant.md``.
 * S5 — the open-core/local edition gets a working document read leg:
   ``PgVectorLocalBackend`` over ``document_chunks.embedding`` (which "legacy
   pgvector mode" ingestion already populates when S3 is off), selected by
@@ -249,3 +253,139 @@ def test_embeddings_settings_roundtrip(monkeypatch):
     assert cfg.model == "text-embedding-3-large"
     assert cfg.dimension == 1536
     assert cfg.cache_dir == "/tmp/emb-cache"
+
+
+# ---------------------------------------------------------------------------
+# S3 — Qdrant memory snapshots (durable + field), daily, retained, restorable
+# ---------------------------------------------------------------------------
+
+from datetime import datetime, timezone  # noqa: E402
+
+from services.qdrant_snapshots import (  # noqa: E402
+    object_key,
+    run_snapshot_cycle,
+    select_snapshots_to_prune,
+)
+
+_NOW = datetime(2026, 7, 16, 4, 0, tzinfo=timezone.utc)
+
+
+def test_select_snapshots_to_prune():
+    """Only snapshots older than the retention window are pruned; undated
+    snapshots are kept (a missing timestamp must never cause data loss)."""
+    snaps = [
+        SimpleNamespace(name="old", creation_time="2026-07-01T00:00:00"),
+        SimpleNamespace(name="fresh", creation_time="2026-07-15T04:00:00"),
+        SimpleNamespace(name="undated", creation_time=None),
+    ]
+    assert select_snapshots_to_prune(snaps, _NOW, retention_days=7) == ["old"]
+
+
+def test_object_key_shape():
+    assert (
+        object_key("qdrant-snapshots", "durable_memory", "snap-1")
+        == "qdrant-snapshots/durable_memory/snap-1"
+    )
+
+
+@pytest.mark.asyncio
+async def test_snapshot_job_registered(monkeypatch):
+    """MEMORY_SNAPSHOT_ENABLED=true registers the cron job; false does not."""
+    from services.memory_jobs import MemoryJobScheduler
+
+    for enabled, expect in ((True, True), (False, False)):
+        monkeypatch.setattr(
+            config_mod.config, "MEMORY_SNAPSHOT_ENABLED", enabled, raising=False
+        )
+        scheduler = MagicMock()
+        jobs = MemoryJobScheduler()
+        await jobs.start(scheduler)
+        registered = {
+            call.kwargs.get("id") for call in scheduler.add_job.call_args_list
+        }
+        assert (MemoryJobScheduler.JOB_ID_SNAPSHOT in registered) is expect
+
+
+class _FakeQdrant:
+    def __init__(self):
+        self.deleted = []
+
+    async def create_snapshot(self, collection_name):
+        return SimpleNamespace(
+            name=f"{collection_name}-snap-new",
+            creation_time="2026-07-16T04:00:00",
+        )
+
+    async def list_snapshots(self, collection_name):
+        return [
+            SimpleNamespace(
+                name=f"{collection_name}-snap-old",
+                creation_time="2026-07-01T00:00:00",
+            ),
+            SimpleNamespace(
+                name=f"{collection_name}-snap-new",
+                creation_time="2026-07-16T04:00:00",
+            ),
+        ]
+
+    async def delete_snapshot(self, collection_name, snapshot_name):
+        self.deleted.append((collection_name, snapshot_name))
+
+
+@pytest.mark.asyncio
+async def test_run_snapshot_cycle_uploads_and_prunes(monkeypatch):
+    """One cycle: both collections snapshotted, uploaded to the object
+    store, node-side and object-store copies pruned to retention."""
+    import services.qdrant_snapshots as snap_mod
+
+    monkeypatch.setattr(
+        snap_mod, "_collections", lambda: ["durable_memory", "field_memory"]
+    )
+    monkeypatch.setattr(
+        config_mod.config, "MEMORY_SNAPSHOT_S3_BUCKET", "", raising=False
+    )
+    monkeypatch.setattr(
+        config_mod.config, "S3_DOCUMENTS_BUCKET", "test-bucket", raising=False
+    )
+    monkeypatch.setattr(
+        config_mod.config, "MEMORY_SNAPSHOT_S3_PREFIX", "qdrant-snapshots", raising=False
+    )
+    monkeypatch.setattr(
+        config_mod.config, "MEMORY_SNAPSHOT_RETENTION_DAYS", 7, raising=False
+    )
+
+    qdrant = _FakeQdrant()
+    s3 = MagicMock()
+    s3.list_objects_v2.return_value = {
+        "Contents": [
+            {
+                "Key": "qdrant-snapshots/durable_memory/stale",
+                "LastModified": datetime(2026, 7, 1, tzinfo=timezone.utc),
+            }
+        ]
+    }
+
+    async def fake_download(collection, snapshot_name):
+        return b"snapshot-bytes"
+
+    summary = await run_snapshot_cycle(
+        qdrant_client=qdrant, s3_client=s3, download=fake_download, now=_NOW
+    )
+
+    assert set(summary) == {"durable_memory", "field_memory"}
+    for collection, result in summary.items():
+        assert "error" not in result
+        assert result["uploaded_key"] == (
+            f"qdrant-snapshots/{collection}/{collection}-snap-new"
+        )
+    uploaded = {call.kwargs["Key"] for call in s3.put_object.call_args_list}
+    assert uploaded == {
+        "qdrant-snapshots/durable_memory/durable_memory-snap-new",
+        "qdrant-snapshots/field_memory/field_memory-snap-new",
+    }
+    assert all(call.kwargs["Bucket"] == "test-bucket" for call in s3.put_object.call_args_list)
+    assert ("durable_memory", "durable_memory-snap-old") in qdrant.deleted
+    assert ("field_memory", "field_memory-snap-old") in qdrant.deleted
+    s3.delete_object.assert_any_call(
+        Bucket="test-bucket", Key="qdrant-snapshots/durable_memory/stale"
+    )

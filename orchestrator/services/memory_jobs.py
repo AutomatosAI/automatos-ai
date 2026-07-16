@@ -37,6 +37,7 @@ class MemoryJobScheduler:
     JOB_ID_PROMOTION = "memory_l2_l3_promotion"
     JOB_ID_ARCHIVAL = "memory_graphify_archival"
     JOB_ID_AUDIT_RETENTION = "audit_retention_sweep"  # PRD-196 S5
+    JOB_ID_SNAPSHOT = "memory_qdrant_snapshot"  # PRD-197 S3
 
     def __init__(self):
         self._scheduler: Optional[AsyncIOScheduler] = None
@@ -123,10 +124,28 @@ class MemoryJobScheduler:
             max_instances=1,
         )
 
+        # PRD-197 S3: daily Qdrant snapshot of the memory planes (durable +
+        # field), uploaded to the object store, both sides pruned to the
+        # retention window. §8-Q3 built to proposal (daily / 7-day / platform
+        # object store) — the MEMORY_SNAPSHOT_* knobs adjust it.
+        snapshot_enabled = getattr(app_config, "MEMORY_SNAPSHOT_ENABLED", True)
+        snapshot_hour = getattr(app_config, "MEMORY_SNAPSHOT_CRON_HOUR_UTC", 4)
+        if snapshot_enabled:
+            self._scheduler.add_job(
+                self._run_snapshot,
+                "cron",
+                hour=snapshot_hour,
+                minute=0,
+                id=self.JOB_ID_SNAPSHOT,
+                replace_existing=True,
+                max_instances=1,
+            )
+
         logger.info(
             "[MemoryJobs] Started — consolidation every %ds, "
             "decay every %ds, promotion daily at %02d:00 UTC, "
-            "archival %s (day=%d hour=%02d), audit-retention every %ds",
+            "archival %s (day=%d hour=%02d), audit-retention every %ds, "
+            "qdrant-snapshot %s (daily %02d:00 UTC)",
             consolidation_interval,
             decay_interval,
             promotion_hour,
@@ -134,6 +153,8 @@ class MemoryJobScheduler:
             archival_day,
             archival_hour,
             retention_interval,
+            "enabled" if snapshot_enabled else "disabled",
+            snapshot_hour,
         )
 
     async def stop(self):
@@ -146,6 +167,7 @@ class MemoryJobScheduler:
             self.JOB_ID_PROMOTION,
             self.JOB_ID_ARCHIVAL,
             self.JOB_ID_AUDIT_RETENTION,
+            self.JOB_ID_SNAPSHOT,
         ):
             if self._scheduler.get_job(job_id):
                 self._scheduler.remove_job(job_id)
@@ -291,6 +313,35 @@ class MemoryJobScheduler:
             )
 
     # ------------------------------------------------------------------
+    # Job: Qdrant memory snapshots (PRD-197 S3)
+    # ------------------------------------------------------------------
+
+    async def _run_snapshot(self):
+        """PRD-197 S3: snapshot durable_memory + field_memory to the object
+        store and prune to retention. Fail-soft like the rest — a snapshot
+        failure is logged and never stops the sibling jobs."""
+        try:
+            from services.qdrant_snapshots import run_snapshot_cycle
+
+            summary = await run_snapshot_cycle()
+            failures = [c for c, s in summary.items() if "error" in s]
+            if failures:
+                logger.warning(
+                    "[MemoryJobs] Qdrant snapshot cycle completed with "
+                    "failures: %s", ", ".join(failures),
+                )
+            else:
+                logger.info(
+                    "[MemoryJobs] Qdrant snapshot cycle complete: %s",
+                    {c: s.get("snapshot") for c, s in summary.items()},
+                )
+        except Exception as e:
+            logger.error(
+                "[MemoryJobs] Qdrant snapshot cycle failed: %s", e,
+                exc_info=True,
+            )
+
+    # ------------------------------------------------------------------
     # Status
     # ------------------------------------------------------------------
 
@@ -306,6 +357,7 @@ class MemoryJobScheduler:
             self.JOB_ID_PROMOTION,
             self.JOB_ID_ARCHIVAL,
             self.JOB_ID_AUDIT_RETENTION,
+            self.JOB_ID_SNAPSHOT,
         ):
             job = self._scheduler.get_job(job_id)
             jobs[job_id] = {
