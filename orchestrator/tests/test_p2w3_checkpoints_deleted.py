@@ -25,6 +25,7 @@ config, which must survive.)
 from __future__ import annotations
 
 import pathlib
+import re
 import sys
 
 _ORCH = pathlib.Path(__file__).resolve().parents[1]
@@ -34,7 +35,10 @@ if str(_ORCH) not in sys.path:
 _SOURCE_DIRS = ("modules", "services", "core", "api", "consumers", "evals")
 
 # Specific deleted symbols only — NOT the bare word "checkpoint" (PRD-164's
-# joiner "checkpoint" and seed_skills "checkpoint_enabled" are unrelated live code).
+# joiner "checkpoint" and seed_skills "checkpoint_enabled" are unrelated live
+# code). Matched on WORD BOUNDARIES, not substrings — PRD-206's
+# ``thread_checkpoint`` (an unrelated live module) contains the letters
+# "read_checkpoint", which a substring scan false-positives on.
 _GONE_TOKENS = (
     "checkpoint_service",
     "SessionCheckpoint",
@@ -42,6 +46,9 @@ _GONE_TOKENS = (
     "list_checkpoints",
     "read_checkpoint",
     "checkpoint_count",
+)
+_GONE_TOKEN_PATTERNS = tuple(
+    (token, re.compile(rf"\b{re.escape(token)}\b")) for token in _GONE_TOKENS
 )
 
 
@@ -62,13 +69,13 @@ def test_no_dangling_checkpoint_imports():
             continue
         for path in root.rglob("*.py"):
             text = path.read_text(errors="ignore")
-            for token in _GONE_TOKENS:
-                if token in text:
+            for token, pattern in _GONE_TOKEN_PATTERNS:
+                if pattern.search(text):
                     offenders.append(f"{path.relative_to(_ORCH)}: {token}")
     for extra in ("main.py", "config.py"):
         text = (_ORCH / extra).read_text(errors="ignore")
-        for token in _GONE_TOKENS:
-            if token in text:
+        for token, pattern in _GONE_TOKEN_PATTERNS:
+            if pattern.search(text):
                 offenders.append(f"{extra}: {token}")
     assert not offenders, f"dangling checkpoint references: {offenders}"
 
