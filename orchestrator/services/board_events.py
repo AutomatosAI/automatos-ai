@@ -102,7 +102,7 @@ def notify_chat_event(
             text("SELECT pg_notify(:chan, :payload)"),
             {"chan": NOTIFY_CHANNEL, "payload": payload},
         )
-    except Exception:  # noqa: BLE001 — NOTIFY is an optimisation, not a guarantee
+    except Exception:  # noqa: BLE001 -- NOTIFY is an optimisation, not a guarantee
         logger.debug(
             "[board_events] pg_notify failed for chat %s", chat_id, exc_info=True
         )
