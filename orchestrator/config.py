@@ -1263,14 +1263,19 @@ class Config:
     VOICE_MAX_AUDIO_SIZE_MB: int = int(os.getenv("VOICE_MAX_AUDIO_SIZE_MB", "25"))
     AUTO_VOICE_PROVIDER: str = os.getenv("AUTO_VOICE_PROVIDER", "chatterbox")
 
-    # PRD-203 V·S4: streaming voice transport (§8-Qa vendor = Retell). Retell
-    # handles STT/TTS/turn-taking/barge-in and posts transcripts to Auto's own
-    # agent loop via the custom-LLM webhook (api/voice_retell.py). Keys unset →
-    # the webhook fails closed (honest-degrade, §8-Qd). The self-hosted pod path
-    # (VoiceServiceClient) stays as the fallback; retiring it is cross-repo (§8-Qa).
-    RETELL_API_KEY: str = os.getenv("RETELL_API_KEY", "")
-    RETELL_WEBHOOK_SECRET: str = os.getenv("RETELL_WEBHOOK_SECRET", "")
-    RETELL_AGENT_ID: str = os.getenv("RETELL_AGENT_ID", "")
+    # PRD-207 S4: Auto Live tuning constants. These are NUMERIC dials only —
+    # the ON-switch (`voice.live_enabled`) and the Retell credentials live in
+    # DB system_settings (category 'voice', masked; see
+    # modules/voice/live_settings.py) so arming is a super-admin Settings-page
+    # act: no env var, no redeploy. (The former RETELL_* env keys are gone —
+    # PRD-143 killed .env-as-config; PRD-207 moved the seam to settings.)
+    VOICE_LIVE_DEFAULT_MONTHLY_CAP_MINUTES: int = int(
+        os.getenv("VOICE_LIVE_DEFAULT_MONTHLY_CAP_MINUTES", "100")
+    )
+    VOICE_LIVE_ACTIVE_CALL_RESERVE_MINUTES: int = int(
+        os.getenv("VOICE_LIVE_ACTIVE_CALL_RESERVE_MINUTES", "10")
+    )
+    VOICE_LIVE_MAX_CALL_MINUTES: int = int(os.getenv("VOICE_LIVE_MAX_CALL_MINUTES", "30"))
 
     def validate_security(self) -> None:
         """PRD-172: fail-closed validation of tenant-isolation secrets.

@@ -355,7 +355,11 @@ async def checkpoint_thread(db: Session, workspace_id: UUID, params: Dict[str, A
 # their own dedicated tools (power_mode, widget config, autonomy,
 # auto-reporting) or are deliberately excluded (integrations carries raw
 # tokens; orchestrator has its own seeded-agent PUT flow).
-OPERATOR_WORKSPACE_SETTINGS_KEYS = ("byok_overrides", "default_notification_channel")
+OPERATOR_WORKSPACE_SETTINGS_KEYS = (
+    "byok_overrides",
+    "default_notification_channel",
+    "voice_live",  # PRD-207 S4: {enabled, monthly_cap_minutes, retell_voice_id}
+)
 
 
 async def update_workspace_settings(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -392,6 +396,20 @@ async def update_workspace_settings(db: Session, workspace_id: UUID, params: Dic
                     overrides[provider] = bool(enabled)
             settings["byok_overrides"] = overrides
             applied: Any = overrides
+        elif key == "voice_live":
+            # PRD-207 S4: same fail-closed validation as PUT
+            # /api/workspaces/current/voice-live — merge, never replace-blind.
+            from modules.voice.live_settings import validate_voice_live_update
+
+            try:
+                normalized = validate_voice_live_update(value)
+            except ValueError as ve:
+                return {"success": False, "error": str(ve)}
+            merged = dict(settings.get("voice_live", {}))
+            merged.update(normalized)
+            settings["voice_live"] = merged
+            applied = merged
+            ignored = []
         else:  # default_notification_channel
             from api.workspaces import _VALID_NOTIFICATION_CHANNELS
 

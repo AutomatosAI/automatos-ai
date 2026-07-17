@@ -48,6 +48,9 @@ class VoiceTurn(Base):
     # not a chat-lifecycle row, and a deleted chat should not cascade-drop history).
     conversation_id = Column(String(64), nullable=True)
     message_id = Column(String(64), nullable=True)
+    # PRD-207 S8: links a live turn to its voice_calls row. NULL on the
+    # push-to-talk path (no call) and on pre-207 rows.
+    call_id = Column(String(128), nullable=True)
 
     # Decomposed latencies (milliseconds) — the whole point of the table.
     stt_latency_ms = Column(Integer, nullable=False, server_default="0")
