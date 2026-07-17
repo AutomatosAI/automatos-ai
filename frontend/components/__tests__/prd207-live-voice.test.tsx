@@ -109,13 +109,12 @@ vi.mock('@/components/voice/PresenceOrb', () => ({
 import { LiveVoiceMode } from '@/components/voice/LiveVoiceMode'
 
 describe('PRD-207 — LiveVoiceMode', () => {
-  it('live: orb + mic-live indicator + named mute and end controls', () => {
+  it('live: mic-live indicator + named mute and end controls (the wave lives in the chat background, not here)', () => {
     Object.assign(hookState, {
       refusal: null, error: null, isLive: true, orbState: 'listening',
       stateLabel: 'Auto is listening',
     })
     render(<LiveVoiceMode onExit={() => {}} />)
-    expect(screen.getByTestId('orb')).toBeTruthy()
     expect(screen.getByText(/Mic live/)).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Mute microphone' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'End call' })).toBeTruthy()
