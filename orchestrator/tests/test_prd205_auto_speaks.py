@@ -249,6 +249,64 @@ def test_executor_injects_and_overwrites_origin():
     assert '"_origin_chat_id" not in params' not in block.group("body")
 
 
+def test_executor_strips_spoofed_origin_without_context(monkeypatch):
+    """A caller-supplied _origin_chat_id must never reach a handler: the
+    headless paths (board dispatcher, workflows) carry no conversation_id in
+    caller_context, so inject-on-truthy alone would let the spoofed tool arg
+    survive there. The executor strips the key FIRST, then injects only the
+    context value."""
+    import modules.tools.discovery as discovery_pkg
+    from modules.tools.discovery.platform_executor import PlatformActionExecutor
+
+    registry = MagicMock()
+    registry.get.return_value = None  # no action_def -> permission gates no-op
+    monkeypatch.setattr(discovery_pkg, "get_action_registry", lambda: registry)
+
+    seen = []
+
+    async def _handler(db, workspace_id, params):
+        seen.append(params)
+        return {"success": True}
+
+    executor = PlatformActionExecutor(MagicMock(), uuid.uuid4())
+    executor._handlers["platform_create_watch"] = _handler
+
+    spoofed = str(uuid.uuid4())
+
+    # Headless: no caller_context at all -> the spoofed arg is dropped.
+    result = asyncio.run(
+        executor.execute(
+            "platform_create_watch",
+            {"title": "w", "_origin_chat_id": spoofed},
+            caller_context=None,
+        )
+    )
+    assert result == {"success": True}
+    assert "_origin_chat_id" not in seen[0]
+    assert seen[0]["title"] == "w"
+
+    # Context without a conversation (board dispatcher shape) -> still dropped.
+    asyncio.run(
+        executor.execute(
+            "platform_create_watch",
+            {"title": "w", "_origin_chat_id": spoofed},
+            caller_context={"user_id": "user_abc"},
+        )
+    )
+    assert "_origin_chat_id" not in seen[1]
+
+    # Chat path: the context value wins over the spoofed arg.
+    origin = str(uuid.uuid4())
+    asyncio.run(
+        executor.execute(
+            "platform_create_watch",
+            {"title": "w", "_origin_chat_id": spoofed},
+            caller_context={"conversation_id": origin},
+        )
+    )
+    assert seen[2]["_origin_chat_id"] == origin
+
+
 # ---------------------------------------------------------------------------
 # S5 — the watcher speaks (bell first, chat second, both fail-soft)
 # ---------------------------------------------------------------------------
