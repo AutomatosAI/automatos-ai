@@ -34,6 +34,15 @@ def format_score_display(score: Optional[float]) -> str:
     return f"{score * 10:.1f}/10"
 
 
+# PRD-205 S5: the conversational watch events -- verdicts, corrective
+# actions and escalations ALSO land in chat (Section 8 Q3: both surfaces
+# in v1; the bell is unchanged). approval_pending stays bell-only: the
+# approvals inbox is its surface.
+_CHAT_DELIVERED_EVENT_TYPES = frozenset(
+    {"watch_verdict", "watch_action", "watch_escalation"}
+)
+
+
 async def dispatch_watch_notification(
     db: Session,
     watch,
@@ -45,16 +54,26 @@ async def dispatch_watch_notification(
 ) -> bool:
     """Fire a watch-related event through NotificationDispatcher.
 
-    Joins the caller's transaction. Returns True iff the dispatch call
+    Joins the caller's transaction. Returns True iff the BELL dispatch
     completed; False (logged) on any failure -- never raises.
+
+    PRD-205 S5: for watch_verdict / watch_action / watch_escalation the
+    same prose is additionally delivered into chat -- the watch's origin
+    conversation when known, else the creator's Auto thread. Ordering is
+    bell first, chat second, each independently fail-soft: a bell failure
+    does not silence the chat and a chat failure does not cost the bell
+    (nor the return value). The chat post runs on ITS OWN session inside
+    ``deliver_background_message`` -- the caller's transaction here is
+    never touched by it.
     """
+    workspace_id = getattr(watch, "workspace_id", None)
+    if workspace_id is None:
+        return False
+
+    bell_ok = False
     try:
         from core.models.core import User
         from core.services.notification_dispatcher import NotificationDispatcher
-
-        workspace_id = getattr(watch, "workspace_id", None)
-        if workspace_id is None:
-            return False
 
         user_id: Optional[int] = None
         created_by = getattr(watch, "created_by", None)
@@ -77,7 +96,7 @@ async def dispatch_watch_notification(
             status=status,
             user_id=user_id,
         )
-        return True
+        bell_ok = True
     except Exception:
         logger.error(
             "[WatchNotifications] %s dispatch failed for watch %s",
@@ -85,7 +104,35 @@ async def dispatch_watch_notification(
             getattr(watch, "id", "?"),
             exc_info=True,
         )
-        return False
+
+    if event_type in _CHAT_DELIVERED_EVENT_TYPES:
+        try:
+            from services import chat_messenger
+
+            origin_chat = getattr(watch, "origin_chat_id", None)
+            watch_id = str(getattr(watch, "id", "") or "")
+            chat_messenger.deliver_background_message(
+                workspace_id=workspace_id,
+                # The prose the watcher already composed -- never re-composed
+                # (Section 8 Q2); title as the degenerate fallback.
+                text=(message or title or ""),
+                source={
+                    "origin": "watcher",
+                    "label": chat_messenger.AUTO_BACKGROUND_LABEL,
+                },
+                chat_id=(str(origin_chat) if origin_chat else None),
+                clerk_user_id=getattr(watch, "created_by", None),
+                link_type="watch",
+                link_id=(watch_id or None),
+            )
+        except Exception:  # noqa: BLE001 -- deliver is fail-soft; belt and braces
+            logger.error(
+                "[WatchNotifications] chat delivery failed for watch %s",
+                getattr(watch, "id", "?"),
+                exc_info=True,
+            )
+
+    return bell_ok
 
 
 def build_verdict_message(
