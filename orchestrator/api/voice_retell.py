@@ -1,33 +1,41 @@
 """
-Retell streaming-voice webhook (PRD-203 V·S4)
-=============================================
+Retell voice lane (PRD-203 V·S4 seam · PRD-207 Auto Live)
+==========================================================
 
-POST /api/voice/retell/llm — Retell's custom-LLM webhook.
+* ``WS /api/voice/retell/llm-websocket/{call_id}`` — Retell's custom-LLM
+  transport (WebSocket-ONLY per their integration contract; the HTTP variant
+  PRD-203 merged was uncallable by Retell and is deleted). Retell runs
+  STT/TTS/turn-taking/barge-in vendor-side and drives Auto's OWN agent loop
+  (the same ``StreamingChatService`` text chat uses) through this socket,
+  streaming each reply chunk the moment it exists.
+* ``POST /api/voice/web-call`` — the S1 session mint (hybrid auth, four
+  ordered fail-closed gates); the ``voice_calls`` row born here is BOTH the
+  webhook trust boundary and the WS credential.
+* ``POST /api/voice/retell/events`` — call-lifecycle webhook (HMAC
+  fail-closed), the minute meter's write path.
+* ``GET /api/voice/live-status`` — the S7 settings read.
 
-Retell (§8-Qa) runs STT/TTS/turn-taking/barge-in vendor-side and calls THIS
-endpoint for the words. We front Auto's own agent loop (the same
-``StreamingChatService`` text chat uses) and **stream** the reply back as Retell
-custom-LLM frames, so Retell starts speaking (first audio) before the full
-generation completes — the streaming posture the blocking self-hosted path
-(``chat_voice._collect_streaming_response``) never had.
-
-Auth: the webhook carries no user JWT — it is authenticated by an HMAC signature
-(``config.RETELL_WEBHOOK_SECRET``) and fails closed. Per-call workspace/agent
-context rides in Retell dynamic variables (set when the call is created).
-
-The self-hosted pod path stays as the fallback; retiring the Pipecat/GPU pod is a
-cross-repo automatos-voice coordination (§8-Qa), NOT done here.
+The self-hosted pod path stays as the fallback; retiring the Pipecat/GPU pod
+is a cross-repo automatos-voice coordination (§8-Qd/Qe), NOT done here.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
 from typing import Any, AsyncIterator, Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    HTTPException,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -37,17 +45,19 @@ from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db, get_db_session
 from modules.voice import live_settings, retell_api, voice_meter
 from modules.voice.providers.retell import (
+    INTERACTION_CALL_DETAILS,
+    INTERACTION_PING_PONG,
+    INTERACTION_REMINDER,
     INTERACTION_RESPONSE_REQUIRED,
     RetellLLMRequest,
     parse_llm_request,
     retell_response_frames,
     verify_webhook_signature,
+    wrap_ws_response,
 )
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["voice"])
-
-_NDJSON = "application/x-ndjson"
 
 
 # ---------------------------------------------------------------------------
@@ -333,13 +343,6 @@ async def voice_live_status(
     }
 
 
-async def _single_complete(response_id: int) -> AsyncIterator[str]:
-    """A one-frame stream that closes the turn without words (non-answer events)."""
-    yield json.dumps(
-        {"response_id": response_id, "content": "", "content_complete": True}
-    ) + "\n"
-
-
 async def _agent_retell_stream(req: RetellLLMRequest) -> AsyncIterator[dict[str, Any]]:
     """Drive Auto's agent loop for one Retell turn and yield Retell frames.
 
@@ -461,47 +464,97 @@ async def _agent_retell_stream(req: RetellLLMRequest) -> AsyncIterator[dict[str,
     )
 
 
-@router.post("/api/voice/retell/llm")
-async def retell_llm_webhook(request: Request) -> StreamingResponse:
-    """Retell custom-LLM webhook — stream Auto's reply back as Retell frames."""
-    # PRD-207 S4: the settings toggle is the master switch for the WHOLE
-    # Retell lane — flipping it off in Settings kills in-flight speech too
-    # (the "instant platform-wide kill" promise), no redeploy.
+@router.websocket("/api/voice/retell/llm-websocket/{call_id}")
+async def retell_llm_websocket(websocket: WebSocket, call_id: str) -> None:
+    """Retell custom-LLM WebSocket — Auto's brain on Retell's actual transport.
+
+    Retell's dashboard takes a ``wss://…/api/voice/retell/llm-websocket`` URL
+    and appends ``/{call_id}``. Protocol: the server speaks FIRST with an
+    empty response (the human has the floor); ``call_details`` delivers the
+    dynamic variables once; ``ping_pong`` must be echoed; ``update_only``
+    owes nothing; ``response_required``/``reminder_required`` start a turn —
+    a newer ``response_required`` supersedes a still-streaming one (barge-in),
+    so the old stream task is cancelled.
+
+    Auth: a WS handshake carries no HMAC — the MINTED ``call_id`` is the
+    credential (born server-side at ``/api/voice/web-call``, unguessable,
+    dead in ~30s unused). No mint row → close 4401 before accept. The
+    steward/orphan fallback lane stays exclusive to the HMAC-verified events
+    webhook; an unauthenticated socket can never conjure attribution.
+
+    The settings toggle gates the socket too — disarming kills in-flight
+    speech (§7.5-3), no redeploy.
+    """
     if not live_settings.voice_live_enabled():
-        raise HTTPException(status_code=503, detail="Auto Live is switched off platform-wide")
+        await websocket.close(code=4403)
+        return
 
-    body = await request.body()
-    signature = request.headers.get("x-retell-signature")
-    secret = live_settings.retell_credentials().webhook_secret
-    if not verify_webhook_signature(secret, signature, body):
-        # Fail-closed: unsigned/unconfigured/mismatched → never drive the agent.
-        raise HTTPException(status_code=401, detail="Invalid Retell webhook signature")
+    from core.models.voice_calls import VoiceCall
 
-    try:
-        payload = json.loads(body)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid JSON body")
+    with get_db_session() as db:
+        minted = db.query(VoiceCall.id).filter(VoiceCall.call_id == str(call_id)).first()
+    if minted is None:
+        logger.warning("voice_live_ws_rejected reason=unminted_call call=%s", call_id)
+        await websocket.close(code=4401)
+        return
 
-    req = parse_llm_request(payload)
+    await websocket.accept()
 
-    # Non-answer interactions (pings/updates) just close the turn.
-    if req.interaction_type != INTERACTION_RESPONSE_REQUIRED:
-        return StreamingResponse(_single_complete(req.response_id), media_type=_NDJSON)
+    dynamic_vars: dict[str, Any] = {}
+    speaking: asyncio.Task | None = None
 
-    if not req.workspace_id:
-        raise HTTPException(
-            status_code=422,
-            detail="Retell call is missing the workspace_id dynamic variable",
-        )
-
-    async def stream() -> AsyncIterator[str]:
+    async def respond(req: RetellLLMRequest) -> None:
         try:
             async for frame in _agent_retell_stream(req):
-                yield json.dumps(frame) + "\n"
-        except Exception:  # noqa: BLE001 — a mid-stream fault closes the turn cleanly
-            logger.exception("retell_llm_stream_failed call=%s", req.call_id)
-            yield json.dumps(
-                {"response_id": req.response_id, "content": "", "content_complete": True}
-            ) + "\n"
+                await websocket.send_json(wrap_ws_response(frame))
+        except asyncio.CancelledError:
+            # Superseded turn (barge-in): Retell has moved on — stop quietly.
+            raise
+        except Exception:  # noqa: BLE001 — a mid-turn fault closes the turn cleanly
+            logger.exception("retell_ws_stream_failed call=%s", call_id)
+            try:
+                await websocket.send_json(
+                    wrap_ws_response(
+                        {"response_id": req.response_id, "content": "", "content_complete": True}
+                    )
+                )
+            except Exception:  # noqa: BLE001 — socket already gone
+                pass
 
-    return StreamingResponse(stream(), media_type=_NDJSON)
+    try:
+        # Server speaks first with an EMPTY response — the human opens.
+        await websocket.send_json(
+            wrap_ws_response({"response_id": 0, "content": "", "content_complete": True})
+        )
+        while True:
+            message = await websocket.receive_json()
+            itype = message.get("interaction_type")
+            if itype == INTERACTION_PING_PONG:
+                await websocket.send_json(
+                    {"response_type": "ping_pong", "timestamp": message.get("timestamp")}
+                )
+            elif itype == INTERACTION_CALL_DETAILS:
+                dynamic_vars = (message.get("call") or {}).get(
+                    "retell_llm_dynamic_variables"
+                ) or {}
+            elif itype in (INTERACTION_RESPONSE_REQUIRED, INTERACTION_REMINDER):
+                if speaking is not None and not speaking.done():
+                    speaking.cancel()
+                req = parse_llm_request(
+                    {
+                        "response_id": message.get("response_id"),
+                        "interaction_type": INTERACTION_RESPONSE_REQUIRED,
+                        "transcript": message.get("transcript") or [],
+                        "call": {
+                            "call_id": call_id,
+                            "retell_llm_dynamic_variables": dynamic_vars,
+                        },
+                    }
+                )
+                speaking = asyncio.create_task(respond(req))
+            # update_only / unknown types: no response owed.
+    except WebSocketDisconnect:
+        pass
+    finally:
+        if speaking is not None and not speaking.done():
+            speaking.cancel()

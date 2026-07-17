@@ -37,6 +37,17 @@ logger = logging.getLogger(__name__)
 # Retell custom-LLM interaction types we act on.
 INTERACTION_RESPONSE_REQUIRED = "response_required"
 INTERACTION_REMINDER = "reminder_required"
+# WebSocket-lane interaction types (PRD-207: Retell's custom-LLM transport is
+# WebSocket-only — dynamic variables arrive once in call_details, pings must
+# be echoed, update_only owes no response).
+INTERACTION_CALL_DETAILS = "call_details"
+INTERACTION_UPDATE_ONLY = "update_only"
+INTERACTION_PING_PONG = "ping_pong"
+
+
+def wrap_ws_response(frame: Dict[str, Any]) -> Dict[str, Any]:
+    """Wrap one custom-LLM response frame in Retell's WebSocket envelope."""
+    return {"response_type": "response", **frame}
 
 
 @dataclass(frozen=True)
