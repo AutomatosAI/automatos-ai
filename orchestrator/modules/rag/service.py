@@ -40,6 +40,16 @@ from core.observability.tracer import (
     STATUS_ERROR,
 )
 
+# PRD-197 S4: per-seam substrate telemetry (documents seam) — always-on DB
+# sink behind the Command Center substrate tile; fire-and-forget, never
+# blocks or fails retrieval.
+import time as _time
+
+from core.observability.substrate_metrics import (
+    SEAM_DOCUMENTS,
+    record_substrate_search_nowait,
+)
+
 
 @dataclass
 class RAGResult:
@@ -202,9 +212,11 @@ class RAGService:
     ):
         self.config = config or RAGConfig()
         self._workspace_id = workspace_id
-        # PRD-157 S4: one initialized S3 backend per workspace, reused across
-        # queries instead of rebuilt+reinitialized on every _get_candidates call.
-        self._s3_backends: Dict[str, Any] = {}
+        # PRD-157 S4: one initialized document backend per workspace, reused
+        # across queries instead of rebuilt+reinitialized on every
+        # _get_candidates call. PRD-197 S5: which backend (S3 Vectors on SaaS,
+        # pgvector-local on the OSS edition) is decided by config at build.
+        self._doc_backends: Dict[str, Any] = {}
         self._context_optimizer = None
         self._semantic_chunker = None
         self._embedding_manager = None
@@ -1010,26 +1022,42 @@ class RAGService:
             query=query
         )
     
-    async def _get_s3_backend(self, workspace_id: str):
-        """PRD-157 S4: reuse one initialized S3VectorsBackend per workspace.
+    async def _get_doc_backend(self, workspace_id: str):
+        """PRD-157 S4: reuse one initialized document backend per workspace.
 
         The backend is workspace-scoped, so caching by workspace_id is safe and
-        removes the boto3 client + bucket/index checks from every query (the RRF
+        removes the client + bucket/index checks from every query (the RRF
         path calls _get_candidates up to 5x per retrieve()).
+
+        PRD-197 S5: S3 Vectors is the SaaS document plane; with
+        S3_VECTORS_ENABLED=false (the open-core/local default — S3 Vectors is
+        AWS-only) the pgvector-local backend serves the same contract from
+        document_chunks.embedding, which "legacy pgvector mode" ingestion
+        already populates. Previously the local edition constructed the S3
+        backend unconditionally, failed on the unset bucket, and every
+        retrieval came back empty.
         """
         key = str(workspace_id)
-        backend = self._s3_backends.get(key)
+        backend = self._doc_backends.get(key)
         if backend is None:
-            from modules.search.vector_store.backends.s3_vectors_backend import S3VectorsBackend
+            from config import config as app_config
 
-            backend = S3VectorsBackend(workspace_id=key)
+            if app_config.S3_VECTORS_ENABLED:
+                from modules.search.vector_store.backends.s3_vectors_backend import S3VectorsBackend
+
+                backend = S3VectorsBackend(workspace_id=key)
+            else:
+                from modules.search.vector_store.backends.pgvector_local_backend import PgVectorLocalBackend
+
+                backend = PgVectorLocalBackend(workspace_id=key)
             await backend.initialize()
-            self._s3_backends[key] = backend
+            self._doc_backends[key] = backend
         return backend
 
     async def _get_candidates(self, query: str, limit: int = 20, min_similarity: float = 0.5, workspace_id: str = None) -> List[Dict]:
         """
-        Get candidate chunks via S3 Vectors.
+        Get candidate chunks from the workspace's document-vector backend
+        (S3 Vectors on SaaS, pgvector-local on the OSS edition — PRD-197 S5).
 
         Args:
             workspace_id: Workspace ID for multi-tenant isolation.
@@ -1041,17 +1069,22 @@ class RAGService:
 
         effective_workspace_id = workspace_id or getattr(self, "_workspace_id", None)
         if not effective_workspace_id:
-            logger.error("No workspace_id available — cannot search S3 Vectors")
+            logger.error("No workspace_id available — cannot search document vectors")
             return []
 
+        seam_t0 = _time.perf_counter()
         try:
             # Generate query embedding
             query_embedding = await self._embedding_manager.generate_embedding(query)
 
-            # PRD-157 S4: reuse the per-workspace S3 backend (built+initialized once).
-            vector_store = await self._get_s3_backend(effective_workspace_id)
+            # PRD-157 S4: reuse the per-workspace document backend
+            # (built+initialized once; S3 on SaaS, pgvector-local on OSS).
+            vector_store = await self._get_doc_backend(effective_workspace_id)
 
-            logger.info(f"🔎 S3 Vectors search: workspace={effective_workspace_id}, min_similarity={min_similarity}, limit={limit}")
+            logger.info(
+                f"🔎 Document-vector search ({type(vector_store).__name__}): "
+                f"workspace={effective_workspace_id}, min_similarity={min_similarity}, limit={limit}"
+            )
 
             # PRD-172 F005: pass an explicit workspace_id filter so the backend
             # drops any hit not scoped to this workspace (defence-in-depth over
@@ -1100,9 +1133,28 @@ class RAGService:
                 logger.info(f"📈 Similarity range: {min(similarity_scores):.3f} - {max(similarity_scores):.3f}")
             logger.info(f"✅ Retrieved {len(candidates)} candidates from S3 Vectors")
 
+            record_substrate_search_nowait(
+                seam=SEAM_DOCUMENTS,
+                workspace_id=effective_workspace_id,
+                candidates=len(candidates),
+                latency_ms=(_time.perf_counter() - seam_t0) * 1000.0,
+                status=STATUS_HIT if candidates else STATUS_EMPTY,
+            )
             return candidates
 
         except Exception as e:
+            # Substrate tile semantics: ANY failed search — including an
+            # unavailable embedding key — is an error on the documents seam
+            # (the dark-plane signal S4 exists to catch). The grounding
+            # semantics below are unchanged: embedding-unavailable still
+            # returns a typed EMPTY result to the caller (PRD-185 S3).
+            record_substrate_search_nowait(
+                seam=SEAM_DOCUMENTS,
+                workspace_id=effective_workspace_id,
+                candidates=0,
+                latency_ms=(_time.perf_counter() - seam_t0) * 1000.0,
+                status=STATUS_ERROR,
+            )
             from core.llm.clients.base import EmbeddingUnavailableError
             if isinstance(e, EmbeddingUnavailableError):
                 # PRD-185 S3: typed EMPTY (honest "no grounding"), NOT an error

@@ -10,11 +10,11 @@ from sqlalchemy.orm import Session
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 
+from pydantic import BaseModel
+
 from core.database.database import get_db
 from core.models.database_knowledge import (
     DatabaseKnowledgeSourceCreate,
-    SemanticMetricCreate,
-    SemanticDimensionCreate,
     DatabaseQueryRequest,
     QueryTemplateExecute
 )
@@ -96,8 +96,6 @@ async def get_item(
                 "dialect": s.dialect,
                 "is_active": s.is_active,
                 "status": s.status,
-                "total_queries_executed": s.total_queries_executed or 0,
-                "avg_query_time_ms": s.avg_query_time_ms,
                 "last_introspected": s.last_introspected.isoformat() if s.last_introspected else None,
                 "created_at": s.created_at.isoformat() if s.created_at else None,
                 "schema_tables_count": len(s.schema_metadata.get('tables', {})) if s.schema_metadata else 0,
@@ -292,42 +290,85 @@ async def get_schema(
     return source.schema_metadata
 
 
+# PRD-199 S2: the canonical semantic doc is the READER's shape
+# (modules/nl2sql/query/nl2sql_service.py renders it into the generation
+# prompt) — instructions first-class, metrics dict-of-dicts keyed on 'sql',
+# dimensions nested {category: {name: sql}}. The API accepts flat rows and
+# builds that shape once, here.
+class SemanticMetricRow(BaseModel):
+    name: str
+    sql: str
+    description: Optional[str] = ""
+
+
+class SemanticDimensionRow(BaseModel):
+    category: str
+    name: str
+    sql: str
+
+
+class SemanticLayerBody(BaseModel):
+    instructions: str = ""
+    metrics: List[SemanticMetricRow] = []
+    dimensions: List[SemanticDimensionRow] = []
+
+
+def _dimension_rows_to_doc(rows: List[SemanticDimensionRow]) -> Dict[str, Dict[str, str]]:
+    doc: Dict[str, Dict[str, str]] = {}
+    for row in rows:
+        doc.setdefault(row.category, {})[row.name] = row.sql
+    return doc
+
+
+@router.get("/{source_id}/semantic")
+async def get_semantic_layer(
+    source_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """PRD-199 S2: the editor's load path. Only POST existed before, so
+    every load 405'd and was swallowed to console — the admin edited a
+    blank form regardless of what was stored."""
+    service, _, _ = get_services()
+    try:
+        doc = await service.get_semantic_layer(
+            str(source_id), workspace_id=str(ctx.workspace_id)
+        )
+        return {"success": True, **doc}
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Database source not found")
+
+
 @router.post("/{source_id}/semantic", dependencies=[Depends(require_workspace_permission("knowledge:update"))])
 async def update_semantic_layer(
     source_id: int,
-    metrics: List[SemanticMetricCreate] = Body(default=[]),
-    dimensions: List[SemanticDimensionCreate] = Body(default=[]),
+    body: SemanticLayerBody,
     ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db)
 ):
-    """
-    Update semantic layer (metrics and dimensions).
-    """
-    service, cache, _ = get_services()
-    
+    """PRD-199 S1/S2: persist the canonical semantic doc (workspace-scoped —
+    the old handler never passed the workspace, so only its own crash
+    prevented a cross-tenant write)."""
+    service, _, _ = get_services()
     try:
-        # Convert to proper types
-        from modules.nl2sql import SemanticMetric, SemanticDimension
-        
-        metric_objects = [
-            SemanticMetric(**m.dict()) for m in metrics
-        ]
-        dimension_objects = [
-            SemanticDimension(**d.dict()) for d in dimensions
-        ]
-        
-        await service.update_semantic_layer(
+        doc = await service.update_semantic_layer(
             source_id=str(source_id),
-            metrics=metric_objects,
-            dimensions=dimension_objects
+            semantic_doc={
+                "instructions": body.instructions,
+                "metrics": {
+                    m.name: {"sql": m.sql, "description": m.description or ""}
+                    for m in body.metrics
+                },
+                "dimensions": _dimension_rows_to_doc(body.dimensions),
+            },
+            workspace_id=str(ctx.workspace_id),
         )
-        
         return {
             "success": True,
-            "metrics_updated": len(metrics),
-            "dimensions_updated": len(dimensions)
+            "instructions_saved": bool(doc["instructions"]),
+            "metrics_updated": len(body.metrics),
+            "dimensions_updated": len(body.dimensions),
         }
-    
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Database source not found")
     except Exception as e:
         logging.getLogger(__name__).error(f"Failed to update semantic layer for source {source_id}: {e}", exc_info=True)
         raise HTTPException(status_code=400, detail="Failed to update semantic layer")
@@ -357,8 +398,6 @@ async def get_database_source(
         "dialect": source.dialect,
         "status": source.status,
         "is_active": source.is_active,
-        "total_queries_executed": source.total_queries_executed,
-        "avg_query_time_ms": source.avg_query_time_ms,
         "last_introspected": source.last_introspected,
         "created_at": source.created_at
     }
@@ -1001,11 +1040,20 @@ async def run_benchmark(
         example_store=SQLExampleStore(db_session=db)
     )
 
+    # PRD-199 S6 (§8-Q4: live source): execution accuracy against the
+    # connected database — each SQL is validated (read-only, LIMIT-capped)
+    # and runs under the pipeline's EXPLAIN/timeout guards. The old runner
+    # mirrored exact-match into execution_match (a TODO since PRD-61);
+    # equivalent-but-textually-different SQL now scores as the match it is.
+    async def _execute(sql: str):
+        return await service.run_validated_readonly_sql(source, sql)
+
     result = await runner.run_benchmark(
         database_source_id=str(source_id),
         workspace_id=str(ctx.workspace_id),
         schema_metadata=source.schema_metadata,
-        dialect=source.dialect or "postgresql"
+        dialect=source.dialect or "postgresql",
+        execute_sql=_execute,
     )
 
     # Persist benchmark run

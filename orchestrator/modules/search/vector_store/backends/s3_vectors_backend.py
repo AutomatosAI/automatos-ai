@@ -35,7 +35,7 @@ class IndexDimensionMismatchError(RuntimeError):
 
 class S3VectorsBackend:
     """
-    AWS S3 Vectors backend for EnhancedVectorStore.
+    AWS S3 Vectors document backend (the SaaS document plane).
 
     Implements search, add_documents, and delete_documents using the
     S3 Vectors API (boto3 s3vectors client).

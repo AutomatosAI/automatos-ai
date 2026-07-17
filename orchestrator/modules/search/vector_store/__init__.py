@@ -2,19 +2,16 @@
 Vector Store Module
 ===================
 
-pgvector-based vector storage and retrieval, with pluggable backend support.
+Pluggable document-vector backends behind one factory.
+
+PRD-197 S1/S5: the F079 ``EnhancedVectorStore`` (wrong-math cosine via the L2
+operator, namesake table dropped in PRD-135) is deleted; the ``pgvector``
+backend name now returns the correct-math, workspace-scoped
+``PgVectorLocalBackend`` — the open-core/local edition's document read leg
+over ``document_chunks.embedding``. S3 Vectors stays the SaaS document plane.
 """
 
 from typing import Literal, Optional
-
-from .store import (
-    EnhancedVectorStore,
-    VectorDocument,
-    SearchFilter,
-    SearchResult,
-    SearchMode,
-    RankingStrategy,
-)
 
 VectorBackendType = Literal["pgvector", "s3_vectors", "s3_vectors_mock"]
 
@@ -28,17 +25,21 @@ def get_vector_store(
     Factory for vector stores with pluggable backends.
 
     Args:
-        backend: "pgvector" (existing PostgreSQL), "s3_vectors" (AWS S3 Vectors),
+        backend: "pgvector" (local edition — document_chunks read leg),
+                 "s3_vectors" (AWS S3 Vectors, the SaaS document plane),
                  or "s3_vectors_mock" (in-memory mock for local testing).
-        workspace_id: Required for s3_vectors and s3_vectors_mock (used for bucket scoping).
+        workspace_id: Required for every backend — all three are
+                 workspace-scoped (fail-closed isolation).
         **kwargs: Passed through to the backend constructor.
 
     Returns:
-        EnhancedVectorStore for pgvector, S3VectorsBackend for s3_vectors,
-        MockS3VectorsBackend for s3_vectors_mock.
+        PgVectorLocalBackend, S3VectorsBackend, or MockS3VectorsBackend.
     """
     if backend == "pgvector":
-        return EnhancedVectorStore(**kwargs)
+        if not workspace_id:
+            raise ValueError("workspace_id is required for the pgvector backend")
+        from .backends.pgvector_local_backend import PgVectorLocalBackend
+        return PgVectorLocalBackend(workspace_id=workspace_id, **kwargs)
 
     if backend == "s3_vectors_mock":
         if not workspace_id:
@@ -56,12 +57,6 @@ def get_vector_store(
 
 
 __all__ = [
-    "EnhancedVectorStore",
-    "VectorDocument",
-    "SearchFilter",
-    "SearchResult",
-    "SearchMode",
-    "RankingStrategy",
     "get_vector_store",
     "VectorBackendType",
 ]

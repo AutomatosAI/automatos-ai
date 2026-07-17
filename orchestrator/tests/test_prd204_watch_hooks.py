@@ -17,7 +17,6 @@ from unittest.mock import MagicMock
 
 import pytest
 from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker
 
 from core.database.database import get_database_url
 from core.models.orchestration import OrchestrationRun
@@ -101,11 +100,6 @@ def engine():
 
 
 @pytest.fixture
-def new_session(engine):
-    return sessionmaker(bind=engine, expire_on_commit=False)
-
-
-@pytest.fixture
 def workspace(new_session):
     ws_id = str(uuid.uuid4())
     s = new_session()
@@ -121,7 +115,7 @@ def workspace(new_session):
 
     yield ws_id
 
-    s = new_session()
+    s = new_session.sweep()
     s.execute(
         text(
             "DELETE FROM watch_events WHERE watch_id IN "

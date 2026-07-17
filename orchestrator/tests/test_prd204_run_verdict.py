@@ -299,13 +299,6 @@ def engine():
 
 
 @pytest.fixture
-def new_session(engine):
-    from sqlalchemy.orm import sessionmaker
-
-    return sessionmaker(bind=engine, expire_on_commit=False)
-
-
-@pytest.fixture
 def workspace(new_session):
     from sqlalchemy import text
 
@@ -323,7 +316,7 @@ def workspace(new_session):
 
     yield ws_id
 
-    s = new_session()
+    s = new_session.sweep()
     for stmt in (
         "DELETE FROM watch_events WHERE watch_id IN "
         "(SELECT id FROM watches WHERE workspace_id = CAST(:w AS uuid))",

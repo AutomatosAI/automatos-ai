@@ -39,10 +39,13 @@ class NaturalLanguageToSQLService:
     Supports few-shot examples, error correction context, and schema linking.
     """
 
-    def __init__(self, llm_provider, example_store=None, schema_linker=None):
+    def __init__(self, llm_provider, example_store=None):
+        # PRD-199 S5: the schema_linker seam is deleted — production never
+        # injected one, so the branch below it was dead; the linker's own
+        # "embedding-based" docstring was false (embedding_manager assigned,
+        # never used). The wired keyword path IS the path.
         self.llm_provider = llm_provider
         self.example_store = example_store
-        self.schema_linker = schema_linker
 
     def generate_sql(
         self,
@@ -127,15 +130,7 @@ class NaturalLanguageToSQLService:
     ) -> str:
         """Build a comprehensive prompt for the LLM."""
 
-        # Use schema linker if available, otherwise fall back to improved scoring
-        if self.schema_linker:
-            try:
-                linked = self.schema_linker.link(question, schema_metadata, semantic_layer)
-                relevant_tables = linked.tables
-            except Exception:
-                relevant_tables = self._get_relevant_tables(question, schema_metadata)
-        else:
-            relevant_tables = self._get_relevant_tables(question, schema_metadata)
+        relevant_tables = self._get_relevant_tables(question, schema_metadata)
 
         prompt_parts = []
 

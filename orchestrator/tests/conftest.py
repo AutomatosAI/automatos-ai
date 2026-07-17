@@ -333,3 +333,79 @@ def mock_ctx(mock_agent):
     ctx.user.id = "user_123"
     ctx.auth_type = "clerk"
     return ctx
+
+
+# ---- Real-DB teardown guard: leaked sessions + bounded sweep locks ----
+#
+# Anatomy of the silent-hang class this kills (first hit: a 30-minute CI hang,
+# fixed for one file in 2b86dfeda): a test that dies mid-transaction (e.g. an
+# ImportError between flush and commit) abandons its session; pytest pins the
+# failed frames -- and with them the session and its uncommitted row locks --
+# via ``sys.last_traceback``. pytest-timeout cancels its per-item timer on any
+# failure (pytest_exception_interact), so when a later fixture teardown's
+# DELETE sweep blocks on the leaked lock, nothing kills the wait: the lane
+# hangs silently to the job cap.
+#
+# ``new_session`` below is the shared cure: it REMEMBERS every session it
+# hands out, and ``new_session.sweep()`` rolls them all back before returning
+# a fresh session whose transaction carries a bounded lock_timeout -- so a
+# future leak fails LOUDLY in seconds instead of hanging the lane.
+
+TEARDOWN_LOCK_TIMEOUT = "5s"
+
+
+def _release_sessions(sessions) -> None:
+    """Roll back + close every recorded session. Never raises: a teardown
+    must always reach its DELETE sweep."""
+    for leaked in list(sessions):
+        try:
+            leaked.rollback()
+            leaked.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+@pytest.fixture
+def new_session(engine):
+    """Tracking session factory shared by the real-DB test files.
+
+    Each file keeps its own module-scoped ``engine`` fixture (schema probes
+    and skip messages differ per suite); pytest resolves it per-module.
+
+    * ``new_session()`` -- an independent, committing session
+      (``expire_on_commit=False``), recorded so teardown can reclaim it.
+    * ``new_session.sweep()`` -- for fixture teardowns that DELETE-sweep
+      rows: rolls back + closes every session this factory issued (releasing
+      locks a failed test left behind), then returns a fresh session whose
+      transaction runs under ``SET LOCAL lock_timeout`` so any residual
+      blocker raises instead of hanging. Keep the sweep to a single commit;
+      ``SET LOCAL`` lasts only until the first COMMIT/ROLLBACK.
+
+    SQLAlchemy is imported lazily so pure-stdlib collection stays possible
+    (see the root conftest).
+    """
+    from sqlalchemy import text
+    from sqlalchemy.orm import sessionmaker
+
+    maker = sessionmaker(bind=engine, expire_on_commit=False)
+    created = []
+
+    def factory(**kwargs):
+        s = maker(**kwargs)
+        created.append(s)
+        return s
+
+    def sweep():
+        _release_sessions(created)
+        s = factory()
+        s.execute(text(f"SET LOCAL lock_timeout = '{TEARDOWN_LOCK_TIMEOUT}'"))
+        return s
+
+    factory.created = created
+    factory.sweep = sweep
+
+    yield factory
+
+    # Files with no sweep of their own must still not pin row locks for the
+    # rest of the run -- a leak here would hang a LATER module's sweep.
+    _release_sessions(created)

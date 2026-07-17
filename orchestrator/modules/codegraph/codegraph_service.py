@@ -840,14 +840,16 @@ class CodeGraphService:
     def _ensure_embedding_dimension(self):
         """Ensure the embedding column dimension matches the current embedding model from database settings"""
         try:
-            # Read dimension directly from database settings (no hardcoding)
+            # Read dimension directly from database settings (no hardcoding).
+            # PRD-197 S2: canonical (embeddings, dimensions) key — the old
+            # long name was renamed by PRD-136 and missed on every read.
             from core.llm.embedding_manager import get_system_setting
-            dimension_str = get_system_setting("vector_store_dimensions")
-            
+            dimension_str = get_system_setting("dimensions")
+
             if not dimension_str:
                 # Fallback to embedding manager if settings not found
                 current_dim = self.embedding_manager.get_dimension()
-                logger.warning(f"vector_store_dimensions not found in settings, using embedding_manager dimension: {current_dim}")
+                logger.warning(f"embeddings.dimensions not found in settings, using embedding_manager dimension: {current_dim}")
             else:
                 current_dim = int(dimension_str)
                 logger.info(f"Read embedding dimension from database settings: {current_dim}")

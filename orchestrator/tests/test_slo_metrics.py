@@ -17,7 +17,6 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker
 
 # ``slo_metrics`` imports ``config`` + models but opens no DB connection at import;
 # ``get_database_url`` is imported lazily in the engine fixture so the pure tests
@@ -49,11 +48,6 @@ def engine():
 
 
 @pytest.fixture
-def new_session(engine):
-    return sessionmaker(bind=engine, expire_on_commit=False)
-
-
-@pytest.fixture
 def workspace(engine, new_session):
     """Throwaway workspace; cleans up its telemetry + itself on teardown."""
     ws_id = str(uuid.uuid4())
@@ -70,7 +64,7 @@ def workspace(engine, new_session):
 
     yield ws_id
 
-    s = new_session()
+    s = new_session.sweep()
     s.execute(text("DELETE FROM tool_execution_logs WHERE workspace_id = CAST(:id AS uuid)"), {"id": ws_id})
     s.execute(text("DELETE FROM board_tasks WHERE workspace_id = CAST(:id AS uuid)"), {"id": ws_id})
     s.execute(text("DELETE FROM workspaces WHERE id = CAST(:id AS uuid)"), {"id": ws_id})

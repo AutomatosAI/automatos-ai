@@ -20,7 +20,6 @@ from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker
 
 from core.database.database import get_database_url
 from core.models.core import Agent, BoardTask
@@ -51,30 +50,6 @@ def engine():
 
 
 @pytest.fixture
-def new_session(engine):
-    """Session factory that REMEMBERS every session it hands out.
-
-    A test that dies mid-transaction (an exception between flush and commit)
-    abandons its session; pytest pins the failed frames -- and with them the
-    session and its uncommitted row locks -- via ``sys.last_traceback``. The
-    workspace teardown rolls these back before its DELETE sweep; without
-    that, the sweep blocks on the leaked lock FOREVER (pytest-timeout cancels
-    its per-item timer on any failure via pytest_exception_interact, so
-    nothing kills the wait -- the CI 30-minute silent hang on PR #545).
-    """
-    maker = sessionmaker(bind=engine, expire_on_commit=False)
-    created = []
-
-    def factory():
-        s = maker()
-        created.append(s)
-        return s
-
-    factory.created = created
-    return factory
-
-
-@pytest.fixture
 def workspace(new_session):
     ws_id = str(uuid.uuid4())
     s = new_session()
@@ -90,18 +65,9 @@ def workspace(new_session):
 
     yield ws_id
 
-    # Release locks a failed test left behind (see new_session docstring).
-    for leaked in list(getattr(new_session, "created", [])):
-        try:
-            leaked.rollback()
-            leaked.close()
-        except Exception:  # noqa: BLE001 -- teardown must reach the sweep
-            pass
-
-    s = new_session()
-    # Belt and braces: if anything else still holds a lock, fail LOUDLY in
-    # seconds instead of hanging the lane to the 30-minute job cap.
-    s.execute(text("SET LOCAL lock_timeout = '5s'"))
+    # Shared guard (tests/conftest.py): releases leaked sessions, then opens
+    # a lock_timeout-bounded sweep session so a future leak fails loudly.
+    s = new_session.sweep()
     for stmt in (
         "DELETE FROM watch_events WHERE watch_id IN "
         "(SELECT id FROM watches WHERE workspace_id = CAST(:w AS uuid))",
