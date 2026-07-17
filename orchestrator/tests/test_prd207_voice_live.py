@@ -711,6 +711,34 @@ def test_phone_lane_attributes_to_workspace_steward(voice_workspace, new_session
 
 
 # ---------------------------------------------------------------------------
+# Guard · the live path never touches the 120s-TTS pod client
+# ---------------------------------------------------------------------------
+
+def test_live_path_never_imports_pod_voice_client():
+    """§6 grep-guard: the Retell lane must never import modules/voice/client
+    (the blocking self-hosted pod path this PRD replaces for live mode).
+    Word-boundary aware — the PRD-200 substring-scan lesson."""
+    import re
+
+    live_files = (
+        "api/voice_retell.py",
+        "modules/voice/retell_api.py",
+        "modules/voice/call_binding.py",
+        "modules/voice/live_settings.py",
+        "modules/voice/voice_meter.py",
+    )
+    pattern = re.compile(
+        r"from\s+modules\.voice\.client\s+import|from\s+modules\.voice\s+import\s+([\w,\s]*\b)?client\b|import\s+modules\.voice\.client\b"
+    )
+    offenders = [
+        rel
+        for rel in live_files
+        if pattern.search((_orchestrator_root / rel).read_text(encoding="utf-8"))
+    ]
+    assert offenders == []
+
+
+# ---------------------------------------------------------------------------
 # S3 · lifecycle events — idempotent updates, loud orphans, HMAC fail-closed
 # ---------------------------------------------------------------------------
 
