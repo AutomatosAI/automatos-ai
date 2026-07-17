@@ -1,5 +1,5 @@
 {
-  "route_count": 775,
+  "route_count": 776,
   "routes": [
     {
       "method": "GET",
@@ -2436,6 +2436,10 @@
     {
       "method": "POST",
       "path": "/api/verticals/{vertical}/provision"
+    },
+    {
+      "method": "POST",
+      "path": "/api/voice/arm"
     },
     {
       "method": "GET",

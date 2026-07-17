@@ -68,6 +68,33 @@ def retell_credentials() -> RetellCredentials:
     )
 
 
+def set_voice_setting(db, key: str, value: str) -> None:
+    """Write one ``voice.*`` system-settings row (the arm endpoint's pen).
+
+    Rows are migration-seeded; if one is missing (fresh env), it is created
+    with the safe shape rather than silently skipped.
+    """
+    from core.models.system_settings import SystemSetting
+
+    row = (
+        db.query(SystemSetting)
+        .filter(SystemSetting.category == VOICE_SETTINGS_CATEGORY, SystemSetting.key == key)
+        .first()
+    )
+    if row is None:
+        row = SystemSetting(
+            category=VOICE_SETTINGS_CATEGORY,
+            key=key,
+            value=value,
+            value_type="boolean" if key == KEY_LIVE_ENABLED else "string",
+            is_sensitive=key in (KEY_RETELL_API_KEY, KEY_RETELL_WEBHOOK_SECRET),
+            created_by="prd207",
+        )
+        db.add(row)
+    else:
+        row.value = value
+
+
 @dataclass(frozen=True)
 class WorkspaceVoiceLive:
     enabled: bool
@@ -137,6 +164,12 @@ def validate_voice_live_update(value: Any) -> Dict[str, Any]:
         vid = value["retell_voice_id"]
         if not isinstance(vid, str) or len(vid) > 64:
             raise ValueError("voice_live.retell_voice_id must be a string of at most 64 characters")
-        normalized["retell_voice_id"] = vid.strip()
+        vid = vid.strip()
+        # The field that ate Gerard's API key: a Retell key is NEVER a voice id.
+        if vid.lower().startswith("key_"):
+            raise ValueError(
+                "that looks like a Retell API key — it belongs in the Arm box, not the voice field"
+            )
+        normalized["retell_voice_id"] = vid
 
     return normalized
