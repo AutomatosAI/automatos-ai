@@ -1,9 +1,15 @@
 'use client'
 
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { useAuth } from '@clerk/nextjs'
 import type { ChatMessage, AppUsage, ToolCall, RoutingInfo } from '@/types'
 import { toast } from 'sonner'
+import { getChatMessages } from './api'
+import {
+  CHAT_CHANGED_EVENT,
+  mergeBackgroundMessages,
+  type ChatChangedDetail,
+} from './live-events'
 
 export function useChat({
   id,
@@ -35,6 +41,37 @@ export function useChat({
   const [status, setStatus] = useState<'idle' | 'streaming' | 'error'>('idle')
   const [chatId, setChatId] = useState(id)
   const abortControllerRef = useRef<AbortController | null>(null)
+
+  // PRD-205 S7: live receive. A background post (watcher verdict, scheduled
+  // task output) fires a window-level chat-changed event via the board SSE
+  // bridge; when it targets THIS open chat and no outbound stream is in
+  // flight, refetch and append whatever is missing (merge-by-id, append-only
+  // -- see mergeBackgroundMessages). useState stays the source of truth: no
+  // react-query migration (PRD-205 section 9). Refs keep the one listener
+  // current without re-subscribing per render.
+  const chatIdRef = useRef(chatId)
+  chatIdRef.current = chatId
+  const isLoadingRef = useRef(isLoading)
+  isLoadingRef.current = isLoading
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const onChatChanged = (event: Event) => {
+      const detail = (event as CustomEvent<ChatChangedDetail>).detail
+      if (!detail?.chatId || detail.chatId !== chatIdRef.current) return
+      if (isLoadingRef.current) return // never fight an in-flight stream
+      void (async () => {
+        try {
+          const fetched = await getChatMessages(detail.chatId)
+          setMessages((prev) => mergeBackgroundMessages(prev, fetched))
+        } catch {
+          // Best-effort: the next open/fetch shows the message anyway.
+        }
+      })()
+    }
+    window.addEventListener(CHAT_CHANGED_EVENT, onChatChanged)
+    return () => window.removeEventListener(CHAT_CHANGED_EVENT, onChatChanged)
+  }, [])
 
   const stop = useCallback(() => {
     if (abortControllerRef.current) {

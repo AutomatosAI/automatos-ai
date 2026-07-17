@@ -295,15 +295,24 @@ export function Message({
               <div className="mt-2 pt-2 border-t border-border/30 flex items-center justify-between text-xs dark:border-border/30">
                 <div className="flex items-center space-x-3 text-muted-foreground">
                   {message.metadata.source && (
-                    <Badge variant="outline" className={`text-[10px] ${
-                      message.metadata.source === 'codegraph' ? 'bg-agent/10 border-agent/20 text-agent' :
-                      message.metadata.source === 'rag' ? 'bg-info/10 border-info/20 text-info' :
-                      message.metadata.source === 'semantic' ? 'bg-success/10 border-success/20 text-success' :
-                      message.metadata.source === 'database' ? 'bg-success/10 border-success/20 text-success' :
-                      message.metadata.source === 'llm' ? 'bg-primary/10 border-primary/20 text-primary' : ''
-                    }`}>
-                      {message.metadata.source.toUpperCase()}
-                    </Badge>
+                    typeof message.metadata.source === 'object' ? (
+                      // PRD-205 S7: persisted background provenance -- render
+                      // the server's label as-is (the escape keeps the
+                      // fallback ASCII-only in source).
+                      <Badge variant="outline" className="text-[10px] bg-warning/10 border-warning/20 text-warning">
+                        {message.metadata.source.label || 'Auto \u00b7 background'}
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className={`text-[10px] ${
+                        message.metadata.source === 'codegraph' ? 'bg-agent/10 border-agent/20 text-agent' :
+                        message.metadata.source === 'rag' ? 'bg-info/10 border-info/20 text-info' :
+                        message.metadata.source === 'semantic' ? 'bg-success/10 border-success/20 text-success' :
+                        message.metadata.source === 'database' ? 'bg-success/10 border-success/20 text-success' :
+                        message.metadata.source === 'llm' ? 'bg-primary/10 border-primary/20 text-primary' : ''
+                      }`}>
+                        {message.metadata.source.toUpperCase()}
+                      </Badge>
+                    )
                   )}
                   {message.metadata.processing_time !== undefined && (
                     <span>{(message.metadata.processing_time).toFixed(2)}s</span>

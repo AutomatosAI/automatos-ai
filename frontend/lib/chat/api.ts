@@ -5,6 +5,7 @@
 
 import type { Chat, ChatMessage, Vote } from '@/types'
 import { apiClient } from '@/lib/api-client'
+import { attachPersistedSource, rememberViewerUserId } from './live-events'
 
 /**
  * Fetch chat history
@@ -19,14 +20,21 @@ export async function getChatHistory(
     params.set('starting_after', starting_after)
   }
 
-  return apiClient.request<Chat[]>(`/api/chat/history?${params.toString()}`)
+  const chats = await apiClient.request<Chat[]>(`/api/chat/history?${params.toString()}`)
+  // PRD-205 S7: history rows are the viewer's own -- their userId feeds the
+  // SSE chat_changed per-user filter.
+  if (chats.length > 0) rememberViewerUserId(chats[0].userId)
+  return chats
 }
 
 /**
  * Get a specific chat by ID
  */
 export async function getChat(id: string): Promise<Chat> {
-  return apiClient.request<Chat>(`/api/chat/${id}`)
+  const chat = await apiClient.request<Chat>(`/api/chat/${id}`)
+  // PRD-205 S7: the endpoint 403s on foreign chats, so userId is the viewer's.
+  rememberViewerUserId(chat.userId)
+  return chat
 }
 
 /**
@@ -52,9 +60,14 @@ export async function voteMessage(
 
 /**
  * Get chat messages
+ *
+ * PRD-205 S7: rows carry a persisted `source` for background-authored
+ * messages -- lift it into `metadata.source` so the existing badge slot
+ * renders it (and so it survives reload).
  */
 export async function getChatMessages(chatId: string): Promise<ChatMessage[]> {
-  return apiClient.request<ChatMessage[]>(`/api/chat/${chatId}/messages`)
+  const rows = await apiClient.request<ChatMessage[]>(`/api/chat/${chatId}/messages`)
+  return rows.map(attachPersistedSource)
 }
 
 /**

@@ -18,6 +18,7 @@ import { useEffect, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
 import { boardQueryKeys } from '@/hooks/use-board-tasks'
+import { routeChatChangedPayload } from '@/lib/chat/live-events'
 
 const STREAM_ENDPOINT = '/api/v1/tasks/stream'
 const RECONNECT_MIN_MS = 1000
@@ -122,7 +123,13 @@ export function useBoardEventStream(enabled: boolean = true): void {
           const { events, rest } = parseSSEFrames(buffer)
           buffer = rest
           for (const evt of events) {
-            if (evt.event === 'board_changed') invalidateBoard()
+            if (evt.event !== 'board_changed') continue
+            // PRD-205 S7: chat payloads ride the SAME lane under the SAME
+            // SSE event name (the server wraps all payloads as
+            // `board_changed`) -- route them to the chat bridge (window
+            // CustomEvent, per-user filtered) instead of a board refetch.
+            if (routeChatChangedPayload(evt.data)) continue
+            invalidateBoard()
           }
         }
       } catch (err) {

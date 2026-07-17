@@ -16,6 +16,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import React from 'react'
 
 import { parseSSEFrames, useBoardEventStream } from '@/hooks/use-board-event-stream'
+import {
+  CHAT_CHANGED_EVENT,
+  rememberViewerUserId,
+  resetViewerUserIdForTests,
+  type ChatChangedDetail,
+} from '@/lib/chat/live-events'
 
 // ── Pure frame parser ───────────────────────────────────────────────────────
 
@@ -144,6 +150,78 @@ describe('useBoardEventStream', () => {
     // Give any async connect a tick — it must never fire.
     await new Promise((r) => setTimeout(r, 20))
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+})
+
+// -- PRD-205 S7: chat payloads on the same lane -----------------------------
+//
+// The server wraps EVERY payload as SSE event `board_changed`; chat payloads
+// are distinguished by `data.event === "chat_changed"`. The hook must route
+// them to the window chat bridge (per-user filtered) and NOT refetch the
+// board for them.
+
+describe('useBoardEventStream chat_changed branch (PRD-205 S7)', () => {
+  let received: string[]
+  const chatListener = (event: Event) =>
+    received.push((event as CustomEvent<ChatChangedDetail>).detail.chatId)
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    getAuthHeadersMock.mockResolvedValue({ Authorization: 'Bearer test' })
+    getBaseUrlMock.mockReturnValue('https://api.test')
+    resetViewerUserIdForTests()
+    received = []
+    window.addEventListener(CHAT_CHANGED_EVENT, chatListener)
+  })
+  afterEach(() => {
+    window.removeEventListener(CHAT_CHANGED_EVENT, chatListener)
+    resetViewerUserIdForTests()
+    vi.unstubAllGlobals()
+  })
+
+  function setupStream() {
+    const stream = makeFakeStream()
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      body: stream.body,
+    } as unknown as Response)
+    vi.stubGlobal('fetch', fetchMock)
+    const client = new QueryClient()
+    const invalidateSpy = vi.spyOn(client, 'invalidateQueries')
+    renderHook(() => useBoardEventStream(true), { wrapper: wrapper(client) })
+    return { stream, fetchMock, invalidateSpy }
+  }
+
+  it('dispatches the window chat event and skips the board refetch', async () => {
+    rememberViewerUserId(7)
+    const { stream, fetchMock, invalidateSpy } = setupStream()
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+
+    stream.emit(
+      'event: board_changed\ndata: {"workspace_id":"ws-1","chat_id":"chat-1","user_id":7,"event":"chat_changed"}\n\n'
+    )
+
+    await waitFor(() => expect(received).toEqual(['chat-1']))
+    expect(invalidateSpy).not.toHaveBeenCalled()
+    stream.close()
+  })
+
+  it('drops chat events addressed to another user', async () => {
+    rememberViewerUserId(7)
+    const { stream, fetchMock, invalidateSpy } = setupStream()
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+
+    stream.emit(
+      'event: board_changed\ndata: {"workspace_id":"ws-1","chat_id":"chat-2","user_id":8,"event":"chat_changed"}\n\n'
+    )
+    // A board event afterwards proves the frame above was processed.
+    stream.emit('event: board_changed\ndata: {"task_id":1,"status":"done"}\n\n')
+
+    await waitFor(() =>
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['board'] }),
+    )
+    expect(received).toEqual([])
+    stream.close()
   })
 })
 

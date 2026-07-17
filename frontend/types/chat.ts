@@ -118,12 +118,24 @@ export interface RoutingInfo {
 }
 
 /**
+ * PRD-205: persisted provenance for background-authored messages, lifted
+ * from the `source` column on GET /api/chat/{id}/messages rows. The badge
+ * slot renders `label` (the server sends the Auto badge label) as-is.
+ */
+export interface BackgroundMessageSource {
+  origin: 'watcher' | 'scheduled_task' | string
+  label?: string
+  link_type?: string | null
+  link_id?: string | null
+}
+
+/**
  * Message metadata
  */
 export interface MessageMetadata {
   intent?: string
   confidence?: number
-  source?: 'rag' | 'semantic' | 'codegraph' | 'llm' | 'database'
+  source?: 'rag' | 'semantic' | 'codegraph' | 'llm' | 'database' | BackgroundMessageSource
   processing_time?: number
   tools_used?: string[]
   database_count?: number
@@ -200,7 +212,8 @@ export type VisibilityType = 'private' | 'public'
  */
 export interface Chat {
   id: string
-  userId: string
+  /** The backend sends the integer `users.id` (always the viewer's own). */
+  userId: number | string
   title: string
   createdAt: string
   updatedAt: string
@@ -208,6 +221,8 @@ export interface Chat {
   lastContext?: AppUsage
   /** PRD-220: latest message text (truncated server-side) for thread lists. */
   lastMessagePreview?: string | null
+  /** PRD-205: 'auto' marks the per-user thread where Auto speaks unprompted. */
+  kind?: 'user' | 'auto' | string
 }
 
 /**
