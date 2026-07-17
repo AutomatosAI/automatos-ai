@@ -224,6 +224,10 @@ def frame_for_payload(payload: str, workspace_id: str) -> Optional[str]:
     data = _parse_payload(payload)
     if data is None or data.get("workspace_id") != workspace_id:
         return None
+    # PRD-205 S7: chat events keep their name so the client can route them
+    # to the open conversation; everything else stays the board refresh.
+    if data.get("event") == "chat_changed":
+        return _frame("chat_changed", data)
     return _frame("board_changed", data)
 
 

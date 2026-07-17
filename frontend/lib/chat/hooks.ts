@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { useAuth } from '@clerk/nextjs'
 import type { ChatMessage, AppUsage, ToolCall, RoutingInfo } from '@/types'
 import { toast } from 'sonner'
@@ -43,6 +43,34 @@ export function useChat({
       setStatus('idle')
     }
   }, [])
+
+  // PRD-205 S7: a background producer posted into a chat (watcher verdict,
+  // scheduled-task output). The SSE lane fans it out as a window event; when
+  // it targets THIS conversation, refetch and merge missing messages by id.
+  // Append-only: an in-flight streaming placeholder has an id the server
+  // doesn't know, so it is never clobbered.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const onChatChanged = (event: Event) => {
+      const detail = (event as CustomEvent).detail as { chat_id?: string } | undefined
+      if (!detail?.chat_id || !chatId || detail.chat_id !== chatId) return
+      void (async () => {
+        try {
+          const { getChatMessages } = await import('@/lib/chat/api')
+          const serverMessages = await getChatMessages(chatId)
+          setMessages((prev) => {
+            const known = new Set(prev.map((m) => m.id))
+            const missing = serverMessages.filter((m) => !known.has(m.id))
+            return missing.length > 0 ? [...prev, ...missing] : prev
+          })
+        } catch {
+          // Best-effort: the message still appears on next open/reload.
+        }
+      })()
+    }
+    window.addEventListener('automatos:chat-changed', onChatChanged)
+    return () => window.removeEventListener('automatos:chat-changed', onChatChanged)
+  }, [chatId])
 
   const reload = useCallback(() => {
     const lastUserMessageIndex = messages.findLastIndex(m => m.role === 'user')
