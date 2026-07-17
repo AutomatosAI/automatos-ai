@@ -65,13 +65,25 @@ export function LiveVoiceMode({ chatId, agentId, onExit }: LiveVoiceModeProps) {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -16 }}
       transition={{ duration: 0.35 }}
-      className="flex w-full flex-col items-center gap-2 pt-6 pb-2"
+      className="relative flex w-full flex-col items-center gap-1 pt-4 pb-2"
       data-testid="live-voice-mode"
     >
-      <PresenceOrb state={orbState} levelsRef={levelsRef} size={120} />
+      {/* The room: a soft gold field behind the ring so Auto has a stage,
+          not a black void. Pure CSS, pointer-transparent. */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute left-1/2 top-0 h-[340px] w-[560px] -translate-x-1/2 opacity-70"
+        style={{
+          background:
+            'radial-gradient(ellipse at center, hsl(var(--warning) / 0.14) 0%, hsl(var(--warning) / 0.05) 45%, transparent 70%)',
+          filter: 'blur(2px)',
+        }}
+      />
+
+      <PresenceOrb state={orbState} levelsRef={levelsRef} size={260} />
 
       {/* State for ears and eyes — the a11y surface for the canvas. */}
-      <p aria-live="polite" className="text-sm text-muted-foreground">
+      <p aria-live="polite" className="relative -mt-3 text-sm font-medium text-warning/90 tracking-wide">
         {stateLabel}
         {isLive && (
           <span className="ml-2 font-mono text-xs text-muted-foreground/70">
@@ -82,12 +94,12 @@ export function LiveVoiceMode({ chatId, agentId, onExit }: LiveVoiceModeProps) {
 
       {/* Live captions (accessibility + trust) */}
       {isLive && captions.length > 0 && (
-        <div className="max-w-md space-y-0.5 text-center">
+        <div className="relative max-w-md space-y-0.5 text-center">
           {captions.map((line, i) => (
             <p
               key={`${line.role}-${i}`}
               className={`truncate text-xs ${
-                line.role === 'agent' ? 'text-warning' : 'text-muted-foreground'
+                line.role === 'agent' ? 'text-warning/90' : 'text-muted-foreground/70'
               }`}
             >
               <span className="font-medium">{line.role === 'agent' ? 'Auto' : 'You'}:</span>{' '}
