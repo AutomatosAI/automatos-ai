@@ -23,6 +23,7 @@ for _name in [n for n, m in list(_sys_guard.modules.items())
 
 from services.page_context import (  # noqa: E402
     inject_page_preamble,
+    merge_into_trace,
     render_page_preamble,
     sanitize_page_context,
 )
@@ -112,6 +113,32 @@ def test_inject_rebuilds_never_mutates():
     assert len(original_entry["parts"]) == 1
     assert len(out[0]["parts"]) == 2
     assert out[0]["parts"][1]["text"].startswith("[Page context]")
+
+
+def test_context_trace_includes_page_context():
+    trace = {"mode": "auto", "sections": [{"name": "memory", "tokens": 120}]}
+    sanitized = sanitize_page_context({"page": "command-center", "tab": "board"})
+    merged = merge_into_trace(trace, sanitized)
+    assert merged["page_context"] == {"page": "command-center", "tab": "board"}
+    # original trace keys preserved; input dict not mutated (ORM-bound JSONB)
+    assert merged["mode"] == "auto"
+    assert "page_context" not in trace
+    assert merge_into_trace(None, sanitized) == {"page_context": sanitized}
+
+
+def test_context_trace_never_raw():
+    dirty = {"page": "agents", "userRole": "admin", "permissions": ["*"]}
+    merged = merge_into_trace({}, sanitize_page_context(dirty))
+    assert merged["page_context"] == {"page": "agents"}
+    assert "userRole" not in repr(merged)
+    assert "permissions" not in repr(merged)
+
+
+def test_merge_into_trace_identity_when_empty():
+    trace = {"mode": "auto"}
+    assert merge_into_trace(trace, {}) is trace
+    assert merge_into_trace(None, {}) is None
+    assert merge_into_trace(None, None) is None
 
 
 def test_inject_targets_last_user_message():

@@ -148,6 +148,21 @@ def render_page_preamble(sanitized: Dict[str, Any]) -> str:
     return " ".join(bits)
 
 
+def merge_into_trace(
+    trace: Optional[Dict[str, Any]], sanitized: Optional[Dict[str, Any]]
+) -> Optional[Dict[str, Any]]:
+    """Return a NEW trace dict carrying the sanitized page context (PRD-221 S3).
+
+    Empty/absent context returns the trace untouched — identity, including
+    ``None``. Never mutates the input trace (it may already be bound to an ORM
+    row's JSONB), and only ever receives SANITIZED context — the raw client
+    dict is never stored.
+    """
+    if not sanitized:
+        return trace
+    return {**(trace or {}), "page_context": sanitized}
+
+
 def inject_page_preamble(message_history: List[dict], sanitized: Dict[str, Any]) -> List[dict]:
     """Return history with an ephemeral preamble part on the last user message.
 

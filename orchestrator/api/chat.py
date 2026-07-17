@@ -531,6 +531,9 @@ async def stream_chat(
                 plan_mode=bool(request.planMode),
                 suggest_mission=_suggest_mission,
                 is_super_admin=_is_super_admin,
+                # PRD-221 S3/S4: the sanitized reference set rides into the
+                # turn's context_trace and the page-prior action exposure.
+                page_context=_page_ctx,
             ):
                 yield chunk
 
