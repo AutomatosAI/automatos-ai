@@ -24,6 +24,7 @@ for _name in [n for n, m in list(_sys_guard.modules.items())
 from services.page_context import (  # noqa: E402
     inject_page_preamble,
     merge_into_trace,
+    page_actions_from_context,
     render_page_preamble,
     sanitize_page_context,
 )
@@ -113,6 +114,17 @@ def test_inject_rebuilds_never_mutates():
     assert len(original_entry["parts"]) == 1
     assert len(out[0]["parts"]) == 2
     assert out[0]["parts"][1]["text"].startswith("[Page context]")
+
+
+def test_page_actions_from_context_resolves_manifest():
+    cc = page_actions_from_context(sanitize_page_context({"page": "command-center"}))
+    assert "platform_get_activity_feed" in cc
+    # subpath route resolves to its page's actions
+    m = page_actions_from_context(sanitize_page_context({"route": "/missions/abc"}))
+    assert "platform_list_missions" in m
+    # unknown / empty → no actions (caller gets pure semantic narrowing)
+    assert page_actions_from_context({}) == []
+    assert page_actions_from_context(sanitize_page_context({"page": "Dashboard"})) == []
 
 
 def test_context_trace_includes_page_context():

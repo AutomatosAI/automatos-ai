@@ -148,6 +148,18 @@ def render_page_preamble(sanitized: Dict[str, Any]) -> str:
     return " ".join(bits)
 
 
+def page_actions_from_context(sanitized: Optional[Dict[str, Any]]) -> List[str]:
+    """Manifest action names for the page the sanitized context points at.
+
+    Empty list when the context references no known page — the caller then
+    gets pure semantic narrowing (unchanged behaviour). Never raises.
+    """
+    if not sanitized:
+        return []
+    entry = _resolve_entry(sanitized)
+    return list(entry.actions) if entry else []
+
+
 def merge_into_trace(
     trace: Optional[Dict[str, Any]], sanitized: Optional[Dict[str, Any]]
 ) -> Optional[Dict[str, Any]]:

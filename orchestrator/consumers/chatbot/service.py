@@ -54,7 +54,10 @@ from modules.tools.tool_router import (
     _semantic_routing_top_k,
     get_tools_for_agent_async,
 )
-from services.page_context import merge_into_trace
+from services.page_context import (
+    merge_into_trace,
+    page_actions_from_context as _page_actions_from_context,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -790,6 +793,7 @@ class StreamingChatService:
         skill_tools: Optional[List[Dict[str, Any]]] = None,
         query: Optional[str] = None,
         is_super_admin: bool = False,
+        page_actions: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Get all tools for an agent from the SINGLE source: modules.tools.tool_router.
@@ -811,6 +815,7 @@ class StreamingChatService:
             workspace_id=self.workspace_id,
             query=query,
             is_super_admin=is_super_admin,
+            page_actions=page_actions,
         )
         if skill_tools:
             all_tools = (all_tools or []) + skill_tools
@@ -2108,6 +2113,10 @@ class StreamingChatService:
                     agent_ctx.get("skill_tools"),
                     query=latest_text,
                     is_super_admin=is_super_admin,
+                    # PRD-221 S4: the current page's manifest actions get folded
+                    # into the dispatcher enum (gate-filtered) so page-relevant
+                    # tools survive semantic narrowing.
+                    page_actions=_page_actions_from_context(page_context),
                 )
             else:
                 # ATOM path skips full tool loading, but always include
