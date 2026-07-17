@@ -422,9 +422,60 @@ class VectorFieldSharedContext(SharedContextPort):
         return await self._scored_search(
             self._workspace_filter(workspace_id), query, top_k,
             label=f"ws={workspace_id}", query_vector=query_vector,
+            workspace_id=workspace_id,
         )
 
     async def _scored_search(
+        self,
+        scroll_filter: Filter,
+        query: str,
+        top_k: int,
+        label: str,
+        query_vector: Optional[list[float]] = None,
+        record_access: bool = True,
+        workspace_id: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        """PRD-197 S4 wrapper: field-seam substrate telemetry (candidates/
+        latency/errors → the Command Center substrate tile), around the
+        unchanged scoring body below. Fire-and-forget; errors re-raise."""
+        import time as _time
+
+        from core.observability.substrate_metrics import (
+            SEAM_FIELD,
+            STATUS_EMPTY,
+            STATUS_ERROR,
+            STATUS_HIT,
+            record_substrate_search_nowait,
+        )
+
+        seam_t0 = _time.perf_counter()
+        try:
+            top_results = await self._scored_search_inner(
+                scroll_filter, query, top_k, label,
+                query_vector=query_vector, record_access=record_access,
+            )
+        except Exception:
+            record_substrate_search_nowait(
+                seam=SEAM_FIELD,
+                workspace_id=workspace_id,
+                candidates=0,
+                latency_ms=(_time.perf_counter() - seam_t0) * 1000.0,
+                status=STATUS_ERROR,
+                query=query,
+            )
+            raise
+        record_substrate_search_nowait(
+            seam=SEAM_FIELD,
+            workspace_id=workspace_id,
+            candidates=len(top_results),
+            latency_ms=(_time.perf_counter() - seam_t0) * 1000.0,
+            status=STATUS_HIT if top_results else STATUS_EMPTY,
+            query=query,
+            top_score=float(top_results[0].get("score") or 0.0) if top_results else 0.0,
+        )
+        return top_results
+
+    async def _scored_search_inner(
         self,
         scroll_filter: Filter,
         query: str,

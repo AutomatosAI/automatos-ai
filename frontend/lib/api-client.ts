@@ -73,6 +73,23 @@ export interface PrimitiveHealthMetric {
   generated_at: string
 }
 
+// PRD-197 S4 — per-seam retrieval substrate health (workspace-admin reachable).
+export interface SubstrateSeamHealth {
+  seam: string
+  searches: number
+  error_rate: number
+  empty_rate: number
+  avg_latency_ms: number | null
+  p95_latency_ms: number | null
+  status: 'green' | 'degraded' | 'down' | 'unknown'
+}
+
+export interface SubstrateHealthMetric {
+  generated_at: string
+  window_seconds: number
+  seams: SubstrateSeamHealth[]
+}
+
 // PRD-185 S12 — own-workspace cockpit tiles (workspace-admin reachable).
 export interface SloItem {
   sli: string
@@ -1753,6 +1770,11 @@ class ApiClient {
   // ===== PRD-185 S12 own-workspace cockpit tiles =====
   async getSLOs(window: string = '24h'): Promise<SlosMetric> {
     return this.request<SlosMetric>(`/api/analytics/slos?window=${encodeURIComponent(window)}`)
+  }
+
+  // PRD-197 S4 — per-seam retrieval substrate health
+  async getSubstrateHealth(window: string = '24h'): Promise<SubstrateHealthMetric> {
+    return this.request<SubstrateHealthMetric>(`/api/analytics/substrate-health?window=${encodeURIComponent(window)}`)
   }
 
   async getWorkspaceActivation(): Promise<WorkspaceActivationMetric> {

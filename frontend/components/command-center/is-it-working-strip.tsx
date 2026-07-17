@@ -22,6 +22,9 @@
  * workspaces with a commerce sync history; reads reported-vs-present
  * frequently-bought-together edges (the "16 reported / 0 present" query that
  * would have caught the FBT wipe on day one).
+ *
+ * PRD-197 S4: RETRIEVAL — per-seam substrate health (documents / memory /
+ * field) from /substrate-health; the tile a dark retrieval plane trips.
  */
 
 import type { SparklineTone } from './sparkline'
@@ -32,6 +35,7 @@ import {
   useWidgetEngagement,
   usePrimitiveHealth,
   useSLOs,
+  useSubstrateHealth,
   useDeliverableFreshness,
   useCommerceIntegrity,
 } from '@/hooks/use-analytics-api'
@@ -75,6 +79,16 @@ export function IsItWorkingStrip() {
   const primGreen = prim.filter((p) => p.status === 'green').length
   const primDegraded = prim.filter((p) => p.status === 'degraded').length
   const primDown = prim.filter((p) => p.status === 'down').length
+
+  // PRD-197 S4: per-seam retrieval substrate roll-up (documents/memory/field)
+  // — "is retrieval healthy?" as a live number; the tile a dark plane trips.
+  const { data: substrate } = useSubstrateHealth('24h')
+  const seams = substrate?.seams ?? []
+  const seamsTotal = seams.length
+  const seamKnown = seams.filter((s) => s.status !== 'unknown').length
+  const seamGreen = seams.filter((s) => s.status === 'green').length
+  const seamDown = seams.filter((s) => s.status === 'down')
+  const seamDegraded = seams.filter((s) => s.status === 'degraded')
 
   // SLOs (PRD-180) — met vs breached over the window; null meets_target = no data.
   const sloList = slos?.slos ?? []
@@ -176,6 +190,22 @@ export function IsItWorkingStrip() {
             : primDegraded > 0
               ? `${primDegraded} degraded`
               : 'all green',
+    },
+    {
+      // PRD-197 S4: substrate health — documents / memory / field seams.
+      // Honest zero: no searches in the window renders "awaiting searches",
+      // never a fake green.
+      label: 'RETRIEVAL',
+      value: seamKnown > 0 ? `${seamGreen}/${seamsTotal}` : '—',
+      tone: seamDown.length > 0 ? 'err' : seamDegraded.length > 0 ? 'warn' : seamKnown > 0 ? 'ok' : 'muted',
+      delta:
+        seamKnown === 0
+          ? 'awaiting searches'
+          : seamDown.length > 0
+            ? `${seamDown[0].seam} down`
+            : seamDegraded.length > 0
+              ? `${seamDegraded[0].seam} degraded`
+              : 'all seams green · 24h',
     },
     {
       // PRD-196 S3: is governance actually enforcing? OFF is shown loudly (the

@@ -157,6 +157,33 @@ async def get_slos(
         raise HTTPException(status_code=500, detail="Failed to compute SLOs")
 
 
+@ws_router.get("/substrate-health")
+async def get_substrate_health(
+    window: str = "24h",
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """PRD-197 S4 — per-seam retrieval substrate health for this workspace.
+
+    Aggregates ``substrate_metric_events`` (documents / memory / field
+    seams) over the window into searches, error rate, empty rate, and p95
+    latency, rolled into a green/degraded/down/unknown status per seam —
+    the "is retrieval healthy?" number the Command Center strip renders.
+    Honest by construction: a seam with no searches reports ``unknown``,
+    never a fabricated green.
+    """
+    from services.substrate_health import compute_substrate_health
+
+    try:
+        window_seconds = int(_parse_window(window).total_seconds())
+        return compute_substrate_health(
+            db, workspace_id=ctx.workspace_id, window_seconds=window_seconds
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Error computing substrate health: {e}")
+        raise HTTPException(status_code=500, detail="Failed to compute substrate health")
+
+
 def _parse_window(window: str) -> timedelta:
     """Parse a window string like '24h' or '7d' into a timedelta.
 

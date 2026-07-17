@@ -7,6 +7,7 @@ import type {
   WidgetEngagementMetric,
   PrimitiveHealthMetric,
   SlosMetric,
+  SubstrateHealthMetric,
   WorkspaceActivationMetric,
   DeliverableFreshnessMetric,
   CommerceIntegrityMetric,
@@ -105,6 +106,14 @@ export function useSLOs(window: string = '24h') {
   return useQuery<SlosMetric>({
     queryKey: ['analytics', 'slos', window],
     queryFn: () => apiClient.getSLOs(window)
+  })
+}
+
+// PRD-197 S4 — per-seam retrieval substrate health (documents / memory / field)
+export function useSubstrateHealth(window: string = '24h') {
+  return useQuery<SubstrateHealthMetric>({
+    queryKey: ['analytics', 'substrate-health', window],
+    queryFn: () => apiClient.getSubstrateHealth(window)
   })
 }
 

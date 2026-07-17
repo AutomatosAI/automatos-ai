@@ -1,30 +1,21 @@
 """
-Search Module - Core Search Engine
-==================================
+Search Module - Optimization & Vector Backends
+==============================================
 
-Foundation module providing vector search, embeddings, retrieval, and optimization.
-Other modules (RAG, Knowledge, NL-to-SQL, CodeGraph) depend on this.
+Foundation module providing context optimization, mathematical foundations,
+and the pluggable vector-store backends (``modules.search.vector_store``).
+
+PRD-197 S1: the F079 zombie layer (``SearchService`` / ``EnhancedVectorStore``
+/ ``ContextRetrievalEngine``) is deleted — it was a parallel retrieval stack
+the live path never imported, whose "cosine" ranking used the L2 operator and
+whose namesake table was dropped in PRD-135. The live document plane is
+``S3VectorsBackend`` via ``modules.rag.service``; local/OSS documents go
+through the pgvector-local backend (PRD-197 S5). Do not resurrect.
 
 Usage:
-    from modules.search import SearchService, SearchConfig
     from modules.search import ContextOptimizer, ContextItem
-    from modules.search import EnhancedVectorStore
-    from modules.search import ContextRetrievalEngine, ContextType, RetrievalStrategy
+    from modules.search.vector_store import get_vector_store
 """
-
-# Service layer
-from .service import SearchService, SearchResult, create_search_service
-from .config import SearchConfig
-
-# Vector store
-from .vector_store.store import (
-    EnhancedVectorStore,
-    VectorDocument,
-    SearchFilter,
-    SearchResult as VectorSearchResult,
-    SearchMode,
-    RankingStrategy,
-)
 
 # Optimization
 from .optimization.context_optimizer import (
@@ -51,31 +42,7 @@ from core.math import (
     TrendAnalysis,
 )
 
-# Retrieval
-from .retrieval.context_retrieval_engine import (
-    ContextRetrievalEngine,
-    ContextType,
-    RetrievalStrategy,
-    ContextQuery,
-    ContextPiece,
-    RetrievalResult,
-)
-
 __all__ = [
-    # Service
-    "SearchService",
-    "SearchResult",
-    "SearchConfig",
-    "create_search_service",
-    
-    # Vector Store
-    "EnhancedVectorStore",
-    "VectorDocument",
-    "SearchFilter",
-    "VectorSearchResult",
-    "SearchMode",
-    "RankingStrategy",
-    
     # Optimization
     "ContextOptimizer",
     "ContextItem",
@@ -85,7 +52,7 @@ __all__ = [
     "EnhancedPrompt",
     "create_context_optimizer",
     "optimize_prompt_context",
-    
+
     # Mathematical Foundations
     "InformationTheory",
     "VectorOperations",
@@ -96,12 +63,4 @@ __all__ = [
     "ConfidenceInterval",
     "StatisticalAnalysis",
     "TrendAnalysis",
-    
-    # Retrieval
-    "ContextRetrievalEngine",
-    "ContextType",
-    "RetrievalStrategy",
-    "ContextQuery",
-    "ContextPiece",
-    "RetrievalResult",
 ]

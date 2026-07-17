@@ -138,6 +138,23 @@ class Config:
     MEMORY_ARCHIVAL_L2_DECAY_THRESHOLD: float = float(os.getenv("MEMORY_ARCHIVAL_L2_DECAY_THRESHOLD", "0.2"))
     MEMORY_ARCHIVAL_L3_RETENTION_DAYS: int = int(os.getenv("MEMORY_ARCHIVAL_L3_RETENTION_DAYS", "180"))
     MEMORY_ARCHIVAL_BATCH_SIZE: int = int(os.getenv("MEMORY_ARCHIVAL_BATCH_SIZE", "500"))
+    # PRD-197 S3: Qdrant memory snapshots (durable_memory + field_memory) — the
+    # memory planes' DR arm; the document plane is S3 Vectors (PRD-186's DR).
+    # Built to the §8-Q3 proposal: daily, 7-day retention, the platform object
+    # store. Hour 4 UTC = after the 03:00 L2→L3 promotion, so the snapshot
+    # includes the night's promotions. Empty bucket = S3_DOCUMENTS_BUCKET at
+    # run time (that attr is defined later in this file).
+    MEMORY_SNAPSHOT_ENABLED: bool = os.getenv("MEMORY_SNAPSHOT_ENABLED", "true").lower() in ("true", "1", "yes")
+    MEMORY_SNAPSHOT_CRON_HOUR_UTC: int = int(os.getenv("MEMORY_SNAPSHOT_CRON_HOUR_UTC", "4"))
+    MEMORY_SNAPSHOT_RETENTION_DAYS: int = int(os.getenv("MEMORY_SNAPSHOT_RETENTION_DAYS", "7"))
+    MEMORY_SNAPSHOT_S3_BUCKET: str = os.getenv("MEMORY_SNAPSHOT_S3_BUCKET", "")
+    MEMORY_SNAPSHOT_S3_PREFIX: str = os.getenv("MEMORY_SNAPSHOT_S3_PREFIX", "qdrant-snapshots")
+    # PRD-197 S4: substrate telemetry retention — the per-seam retrieval
+    # metric rows behind the Command Center substrate tile are pruned past
+    # this window (the heartbeat_results 148k-row lesson: no unbounded
+    # telemetry tables). Sweep rides the memory-jobs scheduler daily.
+    SUBSTRATE_METRICS_RETENTION_DAYS: int = int(os.getenv("SUBSTRATE_METRICS_RETENTION_DAYS", "14"))
+    SUBSTRATE_METRICS_PRUNE_INTERVAL_SECONDS: int = int(os.getenv("SUBSTRATE_METRICS_PRUNE_INTERVAL_SECONDS", "86400"))
 
     # =============================================================================
     # BOOT REAPER — orphaned in-flight runs (PRD-142 Wave 1 · WS-C · W1-S6)

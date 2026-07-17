@@ -1,5 +1,5 @@
 {
-  "route_count": 767,
+  "route_count": 768,
   "routes": [
     {
       "method": "GET",
@@ -484,6 +484,10 @@
     {
       "method": "GET",
       "path": "/api/analytics/slos"
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/substrate-health"
     },
     {
       "method": "GET",
