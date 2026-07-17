@@ -38,6 +38,13 @@ export function useChat({
   const [chatId, setChatId] = useState(id)
   const abortControllerRef = useRef<AbortController | null>(null)
 
+  // PRD-207: the id prop can move mid-mount (a live call binds the screen to
+  // its thread) — follow it so the chat_changed merge listener and sends
+  // target the conversation actually on screen.
+  useEffect(() => {
+    setChatId(id)
+  }, [id])
+
   const stop = useCallback(() => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort()

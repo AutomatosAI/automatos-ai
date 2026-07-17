@@ -1129,6 +1129,7 @@ export function Chat({
               <LiveVoiceMode
                 chatId={hasSentMessage ? activeChatId : undefined}
                 agentId={selectedAgentId}
+                onChatId={(cid) => setActiveChatId(cid)}
                 onExit={() => setIsLiveMode(false)}
               />
             )}

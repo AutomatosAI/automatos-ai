@@ -404,7 +404,7 @@ def test_mint_passes_dynamic_vars_and_inserts_minted_row(monkeypatch):
         db=db,
     )
 
-    assert out == {"call_id": "call_abc", "access_token": "tok_xyz"}
+    assert out == {"call_id": "call_abc", "access_token": "tok_xyz", "chat_id": str(chat_id)}
     dv = seen["payload"]["retell_llm_dynamic_variables"]
     assert dv == {
         "workspace_id": str(ws_id),
@@ -422,6 +422,140 @@ def test_mint_passes_dynamic_vars_and_inserts_minted_row(monkeypatch):
     assert row.user_id == 7
     assert row.chat_id == str(chat_id)
     assert db.commit.called
+
+
+def test_mint_without_chat_creates_and_binds_thread(monkeypatch):
+    """Gerard's first-call feedback: the spoken conversation must be the
+    VISIBLE one. No chat on screen → mint creates the thread, binds it, and
+    hands its id back so the screen can point at it."""
+    import consumers.chatbot.service as chat_service_mod
+
+    import api.voice_retell as vr
+    from core.models.voice_calls import VoiceCall
+    from modules.voice.live_settings import RetellCredentials
+    from modules.voice.retell_api import RetellWebCall
+    from modules.voice.voice_meter import MeterReading
+
+    ws_id = uuid.uuid4()
+    created_chat_id = uuid.uuid4()
+    created = {}
+
+    class FakeChatService:
+        def __init__(self, db):
+            pass
+
+        def create_chat(self, *, user_id, title, workspace_id):
+            created.update(user_id=user_id, title=title, workspace_id=workspace_id)
+            return SimpleNamespace(id=created_chat_id)
+
+    monkeypatch.setattr(chat_service_mod, "ChatService", FakeChatService)
+    monkeypatch.setattr(vr.live_settings, "voice_live_enabled", lambda: True)
+    monkeypatch.setattr(
+        vr.live_settings, "retell_credentials", lambda: RetellCredentials("k", "s", "a")
+    )
+    monkeypatch.setattr(vr.voice_meter, "monthly_meter", lambda db, w: MeterReading(0, 0, 10))
+
+    async def fake_vendor(api_key, payload):
+        return RetellWebCall(call_id="call_fresh", access_token="tok")
+
+    monkeypatch.setattr(vr.retell_api, "create_web_call", fake_vendor)
+
+    ws = SimpleNamespace(settings={"voice_live": {"enabled": True}})
+    db = _mint_db(workspace=ws)
+
+    out = _run_mint(ctx=_mint_ctx(ws_id=ws_id, user_int=7), db=db)
+
+    assert out["chat_id"] == str(created_chat_id)  # the screen can follow it
+    assert created["user_id"] == 7 and created["title"] == "Voice call"
+    rows = [a.args[0] for a in db.add.call_args_list if isinstance(a.args[0], VoiceCall)]
+    assert rows[0].chat_id == str(created_chat_id)  # mint-proven binding → webhook writes HERE
+
+
+def test_voice_turn_rides_the_fast_path(monkeypatch):
+    """First live calls measured MINUTES per turn: the spoken lane must trim
+    history and skip widget payloads + external tool loops."""
+    import consumers.chatbot as chatbot_pkg
+
+    import api.voice_retell as vr
+    from config import config as app_config
+    from modules.voice.call_binding import CallBinding
+
+    captured = {}
+    ws_id = str(uuid.uuid4())
+    chat_id = str(uuid.uuid4())
+
+    class FakeChatService:
+        def __init__(self, db):
+            pass
+
+        def save_message(self, **kwargs):
+            return SimpleNamespace(id=uuid.uuid4())
+
+        def get_messages_by_chat_id(self, cid):
+            return [
+                SimpleNamespace(role="user", parts=[{"type": "text", "text": f"m{i}"}])
+                for i in range(40)  # a long archive — the call must not replay it
+            ]
+
+    class FakeStreaming:
+        def __init__(self, db, workspace_id=None):
+            pass
+
+        def stream_response_with_agent(self, **kwargs):
+            captured.update(kwargs)
+
+            async def gen():
+                yield '0:"hi"'
+
+            return gen()
+
+    monkeypatch.setattr(chatbot_pkg, "ChatService", FakeChatService)
+    monkeypatch.setattr(chatbot_pkg, "StreamingChatService", FakeStreaming)
+
+    import modules.voice.call_binding as cb
+
+    monkeypatch.setattr(
+        cb, "resolve_call_binding",
+        lambda db, **k: CallBinding(chat_id=chat_id, user_id=7, workspace_id=ws_id, bound=True),
+    )
+    monkeypatch.setattr(cb, "stamp_assistant_voice_source", lambda db, **k: 0)
+
+    import api.chat as chat_api
+
+    monkeypatch.setattr(chat_api, "get_default_agent_id", lambda db, w: 1)
+
+    import services.board_events as be
+
+    monkeypatch.setattr(be, "notify_chat_event", lambda db, **k: None)
+
+    import modules.voice.telemetry as tel
+
+    monkeypatch.setattr(tel, "record_voice_turn", lambda **k: None)
+
+    from contextlib import contextmanager
+
+    @contextmanager
+    def fake_session():
+        yield MagicMock()
+
+    monkeypatch.setattr(vr, "get_db_session", fake_session)
+
+    from modules.voice.providers.retell import RetellLLMRequest
+
+    req = RetellLLMRequest(
+        response_id=1, user_text="hey", interaction_type="response_required",
+        workspace_id=ws_id, agent_id=None, call_id="call_fast",
+    )
+
+    async def run():
+        return [f async for f in vr._agent_retell_stream(req)]
+
+    frames = asyncio.run(run())
+    assert any(f.get("content") for f in frames)  # the turn streamed
+
+    assert captured["force_text_only"] is True   # words only — no widget payloads
+    assert captured["skip_composio"] is True     # no external tool loops mid-call
+    assert len(captured["messages"]) <= int(app_config.VOICE_LIVE_TURN_HISTORY_MESSAGES)
 
 
 def test_mint_refuses_binding_to_someone_elses_chat(monkeypatch):
