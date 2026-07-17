@@ -66,13 +66,18 @@ export function GraphLegend({
   }
 
   return (
+    // Height-bounded so a chip-heavy graph never eats the canvas: the collapse
+    // control is a fixed header (shrink-0) and the chip rows scroll beneath it,
+    // so "Hide legend" stays reachable even with hundreds of edge types. The
+    // parent graph area is `relative overflow-hidden`, which used to clip the
+    // bottom-anchored panel's top (and its close button) right off the canvas.
     <div
-      className={`${position} flex flex-col items-end gap-1.5 max-w-[65%] rounded-lg border border-white/10 bg-black/50 backdrop-blur-sm p-2`}
+      className={`${position} flex flex-col items-end gap-1.5 max-w-[40%] sm:max-w-[320px] max-h-[380px] rounded-lg border border-white/10 bg-black/50 backdrop-blur-sm p-2`}
     >
       <button
         type="button"
         onClick={() => onCollapsedChange(true)}
-        className="flex items-center gap-1 self-end text-[10px] uppercase tracking-wider text-muted-foreground/70 hover:text-foreground transition"
+        className="flex items-center gap-1 self-end shrink-0 text-[10px] uppercase tracking-wider text-muted-foreground/70 hover:text-foreground transition"
         title="Hide legend"
         aria-expanded={true}
       >
@@ -80,6 +85,7 @@ export function GraphLegend({
         <ChevronDown className="w-3 h-3" />
       </button>
 
+      <div className="flex flex-col items-end gap-1.5 overflow-y-auto min-h-0 w-full">
       {sections.map((section) =>
         section.chips.length === 0 ? null : (
           <div key={section.title} className="flex flex-wrap gap-1.5 justify-end">
@@ -129,6 +135,7 @@ export function GraphLegend({
           </div>
         ),
       )}
+      </div>
     </div>
   )
 }
