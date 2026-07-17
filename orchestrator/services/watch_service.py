@@ -130,6 +130,7 @@ class WatchService:
         policy: str = WatchPolicy.RUN_AND_REPORT.value,
         allowed_actions: Optional[List[str]] = None,
         action_budget: int = DEFAULT_ACTION_BUDGET,
+        origin_chat_id: Optional[UUID] = None,
         now: Optional[datetime] = None,
     ) -> Watch:
         """Create a watch on a target. One live watch per target.
@@ -154,6 +155,8 @@ class WatchService:
             workspace_id=str(workspace_id),
             created_by=created_by,
             owner_agent_id=owner_agent_id,
+            # PRD-205 S4: server-captured originating conversation (nullable).
+            origin_chat_id=origin_chat_id,
             watch_type=watch_type,
             target_type=target_type,
             target_id=target_id,

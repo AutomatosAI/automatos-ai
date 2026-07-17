@@ -68,6 +68,39 @@ def notify_board_event(
         )
 
 
+def notify_chat_event(
+    db: Session,
+    *,
+    workspace_id,
+    chat_id: str,
+    user_id: int,
+    event: str = "chat_changed",
+) -> None:
+    """PRD-205 S7: fire ``pg_notify`` when a background message lands in a
+    chat, on the SAME channel the Command Centre already LISTENs - one new
+    event value, zero new transport. The payload carries ``user_id`` so the
+    client drops events for other users (the SSE lane's workspace filter is
+    unchanged). Best-effort like its sibling: never raises into the caller.
+    """
+    try:
+        payload = json.dumps(
+            {
+                "workspace_id": str(workspace_id),
+                "chat_id": str(chat_id),
+                "user_id": int(user_id),
+                "event": event,
+            }
+        )
+        db.execute(
+            text("SELECT pg_notify(:chan, :payload)"),
+            {"chan": NOTIFY_CHANNEL, "payload": payload},
+        )
+    except Exception:  # noqa: BLE001 - NOTIFY is an optimisation, not a guarantee
+        logger.debug(
+            "[board_events] pg_notify failed for chat %s", chat_id, exc_info=True
+        )
+
+
 class _SSEListener(threading.Thread):
     """Holds one raw LISTEN connection and pushes notifications onto a queue.
 
@@ -191,6 +224,10 @@ def frame_for_payload(payload: str, workspace_id: str) -> Optional[str]:
     data = _parse_payload(payload)
     if data is None or data.get("workspace_id") != workspace_id:
         return None
+    # PRD-205 S7: chat events keep their name so the client can route them
+    # to the open conversation; everything else stays the board refresh.
+    if data.get("event") == "chat_changed":
+        return _frame("chat_changed", data)
     return _frame("board_changed", data)
 
 

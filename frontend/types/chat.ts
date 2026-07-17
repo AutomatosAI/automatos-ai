@@ -123,7 +123,10 @@ export interface RoutingInfo {
 export interface MessageMetadata {
   intent?: string
   confidence?: number
-  source?: 'rag' | 'semantic' | 'codegraph' | 'llm' | 'database'
+  // PRD-205 S7: background-authored messages carry their persisted
+  // source.label ("Auto · background") through this slot — any string
+  // renders as a neutral badge; the literals keep their colour branches.
+  source?: 'rag' | 'semantic' | 'codegraph' | 'llm' | 'database' | (string & {})
   processing_time?: number
   tools_used?: string[]
   database_count?: number

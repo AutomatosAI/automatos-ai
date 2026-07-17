@@ -653,109 +653,10 @@ async def search_chat_history(
     return {"query": q, "total": len(results), "results": results}
 
 
-@router.get("/{chat_id}")
-async def get_chat(
-    chat_id: str,
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db)
-):
-    """Get a specific chat (workspace-scoped)"""
-    chat_service = ChatService(db)
-    user_id = get_user_id(db, ctx)
-
-    chat = chat_service.get_chat(chat_id, workspace_id=ctx.workspace_id)
-    if not chat:
-        raise HTTPException(status_code=404, detail="Chat not found")
-
-    if chat.user_id != user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
-
-    return {
-        "id": str(chat.id),
-        "userId": chat.user_id,
-        "title": chat.title,
-        "createdAt": chat.created_at.isoformat(),
-        "updatedAt": chat.updated_at.isoformat(),
-        "visibility": chat.visibility,
-        "lastContext": chat.last_context
-    }
-
-
-@router.get("/{chat_id}/messages")
-async def get_chat_messages(
-    chat_id: str,
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db)
-):
-    """Get all messages for a chat (workspace-scoped)"""
-    chat_service = ChatService(db)
-    user_id = get_user_id(db, ctx)
-
-    # Verify chat access within workspace
-    chat = chat_service.get_chat(chat_id, workspace_id=ctx.workspace_id)
-    if not chat:
-        raise HTTPException(status_code=404, detail="Chat not found")
-
-    if chat.user_id != user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
-    
-    messages = chat_service.get_messages_by_chat_id(chat_id)
-    
-    return [
-        {
-            "id": str(msg.id),
-            "role": msg.role,
-            "parts": msg.parts,
-            "attachments": msg.attachments,
-            "createdAt": msg.created_at.isoformat()
-        }
-        for msg in messages
-    ]
-
-
-@router.delete("/{chat_id}", dependencies=[Depends(require_workspace_permission("agents:execute"))])
-async def delete_chat(
-    chat_id: str,
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db)
-):
-    """Delete a chat (workspace-scoped)"""
-    chat_service = ChatService(db)
-    user_id = get_user_id(db, ctx)
-
-    chat = chat_service.get_chat(chat_id, workspace_id=ctx.workspace_id)
-    if not chat:
-        raise HTTPException(status_code=404, detail="Chat not found")
-
-    if chat.user_id != user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
-
-    success = chat_service.delete_chat(chat_id)
-    return {"success": success}
-
-
-@router.patch("/{chat_id}", dependencies=[Depends(require_workspace_permission("agents:execute"))])
-async def update_chat(
-    chat_id: str,
-    request: UpdateTitleRequest,
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db)
-):
-    """Update chat title (workspace-scoped)"""
-    chat_service = ChatService(db)
-    user_id = get_user_id(db, ctx)
-
-    chat = chat_service.get_chat(chat_id, workspace_id=ctx.workspace_id)
-    if not chat:
-        raise HTTPException(status_code=404, detail="Chat not found")
-
-    if chat.user_id != user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
-    
-    success = chat_service.update_chat_title(chat_id, request.title)
-    return {"success": success}
-
-
+# PRD-205 S8: /vote and /agents MUST be declared before the /{chat_id}
+# routes below — declared after, FastAPI matched chat_id="vote"/"agents"
+# and both endpoints were dead (the exact PRD-220 /search failure mode).
+# Locked by route-order regression tests.
 @router.patch("/vote", dependencies=[Depends(require_workspace_permission("agents:execute"))])
 async def vote_message(
     request: VoteRequest,
@@ -842,6 +743,113 @@ async def get_available_agents(
 class SwitchAgentRequest(BaseModel):
     newAgentId: int
     reason: Optional[str] = None
+
+
+@router.get("/{chat_id}")
+async def get_chat(
+    chat_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
+    """Get a specific chat (workspace-scoped)"""
+    chat_service = ChatService(db)
+    user_id = get_user_id(db, ctx)
+
+    chat = chat_service.get_chat(chat_id, workspace_id=ctx.workspace_id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    if chat.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    return {
+        "id": str(chat.id),
+        "userId": chat.user_id,
+        "title": chat.title,
+        "createdAt": chat.created_at.isoformat(),
+        "updatedAt": chat.updated_at.isoformat(),
+        "visibility": chat.visibility,
+        "lastContext": chat.last_context
+    }
+
+
+@router.get("/{chat_id}/messages")
+async def get_chat_messages(
+    chat_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
+    """Get all messages for a chat (workspace-scoped)"""
+    chat_service = ChatService(db)
+    user_id = get_user_id(db, ctx)
+
+    # Verify chat access within workspace
+    chat = chat_service.get_chat(chat_id, workspace_id=ctx.workspace_id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    if chat.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    messages = chat_service.get_messages_by_chat_id(chat_id)
+    
+    return [
+        {
+            "id": str(msg.id),
+            "role": msg.role,
+            "parts": msg.parts,
+            "attachments": msg.attachments,
+            # PRD-205 S3: background-author provenance — the frontend maps it
+            # into the message badge slot ("Auto · background"). null for
+            # every in-turn message, incl. all rows predating the column.
+            "source": msg.source,
+            "createdAt": msg.created_at.isoformat()
+        }
+        for msg in messages
+    ]
+
+
+@router.delete("/{chat_id}", dependencies=[Depends(require_workspace_permission("agents:execute"))])
+async def delete_chat(
+    chat_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
+    """Delete a chat (workspace-scoped)"""
+    chat_service = ChatService(db)
+    user_id = get_user_id(db, ctx)
+
+    chat = chat_service.get_chat(chat_id, workspace_id=ctx.workspace_id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    if chat.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    success = chat_service.delete_chat(chat_id)
+    return {"success": success}
+
+
+@router.patch("/{chat_id}", dependencies=[Depends(require_workspace_permission("agents:execute"))])
+async def update_chat(
+    chat_id: str,
+    request: UpdateTitleRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
+    """Update chat title (workspace-scoped)"""
+    chat_service = ChatService(db)
+    user_id = get_user_id(db, ctx)
+
+    chat = chat_service.get_chat(chat_id, workspace_id=ctx.workspace_id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    if chat.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    success = chat_service.update_chat_title(chat_id, request.title)
+    return {"success": success}
 
 
 @router.post("/{chat_id}/switch-agent", dependencies=[Depends(require_workspace_permission("agents:execute"))])

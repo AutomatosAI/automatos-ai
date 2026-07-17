@@ -129,7 +129,10 @@ async def create_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]
         # by default (workspace setting watch_auto_create, default ON);
         # success_criteria is the user's request text. Fail-soft -- a broken
         # watcher never breaks a launch.
-        from modules.tools.discovery.handlers_watches import auto_create_watch
+        from modules.tools.discovery.handlers_watches import (
+            _origin_chat_id,
+            auto_create_watch,
+        )
 
         auto_create_watch(
             db,
@@ -138,6 +141,7 @@ async def create_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]
             target_id=str(run.id),
             title=f"Watch: {goal[:80]}",
             success_criteria=goal,
+            origin_chat_id=_origin_chat_id(params),
             created_by=params.get("_created_by"),
             owner_agent_id=(
                 int(params["_agent_id"])

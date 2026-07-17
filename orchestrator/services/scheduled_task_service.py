@@ -45,6 +45,7 @@ class ScheduledTaskService:
         description: str,
         schedule: str,
         max_runs: Optional[int] = None,
+        origin_chat_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Create a new scheduled task.
@@ -129,10 +130,12 @@ class ScheduledTaskService:
             text("""
                 INSERT INTO agent_scheduled_tasks
                     (workspace_id, created_by_agent_id, target_agent_id,
-                     task_type, description, schedule, max_runs, next_run_at)
+                     task_type, description, schedule, max_runs, next_run_at,
+                     origin_chat_id)
                 VALUES
                     (:ws_id, :created_by, :target,
-                     :task_type, :description, :schedule, :max_runs, :next_run_at)
+                     :task_type, :description, :schedule, :max_runs, :next_run_at,
+                     CAST(:origin_chat_id AS uuid))
                 RETURNING id, created_at
             """),
             {
@@ -144,6 +147,7 @@ class ScheduledTaskService:
                 "schedule": schedule,
                 "max_runs": max_runs,
                 "next_run_at": next_run_at,
+                "origin_chat_id": str(origin_chat_id) if origin_chat_id else None,
             },
         )
         row = result.fetchone()
@@ -367,6 +371,8 @@ class ScheduledTaskService:
                 agent_id=task.target_agent_id,
                 message=f"[Scheduled Task #{task_id}] {task.description}",
                 db=db,
+                origin_chat_id=getattr(task, "origin_chat_id", None),
+                task_id=task_id,
             )
 
         except Exception as e:
@@ -389,6 +395,8 @@ class ScheduledTaskService:
         agent_id: int,
         message: str,
         db: Session,
+        origin_chat_id: Optional[str] = None,
+        task_id: Optional[int] = None,
     ) -> None:
         """
         Execute a task on the target agent via AgentFactory.
@@ -417,6 +425,27 @@ class ScheduledTaskService:
                 "[ScheduledTask] Agent %d completed task: %s",
                 agent_id, str(llm_text)[:200],
             )
+
+            # PRD-205 S6: the output is DELIVERED, not discarded (the PRD-77
+            # defect: this used to be a 200-char logger.info and nothing
+            # else). Target = the conversation the task was created from
+            # (origin_chat_id, captured at platform_schedule_task time) --
+            # scheduled-task rows are agent-created, so there is no user to
+            # fall back to; a task with no captured origin (pre-205 rows, API
+            # creations) keeps the log-only behaviour honestly. Fail-soft: a
+            # chat failure never fails the scheduled run.
+            if str(llm_text).strip() and origin_chat_id:
+                from services.chat_messenger import deliver_background_message
+
+                deliver_background_message(
+                    db,
+                    workspace_id=workspace_id,
+                    text=str(llm_text),
+                    source={"origin": "scheduled_task"},
+                    chat_id=str(origin_chat_id),
+                    link_type="scheduled_task",
+                    link_id=str(task_id) if task_id is not None else None,
+                )
         except Exception as e:
             logger.error("[ScheduledTask] Failed to trigger agent chat: %s", e, exc_info=True)
             raise

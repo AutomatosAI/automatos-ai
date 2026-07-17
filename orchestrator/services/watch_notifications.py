@@ -77,6 +77,27 @@ async def dispatch_watch_notification(
             status=status,
             user_id=user_id,
         )
+
+        # PRD-205 S5: verdicts/actions/escalations also land IN the
+        # conversation -- the originating chat when captured at watch
+        # creation, else the creator's Auto thread. Both surfaces fire in v1
+        # (Q3: the bell and the chat serve different attention models).
+        # Fail-soft AFTER the bell: a chat failure never costs the
+        # notification (deliver_background_message never raises).
+        if event_type in ("watch_verdict", "watch_action", "watch_escalation"):
+            from services.chat_messenger import deliver_background_message
+
+            origin_chat = getattr(watch, "origin_chat_id", None)
+            deliver_background_message(
+                db,
+                workspace_id=workspace_id,
+                text=f"{title}\n\n{message}" if message else title,
+                source={"origin": "watcher", "event": event_type},
+                chat_id=str(origin_chat) if origin_chat else None,
+                clerk_user_id=created_by,
+                link_type="watch",
+                link_id=str(getattr(watch, "id", "")) or None,
+            )
         return True
     except Exception:
         logger.error(

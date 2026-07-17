@@ -30,6 +30,18 @@ def _actor(params: Dict[str, Any]) -> Optional[str]:
     return str(created_by) if created_by else None
 
 
+def _origin_chat_id(params: Dict[str, Any]) -> Optional[UUID]:
+    """PRD-205 S4: the server-injected originating conversation (never an
+    LLM-supplied arg -- the executor overwrites it from caller_context)."""
+    raw = params.get("_origin_chat_id")
+    if not raw:
+        return None
+    try:
+        return UUID(str(raw))
+    except (ValueError, AttributeError, TypeError):
+        return None
+
+
 def _owner_agent_id(params: Dict[str, Any]) -> Optional[int]:
     raw = params.get("_agent_id")
     try:
@@ -228,6 +240,7 @@ async def create_watch(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
             title=(params.get("title") or resolved["title"])[:500],
             created_by=_actor(params),
             owner_agent_id=_owner_agent_id(params),
+            origin_chat_id=_origin_chat_id(params),
             success_criteria=params.get("success_criteria") or resolved["criteria"],
             quality_threshold=threshold,
             deadline_at=deadline_at,
@@ -374,6 +387,7 @@ def auto_create_watch(
     success_criteria: str,
     created_by: Optional[str] = None,
     owner_agent_id: Optional[int] = None,
+    origin_chat_id: Optional[UUID] = None,
 ):
     """Create the default run_and_report watch on Auto-launched work.
 
@@ -408,6 +422,7 @@ def auto_create_watch(
             created_by=created_by,
             owner_agent_id=owner_agent_id,
             success_criteria=success_criteria,
+            origin_chat_id=origin_chat_id,
         )
         logger.info(
             "[Watches] auto-created watch %s on %s:%s",

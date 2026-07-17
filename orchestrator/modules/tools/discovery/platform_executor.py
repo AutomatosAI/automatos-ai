@@ -1004,6 +1004,23 @@ class PlatformActionExecutor:
             if _driver and "_created_by" not in params:
                 params = {**params, "_created_by": str(_driver)}
 
+        # PRD-205 S4: capture the originating conversation for watch-creating
+        # actions (direct create + the launches whose handlers auto-create a
+        # watch) so verdicts post back into that chat. Server-injected from
+        # caller_context; an LLM-supplied param of the same name is OVERWRITTEN
+        # -- the origin is never spoofable via tool args.
+        _WATCH_ORIGIN_ACTIONS = (
+            "platform_create_watch",
+            "platform_create_mission",
+            "platform_execute_playbook",
+            "platform_execute_recipe",
+            "platform_schedule_task",
+        )
+        if action_name in _WATCH_ORIGIN_ACTIONS:
+            _origin_chat = (caller_context or {}).get("conversation_id")
+            if _origin_chat:
+                params = {**params, "_origin_chat_id": str(_origin_chat)}
+
         try:
             result = await handler(self.db, self.workspace_id, params)
             # PRD-143 S8: an invocation that ran only because the full-autonomy
