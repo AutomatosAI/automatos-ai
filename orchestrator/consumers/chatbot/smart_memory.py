@@ -136,9 +136,17 @@ class SmartMemoryManager:
         # Everything else → single workspace namespace. No double-write.
         return "global"
 
-    def _get_cache_key(self, workspace_id: str, agent_id: Optional[int], query: str) -> str:
-        """Create cache key for memory lookups (includes agent for agent-specific cache)."""
-        return f"{workspace_id}:{agent_id}:{query[:50]}"
+    def _get_cache_key(
+        self,
+        workspace_id: str,
+        agent_id: Optional[int],
+        query: str,
+        viewer_subject_id: Optional[str] = None,
+    ) -> str:
+        """Cache key for memory lookups. Includes the agent AND the viewer —
+        the Q7 private-scope guard filters per viewer, so two users sharing a
+        cache entry would leak one user's private rows to the other."""
+        return f"{workspace_id}:{agent_id}:{viewer_subject_id}:{query[:50]}"
 
     async def retrieve_memories(
         self,
@@ -146,7 +154,8 @@ class SmartMemoryManager:
         agent_id: Optional[int],
         query: str,
         limit: int = 8,
-        widget_mode: bool = False
+        widget_mode: bool = False,
+        viewer_subject_id: Optional[str] = None,
     ) -> MemoryResult:
         """
         Retrieve relevant memories for a query.
@@ -163,7 +172,7 @@ class SmartMemoryManager:
         start_time = time.time()
 
         # Check cache first
-        cache_key = self._get_cache_key(workspace_id, agent_id, query)
+        cache_key = self._get_cache_key(workspace_id, agent_id, query, viewer_subject_id)
         cached = self._cache.get(cache_key)
         if cached and (time.time() - cached[0]) < self._cache_ttl:
             logger.debug("[SmartMemory] Using cached memory result")
@@ -221,13 +230,31 @@ class SmartMemoryManager:
                     from config import config as _cfg
                     _floor = float(getattr(_cfg, "MEMORY_RELEVANCE_FLOOR", 0.3))
                 except Exception:
+                    _cfg = None
                     _floor = 0.3
                 _before = len(memories)
-                memories = filter_injectable_memories(memories, floor=_floor)
+                # PRD-206 S7: the viewer rides into the guard — Q7 private
+                # memories only inject for their owner (unknown viewer fails
+                # closed; legacy/workspace rows unchanged).
+                memories = filter_injectable_memories(
+                    memories, floor=_floor, viewer_subject_id=viewer_subject_id,
+                )
                 if len(memories) != _before:
                     logger.info(
-                        "[SmartMemory] Injection guard dropped %d/%d memories (floor+type)",
+                        "[SmartMemory] Injection guard dropped %d/%d memories (floor+type+scope)",
                         _before - len(memories), _before,
+                    )
+
+                # PRD-206 S7: composite recall ranking ABOVE the floor and
+                # exclusions (which stay load-bearing, untouched): semantic ×
+                # recency × importance × pin. Reorders only — never adds or
+                # removes candidates. Knobs: MEMORY_RANK_*.
+                if _cfg is None or getattr(_cfg, "MEMORY_RANK_ENABLED", True):
+                    from modules.memory.recall_ranking import rank_memories
+                    memories = rank_memories(
+                        memories,
+                        half_life_days=float(getattr(_cfg, "MEMORY_RANK_HALF_LIFE_DAYS", 30.0)) if _cfg else 30.0,
+                        pin_boost=float(getattr(_cfg, "MEMORY_RANK_PIN_BOOST", 2.0)) if _cfg else 2.0,
                     )
 
                 if memories:

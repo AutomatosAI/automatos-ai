@@ -155,6 +155,12 @@ class Config:
     # telemetry tables). Sweep rides the memory-jobs scheduler daily.
     SUBSTRATE_METRICS_RETENTION_DAYS: int = int(os.getenv("SUBSTRATE_METRICS_RETENTION_DAYS", "14"))
     SUBSTRATE_METRICS_PRUNE_INTERVAL_SECONDS: int = int(os.getenv("SUBSTRATE_METRICS_PRUNE_INTERVAL_SECONDS", "86400"))
+    # PRD-206 S7: composite recall ranking (semantic × recency × importance ×
+    # pin), applied ABOVE the relevance floor + type exclusions. Conservative
+    # defaults; the S10 continuity eval slice is the referee.
+    MEMORY_RANK_ENABLED: bool = os.getenv("MEMORY_RANK_ENABLED", "true").lower() in ("true", "1", "yes")
+    MEMORY_RANK_HALF_LIFE_DAYS: float = float(os.getenv("MEMORY_RANK_HALF_LIFE_DAYS", "30"))
+    MEMORY_RANK_PIN_BOOST: float = float(os.getenv("MEMORY_RANK_PIN_BOOST", "2.0"))
     # PRD-206 S2: thread-checkpoint sweep — recently-idle chats get an LLM
     # checkpoint (chats.summary + typed decision/open_loop memories). The
     # batch cap bounds LLM spend per sweep; min-messages skips trivia.

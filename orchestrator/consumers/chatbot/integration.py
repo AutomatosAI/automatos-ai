@@ -74,6 +74,7 @@ class SmartChatIntegration:
         complexity_assessment: Optional[Any] = None,
         attachment_ids: Optional[List[str]] = None,
         model_id: Optional[str] = None,
+        viewer_subject_id: Optional[str] = None,
     ) -> OrchestratedRequest:
         """
         Prepare a chat request using smart orchestration.
@@ -90,6 +91,8 @@ class SmartChatIntegration:
             complexity_assessment: Optional PRD-68 AutoBrain assessment
             attachment_ids: PRD-127 ephemeral attachments to resolve
             model_id: PRD-127 model identifier for vision capability check
+            viewer_subject_id: PRD-206 S7 — the driving human
+                (``user:{users.id}``) for the Q7 private-scope recall guard
 
         Returns:
             OrchestratedRequest ready for LLM
@@ -101,6 +104,7 @@ class SmartChatIntegration:
             complexity_assessment=complexity_assessment,
             attachment_ids=attachment_ids,
             model_id=model_id,
+            viewer_subject_id=viewer_subject_id,
         )
 
     async def store(
