@@ -1,24 +1,22 @@
 'use client'
 
 /**
- * VoiceCallPanel — Real-time voice conversation UI (PRD-74 Phase 3)
+ * VoiceCallPanel — the docked live-call variant (PRD-74 shell, PRD-207 transport).
  *
- * Full-screen or docked panel for live voice mode.
- * Shows live transcript, connection state, and call controls.
+ * S5 rewired this panel off the dead Pipecat-pod WebSocket (`useVoiceStream`,
+ * deleted) onto `useRetellCall` — the same mint + Retell WebRTC lane the chat
+ * screen's orb rides. The props interface is unchanged so hosts
+ * (multimodal-input) need nothing; `workspaceId` stays for callers but the
+ * server now derives the workspace from the authenticated mint.
  */
 
-import { useState, useCallback, useRef, useEffect } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import {
-  Phone,
-  PhoneOff,
-  Mic,
-  MicOff,
-  Volume2,
-  Loader2,
-} from 'lucide-react'
+import { useEffect, useRef } from 'react'
+import { motion } from 'framer-motion'
+import { Loader2, Mic, MicOff, Phone, PhoneOff } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { useVoiceStream, type VoiceStreamState } from '@/hooks/use-voice-stream'
+import { PresenceOrb } from '@/components/voice/PresenceOrb'
+import { useRetellCall } from '@/hooks/use-retell-call'
+import type { OrbState } from '@/lib/voice/orb-state'
 
 interface VoiceCallPanelProps {
   workspaceId: string
@@ -28,29 +26,13 @@ interface VoiceCallPanelProps {
   onClose?: () => void
 }
 
-interface TranscriptEntry {
-  role: 'user' | 'assistant'
-  text: string
-  timestamp: number
-}
-
-const STATE_LABELS: Record<VoiceStreamState, string> = {
-  disconnected: 'Ready to call',
-  connecting: 'Connecting...',
-  connected: 'Listening...',
-  speaking: 'You are speaking',
-  processing: 'Thinking...',
-  responding: 'Agent is speaking',
-  error: 'Connection error',
-}
-
-const STATE_COLORS: Record<VoiceStreamState, string> = {
-  disconnected: 'text-muted-foreground',
+const STATE_COLORS: Record<OrbState, string> = {
+  idle: 'text-muted-foreground',
   connecting: 'text-warning',
-  connected: 'text-success',
-  speaking: 'text-info',
-  processing: 'text-warning',
-  responding: 'text-agent',
+  listening: 'text-success',
+  thinking: 'text-warning',
+  speaking: 'text-warning',
+  ended: 'text-muted-foreground',
   error: 'text-destructive',
 }
 
@@ -61,51 +43,42 @@ function formatDuration(seconds: number): string {
 }
 
 export function VoiceCallPanel({
-  workspaceId,
+  workspaceId: _workspaceId,
   agentId,
   conversationId,
   agentName = 'Auto',
   onClose,
 }: VoiceCallPanelProps) {
-  const [transcript, setTranscript] = useState<TranscriptEntry[]>([])
-  const [muted, setMuted] = useState(false)
-  const transcriptEndRef = useRef<HTMLDivElement>(null)
+  const {
+    orbState,
+    stateLabel,
+    levelsRef,
+    captions,
+    durationSec,
+    muted,
+    refusal,
+    error,
+    isLive,
+    start,
+    stop,
+    toggleMute,
+  } = useRetellCall({ chatId: conversationId, agentId })
 
-  const handleTranscript = useCallback((text: string, isFinal: boolean) => {
-    if (isFinal) {
-      setTranscript((prev) => [...prev, { role: 'user', text, timestamp: Date.now() }])
-    }
-  }, [])
-
-  const handleResponseText = useCallback((text: string) => {
-    setTranscript((prev) => [...prev, { role: 'assistant', text, timestamp: Date.now() }])
-  }, [])
-
-  const { state, connect, disconnect, error, sessionDuration } = useVoiceStream({
-    workspaceId,
-    agentId,
-    conversationId,
-    onTranscript: handleTranscript,
-    onResponseText: handleResponseText,
-  })
-
-  // Auto-scroll transcript
+  const captionsEndRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [transcript])
+    captionsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [captions])
 
-  const isActive = state !== 'disconnected' && state !== 'error'
+  const isActive = isLive || orbState === 'connecting'
+  const failure = refusal || error
 
   const handleToggleCall = async () => {
-    if (isActive) {
-      disconnect()
-    } else {
-      await connect()
-    }
+    if (isActive) stop()
+    else await start()
   }
 
   const handleEndCall = () => {
-    disconnect()
+    stop()
     onClose?.()
   }
 
@@ -120,150 +93,67 @@ export function VoiceCallPanel({
         {/* Header */}
         <div className="flex items-center justify-between px-5 pt-4 pb-2">
           <div className="flex items-center gap-3">
-            {/* Pulsing indicator */}
             <div className="relative">
               <div
                 className={[
                   'h-3 w-3 rounded-full',
-                  isActive ? 'bg-success' : state === 'error' ? 'bg-destructive' : 'bg-muted',
+                  isLive ? 'bg-success' : orbState === 'error' ? 'bg-destructive' : 'bg-muted',
                 ].join(' ')}
               />
-              {(state === 'speaking' || state === 'responding') && (
-                <div className="absolute inset-0 h-3 w-3 animate-ping rounded-full bg-success/50" />
+              {orbState === 'speaking' && (
+                <div className="absolute inset-0 h-3 w-3 animate-ping rounded-full bg-warning/50" />
               )}
             </div>
             <div>
               <h3 className="text-sm font-semibold">{agentName}</h3>
-              <p className={`text-xs ${STATE_COLORS[state]}`}>
-                {STATE_LABELS[state]}
+              <p className={`text-xs ${STATE_COLORS[orbState]}`} aria-live="polite">
+                {stateLabel}
               </p>
             </div>
           </div>
           {isActive && (
             <span className="text-xs text-muted-foreground font-mono">
-              {formatDuration(sessionDuration)}
+              {formatDuration(durationSec)}
             </span>
           )}
         </div>
 
-        {/* Live Transcript */}
-        {isActive && transcript.length > 0 && (
+        {/* Live captions */}
+        {isLive && captions.length > 0 && (
           <div className="mx-4 mb-2 max-h-40 overflow-y-auto rounded-xl bg-secondary/30 p-3 space-y-2">
-            {transcript.slice(-6).map((entry, i) => (
+            {captions.map((line, i) => (
               <div
-                key={`${entry.timestamp}-${i}`}
-                className={`text-xs ${
-                  entry.role === 'user'
-                    ? 'text-info/80'
-                    : 'text-warning'
-                }`}
+                key={`${line.role}-${i}`}
+                className={`text-xs ${line.role === 'user' ? 'text-info/80' : 'text-warning'}`}
               >
-                <span className="font-medium">
-                  {entry.role === 'user' ? 'You' : agentName}:
-                </span>{' '}
-                {entry.text}
+                <span className="font-medium">{line.role === 'user' ? 'You' : agentName}:</span>{' '}
+                {line.text}
               </div>
             ))}
-            <div ref={transcriptEndRef} />
+            <div ref={captionsEndRef} />
           </div>
         )}
 
-        {/* Visualiser / State indicator */}
-        <div className="flex items-center justify-center py-4">
-          <AnimatePresence mode="wait">
-            {state === 'connecting' ? (
-              <motion.div
-                key="connecting"
-                initial={{ scale: 0.8, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                exit={{ scale: 0.8, opacity: 0 }}
-              >
-                <Loader2 className="w-12 h-12 animate-spin text-warning" />
-              </motion.div>
-            ) : state === 'speaking' ? (
-              <motion.div
-                key="speaking"
-                initial={{ scale: 0.8 }}
-                animate={{ scale: [1, 1.15, 1] }}
-                transition={{ repeat: Infinity, duration: 0.8 }}
-                className="flex items-center gap-1"
-              >
-                {[...Array(5)].map((_, i) => (
-                  <motion.div
-                    key={i}
-                    className="w-1.5 bg-info rounded-full"
-                    animate={{ height: [8, 24, 8] }}
-                    transition={{
-                      repeat: Infinity,
-                      duration: 0.6,
-                      delay: i * 0.1,
-                    }}
-                  />
-                ))}
-              </motion.div>
-            ) : state === 'responding' ? (
-              <motion.div
-                key="responding"
-                className="flex items-center gap-1"
-              >
-                {[...Array(5)].map((_, i) => (
-                  <motion.div
-                    key={i}
-                    className="w-1.5 bg-warning rounded-full"
-                    animate={{ height: [8, 20, 8] }}
-                    transition={{
-                      repeat: Infinity,
-                      duration: 0.7,
-                      delay: i * 0.12,
-                    }}
-                  />
-                ))}
-              </motion.div>
-            ) : state === 'processing' ? (
-              <motion.div
-                key="processing"
-                className="flex items-center gap-2"
-              >
-                {[0, 1, 2].map((i) => (
-                  <motion.div
-                    key={i}
-                    className="w-2 h-2 rounded-full bg-warning"
-                    animate={{ opacity: [0.3, 1, 0.3] }}
-                    transition={{
-                      repeat: Infinity,
-                      duration: 1,
-                      delay: i * 0.3,
-                    }}
-                  />
-                ))}
-              </motion.div>
-            ) : (
-              <motion.div
-                key="idle"
-                initial={{ scale: 0.8, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-              >
-                <Volume2 className="w-10 h-10 text-muted-foreground/40" />
-              </motion.div>
-            )}
-          </AnimatePresence>
+        {/* The presence — same orb, docked size */}
+        <div className="flex items-center justify-center py-3">
+          <PresenceOrb state={orbState} levelsRef={levelsRef} size={88} />
         </div>
 
-        {/* Error message */}
-        {error && (
-          <p className="text-center text-xs text-destructive pb-2 px-4">
-            {error}
-          </p>
+        {/* Failure copy (mint refusal reason, mic denied, disconnects) */}
+        {failure && (
+          <p className="text-center text-xs text-destructive pb-2 px-4">{failure}</p>
         )}
 
         {/* Controls */}
         <div className="flex items-center justify-center gap-4 px-5 pb-5">
-          {isActive && (
+          {isLive && (
             <Button
               variant="ghost"
               size="icon"
               className="h-12 w-12 rounded-full"
-              onClick={() => setMuted(!muted)}
+              onClick={toggleMute}
+              aria-label={muted ? 'Unmute microphone' : 'Mute microphone'}
+              aria-pressed={muted}
             >
               {muted ? (
                 <MicOff className="w-5 h-5 text-destructive" />
@@ -273,7 +163,6 @@ export function VoiceCallPanel({
             </Button>
           )}
 
-          {/* Main call button */}
           <Button
             size="icon"
             className={[
@@ -283,10 +172,11 @@ export function VoiceCallPanel({
                 : 'bg-gradient-to-br from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 shadow-green-500/25',
             ].join(' ')}
             onClick={handleToggleCall}
+            aria-label={isActive ? 'Hang up' : 'Start call'}
           >
             {isActive ? (
               <PhoneOff className="w-6 h-6" />
-            ) : state === 'connecting' ? (
+            ) : orbState === 'connecting' ? (
               <Loader2 className="w-6 h-6 animate-spin" />
             ) : (
               <Phone className="w-6 h-6" />
@@ -299,6 +189,7 @@ export function VoiceCallPanel({
               size="icon"
               className="h-12 w-12 rounded-full"
               onClick={handleEndCall}
+              aria-label="End call and close"
             >
               <PhoneOff className="w-5 h-5 text-muted-foreground" />
             </Button>

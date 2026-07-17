@@ -1,6 +1,6 @@
 'use client'
 
-import { Code2, FileText, Target } from 'lucide-react'
+import { Code2, FileText, Mic, Target } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { pillBase, inactiveStyle } from './chat-mode-styles'
 
@@ -18,6 +18,9 @@ interface ChatModeBarProps {
   onCodeClick: () => void
   onPlanClick: () => void
   onMissionClick: () => void
+  /** PRD-207 S5: live voice on the chat screen. */
+  isLiveActive?: boolean
+  onLiveClick?: () => void
   pinnedAgentIds?: number[]
   agents?: PinnedAgent[]
   selectedAgentId?: number | null
@@ -25,6 +28,9 @@ interface ChatModeBarProps {
 }
 
 const activeStyle = 'bg-primary/20 ring-1 ring-primary/50 text-foreground/90'
+
+// Live is the voice presence — brand warning-orange, like the orb.
+const liveActiveStyle = 'bg-warning/20 ring-1 ring-warning/50 text-foreground/90'
 
 const agentActiveStyle = 'bg-primary/20 ring-1 ring-primary/50 text-foreground/90'
 
@@ -38,6 +44,8 @@ export function ChatModeBar({
   onCodeClick,
   onPlanClick,
   onMissionClick,
+  isLiveActive = false,
+  onLiveClick,
   pinnedAgentIds = [],
   agents = [],
   selectedAgentId,
@@ -50,6 +58,20 @@ export function ChatModeBar({
 
   return (
     <div data-tour="chat-mode-bar" className="flex flex-wrap justify-center gap-3 md:gap-2">
+      {/* Live voice (PRD-207) */}
+      {onLiveClick && (
+        <button
+          type="button"
+          onClick={onLiveClick}
+          title="Live"
+          aria-pressed={isLiveActive}
+          className={cn(pillBase, isLiveActive ? liveActiveStyle : inactiveStyle)}
+        >
+          <Mic className={cn(iconClass, isLiveActive && 'text-warning')} />
+          <span className={labelClass}>Live</span>
+        </button>
+      )}
+
       {/* Code mode */}
       <button
         type="button"

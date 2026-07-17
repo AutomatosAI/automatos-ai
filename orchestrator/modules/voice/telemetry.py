@@ -58,11 +58,13 @@ def record_voice_turn(
     response_text: str,
     truncated: bool,
     audio_delivered: bool,
+    call_id: Optional[str] = None,
 ) -> None:
     """Persist one voice turn. Never raises — a telemetry fault is not fatal.
 
     Opens its own ``get_db_session`` (which commits on clean exit) so it stays
-    off the request transaction.
+    off the request transaction. ``call_id`` (PRD-207 S8) links a live turn to
+    its ``voice_calls`` row; None on the push-to-talk path.
     """
     try:
         from core.database.database import get_db_session
@@ -83,6 +85,7 @@ def record_voice_turn(
                     workspace_id=workspace_id,
                     conversation_id=conversation_id,
                     message_id=message_id,
+                    call_id=call_id,
                     **fields,
                 )
             )

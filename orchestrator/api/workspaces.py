@@ -233,6 +233,43 @@ async def save_byok_preferences(
     return {"status": "saved", "byok_overrides": overrides}
 
 
+@router.put("/current/voice-live", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
+async def save_voice_live_settings(
+    payload: Dict[str, Any] = Body(...),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """PRD-207 S4/S7: the workspace's own Auto Live gate.
+
+    Body: ``{"voice_live": {"enabled": bool, "monthly_cap_minutes"?: int,
+    "retell_voice_id"?: str}}`` — validated by the SAME fail-closed rules as
+    the platform tool (one whitelist, two doors), merged never replace-blind.
+    """
+    from modules.voice.live_settings import validate_voice_live_update
+
+    workspace = db.query(Workspace).get(ctx.workspace_id)
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+
+    try:
+        normalized = validate_voice_live_update(payload.get("voice_live"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    settings = dict(workspace.settings or {})
+    merged = dict(settings.get("voice_live", {}))
+    merged.update(normalized)
+    settings["voice_live"] = merged
+    workspace.settings = settings
+
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(workspace, "settings")
+    db.commit()
+
+    logger.info("Updated voice_live settings for workspace %s: %s", workspace.id, merged)
+    return {"status": "saved", "voice_live": merged}
+
+
 # ── Orchestrator Soul & Personality ──────────────────────────────────
 
 _VALID_PERSONALITY_MODES = {"friendly", "professional", "technical", "custom"}

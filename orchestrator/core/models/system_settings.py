@@ -49,6 +49,9 @@ class SettingCategory(str, Enum):
     AGENT_HEARTBEAT = "agent_heartbeat"
     COORDINATOR = "coordinator"
 
+    # PRD-207: Auto Live — the live-voice master switch + Retell credentials.
+    VOICE = "voice"
+
 
 class SystemSetting(Base):
     """System-wide configuration settings"""

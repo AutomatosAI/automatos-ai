@@ -83,6 +83,10 @@ OWN_AUTH_ROUTES = {
     # RETELL_WEBHOOK_SECRET HMAC (verify_webhook_signature, fail-closed), NOT the
     # shared hybrid dependency; per-call workspace rides Retell dynamic variables.
     ("POST", "/api/voice/retell/llm"),
+    # Retell call-lifecycle events webhook (PRD-207 S3) — same HMAC fail-closed
+    # posture (secret from DB system_settings); binding trust is the mint-row
+    # cross-validation, never the vars.
+    ("POST", "/api/voice/retell/events"),
     # Shopify machine lane — _verify_internal_key shared-secret auth
     # (api/verticals.py provisioning + GDPR forwarding rides the same key).
     ("POST", "/api/verticals/{vertical}/gdpr/erase"),

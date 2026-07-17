@@ -11,12 +11,15 @@ import {
   Loader2,
   Star,
   Mic,
+  Radio,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
+import { Switch } from '@/components/ui/switch'
+import { Progress } from '@/components/ui/progress'
 import {
   Select,
   SelectContent,
@@ -119,6 +122,195 @@ interface VoiceProfile {
   is_default: boolean
   created_at: string | null
   updated_at: string | null
+}
+
+// PRD-207 S7: the one status read behind the Auto Live card.
+interface VoiceLiveStatus {
+  platform_enabled: boolean
+  armed: boolean
+  workspace_enabled: boolean
+  retell_voice_id: string | null
+  used_minutes: number
+  cap_minutes: number
+  active_calls: number
+  max_call_minutes: number
+}
+
+/**
+ * Auto Live card (PRD-207 S7) — the workspace half of the two gates:
+ * enable toggle, Retell voice id, the month's minute meter, and read-only
+ * arming truth from the super-admin surface. Honest UI: the meter renders
+ * real numbers from voice_calls, never placeholders.
+ */
+function AutoLiveCard() {
+  const [status, setStatus] = useState<VoiceLiveStatus | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [savingToggle, setSavingToggle] = useState(false)
+  const [voiceId, setVoiceId] = useState('')
+  const [savingVoice, setSavingVoice] = useState(false)
+
+  const loadStatus = useCallback(async () => {
+    try {
+      const data = await apiClient.request<VoiceLiveStatus>('/api/voice/live-status')
+      setStatus(data)
+      setVoiceId(data.retell_voice_id || '')
+    } catch (err) {
+      console.error('Failed to load Auto Live status:', err)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadStatus()
+  }, [loadStatus])
+
+  const saveVoiceLive = async (patch: Record<string, unknown>) => {
+    await apiClient.request('/api/workspaces/current/voice-live', {
+      method: 'PUT',
+      body: { voice_live: patch } as any,
+    })
+    await loadStatus()
+  }
+
+  const handleToggle = async (enabled: boolean) => {
+    setSavingToggle(true)
+    try {
+      await saveVoiceLive({ enabled })
+      toast.success(enabled ? 'Auto Live enabled for this workspace' : 'Auto Live disabled')
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to update Auto Live')
+    } finally {
+      setSavingToggle(false)
+    }
+  }
+
+  const handleSaveVoice = async () => {
+    setSavingVoice(true)
+    try {
+      await saveVoiceLive({ retell_voice_id: voiceId.trim() })
+      toast.success('Auto Live voice saved')
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to save the voice')
+    } finally {
+      setSavingVoice(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <Card>
+        <CardContent className="flex items-center justify-center py-8">
+          <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+        </CardContent>
+      </Card>
+    )
+  }
+  if (!status) return null
+
+  const platformReady = status.platform_enabled && status.armed
+  const overCap = status.used_minutes >= status.cap_minutes
+  const meterPct = Math.min(100, Math.round((status.used_minutes / Math.max(1, status.cap_minutes)) * 100))
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Radio className="w-5 h-5" />
+          Auto Live
+          {status.workspace_enabled && platformReady ? (
+            <Badge className="bg-warning/15 text-warning border-warning/30" variant="outline">
+              live
+            </Badge>
+          ) : (
+            <Badge variant="secondary">off</Badge>
+          )}
+        </CardTitle>
+        <CardDescription className="mt-1">
+          Real-time voice with Auto on the chat screen — interruptible, transcript in the
+          thread, metered per workspace.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        {/* Read-only platform truth from the super-admin gate */}
+        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <span>
+            Platform voice:{' '}
+            <span className={status.platform_enabled ? 'text-success' : 'text-destructive'}>
+              {status.platform_enabled ? 'on' : 'off'}
+            </span>
+          </span>
+          <span>·</span>
+          <span>
+            Retell:{' '}
+            <span className={status.armed ? 'text-success' : 'text-warning'}>
+              {status.armed ? 'armed' : 'not configured'}
+            </span>
+          </span>
+          {!platformReady && (
+            <span className="basis-full text-muted-foreground/80">
+              A super-admin arms voice platform-wide in System Settings → Voice.
+            </span>
+          )}
+        </div>
+
+        {/* The workspace gate */}
+        <div className="flex items-center justify-between rounded-xl border border-border/50 px-4 py-3">
+          <div>
+            <Label htmlFor="auto-live-enabled" className="font-medium">
+              Enable Auto Live in this workspace
+            </Label>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Members get the Live button on the chat screen.
+            </p>
+          </div>
+          <Switch
+            id="auto-live-enabled"
+            checked={status.workspace_enabled}
+            onCheckedChange={handleToggle}
+            disabled={savingToggle}
+          />
+        </div>
+
+        {/* Voice (per-call override rides the mint — verified supported) */}
+        <div>
+          <Label htmlFor="auto-live-voice">Auto&apos;s voice (Retell voice id)</Label>
+          <div className="mt-1 flex gap-2">
+            <Input
+              id="auto-live-voice"
+              value={voiceId}
+              onChange={(e) => setVoiceId(e.target.value)}
+              placeholder="e.g. 11labs-Adrian — empty = the Retell agent's default"
+              className="font-mono"
+            />
+            <Button size="sm" onClick={handleSaveVoice} disabled={savingVoice}>
+              {savingVoice ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save'}
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground mt-1">
+            Any voice id from your Retell dashboard; applied per call.
+          </p>
+        </div>
+
+        {/* The month's meter — real numbers from voice_calls */}
+        <div>
+          <div className="flex items-center justify-between text-sm">
+            <span className="font-medium">This month</span>
+            <span className={overCap ? 'text-warning font-medium' : 'text-muted-foreground'}>
+              {status.used_minutes}/{status.cap_minutes} min
+              {status.active_calls > 0 && ` · ${status.active_calls} live now`}
+            </span>
+          </div>
+          <Progress value={meterPct} className="mt-2 h-2" />
+          {overCap && (
+            <p className="text-xs text-warning mt-1">
+              Voice budget used — new calls are refused until next month (or raise the cap).
+            </p>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  )
 }
 
 export function VoiceProfilesSettingsTab() {
@@ -280,6 +472,9 @@ export function VoiceProfilesSettingsTab() {
 
   return (
     <div className="space-y-6">
+      {/* PRD-207 S7: Auto Live — the workspace gate, voice, meter */}
+      <AutoLiveCard />
+
       {/* Header */}
       <Card>
         <CardHeader>

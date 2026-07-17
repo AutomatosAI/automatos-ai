@@ -1,5 +1,5 @@
 {
-  "route_count": 772,
+  "route_count": 776,
   "routes": [
     {
       "method": "GET",
@@ -2443,6 +2443,10 @@
     },
     {
       "method": "GET",
+      "path": "/api/voice/live-status"
+    },
+    {
+      "method": "GET",
       "path": "/api/voice/profiles"
     },
     {
@@ -2471,7 +2475,15 @@
     },
     {
       "method": "POST",
+      "path": "/api/voice/retell/events"
+    },
+    {
+      "method": "POST",
       "path": "/api/voice/retell/llm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/voice/web-call"
     },
     {
       "method": "GET",
@@ -2900,6 +2912,10 @@
     {
       "method": "PUT",
       "path": "/api/workspaces/current/orchestrator"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/workspaces/current/voice-live"
     },
     {
       "method": "POST",

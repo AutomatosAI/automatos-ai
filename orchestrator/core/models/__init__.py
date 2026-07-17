@@ -23,6 +23,7 @@ from .personas import *  # PRD-42: Agent Personas
 from .system_prompts import *  # PRD-58: System Prompt Management
 from .voice_profiles import *  # PRD-74: Voice Profiles
 from .voice_turns import VoiceTurn  # noqa: F401  # PRD-203 V·S6: Voice turn telemetry
+from .voice_calls import VoiceCall  # noqa: F401  # PRD-207 S3: Voice call lifecycle + metering
 from .business_profiles import BusinessProfile  # noqa: F401  # PRD-130: Business Intake Wizard
 from .blueprints import *  # Governance: Agent Blueprints
 
