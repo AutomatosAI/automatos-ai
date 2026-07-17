@@ -7,6 +7,8 @@ Additive only:
   one per (workspace, user) via a partial unique index.
 - ``watches.origin_chat_id`` UUID — the conversation a watched launch came
   from, so verdicts post back into it.
+- ``agent_scheduled_tasks.origin_chat_id`` UUID — same capture for scheduled
+  tasks, whose rows are agent-created (no user to fall back to).
 
 Chains single-parent on prd199_drop_fake_stats (the current single head —
 the §8-Q7 rule: never author a second join of the same parents).
@@ -50,8 +52,17 @@ def upgrade() -> None:
         "watches", sa.Column("origin_chat_id", UUID(as_uuid=True), nullable=True)
     )
 
+    # S6: scheduled tasks are agent-created (created_by_agent_id — no human,
+    # no chat on the row), so without a captured origin the delivered output
+    # has no target. Same capture pattern as watches.
+    op.add_column(
+        "agent_scheduled_tasks",
+        sa.Column("origin_chat_id", UUID(as_uuid=True), nullable=True),
+    )
+
 
 def downgrade() -> None:
+    op.drop_column("agent_scheduled_tasks", "origin_chat_id")
     op.drop_column("watches", "origin_chat_id")
     op.drop_index("uq_chats_auto_thread", table_name="chats")
     op.drop_constraint("check_chat_kind", "chats", type_="check")

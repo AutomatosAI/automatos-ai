@@ -47,6 +47,9 @@ async def schedule_task(db: Session, workspace_id: UUID, params: Dict[str, Any])
         description=description,
         schedule=schedule,
         max_runs=params.get("max_runs"),
+        # PRD-205 S6: server-injected originating conversation (never an
+        # LLM-supplied arg) — the delivered output posts back here.
+        origin_chat_id=params.get("_origin_chat_id"),
     )
 
 

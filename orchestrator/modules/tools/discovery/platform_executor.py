@@ -1014,6 +1014,7 @@ class PlatformActionExecutor:
             "platform_create_mission",
             "platform_execute_playbook",
             "platform_execute_recipe",
+            "platform_schedule_task",
         )
         if action_name in _WATCH_ORIGIN_ACTIONS:
             _origin_chat = (caller_context or {}).get("conversation_id")
