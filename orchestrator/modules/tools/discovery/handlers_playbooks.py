@@ -487,7 +487,10 @@ async def execute_playbook(db: Session, workspace_id: UUID, params: Dict[str, An
     # committed separately AFTER the execution row so a watch problem can
     # never poison the launch transaction.
     try:
-        from modules.tools.discovery.handlers_watches import auto_create_watch
+        from modules.tools.discovery.handlers_watches import (
+            _origin_chat_id,
+            auto_create_watch,
+        )
 
         criteria = f"Playbook '{playbook.name}' completes and delivers its expected output."
         if input_data:
@@ -503,6 +506,7 @@ async def execute_playbook(db: Session, workspace_id: UUID, params: Dict[str, An
             target_type="playbook_execution",
             target_id=execution_id,
             title=f"Watch: {playbook.name[:80]}",
+            origin_chat_id=_origin_chat_id(params),
             success_criteria=criteria,
             created_by=(str(params.get("_created_by")) if params.get("_created_by") else None),
             owner_agent_id=(
