@@ -48,6 +48,7 @@ from api.widget_memory import router as widget_memory_router  # US-013: Widget m
 from api.analytics import router as analytics_router
 from api.workflow_history import router as workflow_history_router
 from api.memory_stats import router as memory_stats_router
+from api.memory_stats import admin_router as memory_stats_admin_router  # PRD-77: delete/consolidate stay super-admin (PRD-143 S7)
 from api.context_policy import router as context_policy_router
 from api.codegraph import router as codegraph_router  # PRD-11: New CodeGraph implementation
 from api.github_webhooks import router as github_webhooks_router  # GitHub PR automation
@@ -971,7 +972,8 @@ app.include_router(teams_router)  # PRD-158: Teams entity (list/create)
 app.include_router(blog_router)  # Authenticated blog management (Deliverables → Blogs)
 app.include_router(cache_router)  # Cache management and monitoring
 app.include_router(system_router)
-app.include_router(memory_stats_router)  # PRD-77 memory stats (/browse, /health, /stats/real)
+app.include_router(memory_stats_router)  # PRD-77 memory explorer reads (/browse, /health, /stats/real) — workspace-scoped, member-visible
+app.include_router(memory_stats_admin_router)  # PRD-77 memory mutations (delete/consolidate) — super-admin only (PRD-143 S7 obs tier)
 app.include_router(widget_memory_router)  # US-013: Widget memory panel (/api/memory)
 app.include_router(analytics_router)
 app.include_router(workflow_history_router)
