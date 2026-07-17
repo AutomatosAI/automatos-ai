@@ -1696,3 +1696,30 @@ class BlogPost(Base):
         return d
 
 
+class DigestFeedback(Base):
+    """PRD-221 S10 — thumbs up/down on an Auto's Read digest.
+
+    Keyed by the digest's ``state_hash`` (not a digest row — the digest is
+    cache-only), so feedback attaches to the workspace state the read
+    described. One row per rating event; the endpoint validates rating ∈ {-1, 1}.
+    """
+
+    __tablename__ = "digest_feedback"
+    __table_args__ = (
+        CheckConstraint("rating IN (-1, 1)", name="ck_digest_feedback_rating"),
+        Index("ix_digest_feedback_workspace", "workspace_id"),
+        {"extend_existing": True},
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    workspace_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id = Column(String(255), nullable=True)
+    state_hash = Column(String(64), nullable=False)
+    rating = Column(Integer, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+

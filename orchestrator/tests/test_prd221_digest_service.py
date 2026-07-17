@@ -52,7 +52,9 @@ def _mock_snapshot(monkeypatch, items, stats=None):
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    # asyncio.get_event_loop() raises on 3.11+ in a thread with no running loop;
+    # asyncio.run() creates and tears down its own loop each call.
+    return asyncio.run(coro)
 
 
 def test_digest_cache_hit_skips_llm(monkeypatch):
