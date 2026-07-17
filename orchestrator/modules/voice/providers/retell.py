@@ -49,6 +49,11 @@ class RetellLLMRequest:
     workspace_id: Optional[str]
     agent_id: Optional[str]
     call_id: Optional[str]
+    # PRD-207 S2: who is talking and which on-screen thread to bind — set by
+    # the S1 mint as dynamic variables; cross-validated against the mint row
+    # before anything is written (HMAC alone never authorises binding).
+    user_id: Optional[str] = None
+    chat_id: Optional[str] = None
 
 
 def parse_llm_request(payload: Dict[str, Any]) -> RetellLLMRequest:
@@ -75,6 +80,8 @@ def parse_llm_request(payload: Dict[str, Any]) -> RetellLLMRequest:
     workspace_id = dynamic.get("workspace_id") or None
     agent_id = dynamic.get("agent_id") or None
     call_id = call.get("call_id") or None
+    user_id = dynamic.get("user_id") or None
+    chat_id = dynamic.get("chat_id") or None
 
     return RetellLLMRequest(
         response_id=response_id,
@@ -83,6 +90,8 @@ def parse_llm_request(payload: Dict[str, Any]) -> RetellLLMRequest:
         workspace_id=str(workspace_id) if workspace_id else None,
         agent_id=str(agent_id) if agent_id else None,
         call_id=str(call_id) if call_id else None,
+        user_id=str(user_id) if user_id else None,
+        chat_id=str(chat_id) if chat_id else None,
     )
 
 

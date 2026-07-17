@@ -451,3 +451,301 @@ def test_mint_refuses_binding_to_someone_elses_chat(monkeypatch):
         )
     assert exc.value.status_code == 403
     assert "your own chat" in exc.value.detail
+
+
+# ---------------------------------------------------------------------------
+# S2 · parse — the webhook reads the binding vars
+# ---------------------------------------------------------------------------
+
+def test_parse_llm_request_extracts_binding_vars():
+    from modules.voice.providers.retell import parse_llm_request
+
+    req = parse_llm_request(
+        {
+            "response_id": 3,
+            "interaction_type": "response_required",
+            "transcript": [{"role": "user", "content": "hey auto"}],
+            "call": {
+                "call_id": "call_1",
+                "retell_llm_dynamic_variables": {
+                    "workspace_id": "ws-1",
+                    "user_id": "7",
+                    "chat_id": "chat-9",
+                    "agent_id": "2",
+                },
+            },
+        }
+    )
+    assert (req.user_id, req.chat_id) == ("7", "chat-9")
+    assert req.workspace_id == "ws-1" and req.call_id == "call_1"
+
+
+def test_parse_llm_request_binding_vars_default_none():
+    from modules.voice.providers.retell import parse_llm_request
+
+    req = parse_llm_request({"interaction_type": "reminder_required", "response_id": 0})
+    assert req.user_id is None and req.chat_id is None
+
+
+# ---------------------------------------------------------------------------
+# S2 · the trust boundary (DB seam — PRD-205 idiom: skip without Postgres)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def engine():
+    from sqlalchemy import create_engine, text
+
+    from core.database.database import get_database_url
+
+    try:
+        eng = create_engine(get_database_url(), pool_pre_ping=True)
+        with eng.connect() as c:
+            c.execute(text("SELECT call_id, fallback_chat_id FROM voice_calls LIMIT 1"))
+            c.execute(text("SELECT source FROM messages LIMIT 1"))
+    except Exception as exc:  # noqa: BLE001
+        pytest.skip(f"voice-live suite needs Postgres with the 207 schema: {exc}")
+    yield eng
+    eng.dispose()
+
+
+@pytest.fixture
+def new_session(engine):
+    from sqlalchemy.orm import sessionmaker
+
+    maker = sessionmaker(bind=engine)
+    sessions = []
+
+    def _make():
+        s = maker()
+        sessions.append(s)
+        return s
+
+    yield _make
+    for s in sessions:
+        try:
+            s.rollback()
+            s.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+@pytest.fixture
+def voice_workspace(engine, new_session):
+    """A workspace + two real users (member owns it) + the owner's chat."""
+    from sqlalchemy import text
+
+    s = new_session()
+    ws_id = str(uuid.uuid4())
+    marker = uuid.uuid4().hex[:10]
+    s.execute(
+        text(
+            "INSERT INTO workspaces (id, name) "
+            "VALUES (CAST(:id AS uuid), :n) ON CONFLICT (id) DO NOTHING"
+        ),
+        {"id": ws_id, "n": f"voice-ws-{marker}"},
+    )
+    uids = []
+    for i in range(2):
+        uname = f"voice_{marker}_{i}"
+        row = s.execute(
+            text(
+                "INSERT INTO users (username, email, clerk_user_id) "
+                "VALUES (:un, :em, :cid) RETURNING id"
+            ),
+            {"un": uname, "em": f"{uname}@test.local", "cid": f"user_{uname}"},
+        ).fetchone()
+        uids.append(int(row[0]))
+    s.execute(
+        text(
+            "INSERT INTO workspace_members (workspace_id, user_id, role) "
+            "VALUES (CAST(:ws AS uuid), :u, 'owner')"
+        ),
+        {"ws": ws_id, "u": uids[0]},
+    )
+    chat_id = str(uuid.uuid4())
+    s.execute(
+        text(
+            "INSERT INTO chats (id, user_id, workspace_id, title) "
+            "VALUES (CAST(:id AS uuid), :u, CAST(:ws AS uuid), 'my thread')"
+        ),
+        {"id": chat_id, "u": uids[0], "ws": ws_id},
+    )
+    s.commit()
+
+    yield SimpleNamespace(ws_id=ws_id, owner=uids[0], other=uids[1], chat_id=chat_id)
+
+    sweep = new_session()
+    for stmt, params in (
+        ("DELETE FROM voice_turns WHERE workspace_id = CAST(:ws AS uuid)", {"ws": ws_id}),
+        ("DELETE FROM voice_calls WHERE workspace_id = CAST(:ws AS uuid)", {"ws": ws_id}),
+        ("DELETE FROM messages WHERE workspace_id = CAST(:ws AS uuid)", {"ws": ws_id}),
+        ("DELETE FROM chats WHERE workspace_id = CAST(:ws AS uuid)", {"ws": ws_id}),
+        ("DELETE FROM workspace_members WHERE workspace_id = CAST(:ws AS uuid)", {"ws": ws_id}),
+        ("DELETE FROM workspaces WHERE id = CAST(:ws AS uuid)", {"ws": ws_id}),
+        ("DELETE FROM users WHERE id = ANY(:ids)", {"ids": uids}),
+    ):
+        sweep.execute(text(stmt), params)
+    sweep.commit()
+
+
+def _mint_row(session, *, call_id, ws_id, user_id, chat_id=None):
+    from sqlalchemy import text
+
+    session.execute(
+        text(
+            "INSERT INTO voice_calls (call_id, workspace_id, user_id, chat_id, status) "
+            "VALUES (:c, CAST(:ws AS uuid), :u, :chat, 'minted')"
+        ),
+        {"c": call_id, "ws": ws_id, "u": user_id, "chat": chat_id},
+    )
+    session.commit()
+
+
+def test_webhook_binds_to_existing_chat_and_user(voice_workspace, new_session):
+    from modules.voice.call_binding import resolve_call_binding
+
+    s = new_session()
+    _mint_row(
+        s, call_id="call_bind1", ws_id=voice_workspace.ws_id,
+        user_id=voice_workspace.owner, chat_id=voice_workspace.chat_id,
+    )
+    b = resolve_call_binding(
+        s,
+        call_id="call_bind1",
+        workspace_id=voice_workspace.ws_id,
+        user_id_var=str(voice_workspace.owner),
+        chat_id_var=voice_workspace.chat_id,
+        first_text="hello",
+    )
+    assert b is not None and b.bound is True
+    assert b.chat_id == voice_workspace.chat_id  # the on-screen thread IS the transcript
+    assert b.user_id == voice_workspace.owner
+
+
+def test_webhook_rejects_vars_mismatching_mint_row(voice_workspace, new_session):
+    from modules.voice.call_binding import resolve_call_binding
+
+    s = new_session()
+    _mint_row(
+        s, call_id="call_bind2", ws_id=voice_workspace.ws_id,
+        user_id=voice_workspace.owner, chat_id=voice_workspace.chat_id,
+    )
+    # var claims a DIFFERENT user than the mint row proved → never the bound thread
+    b = resolve_call_binding(
+        s,
+        call_id="call_bind2",
+        workspace_id=voice_workspace.ws_id,
+        user_id_var=str(voice_workspace.other),
+        chat_id_var=voice_workspace.chat_id,
+        first_text="spoof",
+    )
+    assert b is not None and b.bound is False
+    assert b.chat_id != voice_workspace.chat_id  # fail-closed to the per-call chat
+    assert b.user_id == voice_workspace.owner  # attributed to the MINT-proven user
+
+
+def test_webhook_rejects_workspace_mismatch_outright(voice_workspace, new_session):
+    from modules.voice.call_binding import resolve_call_binding
+
+    s = new_session()
+    _mint_row(
+        s, call_id="call_bind3", ws_id=voice_workspace.ws_id,
+        user_id=voice_workspace.owner, chat_id=voice_workspace.chat_id,
+    )
+    b = resolve_call_binding(
+        s,
+        call_id="call_bind3",
+        workspace_id=str(uuid.uuid4()),  # not the minted workspace
+        user_id_var=str(voice_workspace.owner),
+        chat_id_var=voice_workspace.chat_id,
+    )
+    assert b is None  # no proven workspace → refuse the turn entirely
+
+
+def test_webhook_fallback_chat_is_stable_across_turns(voice_workspace, new_session):
+    """The per-turn-chat bug is dead: two turns of one call share ONE thread."""
+    from modules.voice.call_binding import resolve_call_binding
+
+    s = new_session()
+    _mint_row(
+        s, call_id="call_bind4", ws_id=voice_workspace.ws_id,
+        user_id=voice_workspace.owner, chat_id=None,  # welcome-screen mint: no thread yet
+    )
+    kwargs = dict(
+        call_id="call_bind4",
+        workspace_id=voice_workspace.ws_id,
+        user_id_var=str(voice_workspace.owner),
+        chat_id_var=None,
+        first_text="turn one",
+    )
+    b1 = resolve_call_binding(s, **kwargs)
+    b2 = resolve_call_binding(s, **kwargs)
+    assert b1 is not None and b2 is not None
+    assert b1.chat_id == b2.chat_id  # remembered on voice_calls.fallback_chat_id
+    assert b1.user_id == voice_workspace.owner
+
+
+def test_phone_lane_attributes_to_workspace_steward(voice_workspace, new_session):
+    """Unminted call (phone lane): loud orphan row + steward attribution —
+    the old user_id=0 fallback violated the chats.user_id FK and could never
+    have worked."""
+    from sqlalchemy import text
+
+    from modules.voice.call_binding import resolve_call_binding
+
+    s = new_session()
+    b = resolve_call_binding(
+        s,
+        call_id="call_phone1",
+        workspace_id=voice_workspace.ws_id,
+        user_id_var=None,
+        chat_id_var=None,
+        first_text="phone hello",
+    )
+    assert b is not None and b.bound is False
+    assert b.user_id == voice_workspace.owner  # the earliest owner is the steward
+    row = s.execute(
+        text("SELECT status, fallback_chat_id FROM voice_calls WHERE call_id = 'call_phone1'")
+    ).fetchone()
+    assert row is not None and row[1] == b.chat_id  # orphan registered for reuse
+
+
+def test_assistant_stamp_bounded_to_turn_window(voice_workspace, new_session):
+    from datetime import datetime, timedelta
+
+    from sqlalchemy import text
+
+    from modules.voice.call_binding import stamp_assistant_voice_source
+
+    s = new_session()
+    turn_start = datetime.utcnow()
+    old = str(uuid.uuid4())
+    fresh = str(uuid.uuid4())
+    s.execute(
+        text(
+            "INSERT INTO messages (id, chat_id, workspace_id, role, parts, created_at) VALUES "
+            "(CAST(:old AS uuid), CAST(:chat AS uuid), CAST(:ws AS uuid), 'assistant', '[]', :before), "
+            "(CAST(:fresh AS uuid), CAST(:chat AS uuid), CAST(:ws AS uuid), 'assistant', '[]', :after)"
+        ),
+        {
+            "old": old, "fresh": fresh, "chat": voice_workspace.chat_id,
+            "ws": voice_workspace.ws_id,
+            "before": turn_start - timedelta(minutes=5),
+            "after": turn_start + timedelta(seconds=1),
+        },
+    )
+    s.commit()
+
+    stamped = stamp_assistant_voice_source(
+        s, chat_id=voice_workspace.chat_id, turn_started_at=turn_start
+    )
+    assert stamped == 1
+    rows = {
+        str(r[0]): r[1]
+        for r in s.execute(
+            text("SELECT id, source FROM messages WHERE chat_id = CAST(:c AS uuid)"),
+            {"c": voice_workspace.chat_id},
+        ).fetchall()
+    }
+    assert rows[old] is None  # the pre-turn text reply keeps no voice badge
+    assert rows[fresh] == {"origin": "voice", "label": "Auto · voice"}

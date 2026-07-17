@@ -216,34 +216,57 @@ async def _single_complete(response_id: int) -> AsyncIterator[str]:
 async def _agent_retell_stream(req: RetellLLMRequest) -> AsyncIterator[dict[str, Any]]:
     """Drive Auto's agent loop for one Retell turn and yield Retell frames.
 
-    Reuses the proven chat bridge (``ChatService`` + ``StreamingChatService``):
-    the conversation is keyed by the Retell ``call_id`` so multi-turn calls
-    continue with memory/context, and each streamed chunk becomes a Retell frame
-    the instant it arrives (``retell_response_frames`` owns that streaming property).
+    PRD-207 S2 rewired this onto the mint-row trust boundary
+    (``resolve_call_binding``): a web call launched from /chat writes into the
+    on-screen thread attributed to the REAL user (memory owner/Q7 scoping and
+    thread checkpoints now cover spoken conversations); anything unproven
+    falls closed to a per-call chat. That also fixes two latent faults in the
+    merged-unarmed lane: ``get_chat("retell:{call_id}")`` can never parse as a
+    UUID (→ a NEW chat every TURN, multi-turn calls lost their history) and
+    ``create_chat(user_id=0)`` violates the NOT-NULL FK to ``users``.
+
+    S6: both turn messages carry the persisted voice source; a
+    ``chat_changed`` NOTIFY lets the open thread receive them live.
+    S8: one ``voice_turns`` row per turn — the judging metric exists from
+    day one (webhook-receipt → stream-close; vendor-side STT/TTS honestly 0).
     """
+    from datetime import datetime as _dt
+    from time import monotonic
+
     from consumers.chatbot import ChatService, StreamingChatService
+    from modules.voice.call_binding import (
+        resolve_call_binding,
+        stamp_assistant_voice_source,
+        voice_source,
+    )
+
+    turn_t0 = monotonic()
+    turn_started_at = _dt.utcnow()
 
     with get_db_session() as db:
+        binding = resolve_call_binding(
+            db,
+            call_id=req.call_id,
+            workspace_id=req.workspace_id,
+            user_id_var=req.user_id,
+            chat_id_var=req.chat_id,
+            first_text=req.user_text,
+        )
+        if binding is None:
+            # No safe place to write (logged LOUD upstream) — close the turn.
+            yield {"response_id": req.response_id, "content": "", "content_complete": True}
+            return
+
         chat_service = ChatService(db)
-        streaming_service = StreamingChatService(db, workspace_id=req.workspace_id)
-
-        ws_uuid = uuid.UUID(req.workspace_id)
-        conversation_id = f"retell:{req.call_id or req.workspace_id}"
-
-        chat = chat_service.get_chat(conversation_id, workspace_id=ws_uuid)
-        if not chat:
-            chat = chat_service.create_chat(
-                user_id=0,  # webhook principal — no interactive user
-                title=(req.user_text or "Voice call")[:50],
-                workspace_id=ws_uuid,
-            )
-            conversation_id = str(chat.id)
+        streaming_service = StreamingChatService(db, workspace_id=binding.workspace_id)
+        conversation_id = binding.chat_id
 
         chat_service.save_message(
             chat_id=conversation_id,
             role="user",
             parts=[{"type": "text", "text": req.user_text}],
-            workspace_id=req.workspace_id,
+            workspace_id=binding.workspace_id,
+            source=voice_source("user"),
         )
 
         # Agent selection: an explicit dynamic-variable agent wins; otherwise the
@@ -257,7 +280,7 @@ async def _agent_retell_stream(req: RetellLLMRequest) -> AsyncIterator[dict[str,
             except (TypeError, ValueError):
                 agent_id = None
         if agent_id is None:
-            agent_id = get_default_agent_id(db, req.workspace_id)
+            agent_id = get_default_agent_id(db, binding.workspace_id)
 
         messages = chat_service.get_messages_by_chat_id(conversation_id)
         message_history = [{"role": m.role, "parts": m.parts} for m in messages]
@@ -266,23 +289,64 @@ async def _agent_retell_stream(req: RetellLLMRequest) -> AsyncIterator[dict[str,
             chat_id=conversation_id,
             messages=message_history,
             agent_id=agent_id,
-            user_id=0,
+            user_id=binding.user_id,
             use_orchestrator_llm=True,
         )
 
+        response_chars = 0
         async for frame in retell_response_frames(req.response_id, agent_chunks):
+            response_chars += len(frame.get("content") or "")
             yield frame
+
+        # S6 — stamp this turn's assistant reply + let the open thread hear it.
+        try:
+            stamp_assistant_voice_source(
+                db, chat_id=conversation_id, turn_started_at=turn_started_at
+            )
+            from services.board_events import notify_chat_event
+
+            notify_chat_event(
+                db,
+                workspace_id=binding.workspace_id,
+                chat_id=conversation_id,
+                user_id=binding.user_id,
+            )
+        except Exception:  # noqa: BLE001 — provenance/notify never fail a turn
+            logger.debug("voice turn stamp/notify failed", exc_info=True)
+
+    # S8 — telemetry parity (fire-and-forget, own session, never raises).
+    # STT/TTS run vendor-side: honestly 0, not faked. audio_delivered means
+    # content frames actually went to the vendor's TTS this turn.
+    from modules.voice.telemetry import record_voice_turn
+
+    record_voice_turn(
+        workspace_id=binding.workspace_id,
+        conversation_id=conversation_id,
+        message_id=None,
+        call_id=req.call_id,
+        stt_latency_ms=0,
+        tts_latency_ms=0,
+        total_ms=(monotonic() - turn_t0) * 1000.0,
+        transcript=req.user_text,
+        response_text="x" * response_chars,  # lengths-only discipline: only len() is stored
+        truncated=False,
+        audio_delivered=response_chars > 0,
+    )
 
 
 @router.post("/api/voice/retell/llm")
 async def retell_llm_webhook(request: Request) -> StreamingResponse:
     """Retell custom-LLM webhook — stream Auto's reply back as Retell frames."""
-    if not config.VOICE_ENABLED:
-        raise HTTPException(status_code=503, detail="Voice features are disabled")
+    # PRD-207 S4: the settings toggle is the master switch for the WHOLE
+    # Retell lane — flipping it off in Settings kills in-flight speech too
+    # (the "instant platform-wide kill" promise), no redeploy.
+    if not live_settings.voice_live_enabled():
+        raise HTTPException(status_code=503, detail="Auto Live is switched off platform-wide")
 
     body = await request.body()
     signature = request.headers.get("x-retell-signature")
-    if not verify_webhook_signature(config.RETELL_WEBHOOK_SECRET, signature, body):
+    secret = live_settings.retell_credentials().webhook_secret
+    if not verify_webhook_signature(secret, signature, body):
         # Fail-closed: unsigned/unconfigured/mismatched → never drive the agent.
         raise HTTPException(status_code=401, detail="Invalid Retell webhook signature")
 
