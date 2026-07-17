@@ -93,6 +93,10 @@ class GoldQuery:
     # these count toward the task-lift A/B (a general-knowledge query gets no
     # honest lift from memory).
     memory_dependent: bool
+    # PRD-206 S10: the eval slice this query belongs to. "core" = the original
+    # fact-recall set; "continuity" = resume / decision-recall / open-loop
+    # queries (the auntie layer's before/after number). Reported per slice.
+    slice: str = "core"
 
 
 @dataclass
@@ -111,6 +115,10 @@ class TenantResult:
 @dataclass
 class MemoryRecallReport:
     tenants: List[TenantResult] = field(default_factory=list)
+    # PRD-206 S10: per-slice breakdown across all tenants —
+    # {slice: {"n": int, "recall_at_5": float, "mrr": float}}. The continuity
+    # slice is the before/after number the auntie layer answers to.
+    slices: Dict[str, Dict[str, float]] = field(default_factory=dict)
 
     def _mean(self, attr: str) -> float:
         if not self.tenants:
@@ -141,6 +149,14 @@ class MemoryRecallReport:
             "mean_mrr": round(self.mean_mrr, 4),
             "mean_task_lift_points": round(self.mean_task_lift_points, 2),
             "passes": self.passes,
+            "slices": {
+                name: {
+                    "n": int(stats["n"]),
+                    "recall_at_5": round(stats["recall_at_5"], 4),
+                    "mrr": round(stats["mrr"], 4),
+                }
+                for name, stats in sorted(self.slices.items())
+            },
             "tenants": [
                 {
                     "workspace_id": t.workspace_id,
@@ -256,6 +272,11 @@ def run_memory_recall_eval(
         gold_by_tenant[q.workspace_id].append(q)
 
     report = MemoryRecallReport()
+    # PRD-206 S10: per-slice accumulators across ALL tenants (a slice is a
+    # query family — core fact-recall vs continuity — not a tenant).
+    slice_sums: Dict[str, Dict[str, float]] = defaultdict(
+        lambda: {"n": 0.0, "r5": 0.0, "mrr": 0.0}
+    )
     for ws in sorted(gold_by_tenant):
         queries = gold_by_tenant[ws]
         retriever = factory(corpus_by_tenant.get(ws, []))
@@ -265,10 +286,16 @@ def run_memory_recall_eval(
         n_dependent = 0
         for q in queries:
             ranked = retriever(q.query)
+            q_r5 = _recall_at_k(ranked, q.relevant_ids, TOP_K)
+            q_mrr = _reciprocal_rank(ranked, q.relevant_ids, TOP_K)
             r1 += _recall_at_k(ranked, q.relevant_ids, 1)
             r3 += _recall_at_k(ranked, q.relevant_ids, 3)
-            r5 += _recall_at_k(ranked, q.relevant_ids, TOP_K)
-            mrr += _reciprocal_rank(ranked, q.relevant_ids, TOP_K)
+            r5 += q_r5
+            mrr += q_mrr
+            bucket = slice_sums[q.slice or "core"]
+            bucket["n"] += 1
+            bucket["r5"] += q_r5
+            bucket["mrr"] += q_mrr
             if q.memory_dependent:
                 n_dependent += 1
                 # "with memory" answerability: the needed fact is in the top-k.
@@ -295,6 +322,14 @@ def run_memory_recall_eval(
                 task_lift_points=task_lift_points,
             )
         )
+    report.slices = {
+        name: {
+            "n": sums["n"],
+            "recall_at_5": (sums["r5"] / sums["n"]) if sums["n"] else 0.0,
+            "mrr": (sums["mrr"] / sums["n"]) if sums["n"] else 0.0,
+        }
+        for name, sums in slice_sums.items()
+    }
     return report
 
 
@@ -337,6 +372,7 @@ def load_gold_set(path: Path = _DEFAULT_GOLD_SET) -> List[GoldQuery]:
             category=r.get("category", "uncategorized"),
             difficulty=r.get("difficulty", "medium"),
             memory_dependent=bool(r.get("memory_dependent", True)),
+            slice=r.get("slice", "core"),
         )
         for r in _read_jsonl(path)
     ]
@@ -362,6 +398,18 @@ def render_report(report: MemoryRecallReport) -> str:
             f"{t.recall_at_3*100:.1f}% | {t.recall_at_5*100:.1f}% | {t.mrr:.3f} | "
             f"{t.n_dependent} | {t.task_lift_points:+.1f} |"
         )
+    if report.slices:
+        lines += [
+            "",
+            "| slice | n(q) | recall@5 | MRR |",
+            "| --- | --- | --- | --- |",
+        ]
+        for name in sorted(report.slices):
+            stats = report.slices[name]
+            lines.append(
+                f"| {name} | {int(stats['n'])} | {stats['recall_at_5']*100:.1f}% "
+                f"| {stats['mrr']:.3f} |"
+            )
     lines += [
         "",
         f"**Mean recall@5: {report.mean_recall_at_5*100:.1f}%** "
