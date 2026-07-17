@@ -55,9 +55,13 @@ interface UseRetellCallOptions {
   /** Bind the call to this on-screen thread (omit when the chat has no server row yet). */
   chatId?: string | null
   agentId?: number | null
+  /** Fires with the call's thread id (server-created when none was bound) —
+   * the chat screen points itself at it so voice and text are ONE
+   * conversation, visible while speaking. */
+  onChatId?: (chatId: string) => void
 }
 
-export function useRetellCall({ chatId, agentId }: UseRetellCallOptions): UseRetellCallReturn {
+export function useRetellCall({ chatId, agentId, onChatId }: UseRetellCallOptions): UseRetellCallReturn {
   const [snap, setSnap] = useState<OrbSnapshot>(initialOrb)
   const [captions, setCaptions] = useState<CaptionLine[]>([])
   const [durationSec, setDurationSec] = useState(0)
@@ -135,22 +139,26 @@ export function useRetellCall({ chatId, agentId }: UseRetellCallOptions): UseRet
 
     // 1 — mint (every refusal reason here is user-facing truth: platform off,
     // not armed, workspace off, over budget).
-    let minted: { call_id: string; access_token: string }
+    let minted: { call_id: string; access_token: string; chat_id?: string | null }
     try {
-      minted = await apiClient.request<{ call_id: string; access_token: string }>(
-        '/api/voice/web-call',
-        {
-          method: 'POST',
-          body: {
-            ...(chatId ? { chat_id: chatId } : {}),
-            ...(agentId ? { agent_id: agentId } : {}),
-          } as any,
-        }
-      )
+      minted = await apiClient.request<{
+        call_id: string
+        access_token: string
+        chat_id?: string | null
+      }>('/api/voice/web-call', {
+        method: 'POST',
+        body: {
+          ...(chatId ? { chat_id: chatId } : {}),
+          ...(agentId ? { agent_id: agentId } : {}),
+        } as any,
+      })
     } catch (err: any) {
       setRefusal(err?.message || 'Live voice is unavailable right now')
       dispatch({ type: 'error' })
       return
+    }
+    if (minted.chat_id) {
+      onChatId?.(minted.chat_id)
     }
 
     // 2 — connect (the token dies in ~30s unused; go now).
@@ -235,7 +243,7 @@ export function useRetellCall({ chatId, agentId }: UseRetellCallOptions): UseRet
       // No analyser is cosmetic-only: the call still works, the orb just
       // won't react to the user's voice.
     }
-  }, [agentId, chatId, dispatch, stop, teardown])
+  }, [agentId, chatId, onChatId, dispatch, stop, teardown])
 
   useEffect(() => () => teardown(), [teardown])
 

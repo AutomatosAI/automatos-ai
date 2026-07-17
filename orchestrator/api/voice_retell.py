@@ -154,7 +154,10 @@ async def mint_web_call(
 
     # Bind-target validation at mint: the chat must be the caller's own thread
     # in THIS workspace — refuse honestly rather than mint a lie the webhook
-    # would then reject (§7.5-1/2).
+    # would then reject (§7.5-1/2). No chat on screen yet? CREATE the thread
+    # here and hand its id back — voice and text are the SAME conversation,
+    # visible while you speak, typeable when you hang up (Gerard's first-call
+    # feedback: the transcript must never land in an invisible side thread).
     bound_chat_id: Optional[str] = None
     if body.chat_id:
         try:
@@ -171,6 +174,15 @@ async def mint_web_call(
         if int(chat.user_id) != int(user_int_id):
             raise HTTPException(status_code=403, detail="You can only bind a live call to your own chat")
         bound_chat_id = str(chat_uuid)
+    else:
+        from consumers.chatbot.service import ChatService
+
+        chat = ChatService(db).create_chat(
+            user_id=int(user_int_id),
+            title="Voice call",
+            workspace_id=ctx.workspace_id,
+        )
+        bound_chat_id = str(chat.id)
 
     dynamic_vars = {
         "workspace_id": str(ctx.workspace_id),
@@ -213,7 +225,13 @@ async def mint_web_call(
         web_call.call_id, ctx.workspace_id, user_int_id, bound_chat_id,
     )
     # The token dies in ~30s unused — the client connects immediately.
-    return {"call_id": web_call.call_id, "access_token": web_call.access_token}
+    # chat_id lets the screen point at the call's thread: one conversation,
+    # spoken and typed.
+    return {
+        "call_id": web_call.call_id,
+        "access_token": web_call.access_token,
+        "chat_id": bound_chat_id,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -509,8 +527,18 @@ async def _agent_retell_stream(req: RetellLLMRequest) -> AsyncIterator[dict[str,
         if agent_id is None:
             agent_id = get_default_agent_id(db, binding.workspace_id)
 
+        # VOICE FAST PATH (first live calls measured MINUTES per turn — the
+        # full chat pipeline is built for screens, not speech):
+        # * history is the recent conversation, not the archive — Retell holds
+        #   the floor open while we re-read old messages;
+        # * force_text_only: widget/tool-data payload assembly is meaningless
+        #   to a voice — words only;
+        # * skip_composio: external tool loops are tens of seconds of dead
+        #   air mid-call. Auto says what it knows; deep work belongs to text
+        #   turns or background missions.
         messages = chat_service.get_messages_by_chat_id(conversation_id)
-        message_history = [{"role": m.role, "parts": m.parts} for m in messages]
+        recent = messages[-int(config.VOICE_LIVE_TURN_HISTORY_MESSAGES):]
+        message_history = [{"role": m.role, "parts": m.parts} for m in recent]
 
         agent_chunks = streaming_service.stream_response_with_agent(
             chat_id=conversation_id,
@@ -518,6 +546,8 @@ async def _agent_retell_stream(req: RetellLLMRequest) -> AsyncIterator[dict[str,
             agent_id=agent_id,
             user_id=binding.user_id,
             use_orchestrator_llm=True,
+            force_text_only=True,
+            skip_composio=True,
         )
 
         response_chars = 0

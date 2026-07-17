@@ -1276,6 +1276,12 @@ class Config:
         os.getenv("VOICE_LIVE_ACTIVE_CALL_RESERVE_MINUTES", "10")
     )
     VOICE_LIVE_MAX_CALL_MINUTES: int = int(os.getenv("VOICE_LIVE_MAX_CALL_MINUTES", "30"))
+    # Spoken turns ride a FAST PATH: only this many recent messages feed the
+    # prompt (a call is a conversation, not an archive replay) — first-token
+    # time is the product in voice.
+    VOICE_LIVE_TURN_HISTORY_MESSAGES: int = int(
+        os.getenv("VOICE_LIVE_TURN_HISTORY_MESSAGES", "12")
+    )
     # The public host Retell must reach for the custom-LLM socket + events
     # webhook (one-click arming builds the URLs from it). Railway injects
     # RAILWAY_PUBLIC_DOMAIN; override with PUBLIC_API_HOST where that's absent.
