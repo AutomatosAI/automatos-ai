@@ -5,8 +5,9 @@ Covers the three backend changes:
 1. Route order — ``GET /api/chat/search`` must be registered BEFORE
    ``GET /api/chat/{chat_id}``. Routes match in declaration order, so the old
    placement resolved ``/api/chat/search`` as ``chat_id="search"`` and 404'd.
-2. ``_inject_page_context`` — the widget's page hint is added prompt-side only,
+2. page-context injection — the widget's page hint is added prompt-side only,
    AFTER the clean save, by rebuilding (never mutating) the history entries.
+   (PRD-221 S2 moved this to ``services.page_context``; invariants preserved.)
 3. ``_last_message_previews`` — thread-list previews for ``GET /api/chat/history``.
 
 Pure unit tests — no DB / network (db is mocked), matching
@@ -45,17 +46,26 @@ def test_search_route_registered_before_chat_id_param_route():
 
 
 # ---------------------------------------------------------------------------
-# 2. _inject_page_context
+# 2. page-context injection — PRD-221 S2 replaced the old ``_inject_page_context``
+#    helper with the ``services.page_context`` pipeline (sanitize → render →
+#    inject). The invariants below (last-user-only, rebuild-never-mutate, noop
+#    on empty, legacy-label truncation) are preserved through a legacy
+#    ``{"page": <label>}`` context, which renders via the same one renderer.
+#    Structured-context behaviour is covered in test_prd221_page_context.py.
 # ---------------------------------------------------------------------------
 
+def _inject(history, page_label):
+    from services.page_context import inject_page_preamble
+    return inject_page_preamble(history, {"page": page_label} if page_label else {})
+
+
 def test_page_context_appended_to_last_user_message_only():
-    chat_module = _api_chat()
     history = [
         {"role": "user", "parts": [{"type": "text", "text": "first"}]},
         {"role": "assistant", "parts": [{"type": "text", "text": "reply"}]},
         {"role": "user", "parts": [{"type": "text", "text": "second"}]},
     ]
-    out = chat_module._inject_page_context(history, "Dashboard")
+    out = _inject(history, "Dashboard")
 
     assert len(out) == 3
     # Earlier messages untouched (same objects — no rebuild needed for them).
@@ -70,11 +80,10 @@ def test_page_context_appended_to_last_user_message_only():
 
 def test_page_context_never_mutates_inputs():
     """The parts list is the ORM row's JSONB — in-place edits could get flushed."""
-    chat_module = _api_chat()
     original_parts = [{"type": "text", "text": "hello"}]
     history = [{"role": "user", "parts": original_parts}]
 
-    out = chat_module._inject_page_context(history, "Agent Management")
+    out = _inject(history, "Agent Management")
 
     assert original_parts == [{"type": "text", "text": "hello"}]
     assert history[0]["parts"] is original_parts
@@ -83,25 +92,23 @@ def test_page_context_never_mutates_inputs():
 
 
 def test_page_context_noop_when_absent_blank_or_no_user_message():
-    chat_module = _api_chat()
     history = [{"role": "user", "parts": [{"type": "text", "text": "hi"}]}]
 
-    assert chat_module._inject_page_context(history, None) is history
-    assert chat_module._inject_page_context(history, "") is history
-    assert chat_module._inject_page_context(history, "   ") is history
-    assert chat_module._inject_page_context(history, 42) is history
+    assert _inject(history, None) is history
+    assert _inject(history, "") is history
+    assert _inject(history, "   ") is history
 
     assistant_only = [{"role": "assistant", "parts": [{"type": "text", "text": "yo"}]}]
-    assert chat_module._inject_page_context(assistant_only, "Dashboard") is assistant_only
+    assert _inject(assistant_only, "Dashboard") is assistant_only
 
 
 def test_page_context_label_is_truncated():
-    chat_module = _api_chat()
+    from services.page_context import _LEGACY_LABEL_MAX_LEN
     history = [{"role": "user", "parts": [{"type": "text", "text": "hi"}]}]
-    out = chat_module._inject_page_context(history, "x" * 500)
+    out = _inject(history, "x" * 500)
     hint_text = out[0]["parts"][1]["text"]
-    assert "x" * chat_module._PAGE_CONTEXT_MAX_LEN in hint_text
-    assert "x" * (chat_module._PAGE_CONTEXT_MAX_LEN + 1) not in hint_text
+    assert "x" * _LEGACY_LABEL_MAX_LEN in hint_text
+    assert "x" * (_LEGACY_LABEL_MAX_LEN + 1) not in hint_text
 
 
 # ---------------------------------------------------------------------------
