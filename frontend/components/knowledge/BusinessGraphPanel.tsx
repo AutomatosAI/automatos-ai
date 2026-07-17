@@ -58,6 +58,11 @@ const graphQueryKeys = {
   meta: (wsId: string) => ['business-graph', 'meta', wsId] as const,
 }
 
+/** Max legend chips rendered per section before the title switches to a
+ *  "top N/total" summary — keeps a free-text-heavy graph from flooding the
+ *  legend over the canvas (paired with the height-bounded GraphLegend). */
+const MAX_LEGEND_CHIPS = 12
+
 // ─── Component ──────────────────────────────────────────
 
 export function BusinessGraphPanel() {
@@ -332,24 +337,33 @@ export function BusinessGraphPanel() {
     return new Set(relationChips.filter((c) => !hiddenRelSet.has(c.relation)).map((c) => c.relation))
   }, [hiddenRelSet, relationChips])
 
-  const legendSections: LegendSection[] = useMemo(() => [
-    {
-      title: 'Nodes',
-      onToggle: toggleType,
-      chips: typeChips.map((c) => ({
-        key: c.type, label: c.label, color: c.color, count: c.count,
-        hidden: hiddenTypeSet.has(c.type),
-      })),
-    },
-    {
-      title: 'Edges',
-      onToggle: toggleRelation,
-      chips: relationChips.map((c) => ({
-        key: c.relation, label: c.label, color: c.color, count: c.count,
-        hidden: hiddenRelSet.has(c.relation),
-      })),
-    },
-  ], [typeChips, relationChips, hiddenTypeSet, hiddenRelSet, toggleType, toggleRelation])
+  // Cap chips per section: a general knowledge graph carries hundreds of
+  // free-text edge relations (each count 1) that flood the legend and bury the
+  // canvas. Chips are pre-sorted (curated order, then count desc), so the slice
+  // keeps the most meaningful ones and the title shows "top N/total" when
+  // truncated. The legend itself is height-bounded + scrollable for any residual.
+  const legendSections: LegendSection[] = useMemo(() => {
+    const cap = (title: string, total: number) =>
+      total > MAX_LEGEND_CHIPS ? `${title} · top ${MAX_LEGEND_CHIPS}/${total}` : title
+    return [
+      {
+        title: cap('Nodes', typeChips.length),
+        onToggle: toggleType,
+        chips: typeChips.slice(0, MAX_LEGEND_CHIPS).map((c) => ({
+          key: c.type, label: c.label, color: c.color, count: c.count,
+          hidden: hiddenTypeSet.has(c.type),
+        })),
+      },
+      {
+        title: cap('Edges', relationChips.length),
+        onToggle: toggleRelation,
+        chips: relationChips.slice(0, MAX_LEGEND_CHIPS).map((c) => ({
+          key: c.relation, label: c.label, color: c.color, count: c.count,
+          hidden: hiddenRelSet.has(c.relation),
+        })),
+      },
+    ]
+  }, [typeChips, relationChips, hiddenTypeSet, hiddenRelSet, toggleType, toggleRelation])
 
   const filteredData = useMemo((): GraphData | null => {
     if (!graphData) return null
