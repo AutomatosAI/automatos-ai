@@ -1,5 +1,5 @@
 {
-  "route_count": 769,
+  "route_count": 770,
   "routes": [
     {
       "method": "GET",
@@ -20,6 +20,10 @@
     {
       "method": "GET",
       "path": "/api/activity/board/stats"
+    },
+    {
+      "method": "GET",
+      "path": "/api/activity/digest"
     },
     {
       "method": "GET",

@@ -909,6 +909,10 @@ class Config:
     # page's manifest actions are unioned in with the semantic top-K. Bounds the
     # prompt cost of page-prior exposure; role gates still apply before the cap.
     TOOL_ROUTING_ENUM_CAP: int = int(os.getenv("TOOL_ROUTING_ENUM_CAP", "40"))
+    # PRD-221 S9: Auto's Read digest is cached per (workspace, state_hash) for
+    # this many seconds, so the digest LLM fires at most once per real state
+    # change rather than once per Command Centre pageview.
+    DIGEST_CACHE_TTL_S: int = int(os.getenv("DIGEST_CACHE_TTL_S", "900"))
     # Max seconds a live query embedding may take before narrowing falls back
     # to the full action enum (the embed keeps running and caches for next turn).
     SEMANTIC_TOOL_ROUTING_EMBED_TIMEOUT_S: float = float(os.getenv("SEMANTIC_TOOL_ROUTING_EMBED_TIMEOUT_S", "2.5"))

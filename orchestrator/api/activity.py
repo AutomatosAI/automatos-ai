@@ -20,6 +20,7 @@ from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db
 from core.models.core import Agent, BoardTask
 from services.activity_service import ActivityService
+from services.digest_service import generate_digest
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/activity", tags=["Activity"])
@@ -60,6 +61,26 @@ async def get_activity_feed(
     except Exception as e:
         logger.error("Activity feed error: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to fetch activity feed")
+
+
+@router.get("/digest")
+async def get_workspace_digest(
+    period: str = Query("1d", description="Time window: 1d, 7d, 30d, 90d"),
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """Auto's Read — a cached plain-English summary of the workspace (PRD-221 S9).
+
+    Cached per (workspace, state_hash): the digest LLM fires at most once per
+    real state change. Never 500s — a degraded model returns a deterministic
+    fallback. Response: {text, generated_at, state_hash, needs_attention_count}.
+    """
+    try:
+        return await generate_digest(db, ctx.workspace_id, period=period)
+    except Exception as e:
+        # Defence in depth — generate_digest already falls back internally.
+        logger.error("Digest error: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to build digest")
 
 
 @router.get("/schedule")
