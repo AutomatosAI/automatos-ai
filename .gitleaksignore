@@ -1,0 +1,8 @@
+# Gitleaks false-positive fingerprints (commit:file:rule:line).
+#
+# PRD-206 S1: the memory exclusion validator's OWN test fixture — a fake
+# "api_key = ..." string that exists precisely to prove such content is
+# REFUSED by the write path. The working-tree copy was defanged (runtime
+# string concatenation) right after, but the original literal lives in this
+# one historical commit blob, which the range scan keeps re-reading.
+7f653279595e32516ff1b182a620ffb1e1b258cd:orchestrator/tests/test_prd206_write_contract.py:generic-api-key:242
