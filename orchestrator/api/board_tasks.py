@@ -356,6 +356,12 @@ async def create_task(
     if attachment_ids and not isinstance(attachment_ids, list):
         raise HTTPException(status_code=422, detail="attachment_ids must be a list")
 
+    # PRD-221 S14: a caller (e.g. a Command Centre activity card) may attach
+    # the source it was created from, so the board card links back. Defaults
+    # to 'user' when absent — unchanged for every existing caller.
+    source_type = body.get("source_type", "user")
+    source_id = body.get("source_id")
+
     task = BoardTask(
         workspace_id=ctx.workspace_id,
         title=title,
@@ -368,6 +374,8 @@ async def create_task(
         created_by_type="user",
         created_by_id=ctx.user.clerk_user_id or ctx.user.id,
         parent_task_id=body.get("parent_task_id"),
+        source_type=source_type,
+        source_id=source_id,
         tags=body.get("tags", []),
         planning_data=planning_data,
         attachment_ids=attachment_ids,  # PRD-127
