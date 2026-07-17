@@ -211,6 +211,8 @@ export interface Chat {
   lastContext?: AppUsage
   /** PRD-220: latest message text (truncated server-side) for thread lists. */
   lastMessagePreview?: string | null
+  /** PRD-205: 'auto' marks the per-user thread where Auto speaks unprompted. */
+  kind?: 'user' | 'auto'
 }
 
 /**

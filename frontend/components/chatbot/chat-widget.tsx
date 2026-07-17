@@ -314,6 +314,12 @@ function AutoChatTab({ currentPage, onClose }: { currentPage: string; onClose?: 
                       <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
                         {thread.title}
                       </span>
+                      {/* PRD-205 S7: mark the thread where Auto speaks unprompted */}
+                      {thread.kind === 'auto' && (
+                        <span className="shrink-0 rounded-full border border-warning/20 bg-warning/10 px-1.5 text-[9px] leading-4 text-warning">
+                          Auto
+                        </span>
+                      )}
                       <span className="shrink-0 text-[10px] text-muted-foreground">
                         {threadTimeAgo(thread.updatedAt)}
                       </span>
